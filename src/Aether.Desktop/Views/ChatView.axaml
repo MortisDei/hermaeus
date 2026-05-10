@@ -61,9 +61,10 @@
                 Padding="16,8"
                 BorderThickness="0,0,0,1"
                 BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
-            <StackPanel Spacing="4">
-                <TextBlock Text="SYSTEM PROMPT" FontSize="10"
-                           Classes="sidebar-section-header" />
+            <StackPanel Spacing="8">
+                <TextBlock FontSize="10"
+                           Classes="sidebar-section-header"
+                           Text="{Binding Source=System prompt, Converter={StaticResource UppercaseConverter}}" />
                 <TextBox Text="{Binding SystemPrompt}"
                          Watermark="You are a helpful assistant..."
                          AcceptsReturn="True" TextWrapping="Wrap"

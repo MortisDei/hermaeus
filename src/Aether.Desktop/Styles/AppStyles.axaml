@@ -1,6 +1,25 @@
 <Styles xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
+    <!-- Global layout tweaks to reduce overlap and provide consistent spacing -->
+    <Style Selector="Window">
+        <Setter Property="Padding" Value="12" />
+        <Setter Property="FontSize" Value="13" />
+    </Style>
+
+    <Style Selector="StackPanel">
+        <Setter Property="Spacing" Value="8" />
+    </Style>
+
+    <Style Selector="Grid">
+        <Setter Property="ColumnSpacing" Value="8" />
+        <Setter Property="RowSpacing" Value="6" />
+    </Style>
+
+    <Style Selector="TextBlock">
+        <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+
     <!-- ── Sidebar ─────────────────────────────────────────────────────── -->
     <Style Selector="ListBoxItem.conv-item">
         <Setter Property="Padding" Value="10,6" />
