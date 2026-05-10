@@ -12,23 +12,46 @@ namespace Aether.Rag.Storage;
 /// </summary>
 public sealed class SqliteRagStore
 {
-    private readonly string _db;
-    private string Cs => $"Data Source={_db}";
-
-    public SqliteRagStore(ISettingsService _)
+    private readonly ISettingsService _settings;
+    private string _initializedPath = string.Empty;
+    private string DbPath
     {
-        var dir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Aether");
-        Directory.CreateDirectory(dir);
-        _db = Path.Combine(dir, "conversations.db");
+        get
+        {
+            var dir = ResolveDataRoot();
+            Directory.CreateDirectory(dir);
+            return Path.Combine(dir, "conversations.db");
+        }
+    }
+    private string Cs => $"Data Source={DbPath}";
+
+    public SqliteRagStore(ISettingsService settings)
+    {
+        _settings = settings;
+    }
+
+    private string ResolveDataRoot()
+    {
+        var configured = _settings.Settings.DataRootDirectory?.Trim();
+        if (!string.IsNullOrWhiteSpace(configured))
+            return Path.GetFullPath(configured);
+
+        return Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Aether");
     }
 
     // ── Init ─────────────────────────────────────────────────────────────────
 
-    public async Task InitializeAsync()
+    public async Task InitializeAsync() => await EnsureInitializedAsync();
+
+    private async Task EnsureInitializedAsync(CancellationToken ct = default)
     {
+        var dbPath = DbPath;
+        if (_initializedPath == dbPath && File.Exists(dbPath)) return;
+
         await using var c = new SqliteConnection(Cs);
-        await c.OpenAsync();
+        await c.OpenAsync(ct);
         var cmd = c.CreateCommand();
         cmd.CommandText = @"
             PRAGMA journal_mode=WAL;
@@ -64,13 +87,15 @@ public sealed class SqliteRagStore
                 stats_json TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );";
-        await cmd.ExecuteNonQueryAsync();
+        await cmd.ExecuteNonQueryAsync(ct);
+        _initializedPath = dbPath;
     }
 
     // ── Datasets ─────────────────────────────────────────────────────────────
 
     public async Task<List<RagDataset>> GetDatasetsAsync(CancellationToken ct = default)
     {
+        await EnsureInitializedAsync(ct);
         await using var c = new SqliteConnection(Cs); await c.OpenAsync(ct);
         var cmd = c.CreateCommand();
         cmd.CommandText = "SELECT * FROM rag_datasets ORDER BY name";
@@ -82,6 +107,7 @@ public sealed class SqliteRagStore
 
     public async Task SaveDatasetAsync(RagDataset ds, CancellationToken ct = default)
     {
+        await EnsureInitializedAsync(ct);
         await using var c = new SqliteConnection(Cs); await c.OpenAsync(ct);
         var cmd = c.CreateCommand();
         cmd.CommandText = @"
@@ -101,6 +127,7 @@ public sealed class SqliteRagStore
 
     public async Task DeleteDatasetAsync(string datasetId, CancellationToken ct = default)
     {
+        await EnsureInitializedAsync(ct);
         await using var c = new SqliteConnection(Cs); await c.OpenAsync(ct);
         var cmd = c.CreateCommand();
         cmd.CommandText = "DELETE FROM rag_datasets WHERE id = $id";
@@ -112,6 +139,7 @@ public sealed class SqliteRagStore
 
     public async Task SaveChunksBatchAsync(IEnumerable<RagChunk> chunks, CancellationToken ct = default)
     {
+        await EnsureInitializedAsync(ct);
         await using var c = new SqliteConnection(Cs); await c.OpenAsync(ct);
         await using var tx = await c.BeginTransactionAsync(ct);
         var cmd = c.CreateCommand();
@@ -154,6 +182,7 @@ public sealed class SqliteRagStore
 
     public async Task<List<RagChunk>> GetChunksAsync(string datasetId, bool includeEmbeddings = true, CancellationToken ct = default)
     {
+        await EnsureInitializedAsync(ct);
         await using var c = new SqliteConnection(Cs); await c.OpenAsync(ct);
         var cmd = c.CreateCommand();
         cmd.CommandText = includeEmbeddings
@@ -168,6 +197,7 @@ public sealed class SqliteRagStore
 
     public async Task<RagChunk?> GetParentChunkAsync(string parentId, CancellationToken ct = default)
     {
+        await EnsureInitializedAsync(ct);
         await using var c = new SqliteConnection(Cs); await c.OpenAsync(ct);
         var cmd = c.CreateCommand();
         cmd.CommandText = "SELECT * FROM rag_chunks WHERE id=$id";
@@ -178,6 +208,7 @@ public sealed class SqliteRagStore
 
     public async Task DeleteChunksForDatasetAsync(string datasetId, CancellationToken ct = default)
     {
+        await EnsureInitializedAsync(ct);
         await using var c = new SqliteConnection(Cs); await c.OpenAsync(ct);
         var cmd = c.CreateCommand();
         cmd.CommandText = "DELETE FROM rag_chunks WHERE dataset_id=$ds";
@@ -189,6 +220,7 @@ public sealed class SqliteRagStore
 
     public async Task SaveBm25StatsAsync(string datasetId, Bm25Stats stats, CancellationToken ct = default)
     {
+        await EnsureInitializedAsync(ct);
         await using var c = new SqliteConnection(Cs); await c.OpenAsync(ct);
         var cmd = c.CreateCommand();
         cmd.CommandText = @"
@@ -203,6 +235,7 @@ public sealed class SqliteRagStore
 
     public async Task<Bm25Stats?> GetBm25StatsAsync(string datasetId, CancellationToken ct = default)
     {
+        await EnsureInitializedAsync(ct);
         await using var c = new SqliteConnection(Cs); await c.OpenAsync(ct);
         var cmd = c.CreateCommand();
         cmd.CommandText = "SELECT stats_json FROM rag_bm25_stats WHERE dataset_id=$ds";

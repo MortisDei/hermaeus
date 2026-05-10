@@ -16,5 +16,6 @@ public class RagDatasetConfig
     public int    OverlapChars      { get; set; } = 320;
     public int    ParentChunkChars  { get; set; } = 3200;
     public bool   UseParentChild    { get; set; } = false;
+    public bool   PrependTitleToEmbedding { get; set; } = true;
     public string AliasFilePath     { get; set; } = string.Empty;
 }

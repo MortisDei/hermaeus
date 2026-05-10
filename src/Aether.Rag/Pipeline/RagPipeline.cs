@@ -101,7 +101,7 @@ public sealed class RagPipeline
         {
             ct.ThrowIfCancellationRequested();
             var batch  = allChunks.Skip(i).Take(EmbedBatchSize).ToList();
-            var texts  = batch.Select(c => c.Content).ToList();
+            var texts  = batch.Select(c => BuildEmbeddingText(c, dataset.Config)).ToList();
             var embeddings = await _embed.EmbedBatchAsync(texts, ct);
 
             for (int j = 0; j < batch.Count; j++)
@@ -130,5 +130,13 @@ public sealed class RagPipeline
 
         progress?.Report(new IngestProgress("Done", total, total,
             $"{allChunks.Count} chunks indexed from {files.Count} files"));
+    }
+
+    private static string BuildEmbeddingText(RagChunk chunk, RagDatasetConfig cfg)
+    {
+        if (!cfg.PrependTitleToEmbedding || string.IsNullOrWhiteSpace(chunk.SourceTitle))
+            return chunk.Content;
+
+        return $"Title: {chunk.SourceTitle}\nSource: {chunk.SourceFile}\n\n{chunk.Content}";
     }
 }

@@ -6,6 +6,29 @@
         <Setter Property="FontSize" Value="13" />
     </Style>
 
+    <Style Selector="TextBlock.page-title">
+        <Setter Property="FontSize" Value="26" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <Style Selector="TextBlock.page-subtitle">
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="Opacity" Value="0.5" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+
+    <Style Selector="Border.settings-card">
+        <Setter Property="BorderBrush" Value="{DynamicResource ControlStrokeColorDefaultBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="Padding" Value="16" />
+        <Setter Property="Background" Value="{DynamicResource SubtleFillColorTertiaryBrush}" />
+    </Style>
+
+    <Style Selector="Border.settings-card:pointerover">
+        <Setter Property="BorderBrush" Value="{DynamicResource ControlStrokeColorSecondaryBrush}" />
+    </Style>
+
     <!-- ── Sidebar ─────────────────────────────────────────────────────── -->
     <Style Selector="ListBoxItem.conv-item">
         <Setter Property="Padding" Value="10,6" />

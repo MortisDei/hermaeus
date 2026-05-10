@@ -7,21 +7,33 @@ namespace Aether.Services;
 
 public sealed class ConversationStore : IConversationStore
 {
-    private readonly string _db;
-    private string Cs => $"Data Source={_db}";
-
-    public ConversationStore()
+    private readonly ISettingsService _settings;
+    private string _initializedPath = string.Empty;
+    private string DbPath
     {
-        var dir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Aether");
-        Directory.CreateDirectory(dir);
-        _db = Path.Combine(dir, "conversations.db");
+        get
+        {
+            var dir = SettingsService.ResolveDataRoot(_settings.Settings);
+            Directory.CreateDirectory(dir);
+            return Path.Combine(dir, "conversations.db");
+        }
+    }
+    private string Cs => $"Data Source={DbPath}";
+
+    public ConversationStore(ISettingsService settings)
+    {
+        _settings = settings;
     }
 
-    public async Task InitializeAsync()
+    public async Task InitializeAsync() => await EnsureInitializedAsync();
+
+    private async Task EnsureInitializedAsync(CancellationToken ct = default)
     {
+        var dbPath = DbPath;
+        if (_initializedPath == dbPath && File.Exists(dbPath)) return;
+
         await using var c = new SqliteConnection(Cs);
-        await c.OpenAsync();
+        await c.OpenAsync(ct);
         var cmd = c.CreateCommand();
         cmd.CommandText = @"
             CREATE TABLE IF NOT EXISTS conversations (
@@ -34,11 +46,13 @@ public sealed class ConversationStore : IConversationStore
                 messages_json TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_updated ON conversations(updated_at DESC);";
-        await cmd.ExecuteNonQueryAsync();
+        await cmd.ExecuteNonQueryAsync(ct);
+        _initializedPath = dbPath;
     }
 
     public async Task<List<Conversation>> GetAllAsync(CancellationToken ct = default)
     {
+        await EnsureInitializedAsync(ct);
         await using var c = new SqliteConnection(Cs); await c.OpenAsync(ct);
         var cmd = c.CreateCommand();
         cmd.CommandText = "SELECT * FROM conversations ORDER BY updated_at DESC";
@@ -50,6 +64,7 @@ public sealed class ConversationStore : IConversationStore
 
     public async Task<Conversation?> GetByIdAsync(string id, CancellationToken ct = default)
     {
+        await EnsureInitializedAsync(ct);
         await using var c = new SqliteConnection(Cs); await c.OpenAsync(ct);
         var cmd = c.CreateCommand();
         cmd.CommandText = "SELECT * FROM conversations WHERE id = $id";
@@ -60,6 +75,7 @@ public sealed class ConversationStore : IConversationStore
 
     public async Task SaveAsync(Conversation conv, CancellationToken ct = default)
     {
+        await EnsureInitializedAsync(ct);
         conv.UpdatedAt = DateTime.UtcNow;
         var json = JsonSerializer.Serialize(conv.Messages);
         await using var c = new SqliteConnection(Cs); await c.OpenAsync(ct);
@@ -83,6 +99,7 @@ public sealed class ConversationStore : IConversationStore
 
     public async Task DeleteAsync(string id, CancellationToken ct = default)
     {
+        await EnsureInitializedAsync(ct);
         await using var c = new SqliteConnection(Cs); await c.OpenAsync(ct);
         var cmd = c.CreateCommand();
         cmd.CommandText = "DELETE FROM conversations WHERE id = $id";
@@ -92,6 +109,7 @@ public sealed class ConversationStore : IConversationStore
 
     public async Task<List<Conversation>> SearchAsync(string q, CancellationToken ct = default)
     {
+        await EnsureInitializedAsync(ct);
         await using var c = new SqliteConnection(Cs); await c.OpenAsync(ct);
         var cmd = c.CreateCommand();
         cmd.CommandText = "SELECT * FROM conversations WHERE title LIKE $q OR messages_json LIKE $q ORDER BY updated_at DESC LIMIT 50";

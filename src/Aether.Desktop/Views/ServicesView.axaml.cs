@@ -1,5 +1,8 @@
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Data.Converters;
+using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Aether.Core.Models;
@@ -15,7 +18,20 @@ public partial class ServicesView : UserControl
     public ServicesView()
     {
         InitializeComponent();
+        AddHandler(PointerWheelChangedEvent, OnPointerWheelChanged, RoutingStrategies.Tunnel);
         DataContextChanged += OnDataContextChanged;
+    }
+
+    private void OnPointerWheelChanged(object? sender, PointerWheelEventArgs e)
+    {
+        var max = Math.Max(0, PageScroller.Extent.Height - PageScroller.Viewport.Height);
+        if (max <= 0) return;
+
+        var next = Math.Clamp(PageScroller.Offset.Y - e.Delta.Y * 56, 0, max);
+        if (Math.Abs(next - PageScroller.Offset.Y) < 0.1) return;
+
+        PageScroller.Offset = new Vector(PageScroller.Offset.X, next);
+        e.Handled = true;
     }
 
     private void OnDataContextChanged(object? sender, EventArgs e)

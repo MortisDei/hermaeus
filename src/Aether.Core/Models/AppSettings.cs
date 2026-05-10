@@ -16,6 +16,7 @@ public class AppSettings
     public string Theme                { get; set; } = "System";
     public bool   CtrlEnterToSend      { get; set; } = false;
     public double FontSize             { get; set; } = 14;
+    public string DataRootDirectory    { get; set; } = string.Empty;
     public bool   RagEnabled           { get; set; } = false;
     public string RagServiceUrl        { get; set; } = "http://localhost:8765";
     public bool   TtsEnabled           { get; set; } = true;

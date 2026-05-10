@@ -72,7 +72,7 @@ public sealed class RagQueryService
         var qEmbed = await _embed.EmbedAsync(expandedQuery, ct);
 
         // ── 4. Semantic scan (cosine) ─────────────────────────────────────
-        var semanticK   = opts.TopK * 4;
+        var semanticK   = Math.Max(opts.TopK * 10, 50);
         var semantic    = HybridRetriever.CosineScan(qEmbed, chunks, semanticK);
 
         // ── 5. BM25 on semantic candidates ───────────────────────────────
@@ -81,7 +81,9 @@ public sealed class RagQueryService
         if (bm25Stats is not null)
         {
             var scorer = new Bm25Scorer();
-            bm25 = scorer.Score(expandedQuery, semantic.Select(s => s.Chunk).ToList(), bm25Stats);
+            bm25 = scorer.Score(expandedQuery, chunks, bm25Stats)
+                .Take(semanticK)
+                .ToList();
         }
 
         // ── 6. RRF fusion ────────────────────────────────────────────────
@@ -151,13 +153,23 @@ public sealed class RagQueryService
         return question;
     }
 
-    private static async Task<List<ScoredChunk>> UpgradeToParentsAsync(
+    private async Task<List<ScoredChunk>> UpgradeToParentsAsync(
         List<ScoredChunk> fused, CancellationToken ct)
     {
-        // Swap child chunks for their parent where available
-        // (implementation would call _store.GetParentChunkAsync — stubbed here)
-        await Task.CompletedTask;
-        return fused;
+        var upgraded = new List<ScoredChunk>();
+        var seen = new HashSet<string>();
+
+        foreach (var scored in fused)
+        {
+            var chunk = scored.Chunk;
+            if (!string.IsNullOrWhiteSpace(chunk.ParentId))
+                chunk = await _store.GetParentChunkAsync(chunk.ParentId, ct) ?? chunk;
+
+            if (!seen.Add(chunk.Id)) continue;
+            upgraded.Add(scored with { Chunk = chunk });
+        }
+
+        return upgraded;
     }
 
     private static string BuildContext(IReadOnlyList<ScoredChunk> chunks)

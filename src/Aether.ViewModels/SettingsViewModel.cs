@@ -21,11 +21,13 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private string _selectedTheme        = "System";
     [ObservableProperty] private bool   _ctrlEnterToSend;
     [ObservableProperty] private bool   _isSaved;
+    [ObservableProperty] private string _dataRootDirectory = string.Empty;
     [ObservableProperty] private bool   _ttsEnabled = true;
     [ObservableProperty] private string _ttsServiceUrl = "http://127.0.0.1:8020";
     [ObservableProperty] private string _ttsSpeaker = string.Empty;
 
     public string[] Themes { get; } = ["System", "Dark", "Light"];
+    public Action? RequestDataRootPicker { get; set; }
 
     public SettingsViewModel(ISettingsService svc) { _svc = svc; Reload(); }
 
@@ -44,6 +46,7 @@ public partial class SettingsViewModel : ObservableObject
         FontSize            = s.FontSize;
         SelectedTheme       = s.Theme;
         CtrlEnterToSend     = s.CtrlEnterToSend;
+        DataRootDirectory   = s.DataRootDirectory;
         TtsEnabled          = s.TtsEnabled;
         TtsServiceUrl       = s.TtsServiceUrl;
         TtsSpeaker          = s.TtsSpeaker;
@@ -65,6 +68,7 @@ public partial class SettingsViewModel : ObservableObject
         s.FontSize            = FontSize;
         s.Theme               = SelectedTheme;
         s.CtrlEnterToSend     = CtrlEnterToSend;
+        s.DataRootDirectory   = DataRootDirectory.Trim();
         s.TtsEnabled          = TtsEnabled;
         s.TtsServiceUrl       = TtsServiceUrl;
         s.TtsSpeaker          = TtsSpeaker;
@@ -73,6 +77,9 @@ public partial class SettingsViewModel : ObservableObject
         await Task.Delay(2000);
         IsSaved = false;
     }
+
+    [RelayCommand]
+    private void BrowseDataRoot() => RequestDataRootPicker?.Invoke();
 
     [RelayCommand] private void Reset() => Reload();
 }
