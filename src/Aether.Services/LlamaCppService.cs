@@ -72,13 +72,14 @@ public sealed class LlamaCppService : IDisposable
         using (var stream = await resp!.Content.ReadAsStreamAsync(ct))
         using (var reader = new StreamReader(stream))
         {
-            while (!reader.EndOfStream && !ct.IsCancellationRequested)
+            while (!ct.IsCancellationRequested)
             {
                 var line = await reader.ReadLineAsync(ct);
+                if (line is null) break;
                 if (string.IsNullOrWhiteSpace(line) || !line.StartsWith("data: ")) continue;
                 var json = line[6..];
                 if (json == "[DONE]") break;
-                
+
                 var chunk = JsonSerializer.Deserialize<StreamChunk>(json, JsonOpts);
                 var c = chunk?.Choices?[0]?.Delta?.Content;
                 if (!string.IsNullOrEmpty(c)) yield return c;

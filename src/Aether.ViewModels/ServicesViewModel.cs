@@ -161,7 +161,7 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(StatusLabel));
     }
 
-    partial void OnStatusChanged(ServerStatus v) => NotifyStatusProps();
+    partial void OnStatusChanged(ServerStatus value) => NotifyStatusProps();
 
     public void Dispose() => _mgr.Dispose();
 }

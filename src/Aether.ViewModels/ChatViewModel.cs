@@ -185,7 +185,7 @@ public partial class ChatViewModel : ObservableObject
         ConversationSaved?.Invoke(this, CurrentConversationId);
     }
 
-    partial void OnInputTextChanged(string v)        => SendCommand.NotifyCanExecuteChanged();
-    partial void OnSelectedModelChanged(LlmModel? v) => SendCommand.NotifyCanExecuteChanged();
-    partial void OnIsGeneratingChanged(bool v)       => SendCommand.NotifyCanExecuteChanged();
+    partial void OnInputTextChanged(string value)        => SendCommand.NotifyCanExecuteChanged();
+    partial void OnSelectedModelChanged(LlmModel? value) => SendCommand.NotifyCanExecuteChanged();
+    partial void OnIsGeneratingChanged(bool value)       => SendCommand.NotifyCanExecuteChanged();
 }

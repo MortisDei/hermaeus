@@ -1,9 +1,13 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:conv="using:Aether.Desktop.Converters"
              x:Class="Aether.Desktop.App"
              RequestedThemeVariant="Default">
     <Application.Styles>
         <FluentTheme />
         <StyleInclude Source="avares://Aether.Desktop/Styles/AppStyles.axaml" />
     </Application.Styles>
+    <Application.Resources>
+        <conv:UppercaseConverter x:Key="UppercaseConverter" />
+    </Application.Resources>
 </Application>

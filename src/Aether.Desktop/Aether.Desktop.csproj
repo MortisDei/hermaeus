@@ -5,18 +5,19 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>Aether.Desktop</RootNamespace>
-    <AssemblyName>Aether</AssemblyName>
+    <AssemblyName>Aether.Desktop</AssemblyName>
     <ApplicationIcon>Assets/aether.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Avalonia"               Version="11.2.1" />
-    <PackageReference Include="Avalonia.Desktop"       Version="11.2.1" />
-    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.2.1" />
-    <PackageReference Include="Avalonia.Fonts.Inter"   Version="11.2.1" />
-    <PackageReference Include="Avalonia.Diagnostics"   Version="11.2.1"
+    <PackageReference Include="Avalonia"               Version="11.3.0" />
+    <PackageReference Include="Avalonia.Desktop"       Version="11.3.0" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.0" />
+    <PackageReference Include="Avalonia.Fonts.Inter"   Version="11.3.0" />
+    <PackageReference Include="Avalonia.Diagnostics"   Version="11.3.0"
                       Condition="'$(Configuration)'=='Debug'" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.4" />
     <PackageReference Include="Markdig"                Version="0.38.0" />
+    <PackageReference Include="Tmds.DBus.Protocol" Version="0.21.3" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Aether.Core/Aether.Core.csproj" />

@@ -206,9 +206,9 @@ public partial class RagViewModel : ObservableObject
 
     private void SetError(string msg) { StatusMessage = msg; IsError = true; }
 
-    partial void OnQuestionTextChanged(string v) => QueryCommand.NotifyCanExecuteChanged();
-    partial void OnSelectedDatasetChanged(RagDataset? v) => QueryCommand.NotifyCanExecuteChanged();
-    partial void OnIsQueryingChanged(bool v) => QueryCommand.NotifyCanExecuteChanged();
-    partial void OnIngestPathChanged(string v) => IngestCommand.NotifyCanExecuteChanged();
-    partial void OnNewDatasetNameChanged(string v) => IngestCommand.NotifyCanExecuteChanged();
+    partial void OnQuestionTextChanged(string value) => QueryCommand.NotifyCanExecuteChanged();
+    partial void OnSelectedDatasetChanged(RagDataset? value) => QueryCommand.NotifyCanExecuteChanged();
+    partial void OnIsQueryingChanged(bool value) => QueryCommand.NotifyCanExecuteChanged();
+    partial void OnIngestPathChanged(string value) => IngestCommand.NotifyCanExecuteChanged();
+    partial void OnNewDatasetNameChanged(string value) => IngestCommand.NotifyCanExecuteChanged();
 }

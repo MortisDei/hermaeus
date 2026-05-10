@@ -133,7 +133,7 @@ public partial class MainWindowViewModel : ObservableObject
         }
     }
 
-    partial void OnActivePanelChanged(string v)
+    partial void OnActivePanelChanged(string value)
     {
         OnPropertyChanged(nameof(ShowChat));
         OnPropertyChanged(nameof(ShowSettings));
@@ -142,8 +142,8 @@ public partial class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowServices));
     }
 
-    partial void OnSearchQueryChanged(string v)
+    partial void OnSearchQueryChanged(string value)
     {
-        if (string.IsNullOrWhiteSpace(v)) _ = LoadConversationsAsync();
+        if (string.IsNullOrWhiteSpace(value)) _ = LoadConversationsAsync();
     }
 }
