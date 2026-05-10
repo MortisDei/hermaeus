@@ -43,7 +43,7 @@
                         <CheckBox IsChecked="{Binding OpenAiEnabled}" />
                         <TextBlock Text="OpenAI / Compatible API" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center" />
                     </StackPanel>
-                    <Grid ColumnDefinitions="110,*" RowDefinitions="Auto,Auto"
+                    <Grid ColumnDefinitions="110,*,Auto" RowDefinitions="Auto,Auto"
                           RowSpacing="8" ColumnSpacing="12">
                         <TextBlock Grid.Row="0" Grid.Column="0" Text="Base URL"
                                    VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
@@ -92,9 +92,17 @@
                                  FontSize="13" CornerRadius="6" Padding="10,6" />
                         <TextBlock Grid.Row="1" Grid.Column="0" Text="Speaker"
                                    VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
-                        <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding TtsSpeaker}"
-                                 Watermark="/path/to/reference.wav"
-                                 FontSize="13" CornerRadius="6" Padding="10,6" />
+                        <ComboBox Grid.Row="1" Grid.Column="1"
+                                  ItemsSource="{Binding TtsVoices}"
+                                  SelectedItem="{Binding TtsSpeaker}"
+                                  FontSize="13" />
+                        <Button Grid.Row="1" Grid.Column="2"
+                                Classes="icon-btn"
+                                Command="{Binding RefreshTtsVoicesCommand}"
+                                ToolTip.Tip="Refresh XTTS voices">
+                            <PathIcon Data="M17.65 6.35C16.2 4.9 14.21 4 12 4a8 8 0 0 0-8 8h2.5l-3.5 3.5L-.5 12H2a10 10 0 0 1 17.07-7.07l-1.42 1.42zM6.35 17.65C7.8 19.1 9.79 20 12 20a8 8 0 0 0 8-8h-2.5l3.5-3.5 3.5 3.5H22a10 10 0 0 1-17.07 7.07l1.42-1.42z"
+                                      Width="15" Height="15" />
+                        </Button>
                     </Grid>
                     <TextBlock Text="Audio is held in memory and piped to the system player; Aether does not keep generated WAV files."
                                FontSize="11" Opacity="0.45" TextWrapping="Wrap" />
@@ -179,6 +187,10 @@
                 <TextBlock Text="Saved" IsVisible="{Binding IsSaved}"
                            VerticalAlignment="Center" FontSize="13"
                            Foreground="{DynamicResource AccentFillColorDefaultBrush}" />
+                <TextBlock Text="{Binding SettingsError}"
+                           VerticalAlignment="Center" FontSize="13"
+                           Foreground="{DynamicResource SystemFillColorCriticalBrush}"
+                           TextWrapping="Wrap" />
             </StackPanel>
 
         </StackPanel>

@@ -6,6 +6,6 @@ public interface ISettingsService
 {
     AppSettings Settings { get; }
     Task LoadAsync();
-    Task SaveAsync();
+    Task SaveAsync(string? previousDataRootDirectory = null);
     event EventHandler? SettingsChanged;
 }

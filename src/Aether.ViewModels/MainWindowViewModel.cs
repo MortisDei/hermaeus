@@ -8,6 +8,8 @@ namespace Aether.ViewModels;
 public partial class MainWindowViewModel : ObservableObject
 {
     private readonly IConversationStore _store;
+    private readonly IToastService _toasts;
+    private readonly SynchronizationContext? _sync;
 
     public ChatViewModel            Chat     { get; }
     public SettingsViewModel        Settings { get; }
@@ -16,6 +18,7 @@ public partial class MainWindowViewModel : ObservableObject
     public ServicesViewModel        Services { get; }
 
     public ObservableCollection<ConversationItemViewModel> Conversations { get; } = [];
+    public ObservableCollection<ToastViewModel> Toasts { get; } = [];
 
     [ObservableProperty] private bool   _isSidebarOpen = true;
     [ObservableProperty] private string _searchQuery   = string.Empty;
@@ -42,12 +45,16 @@ public partial class MainWindowViewModel : ObservableObject
         SettingsViewModel settings,
         ModelManagementViewModel models,
         RagViewModel rag,
-        ServicesViewModel services)
+        ServicesViewModel services,
+        IToastService toasts)
     {
+        _sync = SynchronizationContext.Current;
+        _toasts = toasts;
         _store = store; Chat = chat; Settings = settings;
         Models = models; Rag = rag; Services = services;
         Chat.ConversationSaved += OnConversationSaved;
         Services.ServerAvailabilityChanged += async (_, _) => await Chat.LoadModelsAsync();
+        _toasts.ToastRaised += OnToastRaised;
     }
 
     public async Task InitializeAsync()
@@ -178,5 +185,32 @@ public partial class MainWindowViewModel : ObservableObject
     partial void OnSearchQueryChanged(string value)
     {
         if (string.IsNullOrWhiteSpace(value)) _ = LoadConversationsAsync();
+    }
+
+    private void OnToastRaised(ToastMessage toast)
+    {
+        var vm = new ToastViewModel
+        {
+            Title = toast.Title,
+            Message = toast.Message,
+            Kind = toast.Kind,
+            DurationMs = toast.DurationMs
+        };
+        RunOnUi(() => Toasts.Add(vm));
+        _ = RemoveToastLaterAsync(vm);
+    }
+
+    private async Task RemoveToastLaterAsync(ToastViewModel toast)
+    {
+        await Task.Delay(toast.DurationMs);
+        RunOnUi(() => Toasts.Remove(toast));
+    }
+
+    private void RunOnUi(Action action)
+    {
+        if (_sync is null)
+            action();
+        else
+            _sync.Post(_ => action(), null);
     }
 }

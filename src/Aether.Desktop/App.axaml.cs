@@ -62,6 +62,7 @@ public partial class App : Application
         s.AddSingleton<OpenAiService>();
         s.AddSingleton<ILlmService,        CompositeLlmService>();
         s.AddSingleton<ITtsService,        XttsService>();
+        s.AddSingleton<IToastService,      ToastService>();
         s.AddSingleton<SqliteRagStore>();
         s.AddSingleton<IEmbeddingService,  LlamaCppEmbeddingService>();
         s.AddSingleton<RagPipeline>();

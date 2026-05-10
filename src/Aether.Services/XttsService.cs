@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 using System.Net.Http.Json;
 using Aether.Core.Services;
 
@@ -26,14 +27,20 @@ public sealed class XttsService : ITtsService, IDisposable
 
         var payload = new Dictionary<string, object?>
         {
+            ["text"] = text,
             ["input"] = text,
             ["language"] = "en"
         };
 
-        if (!string.IsNullOrWhiteSpace(_settings.Settings.TtsSpeaker))
-            payload["speaker_wav"] = _settings.Settings.TtsSpeaker;
+        var speaker = _settings.Settings.TtsSpeaker.Trim();
+        if (!string.IsNullOrWhiteSpace(speaker) && !speaker.Equals("default", StringComparison.OrdinalIgnoreCase))
+            payload["speaker_wav"] = speaker;
 
-        using var response = await _http.PostAsJsonAsync($"{baseUrl}/v1/audio/speech", payload, ct);
+        var endpoint = !string.IsNullOrWhiteSpace(speaker) && !LooksLikeVoicePath(speaker)
+            ? "tts_to_audio"
+            : "v1/audio/speech";
+
+        using var response = await _http.PostAsJsonAsync($"{baseUrl}/{endpoint}", payload, ct);
         response.EnsureSuccessStatusCode();
 
         await using var source = await response.Content.ReadAsStreamAsync(ct);
@@ -45,6 +52,45 @@ public sealed class XttsService : ITtsService, IDisposable
             throw new InvalidOperationException("TTS returned an empty audio response.");
 
         await PlayAsync(wav, ct);
+    }
+
+    public async Task<IReadOnlyList<string>> GetVoicesAsync(CancellationToken ct = default)
+    {
+        var baseUrl = _settings.Settings.TtsServiceUrl.TrimEnd('/');
+        var all = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "default" };
+
+        foreach (var endpoint in new[] { "studio_speakers", "speakers_list", "speakers", "speaker_ids", "api/speakers", "api/speaker_ids", "api/speakers_list" })
+        {
+            try
+            {
+                using var resp = await _http.GetAsync($"{baseUrl}/{endpoint}", ct);
+                if (!resp.IsSuccessStatusCode) continue;
+
+                var json = await resp.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: ct);
+                foreach (var voice in ParseVoiceNames(json))
+                    all.Add(voice);
+            }
+            catch { }
+        }
+
+        try
+        {
+            using var resp = await _http.GetAsync($"{baseUrl}/voices", ct);
+            if (resp.IsSuccessStatusCode)
+            {
+                var text = await resp.Content.ReadAsStringAsync(ct);
+                foreach (var voice in text
+                    .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Select(ParseMaryVoiceName)
+                    .Where(v => !string.IsNullOrWhiteSpace(v)))
+                {
+                    all.Add(voice);
+                }
+            }
+        }
+        catch { }
+
+        return all.Order(StringComparer.OrdinalIgnoreCase).ToList();
     }
 
     private static async Task PlayAsync(byte[] wav, CancellationToken ct)
@@ -101,6 +147,61 @@ public sealed class XttsService : ITtsService, IDisposable
             catch { }
             return false;
         }
+    }
+
+    private static List<string> ParseVoiceNames(JsonElement json)
+    {
+        if (json.ValueKind == JsonValueKind.Array)
+            return json.EnumerateArray()
+                .Select(x => x.GetString() ?? string.Empty)
+                .Where(s => s.Length > 0)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+        if (json.ValueKind != JsonValueKind.Object)
+            return [];
+
+        foreach (var key in new[] { "speakers", "speaker_ids", "speaker_names", "voices" })
+        {
+            if (!json.TryGetProperty(key, out var value))
+                continue;
+
+            if (value.ValueKind == JsonValueKind.Array)
+                return value.EnumerateArray()
+                    .Select(x => x.GetString() ?? string.Empty)
+                    .Where(s => s.Length > 0)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+            if (value.ValueKind == JsonValueKind.Object)
+                return value.EnumerateObject()
+                    .Select(p => p.Name)
+                    .Where(s => s.Length > 0)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+        }
+
+        return json.EnumerateObject()
+            .Select(p => p.Name)
+            .Where(s => s.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static bool LooksLikeVoicePath(string value) =>
+        value.Contains('/') ||
+        value.Contains('\\') ||
+        value.EndsWith(".wav", StringComparison.OrdinalIgnoreCase) ||
+        value.EndsWith(".mp3", StringComparison.OrdinalIgnoreCase) ||
+        value.EndsWith(".flac", StringComparison.OrdinalIgnoreCase);
+
+    private static string ParseMaryVoiceName(string line)
+    {
+        var tokens = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (tokens.Length <= 3)
+            return tokens.FirstOrDefault() ?? string.Empty;
+
+        return string.Join(" ", tokens.Take(tokens.Length - 2));
     }
 
     public void Dispose() => _http.Dispose();
