@@ -1,0 +1,47 @@
+namespace Aether.Core.Models;
+
+public class AppSettings
+{
+    public string LlamaCppBaseUrl      { get; set; } = "http://localhost:8080";
+    public bool   LlamaCppEnabled      { get; set; } = true;
+    public string OpenAiBaseUrl        { get; set; } = "https://api.openai.com";
+    public string OpenAiApiKey         { get; set; } = string.Empty;
+    public bool   OpenAiEnabled        { get; set; } = false;
+    public string EmbeddingModel       { get; set; } = "nomic-embed-text";
+    public string DefaultModel         { get; set; } = string.Empty;
+    public string DefaultSystemPrompt  { get; set; } = string.Empty;
+    public double Temperature          { get; set; } = 0.7;
+    public int    MaxTokens            { get; set; } = 4096;
+    public bool   StreamResponses      { get; set; } = true;
+    public string Theme                { get; set; } = "System";
+    public bool   CtrlEnterToSend      { get; set; } = false;
+    public double FontSize             { get; set; } = 14;
+    public bool   RagEnabled           { get; set; } = false;
+    public string RagServiceUrl        { get; set; } = "http://localhost:8765";
+
+    public List<ServerConfig> ManagedServers { get; set; } =
+    [
+        new ServerConfig
+        {
+            Name           = "Chat",
+            ExecutablePath = "llama-server",
+            Port           = 8080,
+            ContextSize    = 4096,
+            GpuLayers      = 0,
+            Threads        = 4,
+            EmbeddingsMode = false,
+            AutoStart      = false
+        },
+        new ServerConfig
+        {
+            Name           = "Embeddings",
+            ExecutablePath = "llama-server",
+            Port           = 8081,
+            ContextSize    = 2048,
+            GpuLayers      = 0,
+            Threads        = 4,
+            EmbeddingsMode = true,
+            AutoStart      = false
+        }
+    ];
+}

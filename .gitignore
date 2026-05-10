@@ -1,0 +1,52 @@
+# Build outputs
+**/bin/
+**/obj/
+**/dist/
+
+# Visual Studio / Rider
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# VS Code
+.vscode/
+
+# NuGet
+*.nupkg
+# Rider
+.idea/
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Python / Oghma sidecar artifacts
+__pycache__/
+*.pyc
+
+# Large LLM model files
+*.gguf
+*.bin
+*.pth
+*.pt
+models/
+
+# Local secrets
+local.settings.json
+secrets.json
+
+# Misc
+*.pid
+*.seed
+
+# Node
+node_modules/
+
+# Temporary
+*.tmp
+*.temp

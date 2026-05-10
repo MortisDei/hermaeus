@@ -1,0 +1,237 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Aether.ViewModels"
+             xmlns:views="using:Aether.Desktop.Views"
+             x:Class="Aether.Desktop.Views.ServicesView"
+             x:DataType="vm:ServicesViewModel">
+
+    <ScrollViewer Padding="24">
+        <StackPanel MaxWidth="680" Spacing="16">
+
+            <TextBlock Text="Services" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,4" />
+            <TextBlock FontSize="13" Opacity="0.45" TextWrapping="Wrap"
+                       Text="Manage llama-server processes. Paths and config are saved per server. Auto-start launches on Aether startup if model path is set." />
+
+            <ItemsControl ItemsSource="{Binding Servers}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="vm:ServerProcessViewModel">
+                        <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                BorderThickness="1" CornerRadius="10"
+                                Padding="16" Margin="0,0,0,12">
+                            <StackPanel Spacing="12">
+
+                                <!-- ── Header row ─────────────────────────── -->
+                                <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="10">
+
+                                    <!-- Status dot -->
+                                    <Border Grid.Column="0"
+                                            Width="10" Height="10"
+                                            CornerRadius="5"
+                                            VerticalAlignment="Center"
+                                            Background="{Binding Status,
+                                                Converter={x:Static views:ServicesView.StatusColor}}" />
+
+                                    <StackPanel Grid.Column="1" Spacing="1">
+                                        <TextBlock Text="{Binding Name}"
+                                                   FontSize="15" FontWeight="SemiBold" />
+                                        <TextBlock Text="{Binding StatusLabel}"
+                                                   FontSize="11" Opacity="0.5" />
+                                    </StackPanel>
+
+                                    <!-- Start button -->
+                                    <Button Grid.Column="2"
+                                            Command="{Binding StartCommand}"
+                                            IsVisible="{Binding IsStopped}"
+                                            Content="Start"
+                                            Padding="14,6" CornerRadius="6" FontSize="13" />
+
+                                    <!-- Starting indicator -->
+                                    <StackPanel Grid.Column="2"
+                                                IsVisible="{Binding IsStarting}"
+                                                Orientation="Horizontal" Spacing="6"
+                                                VerticalAlignment="Center">
+                                        <TextBlock Text="Starting…" FontSize="13" Opacity="0.6" />
+                                    </StackPanel>
+
+                                    <!-- Stop button -->
+                                    <Button Grid.Column="2"
+                                            Command="{Binding StopCommand}"
+                                            IsVisible="{Binding IsRunning}"
+                                            Content="Stop"
+                                            Padding="14,6" CornerRadius="6" FontSize="13" />
+
+                                    <!-- Toggle log -->
+                                    <Button Grid.Column="3"
+                                            Classes="icon-btn"
+                                            Command="{Binding ToggleLogCommand}"
+                                            Margin="4,0,0,0"
+                                            ToolTip.Tip="Show/hide log">
+                                        <PathIcon Data="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"
+                                                  Width="15" Height="15" Opacity="0.5" />
+                                    </Button>
+                                </Grid>
+
+                                <!-- ── Error banner ──────────────────────── -->
+                                <Border IsVisible="{Binding IsError}"
+                                        CornerRadius="6" Padding="10,6"
+                                        Background="{DynamicResource SystemFillColorCriticalBackgroundBrush}">
+                                    <TextBlock Text="{Binding ErrorMessage}"
+                                               FontSize="12" TextWrapping="Wrap"
+                                               Foreground="{DynamicResource SystemFillColorCriticalBrush}" />
+                                </Border>
+
+                                <!-- ── Config grid ───────────────────────── -->
+                                <Grid ColumnDefinitions="100,*,Auto"
+                                      RowDefinitions="Auto,Auto,Auto,Auto,Auto"
+                                      RowSpacing="8" ColumnSpacing="10">
+
+                                    <!-- Executable -->
+                                    <TextBlock Grid.Row="0" Grid.Column="0"
+                                               Text="Executable" VerticalAlignment="Center"
+                                               Opacity="0.6" FontSize="13" />
+                                    <TextBox Grid.Row="0" Grid.Column="1"
+                                             Text="{Binding ExecutablePath}"
+                                             Watermark="llama-server  or  /full/path/llama-server"
+                                             FontSize="13" CornerRadius="6" Padding="10,6"
+                                             IsEnabled="{Binding IsStopped}" />
+                                    <Button Grid.Row="0" Grid.Column="2"
+                                            Classes="icon-btn"
+                                            Command="{Binding BrowseExecutableCommand}"
+                                            IsEnabled="{Binding IsStopped}"
+                                            ToolTip.Tip="Browse for executable">
+                                        <PathIcon Data="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z"
+                                                  Width="15" Height="15" />
+                                    </Button>
+
+                                    <!-- Model -->
+                                    <TextBlock Grid.Row="1" Grid.Column="0"
+                                               Text="Model (.gguf)" VerticalAlignment="Center"
+                                               Opacity="0.6" FontSize="13" />
+                                    <TextBox Grid.Row="1" Grid.Column="1"
+                                             Text="{Binding ModelPath}"
+                                             Watermark="/path/to/model.gguf"
+                                             FontSize="13" CornerRadius="6" Padding="10,6"
+                                             IsEnabled="{Binding IsStopped}" />
+                                    <Button Grid.Row="1" Grid.Column="2"
+                                            Classes="icon-btn"
+                                            Command="{Binding BrowseModelCommand}"
+                                            IsEnabled="{Binding IsStopped}"
+                                            ToolTip.Tip="Browse for model file">
+                                        <PathIcon Data="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z"
+                                                  Width="15" Height="15" />
+                                    </Button>
+
+                                    <!-- Numeric params -->
+                                    <TextBlock Grid.Row="2" Grid.Column="0"
+                                               Text="Port / Ctx / GPU" VerticalAlignment="Center"
+                                               Opacity="0.6" FontSize="13" />
+                                    <StackPanel Grid.Row="2" Grid.Column="1"
+                                                Orientation="Horizontal" Spacing="6">
+                                        <NumericUpDown Value="{Binding Port}"
+                                                       Minimum="1024" Maximum="65535"
+                                                       Increment="1" Width="95"
+                                                       FontSize="13"
+                                                       IsEnabled="{Binding IsStopped}"
+                                                       ToolTip.Tip="Port" />
+                                        <NumericUpDown Value="{Binding ContextSize}"
+                                                       Minimum="512" Maximum="131072"
+                                                       Increment="512" Width="100"
+                                                       FontSize="13"
+                                                       IsEnabled="{Binding IsStopped}"
+                                                       ToolTip.Tip="Context size (tokens)" />
+                                        <NumericUpDown Value="{Binding GpuLayers}"
+                                                       Minimum="0" Maximum="999"
+                                                       Increment="1" Width="80"
+                                                       FontSize="13"
+                                                       IsEnabled="{Binding IsStopped}"
+                                                       ToolTip.Tip="GPU layers (0 = CPU only)" />
+                                    </StackPanel>
+
+                                    <!-- Threads -->
+                                    <TextBlock Grid.Row="3" Grid.Column="0"
+                                               Text="Threads" VerticalAlignment="Center"
+                                               Opacity="0.6" FontSize="13" />
+                                    <StackPanel Grid.Row="3" Grid.Column="1"
+                                                Orientation="Horizontal" Spacing="16">
+                                        <NumericUpDown Value="{Binding Threads}"
+                                                       Minimum="1" Maximum="128"
+                                                       Increment="1" Width="80"
+                                                       FontSize="13"
+                                                       IsEnabled="{Binding IsStopped}"
+                                                       ToolTip.Tip="CPU thread count" />
+                                        <CheckBox IsChecked="{Binding EmbeddingsMode}"
+                                                  Content="--embeddings"
+                                                  IsEnabled="{Binding IsStopped}"
+                                                  FontSize="13"
+                                                  VerticalAlignment="Center" />
+                                        <CheckBox IsChecked="{Binding AutoStart}"
+                                                  Content="Auto-start"
+                                                  FontSize="13"
+                                                  VerticalAlignment="Center" />
+                                    </StackPanel>
+
+                                    <!-- Extra args -->
+                                    <TextBlock Grid.Row="4" Grid.Column="0"
+                                               Text="Extra args" VerticalAlignment="Center"
+                                               Opacity="0.6" FontSize="13" />
+                                    <TextBox Grid.Row="4" Grid.Column="1"
+                                             Text="{Binding ExtraArgs}"
+                                             Watermark="--flash-attn --mlock  etc."
+                                             FontSize="13" CornerRadius="6" Padding="10,6"
+                                             IsEnabled="{Binding IsStopped}" />
+
+                                </Grid>
+
+                                <!-- ── Save config ───────────────────────── -->
+                                <Button Command="{Binding SaveConfigCommand}"
+                                        Content="Save Config"
+                                        HorizontalAlignment="Left"
+                                        Padding="12,5" CornerRadius="6" FontSize="12" />
+
+                                <!-- ── Log panel ─────────────────────────── -->
+                                <Border IsVisible="{Binding LogExpanded}"
+                                        CornerRadius="6"
+                                        Background="{DynamicResource SubtleFillColorTertiaryBrush}"
+                                        Padding="1">
+                                    <Grid RowDefinitions="Auto,*">
+                                        <Grid Grid.Row="0"
+                                              ColumnDefinitions="*,Auto"
+                                              Margin="10,6,6,4">
+                                            <TextBlock Grid.Column="0"
+                                                       Text="Log"
+                                                       FontSize="11"
+                                                       Opacity="0.5"
+                                                       FontWeight="SemiBold"
+                                                       VerticalAlignment="Center" />
+                                            <Button Grid.Column="1"
+                                                    Classes="icon-btn"
+                                                    Command="{Binding ClearLogCommand}"
+                                                    ToolTip.Tip="Clear log">
+                                                <PathIcon Data="M12 2C6.47 2 2 6.47 2 12s4.47 10 10 10 10-4.47 10-10S17.53 2 12 2zm5 13.59L15.59 17 12 13.41 8.41 17 7 15.59 10.59 12 7 8.41 8.41 7 12 10.59 15.59 7 17 8.41 13.41 12 17 15.59z"
+                                                          Width="12" Height="12" />
+                                            </Button>
+                                        </Grid>
+                                        <ScrollViewer Grid.Row="1"
+                                                      x:Name="LogScroller"
+                                                      MaxHeight="200"
+                                                      HorizontalScrollBarVisibility="Auto"
+                                                      VerticalScrollBarVisibility="Auto">
+                                            <SelectableTextBlock
+                                                Text="{Binding LogOutput}"
+                                                FontFamily="Cascadia Code,Fira Code,Consolas,monospace"
+                                                FontSize="11"
+                                                TextWrapping="NoWrap"
+                                                Margin="10,2,10,8" />
+                                        </ScrollViewer>
+                                    </Grid>
+                                </Border>
+
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

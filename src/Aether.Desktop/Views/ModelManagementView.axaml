@@ -1,0 +1,89 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Aether.ViewModels"
+             xmlns:views="using:Aether.Desktop.Views"
+             x:Class="Aether.Desktop.Views.ModelManagementView"
+             x:DataType="vm:ModelManagementViewModel">
+
+    <DockPanel Margin="24">
+
+        <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="0,0,0,16">
+            <TextBlock Grid.Column="0" Text="Models"
+                       FontSize="22" FontWeight="SemiBold" VerticalAlignment="Center" />
+            <Button Grid.Column="1" Command="{Binding RefreshCommand}"
+                    Content="Refresh" Padding="14,7" CornerRadius="6" FontSize="13" />
+        </Grid>
+
+        <!-- Status -->
+        <TextBlock DockPanel.Dock="Top"
+                   Text="{Binding StatusMessage}"
+                   IsVisible="{Binding StatusMessage, Converter={x:Static views:NotEmptyConverter.Instance}}"
+                   FontSize="13" Margin="0,0,0,12"
+                   Foreground="{Binding IsError, Converter={x:Static views:ErrorColorConverter.Instance}}" />
+
+        <!-- Pull -->
+        <Border DockPanel.Dock="Top"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                BorderThickness="1" CornerRadius="8"
+                Padding="14,12" Margin="0,0,0,16">
+            <StackPanel Spacing="10">
+                <TextBlock Text="Pull Model" FontSize="14" FontWeight="SemiBold" />
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                    <TextBox Grid.Column="0"
+                             Text="{Binding PullModelName}"
+                             Watermark="e.g.  llama3.2,  mistral,  gemma3:27b"
+                             FontSize="13" CornerRadius="6" Padding="10,8" />
+                    <Button Grid.Column="1"
+                            Command="{Binding PullCommand}"
+                            IsEnabled="{Binding !IsPulling}"
+                            Padding="14,8" CornerRadius="6" FontSize="13">
+                        <Button.Content>
+                            <TextBlock Text="{Binding IsPulling, Converter={x:Static views:PullingTextConverter.Instance}}" />
+                        </Button.Content>
+                    </Button>
+                </Grid>
+                <TextBlock Text="{Binding PullStatus}"
+                           IsVisible="{Binding IsPulling}"
+                           FontSize="12" Opacity="0.55" />
+            </StackPanel>
+        </Border>
+
+        <!-- Model list -->
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <ItemsControl ItemsSource="{Binding Models}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                BorderThickness="1" CornerRadius="6"
+                                Padding="14,10" Margin="0,2">
+                            <Grid ColumnDefinitions="*,Auto,Auto">
+                                <StackPanel Grid.Column="0" Spacing="2">
+                                    <TextBlock Text="{Binding Name}"
+                                               FontSize="14" FontWeight="Medium" />
+                                    <StackPanel Orientation="Horizontal" Spacing="10">
+                                        <TextBlock Text="{Binding Provider}"
+                                                   FontSize="11" Opacity="0.45" />
+                                        <TextBlock Text="{Binding SizeDisplay}"
+                                                   FontSize="11" Opacity="0.45" />
+                                    </StackPanel>
+                                </StackPanel>
+                                <TextBlock Grid.Column="1"
+                                           Text="{Binding ModifiedAt, StringFormat={}{0:d MMM yyyy}}"
+                                           FontSize="11" Opacity="0.35"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,12,0" />
+                                <Button Grid.Column="2" Classes="icon-btn"
+                                        Command="{Binding $parent[UserControl].DataContext.DeleteCommand}"
+                                        CommandParameter="{Binding}"
+                                        ToolTip.Tip="Delete model">
+                                    <PathIcon Data="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"
+                                              Width="13" Height="13" Opacity="0.55" />
+                                </Button>
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+    </DockPanel>
+</UserControl>

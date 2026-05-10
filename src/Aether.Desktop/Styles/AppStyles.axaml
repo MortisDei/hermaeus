@@ -1,0 +1,77 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- ── Sidebar ─────────────────────────────────────────────────────── -->
+    <Style Selector="ListBoxItem.conv-item">
+        <Setter Property="Padding" Value="10,6" />
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="Margin" Value="0,1" />
+        <Setter Property="Cursor" Value="Hand" />
+    </Style>
+
+    <!-- ── Chat input ───────────────────────────────────────────────────── -->
+    <Style Selector="TextBox.chat-input">
+        <Setter Property="CornerRadius" Value="10" />
+        <Setter Property="Padding" Value="14,10" />
+        <Setter Property="FontSize" Value="14" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="MinHeight" Value="48" />
+        <Setter Property="MaxHeight" Value="200" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+        <Setter Property="AcceptsReturn" Value="True" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+
+    <!-- ── Icon buttons ─────────────────────────────────────────────────── -->
+    <Style Selector="Button.icon-btn">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Padding" Value="6" />
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="Button.icon-btn:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+    </Style>
+
+    <!-- ── Send / Stop button ───────────────────────────────────────────── -->
+    <Style Selector="Button.send-btn">
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="Padding" Value="14,10" />
+        <Setter Property="FontSize" Value="14" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="MinWidth" Value="70" />
+    </Style>
+
+    <!-- ── Sidebar new-chat button ──────────────────────────────────────── -->
+    <Style Selector="Button.sidebar-new">
+        <Setter Property="HorizontalAlignment" Value="Stretch" />
+        <Setter Property="HorizontalContentAlignment" Value="Left" />
+        <Setter Property="Padding" Value="10,8" />
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="Margin" Value="8,4" />
+        <Setter Property="Cursor" Value="Hand" />
+    </Style>
+
+    <!-- ── Code block ───────────────────────────────────────────────────── -->
+    <Style Selector="Border.code-block">
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="Padding" Value="14,10" />
+        <Setter Property="Margin" Value="0,4" />
+    </Style>
+
+    <!-- ── Sidebar section header ───────────────────────────────────────── -->
+    <Style Selector="TextBlock.sidebar-section-header">
+        <Setter Property="FontSize" Value="10" />
+        <Setter Property="Opacity" Value="0.45" />
+        <Setter Property="Margin" Value="14,6,0,2" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="TextTransform" Value="Uppercase" />
+    </Style>
+
+    <!-- ── Streaming pulse ──────────────────────────────────────────────── -->
+    <Style Selector="TextBlock.streaming-cursor">
+        <Setter Property="Opacity" Value="0.7" />
+    </Style>
+
+</Styles>

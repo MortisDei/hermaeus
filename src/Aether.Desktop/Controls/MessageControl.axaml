@@ -1,0 +1,57 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Aether.ViewModels"
+             xmlns:controls="using:Aether.Desktop.Controls"
+             x:Class="Aether.Desktop.Controls.MessageControl"
+             x:DataType="vm:MessageViewModel">
+
+    <Grid>
+        <!-- ── User bubble ────────────────────────────────────────────────── -->
+        <Border IsVisible="{Binding IsUser}"
+                HorizontalAlignment="Right"
+                MaxWidth="680"
+                CornerRadius="14,14,2,14"
+                Padding="14,10"
+                Background="{DynamicResource AccentFillColorDefaultBrush}"
+                Margin="60,0,0,0">
+            <SelectableTextBlock Text="{Binding Content}"
+                                 TextWrapping="Wrap"
+                                 FontSize="14"
+                                 LineHeight="22"
+                                 Foreground="{DynamicResource TextOnAccentFillColorPrimaryBrush}" />
+        </Border>
+
+        <!-- ── Assistant message ─────────────────────────────────────────── -->
+        <StackPanel IsVisible="{Binding IsAssistant}"
+                    HorizontalAlignment="Left"
+                    MaxWidth="780"
+                    Margin="0,0,60,0">
+
+            <StackPanel Orientation="Horizontal" Spacing="6" Margin="2,0,0,4">
+                <PathIcon Data="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v1a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-1H1a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2M7.5 13A2.5 2.5 0 0 0 5 15.5A2.5 2.5 0 0 0 7.5 18a2.5 2.5 0 0 0 2.5-2.5A2.5 2.5 0 0 0 7.5 13m9 0a2.5 2.5 0 0 0-2.5 2.5a2.5 2.5 0 0 0 2.5 2.5a2.5 2.5 0 0 0 2.5-2.5A2.5 2.5 0 0 0 16.5 13z"
+                          Width="13" Height="13" Opacity="0.45" />
+                <TextBlock Text="Assistant" FontSize="11" Opacity="0.4"
+                           FontWeight="Medium" VerticalAlignment="Center" />
+                <TextBlock IsVisible="{Binding IsStreaming}"
+                           Text="●" FontSize="9"
+                           Opacity="0.6"
+                           VerticalAlignment="Center" />
+            </StackPanel>
+
+            <controls:MarkdownViewer Markdown="{Binding Content}"
+                                     IsError="{Binding IsError}"
+                                     FontSize="14" />
+
+            <Button Classes="icon-btn"
+                    HorizontalAlignment="Left"
+                    Margin="0,4,0,0"
+                    Opacity="0.45"
+                    ToolTip.Tip="Copy"
+                    Command="{Binding $parent[ItemsControl].DataContext.CopyMessageCommand}"
+                    CommandParameter="{Binding}">
+                <PathIcon Data="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"
+                          Width="12" Height="12" />
+            </Button>
+        </StackPanel>
+    </Grid>
+</UserControl>

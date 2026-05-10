@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Aether.Desktop</RootNamespace>
+    <AssemblyName>Aether</AssemblyName>
+    <ApplicationIcon>Assets/aether.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia"               Version="11.2.1" />
+    <PackageReference Include="Avalonia.Desktop"       Version="11.2.1" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.2.1" />
+    <PackageReference Include="Avalonia.Fonts.Inter"   Version="11.2.1" />
+    <PackageReference Include="Avalonia.Diagnostics"   Version="11.2.1"
+                      Condition="'$(Configuration)'=='Debug'" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.4" />
+    <PackageReference Include="Markdig"                Version="0.38.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Aether.Core/Aether.Core.csproj" />
+    <ProjectReference Include="../Aether.Services/Aether.Services.csproj" />
+    <ProjectReference Include="../Aether.ViewModels/Aether.ViewModels.csproj" />
+    <ProjectReference Include="../Aether.Rag/Aether.Rag.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <AvaloniaResource Include="Assets/**" />
+    <AvaloniaResource Include="Styles/**" />
+  </ItemGroup>
+</Project>

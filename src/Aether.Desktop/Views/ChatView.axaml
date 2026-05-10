@@ -1,0 +1,143 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Aether.ViewModels"
+             xmlns:controls="using:Aether.Desktop.Controls"
+             x:Class="Aether.Desktop.Views.ChatView"
+             x:DataType="vm:ChatViewModel">
+
+    <Grid RowDefinitions="Auto,Auto,*,Auto">
+
+        <!-- ── Model / options bar ────────────────────────────────────────── -->
+        <Border Grid.Row="0"
+                Padding="12,6"
+                BorderThickness="0,0,0,1"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="8">
+
+                <TextBlock Grid.Column="0" Text="Model"
+                           VerticalAlignment="Center" Opacity="0.5" FontSize="12" />
+
+                <ComboBox Grid.Column="1"
+                          ItemsSource="{Binding AvailableModels}"
+                          SelectedItem="{Binding SelectedModel}"
+                          MaxWidth="300"
+                          HorizontalAlignment="Left"
+                          FontSize="13">
+                    <ComboBox.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding DisplayName}" />
+                        </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                </ComboBox>
+
+                <StackPanel Grid.Column="2"
+                            Orientation="Horizontal" Spacing="6"
+                            VerticalAlignment="Center">
+                    <TextBlock Text="Temp" Opacity="0.5" FontSize="12" VerticalAlignment="Center" />
+                    <NumericUpDown Value="{Binding Temperature}"
+                                  Minimum="0" Maximum="2" Increment="0.1"
+                                  FormatString="F1" FontSize="13" Width="90" />
+                </StackPanel>
+
+                <Button Grid.Column="3" Classes="icon-btn"
+                        Command="{Binding ToggleSystemPromptCommand}"
+                        ToolTip.Tip="System prompt">
+                    <PathIcon Data="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 9h12v2H6V9zm8 5H6v-2h8v2zm4-6H6V6h12v2z"
+                              Width="16" Height="16" />
+                </Button>
+
+                <Button Grid.Column="4" Classes="icon-btn"
+                        Command="{Binding ClearChatCommand}"
+                        ToolTip.Tip="Clear chat">
+                    <PathIcon Data="M12 2C6.47 2 2 6.47 2 12s4.47 10 10 10 10-4.47 10-10S17.53 2 12 2zm5 13.59L15.59 17 12 13.41 8.41 17 7 15.59 10.59 12 7 8.41 8.41 7 12 10.59 15.59 7 17 8.41 13.41 12 17 15.59z"
+                              Width="16" Height="16" />
+                </Button>
+            </Grid>
+        </Border>
+
+        <!-- ── System prompt (collapsible) ───────────────────────────────── -->
+        <Border Grid.Row="1"
+                IsVisible="{Binding ShowSystemPrompt}"
+                Padding="16,8"
+                BorderThickness="0,0,0,1"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
+            <StackPanel Spacing="4">
+                <TextBlock Text="SYSTEM PROMPT" FontSize="10"
+                           Classes="sidebar-section-header" />
+                <TextBox Text="{Binding SystemPrompt}"
+                         Watermark="You are a helpful assistant..."
+                         AcceptsReturn="True" TextWrapping="Wrap"
+                         FontSize="13" CornerRadius="6"
+                         Padding="10,6" MinHeight="40" MaxHeight="100" />
+            </StackPanel>
+        </Border>
+
+        <!-- ── Messages ───────────────────────────────────────────────────── -->
+        <ScrollViewer Grid.Row="2"
+                      x:Name="MessageScroller"
+                      VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled"
+                      Padding="0,8">
+            <StackPanel Margin="16,0" Spacing="4">
+
+                <StackPanel IsVisible="{Binding !HasMessages}"
+                            HorizontalAlignment="Center"
+                            Margin="0,80" Spacing="10">
+                    <PathIcon Data="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"
+                              Width="52" Height="52" Opacity="0.12"
+                              HorizontalAlignment="Center" />
+                    <TextBlock Text="Start a conversation"
+                               HorizontalAlignment="Center"
+                               FontSize="17" Opacity="0.25" />
+                    <TextBlock Text="Select a model above then type below"
+                               HorizontalAlignment="Center"
+                               FontSize="13" Opacity="0.18" />
+                </StackPanel>
+
+                <ItemsControl ItemsSource="{Binding Messages}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="vm:MessageViewModel">
+                            <controls:MessageControl Margin="0,4" />
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- ── Input bar ──────────────────────────────────────────────────── -->
+        <Border Grid.Row="3"
+                Padding="16,10"
+                BorderThickness="0,1,0,0"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
+            <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+
+                <TextBox Grid.Column="0"
+                         x:Name="InputBox"
+                         Classes="chat-input"
+                         Text="{Binding InputText}"
+                         Watermark="Message…"
+                         KeyDown="OnInputKeyDown" />
+
+                <Button Grid.Column="1" Classes="send-btn"
+                        Command="{Binding SendCommand}"
+                        IsVisible="{Binding !IsGenerating}"
+                        Content="Send" />
+
+                <Button Grid.Column="1" Classes="send-btn"
+                        Command="{Binding StopCommand}"
+                        IsVisible="{Binding IsGenerating}"
+                        Content="Stop" />
+
+                <Button Grid.Column="2" Classes="icon-btn"
+                        Command="{Binding RegenerateCommand}"
+                        IsEnabled="{Binding !IsGenerating}"
+                        IsVisible="{Binding HasMessages}"
+                        ToolTip.Tip="Regenerate last response">
+                    <PathIcon Data="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"
+                              Width="16" Height="16" />
+                </Button>
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>

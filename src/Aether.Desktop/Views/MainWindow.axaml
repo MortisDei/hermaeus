@@ -1,0 +1,100 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Aether.ViewModels"
+        xmlns:views="using:Aether.Desktop.Views"
+        x:Class="Aether.Desktop.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="Aether"
+        MinWidth="720" MinHeight="500"
+        Width="1280"   Height="820"
+        WindowStartupLocation="CenterScreen"
+        Closing="OnWindowClosing">
+
+    <Grid ColumnDefinitions="Auto,*">
+
+        <Border Grid.Column="0" Width="260"
+                IsVisible="{Binding IsSidebarOpen}"
+                BorderThickness="0,0,1,0"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
+            <views:ConversationListView DataContext="{Binding}" />
+        </Border>
+
+        <Grid Grid.Column="1" RowDefinitions="Auto,*">
+
+            <Border Grid.Row="0" Padding="8,6"
+                    BorderThickness="0,0,0,1"
+                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
+                <Grid ColumnDefinitions="Auto,*,Auto">
+
+                    <Button Grid.Column="0" Classes="icon-btn"
+                            Command="{Binding ToggleSidebarCommand}"
+                            ToolTip.Tip="Toggle sidebar">
+                        <PathIcon Data="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"
+                                  Width="18" Height="18" />
+                    </Button>
+
+                    <StackPanel Grid.Column="1" Orientation="Horizontal"
+                                HorizontalAlignment="Center" Spacing="4">
+
+                        <Button Classes="icon-btn" Command="{Binding ShowChatPanelCommand}"
+                                ToolTip.Tip="Chat">
+                            <PathIcon Data="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"
+                                      Width="17" Height="17" />
+                        </Button>
+
+                        <Button Classes="icon-btn" Command="{Binding ShowRagPanelCommand}"
+                                ToolTip.Tip="RAG — ask your documents">
+                            <PathIcon Data="M12 3L1 9l11 6 9-4.91V17h2V9L12 3zM5 13.18v4L12 21l7-3.82v-4L12 17l-7-3.82z"
+                                      Width="17" Height="17" />
+                        </Button>
+
+                        <Button Classes="icon-btn" Command="{Binding ShowModelsPanelCommand}"
+                                ToolTip.Tip="Model management">
+                            <PathIcon Data="M4 8h4V4H4v4zm6 12h4v-4h-4v4zm-6 0h4v-4H4v4zm0-6h4v-4H4v4zm6 0h4v-4h-4v4zm6-10v4h4V4h-4zm-6 4h4V4h-4v4zm6 6h4v-4h-4v4zm0 6h4v-4h-4v4z"
+                                      Width="17" Height="17" />
+                        </Button>
+
+                        <!-- Services / process manager -->
+                        <Button Classes="icon-btn" Command="{Binding ShowServicesPanelCommand}"
+                                ToolTip.Tip="Services — manage llama-server processes">
+                            <Grid>
+                                <PathIcon Data="M13 2.05v2.02c3.95.49 7 3.85 7 7.93 0 3.21-1.81 6-4.72 7.28L13 17v5h5l-1.22-1.22C19.91 19.07 22 15.76 22 12c0-5.18-3.95-9.45-9-9.95zM11 2.05C5.95 2.55 2 6.82 2 12c0 3.76 2.09 7.07 5.22 8.78L6 22h5v-5l-2.28 2.28C7.81 18 6 15.21 6 12c0-4.08 3.05-7.44 7-7.93V2.05z"
+                                          Width="17" Height="17" />
+                                <!-- Running indicator dot — visible when any server is running -->
+                                <Ellipse Width="6" Height="6"
+                                         HorizontalAlignment="Right"
+                                         VerticalAlignment="Top"
+                                         Margin="0,0,-1,-1"
+                                         Fill="#4CAF50"
+                                         IsVisible="{Binding Services.Servers,
+                                             Converter={x:Static views:MainWindow.AnyRunning}}" />
+                            </Grid>
+                        </Button>
+
+                        <Button Classes="icon-btn" Command="{Binding ShowSettingsPanelCommand}"
+                                ToolTip.Tip="Settings">
+                            <PathIcon Data="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"
+                                      Width="17" Height="17" />
+                        </Button>
+                    </StackPanel>
+
+                    <TextBlock Grid.Column="2"
+                               Text="{Binding Chat.ConversationTitle}"
+                               IsVisible="{Binding ShowChat}"
+                               VerticalAlignment="Center"
+                               Margin="0,0,12,0" Opacity="0.5"
+                               FontSize="12" MaxWidth="220"
+                               TextTrimming="CharacterEllipsis" />
+                </Grid>
+            </Border>
+
+            <Panel Grid.Row="1">
+                <views:ChatView            IsVisible="{Binding ShowChat}"     DataContext="{Binding Chat}" />
+                <views:RagView             IsVisible="{Binding ShowRag}"      DataContext="{Binding Rag}" />
+                <views:ModelManagementView IsVisible="{Binding ShowModels}"   DataContext="{Binding Models}" />
+                <views:ServicesView        IsVisible="{Binding ShowServices}" DataContext="{Binding Services}" />
+                <views:SettingsView        IsVisible="{Binding ShowSettings}" DataContext="{Binding Settings}" />
+            </Panel>
+        </Grid>
+    </Grid>
+</Window>
