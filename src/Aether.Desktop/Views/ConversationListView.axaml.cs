@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Interactivity;
 using Aether.ViewModels;
 
@@ -15,6 +16,26 @@ public partial class ConversationListView : UserControl
             && DataContext is MainWindowViewModel vm)
         {
             vm.SelectConversationCommand.Execute(item);
+        }
+    }
+
+    private void OnTitleLostFocus(object? sender, RoutedEventArgs e) => CommitRename(sender);
+
+    private void OnTitleKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter) return;
+        CommitRename(sender);
+        e.Handled = true;
+        if (sender is Control control)
+            control.Focus(NavigationMethod.Unspecified);
+    }
+
+    private void CommitRename(object? sender)
+    {
+        if (sender is TextBox { DataContext: ConversationItemViewModel item }
+            && DataContext is MainWindowViewModel vm)
+        {
+            vm.RenameConversationCommand.Execute(item);
         }
     }
 }

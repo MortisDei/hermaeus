@@ -8,4 +8,6 @@ public class Message
     public string Content { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public bool IsError { get; set; }
+    public string ModelId { get; set; } = string.Empty;
+    public long DurationMs { get; set; }
 }

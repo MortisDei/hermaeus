@@ -6,7 +6,7 @@
              x:DataType="vm:ServicesViewModel">
 
     <ScrollViewer Padding="24">
-        <StackPanel MaxWidth="680" Spacing="16">
+        <StackPanel MaxWidth="760" Spacing="16">
 
             <TextBlock Text="Services" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,4" />
             <TextBlock FontSize="13" Opacity="0.45" TextWrapping="Wrap"
@@ -127,50 +127,60 @@
                                     <TextBlock Grid.Row="2" Grid.Column="0"
                                                Text="Port / Ctx / GPU" VerticalAlignment="Center"
                                                Opacity="0.6" FontSize="13" />
-                                    <StackPanel Grid.Row="2" Grid.Column="1"
-                                                Orientation="Horizontal" Spacing="6">
+                                    <Grid Grid.Row="2" Grid.Column="1"
+                                          ColumnDefinitions="140,140,120,*"
+                                          ColumnSpacing="8">
                                         <NumericUpDown Value="{Binding Port}"
                                                        Minimum="1024" Maximum="65535"
-                                                       Increment="1" Width="120"
+                                                       Increment="1"
+                                                       HorizontalAlignment="Stretch"
                                                        FontSize="13"
                                                        IsEnabled="{Binding CanEdit}"
                                                        ToolTip.Tip="Port" />
-                                        <NumericUpDown Value="{Binding ContextSize}"
+                                        <NumericUpDown Grid.Column="1"
+                                                       Value="{Binding ContextSize}"
                                                        Minimum="512" Maximum="131072"
-                                                       Increment="512" Width="120"
+                                                       Increment="512"
+                                                       HorizontalAlignment="Stretch"
                                                        FontSize="13"
                                                        IsEnabled="{Binding CanEdit}"
                                                        ToolTip.Tip="Context size (tokens)" />
-                                        <NumericUpDown Value="{Binding GpuLayers}"
+                                        <NumericUpDown Grid.Column="2"
+                                                       Value="{Binding GpuLayers}"
                                                        Minimum="0" Maximum="999"
-                                                       Increment="1" Width="90"
+                                                       Increment="1"
+                                                       HorizontalAlignment="Stretch"
                                                        FontSize="13"
                                                        IsEnabled="{Binding CanEdit}"
                                                        ToolTip.Tip="GPU layers to request. 0 leaves llama.cpp in auto-fit mode; use a high value such as 999 to request full offload when VRAM allows." />
-                                    </StackPanel>
+                                    </Grid>
 
                                     <!-- Threads -->
                                     <TextBlock Grid.Row="3" Grid.Column="0"
                                                Text="Threads" VerticalAlignment="Center"
                                                Opacity="0.6" FontSize="13" />
-                                    <StackPanel Grid.Row="3" Grid.Column="1"
-                                                Orientation="Horizontal" Spacing="16">
+                                    <Grid Grid.Row="3" Grid.Column="1"
+                                          ColumnDefinitions="140,Auto,Auto,*"
+                                          ColumnSpacing="16">
                                         <NumericUpDown Value="{Binding Threads}"
                                                        Minimum="1" Maximum="128"
-                                                       Increment="1" Width="90"
+                                                       Increment="1"
+                                                       HorizontalAlignment="Stretch"
                                                        FontSize="13"
                                                        IsEnabled="{Binding CanEdit}"
                                                        ToolTip.Tip="CPU thread count" />
-                                        <CheckBox IsChecked="{Binding EmbeddingsMode}"
+                                        <CheckBox Grid.Column="1"
+                                                  IsChecked="{Binding EmbeddingsMode}"
                                                   Content="--embeddings"
                                                   IsEnabled="{Binding CanEdit}"
                                                   FontSize="13"
                                                   VerticalAlignment="Center" />
-                                        <CheckBox IsChecked="{Binding AutoStart}"
+                                        <CheckBox Grid.Column="2"
+                                                  IsChecked="{Binding AutoStart}"
                                                   Content="Auto-start"
                                                   FontSize="13"
                                                   VerticalAlignment="Center" />
-                                    </StackPanel>
+                                    </Grid>
 
                                     <!-- Extra args -->
                                     <TextBlock Grid.Row="4" Grid.Column="0"
@@ -189,11 +199,6 @@
                                     <Button Command="{Binding SaveConfigCommand}"
                                             Content="Save Config"
                                             Padding="12,5" CornerRadius="6" FontSize="12" />
-                                    <Button Command="{Binding ApplyMistralGpuPresetCommand}"
-                                            IsEnabled="{Binding CanEdit}"
-                                            Content="Mistral GPU Preset"
-                                            Padding="12,5" CornerRadius="6" FontSize="12"
-                                            ToolTip.Tip="Set Mistral 7B tuned args: ctx 4096, threads 8, GPU layers 33, device VULKAN0." />
                                     <Button Command="{Binding AutoTuneCommand}"
                                             IsEnabled="{Binding CanEdit}"
                                             Content="Auto Tune"

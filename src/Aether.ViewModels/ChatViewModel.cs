@@ -13,7 +13,9 @@ public partial class ChatViewModel : ObservableObject
     private readonly ILlmService _llm;
     private readonly IConversationStore _store;
     private readonly ISettingsService _settings;
+    private readonly ITtsService _tts;
     private CancellationTokenSource? _cts;
+    private CancellationTokenSource? _ttsCts;
 
     public ObservableCollection<MessageViewModel> Messages        { get; } = [];
     public ObservableCollection<LlmModel>         AvailableModels { get; } = [];
@@ -32,9 +34,9 @@ public partial class ChatViewModel : ObservableObject
     public event EventHandler<string>? ConversationSaved;
     public Action<string>?            RequestCopyToClipboard { get; set; }
 
-    public ChatViewModel(ILlmService llm, IConversationStore store, ISettingsService settings)
+    public ChatViewModel(ILlmService llm, IConversationStore store, ISettingsService settings, ITtsService tts)
     {
-        _llm = llm; _store = store; _settings = settings;
+        _llm = llm; _store = store; _settings = settings; _tts = tts;
         _temperature  = settings.Settings.Temperature;
         _systemPrompt = settings.Settings.DefaultSystemPrompt;
         Messages.CollectionChanged += (_, _) => HasMessages = Messages.Count > 0;
@@ -70,7 +72,14 @@ public partial class ChatViewModel : ObservableObject
             SelectedModel = AvailableModels.FirstOrDefault(m => m.Id == conv.ModelId) ?? SelectedModel;
         Messages.Clear();
         foreach (var msg in conv.Messages)
-            Messages.Add(new MessageViewModel { Role = msg.Role, Content = msg.Content, IsError = msg.IsError });
+            Messages.Add(new MessageViewModel
+            {
+                Role = msg.Role,
+                Content = msg.Content,
+                IsError = msg.IsError,
+                ModelId = msg.ModelId,
+                DurationMs = msg.DurationMs
+            });
         ScrollToBottom?.Invoke(this, EventArgs.Empty);
     }
 
@@ -91,7 +100,14 @@ public partial class ChatViewModel : ObservableObject
         Messages.Add(new MessageViewModel { Role = "user", Content = text });
         InputText = string.Empty;
 
-        var asst = new MessageViewModel { Role = "assistant", Content = "", IsStreaming = true };
+        var selectedModelId = SelectedModel.Id;
+        var asst = new MessageViewModel
+        {
+            Role = "assistant",
+            Content = "",
+            IsStreaming = true,
+            ModelId = selectedModelId
+        };
         Messages.Add(asst);
         ScrollToBottom?.Invoke(this, EventArgs.Empty);
 
@@ -99,19 +115,22 @@ public partial class ChatViewModel : ObservableObject
         _cts = new CancellationTokenSource();
         var streamBuffer = new StringBuilder();
         var streamClock = Stopwatch.StartNew();
+        var responseClock = Stopwatch.StartNew();
         try
         {
             var history = Messages.Where(m => !m.IsStreaming)
                 .Select(m => new ChatMessage(m.Role, m.Content)).ToList();
 
             await foreach (var token in _llm.StreamChatAsync(
-                SelectedModel.Id, history,
+                selectedModelId, history,
                 string.IsNullOrWhiteSpace(SystemPrompt) ? null : SystemPrompt,
                 Temperature, _cts.Token))
             {
                 AppendStreamToken(asst, token, force: false);
             }
             AppendStreamToken(asst, string.Empty, force: true);
+            responseClock.Stop();
+            asst.DurationMs = responseClock.ElapsedMilliseconds;
             asst.IsStreaming = false;
             await PersistAsync();
         }
@@ -123,6 +142,8 @@ public partial class ChatViewModel : ObservableObject
         catch (Exception ex)
         {
             asst.Content = $"Error: {ex.Message}";
+            responseClock.Stop();
+            asst.DurationMs = responseClock.ElapsedMilliseconds;
             asst.IsStreaming = false;
             asst.IsError = true;
         }
@@ -151,6 +172,31 @@ public partial class ChatViewModel : ObservableObject
     private void CopyMessage(MessageViewModel? msg)
     {
         if (msg is not null) RequestCopyToClipboard?.Invoke(msg.Content);
+    }
+
+    [RelayCommand]
+    private async Task SpeakMessageAsync(MessageViewModel? msg)
+    {
+        if (msg is null || string.IsNullOrWhiteSpace(msg.Content)) return;
+
+        _ttsCts?.Cancel();
+        _ttsCts?.Dispose();
+        _ttsCts = new CancellationTokenSource();
+
+        try
+        {
+            await _tts.SpeakAsync(msg.Content, _ttsCts.Token);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            Messages.Add(new MessageViewModel
+            {
+                Role = "assistant",
+                Content = $"TTS error: {ex.Message}",
+                IsError = true
+            });
+        }
     }
 
     [RelayCommand]
@@ -205,7 +251,11 @@ public partial class ChatViewModel : ObservableObject
             Messages = Messages.Where(m => !m.IsStreaming).Select(m => new Message
             {
                 Id = m.Id, ConversationId = CurrentConversationId,
-                Role = m.Role, Content = m.Content, IsError = m.IsError
+                Role = m.Role,
+                Content = m.Content,
+                IsError = m.IsError,
+                ModelId = m.ModelId,
+                DurationMs = m.DurationMs
             }).ToList()
         });
         ConversationSaved?.Invoke(this, CurrentConversationId);

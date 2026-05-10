@@ -52,10 +52,15 @@
                     <DataTemplate DataType="vm:ConversationItemViewModel">
                         <Grid ColumnDefinitions="*,Auto">
                             <StackPanel Grid.Column="0" Spacing="1">
-                                <TextBlock Text="{Binding Title}"
-                                           FontSize="13"
-                                           TextTrimming="CharacterEllipsis"
-                                           MaxWidth="175" />
+                                <TextBox Text="{Binding Title, Mode=TwoWay}"
+                                         FontSize="13"
+                                         MaxWidth="175"
+                                         BorderThickness="0"
+                                         Background="Transparent"
+                                         Padding="0"
+                                         Margin="-2,-3,0,-1"
+                                         LostFocus="OnTitleLostFocus"
+                                         KeyDown="OnTitleKeyDown" />
                                 <TextBlock Text="{Binding TimeDisplay}"
                                            FontSize="11"
                                            Opacity="0.45" />

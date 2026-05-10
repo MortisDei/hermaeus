@@ -18,6 +18,9 @@ public class AppSettings
     public double FontSize             { get; set; } = 14;
     public bool   RagEnabled           { get; set; } = false;
     public string RagServiceUrl        { get; set; } = "http://localhost:8765";
+    public bool   TtsEnabled           { get; set; } = true;
+    public string TtsServiceUrl        { get; set; } = "http://127.0.0.1:8020";
+    public string TtsSpeaker           { get; set; } = string.Empty;
 
     public List<ServerConfig> ManagedServers { get; set; } =
     [

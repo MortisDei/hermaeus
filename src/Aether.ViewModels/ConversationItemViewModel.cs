@@ -17,4 +17,6 @@ public partial class ConversationItemViewModel : ObservableObject
         : UpdatedAt.Date >= DateTime.Today.AddDays(-7)
             ? UpdatedAt.ToString("ddd")
             : UpdatedAt.ToString("d MMM");
+
+    partial void OnUpdatedAtChanged(DateTime value) => OnPropertyChanged(nameof(TimeDisplay));
 }

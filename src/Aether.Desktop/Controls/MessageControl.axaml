@@ -42,16 +42,34 @@
                                      IsError="{Binding IsError}"
                                      FontSize="14" />
 
-            <Button Classes="icon-btn"
-                    HorizontalAlignment="Left"
-                    Margin="0,4,0,0"
-                    Opacity="0.45"
-                    ToolTip.Tip="Copy"
-                    Command="{Binding $parent[ItemsControl].DataContext.CopyMessageCommand}"
-                    CommandParameter="{Binding}">
-                <PathIcon Data="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"
-                          Width="12" Height="12" />
-            </Button>
+            <Grid Margin="0,4,0,0" ColumnDefinitions="Auto,*">
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="2">
+                    <Button Classes="icon-btn"
+                            Opacity="0.45"
+                            ToolTip.Tip="Copy"
+                            Command="{Binding $parent[ItemsControl].DataContext.CopyMessageCommand}"
+                            CommandParameter="{Binding}">
+                        <PathIcon Data="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"
+                                  Width="12" Height="12" />
+                    </Button>
+                    <Button Classes="icon-btn"
+                            Opacity="0.45"
+                            ToolTip.Tip="Read aloud"
+                            Command="{Binding $parent[ItemsControl].DataContext.SpeakMessageCommand}"
+                            CommandParameter="{Binding}">
+                        <PathIcon Data="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 7.97v8.05A4.5 4.5 0 0 0 16.5 12zm-2.5-8.5v2.06A7 7 0 0 1 14 18.44v2.06A9 9 0 0 0 14 3.5z"
+                                  Width="13" Height="13" />
+                    </Button>
+                </StackPanel>
+                <TextBlock Grid.Column="1"
+                           Text="{Binding MetaDisplay}"
+                           HorizontalAlignment="Right"
+                           VerticalAlignment="Bottom"
+                           Margin="12,0,0,2"
+                           FontSize="11"
+                           Opacity="0.35"
+                           TextTrimming="CharacterEllipsis" />
+            </Grid>
         </StackPanel>
     </Grid>
 </UserControl>

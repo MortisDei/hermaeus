@@ -102,6 +102,25 @@ public partial class MainWindowViewModel : ObservableObject
         if (Chat.CurrentConversationId == item.Id) Chat.NewConversation();
     }
 
+    [RelayCommand]
+    private async Task RenameConversationAsync(ConversationItemViewModel item)
+    {
+        var title = string.IsNullOrWhiteSpace(item.Title)
+            ? "New Conversation"
+            : item.Title.Trim();
+        item.Title = title;
+
+        var conv = await _store.GetByIdAsync(item.Id);
+        if (conv is null) return;
+
+        conv.Title = title;
+        await _store.SaveAsync(conv);
+        item.UpdatedAt = conv.UpdatedAt;
+
+        if (Chat.CurrentConversationId == item.Id)
+            Chat.ConversationTitle = title;
+    }
+
     [RelayCommand] private void ToggleSidebar()       => IsSidebarOpen = !IsSidebarOpen;
     [RelayCommand] private async Task ShowChatPanelAsync()
     {

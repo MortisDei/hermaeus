@@ -130,15 +130,6 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
-    private void ApplyMistralGpuPreset()
-    {
-        ContextSize = 4096;
-        Threads = 8;
-        GpuLayers = 33;
-        ExtraArgs = MergeExtraArgs(ExtraArgs, "--device VULKAN0");
-    }
-
-    [RelayCommand]
     private async Task AutoTuneAsync()
     {
         if (!CanEdit) return;

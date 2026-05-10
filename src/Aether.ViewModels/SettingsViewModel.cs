@@ -21,6 +21,9 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private string _selectedTheme        = "System";
     [ObservableProperty] private bool   _ctrlEnterToSend;
     [ObservableProperty] private bool   _isSaved;
+    [ObservableProperty] private bool   _ttsEnabled = true;
+    [ObservableProperty] private string _ttsServiceUrl = "http://127.0.0.1:8020";
+    [ObservableProperty] private string _ttsSpeaker = string.Empty;
 
     public string[] Themes { get; } = ["System", "Dark", "Light"];
 
@@ -41,6 +44,9 @@ public partial class SettingsViewModel : ObservableObject
         FontSize            = s.FontSize;
         SelectedTheme       = s.Theme;
         CtrlEnterToSend     = s.CtrlEnterToSend;
+        TtsEnabled          = s.TtsEnabled;
+        TtsServiceUrl       = s.TtsServiceUrl;
+        TtsSpeaker          = s.TtsSpeaker;
     }
 
     [RelayCommand]
@@ -59,6 +65,9 @@ public partial class SettingsViewModel : ObservableObject
         s.FontSize            = FontSize;
         s.Theme               = SelectedTheme;
         s.CtrlEnterToSend     = CtrlEnterToSend;
+        s.TtsEnabled          = TtsEnabled;
+        s.TtsServiceUrl       = TtsServiceUrl;
+        s.TtsSpeaker          = TtsSpeaker;
         await _svc.SaveAsync();
         IsSaved = true;
         await Task.Delay(2000);
