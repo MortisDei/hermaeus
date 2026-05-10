@@ -23,9 +23,16 @@
                           MaxWidth="300"
                           HorizontalAlignment="Left"
                           FontSize="13">
+                    <ComboBox.SelectionBoxItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding DisplayName}"
+                                       TextTrimming="CharacterEllipsis" />
+                        </DataTemplate>
+                    </ComboBox.SelectionBoxItemTemplate>
                     <ComboBox.ItemTemplate>
                         <DataTemplate>
-                            <TextBlock Text="{Binding DisplayName}" />
+                            <TextBlock Text="{Binding DisplayName}"
+                                       TextTrimming="CharacterEllipsis" />
                         </DataTemplate>
                     </ComboBox.ItemTemplate>
                 </ComboBox>
@@ -36,7 +43,7 @@
                     <TextBlock Text="Temp" Opacity="0.5" FontSize="12" VerticalAlignment="Center" />
                     <NumericUpDown Value="{Binding Temperature}"
                                   Minimum="0" Maximum="2" Increment="0.1"
-                                  FormatString="F1" FontSize="13" Width="90" />
+                                  FormatString="F1" FontSize="13" Width="110" />
                 </StackPanel>
 
                 <Button Grid.Column="3" Classes="icon-btn"

@@ -13,9 +13,6 @@ public partial class ModelManagementViewModel : ObservableObject
     public ObservableCollection<LlmModel> Models { get; } = [];
 
     [ObservableProperty] private bool   _isLoading;
-    [ObservableProperty] private string _pullModelName = string.Empty;
-    [ObservableProperty] private bool   _isPulling;
-    [ObservableProperty] private string _pullStatus    = string.Empty;
     [ObservableProperty] private string _statusMessage = string.Empty;
     [ObservableProperty] private bool   _isError;
 
@@ -30,32 +27,11 @@ public partial class ModelManagementViewModel : ObservableObject
             var models = await _llm.GetModelsAsync();
             Models.Clear();
             foreach (var m in models) Models.Add(m);
-            StatusMessage = $"{models.Count} model(s) loaded";
+            StatusMessage = models.Count == 0
+                ? "No models reported by the running backends"
+                : $"{models.Count} model(s) loaded";
         }
         catch (Exception ex) { StatusMessage = ex.Message; IsError = true; }
         finally { IsLoading = false; }
-    }
-
-    [RelayCommand]
-    private async Task PullAsync()
-    {
-        if (string.IsNullOrWhiteSpace(PullModelName)) return;
-        IsPulling = true; PullStatus = "Starting..."; StatusMessage = string.Empty; IsError = false;
-        try
-        {
-            await _llm.PullModelAsync(PullModelName.Trim(), new Progress<string>(s => PullStatus = s));
-            PullModelName = string.Empty;
-            await RefreshAsync();
-        }
-        catch (Exception ex) { StatusMessage = ex.Message; IsError = true; }
-        finally { IsPulling = false; PullStatus = string.Empty; }
-    }
-
-    [RelayCommand]
-    private async Task DeleteAsync(LlmModel? model)
-    {
-        if (model is null) return;
-        try { await _llm.DeleteModelAsync(model.Id); Models.Remove(model); }
-        catch (Exception ex) { StatusMessage = ex.Message; IsError = true; }
     }
 }

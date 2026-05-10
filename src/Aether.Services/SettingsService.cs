@@ -27,6 +27,7 @@ public sealed class SettingsService : ISettingsService
         {
             var json = await File.ReadAllTextAsync(_path);
             Settings = JsonSerializer.Deserialize<AppSettings>(json, Opts) ?? new();
+            SettingsChanged?.Invoke(this, EventArgs.Empty);
         }
         catch { Settings = new(); }
     }

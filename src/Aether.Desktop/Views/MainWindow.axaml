@@ -88,13 +88,25 @@
                 </Grid>
             </Border>
 
-            <Panel Grid.Row="1">
-                <views:ChatView            IsVisible="{Binding ShowChat}"     DataContext="{Binding Chat}" />
-                <views:RagView             IsVisible="{Binding ShowRag}"      DataContext="{Binding Rag}" />
-                <views:ModelManagementView IsVisible="{Binding ShowModels}"   DataContext="{Binding Models}" />
-                <views:ServicesView        IsVisible="{Binding ShowServices}" DataContext="{Binding Services}" />
-                <views:SettingsView        IsVisible="{Binding ShowSettings}" DataContext="{Binding Settings}" />
-            </Panel>
+            <ContentControl Grid.Row="1" Content="{Binding ActiveViewModel}">
+                <ContentControl.DataTemplates>
+                    <DataTemplate DataType="vm:ChatViewModel">
+                        <views:ChatView />
+                    </DataTemplate>
+                    <DataTemplate DataType="vm:RagViewModel">
+                        <views:RagView />
+                    </DataTemplate>
+                    <DataTemplate DataType="vm:ModelManagementViewModel">
+                        <views:ModelManagementView />
+                    </DataTemplate>
+                    <DataTemplate DataType="vm:ServicesViewModel">
+                        <views:ServicesView />
+                    </DataTemplate>
+                    <DataTemplate DataType="vm:SettingsViewModel">
+                        <views:SettingsView />
+                    </DataTemplate>
+                </ContentControl.DataTemplates>
+            </ContentControl>
         </Grid>
     </Grid>
 </Window>

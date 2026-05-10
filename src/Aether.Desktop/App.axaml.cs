@@ -16,28 +16,42 @@ namespace Aether.Desktop;
 
 public partial class App : Application
 {
+    private ServiceProvider? _services;
+
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
 
-    public override async void OnFrameworkInitializationCompleted()
+    public override void OnFrameworkInitializationCompleted()
     {
         var services = new ServiceCollection();
         ConfigureServices(services);
         var sp = services.BuildServiceProvider();
+        _services = sp;
         Ioc.Default.ConfigureServices(sp);
-
-        await sp.GetRequiredService<ISettingsService>().LoadAsync();
-        await sp.GetRequiredService<IConversationStore>().InitializeAsync();
-        await sp.GetRequiredService<SqliteRagStore>().InitializeAsync();
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             var vm     = sp.GetRequiredService<MainWindowViewModel>();
             var window = new MainWindow { DataContext = vm };
             desktop.MainWindow = window;
-            window.Opened += async (_, _) => await vm.InitializeAsync();
+            window.Opened += async (_, _) => await InitializeAppAsync(sp, vm);
         }
 
         base.OnFrameworkInitializationCompleted();
+    }
+
+    private static async Task InitializeAppAsync(ServiceProvider sp, MainWindowViewModel vm)
+    {
+        try
+        {
+            await sp.GetRequiredService<ISettingsService>().LoadAsync();
+            await sp.GetRequiredService<IConversationStore>().InitializeAsync();
+            await sp.GetRequiredService<SqliteRagStore>().InitializeAsync();
+            await vm.InitializeAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Aether startup initialization failed: {ex}");
+        }
     }
 
     private static void ConfigureServices(IServiceCollection s)

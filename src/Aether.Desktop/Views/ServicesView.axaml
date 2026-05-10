@@ -93,11 +93,12 @@
                                              Text="{Binding ExecutablePath}"
                                              Watermark="llama-server  or  /full/path/llama-server"
                                              FontSize="13" CornerRadius="6" Padding="10,6"
-                                             IsEnabled="{Binding IsStopped}" />
+                                             IsEnabled="{Binding CanEdit}"
+                                             ToolTip.Tip="{Binding ExecutablePath}" />
                                     <Button Grid.Row="0" Grid.Column="2"
                                             Classes="icon-btn"
                                             Command="{Binding BrowseExecutableCommand}"
-                                            IsEnabled="{Binding IsStopped}"
+                                            IsEnabled="{Binding CanEdit}"
                                             ToolTip.Tip="Browse for executable">
                                         <PathIcon Data="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z"
                                                   Width="15" Height="15" />
@@ -111,11 +112,12 @@
                                              Text="{Binding ModelPath}"
                                              Watermark="/path/to/model.gguf"
                                              FontSize="13" CornerRadius="6" Padding="10,6"
-                                             IsEnabled="{Binding IsStopped}" />
+                                             IsEnabled="{Binding CanEdit}"
+                                             ToolTip.Tip="{Binding ModelPath}" />
                                     <Button Grid.Row="1" Grid.Column="2"
                                             Classes="icon-btn"
                                             Command="{Binding BrowseModelCommand}"
-                                            IsEnabled="{Binding IsStopped}"
+                                            IsEnabled="{Binding CanEdit}"
                                             ToolTip.Tip="Browse for model file">
                                         <PathIcon Data="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z"
                                                   Width="15" Height="15" />
@@ -129,22 +131,22 @@
                                                 Orientation="Horizontal" Spacing="6">
                                         <NumericUpDown Value="{Binding Port}"
                                                        Minimum="1024" Maximum="65535"
-                                                       Increment="1" Width="95"
+                                                       Increment="1" Width="120"
                                                        FontSize="13"
-                                                       IsEnabled="{Binding IsStopped}"
+                                                       IsEnabled="{Binding CanEdit}"
                                                        ToolTip.Tip="Port" />
                                         <NumericUpDown Value="{Binding ContextSize}"
                                                        Minimum="512" Maximum="131072"
-                                                       Increment="512" Width="100"
+                                                       Increment="512" Width="120"
                                                        FontSize="13"
-                                                       IsEnabled="{Binding IsStopped}"
+                                                       IsEnabled="{Binding CanEdit}"
                                                        ToolTip.Tip="Context size (tokens)" />
                                         <NumericUpDown Value="{Binding GpuLayers}"
                                                        Minimum="0" Maximum="999"
-                                                       Increment="1" Width="80"
+                                                       Increment="1" Width="90"
                                                        FontSize="13"
-                                                       IsEnabled="{Binding IsStopped}"
-                                                       ToolTip.Tip="GPU layers (0 = CPU only)" />
+                                                       IsEnabled="{Binding CanEdit}"
+                                                       ToolTip.Tip="GPU layers to request. 0 leaves llama.cpp in auto-fit mode; use a high value such as 999 to request full offload when VRAM allows." />
                                     </StackPanel>
 
                                     <!-- Threads -->
@@ -155,13 +157,13 @@
                                                 Orientation="Horizontal" Spacing="16">
                                         <NumericUpDown Value="{Binding Threads}"
                                                        Minimum="1" Maximum="128"
-                                                       Increment="1" Width="80"
+                                                       Increment="1" Width="90"
                                                        FontSize="13"
-                                                       IsEnabled="{Binding IsStopped}"
+                                                       IsEnabled="{Binding CanEdit}"
                                                        ToolTip.Tip="CPU thread count" />
                                         <CheckBox IsChecked="{Binding EmbeddingsMode}"
                                                   Content="--embeddings"
-                                                  IsEnabled="{Binding IsStopped}"
+                                                  IsEnabled="{Binding CanEdit}"
                                                   FontSize="13"
                                                   VerticalAlignment="Center" />
                                         <CheckBox IsChecked="{Binding AutoStart}"
@@ -178,15 +180,35 @@
                                              Text="{Binding ExtraArgs}"
                                              Watermark="--flash-attn --mlock  etc."
                                              FontSize="13" CornerRadius="6" Padding="10,6"
-                                             IsEnabled="{Binding IsStopped}" />
+                                             IsEnabled="{Binding CanEdit}" />
 
                                 </Grid>
 
                                 <!-- ── Save config ───────────────────────── -->
-                                <Button Command="{Binding SaveConfigCommand}"
-                                        Content="Save Config"
-                                        HorizontalAlignment="Left"
-                                        Padding="12,5" CornerRadius="6" FontSize="12" />
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Button Command="{Binding SaveConfigCommand}"
+                                            Content="Save Config"
+                                            Padding="12,5" CornerRadius="6" FontSize="12" />
+                                    <Button Command="{Binding ApplyMistralGpuPresetCommand}"
+                                            IsEnabled="{Binding CanEdit}"
+                                            Content="Mistral GPU Preset"
+                                            Padding="12,5" CornerRadius="6" FontSize="12"
+                                            ToolTip.Tip="Set Mistral 7B tuned args: ctx 4096, threads 8, GPU layers 33, device VULKAN0." />
+                                    <Button Command="{Binding AutoTuneCommand}"
+                                            IsEnabled="{Binding CanEdit}"
+                                            Content="Auto Tune"
+                                            Padding="12,5" CornerRadius="6" FontSize="12"
+                                            ToolTip.Tip="Probe llama.cpp auto-fit for this model/GPU and set the fitted GPU layer count." />
+                                </StackPanel>
+
+                                <TextBlock IsVisible="{Binding HasUnsavedChanges}"
+                                           Text="Save and restart the service for these changes to affect Chat."
+                                           FontSize="12" Opacity="0.55"
+                                           TextWrapping="Wrap" />
+                                <TextBlock IsVisible="{Binding AutoTuneStatus, Converter={x:Static views:NotEmptyConverter.Instance}}"
+                                           Text="{Binding AutoTuneStatus}"
+                                           FontSize="12" Opacity="0.7"
+                                           TextWrapping="Wrap" />
 
                                 <!-- ── Log panel ─────────────────────────── -->
                                 <Border IsVisible="{Binding LogExpanded}"

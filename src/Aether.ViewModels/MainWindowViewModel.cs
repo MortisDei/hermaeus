@@ -27,6 +27,14 @@ public partial class MainWindowViewModel : ObservableObject
     public bool ShowModels   => ActivePanel == "models";
     public bool ShowRag      => ActivePanel == "rag";
     public bool ShowServices => ActivePanel == "services";
+    public object ActiveViewModel => ActivePanel switch
+    {
+        "settings" => Settings,
+        "models"   => Models,
+        "rag"      => Rag,
+        "services" => Services,
+        _          => Chat
+    };
 
     public MainWindowViewModel(
         IConversationStore store,
@@ -39,6 +47,7 @@ public partial class MainWindowViewModel : ObservableObject
         _store = store; Chat = chat; Settings = settings;
         Models = models; Rag = rag; Services = services;
         Chat.ConversationSaved += OnConversationSaved;
+        Services.ServerAvailabilityChanged += async (_, _) => await Chat.LoadModelsAsync();
     }
 
     public async Task InitializeAsync()
@@ -47,9 +56,9 @@ public partial class MainWindowViewModel : ObservableObject
         try
         {
             await LoadConversationsAsync();
-            await Chat.LoadModelsAsync();
             await Rag.LoadDatasetsAsync();
             await Services.AutoStartAllAsync();
+            await Chat.LoadModelsAsync();
         }
         finally { IsLoading = false; }
     }
@@ -94,7 +103,11 @@ public partial class MainWindowViewModel : ObservableObject
     }
 
     [RelayCommand] private void ToggleSidebar()       => IsSidebarOpen = !IsSidebarOpen;
-    [RelayCommand] private void ShowChatPanel()        => ActivePanel = "chat";
+    [RelayCommand] private async Task ShowChatPanelAsync()
+    {
+        ActivePanel = "chat";
+        await Chat.LoadModelsAsync();
+    }
     [RelayCommand] private void ShowRagPanel()         => ActivePanel = "rag";
     [RelayCommand] private void ShowModelsPanel()      { ActivePanel = "models"; _ = Models.RefreshCommand.ExecuteAsync(null); }
     [RelayCommand] private void ShowServicesPanel()    => ActivePanel = "services";
@@ -140,6 +153,7 @@ public partial class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowModels));
         OnPropertyChanged(nameof(ShowRag));
         OnPropertyChanged(nameof(ShowServices));
+        OnPropertyChanged(nameof(ActiveViewModel));
     }
 
     partial void OnSearchQueryChanged(string value)

@@ -1,4 +1,6 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
+using System.Text;
 using Aether.Core.Models;
 using Aether.Core.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -40,13 +42,20 @@ public partial class ChatViewModel : ObservableObject
 
     public async Task LoadModelsAsync()
     {
+        var current = SelectedModel?.Id;
         var models = await _llm.GetModelsAsync();
         AvailableModels.Clear();
         foreach (var m in models) AvailableModels.Add(m);
         if (AvailableModels.Count > 0)
         {
             var def = _settings.Settings.DefaultModel;
-            SelectedModel = AvailableModels.FirstOrDefault(m => m.Id == def) ?? AvailableModels[0];
+            SelectedModel = AvailableModels.FirstOrDefault(m => m.Id == current)
+                ?? AvailableModels.FirstOrDefault(m => m.Id == def)
+                ?? AvailableModels[0];
+        }
+        else
+        {
+            SelectedModel = null;
         }
     }
 
@@ -88,6 +97,8 @@ public partial class ChatViewModel : ObservableObject
 
         IsGenerating = true;
         _cts = new CancellationTokenSource();
+        var streamBuffer = new StringBuilder();
+        var streamClock = Stopwatch.StartNew();
         try
         {
             var history = Messages.Where(m => !m.IsStreaming)
@@ -98,9 +109,9 @@ public partial class ChatViewModel : ObservableObject
                 string.IsNullOrWhiteSpace(SystemPrompt) ? null : SystemPrompt,
                 Temperature, _cts.Token))
             {
-                asst.Content += token;
-                ScrollToBottom?.Invoke(this, EventArgs.Empty);
+                AppendStreamToken(asst, token, force: false);
             }
+            AppendStreamToken(asst, string.Empty, force: true);
             asst.IsStreaming = false;
             await PersistAsync();
         }
@@ -116,6 +127,21 @@ public partial class ChatViewModel : ObservableObject
             asst.IsError = true;
         }
         finally { IsGenerating = false; _cts?.Dispose(); _cts = null; }
+
+        void AppendStreamToken(MessageViewModel message, string token, bool force)
+        {
+            streamBuffer.Append(token);
+            if (!force && streamClock.ElapsedMilliseconds < 50 && streamBuffer.Length < 256)
+                return;
+
+            if (streamBuffer.Length == 0)
+                return;
+
+            message.Content += streamBuffer.ToString();
+            streamBuffer.Clear();
+            streamClock.Restart();
+            ScrollToBottom?.Invoke(this, EventArgs.Empty);
+        }
     }
 
     [RelayCommand]

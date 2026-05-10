@@ -29,11 +29,25 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string       _logOutput = string.Empty;
     [ObservableProperty] private string       _errorMessage = string.Empty;
     [ObservableProperty] private bool         _logExpanded  = false;
+    [ObservableProperty] private bool         _isAutoTuning;
+    [ObservableProperty] private string       _autoTuneStatus = string.Empty;
 
+    public string Id => _config.Id;
     public bool IsRunning  => Status == ServerStatus.Running;
     public bool IsStopped  => Status is ServerStatus.Stopped or ServerStatus.Error;
     public bool IsStarting => Status == ServerStatus.Starting;
     public bool IsError    => Status == ServerStatus.Error;
+    public bool CanEdit => IsStopped && !IsAutoTuning;
+    public bool HasUnsavedChanges =>
+        _config.ExecutablePath != ExecutablePath ||
+        _config.ModelPath != ModelPath ||
+        _config.Port != Port ||
+        _config.ContextSize != ContextSize ||
+        _config.GpuLayers != GpuLayers ||
+        _config.Threads != Threads ||
+        _config.EmbeddingsMode != EmbeddingsMode ||
+        _config.AutoStart != AutoStart ||
+        _config.ExtraArgs != ExtraArgs;
 
     public string StatusLabel => Status switch
     {
@@ -66,6 +80,8 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
         {
             Status       = s;
             ErrorMessage = _mgr.ErrorMessage;
+            if (s is ServerStatus.Starting or ServerStatus.Error)
+                LogExpanded = true;
             NotifyStatusProps();
         };
 
@@ -114,6 +130,59 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
+    private void ApplyMistralGpuPreset()
+    {
+        ContextSize = 4096;
+        Threads = 8;
+        GpuLayers = 33;
+        ExtraArgs = MergeExtraArgs(ExtraArgs, "--device VULKAN0");
+    }
+
+    [RelayCommand]
+    private async Task AutoTuneAsync()
+    {
+        if (!CanEdit) return;
+
+        IsAutoTuning = true;
+        LogExpanded = true;
+        AutoTuneStatus = "Probing llama.cpp auto-fit...";
+        _mgr.ClearLog();
+        LogOutput = string.Empty;
+
+        try
+        {
+            var config = BuildConfig();
+            config.GpuLayers = 0;
+
+            var result = await ServerProcessManager.AutoTuneAsync(
+                config,
+                new Progress<string>(line =>
+                {
+                    LogOutput = string.IsNullOrEmpty(LogOutput)
+                        ? line
+                        : $"{LogOutput}\n{line}";
+                }));
+
+            GpuLayers = result.GpuLayers;
+            Threads = Math.Max(Threads, Environment.ProcessorCount);
+            ExtraArgs = MergeExtraArgs(ExtraArgs, "--device VULKAN0");
+            AutoTuneStatus = result.TotalLayers is int total
+                ? $"Auto-tune chose {result.GpuLayers}/{total} GPU layers. Save and start the service."
+                : $"Auto-tune chose {result.GpuLayers} GPU layers. Save and start the service.";
+        }
+        catch (Exception ex)
+        {
+            AutoTuneStatus = ex.Message;
+            ErrorMessage = ex.Message;
+            Status = ServerStatus.Error;
+        }
+        finally
+        {
+            IsAutoTuning = false;
+        }
+    }
+
+    [RelayCommand]
     private void ToggleLog() => LogExpanded = !LogExpanded;
 
     public async Task AutoStartIfConfiguredAsync()
@@ -136,6 +205,7 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
         _config.EmbeddingsMode = EmbeddingsMode;
         _config.AutoStart      = AutoStart;
         _config.ExtraArgs      = ExtraArgs;
+        OnPropertyChanged(nameof(HasUnsavedChanges));
     }
 
     private ServerConfig BuildConfig() => new()
@@ -158,10 +228,35 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(IsStopped));
         OnPropertyChanged(nameof(IsStarting));
         OnPropertyChanged(nameof(IsError));
+        OnPropertyChanged(nameof(CanEdit));
         OnPropertyChanged(nameof(StatusLabel));
     }
 
     partial void OnStatusChanged(ServerStatus value) => NotifyStatusProps();
+    partial void OnIsAutoTuningChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanEdit));
+        AutoTuneCommand.NotifyCanExecuteChanged();
+    }
+    partial void OnExecutablePathChanged(string value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnModelPathChanged(string value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnPortChanged(int value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnContextSizeChanged(int value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnGpuLayersChanged(int value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnThreadsChanged(int value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnEmbeddingsModeChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnAutoStartChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnExtraArgsChanged(string value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+
+    private static string MergeExtraArgs(string current, string arg)
+    {
+        if (current.Split(' ', StringSplitOptions.RemoveEmptyEntries).Contains(arg.Split(' ')[0]))
+            return current;
+
+        return string.IsNullOrWhiteSpace(current)
+            ? arg
+            : $"{current.Trim()} {arg}";
+    }
 
     public void Dispose() => _mgr.Dispose();
 }
@@ -173,6 +268,7 @@ public partial class ServicesViewModel : ObservableObject
     private readonly ISettingsService _settings;
 
     public ObservableCollection<ServerProcessViewModel> Servers { get; } = [];
+    public event EventHandler? ServerAvailabilityChanged;
 
     public ServicesViewModel(ISettingsService settings)
     {
@@ -183,8 +279,7 @@ public partial class ServicesViewModel : ObservableObject
 
     private void Rebuild()
     {
-        // Keep existing running instances if config IDs match
-        var existing = Servers.ToDictionary(s => s.Name);
+        var existing = Servers.ToDictionary(s => s.Id);
 
         foreach (var srv in Servers) srv.PropertyChanged -= OnServerPropertyChanged;
         Servers.Clear();
@@ -195,17 +290,22 @@ public partial class ServicesViewModel : ObservableObject
         while (configs.Count < 2)
             configs.Add(new ServerConfig
             {
-                Name = configs.Count == 0 ? "Embeddings" : "Chat",
+                Name = configs.Count == 0 ? "Chat" : "Embeddings",
                 Port = configs.Count == 0 ? 8080 : 8081,
-                EmbeddingsMode = configs.Count == 0
+                EmbeddingsMode = configs.Count == 1
             });
 
         foreach (var cfg in configs)
         {
-            var vm = new ServerProcessViewModel(cfg, _settings);
+            var vm = existing.TryGetValue(cfg.Id, out var current)
+                ? current
+                : new ServerProcessViewModel(cfg, _settings);
+
             vm.PropertyChanged += OnServerPropertyChanged;
             Servers.Add(vm);
         }
+
+        ServerAvailabilityChanged?.Invoke(this, EventArgs.Empty);
     }
 
     public async Task AutoStartAllAsync()
@@ -222,6 +322,12 @@ public partial class ServicesViewModel : ObservableObject
 
     private void OnServerPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        // Could add cross-server notifications here (e.g. port conflict detection)
+        if (e.PropertyName is nameof(ServerProcessViewModel.Status)
+            or nameof(ServerProcessViewModel.ModelPath)
+            or nameof(ServerProcessViewModel.ExecutablePath)
+            or nameof(ServerProcessViewModel.Port))
+        {
+            ServerAvailabilityChanged?.Invoke(this, EventArgs.Empty);
+        }
     }
 }
