@@ -7,16 +7,24 @@ public sealed class CompositeLlmService : ILlmService
 {
     private readonly LlamaCppService _llamaCpp;
     private readonly OpenAiService _openAi;
+    private readonly OllamaService _ollama;
     private readonly ISettingsService _settings;
+    private readonly IRuntimeProfileService _runtimeProfiles;
     private readonly List<LlmModel> _cachedModels = [];
     private DateTime _cacheUntilUtc = DateTime.MinValue;
 
     public string ProviderName => "Composite";
-    public bool   IsConfigured => _llamaCpp.IsConfigured || _openAi.IsConfigured;
+    public bool   IsConfigured => _llamaCpp.IsConfigured || _openAi.IsConfigured
+                                   || _runtimeProfiles.Profiles.Any(p => p.Enabled && p.Kind == RuntimeKind.Ollama);
 
-    public CompositeLlmService(LlamaCppService llamaCpp, OpenAiService openAi, ISettingsService settings)
+    public CompositeLlmService(
+        LlamaCppService llamaCpp,
+        OpenAiService openAi,
+        OllamaService ollama,
+        ISettingsService settings,
+        IRuntimeProfileService runtimeProfiles)
     {
-        _llamaCpp = llamaCpp; _openAi = openAi; _settings = settings;
+        _llamaCpp = llamaCpp; _openAi = openAi; _ollama = ollama; _settings = settings; _runtimeProfiles = runtimeProfiles;
     }
 
     public async Task<List<LlmModel>> GetModelsAsync(CancellationToken ct = default)
@@ -29,6 +37,7 @@ public sealed class CompositeLlmService : ILlmService
             all.AddRange(await GetWithTimeoutAsync(_llamaCpp.GetModelsAsync, ct));
         if (_settings.Settings.OpenAiEnabled && _openAi.IsConfigured)
             all.AddRange(await GetWithTimeoutAsync(_openAi.GetModelsAsync, ct));
+        all.AddRange(await GetWithTimeoutAsync(_ollama.GetModelsAsync, ct));
         _cachedModels.Clear();
         _cachedModels.AddRange(all.Select(Clone));
         _cacheUntilUtc = DateTime.UtcNow.AddSeconds(30);
@@ -73,6 +82,9 @@ public sealed class CompositeLlmService : ILlmService
         string? systemPrompt = null, double temperature = 0.7,
         CancellationToken ct = default)
     {
+        if (OllamaService.IsOllamaModelId(modelId))
+            return _ollama.StreamChatAsync(modelId, messages, systemPrompt, temperature, ct);
+
         var isOpenAi = modelId.StartsWith("gpt") || modelId.StartsWith("o1") ||
                        modelId.StartsWith("o3") || modelId.StartsWith("o4");
         return isOpenAi

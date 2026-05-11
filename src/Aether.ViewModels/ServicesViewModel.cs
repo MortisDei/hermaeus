@@ -257,13 +257,28 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
 public partial class ServicesViewModel : ObservableObject
 {
     private readonly ISettingsService _settings;
+    private readonly IRuntimeProfileService _runtimeProfiles;
+    private readonly IToastService _toasts;
 
     public ObservableCollection<ServerProcessViewModel> Servers { get; } = [];
+    public ObservableCollection<RuntimeProfileViewModel> RuntimeProfiles { get; } = [];
     public event EventHandler? ServerAvailabilityChanged;
 
-    public ServicesViewModel(ISettingsService settings)
+    public RuntimeKind[] RuntimeKinds { get; } =
+    [
+        RuntimeKind.LlamaCpp,
+        RuntimeKind.Ollama,
+        RuntimeKind.OpenAiCompatible
+    ];
+
+    public ServicesViewModel(
+        ISettingsService settings,
+        IRuntimeProfileService runtimeProfiles,
+        IToastService toasts)
     {
         _settings = settings;
+        _runtimeProfiles = runtimeProfiles;
+        _toasts = toasts;
         Rebuild();
         _settings.SettingsChanged += (_, _) => Rebuild();
     }
@@ -296,7 +311,64 @@ public partial class ServicesViewModel : ObservableObject
             Servers.Add(vm);
         }
 
+        RuntimeProfiles.Clear();
+        foreach (var profile in _runtimeProfiles.Profiles)
+            RuntimeProfiles.Add(new RuntimeProfileViewModel(profile));
+
         ServerAvailabilityChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    [RelayCommand]
+    private async Task AddRuntimeProfileAsync()
+    {
+        var profile = new RuntimeProfile
+        {
+            Name = "New runtime",
+            Kind = RuntimeKind.OpenAiCompatible,
+            BaseUrl = "http://127.0.0.1:8080",
+            Enabled = true
+        };
+        await _runtimeProfiles.SaveAsync(profile);
+        _toasts.Show("Runtime added", "Configure the new runtime profile before using it.", ToastKind.Info);
+    }
+
+    [RelayCommand]
+    private async Task SaveRuntimeProfileAsync(RuntimeProfileViewModel? item)
+    {
+        if (item is null) return;
+        await _runtimeProfiles.SaveAsync(item.ToProfile());
+        if (item.HasUnsafeHost)
+            _toasts.Show("Unsafe host warning", "0.0.0.0 exposes this runtime beyond localhost. Use it only when you intend network access.", ToastKind.Warning, 7000);
+        else
+            _toasts.Show("Runtime saved", $"{item.Name} was updated.", ToastKind.Success);
+    }
+
+    [RelayCommand]
+    private async Task DeleteRuntimeProfileAsync(RuntimeProfileViewModel? item)
+    {
+        if (item is null) return;
+        await _runtimeProfiles.DeleteAsync(item.Id);
+        _toasts.Show("Runtime deleted", $"{item.Name} was removed.", ToastKind.Info);
+    }
+
+    [RelayCommand]
+    private async Task CheckRuntimeProfileAsync(RuntimeProfileViewModel? item)
+    {
+        if (item is null) return;
+        item.IsChecking = true;
+        try
+        {
+            var health = await _runtimeProfiles.CheckHealthAsync(item.ToProfile());
+            item.HealthMessage = health.Message;
+            item.IsHealthy = health.IsHealthy;
+            _toasts.Show(health.IsHealthy ? "Runtime healthy" : "Runtime unavailable",
+                $"{item.Name}: {health.Message}",
+                health.IsHealthy ? ToastKind.Success : ToastKind.Warning);
+        }
+        finally
+        {
+            item.IsChecking = false;
+        }
     }
 
     public async Task AutoStartAllAsync()
@@ -321,4 +393,55 @@ public partial class ServicesViewModel : ObservableObject
             ServerAvailabilityChanged?.Invoke(this, EventArgs.Empty);
         }
     }
+}
+
+public partial class RuntimeProfileViewModel : ObservableObject
+{
+    [ObservableProperty] private string _name;
+    [ObservableProperty] private RuntimeKind _kind;
+    [ObservableProperty] private string _baseUrl;
+    [ObservableProperty] private string _apiKey;
+    [ObservableProperty] private bool _enabled;
+    [ObservableProperty] private bool _startManagedLlamaServer;
+    [ObservableProperty] private string _linkedServerId;
+    [ObservableProperty] private bool _isChecking;
+    [ObservableProperty] private bool _isHealthy;
+    [ObservableProperty] private string _healthMessage = string.Empty;
+
+    public string Id { get; }
+    public bool HasUnsafeHost => BaseUrl.Contains("://0.0.0.0", StringComparison.OrdinalIgnoreCase)
+                                 || BaseUrl.Contains("//0.0.0.0", StringComparison.OrdinalIgnoreCase);
+    public string KindLabel => Kind switch
+    {
+        RuntimeKind.LlamaCpp => "llama.cpp",
+        RuntimeKind.Ollama => "Ollama",
+        _ => "OpenAI-compatible"
+    };
+
+    public RuntimeProfileViewModel(RuntimeProfile profile)
+    {
+        Id = profile.Id;
+        _name = profile.Name;
+        _kind = profile.Kind;
+        _baseUrl = profile.BaseUrl;
+        _apiKey = profile.ApiKey;
+        _enabled = profile.Enabled;
+        _startManagedLlamaServer = profile.StartManagedLlamaServer;
+        _linkedServerId = profile.LinkedServerId;
+    }
+
+    public RuntimeProfile ToProfile() => new()
+    {
+        Id = Id,
+        Name = Name,
+        Kind = Kind,
+        BaseUrl = BaseUrl,
+        ApiKey = ApiKey,
+        Enabled = Enabled,
+        StartManagedLlamaServer = StartManagedLlamaServer,
+        LinkedServerId = LinkedServerId
+    };
+
+    partial void OnBaseUrlChanged(string value) => OnPropertyChanged(nameof(HasUnsafeHost));
+    partial void OnKindChanged(RuntimeKind value) => OnPropertyChanged(nameof(KindLabel));
 }

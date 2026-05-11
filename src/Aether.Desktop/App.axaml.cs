@@ -61,6 +61,8 @@ public partial class App : Application
         s.AddSingleton<IConversationStore, ConversationStore>();
         s.AddSingleton<LlamaCppService>();
         s.AddSingleton<OpenAiService>();
+        s.AddSingleton<IRuntimeProfileService, RuntimeProfileService>();
+        s.AddSingleton<OllamaService>();
         s.AddSingleton<ILlmService,        CompositeLlmService>();
         s.AddSingleton<IModelProfileService, ModelProfileService>();
         s.AddSingleton<ITtsService,        XttsService>();

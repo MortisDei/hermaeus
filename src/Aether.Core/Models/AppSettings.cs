@@ -29,6 +29,7 @@ public class AppSettings
     public string TtsModelVersion      { get; set; } = "2.0.3";
     public bool   TtsPreload           { get; set; } = false;
     public List<ModelProfile> ModelProfiles { get; set; } = [];
+    public List<RuntimeProfile> RuntimeProfiles { get; set; } = [];
 
     public List<ServerConfig> ManagedServers { get; set; } =
     [
