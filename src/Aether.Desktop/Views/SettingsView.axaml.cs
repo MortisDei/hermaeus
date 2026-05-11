@@ -12,6 +12,7 @@ public partial class SettingsView : UserControl
     {
         InitializeComponent();
         AddHandler(PointerWheelChangedEvent, OnPointerWheelChanged, RoutingStrategies.Tunnel);
+        SizeChanged += (_, _) => UpdateCardWidths();
         DataContextChanged += OnDataContextChanged;
     }
 
@@ -44,5 +45,48 @@ public partial class SettingsView : UserControl
             if (folders.Count > 0)
                 vm.DataRootDirectory = folders[0].Path.LocalPath;
         };
+
+        vm.RequestTtsScriptPicker = async () =>
+        {
+            var top = TopLevel.GetTopLevel(this);
+            if (top is null) return;
+
+            var files = await top.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+            {
+                Title = "Choose xtts_api_server.py",
+                AllowMultiple = false,
+                FileTypeFilter =
+                [
+                    new FilePickerFileType("Python script") { Patterns = ["*.py"] },
+                    new FilePickerFileType("All files") { Patterns = ["*"] }
+                ]
+            });
+
+            if (files.Count > 0)
+                vm.TtsScriptPath = files[0].Path.LocalPath;
+        };
+
+        vm.RequestTtsOutputPicker = async () =>
+        {
+            var top = TopLevel.GetTopLevel(this);
+            if (top is null) return;
+
+            var folders = await top.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+            {
+                Title = "Choose XTTS output folder",
+                AllowMultiple = false
+            });
+
+            if (folders.Count > 0)
+                vm.TtsOutputDirectory = folders[0].Path.LocalPath;
+        };
+    }
+
+    private void UpdateCardWidths()
+    {
+        var available = Math.Max(320, Bounds.Width - 96);
+        var cardWidth = available < 900 ? available : Math.Min(464, (available - 20) / 2);
+        foreach (var child in SettingsCards.Children.OfType<Border>())
+            child.Width = cardWidth;
     }
 }

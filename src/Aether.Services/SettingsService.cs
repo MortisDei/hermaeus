@@ -38,31 +38,45 @@ public sealed class SettingsService : ISettingsService
         catch { Settings = new(); }
     }
 
-    public async Task SaveAsync(string? previousDataRootDirectory = null)
+    public async Task<SettingsSaveResult> SaveAsync(string? previousDataRootDirectory = null)
     {
-        MigrateDataRoot(previousDataRootDirectory, Settings.DataRootDirectory);
+        var migration = MigrateDataRoot(previousDataRootDirectory, Settings.DataRootDirectory);
         Directory.CreateDirectory(ResolveDataRoot(Settings));
         await File.WriteAllTextAsync(_path, JsonSerializer.Serialize(Settings, Opts));
         SettingsChanged?.Invoke(this, EventArgs.Empty);
+        return migration;
     }
 
-    private static void MigrateDataRoot(string? previousDataRootDirectory, string? nextDataRootDirectory)
+    private static SettingsSaveResult MigrateDataRoot(string? previousDataRootDirectory, string? nextDataRootDirectory)
     {
         var previous = ResolveDataRoot(new AppSettings { DataRootDirectory = previousDataRootDirectory ?? string.Empty });
         var next = ResolveDataRoot(new AppSettings { DataRootDirectory = nextDataRootDirectory ?? string.Empty });
         if (string.Equals(previous, next, StringComparison.OrdinalIgnoreCase))
-            return;
+            return new SettingsSaveResult(false, previous, next, null, 0);
 
         Directory.CreateDirectory(next);
         if (!Directory.Exists(previous))
-            return;
+            return new SettingsSaveResult(false, previous, next, null, 0);
 
-        foreach (var name in Directory.EnumerateFiles(previous, "conversations.db*"))
+        var files = Directory.EnumerateFiles(previous, "conversations.db*").ToList();
+        if (files.Count == 0)
+            return new SettingsSaveResult(false, previous, next, null, 0);
+
+        foreach (var name in files)
         {
             var target = Path.Combine(next, Path.GetFileName(name));
             if (File.Exists(target))
                 throw new IOException($"Cannot move Aether data because '{target}' already exists.");
+        }
 
+        var backupDir = Path.Combine(next, ".aether-backups", DateTime.Now.ToString("yyyyMMdd-HHmmss"));
+        Directory.CreateDirectory(backupDir);
+        foreach (var name in files)
+            File.Copy(name, Path.Combine(backupDir, Path.GetFileName(name)));
+
+        foreach (var name in files)
+        {
+            var target = Path.Combine(next, Path.GetFileName(name));
             File.Move(name, target);
         }
 
@@ -72,5 +86,7 @@ public sealed class SettingsService : ISettingsService
         {
             Directory.Delete(previous);
         }
+
+        return new SettingsSaveResult(true, previous, next, backupDir, files.Count);
     }
 }

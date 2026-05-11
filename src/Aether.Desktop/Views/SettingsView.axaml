@@ -16,11 +16,11 @@
                            Classes="page-subtitle" />
             </StackPanel>
 
-            <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto,Auto"
-                  ColumnSpacing="16" RowSpacing="16">
+            <WrapPanel x:Name="SettingsCards"
+                       Orientation="Horizontal">
 
             <!-- llama.cpp Chat -->
-            <Border Grid.Row="0" Grid.Column="0" Classes="settings-card">
+            <Border Grid.Row="0" Grid.Column="0" Classes="settings-card" Width="464" Margin="0,0,16,16">
                 <StackPanel Spacing="12">
                     <StackPanel Orientation="Horizontal" Spacing="8">
                         <CheckBox IsChecked="{Binding LlamaCppEnabled}" />
@@ -37,7 +37,7 @@
             </Border>
 
             <!-- OpenAI compatible -->
-            <Border Grid.Row="0" Grid.Column="1" Classes="settings-card">
+            <Border Grid.Row="0" Grid.Column="1" Classes="settings-card" Width="464" Margin="0,0,16,16">
                 <StackPanel Spacing="12">
                     <StackPanel Orientation="Horizontal" Spacing="8">
                         <CheckBox IsChecked="{Binding OpenAiEnabled}" />
@@ -60,7 +60,7 @@
             </Border>
 
             <!-- RAG Embeddings -->
-            <Border Grid.Row="1" Grid.Column="0" Classes="settings-card">
+            <Border Grid.Row="1" Grid.Column="0" Classes="settings-card" Width="464" Margin="0,0,16,16">
                 <StackPanel Spacing="12">
                     <TextBlock Text="RAG Embeddings" FontSize="14" FontWeight="SemiBold" />
                     <Grid ColumnDefinitions="110,*"
@@ -77,13 +77,28 @@
             </Border>
 
             <!-- Text to speech -->
-            <Border Grid.Row="1" Grid.Column="1" Classes="settings-card">
+            <Border Grid.Row="1" Grid.Column="1" Classes="settings-card" Width="464" Margin="0,0,16,16">
                 <StackPanel Spacing="12">
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                        <CheckBox IsChecked="{Binding TtsEnabled}" />
-                        <TextBlock Text="XTTS v2" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center" />
-                    </StackPanel>
-                    <Grid ColumnDefinitions="110,*" RowDefinitions="Auto,Auto"
+                    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+                        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
+                            <CheckBox IsChecked="{Binding TtsEnabled}" />
+                            <TextBlock Text="XTTS v2" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding TtsStatus}" FontSize="11" Opacity="0.5" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <Button Grid.Column="1" Command="{Binding StartTtsCommand}"
+                                IsVisible="{Binding !IsTtsRunning}"
+                                Content="Start" FontSize="12" Padding="12,5" CornerRadius="6" />
+                        <Button Grid.Column="1" Command="{Binding StopTtsCommand}"
+                                IsVisible="{Binding IsTtsRunning}"
+                                Content="Stop" FontSize="12" Padding="12,5" CornerRadius="6" />
+                        <Button Grid.Column="2" Classes="icon-btn"
+                                Command="{Binding RefreshTtsVoicesCommand}"
+                                ToolTip.Tip="Refresh XTTS voices">
+                            <PathIcon Data="M17.65 6.35C16.2 4.9 14.21 4 12 4a8 8 0 0 0-8 8h2.5l-3.5 3.5L-.5 12H2a10 10 0 0 1 17.07-7.07l-1.42 1.42zM6.35 17.65C7.8 19.1 9.79 20 12 20a8 8 0 0 0 8-8h-2.5l3.5-3.5 3.5 3.5H22a10 10 0 0 1-17.07 7.07l1.42-1.42z"
+                                      Width="15" Height="15" />
+                        </Button>
+                    </Grid>
+                    <Grid ColumnDefinitions="110,*,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto"
                           RowSpacing="8" ColumnSpacing="12">
                         <TextBlock Grid.Row="0" Grid.Column="0" Text="Base URL"
                                    VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
@@ -96,11 +111,40 @@
                                   ItemsSource="{Binding TtsVoices}"
                                   SelectedItem="{Binding TtsSpeaker}"
                                   FontSize="13" />
-                        <Button Grid.Row="1" Grid.Column="2"
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Device"
+                                   VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
+                        <ComboBox Grid.Row="2" Grid.Column="1"
+                                  ItemsSource="{Binding TtsDevices}"
+                                  SelectedItem="{Binding TtsDevice}"
+                                  FontSize="13" />
+                        <CheckBox Grid.Row="2" Grid.Column="2"
+                                  IsChecked="{Binding TtsPreload}"
+                                  Content="Preload"
+                                  FontSize="12" VerticalAlignment="Center" />
+                        <TextBlock Grid.Row="3" Grid.Column="0" Text="Version"
+                                   VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
+                        <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding TtsModelVersion}"
+                                 Watermark="2.0.3" FontSize="13" CornerRadius="6" Padding="10,6" />
+                        <TextBlock Grid.Row="4" Grid.Column="0" Text="Script"
+                                   VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
+                        <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding TtsScriptPath}"
+                                 Watermark="/path/to/xtts_api_server.py" FontSize="13" CornerRadius="6" Padding="10,6" />
+                        <Button Grid.Row="4" Grid.Column="2"
                                 Classes="icon-btn"
-                                Command="{Binding RefreshTtsVoicesCommand}"
-                                ToolTip.Tip="Refresh XTTS voices">
-                            <PathIcon Data="M17.65 6.35C16.2 4.9 14.21 4 12 4a8 8 0 0 0-8 8h2.5l-3.5 3.5L-.5 12H2a10 10 0 0 1 17.07-7.07l-1.42 1.42zM6.35 17.65C7.8 19.1 9.79 20 12 20a8 8 0 0 0 8-8h-2.5l3.5-3.5 3.5 3.5H22a10 10 0 0 1-17.07 7.07l1.42-1.42z"
+                                Command="{Binding BrowseTtsScriptCommand}"
+                                ToolTip.Tip="Choose XTTS script">
+                            <PathIcon Data="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z"
+                                      Width="15" Height="15" />
+                        </Button>
+                        <TextBlock Grid.Row="5" Grid.Column="0" Text="Output"
+                                   VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
+                        <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding TtsOutputDirectory}"
+                                 Watermark="Default Aether XTTS folder" FontSize="13" CornerRadius="6" Padding="10,6" />
+                        <Button Grid.Row="5" Grid.Column="2"
+                                Classes="icon-btn"
+                                Command="{Binding BrowseTtsOutputCommand}"
+                                ToolTip.Tip="Choose XTTS output folder">
+                            <PathIcon Data="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z"
                                       Width="15" Height="15" />
                         </Button>
                     </Grid>
@@ -110,7 +154,7 @@
             </Border>
 
             <!-- Defaults -->
-            <Border Grid.Row="2" Grid.Column="0" Classes="settings-card">
+            <Border Grid.Row="2" Grid.Column="0" Classes="settings-card" Width="464" Margin="0,0,16,16">
                 <StackPanel Spacing="12">
                     <TextBlock Text="Data Storage" FontSize="14" FontWeight="SemiBold" />
                     <Grid ColumnDefinitions="110,*,Auto" ColumnSpacing="8">
@@ -133,7 +177,7 @@
                 </StackPanel>
             </Border>
 
-            <Border Grid.Row="2" Grid.Column="1" Classes="settings-card">
+            <Border Grid.Row="2" Grid.Column="1" Classes="settings-card" Width="464" Margin="0,0,16,16">
                 <StackPanel Spacing="12">
                     <TextBlock Text="Defaults" FontSize="14" FontWeight="SemiBold" />
                     <Grid ColumnDefinitions="110,*" RowDefinitions="Auto,Auto,Auto,Auto"
@@ -177,7 +221,7 @@
                 </StackPanel>
             </Border>
 
-            </Grid>
+            </WrapPanel>
 
             <StackPanel Orientation="Horizontal" Spacing="10">
                 <Button Command="{Binding SaveCommand}" Content="Save"

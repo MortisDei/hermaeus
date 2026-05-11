@@ -108,7 +108,8 @@ public sealed class RagQueryService
             rank  = i + 1,
             title = r.Chunk.SourceTitle,
             file  = r.Chunk.SourceFile,
-            score = MathF.Round(r.Score, 4)
+            score = MathF.Round(r.Score, 4),
+            content = r.Chunk.Content
         }));
         yield return $"__RAG_SOURCES__{sourcesJson}__END_SOURCES__";
 

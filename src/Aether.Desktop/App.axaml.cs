@@ -8,6 +8,7 @@ using Aether.Rag.Embeddings;
 using Aether.Rag.Pipeline;
 using Aether.Rag.Storage;
 using Aether.Services;
+using Aether.Services.ProcessManagement;
 using Aether.ViewModels;
 using CommunityToolkit.Mvvm.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection;
@@ -62,6 +63,7 @@ public partial class App : Application
         s.AddSingleton<OpenAiService>();
         s.AddSingleton<ILlmService,        CompositeLlmService>();
         s.AddSingleton<ITtsService,        XttsService>();
+        s.AddSingleton<XttsProcessManager>();
         s.AddSingleton<IToastService,      ToastService>();
         s.AddSingleton<SqliteRagStore>();
         s.AddSingleton<IEmbeddingService,  LlamaCppEmbeddingService>();

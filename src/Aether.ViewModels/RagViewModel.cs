@@ -12,11 +12,23 @@ namespace Aether.ViewModels;
 
 public partial class RagSourceViewModel : ObservableObject
 {
-    public int    Rank  { get; init; }
-    public string Title { get; init; } = string.Empty;
-    public string File  { get; init; } = string.Empty;
-    public float  Score { get; init; }
+    [ObservableProperty] private bool _isSelected;
+
+    public int    Rank    { get; init; }
+    public string Title   { get; init; } = string.Empty;
+    public string File    { get; init; } = string.Empty;
+    public string Content { get; init; } = string.Empty;
+    public float  Score   { get; init; }
     public string ScoreDisplay => $"{Score:F3}";
+    public string CitationLabel => $"[{Rank}] {Title}";
+    public string Snippet
+    {
+        get
+        {
+            var flat = Content.Replace('\n', ' ').Trim();
+            return flat.Length > 220 ? flat[..217] + "..." : flat;
+        }
+    }
 }
 
 public partial class RagViewModel : ObservableObject
@@ -43,6 +55,8 @@ public partial class RagViewModel : ObservableObject
     [ObservableProperty] private bool        _useParentChild;
     [ObservableProperty] private float       _groundingScore;
     [ObservableProperty] private bool        _hasAnswer;
+    [ObservableProperty] private RagSourceViewModel? _selectedSource;
+    [ObservableProperty] private bool        _showSourceInspector;
 
     public event EventHandler? ScrollToBottom;
     public Action<string>? RequestCopyToClipboard { get; set; }
@@ -105,7 +119,7 @@ public partial class RagViewModel : ObservableObject
             HasAnswer = !string.IsNullOrWhiteSpace(AnswerText);
             GroundingScore = RagQueryService.GroundingScore(
                 AnswerText,
-                string.Join(" ", Sources.Select(s => s.Title)));
+                string.Join(" ", Sources.Select(s => s.Content)));
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { SetError(ex.Message); }
@@ -192,19 +206,47 @@ public partial class RagViewModel : ObservableObject
             var list = JsonSerializer.Deserialize<List<JsonElement>>(json);
             if (list is null) return;
             Sources.Clear();
+            SelectedSource = null;
+            ShowSourceInspector = false;
             foreach (var el in list)
                 Sources.Add(new RagSourceViewModel
                 {
                     Rank  = el.GetProperty("rank").GetInt32(),
                     Title = el.GetProperty("title").GetString() ?? string.Empty,
                     File  = el.GetProperty("file").GetString()  ?? string.Empty,
-                    Score = el.GetProperty("score").GetSingle()
+                    Score = el.GetProperty("score").GetSingle(),
+                    Content = el.TryGetProperty("content", out var content)
+                        ? content.GetString() ?? string.Empty
+                        : string.Empty
                 });
+            SelectedSource = Sources.FirstOrDefault();
+            if (SelectedSource is not null)
+                SelectedSource.IsSelected = true;
         }
         catch { }
     }
 
     private void SetError(string msg) { StatusMessage = msg; IsError = true; }
+
+    [RelayCommand]
+    private void SelectSource(RagSourceViewModel? source)
+    {
+        if (source is null) return;
+        foreach (var s in Sources)
+            s.IsSelected = false;
+
+        source.IsSelected = true;
+        SelectedSource = source;
+        ShowSourceInspector = true;
+    }
+
+    [RelayCommand]
+    private void ToggleSourceInspector()
+    {
+        ShowSourceInspector = !ShowSourceInspector;
+        if (ShowSourceInspector && SelectedSource is null)
+            SelectedSource = Sources.FirstOrDefault();
+    }
 
     partial void OnQuestionTextChanged(string value) => QueryCommand.NotifyCanExecuteChanged();
     partial void OnSelectedDatasetChanged(RagDataset? value) => QueryCommand.NotifyCanExecuteChanged();
