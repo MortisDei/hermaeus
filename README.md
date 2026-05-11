@@ -1,5 +1,7 @@
 # Aether
 
+Version: `0.8.0-alpha`
+
 A native, local-first Avalonia desktop AI workspace for `llama.cpp`, Ollama,
 OpenAI-compatible APIs, Oghma-grade RAG, and XTTS voice playback.
 
@@ -12,7 +14,8 @@ OpenAI-compatible APIs, Oghma-grade RAG, and XTTS voice playback.
 - Direct `llama.cpp` / `llama-server` management.
 - Ollama and OpenAI-compatible runtime profiles.
 - Native markdown rendering with virtualized long chats.
-- Oghma-grade RAG: hybrid retrieval, parent-child context, citations, traces, evals.
+- Oghma-grade RAG: hybrid retrieval, ONNX reranking, parent-child context,
+  citations, traces, evals.
 - XTTS v2 readback with memory-only generated audio.
 
 ## Features
@@ -23,12 +26,14 @@ OpenAI-compatible APIs, Oghma-grade RAG, and XTTS voice playback.
 - Managed `llama-server` start/stop, auto-start, logs, and GPU auto-tune.
 - RAG ingest for text/markdown, reindex diffing, corpus health warnings.
 - RAG citations with `[1] [2] [3] +N`, source inspector, copy source/path.
-- RAG query traces and native eval harness for `gold.json` / `stress.json`.
+- RAG query traces, ONNX cross-encoder reranking, and native eval harness for
+  `gold.json` / `stress.json`.
 - XTTS v2 launch controls, voice selection, voice preview, voice sample import.
 - Local tasks, reminders, and app-running scheduled automations.
 - Toast notifications throughout the app.
 - Configurable data root with migration, backup, restore, and conflict refusal.
 - Local secret references and redacted process logs.
+- Data-safety test harness for migration, backup/restore, and redaction.
 
 ## Quick Start
 
@@ -106,11 +111,25 @@ Security hardening currently includes:
 - unsafe restore path checks
 - API-key and home-path redaction in visible server logs
 - local secret references for OpenAI keys
+- data-safety tests for migration, backup/restore, and redaction
+
+## License
+
+Aether is source-available and free for private/noncommercial use under the
+PolyForm Noncommercial License 1.0.0.
+
+Commercial use requires a separate paid commercial license. See
+[LICENSE.md](LICENSE.md), [COMMERCIAL.md](COMMERCIAL.md), and
+[NOTICE.md](NOTICE.md).
+
+This repository is not OSI open source. Public release terms should be reviewed
+by a qualified lawyer before Aether 1.0.
 
 ## Build
 
 ```bash
 dotnet build Aether.sln
+dotnet run --project tests/Aether.Tests/Aether.Tests.csproj
 dotnet publish src/Aether.Desktop -c Release -r linux-x64 --self-contained false -o dist/linux
 dotnet publish src/Aether.Desktop -c Release -r win-x64 --self-contained false -o dist/windows
 ```
@@ -123,13 +142,17 @@ src/Aether.Services/    Runtime, storage, settings, backup, voice services
 src/Aether.Rag/         Ingest, retrieval, citations, traces, eval harness
 src/Aether.ViewModels/  MVVM state and commands
 src/Aether.Desktop/     Avalonia views, controls, styles, entry point
-docs/                   Parity matrix, security notes, RAG/eval docs
+tests/Aether.Tests/     Lightweight regression harness
+docs/                   Security notes, RAG/eval docs, internal planning notes
 ```
 
-## Remaining Big Rocks
+## Public Release Gates
 
-- Concrete OCR and Firecrawl URL loaders.
-- Local cross-encoder reranker implementation.
+- OS keychain integration for secrets.
+- Concrete local-first OCR loader.
+- Optional web loader kept opt-in and disabled by default.
+- Linux and Windows packaging.
+- Security review and threat model refresh.
 - Global quick-chat hotkey and tray integration.
-- OS keychain integration.
-- Dedicated automated test project for migrations, backup/restore, and RAG eval.
+- Expanded tests for RAG scoring, runtime validation, backup/restore, secret
+  migration, and process argument safety.
