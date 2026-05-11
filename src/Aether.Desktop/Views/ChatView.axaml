@@ -81,37 +81,49 @@
         </Border>
 
         <!-- ── Messages ───────────────────────────────────────────────────── -->
-        <ScrollViewer Grid.Row="2"
-                      x:Name="MessageScroller"
-                      VerticalScrollBarVisibility="Auto"
-                      HorizontalScrollBarVisibility="Disabled"
-                      Padding="0,8">
-            <StackPanel Margin="16,0" Spacing="4">
+        <Grid Grid.Row="2">
+            <ListBox x:Name="MessagesList"
+                     ItemsSource="{Binding Messages}"
+                     Background="Transparent"
+                     BorderThickness="0"
+                     Padding="16,8"
+                     ScrollViewer.VerticalScrollBarVisibility="Auto"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                <ListBox.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <VirtualizingStackPanel />
+                    </ItemsPanelTemplate>
+                </ListBox.ItemsPanel>
+                <ListBox.ItemContainerTheme>
+                    <ControlTheme TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
+                        <Setter Property="Padding" Value="0" />
+                        <Setter Property="Margin" Value="0,4" />
+                        <Setter Property="Background" Value="Transparent" />
+                    </ControlTheme>
+                </ListBox.ItemContainerTheme>
+                <ListBox.ItemTemplate>
+                    <DataTemplate DataType="vm:MessageViewModel">
+                        <controls:MessageControl />
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
 
-                <StackPanel IsVisible="{Binding !HasMessages}"
-                            HorizontalAlignment="Center"
-                            Margin="0,80" Spacing="10">
-                    <PathIcon Data="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"
-                              Width="52" Height="52" Opacity="0.12"
-                              HorizontalAlignment="Center" />
-                    <TextBlock Text="Start a conversation"
-                               HorizontalAlignment="Center"
-                               FontSize="17" Opacity="0.25" />
-                    <TextBlock Text="Select a model above then type below"
-                               HorizontalAlignment="Center"
-                               FontSize="13" Opacity="0.18" />
-                </StackPanel>
-
-                <ItemsControl ItemsSource="{Binding Messages}">
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate DataType="vm:MessageViewModel">
-                            <controls:MessageControl Margin="0,4" />
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-
+            <StackPanel IsVisible="{Binding !HasMessages}"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Top"
+                        Margin="0,80,0,0"
+                        Spacing="10">
+                <PathIcon Data="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"
+                          Width="52" Height="52" Opacity="0.12"
+                          HorizontalAlignment="Center" />
+                <TextBlock Text="Start a conversation"
+                           HorizontalAlignment="Center"
+                           FontSize="17" Opacity="0.25" />
+                <TextBlock Text="Select a model above then type below"
+                           HorizontalAlignment="Center"
+                           FontSize="13" Opacity="0.18" />
             </StackPanel>
-        </ScrollViewer>
+        </Grid>
 
         <!-- ── Input bar ──────────────────────────────────────────────────── -->
         <Border Grid.Row="3"

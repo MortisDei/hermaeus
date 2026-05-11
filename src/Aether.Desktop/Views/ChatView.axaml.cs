@@ -20,8 +20,11 @@ public partial class ChatView : UserControl
             _vm.ScrollToBottom += (_, _) =>
                 Dispatcher.UIThread.Post(() =>
                 {
-                    if (this.FindControl<ScrollViewer>("MessageScroller") is { } sv)
-                        sv.ScrollToEnd();
+                    if (this.FindControl<ListBox>("MessagesList") is { } list
+                        && _vm.Messages.LastOrDefault() is { } last)
+                    {
+                        list.ScrollIntoView(last);
+                    }
                 }, DispatcherPriority.Background);
 
             _vm.RequestCopyToClipboard = async text =>
