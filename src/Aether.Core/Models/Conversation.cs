@@ -9,6 +9,7 @@ public class Conversation
     public string Folder { get; set; } = string.Empty;
     public List<string> Tags { get; set; } = [];
     public bool IsPinned { get; set; }
+    public bool IsArchived { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     public List<Message> Messages { get; set; } = [];

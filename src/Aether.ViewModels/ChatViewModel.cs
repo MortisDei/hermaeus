@@ -255,6 +255,7 @@ public partial class ChatViewModel : ObservableObject
             Folder = existing?.Folder ?? string.Empty,
             Tags = existing?.Tags ?? [],
             IsPinned = existing?.IsPinned ?? false,
+            IsArchived = existing?.IsArchived ?? false,
             Messages = Messages.Where(m => !m.IsStreaming).Select(m => new Message
             {
                 Id = m.Id, ConversationId = CurrentConversationId,

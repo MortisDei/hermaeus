@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using Aether.Rag;
 using Aether.Rag.Models;
 using Aether.Rag.Pipeline;
+using Aether.Core.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -35,6 +36,7 @@ public partial class RagViewModel : ObservableObject
 {
     private readonly RagQueryService _query;
     private readonly RagPipeline     _pipeline;
+    private readonly IToastService   _toasts;
     private CancellationTokenSource? _cts;
 
     public ObservableCollection<RagDataset>       Datasets  { get; } = [];
@@ -61,10 +63,11 @@ public partial class RagViewModel : ObservableObject
     public event EventHandler? ScrollToBottom;
     public Action<string>? RequestCopyToClipboard { get; set; }
 
-    public RagViewModel(RagQueryService query, RagPipeline pipeline)
+    public RagViewModel(RagQueryService query, RagPipeline pipeline, IToastService toasts)
     {
         _query    = query;
         _pipeline = pipeline;
+        _toasts   = toasts;
     }
 
     public async Task LoadDatasetsAsync()
@@ -167,8 +170,13 @@ public partial class RagViewModel : ObservableObject
             NewDatasetName  = string.Empty;
             IngestPath      = string.Empty;
             StatusMessage   = "Ingestion complete.";
+            _toasts.Show("RAG ingest complete", $"Dataset \"{ds.Name}\" is ready.", ToastKind.Success);
         }
-        catch (Exception ex) { SetError(ex.Message); }
+        catch (Exception ex)
+        {
+            SetError(ex.Message);
+            _toasts.Show("RAG ingest failed", ex.Message, ToastKind.Error, 7000);
+        }
         finally { IsIngesting = false; IngestStage = string.Empty; }
     }
 

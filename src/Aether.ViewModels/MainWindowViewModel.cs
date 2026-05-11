@@ -27,6 +27,7 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty] private string _activePanel   = "chat";
     [ObservableProperty] private bool   _isLoading;
     [ObservableProperty] private string _selectedFolderFilter = "All";
+    [ObservableProperty] private bool   _showArchivedConversations;
 
     public bool ShowChat     => ActivePanel == "chat";
     public bool ShowSettings => ActivePanel == "settings";
@@ -89,6 +90,9 @@ public partial class MainWindowViewModel : ObservableObject
                 .ToList();
         }
 
+        if (!ShowArchivedConversations)
+            convs = convs.Where(c => !c.IsArchived).ToList();
+
         Conversations.Clear();
         foreach (var c in convs)
             Conversations.Add(ToItem(c));
@@ -121,7 +125,8 @@ public partial class MainWindowViewModel : ObservableObject
         SystemPrompt = c.SystemPrompt,
         Folder = c.Folder,
         TagsText = string.Join(", ", c.Tags),
-        IsPinned = c.IsPinned
+        IsPinned = c.IsPinned,
+        IsArchived = c.IsArchived
     };
 
     [RelayCommand]
@@ -147,6 +152,7 @@ public partial class MainWindowViewModel : ObservableObject
         await _store.DeleteAsync(item.Id);
         Conversations.Remove(item);
         if (Chat.CurrentConversationId == item.Id) Chat.NewConversation();
+        _toasts.Show("Conversation deleted", $"\"{item.Title}\" was removed.", ToastKind.Info);
     }
 
     [RelayCommand]
@@ -166,10 +172,17 @@ public partial class MainWindowViewModel : ObservableObject
 
         if (Chat.CurrentConversationId == item.Id)
             Chat.ConversationTitle = title;
+
+        _toasts.Show("Conversation renamed", $"Saved as \"{title}\".", ToastKind.Success);
     }
 
     [RelayCommand]
     private async Task SaveConversationMetadataAsync(ConversationItemViewModel item)
+    {
+        await SaveConversationMetadataAsync(item, showToast: true);
+    }
+
+    private async Task SaveConversationMetadataAsync(ConversationItemViewModel item, bool showToast)
     {
         var conv = await _store.GetByIdAsync(item.Id);
         if (conv is null) return;
@@ -178,18 +191,36 @@ public partial class MainWindowViewModel : ObservableObject
         conv.Folder = item.Folder.Trim();
         conv.Tags = item.Tags;
         conv.IsPinned = item.IsPinned;
+        conv.IsArchived = item.IsArchived;
         await _store.SaveAsync(conv);
 
         item.Title = conv.Title;
         item.UpdatedAt = conv.UpdatedAt;
         await LoadConversationsAsync();
+        if (showToast)
+            _toasts.Show("Conversation details saved", $"Updated \"{conv.Title}\".", ToastKind.Success);
     }
 
     [RelayCommand]
     private async Task TogglePinConversationAsync(ConversationItemViewModel item)
     {
         item.IsPinned = !item.IsPinned;
-        await SaveConversationMetadataAsync(item);
+        await SaveConversationMetadataAsync(item, showToast: false);
+        _toasts.Show(item.IsPinned ? "Conversation pinned" : "Conversation unpinned",
+            $"\"{item.Title}\" was {(item.IsPinned ? "pinned" : "unpinned")}.",
+            ToastKind.Info);
+    }
+
+    [RelayCommand]
+    private async Task ToggleArchiveConversationAsync(ConversationItemViewModel item)
+    {
+        item.IsArchived = !item.IsArchived;
+        if (item.IsArchived)
+            item.IsPinned = false;
+        await SaveConversationMetadataAsync(item, showToast: false);
+        _toasts.Show(item.IsArchived ? "Conversation archived" : "Conversation restored",
+            $"\"{item.Title}\" was {(item.IsArchived ? "archived" : "restored")}.",
+            ToastKind.Info);
     }
 
     [RelayCommand] private void ToggleSidebar()       => IsSidebarOpen = !IsSidebarOpen;
@@ -255,6 +286,11 @@ public partial class MainWindowViewModel : ObservableObject
     {
         if (!_refreshingFolderFilters)
             _ = LoadConversationsAsync();
+    }
+
+    partial void OnShowArchivedConversationsChanged(bool value)
+    {
+        _ = LoadConversationsAsync();
     }
 
     private void OnToastRaised(ToastMessage toast)
