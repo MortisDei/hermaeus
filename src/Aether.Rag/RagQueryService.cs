@@ -54,6 +54,43 @@ public sealed class RagQueryService
     public async Task<List<RagDataset>> GetDatasetsAsync(CancellationToken ct = default)
         => await _store.GetDatasetsAsync(ct);
 
+    public async Task<RagRetrievalResult> RetrieveAsync(
+        string datasetId,
+        string question,
+        RagQueryOptions? opts = null,
+        CancellationToken ct = default)
+    {
+        opts ??= new RagQueryOptions();
+        var sw = Stopwatch.StartNew();
+
+        if (!_cache.TryGetValue(datasetId, out var chunks) || chunks.Count == 0)
+            await WarmCacheAsync(datasetId, ct);
+        chunks = _cache.GetValueOrDefault(datasetId, []);
+
+        var expandedQuery = await ExpandQueryAsync(datasetId, question, ct);
+        var qEmbed = await _embed.EmbedAsync(expandedQuery, ct);
+        var semanticK = Math.Max(opts.TopK * 10, 50);
+        var semantic = HybridRetriever.CosineScan(qEmbed, chunks, semanticK);
+
+        var bm25Stats = await _store.GetBm25StatsAsync(datasetId, ct);
+        List<ScoredChunk> bm25 = [];
+        if (bm25Stats is not null)
+        {
+            var scorer = new Bm25Scorer();
+            bm25 = scorer.Score(expandedQuery, chunks, bm25Stats)
+                .Take(semanticK)
+                .ToList();
+        }
+
+        var fused = HybridRetriever.Fuse(semantic, bm25, Math.Max(opts.TopK * 2, opts.TopK));
+        fused = await _reranker.RerankAsync(expandedQuery, fused, opts.TopK, ct);
+        if (opts.UseParentChild)
+            fused = await UpgradeToParentsAsync(fused, ct);
+
+        sw.Stop();
+        return new RagRetrievalResult(question, expandedQuery, semantic, bm25, fused, sw.ElapsedMilliseconds);
+    }
+
     public async IAsyncEnumerable<string> StreamQueryAsync(
         string datasetId,
         string question,
@@ -64,40 +101,10 @@ public sealed class RagQueryService
         var totalSw = Stopwatch.StartNew();
         var retrievalSw = Stopwatch.StartNew();
 
-        // ── 1. Ensure cache ───────────────────────────────────────────────
-        if (!_cache.TryGetValue(datasetId, out var chunks) || chunks.Count == 0)
-            await WarmCacheAsync(datasetId, ct);
-        chunks = _cache.GetValueOrDefault(datasetId, []);
-
-        // ── 2. Query expansion (alias map) ────────────────────────────────
-        var expandedQuery = await ExpandQueryAsync(datasetId, question, ct);
-
-        // ── 3. Embed query ────────────────────────────────────────────────
-        var qEmbed = await _embed.EmbedAsync(expandedQuery, ct);
-
-        // ── 4. Semantic scan (cosine) ─────────────────────────────────────
-        var semanticK   = Math.Max(opts.TopK * 10, 50);
-        var semantic    = HybridRetriever.CosineScan(qEmbed, chunks, semanticK);
-
-        // ── 5. BM25 on semantic candidates ───────────────────────────────
-        var bm25Stats   = await _store.GetBm25StatsAsync(datasetId, ct);
-        List<ScoredChunk> bm25 = [];
-        if (bm25Stats is not null)
-        {
-            var scorer = new Bm25Scorer();
-            bm25 = scorer.Score(expandedQuery, chunks, bm25Stats)
-                .Take(semanticK)
-                .ToList();
-        }
-
-        // ── 6. RRF fusion ────────────────────────────────────────────────
-        var fused = HybridRetriever.Fuse(semantic, bm25, Math.Max(opts.TopK * 2, opts.TopK));
-        fused = await _reranker.RerankAsync(expandedQuery, fused, opts.TopK, ct);
-
-        // ── 7. Parent upgrade (parent-child mode) ────────────────────────
-        if (opts.UseParentChild)
-            fused = await UpgradeToParentsAsync(fused, ct);
-
+        var retrieval = await RetrieveAsync(datasetId, question, opts, ct);
+        var semantic = retrieval.SemanticCandidates;
+        var fused = retrieval.Selected;
+        var expandedQuery = retrieval.ExpandedQuery;
         retrievalSw.Stop();
 
         // ── 8. Build context + prompt ────────────────────────────────────
@@ -242,3 +249,11 @@ public sealed class RagQueryService
         Content = scored.Chunk.Content
     };
 }
+
+public sealed record RagRetrievalResult(
+    string Question,
+    string ExpandedQuery,
+    List<ScoredChunk> SemanticCandidates,
+    List<ScoredChunk> Bm25Candidates,
+    List<ScoredChunk> Selected,
+    long LatencyMs);

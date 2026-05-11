@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Aether.Rag;
+using Aether.Rag.Eval;
 using Aether.Rag.Models;
 using Aether.Rag.Pipeline;
 using Aether.Core.Services;
@@ -38,12 +39,14 @@ public partial class RagViewModel : ObservableObject
 {
     private readonly RagQueryService _query;
     private readonly RagPipeline     _pipeline;
+    private readonly RagEvalService  _eval;
     private readonly IToastService   _toasts;
     private CancellationTokenSource? _cts;
 
     public ObservableCollection<RagDataset>       Datasets  { get; } = [];
     public ObservableCollection<RagSourceViewModel> Sources  { get; } = [];
     public ObservableCollection<RagSourceViewModel> VisibleCitationSources { get; } = [];
+    public ObservableCollection<RagEvalResultViewModel> EvalResults { get; } = [];
 
     [ObservableProperty] private RagDataset? _selectedDataset;
     [ObservableProperty] private string      _questionText    = string.Empty;
@@ -67,14 +70,22 @@ public partial class RagViewModel : ObservableObject
     [ObservableProperty] private string      _lastTraceId = string.Empty;
     [ObservableProperty] private long        _lastRetrievalLatencyMs;
     [ObservableProperty] private long        _lastTotalLatencyMs;
+    [ObservableProperty] private string      _evalPath = string.Empty;
+    [ObservableProperty] private bool        _isEvaluating;
+    [ObservableProperty] private string      _evalStatus = string.Empty;
+    [ObservableProperty] private int         _evalPassed;
+    [ObservableProperty] private int         _evalTotal;
+    [ObservableProperty] private double      _evalPassRate;
+    [ObservableProperty] private RagEvalResultViewModel? _selectedEvalResult;
 
     public event EventHandler? ScrollToBottom;
     public Action<string>? RequestCopyToClipboard { get; set; }
 
-    public RagViewModel(RagQueryService query, RagPipeline pipeline, IToastService toasts)
+    public RagViewModel(RagQueryService query, RagPipeline pipeline, RagEvalService eval, IToastService toasts)
     {
         _query    = query;
         _pipeline = pipeline;
+        _eval     = eval;
         _toasts   = toasts;
     }
 
@@ -228,11 +239,61 @@ public partial class RagViewModel : ObservableObject
         catch (Exception ex) { SetError(ex.Message); }
     }
 
+    [RelayCommand(CanExecute = nameof(CanRunEval))]
+    private async Task RunRetrievalEvalAsync()
+    {
+        await RunEvalAsync(fullAnswer: false);
+    }
+
+    [RelayCommand(CanExecute = nameof(CanRunEval))]
+    private async Task RunFullEvalAsync()
+    {
+        await RunEvalAsync(fullAnswer: true);
+    }
+
+    private async Task RunEvalAsync(bool fullAnswer)
+    {
+        if (SelectedDataset is null || string.IsNullOrWhiteSpace(EvalPath)) return;
+
+        IsEvaluating = true;
+        EvalResults.Clear();
+        EvalStatus = "Starting eval...";
+        try
+        {
+            var run = await _eval.RunAsync(
+                SelectedDataset.Id,
+                EvalPath,
+                fullAnswer,
+                new Progress<string>(s => EvalStatus = s),
+                CancellationToken.None);
+
+            EvalPassed = run.Passed;
+            EvalTotal = run.Total;
+            EvalPassRate = run.PassRate;
+            EvalResults.Clear();
+            foreach (var result in run.Results)
+                EvalResults.Add(new RagEvalResultViewModel(result));
+            SelectedEvalResult = EvalResults.FirstOrDefault();
+            EvalStatus = $"Eval exported to eval-runs/{run.Id}.";
+            _toasts.Show("RAG eval complete", $"{run.Passed}/{run.Total} passed.", run.PassRate >= 0.8 ? ToastKind.Success : ToastKind.Warning);
+        }
+        catch (Exception ex)
+        {
+            EvalStatus = ex.Message;
+            _toasts.Show("RAG eval failed", ex.Message, ToastKind.Error, 7000);
+        }
+        finally
+        {
+            IsEvaluating = false;
+        }
+    }
+
     private bool CanQuery()  => !IsQuerying && !IsIngesting && SelectedDataset is not null
                                 && !string.IsNullOrWhiteSpace(QuestionText);
     private bool CanIngest() => !IsIngesting && !IsQuerying
                                 && !string.IsNullOrWhiteSpace(IngestPath)
                                 && !string.IsNullOrWhiteSpace(NewDatasetName);
+    private bool CanRunEval() => !IsEvaluating && SelectedDataset is not null && File.Exists(EvalPath);
 
     private void ParseSources(string header)
     {
@@ -313,8 +374,55 @@ public partial class RagViewModel : ObservableObject
     }
 
     partial void OnQuestionTextChanged(string value) => QueryCommand.NotifyCanExecuteChanged();
-    partial void OnSelectedDatasetChanged(RagDataset? value) => QueryCommand.NotifyCanExecuteChanged();
+    partial void OnSelectedDatasetChanged(RagDataset? value)
+    {
+        QueryCommand.NotifyCanExecuteChanged();
+        RunRetrievalEvalCommand.NotifyCanExecuteChanged();
+        RunFullEvalCommand.NotifyCanExecuteChanged();
+    }
     partial void OnIsQueryingChanged(bool value) => QueryCommand.NotifyCanExecuteChanged();
     partial void OnIngestPathChanged(string value) => IngestCommand.NotifyCanExecuteChanged();
     partial void OnNewDatasetNameChanged(string value) => IngestCommand.NotifyCanExecuteChanged();
+    partial void OnEvalPathChanged(string value)
+    {
+        RunRetrievalEvalCommand.NotifyCanExecuteChanged();
+        RunFullEvalCommand.NotifyCanExecuteChanged();
+    }
+    partial void OnIsEvaluatingChanged(bool value)
+    {
+        RunRetrievalEvalCommand.NotifyCanExecuteChanged();
+        RunFullEvalCommand.NotifyCanExecuteChanged();
+    }
+}
+
+public sealed class RagEvalResultViewModel
+{
+    public RagEvalResultViewModel(RagEvalResult result)
+    {
+        CaseId = result.CaseId;
+        Question = result.Question;
+        RetrievalHit = result.RetrievalHit;
+        KeywordHit = result.KeywordHit;
+        RefusalCorrect = result.RefusalCorrect;
+        Passed = result.Passed;
+        LatencyMs = result.LatencyMs;
+        GroundingScore = result.GroundingScore;
+        Answer = result.Answer;
+        Notes = result.Notes;
+        RetrievedSummary = string.Join("  ", result.Retrieved.Take(3).Select(r => $"[{r.Rank}] {r.Title}"));
+    }
+
+    public string CaseId { get; }
+    public string Question { get; }
+    public bool RetrievalHit { get; }
+    public bool KeywordHit { get; }
+    public bool RefusalCorrect { get; }
+    public bool Passed { get; }
+    public double LatencyMs { get; }
+    public float GroundingScore { get; }
+    public string Answer { get; }
+    public string Notes { get; }
+    public string RetrievedSummary { get; }
+    public string StatusLabel => Passed ? "PASS" : "FAIL";
+    public string LatencyDisplay => $"{LatencyMs:F0} ms";
 }

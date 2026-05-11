@@ -5,6 +5,7 @@ using Aether.Core.Services;
 using Aether.Desktop.Views;
 using Aether.Rag;
 using Aether.Rag.Embeddings;
+using Aether.Rag.Eval;
 using Aether.Rag.Pipeline;
 using Aether.Rag.Retrieval;
 using Aether.Rag.Storage;
@@ -74,6 +75,7 @@ public partial class App : Application
         s.AddSingleton<IReranker,          NoOpReranker>();
         s.AddSingleton<RagPipeline>();
         s.AddSingleton<RagQueryService>();
+        s.AddSingleton<RagEvalService>();
         s.AddSingleton<ChatViewModel>();
         s.AddSingleton<SettingsViewModel>();
         s.AddSingleton<ModelManagementViewModel>();
