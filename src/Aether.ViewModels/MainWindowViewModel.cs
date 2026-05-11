@@ -17,6 +17,7 @@ public partial class MainWindowViewModel : ObservableObject
     public ModelManagementViewModel Models   { get; }
     public RagViewModel             Rag      { get; }
     public ServicesViewModel        Services { get; }
+    public TasksViewModel           Tasks    { get; }
 
     public ObservableCollection<ConversationItemViewModel> Conversations { get; } = [];
     public ObservableCollection<ToastViewModel> Toasts { get; } = [];
@@ -34,12 +35,14 @@ public partial class MainWindowViewModel : ObservableObject
     public bool ShowModels   => ActivePanel == "models";
     public bool ShowRag      => ActivePanel == "rag";
     public bool ShowServices => ActivePanel == "services";
+    public bool ShowTasks    => ActivePanel == "tasks";
     public object ActiveViewModel => ActivePanel switch
     {
         "settings" => Settings,
         "models"   => Models,
         "rag"      => Rag,
         "services" => Services,
+        "tasks"    => Tasks,
         _          => Chat
     };
 
@@ -50,12 +53,13 @@ public partial class MainWindowViewModel : ObservableObject
         ModelManagementViewModel models,
         RagViewModel rag,
         ServicesViewModel services,
+        TasksViewModel tasks,
         IToastService toasts)
     {
         _sync = SynchronizationContext.Current;
         _toasts = toasts;
         _store = store; Chat = chat; Settings = settings;
-        Models = models; Rag = rag; Services = services;
+        Models = models; Rag = rag; Services = services; Tasks = tasks;
         Chat.ConversationSaved += OnConversationSaved;
         Services.ServerAvailabilityChanged += async (_, _) => await Chat.LoadModelsAsync();
         _toasts.ToastRaised += OnToastRaised;
@@ -232,6 +236,7 @@ public partial class MainWindowViewModel : ObservableObject
     [RelayCommand] private void ShowRagPanel()         => ActivePanel = "rag";
     [RelayCommand] private void ShowModelsPanel()      { ActivePanel = "models"; _ = Models.RefreshCommand.ExecuteAsync(null); }
     [RelayCommand] private void ShowServicesPanel()    => ActivePanel = "services";
+    [RelayCommand] private void ShowTasksPanel()       { Tasks.Reload(); ActivePanel = "tasks"; }
     [RelayCommand] private void ShowSettingsPanel()    { ActivePanel = "settings"; Settings.Reload(); }
 
     [RelayCommand]
@@ -274,6 +279,7 @@ public partial class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowModels));
         OnPropertyChanged(nameof(ShowRag));
         OnPropertyChanged(nameof(ShowServices));
+        OnPropertyChanged(nameof(ShowTasks));
         OnPropertyChanged(nameof(ActiveViewModel));
     }
 

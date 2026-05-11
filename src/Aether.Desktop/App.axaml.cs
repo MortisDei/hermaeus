@@ -49,6 +49,7 @@ public partial class App : Application
             await sp.GetRequiredService<ISettingsService>().LoadAsync();
             await sp.GetRequiredService<IConversationStore>().InitializeAsync();
             await sp.GetRequiredService<SqliteRagStore>().InitializeAsync();
+            sp.GetRequiredService<IAutomationScheduler>().Start();
             await vm.InitializeAsync();
         }
         catch (Exception ex)
@@ -70,6 +71,7 @@ public partial class App : Application
         s.AddSingleton<ITtsService,        XttsService>();
         s.AddSingleton<XttsProcessManager>();
         s.AddSingleton<IToastService,      ToastService>();
+        s.AddSingleton<IAutomationScheduler, AutomationScheduler>();
         s.AddSingleton<SqliteRagStore>();
         s.AddSingleton<IEmbeddingService,  LlamaCppEmbeddingService>();
         s.AddSingleton<IReranker,          NoOpReranker>();
@@ -81,6 +83,7 @@ public partial class App : Application
         s.AddSingleton<ModelManagementViewModel>();
         s.AddSingleton<RagViewModel>();
         s.AddSingleton<ServicesViewModel>();
+        s.AddSingleton<TasksViewModel>();
         s.AddSingleton<MainWindowViewModel>();
     }
 }

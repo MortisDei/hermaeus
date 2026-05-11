@@ -30,6 +30,8 @@ public class AppSettings
     public bool   TtsPreload           { get; set; } = false;
     public List<ModelProfile> ModelProfiles { get; set; } = [];
     public List<RuntimeProfile> RuntimeProfiles { get; set; } = [];
+    public List<LocalTaskItem> Tasks { get; set; } = [];
+    public List<ScheduledAutomation> Automations { get; set; } = [];
 
     public List<ServerConfig> ManagedServers { get; set; } =
     [
