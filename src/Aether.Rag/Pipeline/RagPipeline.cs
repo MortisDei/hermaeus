@@ -3,6 +3,7 @@ using Aether.Rag.Embeddings;
 using Aether.Rag.Models;
 using Aether.Rag.Retrieval;
 using Aether.Rag.Storage;
+using System.Security.Cryptography;
 
 namespace Aether.Rag.Pipeline;
 
@@ -32,6 +33,10 @@ public sealed class RagPipeline
         IProgress<IngestProgress>? progress = null,
         CancellationToken ct = default)
     {
+        ValidateIngestConfig(dataset.Config);
+        if (dataset.Config.ExtractionMode is not RagExtractionMode.TextMarkdown)
+            throw new NotSupportedException($"{dataset.Config.ExtractionMode} is configured but not yet implemented. The provider slot is ready; install a concrete extractor before ingesting this profile.");
+
         var files = Directory.GetFiles(directory, "*.txt", SearchOption.AllDirectories)
             .Concat(Directory.GetFiles(directory, "*.md", SearchOption.AllDirectories))
             .OrderBy(f => f)
@@ -45,6 +50,8 @@ public sealed class RagPipeline
         // ── 1. Chunk all files ────────────────────────────────────────────
         var allChunks = new List<RagChunk>();
         var parentChunks = new List<RagChunk>(); // parent-child mode
+        var changedSourcePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var health = new RagIngestHealth { FileCount = files.Count };
 
         for (int fi = 0; fi < files.Count; fi++)
         {
@@ -52,15 +59,31 @@ public sealed class RagPipeline
             var file  = files[fi];
             var title = Path.GetFileNameWithoutExtension(file);
             var text  = await File.ReadAllTextAsync(file, ct);
+            var sourcePath = Path.GetFullPath(file);
+            var sourceHash = ComputeHash(text);
+            var modifiedUtc = File.GetLastWriteTimeUtc(file);
+
+            if (new FileInfo(file).Length > 50 * 1024 * 1024)
+            {
+                health.OversizedFileCount++;
+                health.Warnings.Add($"Large file: {sourcePath}");
+            }
 
             var textChunks = _chunker.Chunk(text, file, title, dataset.Config);
+            changedSourcePaths.Add(sourcePath);
 
             foreach (var tc in textChunks)
             {
+                if (string.IsNullOrWhiteSpace(tc.Content))
+                    health.EmptyChunkCount++;
+
                 var chunk = new RagChunk
                 {
                     DatasetId   = dataset.Id,
                     SourceFile  = Path.GetFileName(file),
+                    SourcePath  = sourcePath,
+                    SourceHash  = sourceHash,
+                    SourceModifiedUtc = modifiedUtc,
                     SourceTitle = title,
                     Content     = tc.Content,
                     ChunkIndex  = tc.Index,
@@ -77,6 +100,9 @@ public sealed class RagPipeline
                         Id          = parentId,
                         DatasetId   = dataset.Id,
                         SourceFile  = chunk.SourceFile,
+                        SourcePath  = chunk.SourcePath,
+                        SourceHash  = chunk.SourceHash,
+                        SourceModifiedUtc = chunk.SourceModifiedUtc,
                         SourceTitle = chunk.SourceTitle,
                         Content     = tc.ParentContent,
                         ChunkIndex  = tc.Index,
@@ -92,6 +118,14 @@ public sealed class RagPipeline
 
             progress?.Report(new IngestProgress("Chunking", fi + 1, files.Count, $"{title} → {textChunks.Count} chunks"));
         }
+
+        health.DuplicateChunkCount = allChunks
+            .GroupBy(c => $"{c.SourcePath}\n{c.Content}", StringComparer.Ordinal)
+            .Sum(g => Math.Max(0, g.Count() - 1));
+        if (health.DuplicateChunkCount > 0)
+            health.Warnings.Add($"{health.DuplicateChunkCount} duplicate chunks detected.");
+        if (health.EmptyChunkCount > 0)
+            health.Warnings.Add($"{health.EmptyChunkCount} empty chunks detected.");
 
         // ── 2. Embed in batches ───────────────────────────────────────────
         int total = allChunks.Count;
@@ -114,6 +148,8 @@ public sealed class RagPipeline
         // ── 3. Store ──────────────────────────────────────────────────────
         progress?.Report(new IngestProgress("Storing", 0, total, "Writing to SQLite..."));
 
+        await _store.DeleteChunksForSourcesAsync(dataset.Id, changedSourcePaths, ct);
+
         if (parentChunks.Count > 0)
             await _store.SaveChunksBatchAsync(parentChunks, ct);
 
@@ -129,7 +165,7 @@ public sealed class RagPipeline
         await _store.SaveDatasetAsync(dataset, ct);
 
         progress?.Report(new IngestProgress("Done", total, total,
-            $"{allChunks.Count} chunks indexed from {files.Count} files"));
+            $"{allChunks.Count} chunks indexed from {files.Count} files. Health: {BuildHealthSummary(health)}"));
     }
 
     private static string BuildEmbeddingText(RagChunk chunk, RagDatasetConfig cfg)
@@ -138,5 +174,30 @@ public sealed class RagPipeline
             return chunk.Content;
 
         return $"Title: {chunk.SourceTitle}\nSource: {chunk.SourceFile}\n\n{chunk.Content}";
+    }
+
+    private static void ValidateIngestConfig(RagDatasetConfig config)
+    {
+        var template = config.PromptTemplate ?? string.Empty;
+        if (!template.Contains("{context}", StringComparison.OrdinalIgnoreCase)
+            || !template.Contains("{question}", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("RAG prompt template must include both {context} and {question}.");
+        }
+
+        if (template.Split("{context}", StringSplitOptions.None).Length > 2)
+            throw new InvalidOperationException("RAG prompt template includes {context} more than once.");
+    }
+
+    private static string ComputeHash(string text)
+    {
+        var bytes = System.Text.Encoding.UTF8.GetBytes(text);
+        return Convert.ToHexString(SHA256.HashData(bytes));
+    }
+
+    private static string BuildHealthSummary(RagIngestHealth health)
+    {
+        if (health.Warnings.Count == 0) return "ok";
+        return string.Join("; ", health.Warnings.Take(3));
     }
 }

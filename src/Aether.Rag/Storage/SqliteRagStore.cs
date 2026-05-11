@@ -69,6 +69,9 @@ public sealed class SqliteRagStore
                 id           TEXT PRIMARY KEY,
                 dataset_id   TEXT NOT NULL REFERENCES rag_datasets(id) ON DELETE CASCADE,
                 source_file  TEXT NOT NULL,
+                source_path  TEXT NOT NULL DEFAULT '',
+                source_hash  TEXT NOT NULL DEFAULT '',
+                source_modified_utc TEXT,
                 source_title TEXT NOT NULL,
                 content      TEXT NOT NULL,
                 chunk_index  INTEGER NOT NULL DEFAULT 0,
@@ -81,6 +84,7 @@ public sealed class SqliteRagStore
 
             CREATE INDEX IF NOT EXISTS idx_rag_chunks_ds     ON rag_chunks(dataset_id);
             CREATE INDEX IF NOT EXISTS idx_rag_chunks_parent ON rag_chunks(parent_id);
+            CREATE INDEX IF NOT EXISTS idx_rag_chunks_source ON rag_chunks(dataset_id, source_path);
 
             CREATE TABLE IF NOT EXISTS rag_bm25_stats (
                 dataset_id TEXT PRIMARY KEY REFERENCES rag_datasets(id) ON DELETE CASCADE,
@@ -88,7 +92,33 @@ public sealed class SqliteRagStore
                 updated_at TEXT NOT NULL
             );";
         await cmd.ExecuteNonQueryAsync(ct);
+        await EnsureColumnAsync(c, "rag_chunks", "source_path", "TEXT NOT NULL DEFAULT ''", ct);
+        await EnsureColumnAsync(c, "rag_chunks", "source_hash", "TEXT NOT NULL DEFAULT ''", ct);
+        await EnsureColumnAsync(c, "rag_chunks", "source_modified_utc", "TEXT", ct);
         _initializedPath = dbPath;
+    }
+
+    private static async Task EnsureColumnAsync(
+        SqliteConnection c,
+        string table,
+        string column,
+        string definition,
+        CancellationToken ct)
+    {
+        await using (var cmd = c.CreateCommand())
+        {
+            cmd.CommandText = $"PRAGMA table_info({table})";
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            while (await r.ReadAsync(ct))
+            {
+                if (string.Equals(r.GetString(1), column, StringComparison.OrdinalIgnoreCase))
+                    return;
+            }
+        }
+
+        await using var alter = c.CreateCommand();
+        alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {definition}";
+        await alter.ExecuteNonQueryAsync(ct);
     }
 
     // ── Datasets ─────────────────────────────────────────────────────────────
@@ -146,13 +176,16 @@ public sealed class SqliteRagStore
         cmd.Transaction = (SqliteTransaction)tx;
         cmd.CommandText = @"
             INSERT OR REPLACE INTO rag_chunks
-                (id,dataset_id,source_file,source_title,content,chunk_index,chunk_total,
+                (id,dataset_id,source_file,source_path,source_hash,source_modified_utc,source_title,content,chunk_index,chunk_total,
                  parent_id,token_count,embedding,created_at)
-            VALUES ($id,$ds,$sf,$st,$ct,$ci,$ctot,$pid,$tc,$emb,$ca)";
+            VALUES ($id,$ds,$sf,$sp,$sh,$sm,$st,$ct,$ci,$ctot,$pid,$tc,$emb,$ca)";
 
         var pId   = cmd.Parameters.Add("$id",   SqliteType.Text);
         var pDs   = cmd.Parameters.Add("$ds",   SqliteType.Text);
         var pSf   = cmd.Parameters.Add("$sf",   SqliteType.Text);
+        var pSp   = cmd.Parameters.Add("$sp",   SqliteType.Text);
+        var pSh   = cmd.Parameters.Add("$sh",   SqliteType.Text);
+        var pSm   = cmd.Parameters.Add("$sm",   SqliteType.Text);
         var pSt   = cmd.Parameters.Add("$st",   SqliteType.Text);
         var pCt   = cmd.Parameters.Add("$ct",   SqliteType.Text);
         var pCi   = cmd.Parameters.Add("$ci",   SqliteType.Integer);
@@ -167,6 +200,9 @@ public sealed class SqliteRagStore
             pId.Value   = chunk.Id;
             pDs.Value   = chunk.DatasetId;
             pSf.Value   = chunk.SourceFile;
+            pSp.Value   = chunk.SourcePath;
+            pSh.Value   = chunk.SourceHash;
+            pSm.Value   = (object?)chunk.SourceModifiedUtc?.ToString("O") ?? DBNull.Value;
             pSt.Value   = chunk.SourceTitle;
             pCt.Value   = chunk.Content;
             pCi.Value   = chunk.ChunkIndex;
@@ -187,7 +223,7 @@ public sealed class SqliteRagStore
         var cmd = c.CreateCommand();
         cmd.CommandText = includeEmbeddings
             ? "SELECT * FROM rag_chunks WHERE dataset_id=$ds AND parent_id IS NULL ORDER BY source_file, chunk_index"
-            : "SELECT id,dataset_id,source_file,source_title,content,chunk_index,chunk_total,parent_id,token_count,NULL,created_at FROM rag_chunks WHERE dataset_id=$ds AND parent_id IS NULL ORDER BY source_file, chunk_index";
+            : "SELECT id,dataset_id,source_file,source_path,source_hash,source_modified_utc,source_title,content,chunk_index,chunk_total,parent_id,token_count,NULL AS embedding,created_at FROM rag_chunks WHERE dataset_id=$ds AND parent_id IS NULL ORDER BY source_file, chunk_index";
         cmd.Parameters.AddWithValue("$ds", datasetId);
         var list = new List<RagChunk>();
         await using var r = await cmd.ExecuteReaderAsync(ct);
@@ -214,6 +250,27 @@ public sealed class SqliteRagStore
         cmd.CommandText = "DELETE FROM rag_chunks WHERE dataset_id=$ds";
         cmd.Parameters.AddWithValue("$ds", datasetId);
         await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task DeleteChunksForSourcesAsync(string datasetId, IEnumerable<string> sourcePaths, CancellationToken ct = default)
+    {
+        var paths = sourcePaths.Select(p => p.Trim()).Where(p => p.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (paths.Count == 0) return;
+
+        await EnsureInitializedAsync(ct);
+        await using var c = new SqliteConnection(Cs); await c.OpenAsync(ct);
+        await using var tx = await c.BeginTransactionAsync(ct);
+        foreach (var path in paths)
+        {
+            var cmd = c.CreateCommand();
+            cmd.Transaction = (SqliteTransaction)tx;
+            cmd.CommandText = "DELETE FROM rag_chunks WHERE dataset_id=$ds AND (source_path=$path OR (source_path='' AND source_file=$file))";
+            cmd.Parameters.AddWithValue("$ds", datasetId);
+            cmd.Parameters.AddWithValue("$path", path);
+            cmd.Parameters.AddWithValue("$file", Path.GetFileName(path));
+            await cmd.ExecuteNonQueryAsync(ct);
+        }
+        await tx.CommitAsync(ct);
     }
 
     // ── BM25 stats ────────────────────────────────────────────────────────────
@@ -277,13 +334,31 @@ public sealed class SqliteRagStore
         Id          = r.GetString(0),
         DatasetId   = r.GetString(1),
         SourceFile  = r.GetString(2),
-        SourceTitle = r.GetString(3),
-        Content     = r.GetString(4),
-        ChunkIndex  = r.GetInt32(5),
-        ChunkTotal  = r.GetInt32(6),
-        ParentId    = r.IsDBNull(7) ? null : r.GetString(7),
-        TokenCount  = r.GetInt32(8),
-        Embedding   = r.IsDBNull(9) ? [] : BytesToEmbedding((byte[])r.GetValue(9)),
-        CreatedAt   = DateTime.Parse(r.GetString(10))
+        SourcePath  = GetString(r, "source_path"),
+        SourceHash  = GetString(r, "source_hash"),
+        SourceModifiedUtc = TryParseDate(GetString(r, "source_modified_utc")),
+        SourceTitle = GetString(r, "source_title"),
+        Content     = GetString(r, "content"),
+        ChunkIndex  = GetInt(r, "chunk_index"),
+        ChunkTotal  = GetInt(r, "chunk_total"),
+        ParentId    = r.IsDBNull(r.GetOrdinal("parent_id")) ? null : r.GetString(r.GetOrdinal("parent_id")),
+        TokenCount  = GetInt(r, "token_count"),
+        Embedding   = r.IsDBNull(r.GetOrdinal("embedding")) ? [] : BytesToEmbedding((byte[])r.GetValue(r.GetOrdinal("embedding"))),
+        CreatedAt   = DateTime.Parse(GetString(r, "created_at"))
     };
+
+    private static string GetString(SqliteDataReader r, string name)
+    {
+        var ordinal = r.GetOrdinal(name);
+        return r.IsDBNull(ordinal) ? string.Empty : r.GetString(ordinal);
+    }
+
+    private static int GetInt(SqliteDataReader r, string name)
+    {
+        var ordinal = r.GetOrdinal(name);
+        return r.IsDBNull(ordinal) ? 0 : r.GetInt32(ordinal);
+    }
+
+    private static DateTime? TryParseDate(string value) =>
+        DateTime.TryParse(value, out var parsed) ? parsed : null;
 }

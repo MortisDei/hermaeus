@@ -18,4 +18,16 @@ public class RagDatasetConfig
     public bool   UseParentChild    { get; set; } = false;
     public bool   PrependTitleToEmbedding { get; set; } = true;
     public string AliasFilePath     { get; set; } = string.Empty;
+    public RagExtractionMode ExtractionMode { get; set; } = RagExtractionMode.TextMarkdown;
+    public string FirecrawlApiUrl { get; set; } = string.Empty;
+    public string FirecrawlApiKey { get; set; } = string.Empty;
+    public string PromptTemplate { get; set; } = "{context}\n\nQuestion: {question}";
+}
+
+public enum RagExtractionMode
+{
+    TextMarkdown,
+    PdfOcrPlaceholder,
+    WebUrlPlaceholder,
+    FirecrawlUrlPlaceholder
 }
