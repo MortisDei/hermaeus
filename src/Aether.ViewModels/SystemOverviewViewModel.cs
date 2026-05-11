@@ -1,0 +1,102 @@
+using System.Collections.ObjectModel;
+using Aether.Core.Models;
+using Aether.Core.Services;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+
+namespace Aether.ViewModels;
+
+public partial class SystemOverviewViewModel : ObservableObject
+{
+    private readonly ISystemInfoService _system;
+    private readonly IToastService _toasts;
+
+    public ObservableCollection<SystemMetricViewModel> Metrics { get; } = [];
+    public ObservableCollection<GpuInfoViewModel> Gpus { get; } = [];
+    public ObservableCollection<ComponentStatusViewModel> Components { get; } = [];
+
+    [ObservableProperty] private string _status = "Ready.";
+    [ObservableProperty] private bool _isRefreshing;
+    [ObservableProperty] private SystemSnapshot? _snapshot;
+
+    public SystemOverviewViewModel(ISystemInfoService system, IToastService toasts)
+    {
+        _system = system;
+        _toasts = toasts;
+    }
+
+    [RelayCommand]
+    public async Task RefreshAsync()
+    {
+        IsRefreshing = true;
+        try
+        {
+            Snapshot = await _system.CaptureAsync();
+            Metrics.Clear();
+            Metrics.Add(new("App", Snapshot.AppVersion));
+            Metrics.Add(new("OS", $"{Snapshot.OSDescription} ({Snapshot.Architecture})"));
+            Metrics.Add(new("CPU", $"{Snapshot.CpuName} · {Snapshot.ProcessorCount} threads"));
+            Metrics.Add(new("RAM", $"{FormatBytes(Snapshot.AvailableMemoryBytes)} available / {FormatBytes(Snapshot.TotalMemoryBytes)} total"));
+            Metrics.Add(new("Process", $"{FormatBytes(Snapshot.ProcessMemoryBytes)} RSS · {FormatBytes(Snapshot.ManagedMemoryBytes)} managed"));
+            Metrics.Add(new("Data root", Snapshot.DataRoot));
+            Metrics.Add(new("Storage", $"{FormatBytes(Snapshot.DataRootFreeBytes)} free / {FormatBytes(Snapshot.DataRootTotalBytes)} total"));
+            Metrics.Add(new("Databases", FormatBytes(Snapshot.DatabaseBytes)));
+
+            Gpus.Clear();
+            foreach (var gpu in Snapshot.Gpus)
+                Gpus.Add(new GpuInfoViewModel(gpu));
+
+            Components.Clear();
+            foreach (var component in Snapshot.Components)
+                Components.Add(new ComponentStatusViewModel(component));
+
+            Status = $"Updated {Snapshot.CapturedAt.ToLocalTime():T}.";
+        }
+        catch (Exception ex)
+        {
+            Status = ex.Message;
+            _toasts.Show("System overview failed", ex.Message, ToastKind.Warning, 7000);
+        }
+        finally
+        {
+            IsRefreshing = false;
+        }
+    }
+
+    public static string FormatBytes(long bytes)
+    {
+        if (bytes <= 0) return "unavailable";
+        string[] units = ["B", "KB", "MB", "GB", "TB"];
+        var value = (double)bytes;
+        var unit = 0;
+        while (value >= 1024 && unit < units.Length - 1)
+        {
+            value /= 1024;
+            unit++;
+        }
+        return $"{value:0.##} {units[unit]}";
+    }
+}
+
+public sealed record SystemMetricViewModel(string Name, string Value);
+
+public sealed class GpuInfoViewModel
+{
+    private readonly GpuInfo _gpu;
+    public string Name => _gpu.Name;
+    public string Provider => _gpu.Provider;
+    public string Status => _gpu.Status;
+    public string Memory => _gpu.MemoryUsedBytes.HasValue && _gpu.MemoryTotalBytes.HasValue
+        ? $"{SystemOverviewViewModel.FormatBytes(_gpu.MemoryUsedBytes.Value)} / {SystemOverviewViewModel.FormatBytes(_gpu.MemoryTotalBytes.Value)}"
+        : "VRAM unavailable";
+    public GpuInfoViewModel(GpuInfo gpu) => _gpu = gpu;
+}
+
+public sealed class ComponentStatusViewModel
+{
+    private readonly ComponentStatus _component;
+    public string Name => _component.Name;
+    public string Status => _component.Status;
+    public string Detail => _component.Detail;
+    public ComponentStatusViewModel(ComponentStatus component) => _component = component;
+}

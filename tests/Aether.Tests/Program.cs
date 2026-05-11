@@ -1,4 +1,5 @@
 using Aether.Core.Models;
+using Aether.Core.Services;
 using Aether.Services;
 
 var tests = new (string Name, Func<Task> Run)[]
@@ -7,7 +8,10 @@ var tests = new (string Name, Func<Task> Run)[]
     ("data root migration refuses conflicts", DataRootMigrationRefusesConflicts),
     ("data root migration moves db files and leaves no junk", DataRootMigrationMovesFiles),
     ("backup excludes secrets and refuses overwrite restore", BackupExcludesSecretsAndRefusesOverwrite),
-    ("redaction hides common secrets and home path", RedactionHidesSecrets)
+    ("redaction hides common secrets and home path", RedactionHidesSecrets),
+    ("benchmark db creates starter suites and records runs", BenchmarkDbCreatesAndRecordsRuns),
+    ("benchmark scoring and ranking are deterministic", BenchmarkScoringAndRanking),
+    ("system info returns safe fallback values", SystemInfoSafeFallback)
 };
 
 var failed = 0;
@@ -133,6 +137,102 @@ static Task RedactionHidesSecrets()
     return Task.CompletedTask;
 }
 
+static async Task BenchmarkDbCreatesAndRecordsRuns()
+{
+    using var temp = new TempDir();
+    var settings = NewSettings(temp);
+    settings.Settings.DataRootDirectory = temp.PathFor("data");
+    var service = new BenchmarkService(settings, new FakeLlm(), new FakeSystemInfo());
+
+    await service.InitializeAsync();
+    var suites = await service.GetSuitesAsync();
+    True(suites.Count >= 5, "starter suites should be seeded");
+
+    var suite = new BenchmarkSuite
+    {
+        Id = "test-suite",
+        Name = "Test Suite",
+        TimeoutSeconds = 30,
+        Cases =
+        [
+            new BenchmarkCase
+            {
+                Id = "case-1",
+                Name = "Keyword",
+                Prompt = "Say local ready",
+                ExpectedKeywords = ["local", "ready"]
+            }
+        ]
+    };
+    await service.SaveSuiteAsync(suite);
+    var run = await service.RunAsync(suite, new LlmModel { Id = "fake", Name = "Fake", Provider = "Test" });
+    Equal("Completed", run.Status, "benchmark run should complete");
+    Equal(1, run.Results.Count, "benchmark should record one result");
+    True(run.Results[0].Passed, "deterministic benchmark checks should pass");
+
+    var runs = await service.GetRunsAsync();
+    True(runs.Any(r => r.Id == run.Id), "run history should persist");
+    var rerun = await service.RerunAsync(run.Id);
+    Equal("Completed", rerun.Status, "rerun should complete");
+    await service.DeleteRunAsync(run.Id);
+    runs = await service.GetRunsAsync();
+    False(runs.Any(r => r.Id == run.Id), "deleted run should be removed");
+}
+
+static Task BenchmarkScoringAndRanking()
+{
+    var result = BenchmarkService.ScoreDeterministic(new BenchmarkCase
+    {
+        Name = "Checks",
+        Prompt = "prompt",
+        ExpectedKeywords = ["alpha"],
+        ExpectedRegexes = ["beta\\s+\\d+"]
+    }, "alpha beta 42");
+    True(result.Passed, "keyword and regex checks should pass");
+    Equal(1d, result.QualityScore, "all deterministic checks should score 1");
+
+    var invalidRegex = BenchmarkService.ScoreDeterministic(new BenchmarkCase
+    {
+        Name = "Bad regex",
+        Prompt = "prompt",
+        ExpectedRegexes = ["["]
+    }, "anything");
+    False(invalidRegex.Passed, "invalid benchmark regex should fail the check without throwing");
+
+    var good = new BenchmarkRun
+    {
+        SuiteName = "A",
+        ModelName = "good",
+        Results =
+        [
+            new BenchmarkResult { Passed = true, QualityScore = 1, ApproxTokensPerSecond = 30, ResourceScore = 1 }
+        ]
+    };
+    var slow = new BenchmarkRun
+    {
+        SuiteName = "A",
+        ModelName = "slow",
+        Results =
+        [
+            new BenchmarkResult { Passed = true, QualityScore = 0.5, ApproxTokensPerSecond = 5, ResourceScore = 1 }
+        ]
+    };
+    True(good.RankingScore > slow.RankingScore, "better quality/speed should rank higher");
+    return Task.CompletedTask;
+}
+
+static async Task SystemInfoSafeFallback()
+{
+    using var temp = new TempDir();
+    var settings = NewSettings(temp);
+    settings.Settings.DataRootDirectory = temp.PathFor("data");
+    var snapshot = await new SystemInfoService(settings).CaptureAsync();
+    True(snapshot.ProcessorCount > 0, "processor count should be populated");
+    True(!string.IsNullOrWhiteSpace(snapshot.OSDescription), "OS should be populated");
+    True(!string.IsNullOrWhiteSpace(snapshot.DataRoot), "data root should be populated");
+    True(snapshot.Components.Count > 0, "component statuses should be populated");
+}
+
 static SettingsService NewSettings(TempDir temp) => new(temp.PathFor("settings/settings.json"));
 
 static async Task ThrowsAsync<T>(Func<Task> action) where T : Exception
@@ -174,4 +274,44 @@ sealed class TempDir : IDisposable
         if (Directory.Exists(_root))
             Directory.Delete(_root, recursive: true);
     }
+}
+
+sealed class FakeLlm : ILlmService
+{
+    public string ProviderName => "Fake";
+    public bool IsConfigured => true;
+    public Task<List<LlmModel>> GetModelsAsync(CancellationToken ct = default) =>
+        Task.FromResult(new List<LlmModel> { new() { Id = "fake", Name = "Fake", Provider = "Test" } });
+
+    public async IAsyncEnumerable<string> StreamChatAsync(
+        string modelId,
+        IReadOnlyList<ChatMessage> messages,
+        string? systemPrompt = null,
+        double temperature = 0.7,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        await Task.Delay(1, ct);
+        yield return "local ";
+        yield return "ready alpha beta 42";
+    }
+
+    public Task PullModelAsync(string modelId, IProgress<string>? progress = null, CancellationToken ct = default) => Task.CompletedTask;
+    public Task DeleteModelAsync(string modelId, CancellationToken ct = default) => Task.CompletedTask;
+}
+
+sealed class FakeSystemInfo : ISystemInfoService
+{
+    public Task<SystemSnapshot> CaptureAsync(CancellationToken ct = default) => Task.FromResult(new SystemSnapshot
+    {
+        AppVersion = "test",
+        OSDescription = "test-os",
+        Architecture = "x64",
+        ProcessorCount = 8,
+        ProcessMemoryBytes = 100,
+        ManagedMemoryBytes = 50,
+        DataRoot = "test",
+        DataRootFreeBytes = 1024,
+        DataRootTotalBytes = 2048,
+        Components = [new ComponentStatus { Name = "Test", Status = "OK" }]
+    });
 }

@@ -26,6 +26,8 @@ preserving Aether's native desktop, local-first direction.
 | Citations | Source chips, overflow, drawer | **Completed** | `[1] [2] [3] +N`, source inspector, copy source/path. |
 | RAG traces | Retrieval diagnostics | **Completed** | Query traces persisted with chunks, scores, context, model, latency. |
 | Eval harness | Oghma benchmark scripts | **Completed v1** | `gold.json`/`stress.json` loader, retrieval/full-answer eval, dashboard, JSONL/Markdown export. |
+| Model benchmarks | Model rankings, leaderboards, analytics | **Completed v1** | Saved benchmark suites/runs, deterministic quality checks, speed/resource metrics, rerun/export, local rankings. |
+| System overview | Admin/system dashboards | **Completed v1** | App/runtime storage, CPU/RAM, database footprint, components, and best-effort GPU/VRAM status. |
 | Storage | Configurable data root, backup/restore | **Completed v1** | Data root migration, dry-run preview, conflict refusal, zip backup/restore. |
 | Security | Secrets, path checks, log redaction | **Partial** | Local secret refs, user-only secret file on Unix, unsafe restore/path checks, log redaction, initial data-safety tests. OS keychain remains. |
 | Performance | Stream/render stability | **Completed v1** | Model-list memoization, markdown render throttling, response timing logs. |
@@ -37,6 +39,8 @@ preserving Aether's native desktop, local-first direction.
 - Oghma-style RAG retrieval: title/source embedding injection, full-corpus BM25,
   wide semantic candidates, ONNX reranking, and parent-child context.
 - XTTS integration with memory-only generated audio playback.
+- Local benchmark history and system overview for choosing models on the user's
+  own hardware.
 - Local-first data root migration and explicit backup/restore.
 
 ## Deferred

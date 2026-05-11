@@ -1,0 +1,189 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Aether.ViewModels"
+             xmlns:models="using:Aether.Core.Models"
+             x:Class="Aether.Desktop.Views.BenchmarkView"
+             x:DataType="vm:BenchmarkViewModel">
+    <Grid Margin="24"
+          ColumnDefinitions="260,*,360"
+          RowDefinitions="Auto,*"
+          ColumnSpacing="16"
+          RowSpacing="14">
+
+        <Grid Grid.Row="0" Grid.ColumnSpan="3" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+            <StackPanel Grid.Column="0" Spacing="2">
+                <TextBlock Text="Benchmarks" FontSize="22" FontWeight="SemiBold" />
+                <TextBlock Text="{Binding Status}" FontSize="12" Opacity="0.55" />
+            </StackPanel>
+            <Button Grid.Column="1" Content="Refresh" Command="{Binding RefreshCommand}" />
+            <Button Grid.Column="2" Content="Cancel" Command="{Binding CancelCommand}" IsEnabled="{Binding IsRunning}" />
+        </Grid>
+
+        <Border Grid.Row="1" Grid.Column="0"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="8"
+                Padding="12">
+            <Grid RowDefinitions="Auto,*,Auto,Auto" RowSpacing="10">
+                <TextBlock Text="Suites" FontWeight="SemiBold" />
+                <ListBox Grid.Row="1"
+                         ItemsSource="{Binding Suites}"
+                         SelectedItem="{Binding SelectedSuite}">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate DataType="models:BenchmarkSuite">
+                            <StackPanel Spacing="2" Margin="0,4">
+                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding Description}"
+                                           TextWrapping="Wrap"
+                                           FontSize="11"
+                                           Opacity="0.55" />
+                                <TextBlock Text="{Binding Cases.Count, StringFormat={}{0} cases}"
+                                           FontSize="11"
+                                           Opacity="0.4" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+                <TextBlock Grid.Row="2" Text="Run history" FontWeight="SemiBold" />
+                <ListBox Grid.Row="3"
+                         MaxHeight="220"
+                         ItemsSource="{Binding Runs}"
+                         SelectedItem="{Binding SelectedRun}">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate DataType="vm:BenchmarkRunViewModel">
+                            <StackPanel Spacing="2" Margin="0,4">
+                                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                <TextBlock Text="{Binding Summary}" FontSize="11" Opacity="0.55" />
+                                <TextBlock Text="{Binding Started}" FontSize="10" Opacity="0.35" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Grid>
+        </Border>
+
+        <ScrollViewer Grid.Row="1" Grid.Column="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel Spacing="14">
+                <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Padding="14">
+                    <StackPanel Spacing="12">
+                        <TextBlock Text="Run Setup" FontWeight="SemiBold" FontSize="16" />
+                        <ComboBox ItemsSource="{Binding Models}"
+                                  SelectedItem="{Binding SelectedModel}">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate DataType="models:LlmModel">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <TextBlock Text="{Binding Name}" />
+                                        <TextBlock Text="{Binding Provider}" Opacity="0.45" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                        <Grid ColumnDefinitions="*,*,*" RowDefinitions="Auto,Auto" ColumnSpacing="10" RowSpacing="5">
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Temperature" FontSize="11" Opacity="0.55" />
+                            <TextBlock Grid.Row="0" Grid.Column="1" Text="Timeout seconds" FontSize="11" Opacity="0.55" />
+                            <TextBlock Grid.Row="0" Grid.Column="2" Text="Max cases" FontSize="11" Opacity="0.55" />
+                            <NumericUpDown Grid.Row="1" Grid.Column="0"
+                                           Value="{Binding Temperature}"
+                                           Minimum="0"
+                                           Maximum="2"
+                                           Increment="0.1"
+                                           FormatString="F1" />
+                            <NumericUpDown Grid.Row="1" Grid.Column="1"
+                                           Value="{Binding TimeoutSeconds}"
+                                           Minimum="10"
+                                           Maximum="900"
+                                           Increment="10" />
+                            <NumericUpDown Grid.Row="1" Grid.Column="2"
+                                           Value="{Binding MaxCases}"
+                                           Minimum="0"
+                                           Maximum="100"
+                                           Increment="1" />
+                        </Grid>
+                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
+                            <CheckBox Grid.Column="0"
+                                      Content="Use judge"
+                                      IsChecked="{Binding UseJudge}"
+                                      VerticalAlignment="Center" />
+                            <TextBox Grid.Column="1"
+                                     Text="{Binding JudgeModelId}"
+                                     Watermark="Judge model id (optional)" />
+                        </Grid>
+                        <Button Content="Run Benchmark"
+                                Command="{Binding RunCommand}"
+                                IsEnabled="{Binding !IsRunning}"
+                                HorizontalAlignment="Left"
+                                Padding="16,8" />
+                    </StackPanel>
+                </Border>
+
+                <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Padding="14">
+                    <StackPanel Spacing="10">
+                        <TextBlock Text="Rankings" FontWeight="SemiBold" FontSize="16" />
+                        <ItemsControl ItemsSource="{Binding RankedRuns}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="vm:BenchmarkRunViewModel">
+                                    <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                            BorderThickness="0,0,0,1"
+                                            Padding="0,8">
+                                        <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="12">
+                                            <StackPanel Grid.Column="0" Spacing="2">
+                                                <TextBlock Text="{Binding Model}" FontWeight="SemiBold" />
+                                                <TextBlock Text="{Binding Title}" FontSize="11" Opacity="0.45" />
+                                            </StackPanel>
+                                            <TextBlock Grid.Column="1" Text="{Binding Score}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="2" Text="{Binding PassRate}" Opacity="0.6" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="3" Text="{Binding Speed}" Opacity="0.6" VerticalAlignment="Center" />
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+
+        <Border Grid.Row="1" Grid.Column="2"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="8"
+                Padding="14">
+            <Grid RowDefinitions="Auto,Auto,*,Auto" RowSpacing="10">
+                <StackPanel Grid.Row="0" Spacing="2">
+                    <TextBlock Text="{Binding SelectedRun.Title}" FontWeight="SemiBold" FontSize="15" />
+                    <TextBlock Text="{Binding SelectedRun.Summary}" FontSize="12" Opacity="0.55" />
+                </StackPanel>
+                <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8">
+                    <Button Content="Rerun" Command="{Binding RerunCommand}" CommandParameter="{Binding SelectedRun}" />
+                    <Button Content="Export" Command="{Binding ExportRunCommand}" CommandParameter="{Binding SelectedRun}" />
+                    <Button Content="Delete" Command="{Binding DeleteRunCommand}" CommandParameter="{Binding SelectedRun}" />
+                </StackPanel>
+                <ListBox Grid.Row="2"
+                         ItemsSource="{Binding SelectedResults}"
+                         SelectedItem="{Binding SelectedResult}">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate DataType="vm:BenchmarkResultViewModel">
+                            <StackPanel Margin="0,5" Spacing="2">
+                                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding Timings}" FontSize="11" Opacity="0.5" />
+                                <TextBlock Text="{Binding Checks}" FontSize="11" Opacity="0.4" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+                <ScrollViewer Grid.Row="3" MaxHeight="190" VerticalScrollBarVisibility="Auto">
+                    <SelectableTextBlock Text="{Binding SelectedResult.Output}"
+                                         TextWrapping="Wrap"
+                                         FontSize="12"
+                                         Opacity="0.82" />
+                </ScrollViewer>
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>

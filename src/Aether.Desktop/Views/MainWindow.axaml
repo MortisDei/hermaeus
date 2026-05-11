@@ -60,6 +60,12 @@
                                       Width="17" Height="17" />
                         </Button>
 
+                        <Button Classes="icon-btn" Command="{Binding ShowBenchmarksPanelCommand}"
+                                ToolTip.Tip="Benchmarks">
+                            <PathIcon Data="M3 17h2v-7H3v7zm4 0h2V7H7v10zm4 0h2v-4h-2v4zm4 0h2V4h-2v13zm4 0h2v-9h-2v9z"
+                                      Width="17" Height="17" />
+                        </Button>
+
                         <!-- Services / process manager -->
                         <Button Classes="icon-btn" Command="{Binding ShowServicesPanelCommand}"
                                 ToolTip.Tip="Services — manage llama-server processes">
@@ -75,6 +81,12 @@
                                          IsVisible="{Binding Services.Servers,
                                              Converter={x:Static views:MainWindow.AnyRunning}}" />
                             </Grid>
+                        </Button>
+
+                        <Button Classes="icon-btn" Command="{Binding ShowSystemPanelCommand}"
+                                ToolTip.Tip="System overview">
+                            <PathIcon Data="M4 5h16v10H4V5zm0-2c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h6v2H7v2h10v-2h-3v-2h6c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2H4z"
+                                      Width="17" Height="17" />
                         </Button>
 
                         <Button Classes="icon-btn" Command="{Binding ShowSettingsPanelCommand}"
@@ -116,6 +128,12 @@
                     </DataTemplate>
                     <DataTemplate DataType="vm:TasksViewModel">
                         <views:TasksView />
+                    </DataTemplate>
+                    <DataTemplate DataType="vm:BenchmarkViewModel">
+                        <views:BenchmarkView />
+                    </DataTemplate>
+                    <DataTemplate DataType="vm:SystemOverviewViewModel">
+                        <views:SystemOverviewView />
                     </DataTemplate>
                     <DataTemplate DataType="vm:SettingsViewModel">
                         <views:SettingsView />

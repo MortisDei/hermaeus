@@ -28,6 +28,10 @@ OpenAI-compatible APIs, Oghma-grade RAG, and XTTS voice playback.
 - RAG citations with `[1] [2] [3] +N`, source inspector, copy source/path.
 - RAG query traces, ONNX cross-encoder reranking, and native eval harness for
   `gold.json` / `stress.json`.
+- Model benchmarks with saved run history, deterministic quality checks,
+  rankings, reruns, and Markdown/JSON/CSV export.
+- System overview for app version, CPU, RAM, storage, databases, managed
+  components, and best-effort GPU/VRAM visibility.
 - XTTS v2 launch controls, voice selection, voice preview, voice sample import.
 - Local tasks, reminders, and app-running scheduled automations.
 - Toast notifications throughout the app.
@@ -113,6 +117,20 @@ Security hardening currently includes:
 - local secret references for OpenAI keys
 - data-safety tests for migration, backup/restore, and redaction
 
+## Benchmarks And System Overview
+
+The **Benchmarks** workspace runs local prompt suites against selected models and
+stores immutable run history under the Aether data root. Runs record first-token
+latency, total latency, approximate tokens/sec, deterministic quality checks,
+resource deltas, pass rate, and weighted rankings. Built-in starter suites cover
+speed smoke tests, instruction following, light reasoning, RAG answer style, and
+refusal behavior.
+
+The **System Overview** page shows the local machine and app environment:
+version, OS, CPU, RAM, process memory, data-root storage, database footprint,
+component status, and best-effort GPU/VRAM data. NVIDIA systems use
+`nvidia-smi` when available; other GPU probes degrade gracefully.
+
 ## License
 
 Aether is source-available and free for private/noncommercial use under the
@@ -154,5 +172,5 @@ docs/                   Security notes, RAG/eval docs, internal planning notes
 - Linux and Windows packaging.
 - Security review and threat model refresh.
 - Global quick-chat hotkey and tray integration.
-- Expanded tests for RAG scoring, runtime validation, backup/restore, secret
-  migration, and process argument safety.
+- Expanded tests for RAG scoring, runtime validation, secret migration, and
+  process argument safety.

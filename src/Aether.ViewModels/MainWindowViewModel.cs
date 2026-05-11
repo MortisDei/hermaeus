@@ -18,6 +18,8 @@ public partial class MainWindowViewModel : ObservableObject
     public RagViewModel             Rag      { get; }
     public ServicesViewModel        Services { get; }
     public TasksViewModel           Tasks    { get; }
+    public BenchmarkViewModel       Benchmarks { get; }
+    public SystemOverviewViewModel  SystemOverview { get; }
 
     public ObservableCollection<ConversationItemViewModel> Conversations { get; } = [];
     public ObservableCollection<ToastViewModel> Toasts { get; } = [];
@@ -37,6 +39,8 @@ public partial class MainWindowViewModel : ObservableObject
     public bool ShowRag      => ActivePanel == "rag";
     public bool ShowServices => ActivePanel == "services";
     public bool ShowTasks    => ActivePanel == "tasks";
+    public bool ShowBenchmarks => ActivePanel == "benchmarks";
+    public bool ShowSystem => ActivePanel == "system";
     public object ActiveViewModel => ActivePanel switch
     {
         "settings" => Settings,
@@ -44,6 +48,8 @@ public partial class MainWindowViewModel : ObservableObject
         "rag"      => Rag,
         "services" => Services,
         "tasks"    => Tasks,
+        "benchmarks" => Benchmarks,
+        "system"   => SystemOverview,
         _          => Chat
     };
 
@@ -55,12 +61,15 @@ public partial class MainWindowViewModel : ObservableObject
         RagViewModel rag,
         ServicesViewModel services,
         TasksViewModel tasks,
+        BenchmarkViewModel benchmarks,
+        SystemOverviewViewModel systemOverview,
         IToastService toasts)
     {
         _sync = SynchronizationContext.Current;
         _toasts = toasts;
         _store = store; Chat = chat; Settings = settings;
         Models = models; Rag = rag; Services = services; Tasks = tasks;
+        Benchmarks = benchmarks; SystemOverview = systemOverview;
         Chat.ConversationSaved += OnConversationSaved;
         Services.ServerAvailabilityChanged += (_, _) => _ = RefreshModelsAfterServerChangeAsync();
         _toasts.ToastRaised += OnToastRaised;
@@ -71,9 +80,9 @@ public partial class MainWindowViewModel : ObservableObject
         IsLoading = true;
         try
         {
-        await LoadConversationsAsync();
-        ShowQuickChat = Settings.ShowQuickChat;
-        await Rag.LoadDatasetsAsync();
+            await LoadConversationsAsync();
+            ShowQuickChat = Settings.ShowQuickChat;
+            await Rag.LoadDatasetsAsync();
             await Services.AutoStartAllAsync();
             await Chat.LoadModelsAsync();
         }
@@ -240,6 +249,8 @@ public partial class MainWindowViewModel : ObservableObject
     [RelayCommand] private void ShowModelsPanel()      { ActivePanel = "models"; _ = Models.RefreshCommand.ExecuteAsync(null); }
     [RelayCommand] private void ShowServicesPanel()    => ActivePanel = "services";
     [RelayCommand] private void ShowTasksPanel()       { Tasks.Reload(); ActivePanel = "tasks"; }
+    [RelayCommand] private void ShowBenchmarksPanel()  { ActivePanel = "benchmarks"; _ = Benchmarks.LoadCommand.ExecuteAsync(null); }
+    [RelayCommand] private void ShowSystemPanel()      { ActivePanel = "system"; _ = SystemOverview.RefreshCommand.ExecuteAsync(null); }
     [RelayCommand] private void ShowSettingsPanel()    { ActivePanel = "settings"; Settings.Reload(); }
 
     [RelayCommand]
@@ -283,6 +294,8 @@ public partial class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowRag));
         OnPropertyChanged(nameof(ShowServices));
         OnPropertyChanged(nameof(ShowTasks));
+        OnPropertyChanged(nameof(ShowBenchmarks));
+        OnPropertyChanged(nameof(ShowSystem));
         OnPropertyChanged(nameof(ActiveViewModel));
     }
 
