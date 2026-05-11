@@ -2,10 +2,11 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Aether.ViewModels"
              xmlns:controls="using:Aether.Desktop.Controls"
+             xmlns:views="using:Aether.Desktop.Views"
              x:Class="Aether.Desktop.Views.ChatView"
              x:DataType="vm:ChatViewModel">
 
-    <Grid RowDefinitions="Auto,Auto,*,Auto">
+    <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
 
         <!-- ── Model / options bar ────────────────────────────────────────── -->
         <Border Grid.Row="0"
@@ -62,8 +63,15 @@
             </Grid>
         </Border>
 
+        <TextBlock Grid.Row="1"
+                   Text="{Binding PerformanceLog}"
+                   IsVisible="{Binding PerformanceLog, Converter={x:Static views:NotEmptyConverter.Instance}}"
+                   Margin="16,6,16,0"
+                   FontSize="11"
+                   Opacity="0.42" />
+
         <!-- ── System prompt (collapsible) ───────────────────────────────── -->
-        <Border Grid.Row="1"
+        <Border Grid.Row="2"
                 IsVisible="{Binding ShowSystemPrompt}"
                 Padding="16,8"
                 BorderThickness="0,0,0,1"
@@ -81,7 +89,7 @@
         </Border>
 
         <!-- ── Messages ───────────────────────────────────────────────────── -->
-        <Grid Grid.Row="2">
+        <Grid Grid.Row="3">
             <ListBox x:Name="MessagesList"
                      ItemsSource="{Binding Messages}"
                      Background="Transparent"
@@ -126,7 +134,7 @@
         </Grid>
 
         <!-- ── Input bar ──────────────────────────────────────────────────── -->
-        <Border Grid.Row="3"
+        <Border Grid.Row="4"
                 Padding="16,10"
                 BorderThickness="0,1,0,0"
                 BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">

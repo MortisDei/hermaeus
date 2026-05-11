@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Documents;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Threading;
 using Markdig;
 using Markdig.Syntax;
 using Markdig.Syntax.Inlines;
@@ -28,6 +29,23 @@ public sealed class MarkdownViewer : ContentControl
 
     private static readonly FontFamily MonoFamily =
         new("Cascadia Code,Fira Code,JetBrains Mono,Consolas,monospace");
+    private readonly DispatcherTimer _renderTimer;
+    private string _lastRenderedMarkdown = string.Empty;
+    private bool _lastRenderedIsError;
+    private double _lastRenderedFontSize;
+
+    public MarkdownViewer()
+    {
+        _renderTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(75)
+        };
+        _renderTimer.Tick += (_, _) =>
+        {
+            _renderTimer.Stop();
+            Render();
+        };
+    }
 
     public string? Markdown
     {
@@ -46,12 +64,34 @@ public sealed class MarkdownViewer : ContentControl
         base.OnPropertyChanged(change);
         if (change.Property == MarkdownProperty || change.Property == IsErrorProperty
             || change.Property == FontSizeProperty)
-            Render();
+        {
+            if (change.Property == MarkdownProperty)
+            {
+                _renderTimer.Stop();
+                _renderTimer.Start();
+            }
+            else
+            {
+                _renderTimer.Stop();
+                Render();
+            }
+        }
     }
 
     private void Render()
     {
         var md = Markdown ?? string.Empty;
+        if (md == _lastRenderedMarkdown
+            && IsError == _lastRenderedIsError
+            && Math.Abs(FontSize - _lastRenderedFontSize) < 0.01)
+        {
+            return;
+        }
+
+        _lastRenderedMarkdown = md;
+        _lastRenderedIsError = IsError;
+        _lastRenderedFontSize = FontSize;
+
         if (string.IsNullOrEmpty(md))
         {
             Content = null;

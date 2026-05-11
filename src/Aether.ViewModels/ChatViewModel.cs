@@ -17,6 +17,7 @@ public partial class ChatViewModel : ObservableObject
     private readonly IModelProfileService _profiles;
     private CancellationTokenSource? _cts;
     private CancellationTokenSource? _ttsCts;
+    private DateTime _modelsLoadedAtUtc = DateTime.MinValue;
 
     public ObservableCollection<MessageViewModel> Messages        { get; } = [];
     public ObservableCollection<LlmModel>         AvailableModels { get; } = [];
@@ -30,6 +31,7 @@ public partial class ChatViewModel : ObservableObject
     [ObservableProperty] private bool      _showSystemPrompt;
     [ObservableProperty] private double    _temperature = 0.7;
     [ObservableProperty] private bool      _hasMessages;
+    [ObservableProperty] private string    _performanceLog = string.Empty;
 
     public event EventHandler?        ScrollToBottom;
     public event EventHandler<string>? ConversationSaved;
@@ -50,6 +52,9 @@ public partial class ChatViewModel : ObservableObject
 
     public async Task LoadModelsAsync()
     {
+        if (AvailableModels.Count > 0 && DateTime.UtcNow - _modelsLoadedAtUtc < TimeSpan.FromSeconds(30))
+            return;
+
         var current = SelectedModel?.Id;
         var models = await _llm.GetModelsAsync();
         _profiles.ApplyProfiles(models);
@@ -67,6 +72,7 @@ public partial class ChatViewModel : ObservableObject
         {
             SelectedModel = null;
         }
+        _modelsLoadedAtUtc = DateTime.UtcNow;
     }
 
     public async Task LoadConversationAsync(string id)
@@ -124,6 +130,8 @@ public partial class ChatViewModel : ObservableObject
         var streamBuffer = new StringBuilder();
         var streamClock = Stopwatch.StartNew();
         var responseClock = Stopwatch.StartNew();
+        long? firstTokenMs = null;
+        var renderBatches = 0;
         try
         {
             var history = Messages.Where(m => !m.IsStreaming)
@@ -134,11 +142,13 @@ public partial class ChatViewModel : ObservableObject
                 string.IsNullOrWhiteSpace(SystemPrompt) ? null : SystemPrompt,
                 Temperature, _cts.Token))
             {
+                firstTokenMs ??= responseClock.ElapsedMilliseconds;
                 AppendStreamToken(asst, token, force: false);
             }
             AppendStreamToken(asst, string.Empty, force: true);
             responseClock.Stop();
             asst.DurationMs = responseClock.ElapsedMilliseconds;
+            PerformanceLog = $"first token {firstTokenMs ?? 0} ms · full {asst.DurationMs} ms · render batches {renderBatches}";
             asst.IsStreaming = false;
             await PersistAsync();
         }
@@ -152,6 +162,7 @@ public partial class ChatViewModel : ObservableObject
             asst.Content = $"Error: {ex.Message}";
             responseClock.Stop();
             asst.DurationMs = responseClock.ElapsedMilliseconds;
+            PerformanceLog = $"error after {asst.DurationMs} ms";
             asst.IsStreaming = false;
             asst.IsError = true;
         }
@@ -167,6 +178,7 @@ public partial class ChatViewModel : ObservableObject
                 return;
 
             message.Content += streamBuffer.ToString();
+            renderBatches++;
             streamBuffer.Clear();
             streamClock.Restart();
             ScrollToBottom?.Invoke(this, EventArgs.Empty);
