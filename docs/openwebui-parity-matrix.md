@@ -1,47 +1,44 @@
-# Aether Best-in-Class Parity Matrix
+# Aether Open WebUI Parity Matrix
 
-This is the working map for beating Open WebUI feature-by-feature while keeping
-Aether native, local-first, and faster for desktop use.
+This matrix tracks Aether against Open WebUI v0.9.x while preserving Aether's
+native desktop, local-first direction.
 
-## Baseline
+## Status
 
-| Area | Open WebUI / Oghma Reference | Aether Status | Next Build Slice |
+| Area | Open WebUI / Oghma Reference | Aether Status | Notes |
 | --- | --- | --- | --- |
-| Native desktop | Open WebUI now has a desktop app | Native Avalonia app exists | Polish shell, command palette, tray/quick chat |
-| Chat history | Open WebUI folders/search/tags | Rename/delete/search basics | Folders, tags, pinned chats, archived chats |
-| Streaming performance | Open WebUI batches rendering and avoids expensive markdown churn | Token batching exists | Message virtualization and incremental markdown diffing |
-| Notifications | Open WebUI toasts/calendar reminders | Native toast service started | Route service/RAG/TTS/eval events through toasts |
-| Models | Open WebUI model management | llama.cpp/OpenAI-compatible model list | Per-model defaults, avatars, tags, edit-from-selector |
-| Local services | Oghma assumes Ollama; Aether manages llama-server | Direct llama-server process manager | Multi-runtime profiles: llama.cpp, Ollama, OpenAI-compatible |
-| XTTS | Syrinx has speaker discovery and cloning workflows | Voice discovery + readback started | Voice preview, clone import, CPU/GPU service presets |
-| RAG ingest | Oghma title-injects embeddings, BM25 stats, parent-child options | Title injection, BM25, parent upgrade | Source inspector, reindex diffing, corpus health checks |
-| RAG retrieval | Oghma uses wide candidates, hybrid scoring, optional rerank/grounding | Wider hybrid retrieval | Reranker, grounding verification, feedback logging |
-| Citations | Open WebUI source buttons and overflow indicator | RAG emits source metadata internally | Inline citations, source drawer, +N overflow indicator |
-| Eval harness | Oghma has benchmark/eval scripts | Not app-native yet | Golden-set runner, latency/quality dashboard |
-| Security | Open WebUI hardens routes/assets/access | Basic local-only host binding | Data path validation, secret storage, process arg audit |
-| Storage | Open WebUI server DB; Aether local SQLite | Alternate data root + migration | Backup/restore, encrypted secrets, cleanup tools |
+| Native desktop | Open WebUI desktop app | **Completed** | Native Avalonia shell, no WebView markdown, Linux/Windows target. |
+| Chat history | Folders, tags, pins, archive, search | **Completed** | Rename/delete/search/folder/tag/pin/archive plus compact details flyout. |
+| Message scale | Native browser virtualization | **Completed** | Virtualized transcript plus throttled markdown rendering during streams. |
+| Notifications | Toasts/reminders | **Completed** | Toast service used by chat, services, RAG, XTTS, eval, tasks, backups. |
+| Models | Model metadata and management | **Completed** | App-owned model profiles: display name, description, tags, visibility, defaults. |
+| Runtime profiles | llama.cpp, Ollama, OpenAI-compatible | **Completed** | Managed llama.cpp process, Ollama `/api/tags` and `/api/chat`, OpenAI-compatible `/v1`. |
+| XTTS | Voice selection/preview/clone workflows | **Completed** | Voice discovery, in-memory playback, preview, imported voice samples. |
+| Quick chat | Desktop quick bar | **Partial** | In-app compact quick-chat surface; global hotkey/tray are deferred. |
+| Tasks/reminders | Calendar/tasks/automations | **Completed v1** | Local tasks and app-running scheduled automations with toast reminders. |
+| RAG ingest | Oghma-grade corpus processing | **Completed v1** | Text/markdown ingest, title/source embedding injection, parent-child, reindex diffing, health warnings. |
+| OCR/web ingest | PaddleOCR/Firecrawl loaders | **Partial** | Provider config and placeholders exist; concrete OCR/Firecrawl execution deferred. |
+| RAG retrieval | Hybrid, rerank, grounding | **Completed v1** | Wide semantic scan, full-corpus BM25, RRF fusion, no-op reranker slot, grounding score. |
+| Citations | Source chips, overflow, drawer | **Completed** | `[1] [2] [3] +N`, source inspector, copy source/path. |
+| RAG traces | Retrieval diagnostics | **Completed** | Query traces persisted with chunks, scores, context, model, latency. |
+| Eval harness | Oghma benchmark scripts | **Completed v1** | `gold.json`/`stress.json` loader, retrieval/full-answer eval, dashboard, JSONL/Markdown export. |
+| Storage | Configurable data root, backup/restore | **Completed v1** | Data root migration, dry-run preview, conflict refusal, zip backup/restore. |
+| Security | Secrets, path checks, log redaction | **Partial** | Local secret refs, user-only secret file on Unix, unsafe restore/path checks, log redaction. OS keychain and broader automated tests remain. |
+| Performance | Stream/render stability | **Completed v1** | Model-list memoization, markdown render throttling, response timing logs. |
 
-## Borrow From Oghma Infinium
+## Better Than Open WebUI For This App
 
-- Title/source injection before embedding.
-- Broad semantic candidates before final fusion.
-- Full-corpus lexical scoring, not lexical scoring only over vector hits.
-- Parent-child context expansion.
-- Grounding checks and conservative "not enough context" behavior.
-- Query/eval logging for retrieval tuning.
-- Corpus health and index health checks.
+- Native Avalonia desktop app instead of a web UI wrapped for desktop.
+- Direct local `llama-server` management with GPU-layer auto-tune support.
+- Oghma-style RAG retrieval: title/source embedding injection, full-corpus BM25,
+  wide semantic candidates, and parent-child context.
+- XTTS integration with memory-only generated audio playback.
+- Local-first data root migration and explicit backup/restore.
 
-## Borrow From Syrinx / Apocrypha
+## Deferred
 
-- XTTS service launch profiles.
-- Speaker discovery endpoints: `studio_speakers`, `speakers`, `speaker_ids`, `/voices`.
-- Voice clone registration and preview workflow.
-- CPU/GPU device selection surfaced clearly in service settings.
-
-## Immediate Priorities
-
-1. Source inspector for RAG answers with citation chips.
-2. Chat folders/tags/pins plus upgraded search filters.
-3. Message virtualization for very long chats.
-4. Eval harness using Oghma-style gold/stress question sets.
-5. Security review checklist converted into automated tests where possible.
+- System-wide quick-chat hotkey and tray integration.
+- Concrete OCR/PaddleOCR-vl and Firecrawl v2 loaders.
+- Local cross-encoder reranker implementation.
+- OS credential-store integration beyond Aether's local secret reference store.
+- Full automated regression test project for migration/security/RAG eval.
