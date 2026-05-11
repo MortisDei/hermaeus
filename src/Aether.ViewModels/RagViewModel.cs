@@ -18,10 +18,12 @@ public partial class RagSourceViewModel : ObservableObject
     public int    Rank    { get; init; }
     public string Title   { get; init; } = string.Empty;
     public string File    { get; init; } = string.Empty;
+    public string Path    { get; init; } = string.Empty;
     public string Content { get; init; } = string.Empty;
     public float  Score   { get; init; }
     public string ScoreDisplay => $"{Score:F3}";
     public string CitationLabel => $"[{Rank}] {Title}";
+    public string ShortCitationLabel => $"[{Rank}]";
     public string Snippet
     {
         get
@@ -41,6 +43,7 @@ public partial class RagViewModel : ObservableObject
 
     public ObservableCollection<RagDataset>       Datasets  { get; } = [];
     public ObservableCollection<RagSourceViewModel> Sources  { get; } = [];
+    public ObservableCollection<RagSourceViewModel> VisibleCitationSources { get; } = [];
 
     [ObservableProperty] private RagDataset? _selectedDataset;
     [ObservableProperty] private string      _questionText    = string.Empty;
@@ -59,6 +62,11 @@ public partial class RagViewModel : ObservableObject
     [ObservableProperty] private bool        _hasAnswer;
     [ObservableProperty] private RagSourceViewModel? _selectedSource;
     [ObservableProperty] private bool        _showSourceInspector;
+    [ObservableProperty] private string      _sourceOverflowLabel = string.Empty;
+    [ObservableProperty] private bool        _hasSourceOverflow;
+    [ObservableProperty] private string      _lastTraceId = string.Empty;
+    [ObservableProperty] private long        _lastRetrievalLatencyMs;
+    [ObservableProperty] private long        _lastTotalLatencyMs;
 
     public event EventHandler? ScrollToBottom;
     public Action<string>? RequestCopyToClipboard { get; set; }
@@ -112,6 +120,11 @@ public partial class RagViewModel : ObservableObject
                 {
                     ParseSources(token);
                     sourcesHeaderParsed = true;
+                    continue;
+                }
+                if (token.StartsWith("__RAG_TRACE__"))
+                {
+                    ParseTrace(token);
                     continue;
                 }
                 answerBuilder.Append(token);
@@ -188,6 +201,21 @@ public partial class RagViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private void CopySource()
+    {
+        if (SelectedSource is not null)
+            RequestCopyToClipboard?.Invoke(SelectedSource.Content);
+    }
+
+    [RelayCommand]
+    private void CopySourcePath()
+    {
+        var path = SelectedSource?.Path;
+        if (!string.IsNullOrWhiteSpace(path))
+            RequestCopyToClipboard?.Invoke(path);
+    }
+
+    [RelayCommand]
     private async Task WarmCacheAsync()
     {
         if (SelectedDataset is null) return;
@@ -222,6 +250,7 @@ public partial class RagViewModel : ObservableObject
                     Rank  = el.GetProperty("rank").GetInt32(),
                     Title = el.GetProperty("title").GetString() ?? string.Empty,
                     File  = el.GetProperty("file").GetString()  ?? string.Empty,
+                    Path  = el.TryGetProperty("path", out var path) ? path.GetString() ?? string.Empty : string.Empty,
                     Score = el.GetProperty("score").GetSingle(),
                     Content = el.TryGetProperty("content", out var content)
                         ? content.GetString() ?? string.Empty
@@ -230,6 +259,22 @@ public partial class RagViewModel : ObservableObject
             SelectedSource = Sources.FirstOrDefault();
             if (SelectedSource is not null)
                 SelectedSource.IsSelected = true;
+            RefreshCitationOverflow();
+        }
+        catch { }
+    }
+
+    private void ParseTrace(string token)
+    {
+        try
+        {
+            var json = Regex.Match(token, @"__RAG_TRACE__(.+)__END_TRACE__").Groups[1].Value;
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            LastTraceId = root.GetProperty("Id").GetString() ?? string.Empty;
+            LastRetrievalLatencyMs = root.GetProperty("RetrievalLatencyMs").GetInt64();
+            LastTotalLatencyMs = root.GetProperty("TotalLatencyMs").GetInt64();
+            GroundingScore = root.GetProperty("GroundingScore").GetSingle();
         }
         catch { }
     }
@@ -254,6 +299,17 @@ public partial class RagViewModel : ObservableObject
         ShowSourceInspector = !ShowSourceInspector;
         if (ShowSourceInspector && SelectedSource is null)
             SelectedSource = Sources.FirstOrDefault();
+    }
+
+    private void RefreshCitationOverflow()
+    {
+        VisibleCitationSources.Clear();
+        foreach (var source in Sources.Take(3))
+            VisibleCitationSources.Add(source);
+
+        var overflow = Sources.Count - VisibleCitationSources.Count;
+        HasSourceOverflow = overflow > 0;
+        SourceOverflowLabel = overflow > 0 ? $"+{overflow}" : string.Empty;
     }
 
     partial void OnQuestionTextChanged(string value) => QueryCommand.NotifyCanExecuteChanged();

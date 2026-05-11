@@ -13,7 +13,8 @@ public record RagQueryOptions(
     int    TopK            = 5,
     bool   UseParentChild  = false,
     bool   StreamAnswer    = true,
-    string ModelId         = "");
+    string ModelId         = "",
+    RagGroundingMode GroundingMode = RagGroundingMode.TokenOverlap);
 
 /// <summary>
 /// Main entry point for RAG queries.
@@ -26,6 +27,7 @@ public sealed class RagQueryService
     private readonly IEmbeddingService _embed;
     private readonly ILlmService       _llm;
     private readonly ISettingsService  _settings;
+    private readonly IReranker         _reranker;
 
     // In-memory chunk cache per dataset  (dataset_id → chunks)
     private readonly Dictionary<string, List<RagChunk>> _cache = [];
@@ -34,9 +36,10 @@ public sealed class RagQueryService
         SqliteRagStore store,
         IEmbeddingService embed,
         ILlmService llm,
-        ISettingsService settings)
+        ISettingsService settings,
+        IReranker reranker)
     {
-        _store = store; _embed = embed; _llm = llm; _settings = settings;
+        _store = store; _embed = embed; _llm = llm; _settings = settings; _reranker = reranker;
     }
 
     /// <summary>Warm the in-memory embedding cache for a dataset.</summary>
@@ -58,7 +61,8 @@ public sealed class RagQueryService
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
         opts ??= new RagQueryOptions();
-        var sw = Stopwatch.StartNew();
+        var totalSw = Stopwatch.StartNew();
+        var retrievalSw = Stopwatch.StartNew();
 
         // ── 1. Ensure cache ───────────────────────────────────────────────
         if (!_cache.TryGetValue(datasetId, out var chunks) || chunks.Count == 0)
@@ -87,13 +91,14 @@ public sealed class RagQueryService
         }
 
         // ── 6. RRF fusion ────────────────────────────────────────────────
-        var fused = HybridRetriever.Fuse(semantic, bm25, opts.TopK);
+        var fused = HybridRetriever.Fuse(semantic, bm25, Math.Max(opts.TopK * 2, opts.TopK));
+        fused = await _reranker.RerankAsync(expandedQuery, fused, opts.TopK, ct);
 
         // ── 7. Parent upgrade (parent-child mode) ────────────────────────
         if (opts.UseParentChild)
             fused = await UpgradeToParentsAsync(fused, ct);
 
-        sw.Stop();
+        retrievalSw.Stop();
 
         // ── 8. Build context + prompt ────────────────────────────────────
         var context = BuildContext(fused);
@@ -108,6 +113,7 @@ public sealed class RagQueryService
             rank  = i + 1,
             title = r.Chunk.SourceTitle,
             file  = r.Chunk.SourceFile,
+            path  = r.Chunk.SourcePath,
             score = MathF.Round(r.Score, 4),
             content = r.Chunk.Content
         }));
@@ -123,6 +129,24 @@ public sealed class RagQueryService
             answer.Append(token);
             yield return token;
         }
+
+        totalSw.Stop();
+        var answerText = answer.ToString();
+        var trace = new RagQueryTrace
+        {
+            DatasetId = datasetId,
+            Question = question,
+            ExpandedQuestion = expandedQuery,
+            ModelId = modelId,
+            RetrievalLatencyMs = retrievalSw.ElapsedMilliseconds,
+            TotalLatencyMs = totalSw.ElapsedMilliseconds,
+            GroundingMode = opts.GroundingMode,
+            GroundingScore = ComputeGroundingScore(answerText, context, opts.GroundingMode),
+            RetrievedChunks = semantic.Select((r, i) => ToTraceChunk(r, i + 1)).ToList(),
+            SelectedContext = fused.Select((r, i) => ToTraceChunk(r, i + 1)).ToList()
+        };
+        await _store.SaveRagQueryTraceAsync(trace, ct);
+        yield return $"__RAG_TRACE__{JsonSerializer.Serialize(new { trace.Id, trace.RetrievalLatencyMs, trace.TotalLatencyMs, trace.GroundingScore, mode = trace.GroundingMode.ToString() })}__END_TRACE__";
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
@@ -193,11 +217,28 @@ public sealed class RagQueryService
         $"Question: {question}\n\nAnswer:";
 
     public static float GroundingScore(string answer, string context)
+        => ComputeGroundingScore(answer, context, RagGroundingMode.TokenOverlap);
+
+    public static float ComputeGroundingScore(string answer, string context, RagGroundingMode mode)
     {
+        if (mode == RagGroundingMode.SemanticPlaceholder)
+            return GroundingScore(answer, context);
+
         if (string.IsNullOrWhiteSpace(answer)) return 0f;
         var answerTokens  = Bm25Scorer.Tokenize(answer).ToHashSet();
         var contextTokens = Bm25Scorer.Tokenize(context).ToHashSet();
         if (answerTokens.Count == 0) return 0f;
         return (float)answerTokens.Count(t => contextTokens.Contains(t)) / answerTokens.Count;
     }
+
+    private static RagTraceChunk ToTraceChunk(ScoredChunk scored, int rank) => new()
+    {
+        Rank = rank,
+        ChunkId = scored.Chunk.Id,
+        Title = scored.Chunk.SourceTitle,
+        File = scored.Chunk.SourceFile,
+        Path = scored.Chunk.SourcePath,
+        Score = scored.Score,
+        Content = scored.Chunk.Content
+    };
 }

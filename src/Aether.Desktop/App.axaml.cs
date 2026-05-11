@@ -6,6 +6,7 @@ using Aether.Desktop.Views;
 using Aether.Rag;
 using Aether.Rag.Embeddings;
 using Aether.Rag.Pipeline;
+using Aether.Rag.Retrieval;
 using Aether.Rag.Storage;
 using Aether.Services;
 using Aether.Services.ProcessManagement;
@@ -70,6 +71,7 @@ public partial class App : Application
         s.AddSingleton<IToastService,      ToastService>();
         s.AddSingleton<SqliteRagStore>();
         s.AddSingleton<IEmbeddingService,  LlamaCppEmbeddingService>();
+        s.AddSingleton<IReranker,          NoOpReranker>();
         s.AddSingleton<RagPipeline>();
         s.AddSingleton<RagQueryService>();
         s.AddSingleton<ChatViewModel>();

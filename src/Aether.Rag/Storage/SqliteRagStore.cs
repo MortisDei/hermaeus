@@ -90,6 +90,21 @@ public sealed class SqliteRagStore
                 dataset_id TEXT PRIMARY KEY REFERENCES rag_datasets(id) ON DELETE CASCADE,
                 stats_json TEXT NOT NULL,
                 updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS rag_query_traces (
+                id TEXT PRIMARY KEY,
+                dataset_id TEXT NOT NULL,
+                question TEXT NOT NULL,
+                expanded_question TEXT NOT NULL,
+                model_id TEXT NOT NULL,
+                retrieval_latency_ms INTEGER NOT NULL DEFAULT 0,
+                total_latency_ms INTEGER NOT NULL DEFAULT 0,
+                grounding_score REAL NOT NULL DEFAULT 0,
+                grounding_mode TEXT NOT NULL DEFAULT 'TokenOverlap',
+                retrieved_chunks_json TEXT NOT NULL DEFAULT '[]',
+                selected_context_json TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL
             );";
         await cmd.ExecuteNonQueryAsync(ct);
         await EnsureColumnAsync(c, "rag_chunks", "source_path", "TEXT NOT NULL DEFAULT ''", ct);
@@ -299,6 +314,32 @@ public sealed class SqliteRagStore
         cmd.Parameters.AddWithValue("$ds", datasetId);
         var val = await cmd.ExecuteScalarAsync(ct);
         return val is string json ? JsonSerializer.Deserialize<Bm25Stats>(json) : null;
+    }
+
+    public async Task SaveRagQueryTraceAsync(RagQueryTrace trace, CancellationToken ct = default)
+    {
+        await EnsureInitializedAsync(ct);
+        await using var c = new SqliteConnection(Cs); await c.OpenAsync(ct);
+        var cmd = c.CreateCommand();
+        cmd.CommandText = @"
+            INSERT INTO rag_query_traces
+                (id,dataset_id,question,expanded_question,model_id,retrieval_latency_ms,total_latency_ms,
+                 grounding_score,grounding_mode,retrieved_chunks_json,selected_context_json,created_at)
+            VALUES
+                ($id,$ds,$q,$eq,$model,$retrieval,$total,$grounding,$mode,$retrieved,$selected,$created)";
+        cmd.Parameters.AddWithValue("$id", trace.Id);
+        cmd.Parameters.AddWithValue("$ds", trace.DatasetId);
+        cmd.Parameters.AddWithValue("$q", trace.Question);
+        cmd.Parameters.AddWithValue("$eq", trace.ExpandedQuestion);
+        cmd.Parameters.AddWithValue("$model", trace.ModelId);
+        cmd.Parameters.AddWithValue("$retrieval", trace.RetrievalLatencyMs);
+        cmd.Parameters.AddWithValue("$total", trace.TotalLatencyMs);
+        cmd.Parameters.AddWithValue("$grounding", trace.GroundingScore);
+        cmd.Parameters.AddWithValue("$mode", trace.GroundingMode.ToString());
+        cmd.Parameters.AddWithValue("$retrieved", JsonSerializer.Serialize(trace.RetrievedChunks));
+        cmd.Parameters.AddWithValue("$selected", JsonSerializer.Serialize(trace.SelectedContext));
+        cmd.Parameters.AddWithValue("$created", trace.CreatedAt.ToString("O"));
+        await cmd.ExecuteNonQueryAsync(ct);
     }
 
     // ── Serialisation helpers ─────────────────────────────────────────────────
