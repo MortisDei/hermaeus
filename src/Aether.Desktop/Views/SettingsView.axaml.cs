@@ -80,6 +80,41 @@ public partial class SettingsView : UserControl
             if (folders.Count > 0)
                 vm.TtsOutputDirectory = folders[0].Path.LocalPath;
         };
+
+        vm.RequestTtsVoiceDirectoryPicker = async () =>
+        {
+            var top = TopLevel.GetTopLevel(this);
+            if (top is null) return;
+
+            var folders = await top.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+            {
+                Title = "Choose XTTS voice sample folder",
+                AllowMultiple = false
+            });
+
+            if (folders.Count > 0)
+                vm.TtsVoiceDirectory = folders[0].Path.LocalPath;
+        };
+
+        vm.RequestTtsVoiceSamplePicker = async () =>
+        {
+            var top = TopLevel.GetTopLevel(this);
+            if (top is null) return;
+
+            var files = await top.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+            {
+                Title = "Import XTTS voice sample",
+                AllowMultiple = false,
+                FileTypeFilter =
+                [
+                    new FilePickerFileType("Audio sample") { Patterns = ["*.wav", "*.mp3", "*.flac"] },
+                    new FilePickerFileType("All files") { Patterns = ["*"] }
+                ]
+            });
+
+            if (files.Count > 0)
+                await vm.ImportTtsVoiceSampleAsync(files[0].Path.LocalPath);
+        };
     }
 
     private void UpdateCardWidths()

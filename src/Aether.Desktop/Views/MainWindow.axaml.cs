@@ -11,7 +11,17 @@ public partial class MainWindow : Window
 {
     public static readonly IValueConverter AnyRunning = new AnyRunningConverter();
 
-    public MainWindow() => InitializeComponent();
+    public MainWindow()
+    {
+        InitializeComponent();
+        Opened += OnOpened;
+    }
+
+    private void OnOpened(object? sender, EventArgs e)
+    {
+        if (DataContext is MainWindowViewModel { Settings.StartMinimized: true })
+            WindowState = WindowState.Minimized;
+    }
 
     private void OnWindowClosing(object? sender, WindowClosingEventArgs e)
     {

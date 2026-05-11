@@ -28,6 +28,9 @@ public class AppSettings
     public string TtsDevice            { get; set; } = "cpu";
     public string TtsModelVersion      { get; set; } = "2.0.3";
     public bool   TtsPreload           { get; set; } = false;
+    public string TtsVoiceDirectory    { get; set; } = "";
+    public bool   StartMinimized       { get; set; } = false;
+    public bool   ShowQuickChat        { get; set; } = false;
     public List<ModelProfile> ModelProfiles { get; set; } = [];
     public List<RuntimeProfile> RuntimeProfiles { get; set; } = [];
     public List<LocalTaskItem> Tasks { get; set; } = [];

@@ -54,6 +54,45 @@ public sealed class XttsService : ITtsService, IDisposable
         await PlayAsync(wav, ct);
     }
 
+    public async Task PreviewVoiceAsync(string speaker, string text, CancellationToken ct = default)
+    {
+        var previous = _settings.Settings.TtsSpeaker;
+        try
+        {
+            _settings.Settings.TtsSpeaker = speaker;
+            await SpeakAsync(string.IsNullOrWhiteSpace(text)
+                ? "Aether voice preview is ready."
+                : text, ct);
+        }
+        finally
+        {
+            _settings.Settings.TtsSpeaker = previous;
+        }
+    }
+
+    public Task<string> ImportVoiceSampleAsync(string sourcePath, string displayName, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(sourcePath) || !File.Exists(sourcePath))
+            throw new FileNotFoundException("Voice sample file was not found.", sourcePath);
+
+        var ext = Path.GetExtension(sourcePath);
+        if (!new[] { ".wav", ".mp3", ".flac" }.Contains(ext, StringComparer.OrdinalIgnoreCase))
+            throw new InvalidOperationException("XTTS voice samples must be .wav, .mp3, or .flac files.");
+
+        var root = ResolveVoiceDirectory();
+        Directory.CreateDirectory(root);
+        var safeName = MakeSafeFileName(string.IsNullOrWhiteSpace(displayName)
+            ? Path.GetFileNameWithoutExtension(sourcePath)
+            : displayName);
+        var target = Path.Combine(root, $"{safeName}{ext.ToLowerInvariant()}");
+        var i = 2;
+        while (File.Exists(target))
+            target = Path.Combine(root, $"{safeName}-{i++}{ext.ToLowerInvariant()}");
+
+        File.Copy(sourcePath, target);
+        return Task.FromResult(target);
+    }
+
     public async Task<IReadOnlyList<string>> GetVoicesAsync(CancellationToken ct = default)
     {
         var baseUrl = _settings.Settings.TtsServiceUrl.TrimEnd('/');
@@ -90,7 +129,24 @@ public sealed class XttsService : ITtsService, IDisposable
         }
         catch { }
 
+        foreach (var local in Directory.Exists(ResolveVoiceDirectory())
+                     ? Directory.EnumerateFiles(ResolveVoiceDirectory())
+                     : [])
+        {
+            if (LooksLikeVoicePath(local))
+                all.Add(local);
+        }
+
         return all.Order(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private string ResolveVoiceDirectory()
+    {
+        if (!string.IsNullOrWhiteSpace(_settings.Settings.TtsVoiceDirectory))
+            return Path.GetFullPath(_settings.Settings.TtsVoiceDirectory.Trim());
+
+        var dataRoot = SettingsService.ResolveDataRoot(_settings.Settings);
+        return Path.Combine(dataRoot, "xtts-voices");
     }
 
     private static async Task PlayAsync(byte[] wav, CancellationToken ct)
@@ -194,6 +250,13 @@ public sealed class XttsService : ITtsService, IDisposable
         value.EndsWith(".wav", StringComparison.OrdinalIgnoreCase) ||
         value.EndsWith(".mp3", StringComparison.OrdinalIgnoreCase) ||
         value.EndsWith(".flac", StringComparison.OrdinalIgnoreCase);
+
+    private static string MakeSafeFileName(string name)
+    {
+        var invalid = Path.GetInvalidFileNameChars().ToHashSet();
+        var cleaned = new string(name.Select(ch => invalid.Contains(ch) ? '-' : ch).ToArray()).Trim('-', ' ');
+        return string.IsNullOrWhiteSpace(cleaned) ? "voice" : cleaned;
+    }
 
     private static string ParseMaryVoiceName(string line)
     {

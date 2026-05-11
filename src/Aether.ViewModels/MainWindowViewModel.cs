@@ -29,6 +29,7 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty] private bool   _isLoading;
     [ObservableProperty] private string _selectedFolderFilter = "All";
     [ObservableProperty] private bool   _showArchivedConversations;
+    [ObservableProperty] private bool   _showQuickChat;
 
     public bool ShowChat     => ActivePanel == "chat";
     public bool ShowSettings => ActivePanel == "settings";
@@ -70,8 +71,9 @@ public partial class MainWindowViewModel : ObservableObject
         IsLoading = true;
         try
         {
-            await LoadConversationsAsync();
-            await Rag.LoadDatasetsAsync();
+        await LoadConversationsAsync();
+        ShowQuickChat = Settings.ShowQuickChat;
+        await Rag.LoadDatasetsAsync();
             await Services.AutoStartAllAsync();
             await Chat.LoadModelsAsync();
         }
@@ -228,6 +230,7 @@ public partial class MainWindowViewModel : ObservableObject
     }
 
     [RelayCommand] private void ToggleSidebar()       => IsSidebarOpen = !IsSidebarOpen;
+    [RelayCommand] private void ToggleQuickChat()     => ShowQuickChat = !ShowQuickChat;
     [RelayCommand] private async Task ShowChatPanelAsync()
     {
         ActivePanel = "chat";

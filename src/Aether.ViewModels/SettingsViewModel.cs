@@ -33,9 +33,14 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private string _ttsPythonPath = string.Empty;
     [ObservableProperty] private string _ttsScriptPath = string.Empty;
     [ObservableProperty] private string _ttsOutputDirectory = string.Empty;
+    [ObservableProperty] private string _ttsVoiceDirectory = string.Empty;
     [ObservableProperty] private string _ttsDevice = "cpu";
     [ObservableProperty] private string _ttsModelVersion = "2.0.3";
     [ObservableProperty] private bool   _ttsPreload;
+    [ObservableProperty] private string _ttsPreviewText = "Aether voice preview is ready.";
+    [ObservableProperty] private string _ttsCloneDisplayName = string.Empty;
+    [ObservableProperty] private bool   _startMinimized;
+    [ObservableProperty] private bool   _showQuickChat;
     [ObservableProperty] private string _ttsStatus = "Stopped";
     [ObservableProperty] private string _settingsError = string.Empty;
 
@@ -45,6 +50,8 @@ public partial class SettingsViewModel : ObservableObject
     public Action? RequestDataRootPicker { get; set; }
     public Action? RequestTtsScriptPicker { get; set; }
     public Action? RequestTtsOutputPicker { get; set; }
+    public Action? RequestTtsVoiceDirectoryPicker { get; set; }
+    public Action? RequestTtsVoiceSamplePicker { get; set; }
 
     public bool IsTtsRunning => _xttsProcess.IsRunning;
 
@@ -86,9 +93,12 @@ public partial class SettingsViewModel : ObservableObject
         TtsPythonPath       = s.TtsPythonPath;
         TtsScriptPath       = s.TtsScriptPath;
         TtsOutputDirectory  = s.TtsOutputDirectory;
+        TtsVoiceDirectory   = s.TtsVoiceDirectory;
         TtsDevice           = s.TtsDevice;
         TtsModelVersion     = s.TtsModelVersion;
         TtsPreload          = s.TtsPreload;
+        StartMinimized      = s.StartMinimized;
+        ShowQuickChat       = s.ShowQuickChat;
         TtsStatus           = _xttsProcess.StatusLabel;
         OnPropertyChanged(nameof(IsTtsRunning));
     }
@@ -118,9 +128,12 @@ public partial class SettingsViewModel : ObservableObject
         s.TtsPythonPath       = TtsPythonPath.Trim();
         s.TtsScriptPath       = TtsScriptPath.Trim();
         s.TtsOutputDirectory  = TtsOutputDirectory.Trim();
+        s.TtsVoiceDirectory   = TtsVoiceDirectory.Trim();
         s.TtsDevice           = TtsDevice;
         s.TtsModelVersion     = TtsModelVersion.Trim();
         s.TtsPreload          = TtsPreload;
+        s.StartMinimized      = StartMinimized;
+        s.ShowQuickChat       = ShowQuickChat;
         try
         {
             var result = await _svc.SaveAsync(previousDataRoot);
@@ -153,6 +166,12 @@ public partial class SettingsViewModel : ObservableObject
 
     [RelayCommand]
     private void BrowseTtsOutput() => RequestTtsOutputPicker?.Invoke();
+
+    [RelayCommand]
+    private void BrowseTtsVoiceDirectory() => RequestTtsVoiceDirectoryPicker?.Invoke();
+
+    [RelayCommand]
+    private void ImportTtsVoiceSample() => RequestTtsVoiceSamplePicker?.Invoke();
 
     [RelayCommand(CanExecute = nameof(CanStartTts))]
     private async Task StartTtsAsync()
@@ -198,6 +217,40 @@ public partial class SettingsViewModel : ObservableObject
         {
             SettingsError = $"Could not load XTTS voices: {ex.Message}";
             _toasts.Show("XTTS voices unavailable", ex.Message, ToastKind.Warning);
+        }
+    }
+
+    [RelayCommand]
+    private async Task PreviewTtsVoiceAsync()
+    {
+        await SaveAsync();
+        if (!string.IsNullOrWhiteSpace(SettingsError)) return;
+
+        try
+        {
+            await _tts.PreviewVoiceAsync(TtsSpeaker, TtsPreviewText);
+            _toasts.Show("Voice preview played", string.IsNullOrWhiteSpace(TtsSpeaker) ? "default" : TtsSpeaker, ToastKind.Success);
+        }
+        catch (Exception ex)
+        {
+            SettingsError = ex.Message;
+            _toasts.Show("Voice preview failed", ex.Message, ToastKind.Error, 7000);
+        }
+    }
+
+    public async Task ImportTtsVoiceSampleAsync(string sourcePath)
+    {
+        try
+        {
+            var imported = await _tts.ImportVoiceSampleAsync(sourcePath, TtsCloneDisplayName);
+            TtsSpeaker = imported;
+            await RefreshTtsVoicesAsync();
+            _toasts.Show("Voice imported", Path.GetFileName(imported), ToastKind.Success);
+        }
+        catch (Exception ex)
+        {
+            SettingsError = ex.Message;
+            _toasts.Show("Voice import failed", ex.Message, ToastKind.Error, 7000);
         }
     }
 

@@ -98,7 +98,7 @@
                                       Width="15" Height="15" />
                         </Button>
                     </Grid>
-                    <Grid ColumnDefinitions="110,*,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto"
+                    <Grid ColumnDefinitions="110,*,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
                           RowSpacing="8" ColumnSpacing="12">
                         <TextBlock Grid.Row="0" Grid.Column="0" Text="Base URL"
                                    VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
@@ -147,6 +147,31 @@
                             <PathIcon Data="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z"
                                       Width="15" Height="15" />
                         </Button>
+                        <TextBlock Grid.Row="6" Grid.Column="0" Text="Voices"
+                                   VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
+                        <TextBox Grid.Row="6" Grid.Column="1" Text="{Binding TtsVoiceDirectory}"
+                                 Watermark="Default Aether voice folder" FontSize="13" CornerRadius="6" Padding="10,6" />
+                        <Button Grid.Row="6" Grid.Column="2"
+                                Classes="icon-btn"
+                                Command="{Binding BrowseTtsVoiceDirectoryCommand}"
+                                ToolTip.Tip="Choose XTTS voice sample folder">
+                            <PathIcon Data="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z"
+                                      Width="15" Height="15" />
+                        </Button>
+                        <TextBlock Grid.Row="7" Grid.Column="0" Text="Preview"
+                                   VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
+                        <TextBox Grid.Row="7" Grid.Column="1" Text="{Binding TtsPreviewText}"
+                                 Watermark="Preview sentence" FontSize="13" CornerRadius="6" Padding="10,6" />
+                        <Button Grid.Row="7" Grid.Column="2"
+                                Command="{Binding PreviewTtsVoiceCommand}"
+                                Content="Play" FontSize="12" Padding="10,5" CornerRadius="6" />
+                        <TextBlock Grid.Row="8" Grid.Column="0" Text="Clone"
+                                   VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
+                        <TextBox Grid.Row="8" Grid.Column="1" Text="{Binding TtsCloneDisplayName}"
+                                 Watermark="Imported voice name" FontSize="13" CornerRadius="6" Padding="10,6" />
+                        <Button Grid.Row="8" Grid.Column="2"
+                                Command="{Binding ImportTtsVoiceSampleCommand}"
+                                Content="Import" FontSize="12" Padding="10,5" CornerRadius="6" />
                     </Grid>
                     <TextBlock Text="Audio is held in memory and piped to the system player; Aether does not keep generated WAV files."
                                FontSize="11" Opacity="0.45" TextWrapping="Wrap" />
@@ -217,6 +242,12 @@
                     </StackPanel>
                     <CheckBox IsChecked="{Binding CtrlEnterToSend}"
                               Content="Ctrl+Enter to send (Enter inserts newline)"
+                              FontSize="13" />
+                    <CheckBox IsChecked="{Binding ShowQuickChat}"
+                              Content="Show compact quick-chat surface"
+                              FontSize="13" />
+                    <CheckBox IsChecked="{Binding StartMinimized}"
+                              Content="Start minimized"
                               FontSize="13" />
                 </StackPanel>
             </Border>
