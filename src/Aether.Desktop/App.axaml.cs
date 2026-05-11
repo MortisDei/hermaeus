@@ -77,7 +77,7 @@ public partial class App : Application
         s.AddSingleton<IAutomationScheduler, AutomationScheduler>();
         s.AddSingleton<SqliteRagStore>();
         s.AddSingleton<IEmbeddingService,  LlamaCppEmbeddingService>();
-        s.AddSingleton<IReranker,          NoOpReranker>();
+        s.AddSingleton<IReranker,          OnnxCrossEncoderReranker>();
         s.AddSingleton<RagPipeline>();
         s.AddSingleton<RagQueryService>();
         s.AddSingleton<RagEvalService>();

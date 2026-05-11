@@ -19,6 +19,11 @@ public class AppSettings
     public string DataRootDirectory    { get; set; } = string.Empty;
     public bool   RagEnabled           { get; set; } = false;
     public string RagServiceUrl        { get; set; } = "http://localhost:8765";
+    public bool   RagRerankerEnabled   { get; set; } = true;
+    public bool   RagRerankerAutoDownload { get; set; } = true;
+    public string RagRerankerModelPath { get; set; } = string.Empty;
+    public int    RagRerankerMaxLength { get; set; } = 256;
+    public int    RagRerankerMaxCandidates { get; set; } = 20;
     public bool   TtsEnabled           { get; set; } = true;
     public string TtsServiceUrl        { get; set; } = "http://127.0.0.1:8020";
     public string TtsSpeaker           { get; set; } = string.Empty;
