@@ -20,6 +20,12 @@ public sealed class SettingsService : ISettingsService
         _path = Path.Combine(DefaultDir, "settings.json");
     }
 
+    public SettingsService(string settingsPath)
+    {
+        _path = Path.GetFullPath(settingsPath);
+        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+    }
+
     public static string ResolveDataRoot(AppSettings settings)
     {
         var configured = settings.DataRootDirectory?.Trim();
