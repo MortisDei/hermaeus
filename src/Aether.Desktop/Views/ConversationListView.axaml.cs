@@ -20,11 +20,21 @@ public partial class ConversationListView : UserControl
     }
 
     private void OnTitleLostFocus(object? sender, RoutedEventArgs e) => CommitRename(sender);
+    private void OnMetadataLostFocus(object? sender, RoutedEventArgs e) => CommitMetadata(sender);
 
     private void OnTitleKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key != Key.Enter) return;
         CommitRename(sender);
+        e.Handled = true;
+        if (sender is Control control)
+            control.Focus(NavigationMethod.Unspecified);
+    }
+
+    private void OnMetadataKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter) return;
+        CommitMetadata(sender);
         e.Handled = true;
         if (sender is Control control)
             control.Focus(NavigationMethod.Unspecified);
@@ -36,6 +46,15 @@ public partial class ConversationListView : UserControl
             && DataContext is MainWindowViewModel vm)
         {
             vm.RenameConversationCommand.Execute(item);
+        }
+    }
+
+    private void CommitMetadata(object? sender)
+    {
+        if (sender is TextBox { DataContext: ConversationItemViewModel item }
+            && DataContext is MainWindowViewModel vm)
+        {
+            vm.SaveConversationMetadataCommand.Execute(item);
         }
     }
 }

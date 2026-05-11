@@ -242,12 +242,19 @@ public partial class ChatViewModel : ObservableObject
         if (string.IsNullOrEmpty(CurrentConversationId))
             CurrentConversationId = Guid.NewGuid().ToString();
 
+        var existing = string.IsNullOrEmpty(CurrentConversationId)
+            ? null
+            : await _store.GetByIdAsync(CurrentConversationId);
+
         await _store.SaveAsync(new Conversation
         {
             Id = CurrentConversationId,
             Title = ConversationTitle,
             ModelId = SelectedModel?.Id ?? string.Empty,
             SystemPrompt = SystemPrompt,
+            Folder = existing?.Folder ?? string.Empty,
+            Tags = existing?.Tags ?? [],
+            IsPinned = existing?.IsPinned ?? false,
             Messages = Messages.Where(m => !m.IsStreaming).Select(m => new Message
             {
                 Id = m.Id, ConversationId = CurrentConversationId,

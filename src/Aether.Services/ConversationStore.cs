@@ -47,7 +47,33 @@ public sealed class ConversationStore : IConversationStore
             );
             CREATE INDEX IF NOT EXISTS idx_updated ON conversations(updated_at DESC);";
         await cmd.ExecuteNonQueryAsync(ct);
+        await EnsureColumnAsync(c, "folder", "TEXT NOT NULL DEFAULT ''", ct);
+        await EnsureColumnAsync(c, "tags_json", "TEXT NOT NULL DEFAULT '[]'", ct);
+        await EnsureColumnAsync(c, "is_pinned", "INTEGER NOT NULL DEFAULT 0", ct);
         _initializedPath = dbPath;
+    }
+
+    private static async Task EnsureColumnAsync(SqliteConnection c, string column, string definition, CancellationToken ct)
+    {
+        var exists = false;
+        await using (var cmd = c.CreateCommand())
+        {
+            cmd.CommandText = "PRAGMA table_info(conversations)";
+            await using var rd = await cmd.ExecuteReaderAsync(ct);
+            while (await rd.ReadAsync(ct))
+            {
+                if (string.Equals(rd.GetString(1), column, StringComparison.OrdinalIgnoreCase))
+                {
+                    exists = true;
+                    break;
+                }
+            }
+        }
+
+        if (exists) return;
+        await using var alter = c.CreateCommand();
+        alter.CommandText = $"ALTER TABLE conversations ADD COLUMN {column} {definition}";
+        await alter.ExecuteNonQueryAsync(ct);
     }
 
     public async Task<List<Conversation>> GetAllAsync(CancellationToken ct = default)
@@ -55,7 +81,7 @@ public sealed class ConversationStore : IConversationStore
         await EnsureInitializedAsync(ct);
         await using var c = new SqliteConnection(Cs); await c.OpenAsync(ct);
         var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT * FROM conversations ORDER BY updated_at DESC";
+        cmd.CommandText = "SELECT * FROM conversations ORDER BY is_pinned DESC, updated_at DESC";
         var r = new List<Conversation>();
         await using var rd = await cmd.ExecuteReaderAsync(ct);
         while (await rd.ReadAsync(ct)) r.Add(Map(rd));
@@ -78,15 +104,18 @@ public sealed class ConversationStore : IConversationStore
         await EnsureInitializedAsync(ct);
         conv.UpdatedAt = DateTime.UtcNow;
         var json = JsonSerializer.Serialize(conv.Messages);
+        var tagsJson = JsonSerializer.Serialize(NormalizeTags(conv.Tags));
         await using var c = new SqliteConnection(Cs); await c.OpenAsync(ct);
         var cmd = c.CreateCommand();
         cmd.CommandText = @"
-            INSERT INTO conversations (id,title,model_id,system_prompt,created_at,updated_at,messages_json)
-            VALUES ($id,$title,$mid,$sp,$ca,$ua,$mj)
+            INSERT INTO conversations (id,title,model_id,system_prompt,created_at,updated_at,messages_json,folder,tags_json,is_pinned)
+            VALUES ($id,$title,$mid,$sp,$ca,$ua,$mj,$folder,$tags,$pin)
             ON CONFLICT(id) DO UPDATE SET
                 title=excluded.title, model_id=excluded.model_id,
                 system_prompt=excluded.system_prompt,
-                updated_at=excluded.updated_at, messages_json=excluded.messages_json";
+                updated_at=excluded.updated_at, messages_json=excluded.messages_json,
+                folder=excluded.folder, tags_json=excluded.tags_json,
+                is_pinned=excluded.is_pinned";
         cmd.Parameters.AddWithValue("$id",    conv.Id);
         cmd.Parameters.AddWithValue("$title", conv.Title);
         cmd.Parameters.AddWithValue("$mid",   conv.ModelId);
@@ -94,6 +123,9 @@ public sealed class ConversationStore : IConversationStore
         cmd.Parameters.AddWithValue("$ca",    conv.CreatedAt.ToString("O"));
         cmd.Parameters.AddWithValue("$ua",    conv.UpdatedAt.ToString("O"));
         cmd.Parameters.AddWithValue("$mj",    json);
+        cmd.Parameters.AddWithValue("$folder", conv.Folder.Trim());
+        cmd.Parameters.AddWithValue("$tags", tagsJson);
+        cmd.Parameters.AddWithValue("$pin", conv.IsPinned ? 1 : 0);
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
@@ -112,7 +144,7 @@ public sealed class ConversationStore : IConversationStore
         await EnsureInitializedAsync(ct);
         await using var c = new SqliteConnection(Cs); await c.OpenAsync(ct);
         var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT * FROM conversations WHERE title LIKE $q OR messages_json LIKE $q ORDER BY updated_at DESC LIMIT 50";
+        cmd.CommandText = "SELECT * FROM conversations WHERE title LIKE $q OR messages_json LIKE $q OR folder LIKE $q OR tags_json LIKE $q ORDER BY is_pinned DESC, updated_at DESC LIMIT 50";
         cmd.Parameters.AddWithValue("$q", $"%{q}%");
         var r = new List<Conversation>();
         await using var rd = await cmd.ExecuteReaderAsync(ct);
@@ -122,10 +154,35 @@ public sealed class ConversationStore : IConversationStore
 
     private static Conversation Map(SqliteDataReader r) => new()
     {
-        Id = r.GetString(0), Title = r.GetString(1), ModelId = r.GetString(2),
-        SystemPrompt = r.GetString(3),
-        CreatedAt = DateTime.Parse(r.GetString(4)),
-        UpdatedAt = DateTime.Parse(r.GetString(5)),
-        Messages = JsonSerializer.Deserialize<List<Message>>(r.GetString(6)) ?? []
+        Id = GetString(r, "id"),
+        Title = GetString(r, "title"),
+        ModelId = GetString(r, "model_id"),
+        SystemPrompt = GetString(r, "system_prompt"),
+        CreatedAt = DateTime.Parse(GetString(r, "created_at")),
+        UpdatedAt = DateTime.Parse(GetString(r, "updated_at")),
+        Messages = JsonSerializer.Deserialize<List<Message>>(GetString(r, "messages_json")) ?? [],
+        Folder = GetString(r, "folder"),
+        Tags = JsonSerializer.Deserialize<List<string>>(GetString(r, "tags_json", "[]")) ?? [],
+        IsPinned = GetInt(r, "is_pinned") != 0
     };
+
+    private static string GetString(SqliteDataReader r, string name, string fallback = "")
+    {
+        var ordinal = r.GetOrdinal(name);
+        return r.IsDBNull(ordinal) ? fallback : r.GetString(ordinal);
+    }
+
+    private static int GetInt(SqliteDataReader r, string name)
+    {
+        var ordinal = r.GetOrdinal(name);
+        return r.IsDBNull(ordinal) ? 0 : r.GetInt32(ordinal);
+    }
+
+    private static List<string> NormalizeTags(IEnumerable<string> tags) =>
+        tags
+            .Select(t => t.Trim())
+            .Where(t => t.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToList();
 }

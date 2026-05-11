@@ -10,6 +10,7 @@ public partial class MainWindowViewModel : ObservableObject
     private readonly IConversationStore _store;
     private readonly IToastService _toasts;
     private readonly SynchronizationContext? _sync;
+    private bool _refreshingFolderFilters;
 
     public ChatViewModel            Chat     { get; }
     public SettingsViewModel        Settings { get; }
@@ -19,11 +20,13 @@ public partial class MainWindowViewModel : ObservableObject
 
     public ObservableCollection<ConversationItemViewModel> Conversations { get; } = [];
     public ObservableCollection<ToastViewModel> Toasts { get; } = [];
+    public ObservableCollection<string> FolderFilters { get; } = ["All"];
 
     [ObservableProperty] private bool   _isSidebarOpen = true;
     [ObservableProperty] private string _searchQuery   = string.Empty;
     [ObservableProperty] private string _activePanel   = "chat";
     [ObservableProperty] private bool   _isLoading;
+    [ObservableProperty] private string _selectedFolderFilter = "All";
 
     public bool ShowChat     => ActivePanel == "chat";
     public bool ShowSettings => ActivePanel == "settings";
@@ -74,15 +77,52 @@ public partial class MainWindowViewModel : ObservableObject
 
     private async Task LoadConversationsAsync()
     {
-        var convs = await _store.GetAllAsync();
+        var convs = string.IsNullOrWhiteSpace(SearchQuery)
+            ? await _store.GetAllAsync()
+            : await _store.SearchAsync(SearchQuery);
+
+        RefreshFolderFilters(convs);
+        if (SelectedFolderFilter != "All")
+        {
+            convs = convs
+                .Where(c => string.Equals(c.Folder, SelectedFolderFilter, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
+
         Conversations.Clear();
         foreach (var c in convs)
-            Conversations.Add(new ConversationItemViewModel
-            {
-                Id = c.Id, Title = c.Title, ModelId = c.ModelId,
-                UpdatedAt = c.UpdatedAt, SystemPrompt = c.SystemPrompt
-            });
+            Conversations.Add(ToItem(c));
     }
+
+    private void RefreshFolderFilters(IEnumerable<Aether.Core.Models.Conversation> convs)
+    {
+        var selected = SelectedFolderFilter;
+        _refreshingFolderFilters = true;
+        FolderFilters.Clear();
+        FolderFilters.Add("All");
+        foreach (var folder in convs.Select(c => c.Folder.Trim())
+                     .Where(f => f.Length > 0)
+                     .Distinct(StringComparer.OrdinalIgnoreCase)
+                     .Order(StringComparer.OrdinalIgnoreCase))
+        {
+            FolderFilters.Add(folder);
+        }
+
+        SelectedFolderFilter = FolderFilters.Contains(selected) ? selected : "All";
+        _refreshingFolderFilters = false;
+    }
+
+    private static ConversationItemViewModel ToItem(Aether.Core.Models.Conversation c) => new()
+    {
+        Id = c.Id,
+        Title = c.Title,
+        ModelId = c.ModelId,
+        UpdatedAt = c.UpdatedAt,
+        SystemPrompt = c.SystemPrompt,
+        Folder = c.Folder,
+        TagsText = string.Join(", ", c.Tags),
+        IsPinned = c.IsPinned
+    };
 
     [RelayCommand]
     private void NewConversation()
@@ -128,6 +168,30 @@ public partial class MainWindowViewModel : ObservableObject
             Chat.ConversationTitle = title;
     }
 
+    [RelayCommand]
+    private async Task SaveConversationMetadataAsync(ConversationItemViewModel item)
+    {
+        var conv = await _store.GetByIdAsync(item.Id);
+        if (conv is null) return;
+
+        conv.Title = string.IsNullOrWhiteSpace(item.Title) ? "New Conversation" : item.Title.Trim();
+        conv.Folder = item.Folder.Trim();
+        conv.Tags = item.Tags;
+        conv.IsPinned = item.IsPinned;
+        await _store.SaveAsync(conv);
+
+        item.Title = conv.Title;
+        item.UpdatedAt = conv.UpdatedAt;
+        await LoadConversationsAsync();
+    }
+
+    [RelayCommand]
+    private async Task TogglePinConversationAsync(ConversationItemViewModel item)
+    {
+        item.IsPinned = !item.IsPinned;
+        await SaveConversationMetadataAsync(item);
+    }
+
     [RelayCommand] private void ToggleSidebar()       => IsSidebarOpen = !IsSidebarOpen;
     [RelayCommand] private async Task ShowChatPanelAsync()
     {
@@ -142,12 +206,7 @@ public partial class MainWindowViewModel : ObservableObject
     [RelayCommand]
     private async Task SearchAsync()
     {
-        if (string.IsNullOrWhiteSpace(SearchQuery)) { await LoadConversationsAsync(); return; }
-        var results = await _store.SearchAsync(SearchQuery);
-        Conversations.Clear();
-        foreach (var c in results)
-            Conversations.Add(new ConversationItemViewModel
-                { Id = c.Id, Title = c.Title, ModelId = c.ModelId, UpdatedAt = c.UpdatedAt });
+        await LoadConversationsAsync();
     }
 
     private void OnConversationSaved(object? sender, string convId)
@@ -157,18 +216,23 @@ public partial class MainWindowViewModel : ObservableObject
         {
             existing.Title = Chat.ConversationTitle;
             existing.UpdatedAt = DateTime.Now;
+            existing.ModelId = Chat.SelectedModel?.Id ?? existing.ModelId;
             var idx = Conversations.IndexOf(existing);
             if (idx > 0) Conversations.Move(idx, 0);
         }
         else
         {
-            Conversations.Insert(0, new ConversationItemViewModel
+            var item = new ConversationItemViewModel
             {
                 Id = convId, Title = Chat.ConversationTitle,
                 ModelId = Chat.SelectedModel?.Id ?? string.Empty,
-                UpdatedAt = DateTime.Now, IsSelected = true
-            });
+                UpdatedAt = DateTime.Now, IsSelected = true,
+                Folder = SelectedFolderFilter == "All" ? string.Empty : SelectedFolderFilter
+            };
+            Conversations.Insert(0, item);
             foreach (var c in Conversations.Skip(1)) c.IsSelected = false;
+            if (!string.IsNullOrWhiteSpace(item.Folder))
+                _ = SaveConversationMetadataAsync(item);
         }
     }
 
@@ -184,7 +248,13 @@ public partial class MainWindowViewModel : ObservableObject
 
     partial void OnSearchQueryChanged(string value)
     {
-        if (string.IsNullOrWhiteSpace(value)) _ = LoadConversationsAsync();
+        _ = LoadConversationsAsync();
+    }
+
+    partial void OnSelectedFolderFilterChanged(string value)
+    {
+        if (!_refreshingFolderFilters)
+            _ = LoadConversationsAsync();
     }
 
     private void OnToastRaised(ToastMessage toast)
