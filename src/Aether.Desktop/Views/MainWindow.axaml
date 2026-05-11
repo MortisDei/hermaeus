@@ -188,8 +188,8 @@
         <ItemsControl Grid.ColumnSpan="2"
                       ItemsSource="{Binding Toasts}"
                       HorizontalAlignment="Right"
-                      VerticalAlignment="Bottom"
-                      Margin="0,0,18,18"
+                      VerticalAlignment="Top"
+                      Margin="0,58,18,0"
                       IsHitTestVisible="False">
             <ItemsControl.ItemsPanel>
                 <ItemsPanelTemplate>
@@ -198,28 +198,29 @@
             </ItemsControl.ItemsPanel>
             <ItemsControl.ItemTemplate>
                 <DataTemplate DataType="vm:ToastViewModel">
-                    <Border Width="320"
+                    <Border Width="360"
                             CornerRadius="8"
-                            Padding="12"
+                            Padding="14"
                             Background="{DynamicResource SolidBackgroundFillColorBaseBrush}"
                             BorderBrush="{DynamicResource AccentFillColorDefaultBrush}"
-                            BorderThickness="3,1,1,1"
-                            Opacity="0.96">
-                        <StackPanel Spacing="3">
+                            BorderThickness="1"
+                            Opacity="1">
+                        <StackPanel Spacing="5">
                             <Grid ColumnDefinitions="*,Auto">
                                 <TextBlock Grid.Column="0"
                                            Text="{Binding Title}"
                                            FontWeight="SemiBold"
-                                           FontSize="13" />
+                                           FontSize="13"
+                                           Opacity="0.98" />
                                 <TextBlock Grid.Column="1"
                                            Text="{Binding KindLabel}"
                                            FontSize="10"
-                                           Opacity="0.52"
+                                           Opacity="0.7"
                                            Margin="8,1,0,0" />
                             </Grid>
                             <TextBlock Text="{Binding Message}"
                                        FontSize="12"
-                                       Opacity="0.68"
+                                       Opacity="0.9"
                                        TextWrapping="Wrap" />
                         </StackPanel>
                     </Border>

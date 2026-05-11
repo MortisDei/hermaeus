@@ -25,23 +25,19 @@ public sealed class XttsService : ITtsService, IDisposable
 
         var baseUrl = _settings.Settings.TtsServiceUrl.TrimEnd('/');
 
-        var payload = new Dictionary<string, object?>
-        {
-            ["text"] = text,
-            ["input"] = text,
-            ["language"] = "en"
-        };
-
         var speaker = _settings.Settings.TtsSpeaker.Trim();
-        if (!string.IsNullOrWhiteSpace(speaker) && !speaker.Equals("default", StringComparison.OrdinalIgnoreCase))
-            payload["speaker_wav"] = speaker;
+        if (speaker.Equals("default", StringComparison.OrdinalIgnoreCase))
+            speaker = string.Empty;
 
-        var endpoint = !string.IsNullOrWhiteSpace(speaker) && !LooksLikeVoicePath(speaker)
-            ? "tts_to_audio"
-            : "v1/audio/speech";
-
-        using var response = await _http.PostAsJsonAsync($"{baseUrl}/{endpoint}", payload, ct);
-        response.EnsureSuccessStatusCode();
+        using var response = await PostSpeechAsync(baseUrl, text, speaker, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            var detail = TryReadJsonError(body);
+            throw new InvalidOperationException(string.IsNullOrWhiteSpace(detail)
+                ? $"XTTS returned {(int)response.StatusCode} {response.ReasonPhrase}."
+                : $"XTTS returned {(int)response.StatusCode}: {detail}");
+        }
 
         await using var source = await response.Content.ReadAsStreamAsync(ct);
         using var audio = new MemoryStream();
@@ -98,7 +94,7 @@ public sealed class XttsService : ITtsService, IDisposable
         var baseUrl = _settings.Settings.TtsServiceUrl.TrimEnd('/');
         var all = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "default" };
 
-        foreach (var endpoint in new[] { "studio_speakers", "speakers_list", "speakers", "speaker_ids", "api/speakers", "api/speaker_ids", "api/speakers_list" })
+        foreach (var endpoint in new[] { "studio_speakers", "speakers_list", "speakers", "speaker_ids", "api/speakers", "api/speaker_ids", "api/speakers_list", "voices" })
         {
             try
             {
@@ -129,15 +125,44 @@ public sealed class XttsService : ITtsService, IDisposable
         }
         catch { }
 
-        foreach (var local in Directory.Exists(ResolveVoiceDirectory())
-                     ? Directory.EnumerateFiles(ResolveVoiceDirectory())
+        var voiceDirectory = ResolveVoiceDirectory();
+        foreach (var local in Directory.Exists(voiceDirectory)
+                     ? EnumerateLocalVoices(voiceDirectory)
                      : [])
         {
-            if (LooksLikeVoicePath(local))
-                all.Add(local);
+            all.Add(local);
         }
 
         return all.Order(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private async Task<HttpResponseMessage> PostSpeechAsync(
+        string baseUrl,
+        string text,
+        string speaker,
+        CancellationToken ct)
+    {
+        if (!string.IsNullOrWhiteSpace(speaker) && !LooksLikeVoicePath(speaker))
+        {
+            return await _http.PostAsJsonAsync($"{baseUrl}/tts_to_audio", new Dictionary<string, object?>
+            {
+                ["text"] = text,
+                ["language"] = "en",
+                ["speaker_wav"] = speaker
+            }, ct);
+        }
+
+        var payload = new Dictionary<string, object?>
+        {
+            ["text"] = text,
+            ["input"] = text,
+            ["language"] = "en"
+        };
+
+        if (!string.IsNullOrWhiteSpace(speaker))
+            payload["speaker_wav_path"] = speaker;
+
+        return await _http.PostAsJsonAsync($"{baseUrl}/v1/audio/speech", payload, ct);
     }
 
     private string ResolveVoiceDirectory()
@@ -209,7 +234,7 @@ public sealed class XttsService : ITtsService, IDisposable
     {
         if (json.ValueKind == JsonValueKind.Array)
             return json.EnumerateArray()
-                .Select(x => x.GetString() ?? string.Empty)
+                .Select(ReadVoiceName)
                 .Where(s => s.Length > 0)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
@@ -224,7 +249,7 @@ public sealed class XttsService : ITtsService, IDisposable
 
             if (value.ValueKind == JsonValueKind.Array)
                 return value.EnumerateArray()
-                    .Select(x => x.GetString() ?? string.Empty)
+                    .Select(ReadVoiceName)
                     .Where(s => s.Length > 0)
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToList();
@@ -242,6 +267,60 @@ public sealed class XttsService : ITtsService, IDisposable
             .Where(s => s.Length > 0)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    private static string ReadVoiceName(JsonElement value)
+    {
+        if (value.ValueKind == JsonValueKind.String)
+            return value.GetString() ?? string.Empty;
+
+        if (value.ValueKind != JsonValueKind.Object)
+            return string.Empty;
+
+        foreach (var key in new[] { "name", "id", "speaker", "speaker_id", "voice", "voice_id" })
+        {
+            if (value.TryGetProperty(key, out var prop) && prop.ValueKind == JsonValueKind.String)
+                return prop.GetString() ?? string.Empty;
+        }
+
+        return string.Empty;
+    }
+
+    private static IEnumerable<string> EnumerateLocalVoices(string root)
+    {
+        foreach (var dir in Directory.EnumerateDirectories(root))
+        {
+            if (File.Exists(Path.Combine(dir, "speaker.wav")))
+                yield return Path.GetFileName(dir);
+        }
+
+        foreach (var file in Directory.EnumerateFiles(root))
+        {
+            if (LooksLikeVoicePath(file))
+                yield return file;
+        }
+    }
+
+    private static string TryReadJsonError(string body)
+    {
+        if (string.IsNullOrWhiteSpace(body))
+            return string.Empty;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var key in new[] { "error", "message", "detail" })
+                {
+                    if (doc.RootElement.TryGetProperty(key, out var prop))
+                        return prop.ValueKind == JsonValueKind.String ? prop.GetString() ?? string.Empty : prop.ToString();
+                }
+            }
+        }
+        catch (JsonException) { }
+
+        return body.Length <= 280 ? body : $"{body[..280]}...";
     }
 
     private static bool LooksLikeVoicePath(string value) =>

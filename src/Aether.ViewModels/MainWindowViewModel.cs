@@ -62,7 +62,7 @@ public partial class MainWindowViewModel : ObservableObject
         _store = store; Chat = chat; Settings = settings;
         Models = models; Rag = rag; Services = services; Tasks = tasks;
         Chat.ConversationSaved += OnConversationSaved;
-        Services.ServerAvailabilityChanged += async (_, _) => await Chat.LoadModelsAsync();
+        Services.ServerAvailabilityChanged += (_, _) => _ = RefreshModelsAfterServerChangeAsync();
         _toasts.ToastRaised += OnToastRaised;
     }
 
@@ -321,11 +321,44 @@ public partial class MainWindowViewModel : ObservableObject
         RunOnUi(() => Toasts.Remove(toast));
     }
 
+    private async Task RefreshModelsAfterServerChangeAsync()
+    {
+        try
+        {
+            await RunOnUiAsync(() => Chat.LoadModelsAsync(force: true));
+        }
+        catch (Exception ex)
+        {
+            _toasts.Show("Model refresh failed", ex.Message, ToastKind.Warning, 7000);
+        }
+    }
+
     private void RunOnUi(Action action)
     {
         if (_sync is null)
             action();
         else
             _sync.Post(_ => action(), null);
+    }
+
+    private Task RunOnUiAsync(Func<Task> action)
+    {
+        if (_sync is null)
+            return action();
+
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _sync.Post(async _ =>
+        {
+            try
+            {
+                await action();
+                tcs.SetResult();
+            }
+            catch (Exception ex)
+            {
+                tcs.SetException(ex);
+            }
+        }, null);
+        return tcs.Task;
     }
 }

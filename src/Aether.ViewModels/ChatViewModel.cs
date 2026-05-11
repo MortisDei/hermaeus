@@ -50,9 +50,9 @@ public partial class ChatViewModel : ObservableObject
         Messages.CollectionChanged += (_, _) => HasMessages = Messages.Count > 0;
     }
 
-    public async Task LoadModelsAsync()
+    public async Task LoadModelsAsync(bool force = false)
     {
-        if (AvailableModels.Count > 0 && DateTime.UtcNow - _modelsLoadedAtUtc < TimeSpan.FromSeconds(30))
+        if (!force && AvailableModels.Count > 0 && DateTime.UtcNow - _modelsLoadedAtUtc < TimeSpan.FromSeconds(30))
             return;
 
         var current = SelectedModel?.Id;
