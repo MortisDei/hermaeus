@@ -14,6 +14,7 @@ public partial class ChatViewModel : ObservableObject
     private readonly IConversationStore _store;
     private readonly ISettingsService _settings;
     private readonly ITtsService _tts;
+    private readonly IModelProfileService _profiles;
     private CancellationTokenSource? _cts;
     private CancellationTokenSource? _ttsCts;
 
@@ -34,9 +35,14 @@ public partial class ChatViewModel : ObservableObject
     public event EventHandler<string>? ConversationSaved;
     public Action<string>?            RequestCopyToClipboard { get; set; }
 
-    public ChatViewModel(ILlmService llm, IConversationStore store, ISettingsService settings, ITtsService tts)
+    public ChatViewModel(
+        ILlmService llm,
+        IConversationStore store,
+        ISettingsService settings,
+        ITtsService tts,
+        IModelProfileService profiles)
     {
-        _llm = llm; _store = store; _settings = settings; _tts = tts;
+        _llm = llm; _store = store; _settings = settings; _tts = tts; _profiles = profiles;
         _temperature  = settings.Settings.Temperature;
         _systemPrompt = settings.Settings.DefaultSystemPrompt;
         Messages.CollectionChanged += (_, _) => HasMessages = Messages.Count > 0;
@@ -46,14 +52,16 @@ public partial class ChatViewModel : ObservableObject
     {
         var current = SelectedModel?.Id;
         var models = await _llm.GetModelsAsync();
+        _profiles.ApplyProfiles(models);
         AvailableModels.Clear();
-        foreach (var m in models) AvailableModels.Add(m);
+        foreach (var m in models.Where(m => m.IsVisible)) AvailableModels.Add(m);
         if (AvailableModels.Count > 0)
         {
             var def = _settings.Settings.DefaultModel;
-            SelectedModel = AvailableModels.FirstOrDefault(m => m.Id == current)
+            var next = AvailableModels.FirstOrDefault(m => m.Id == current)
                 ?? AvailableModels.FirstOrDefault(m => m.Id == def)
                 ?? AvailableModels[0];
+            SelectedModel = next;
         }
         else
         {
@@ -270,6 +278,13 @@ public partial class ChatViewModel : ObservableObject
     }
 
     partial void OnInputTextChanged(string value)        => SendCommand.NotifyCanExecuteChanged();
-    partial void OnSelectedModelChanged(LlmModel? value) => SendCommand.NotifyCanExecuteChanged();
+    partial void OnSelectedModelChanged(LlmModel? value)
+    {
+        if (value?.DefaultTemperature is { } temp)
+            Temperature = temp;
+        if (value?.DefaultMaxTokens is { } max && max > 0)
+            _settings.Settings.MaxTokens = max;
+        SendCommand.NotifyCanExecuteChanged();
+    }
     partial void OnIsGeneratingChanged(bool value)       => SendCommand.NotifyCanExecuteChanged();
 }

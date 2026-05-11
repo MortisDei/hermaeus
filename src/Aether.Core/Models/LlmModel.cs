@@ -7,8 +7,25 @@ public class LlmModel
     public string Provider { get; set; } = string.Empty;
     public long SizeBytes { get; set; }
     public DateTime? ModifiedAt { get; set; }
+    public string ProfileDisplayName { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public List<string> Tags { get; set; } = [];
+    public double? DefaultTemperature { get; set; }
+    public int? DefaultContextSize { get; set; }
+    public int? DefaultMaxTokens { get; set; }
+    public bool IsVisible { get; set; } = true;
+    public string Avatar { get; set; } = string.Empty;
 
-    public string DisplayName => string.IsNullOrEmpty(Provider) ? Name : $"{Name}  [{Provider}]";
+    public string DisplayName
+    {
+        get
+        {
+            var name = string.IsNullOrWhiteSpace(ProfileDisplayName) ? Name : ProfileDisplayName.Trim();
+            return string.IsNullOrEmpty(Provider) ? name : $"{name}  [{Provider}]";
+        }
+    }
+
+    public string TagsDisplay => string.Join(", ", Tags);
 
     public string SizeDisplay => SizeBytes switch
     {

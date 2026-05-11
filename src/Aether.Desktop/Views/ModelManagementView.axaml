@@ -7,10 +7,16 @@
 
     <DockPanel Margin="24">
 
-        <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="0,0,0,16">
+        <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto,Auto" Margin="0,0,0,16" ColumnSpacing="10">
             <TextBlock Grid.Column="0" Text="Models"
                        FontSize="22" FontWeight="SemiBold" VerticalAlignment="Center" />
-            <Button Grid.Column="1" Command="{Binding RefreshCommand}"
+            <CheckBox Grid.Column="1"
+                      Content="Force refresh"
+                      IsChecked="{Binding ForceRefresh}"
+                      VerticalAlignment="Center"
+                      FontSize="12"
+                      Opacity="0.7" />
+            <Button Grid.Column="2" Command="{Binding RefreshCommand}"
                     Content="Refresh" Padding="14,7" CornerRadius="6" FontSize="13" />
         </Grid>
 
@@ -25,26 +31,101 @@
         <ScrollViewer VerticalScrollBarVisibility="Auto">
             <ItemsControl ItemsSource="{Binding Models}">
                 <ItemsControl.ItemTemplate>
-                    <DataTemplate>
+                    <DataTemplate DataType="vm:ModelProfileItemViewModel">
                         <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
                                 BorderThickness="1" CornerRadius="6"
-                                Padding="14,10" Margin="0,2">
-                            <Grid ColumnDefinitions="*,Auto">
-                                <StackPanel Grid.Column="0" Spacing="2">
-                                    <TextBlock Text="{Binding Name}"
-                                               FontSize="14" FontWeight="Medium" />
-                                    <StackPanel Orientation="Horizontal" Spacing="10">
-                                        <TextBlock Text="{Binding Provider}"
-                                                   FontSize="11" Opacity="0.45" />
-                                        <TextBlock Text="{Binding SizeDisplay}"
-                                                   FontSize="11" Opacity="0.45" />
+                                Padding="14,12" Margin="0,4">
+                            <Grid RowDefinitions="Auto,Auto" RowSpacing="10">
+                                <Grid Grid.Row="0" ColumnDefinitions="*,Auto">
+                                    <StackPanel Grid.Column="0" Spacing="3">
+                                        <TextBlock Text="{Binding EffectiveName}"
+                                                   FontSize="15" FontWeight="SemiBold" />
+                                        <StackPanel Orientation="Horizontal" Spacing="10">
+                                            <TextBlock Text="{Binding RawName}"
+                                                       FontSize="11" Opacity="0.45" />
+                                            <TextBlock Text="{Binding Provider}"
+                                                       FontSize="11" Opacity="0.45" />
+                                            <TextBlock Text="{Binding SizeDisplay}"
+                                                       FontSize="11" Opacity="0.45" />
+                                            <TextBlock Text="{Binding TagsDisplay}"
+                                                       FontSize="11" Opacity="0.45" />
+                                        </StackPanel>
                                     </StackPanel>
-                                </StackPanel>
-                                <TextBlock Grid.Column="1"
-                                           Text="{Binding ModifiedAt, StringFormat={}{0:d MMM yyyy}}"
-                                           FontSize="11" Opacity="0.35"
-                                           VerticalAlignment="Center"
-                                           Margin="0,0,12,0" />
+                                    <TextBlock Grid.Column="1"
+                                               Text="{Binding ModifiedDisplay}"
+                                               FontSize="11" Opacity="0.35"
+                                               VerticalAlignment="Top"
+                                               Margin="12,2,0,0" />
+                                </Grid>
+
+                                <Grid Grid.Row="1"
+                                      ColumnDefinitions="1.1*,1.2*,0.9*"
+                                      RowDefinitions="Auto,Auto,Auto"
+                                      ColumnSpacing="10"
+                                      RowSpacing="8">
+                                    <TextBox Grid.Row="0" Grid.Column="0"
+                                             Text="{Binding DisplayName}"
+                                             Watermark="Display name"
+                                             CornerRadius="6"
+                                             Padding="10,6" />
+                                    <TextBox Grid.Row="0" Grid.Column="1"
+                                             Text="{Binding Description}"
+                                             Watermark="Description"
+                                             CornerRadius="6"
+                                             Padding="10,6" />
+                                    <TextBox Grid.Row="0" Grid.Column="2"
+                                             Text="{Binding TagsText}"
+                                             Watermark="tags"
+                                             CornerRadius="6"
+                                             Padding="10,6" />
+
+                                    <NumericUpDown Grid.Row="1" Grid.Column="0"
+                                                   Value="{Binding DefaultTemperature}"
+                                                   Watermark="Default temp"
+                                                   Minimum="0"
+                                                   Maximum="2"
+                                                   Increment="0.1"
+                                                   FormatString="F1" />
+                                    <NumericUpDown Grid.Row="1" Grid.Column="1"
+                                                   Value="{Binding DefaultContextSize}"
+                                                   Watermark="Default context"
+                                                   Minimum="0"
+                                                   Maximum="262144"
+                                                   Increment="512" />
+                                    <NumericUpDown Grid.Row="1" Grid.Column="2"
+                                                   Value="{Binding DefaultMaxTokens}"
+                                                   Watermark="Max tokens"
+                                                   Minimum="0"
+                                                   Maximum="262144"
+                                                   Increment="256" />
+
+                                    <StackPanel Grid.Row="2" Grid.Column="0"
+                                                Orientation="Horizontal"
+                                                Spacing="8">
+                                        <CheckBox Content="Visible"
+                                                  IsChecked="{Binding IsVisible}"
+                                                  FontSize="12" />
+                                    </StackPanel>
+                                    <TextBox Grid.Row="2" Grid.Column="1"
+                                             Text="{Binding Avatar}"
+                                             Watermark="Avatar/icon label"
+                                             CornerRadius="6"
+                                             Padding="10,6" />
+                                    <StackPanel Grid.Row="2" Grid.Column="2"
+                                                Orientation="Horizontal"
+                                                Spacing="8"
+                                                HorizontalAlignment="Right">
+                                        <Button Content="Save"
+                                                Command="{Binding $parent[ItemsControl].DataContext.SaveProfileCommand}"
+                                                CommandParameter="{Binding}" />
+                                        <Button Content="Reset"
+                                                Command="{Binding $parent[ItemsControl].DataContext.ResetProfileCommand}"
+                                                CommandParameter="{Binding}" />
+                                        <Button Content="Cleanup"
+                                                Command="{Binding $parent[ItemsControl].DataContext.CleanupLocalMetadataCommand}"
+                                                CommandParameter="{Binding}" />
+                                    </StackPanel>
+                                </Grid>
                             </Grid>
                         </Border>
                     </DataTemplate>

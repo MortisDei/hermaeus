@@ -8,6 +8,8 @@ public sealed class CompositeLlmService : ILlmService
     private readonly LlamaCppService _llamaCpp;
     private readonly OpenAiService _openAi;
     private readonly ISettingsService _settings;
+    private readonly List<LlmModel> _cachedModels = [];
+    private DateTime _cacheUntilUtc = DateTime.MinValue;
 
     public string ProviderName => "Composite";
     public bool   IsConfigured => _llamaCpp.IsConfigured || _openAi.IsConfigured;
@@ -19,13 +21,52 @@ public sealed class CompositeLlmService : ILlmService
 
     public async Task<List<LlmModel>> GetModelsAsync(CancellationToken ct = default)
     {
+        if (_cachedModels.Count > 0 && DateTime.UtcNow < _cacheUntilUtc)
+            return _cachedModels.Select(Clone).ToList();
+
         var all = new List<LlmModel>();
         if (_settings.Settings.LlamaCppEnabled)
-            all.AddRange(await _llamaCpp.GetModelsAsync(ct));
+            all.AddRange(await GetWithTimeoutAsync(_llamaCpp.GetModelsAsync, ct));
         if (_settings.Settings.OpenAiEnabled && _openAi.IsConfigured)
-            all.AddRange(await _openAi.GetModelsAsync(ct));
+            all.AddRange(await GetWithTimeoutAsync(_openAi.GetModelsAsync, ct));
+        _cachedModels.Clear();
+        _cachedModels.AddRange(all.Select(Clone));
+        _cacheUntilUtc = DateTime.UtcNow.AddSeconds(30);
         return all;
     }
+
+    private static async Task<List<LlmModel>> GetWithTimeoutAsync(
+        Func<CancellationToken, Task<List<LlmModel>>> load,
+        CancellationToken ct)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(TimeSpan.FromSeconds(2));
+        try
+        {
+            return await load(timeout.Token);
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private static LlmModel Clone(LlmModel model) => new()
+    {
+        Id = model.Id,
+        Name = model.Name,
+        Provider = model.Provider,
+        SizeBytes = model.SizeBytes,
+        ModifiedAt = model.ModifiedAt,
+        ProfileDisplayName = model.ProfileDisplayName,
+        Description = model.Description,
+        Tags = model.Tags.ToList(),
+        DefaultTemperature = model.DefaultTemperature,
+        DefaultContextSize = model.DefaultContextSize,
+        DefaultMaxTokens = model.DefaultMaxTokens,
+        IsVisible = model.IsVisible,
+        Avatar = model.Avatar
+    };
 
     public IAsyncEnumerable<string> StreamChatAsync(
         string modelId, IReadOnlyList<ChatMessage> messages,

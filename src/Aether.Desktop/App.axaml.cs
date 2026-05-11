@@ -62,6 +62,7 @@ public partial class App : Application
         s.AddSingleton<LlamaCppService>();
         s.AddSingleton<OpenAiService>();
         s.AddSingleton<ILlmService,        CompositeLlmService>();
+        s.AddSingleton<IModelProfileService, ModelProfileService>();
         s.AddSingleton<ITtsService,        XttsService>();
         s.AddSingleton<XttsProcessManager>();
         s.AddSingleton<IToastService,      ToastService>();

@@ -1,0 +1,106 @@
+using Aether.Core.Models;
+using Aether.Core.Services;
+
+namespace Aether.Services;
+
+public sealed class ModelProfileService : IModelProfileService
+{
+    private readonly ISettingsService _settings;
+
+    public ModelProfileService(ISettingsService settings)
+    {
+        _settings = settings;
+    }
+
+    public IReadOnlyList<ModelProfile> Profiles => _settings.Settings.ModelProfiles;
+
+    public ModelProfile GetOrCreate(string modelId, string backend = "")
+    {
+        var profile = Get(modelId);
+        if (profile is not null) return profile;
+
+        profile = new ModelProfile
+        {
+            ModelId = modelId,
+            Backend = backend,
+            IsVisible = true
+        };
+        _settings.Settings.ModelProfiles.Add(profile);
+        return profile;
+    }
+
+    public ModelProfile? Get(string modelId) =>
+        _settings.Settings.ModelProfiles.FirstOrDefault(p =>
+            string.Equals(p.ModelId, modelId, StringComparison.OrdinalIgnoreCase));
+
+    public void ApplyProfiles(IList<LlmModel> models)
+    {
+        foreach (var model in models)
+        {
+            var profile = Get(model.Id);
+            if (profile is null) continue;
+
+            model.ProfileDisplayName = profile.DisplayName;
+            model.Description = profile.Description;
+            model.Tags = NormalizeTags(profile.Tags);
+            model.DefaultTemperature = profile.DefaultTemperature;
+            model.DefaultContextSize = profile.DefaultContextSize;
+            model.DefaultMaxTokens = profile.DefaultMaxTokens;
+            model.IsVisible = profile.IsVisible;
+            model.Avatar = profile.Avatar;
+        }
+    }
+
+    public async Task SaveAsync(ModelProfile profile, CancellationToken ct = default)
+    {
+        var normalized = Normalize(profile);
+        var existing = Get(normalized.ModelId);
+        if (existing is null)
+        {
+            _settings.Settings.ModelProfiles.Add(normalized);
+        }
+        else
+        {
+            existing.DisplayName = normalized.DisplayName;
+            existing.Description = normalized.Description;
+            existing.Tags = normalized.Tags;
+            existing.DefaultTemperature = normalized.DefaultTemperature;
+            existing.DefaultContextSize = normalized.DefaultContextSize;
+            existing.DefaultMaxTokens = normalized.DefaultMaxTokens;
+            existing.Backend = normalized.Backend;
+            existing.IsVisible = normalized.IsVisible;
+            existing.Avatar = normalized.Avatar;
+        }
+
+        await _settings.SaveAsync();
+    }
+
+    public async Task ResetAsync(string modelId, CancellationToken ct = default)
+    {
+        _settings.Settings.ModelProfiles.RemoveAll(p =>
+            string.Equals(p.ModelId, modelId, StringComparison.OrdinalIgnoreCase));
+        await _settings.SaveAsync();
+    }
+
+    private static ModelProfile Normalize(ModelProfile profile) => new()
+    {
+        ModelId = profile.ModelId.Trim(),
+        DisplayName = profile.DisplayName.Trim(),
+        Description = profile.Description.Trim(),
+        Tags = NormalizeTags(profile.Tags),
+        DefaultTemperature = profile.DefaultTemperature,
+        DefaultContextSize = profile.DefaultContextSize,
+        DefaultMaxTokens = profile.DefaultMaxTokens,
+        Backend = profile.Backend.Trim(),
+        IsVisible = profile.IsVisible,
+        Avatar = profile.Avatar.Trim()
+    };
+
+    private static List<string> NormalizeTags(IEnumerable<string> tags) =>
+        tags
+            .Select(t => t.Trim())
+            .Where(t => t.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+}

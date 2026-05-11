@@ -9,14 +9,24 @@ namespace Aether.ViewModels;
 public partial class ModelManagementViewModel : ObservableObject
 {
     private readonly ILlmService _llm;
+    private readonly IModelProfileService _profiles;
+    private readonly IToastService _toasts;
+    private DateTime _lastRefreshUtc = DateTime.MinValue;
+    private readonly List<LlmModel> _modelCache = [];
 
-    public ObservableCollection<LlmModel> Models { get; } = [];
+    public ObservableCollection<ModelProfileItemViewModel> Models { get; } = [];
 
     [ObservableProperty] private bool   _isLoading;
     [ObservableProperty] private string _statusMessage = string.Empty;
     [ObservableProperty] private bool   _isError;
+    [ObservableProperty] private bool   _forceRefresh;
 
-    public ModelManagementViewModel(ILlmService llm) => _llm = llm;
+    public ModelManagementViewModel(ILlmService llm, IModelProfileService profiles, IToastService toasts)
+    {
+        _llm = llm;
+        _profiles = profiles;
+        _toasts = toasts;
+    }
 
     [RelayCommand]
     public async Task RefreshAsync()
@@ -24,14 +34,173 @@ public partial class ModelManagementViewModel : ObservableObject
         IsLoading = true; StatusMessage = string.Empty; IsError = false;
         try
         {
-            var models = await _llm.GetModelsAsync();
+            var useCache = !ForceRefresh
+                           && _modelCache.Count > 0
+                           && DateTime.UtcNow - _lastRefreshUtc < TimeSpan.FromMinutes(2);
+            var models = useCache ? _modelCache.ToList() : await _llm.GetModelsAsync();
+            if (!useCache)
+            {
+                _modelCache.Clear();
+                _modelCache.AddRange(models);
+                _lastRefreshUtc = DateTime.UtcNow;
+            }
+
+            _profiles.ApplyProfiles(models);
             Models.Clear();
-            foreach (var m in models) Models.Add(m);
+            foreach (var m in models)
+            {
+                var profile = _profiles.GetOrCreate(m.Id, m.Provider);
+                Models.Add(new ModelProfileItemViewModel(m, profile));
+            }
+
             StatusMessage = models.Count == 0
                 ? "No models reported by the running backends"
-                : $"{models.Count} model(s) loaded";
+                : $"{models.Count} model(s) loaded{(useCache ? " from cache" : "")}";
+            ForceRefresh = false;
         }
         catch (Exception ex) { StatusMessage = ex.Message; IsError = true; }
         finally { IsLoading = false; }
     }
+
+    [RelayCommand]
+    private async Task SaveProfileAsync(ModelProfileItemViewModel? item)
+    {
+        if (item is null) return;
+
+        await _profiles.SaveAsync(item.ToProfile());
+        item.ApplySavedState();
+        _profiles.ApplyProfiles(_modelCache);
+        _toasts.Show("Model profile saved", $"Updated metadata for {item.DisplayName}.", ToastKind.Success);
+    }
+
+    [RelayCommand]
+    private async Task ResetProfileAsync(ModelProfileItemViewModel? item)
+    {
+        if (item is null) return;
+
+        await _profiles.ResetAsync(item.ModelId);
+        item.Reset();
+        _profiles.ApplyProfiles(_modelCache);
+        _toasts.Show("Model profile reset", $"Aether metadata for {item.RawName} was cleared.", ToastKind.Info);
+    }
+
+    [RelayCommand]
+    private void CleanupLocalMetadata(ModelProfileItemViewModel? item)
+    {
+        if (item is null) return;
+        StatusMessage = "Aether only owns metadata here. Physical model-file deletion is intentionally not performed.";
+        _toasts.Show("GGUF untouched", "Cleanup reset/removes Aether metadata only; model files stay on disk.", ToastKind.Warning, 5500);
+    }
+}
+
+public partial class ModelProfileItemViewModel : ObservableObject
+{
+    private readonly string _originalDisplayName;
+    private readonly string _originalDescription;
+    private readonly string _originalTagsText;
+    private readonly double? _originalTemperature;
+    private readonly int? _originalContextSize;
+    private readonly int? _originalMaxTokens;
+    private readonly bool _originalIsVisible;
+    private readonly string _originalAvatar;
+
+    public string ModelId { get; }
+    public string RawName { get; }
+    public string Provider { get; }
+    public string SizeDisplay { get; }
+    public string ModifiedDisplay { get; }
+
+    [ObservableProperty] private string _displayName;
+    [ObservableProperty] private string _description;
+    [ObservableProperty] private string _tagsText;
+    [ObservableProperty] private double? _defaultTemperature;
+    [ObservableProperty] private int? _defaultContextSize;
+    [ObservableProperty] private int? _defaultMaxTokens;
+    [ObservableProperty] private bool _isVisible;
+    [ObservableProperty] private string _avatar;
+
+    public ModelProfileItemViewModel(LlmModel model, ModelProfile profile)
+    {
+        ModelId = model.Id;
+        RawName = model.Name;
+        Provider = model.Provider;
+        SizeDisplay = model.SizeDisplay;
+        ModifiedDisplay = model.ModifiedAt?.ToString("d MMM yyyy") ?? string.Empty;
+        _displayName = profile.DisplayName;
+        _description = profile.Description;
+        _tagsText = string.Join(", ", profile.Tags);
+        _defaultTemperature = profile.DefaultTemperature;
+        _defaultContextSize = profile.DefaultContextSize;
+        _defaultMaxTokens = profile.DefaultMaxTokens;
+        _isVisible = profile.IsVisible;
+        _avatar = profile.Avatar;
+
+        _originalDisplayName = DisplayName;
+        _originalDescription = Description;
+        _originalTagsText = TagsText;
+        _originalTemperature = DefaultTemperature;
+        _originalContextSize = DefaultContextSize;
+        _originalMaxTokens = DefaultMaxTokens;
+        _originalIsVisible = IsVisible;
+        _originalAvatar = Avatar;
+    }
+
+    public string EffectiveName => string.IsNullOrWhiteSpace(DisplayName) ? RawName : DisplayName.Trim();
+    public string TagsDisplay => string.Join("  ", Tags);
+
+    public ModelProfile ToProfile() => new()
+    {
+        ModelId = ModelId,
+        DisplayName = DisplayName,
+        Description = Description,
+        Tags = Tags,
+        DefaultTemperature = DefaultTemperature,
+        DefaultContextSize = DefaultContextSize,
+        DefaultMaxTokens = DefaultMaxTokens,
+        Backend = Provider,
+        IsVisible = IsVisible,
+        Avatar = Avatar
+    };
+
+    public void ApplySavedState()
+    {
+        OnPropertyChanged(nameof(EffectiveName));
+        OnPropertyChanged(nameof(TagsDisplay));
+    }
+
+    public void Reset()
+    {
+        DisplayName = string.Empty;
+        Description = string.Empty;
+        TagsText = string.Empty;
+        DefaultTemperature = null;
+        DefaultContextSize = null;
+        DefaultMaxTokens = null;
+        IsVisible = true;
+        Avatar = string.Empty;
+        ApplySavedState();
+    }
+
+    public void Revert()
+    {
+        DisplayName = _originalDisplayName;
+        Description = _originalDescription;
+        TagsText = _originalTagsText;
+        DefaultTemperature = _originalTemperature;
+        DefaultContextSize = _originalContextSize;
+        DefaultMaxTokens = _originalMaxTokens;
+        IsVisible = _originalIsVisible;
+        Avatar = _originalAvatar;
+        ApplySavedState();
+    }
+
+    private List<string> Tags => TagsText
+        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .Where(t => t.Length > 0)
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .Order(StringComparer.OrdinalIgnoreCase)
+        .ToList();
+
+    partial void OnDisplayNameChanged(string value) => OnPropertyChanged(nameof(EffectiveName));
+    partial void OnTagsTextChanged(string value) => OnPropertyChanged(nameof(TagsDisplay));
 }
