@@ -47,10 +47,30 @@ public sealed class SettingsService : ISettingsService
         return migration;
     }
 
+    public DataMigrationPlan PreviewDataRootMigration(string? previousDataRootDirectory, string? nextDataRootDirectory)
+    {
+        var previous = ResolveDataRoot(new AppSettings { DataRootDirectory = previousDataRootDirectory ?? string.Empty });
+        var next = ResolveDataRoot(new AppSettings { DataRootDirectory = nextDataRootDirectory ?? string.Empty });
+        if (string.Equals(previous, next, StringComparison.OrdinalIgnoreCase))
+            return new DataMigrationPlan(false, previous, next, 0, []);
+
+        if (!Directory.Exists(previous))
+            return new DataMigrationPlan(false, previous, next, 0, []);
+
+        var files = Directory.EnumerateFiles(previous, "conversations.db*").ToList();
+        var conflicts = files
+            .Select(f => Path.Combine(next, Path.GetFileName(f)))
+            .Where(File.Exists)
+            .ToList();
+
+        return new DataMigrationPlan(files.Count > 0 && conflicts.Count == 0, previous, next, files.Count, conflicts);
+    }
+
     private static SettingsSaveResult MigrateDataRoot(string? previousDataRootDirectory, string? nextDataRootDirectory)
     {
         var previous = ResolveDataRoot(new AppSettings { DataRootDirectory = previousDataRootDirectory ?? string.Empty });
         var next = ResolveDataRoot(new AppSettings { DataRootDirectory = nextDataRootDirectory ?? string.Empty });
+        ValidateDataRoot(next);
         if (string.Equals(previous, next, StringComparison.OrdinalIgnoreCase))
             return new SettingsSaveResult(false, previous, next, null, 0);
 
@@ -88,5 +108,16 @@ public sealed class SettingsService : ISettingsService
         }
 
         return new SettingsSaveResult(true, previous, next, backupDir, files.Count);
+    }
+
+    private static void ValidateDataRoot(string path)
+    {
+        var root = Path.GetPathRoot(path);
+        if (string.IsNullOrWhiteSpace(root))
+            throw new IOException("Data root must be an absolute path.");
+
+        var full = Path.GetFullPath(path);
+        if (string.Equals(full, root, StringComparison.OrdinalIgnoreCase))
+            throw new IOException("Aether data root cannot be the filesystem root.");
     }
 }

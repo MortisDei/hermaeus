@@ -197,8 +197,44 @@
                                       Width="15" Height="15" />
                         </Button>
                     </Grid>
-                    <TextBlock Text="New saves use this folder after Save. Move existing data manually if you want to relocate an old library."
+                    <TextBlock Text="{Binding DataMigrationPreview}"
                                FontSize="11" Opacity="0.45" TextWrapping="Wrap" />
+                    <Grid ColumnDefinitions="110,*,Auto" ColumnSpacing="8">
+                        <TextBlock Grid.Column="0" Text="Backup to"
+                                   VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding BackupDirectory}"
+                                 Watermark="Backup folder"
+                                 FontSize="13" CornerRadius="6" Padding="10,6" />
+                        <Button Grid.Column="2"
+                                Classes="icon-btn"
+                                Command="{Binding BrowseBackupDirectoryCommand}"
+                                ToolTip.Tip="Choose backup folder">
+                            <PathIcon Data="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z"
+                                      Width="15" Height="15" />
+                        </Button>
+                    </Grid>
+                    <Grid ColumnDefinitions="110,*,Auto" ColumnSpacing="8">
+                        <TextBlock Grid.Column="0" Text="Restore"
+                                   VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
+                        <TextBox Grid.Column="1"
+                                 Text="{Binding RestoreBackupPath}"
+                                 Watermark="aether-backup.zip"
+                                 FontSize="13" CornerRadius="6" Padding="10,6" />
+                        <Button Grid.Column="2"
+                                Classes="icon-btn"
+                                Command="{Binding BrowseRestoreBackupCommand}"
+                                ToolTip.Tip="Choose backup zip">
+                            <PathIcon Data="M16 6v8h3l-4 4-4-4h3V6h2zM5 20h14v-2H5v2z"
+                                      Width="15" Height="15" />
+                        </Button>
+                    </Grid>
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button Command="{Binding BackupDataCommand}" Content="Backup Now"
+                                FontSize="12" Padding="12,5" CornerRadius="6" />
+                        <Button Command="{Binding RestoreDataCommand}" Content="Restore"
+                                FontSize="12" Padding="12,5" CornerRadius="6" />
+                    </StackPanel>
                 </StackPanel>
             </Border>
 

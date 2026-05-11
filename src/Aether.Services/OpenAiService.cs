@@ -12,6 +12,7 @@ public sealed class OpenAiService : IDisposable
 {
     private readonly HttpClient _http;
     private readonly ISettingsService _settings;
+    private readonly ISecretStore _secrets;
 
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
@@ -22,23 +23,24 @@ public sealed class OpenAiService : IDisposable
     public string ProviderName => "OpenAI";
     public bool   IsConfigured => !string.IsNullOrWhiteSpace(_settings.Settings.OpenAiApiKey);
 
-    public OpenAiService(ISettingsService settings)
+    public OpenAiService(ISettingsService settings, ISecretStore secrets)
     {
         _settings = settings;
+        _secrets = secrets;
         _http = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
     }
 
     private string Base => _settings.Settings.OpenAiBaseUrl.TrimEnd('/');
-    private void Auth() =>
+    private async Task AuthAsync(CancellationToken ct) =>
         _http.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", _settings.Settings.OpenAiApiKey);
+            new AuthenticationHeaderValue("Bearer", await _secrets.ResolveAsync(_settings.Settings.OpenAiApiKey, ct));
 
     public async Task<List<LlmModel>> GetModelsAsync(CancellationToken ct = default)
     {
         if (!IsConfigured) return [];
         try
         {
-            Auth();
+            await AuthAsync(ct);
             var resp = await _http.GetAsync($"{Base}/v1/models", ct);
             resp.EnsureSuccessStatusCode();
             var data = await resp.Content.ReadFromJsonAsync<ModelsResponse>(JsonOpts, ct);
@@ -59,7 +61,6 @@ public sealed class OpenAiService : IDisposable
         CancellationToken ct = default)
     {
         if (!IsConfigured) return YieldError("*OpenAI API key not configured.*");
-        Auth();
         return StreamChatInternal(modelId, messages, systemPrompt, temperature, ct);
     }
 
@@ -106,6 +107,7 @@ public sealed class OpenAiService : IDisposable
     {
         try
         {
+            await AuthAsync(ct);
             var msgs = messages.Select(m => new { role = m.Role, content = m.Content }).ToList<object>();
             if (!string.IsNullOrWhiteSpace(systemPrompt))
                 msgs.Insert(0, new { role = "system", content = systemPrompt });

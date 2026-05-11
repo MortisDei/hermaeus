@@ -11,6 +11,8 @@ public partial class SettingsViewModel : ObservableObject
     private readonly ISettingsService _svc;
     private readonly ITtsService _tts;
     private readonly IToastService _toasts;
+    private readonly IBackupService _backups;
+    private readonly ISecretStore _secrets;
     private readonly XttsProcessManager _xttsProcess;
 
     [ObservableProperty] private string _llamaCppBaseUrl      = "http://localhost:8080";
@@ -27,6 +29,9 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private bool   _ctrlEnterToSend;
     [ObservableProperty] private bool   _isSaved;
     [ObservableProperty] private string _dataRootDirectory = string.Empty;
+    [ObservableProperty] private string _dataMigrationPreview = string.Empty;
+    [ObservableProperty] private string _backupDirectory = string.Empty;
+    [ObservableProperty] private string _restoreBackupPath = string.Empty;
     [ObservableProperty] private bool   _ttsEnabled = true;
     [ObservableProperty] private string _ttsServiceUrl = "http://127.0.0.1:8020";
     [ObservableProperty] private string _ttsSpeaker = string.Empty;
@@ -48,6 +53,8 @@ public partial class SettingsViewModel : ObservableObject
     public string[] TtsDevices { get; } = ["cpu", "auto", "cuda"];
     public ObservableCollection<string> TtsVoices { get; } = ["default"];
     public Action? RequestDataRootPicker { get; set; }
+    public Action? RequestBackupDirectoryPicker { get; set; }
+    public Action? RequestRestoreBackupPicker { get; set; }
     public Action? RequestTtsScriptPicker { get; set; }
     public Action? RequestTtsOutputPicker { get; set; }
     public Action? RequestTtsVoiceDirectoryPicker { get; set; }
@@ -55,11 +62,19 @@ public partial class SettingsViewModel : ObservableObject
 
     public bool IsTtsRunning => _xttsProcess.IsRunning;
 
-    public SettingsViewModel(ISettingsService svc, ITtsService tts, IToastService toasts, XttsProcessManager xttsProcess)
+    public SettingsViewModel(
+        ISettingsService svc,
+        ITtsService tts,
+        IToastService toasts,
+        IBackupService backups,
+        ISecretStore secrets,
+        XttsProcessManager xttsProcess)
     {
         _svc = svc;
         _tts = tts;
         _toasts = toasts;
+        _backups = backups;
+        _secrets = secrets;
         _xttsProcess = xttsProcess;
         _xttsProcess.StatusChanged += () =>
         {
@@ -77,7 +92,7 @@ public partial class SettingsViewModel : ObservableObject
         LlamaCppBaseUrl     = s.LlamaCppBaseUrl;
         LlamaCppEnabled     = s.LlamaCppEnabled;
         OpenAiBaseUrl       = s.OpenAiBaseUrl;
-        OpenAiApiKey        = s.OpenAiApiKey;
+        OpenAiApiKey        = _secrets.IsReference(s.OpenAiApiKey) ? string.Empty : s.OpenAiApiKey;
         OpenAiEnabled       = s.OpenAiEnabled;
         EmbeddingModel      = s.EmbeddingModel;
         DefaultSystemPrompt = s.DefaultSystemPrompt;
@@ -101,6 +116,7 @@ public partial class SettingsViewModel : ObservableObject
         ShowQuickChat       = s.ShowQuickChat;
         TtsStatus           = _xttsProcess.StatusLabel;
         OnPropertyChanged(nameof(IsTtsRunning));
+        UpdateMigrationPreview();
     }
 
     [RelayCommand]
@@ -112,7 +128,8 @@ public partial class SettingsViewModel : ObservableObject
         s.LlamaCppBaseUrl     = LlamaCppBaseUrl;
         s.LlamaCppEnabled     = LlamaCppEnabled;
         s.OpenAiBaseUrl       = OpenAiBaseUrl;
-        s.OpenAiApiKey        = OpenAiApiKey;
+        if (!string.IsNullOrWhiteSpace(OpenAiApiKey))
+            s.OpenAiApiKey = await _secrets.StoreAsync("openai-api-key", OpenAiApiKey.Trim());
         s.OpenAiEnabled       = OpenAiEnabled;
         s.EmbeddingModel      = EmbeddingModel;
         s.DefaultSystemPrompt = DefaultSystemPrompt;
@@ -160,6 +177,45 @@ public partial class SettingsViewModel : ObservableObject
 
     [RelayCommand]
     private void BrowseDataRoot() => RequestDataRootPicker?.Invoke();
+
+    [RelayCommand]
+    private void BrowseBackupDirectory() => RequestBackupDirectoryPicker?.Invoke();
+
+    [RelayCommand]
+    private void BrowseRestoreBackup() => RequestRestoreBackupPicker?.Invoke();
+
+    [RelayCommand]
+    private async Task BackupDataAsync()
+    {
+        try
+        {
+            var target = string.IsNullOrWhiteSpace(BackupDirectory)
+                ? ResolveDataRoot()
+                : BackupDirectory.Trim();
+            var result = await _backups.BackupAsync(target);
+            _toasts.Show("Backup complete", $"{result.FilesIncluded} file(s) written to {result.Path}", ToastKind.Success, 7000);
+        }
+        catch (Exception ex)
+        {
+            SettingsError = ex.Message;
+            _toasts.Show("Backup failed", ex.Message, ToastKind.Error, 7000);
+        }
+    }
+
+    [RelayCommand]
+    private async Task RestoreDataAsync()
+    {
+        try
+        {
+            await _backups.RestoreAsync(RestoreBackupPath.Trim());
+            _toasts.Show("Restore complete", "Restart Aether to load restored data.", ToastKind.Success, 7000);
+        }
+        catch (Exception ex)
+        {
+            SettingsError = ex.Message;
+            _toasts.Show("Restore refused", ex.Message, ToastKind.Error, 7000);
+        }
+    }
 
     [RelayCommand]
     private void BrowseTtsScript() => RequestTtsScriptPicker?.Invoke();
@@ -258,4 +314,24 @@ public partial class SettingsViewModel : ObservableObject
 
     private bool CanStartTts() => !IsTtsRunning;
     private bool CanStopTts() => IsTtsRunning;
+
+    partial void OnDataRootDirectoryChanged(string value) => UpdateMigrationPreview();
+
+    private void UpdateMigrationPreview()
+    {
+        var plan = _svc.PreviewDataRootMigration(_svc.Settings.DataRootDirectory, DataRootDirectory);
+        DataMigrationPreview = plan.Conflicts.Count > 0
+            ? $"Move blocked: {plan.Conflicts.Count} existing database file(s) in target."
+            : plan.WillMove
+                ? $"Save will move {plan.FilesToMove} database file(s) to {plan.CurrentDataRoot}."
+                : "No data move needed.";
+    }
+
+    private string ResolveDataRoot()
+    {
+        var configured = _svc.Settings.DataRootDirectory?.Trim();
+        return string.IsNullOrWhiteSpace(configured)
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Aether")
+            : Path.GetFullPath(configured);
+    }
 }

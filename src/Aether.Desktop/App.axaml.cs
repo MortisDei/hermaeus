@@ -61,6 +61,9 @@ public partial class App : Application
     private static void ConfigureServices(IServiceCollection s)
     {
         s.AddSingleton<ISettingsService,   SettingsService>();
+        s.AddSingleton<ISecretStore,       SecretStore>();
+        s.AddSingleton<IRedactionService,  RedactionService>();
+        s.AddSingleton<IBackupService,     BackupService>();
         s.AddSingleton<IConversationStore, ConversationStore>();
         s.AddSingleton<LlamaCppService>();
         s.AddSingleton<OpenAiService>();

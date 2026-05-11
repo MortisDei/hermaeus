@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.RegularExpressions;
 using Aether.Core.Models;
+using Aether.Core.Services;
 
 namespace Aether.Services.ProcessManagement;
 
@@ -16,6 +17,7 @@ public sealed class ServerProcessManager : IDisposable
     private Process? _process;
     private CancellationTokenSource? _monitorCts;
     private readonly ConcurrentQueue<string> _logRing = new();
+    private readonly IRedactionService? _redactor;
     private const int MaxLogLines = 300;
 
     public ServerStatus Status { get; private set; } = ServerStatus.Stopped;
@@ -29,6 +31,11 @@ public sealed class ServerProcessManager : IDisposable
 
     private static readonly Regex FitLayersRegex =
         new(@"Vulkan\d+.*:\s+(?<used>\d+)\s+layers", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    public ServerProcessManager(IRedactionService? redactor = null)
+    {
+        _redactor = redactor;
+    }
 
     // ── Public API ────────────────────────────────────────────────────────────
 
@@ -439,6 +446,7 @@ public sealed class ServerProcessManager : IDisposable
 
     private void Emit(string line)
     {
+        line = _redactor?.Redact(line) ?? line;
         _logRing.Enqueue($"[{DateTime.Now:HH:mm:ss}] {line}");
         while (_logRing.Count > MaxLogLines)
             _logRing.TryDequeue(out _);

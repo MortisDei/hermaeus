@@ -46,6 +46,41 @@ public partial class SettingsView : UserControl
                 vm.DataRootDirectory = folders[0].Path.LocalPath;
         };
 
+        vm.RequestBackupDirectoryPicker = async () =>
+        {
+            var top = TopLevel.GetTopLevel(this);
+            if (top is null) return;
+
+            var folders = await top.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+            {
+                Title = "Choose backup folder",
+                AllowMultiple = false
+            });
+
+            if (folders.Count > 0)
+                vm.BackupDirectory = folders[0].Path.LocalPath;
+        };
+
+        vm.RequestRestoreBackupPicker = async () =>
+        {
+            var top = TopLevel.GetTopLevel(this);
+            if (top is null) return;
+
+            var files = await top.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+            {
+                Title = "Choose Aether backup zip",
+                AllowMultiple = false,
+                FileTypeFilter =
+                [
+                    new FilePickerFileType("Aether backup") { Patterns = ["*.zip"] },
+                    new FilePickerFileType("All files") { Patterns = ["*"] }
+                ]
+            });
+
+            if (files.Count > 0)
+                vm.RestoreBackupPath = files[0].Path.LocalPath;
+        };
+
         vm.RequestTtsScriptPicker = async () =>
         {
             var top = TopLevel.GetTopLevel(this);

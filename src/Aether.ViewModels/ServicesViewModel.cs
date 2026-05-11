@@ -11,7 +11,7 @@ namespace Aether.ViewModels;
 
 public partial class ServerProcessViewModel : ObservableObject, IDisposable
 {
-    private readonly ServerProcessManager  _mgr = new();
+    private readonly ServerProcessManager  _mgr;
     private readonly ISettingsService      _settings;
     private readonly ServerConfig          _config;
 
@@ -60,8 +60,9 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
     public Action<string>? RequestFilePicker  { get; set; }
     public Action<string>? RequestFolderPicker { get; set; }
 
-    public ServerProcessViewModel(ServerConfig config, ISettingsService settings)
+    public ServerProcessViewModel(ServerConfig config, ISettingsService settings, IRedactionService redactor)
     {
+        _mgr = new ServerProcessManager(redactor);
         _config   = config;
         _settings = settings;
 
@@ -259,6 +260,7 @@ public partial class ServicesViewModel : ObservableObject
     private readonly ISettingsService _settings;
     private readonly IRuntimeProfileService _runtimeProfiles;
     private readonly IToastService _toasts;
+    private readonly IRedactionService _redactor;
 
     public ObservableCollection<ServerProcessViewModel> Servers { get; } = [];
     public ObservableCollection<RuntimeProfileViewModel> RuntimeProfiles { get; } = [];
@@ -274,11 +276,13 @@ public partial class ServicesViewModel : ObservableObject
     public ServicesViewModel(
         ISettingsService settings,
         IRuntimeProfileService runtimeProfiles,
-        IToastService toasts)
+        IToastService toasts,
+        IRedactionService redactor)
     {
         _settings = settings;
         _runtimeProfiles = runtimeProfiles;
         _toasts = toasts;
+        _redactor = redactor;
         Rebuild();
         _settings.SettingsChanged += (_, _) => Rebuild();
     }
@@ -305,7 +309,7 @@ public partial class ServicesViewModel : ObservableObject
         {
             var vm = existing.TryGetValue(cfg.Id, out var current)
                 ? current
-                : new ServerProcessViewModel(cfg, _settings);
+                : new ServerProcessViewModel(cfg, _settings, _redactor);
 
             vm.PropertyChanged += OnServerPropertyChanged;
             Servers.Add(vm);
