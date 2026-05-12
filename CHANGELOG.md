@@ -5,7 +5,20 @@ All notable changes to Aether will be documented in this file.
 The project follows semantic versioning once public release candidates begin.
 Pre-1.0 versions may still change internal APIs and storage details.
 
-## [0.8.3-alpha] - Unreleased
+## [0.8.4-alpha] - Unreleased
+
+### Added
+
+- Repeatable Linux and Windows archive packaging scripts.
+- Linux package layout with desktop launcher metadata, user-local desktop
+  install/uninstall scripts, icon asset, license notices, archive, and SHA256.
+- Windows package layout with launch helper, license notices, ZIP archive, and
+  SHA256.
+- App and tray icon assets derived from the Aether branding sheet.
+- Packaging documentation covering runtime requirements and self-contained
+  builds.
+
+## [0.8.3-alpha]
 
 ### Added
 

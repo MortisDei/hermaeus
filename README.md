@@ -1,6 +1,6 @@
 # Aether
 
-Version: `0.8.3-alpha`
+Version: `0.8.4-alpha`
 
 A native, local-first Avalonia desktop AI workspace for `llama.cpp`, Ollama,
 OpenAI-compatible APIs, Oghma-grade RAG, and XTTS voice playback.
@@ -178,9 +178,14 @@ by a qualified lawyer before Aether 1.0.
 ```bash
 dotnet build Aether.sln
 dotnet run --project tests/Aether.Tests/Aether.Tests.csproj
-dotnet publish src/Aether.Desktop -c Release -r linux-x64 --self-contained false -o dist/linux
-dotnet publish src/Aether.Desktop -c Release -r win-x64 --self-contained false -o dist/windows
+./build.sh --skip-restore
+pwsh ./build.ps1 -SkipRestore
 ```
+
+The packaging scripts create Linux `.tar.gz` and Windows `.zip` archives under
+the ignored `dist/` folder. Packages are framework-dependent by default and can
+be made self-contained with `./build.sh --self-contained` or
+`pwsh ./build.ps1 -SelfContained`. See [docs/packaging.md](docs/packaging.md).
 
 ## Project Structure
 
@@ -198,7 +203,8 @@ docs/                   Security notes, RAG/eval docs, internal planning notes
 
 - Concrete local-first OCR loader.
 - Optional web loader kept opt-in and disabled by default.
-- Linux and Windows packaging.
+- Linux and Windows archive packaging is available; signed installers/update
+  metadata remain future public-release hardening.
 - Security review and threat model refresh.
 - System-wide global hotkey support where the OS/compositor exposes a reliable
   registration API.

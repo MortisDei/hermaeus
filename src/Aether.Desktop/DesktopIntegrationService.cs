@@ -105,7 +105,7 @@ public sealed class DesktopIntegrationService : IDisposable
         {
             ToolTipText = "Aether",
             IsVisible = true,
-            Icon = new WindowIcon(AssetLoader.Open(new Uri("avares://Aether.Desktop/Assets/aether.ico"))),
+            Icon = new WindowIcon(AssetLoader.Open(new Uri("avares://Aether.Desktop/Assets/aether-tray.png"))),
             Menu = BuildMenu()
         };
         tray.Clicked += (_, _) => ShowAndActivate();

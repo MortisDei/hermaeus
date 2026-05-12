@@ -1,12 +1,92 @@
-param([switch]$SelfContained)
+param(
+    [string]$Runtime = "win-x64",
+    [string]$Configuration = "Release",
+    [switch]$SelfContained,
+    [switch]$SkipRestore
+)
 
-$proj = "src/Aether.Desktop/Aether.Desktop.csproj"
-$sc   = if ($SelfContained) { "true" } else { "false" }
+$ErrorActionPreference = "Stop"
+if ($PSVersionTable.PSVersion.Major -ge 7) {
+    $PSNativeCommandUseErrorActionPreference = $true
+}
 
-Write-Host "Restoring..."
-dotnet restore
+$root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$project = Join-Path $root "src/Aether.Desktop/Aether.Desktop.csproj"
+$dist = Join-Path $root "dist"
+$propsPath = Join-Path $root "Directory.Build.props"
+$props = [xml](Get-Content -Raw $propsPath)
+$versionPrefix = $props.Project.PropertyGroup.VersionPrefix
+$versionSuffix = $props.Project.PropertyGroup.VersionSuffix
 
-Write-Host "Building win-x64..."
-dotnet publish $proj -c Release -r win-x64 --self-contained $sc -o "dist/win-x64"
+if ([string]::IsNullOrWhiteSpace($versionPrefix)) {
+    throw "Could not read VersionPrefix from Directory.Build.props."
+}
 
-Write-Host "Done - binaries in dist/win-x64/"
+$version = $versionPrefix
+if (-not [string]::IsNullOrWhiteSpace($versionSuffix)) {
+    $version = "$version-$versionSuffix"
+}
+
+$selfContainedValue = if ($SelfContained) { "true" } else { "false" }
+$packageName = "aether-$version-$Runtime"
+$packageDir = Join-Path $dist $packageName
+$publishDir = Join-Path $dist ".publish-$Runtime"
+$archive = Join-Path $dist "$packageName.zip"
+$checksum = "$archive.sha256"
+$docDir = Join-Path $packageDir "docs"
+
+if (-not $SkipRestore) {
+    Write-Host "Restoring..."
+    dotnet restore $project -r $Runtime
+}
+
+Write-Host "Publishing $Runtime ($Configuration, self-contained=$selfContainedValue)..."
+Remove-Item -Recurse -Force $packageDir, $publishDir, $archive, $checksum -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force $packageDir, $publishDir, $docDir | Out-Null
+
+$publishArgs = @(
+    $project,
+    "-c", $Configuration,
+    "-r", $Runtime,
+    "--self-contained", $selfContainedValue,
+    "-o", $publishDir,
+    "--no-restore",
+    "-p:UseSharedCompilation=false",
+    "-m:1"
+)
+
+dotnet publish @publishArgs
+
+Copy-Item -Path (Join-Path $publishDir "*") -Destination $packageDir -Recurse -Force
+Copy-Item (Join-Path $root "README.md") (Join-Path $docDir "README.md") -Force
+Copy-Item (Join-Path $root "LICENSE.md") (Join-Path $docDir "LICENSE.md") -Force
+Copy-Item (Join-Path $root "NOTICE.md") (Join-Path $docDir "NOTICE.md") -Force
+Copy-Item (Join-Path $root "COMMERCIAL.md") (Join-Path $docDir "COMMERCIAL.md") -Force
+Get-ChildItem (Join-Path $root "docs") -Filter "aether-branding.*" -File -ErrorAction SilentlyContinue |
+    Copy-Item -Destination $docDir -Force
+Copy-Item (Join-Path $root "src/Aether.Desktop/Assets/aether.ico") (Join-Path $packageDir "aether.ico") -Force
+Copy-Item (Join-Path $root "src/Aether.Desktop/Assets/aether-app.png") (Join-Path $packageDir "aether-app.png") -Force
+Copy-Item (Join-Path $root "src/Aether.Desktop/Assets/aether-tray.png") (Join-Path $packageDir "aether-tray.png") -Force
+Copy-Item (Join-Path $root "src/Aether.Desktop/Assets/aether-tray-dark.png") (Join-Path $packageDir "aether-tray-dark.png") -Force
+Copy-Item (Join-Path $root "src/Aether.Desktop/Assets/aether-tray-light.png") (Join-Path $packageDir "aether-tray-light.png") -Force
+
+@'
+@echo off
+setlocal
+cd /d "%~dp0"
+start "" "%~dp0Aether.Desktop.exe"
+'@ | Set-Content -NoNewline -Encoding ASCII (Join-Path $packageDir "Launch-Aether.cmd")
+
+Remove-Item -Recurse -Force $publishDir
+
+Write-Host "Creating $archive..."
+Compress-Archive -Path $packageDir -DestinationPath $archive -Force
+
+$hash = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+$archiveName = Split-Path -Leaf $archive
+"$hash  $archiveName" | Set-Content -NoNewline -Encoding ASCII $checksum
+
+Write-Host "Package ready:"
+Write-Host "  $packageDir"
+Write-Host "  $archive"
+Write-Host "  $checksum"
