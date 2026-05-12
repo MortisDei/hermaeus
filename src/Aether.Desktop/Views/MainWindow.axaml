@@ -42,6 +42,12 @@
                                       Width="17" Height="17" />
                         </Button>
 
+                        <Button Classes="icon-btn" Command="{Binding ShowAgentPanelCommand}"
+                                ToolTip.Tip="Agent — local task workbench">
+                            <PathIcon Data="M12 2 4 5v6c0 5.55 3.84 9.74 8 11 4.16-1.26 8-5.45 8-11V5l-8-3zm0 2.18L18 6.43V11c0 4.24-2.55 7.51-6 8.82C8.55 18.51 6 15.24 6 11V6.43l6-2.25zM11 7h2v5h-2V7zm0 7h2v2h-2v-2z"
+                                      Width="17" Height="17" />
+                        </Button>
+
                         <Button Classes="icon-btn" Command="{Binding ShowRagPanelCommand}"
                                 ToolTip.Tip="RAG — ask your documents">
                             <PathIcon Data="M12 3L1 9l11 6 9-4.91V17h2V9L12 3zM5 13.18v4L12 21l7-3.82v-4L12 17l-7-3.82z"
@@ -116,6 +122,9 @@
                 <ContentControl.DataTemplates>
                     <DataTemplate DataType="vm:ChatViewModel">
                         <views:ChatView />
+                    </DataTemplate>
+                    <DataTemplate DataType="vm:AgentViewModel">
+                        <views:AgentView />
                     </DataTemplate>
                     <DataTemplate DataType="vm:RagViewModel">
                         <views:RagView />

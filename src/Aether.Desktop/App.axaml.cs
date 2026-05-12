@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using Aether.Agent.Services;
 using Aether.Core.Services;
 using Aether.Desktop.Views;
 using Aether.Rag;
@@ -59,6 +60,7 @@ public partial class App : Application
             await sp.GetRequiredService<ISettingsService>().LoadAsync();
             await sp.GetRequiredService<IConversationStore>().InitializeAsync();
             await sp.GetRequiredService<SqliteRagStore>().InitializeAsync();
+            await sp.GetRequiredService<IAgentTaskStateStore>().InitializeAsync();
             await sp.GetRequiredService<IBenchmarkService>().InitializeAsync();
             sp.GetRequiredService<IAutomationScheduler>().Start();
             await vm.InitializeAsync();
@@ -94,7 +96,13 @@ public partial class App : Application
         s.AddSingleton<RagPipeline>();
         s.AddSingleton<RagQueryService>();
         s.AddSingleton<RagEvalService>();
+        s.AddSingleton<IAgentTaskStateStore, FileAgentTaskStateStore>();
+        s.AddSingleton<IAgentWorkspaceTools, AgentWorkspaceTools>();
+        s.AddSingleton<IAgentSafetyGate, AgentSafetyGate>();
+        s.AddSingleton<IAgentContextBuilder, AgentContextBuilder>();
+        s.AddSingleton<IAgentService, AgentService>();
         s.AddSingleton<ChatViewModel>();
+        s.AddSingleton<AgentViewModel>();
         s.AddSingleton<SettingsViewModel>();
         s.AddSingleton<ModelManagementViewModel>();
         s.AddSingleton<RagViewModel>();

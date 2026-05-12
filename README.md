@@ -3,7 +3,8 @@
 Version: `0.8.5-alpha`
 
 A native, local-first Avalonia desktop AI workspace for `llama.cpp`, Ollama,
-OpenAI-compatible APIs, Oghma-grade RAG, and XTTS voice playback.
+OpenAI-compatible APIs, Oghma-grade RAG, agentic task work, and XTTS voice
+playback.
 
 > Built with Avalonia UI + .NET 10. Linux Wayland/X11 and Windows.
 
@@ -16,6 +17,8 @@ OpenAI-compatible APIs, Oghma-grade RAG, and XTTS voice playback.
 - Native markdown rendering with virtualized long chats.
 - Oghma-grade RAG: hybrid retrieval, ONNX reranking, parent-child context,
   citations, traces, evals.
+- Aether Agent: read-first task workbench with explicit state, compact context,
+  retrieval, safety gates, and local logs.
 - XTTS v2 readback with memory-only generated audio.
 
 ## Features
@@ -29,6 +32,8 @@ OpenAI-compatible APIs, Oghma-grade RAG, and XTTS voice playback.
 - RAG citations with `[1] [2] [3] +N`, source inspector, copy source/path.
 - RAG query traces, ONNX cross-encoder reranking, and native eval harness for
   `gold.json` / `stress.json`.
+- Experimental Agent workspace with one-goal task state, retrieved context,
+  read-only file tools, proposed next actions, local logs, and JSONL traces.
 - Model benchmarks with saved run history, deterministic quality checks,
   rankings, reruns, and Markdown/JSON/CSV export.
 - System overview for app version, CPU, RAM, storage, databases, managed
@@ -88,6 +93,25 @@ not crawl links or use a remote scraping service.
 Eval files can be either an array of cases or an object with `cases` /
 `questions`. Cases support `question`, `expected_sources`, `answer_keywords`,
 and `should_refuse`.
+
+## Agent Workbench
+
+The **Agent** workspace is an experimental local-first task runner inspired by
+the Aether Agent design pack. It works one goal at a time and keeps state
+outside the model instead of relying on whole-chat-history context.
+
+The current `0.8.5-alpha` slice is read-first:
+
+- builds explicit task state and compact context packs
+- searches and reads bounded text files under a selected workspace root
+- can include relevant context from an optional RAG dataset
+- records `task_state.json`, `agent.log`, and `agent.trace.jsonl` under the
+  Aether data root
+- classifies risky actions before execution
+
+Writes, command execution, installs, network actions, commit, and push are not
+executed by this alpha agent. They are surfaced as approval-required or blocked
+next actions for a later automation slice.
 
 ## XTTS
 
@@ -210,6 +234,7 @@ be made self-contained with `./build.sh --self-contained` or
 
 ```text
 src/Aether.Core/        Models and service interfaces
+src/Aether.Agent/       Agent task state, context packs, safety gates, tools
 src/Aether.Services/    Runtime, storage, settings, backup, voice services
 src/Aether.Rag/         Ingest, retrieval, citations, traces, eval harness
 src/Aether.ViewModels/  MVVM state and commands

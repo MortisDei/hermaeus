@@ -2,6 +2,8 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Aether.Core", "src\Aether.Core\Aether.Core.csproj", "{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Aether.Agent", "src\Aether.Agent\Aether.Agent.csproj", "{2CE63A89-51EA-46B9-B869-B8BD316A40F6}"
+EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Aether.Services", "src\Aether.Services\Aether.Services.csproj", "{B2C3D4E5-F6A7-8901-BCDE-F01234567891}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Aether.ViewModels", "src\Aether.ViewModels\Aether.ViewModels.csproj", "{C3D4E5F6-A7B8-9012-CDEF-012345678902}"
@@ -22,6 +24,10 @@ Global
         {A1B2C3D4-E5F6-7890-ABCD-EF1234567890}.Debug|Any CPU.Build.0 = Debug|Any CPU
         {A1B2C3D4-E5F6-7890-ABCD-EF1234567890}.Release|Any CPU.ActiveCfg = Release|Any CPU
         {A1B2C3D4-E5F6-7890-ABCD-EF1234567890}.Release|Any CPU.Build.0 = Release|Any CPU
+        {2CE63A89-51EA-46B9-B869-B8BD316A40F6}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+        {2CE63A89-51EA-46B9-B869-B8BD316A40F6}.Debug|Any CPU.Build.0 = Debug|Any CPU
+        {2CE63A89-51EA-46B9-B869-B8BD316A40F6}.Release|Any CPU.ActiveCfg = Release|Any CPU
+        {2CE63A89-51EA-46B9-B869-B8BD316A40F6}.Release|Any CPU.Build.0 = Release|Any CPU
         {B2C3D4E5-F6A7-8901-BCDE-F01234567891}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
         {B2C3D4E5-F6A7-8901-BCDE-F01234567891}.Debug|Any CPU.Build.0 = Debug|Any CPU
         {B2C3D4E5-F6A7-8901-BCDE-F01234567891}.Release|Any CPU.ActiveCfg = Release|Any CPU

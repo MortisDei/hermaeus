@@ -1,5 +1,8 @@
 using Aether.Core.Models;
 using Aether.Core.Services;
+using Aether.Agent.Models;
+using Aether.Agent.Services;
+using Aether.Rag;
 using Aether.Rag.Models;
 using Aether.Rag.Pipeline;
 using Aether.Rag.Retrieval;
@@ -27,6 +30,11 @@ var tests = new (string Name, Func<Task> Run)[]
     ("RAG web loader stays disabled by default", RagWebLoaderDisabledByDefault),
     ("RAG web loader parses explicit opt-in URLs", RagWebLoaderParsesOptInUrls),
     ("RAG web ingest strips HTML and stores chunks", RagWebIngestStripsHtmlAndStoresChunks),
+    ("agent task state serializes schema fields", AgentTaskStateSerializesSchemaFields),
+    ("agent workspace tools enforce path safety", AgentWorkspaceToolsEnforcePathSafety),
+    ("agent context pack stays bounded", AgentContextPackStaysBounded),
+    ("agent tool policy gates risky actions", AgentToolPolicyGatesRiskyActions),
+    ("agent loop writes state log and trace", AgentLoopWritesStateLogAndTrace),
     ("runtime profile normalization and unsafe host validation", RuntimeProfileValidation),
     ("settings save migrates OpenAI key to secret reference", SettingsSaveMigratesOpenAiKey),
     ("settings save preserves existing secret reference", SettingsSavePreservesExistingSecretReference),
@@ -432,6 +440,152 @@ static async Task RagWebIngestStripsHtmlAndStoresChunks()
     Equal(chunks.Count, dataset.ChunkCount, "dataset chunk count should match stored chunks");
 }
 
+static async Task AgentTaskStateSerializesSchemaFields()
+{
+    using var temp = new TempDir();
+    var settings = NewSettings(temp);
+    settings.Settings.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    var state = new AgentTaskState
+    {
+        TaskId = "task-1",
+        Goal = "Check project",
+        Status = AgentTaskStatus.Running,
+        ActiveStep = "Inspect",
+        Constraints = ["local-first"],
+        CompletedSteps = ["created"],
+        PendingSteps = ["inspect"],
+        Summary = "Ready"
+    };
+
+    await store.SaveAsync(state);
+    var json = await File.ReadAllTextAsync(Path.Combine(store.GetTaskDirectory("task-1"), "task_state.json"));
+    True(json.Contains("\"task_id\"", StringComparison.Ordinal), "task state should use schema task_id field");
+    True(json.Contains("\"status\": \"running\"", StringComparison.Ordinal), "task state should serialize schema enum values");
+    True(json.Contains("\"completed_steps\"", StringComparison.Ordinal), "task state should use schema completed_steps field");
+    True(json.Contains("\"approval_history\"", StringComparison.Ordinal), "task state should include approval history");
+    var loaded = await store.LoadAsync("task-1");
+    Equal("Check project", loaded?.Goal, "stored task state should reload");
+}
+
+static Task AgentWorkspaceToolsEnforcePathSafety()
+{
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    var src = Path.Combine(root, "src");
+    var git = Path.Combine(root, ".git");
+    var bin = Path.Combine(root, "bin");
+    Directory.CreateDirectory(src);
+    Directory.CreateDirectory(git);
+    Directory.CreateDirectory(bin);
+    File.WriteAllText(Path.Combine(src, "note.txt"), "needle visible text");
+    File.WriteAllText(Path.Combine(git, "config"), "needle hidden");
+    File.WriteAllText(Path.Combine(bin, "generated.txt"), "needle hidden");
+    File.WriteAllText(Path.Combine(src, "large.txt"), new string('x', 200));
+
+    var tools = new AgentWorkspaceTools();
+    var options = new AgentWorkspaceOptions(root, MaxFileBytes: 64, MaxSearchResults: 10);
+    var listed = tools.ListFiles(options);
+    True(listed.Contains("src/note.txt"), "safe text file should be listed");
+    False(listed.Any(f => f.Contains(".git", StringComparison.Ordinal)), ".git files should be skipped");
+    False(listed.Any(f => f.Contains("bin/", StringComparison.Ordinal)), "bin files should be skipped");
+    False(listed.Contains("src/large.txt"), "oversized files should be skipped");
+
+    var result = tools.SearchFiles(options, "needle");
+    Equal(1, result.Count, "search should only return safe matching files");
+    Equal("src/note.txt", result[0].RelativePath, "search should return relative safe path");
+    var read = tools.ReadFile(options, "src/note.txt");
+    True(read.Content.Contains("needle", StringComparison.Ordinal), "read should return file content");
+    var summary = tools.SummarizeFile(options, "src/note.txt");
+    True(summary.Summary.Contains("needle", StringComparison.Ordinal), "summary should include bounded readable content");
+    Throws<InvalidOperationException>(() => tools.ReadFile(options, "../outside.txt"));
+    Throws<InvalidOperationException>(() => tools.ReadFile(options, Path.Combine(root, "src", "note.txt")));
+    Throws<InvalidOperationException>(() => tools.ReadFile(options, ".git/config"));
+    return Task.CompletedTask;
+}
+
+static async Task AgentContextPackStaysBounded()
+{
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    File.WriteAllText(Path.Combine(root, "alpha.txt"), "agent alpha context");
+    File.WriteAllText(Path.Combine(root, "beta.txt"), "agent beta context");
+    var settings = NewSettings(temp);
+    settings.Settings.DataRootDirectory = temp.PathFor("data");
+    var ragStore = new SqliteRagStore(settings);
+    var rag = new RagQueryService(ragStore, new FakeEmbeddingService(), new FakeLlm(), settings, new NoOpReranker());
+    var builder = new AgentContextBuilder(new AgentWorkspaceTools(), rag, ragStore);
+    var state = new AgentTaskState
+    {
+        Goal = "Find alpha",
+        ActiveStep = "Inspect",
+        Constraints = ["local-first"],
+        Summary = "summary",
+        ToolResults =
+        [
+            new AgentToolResult { Tool = "one", ResultSummary = "1" },
+            new AgentToolResult { Tool = "two", ResultSummary = "2" },
+            new AgentToolResult { Tool = "three", ResultSummary = "3" },
+            new AgentToolResult { Tool = "four", ResultSummary = "4" },
+            new AgentToolResult { Tool = "five", ResultSummary = "5" },
+            new AgentToolResult { Tool = "six", ResultSummary = "6" }
+        ]
+    };
+
+    var pack = await builder.BuildAsync(state, new AgentWorkspaceOptions(root, MaxContextItems: 1));
+    Equal("Find alpha", pack.CurrentGoal, "context pack should include current goal");
+    True(pack.RetrievedFiles.Count <= 1, "context pack should honor context item bound");
+    Equal(5, pack.ToolResults.Count, "context pack should keep latest five tool results");
+    Equal("two", pack.ToolResults[0].Tool, "context pack should drop oldest tool results");
+}
+
+static Task AgentToolPolicyGatesRiskyActions()
+{
+    var gate = new AgentSafetyGate();
+    var read = gate.Evaluate("read_file");
+    Equal(AgentToolDisposition.Allowed, read.Disposition, "read-only tools should be allowed");
+    Equal(AgentRiskLevel.Low, read.RiskLevel, "read-only tools should be low risk");
+
+    var write = gate.Evaluate("apply_patch");
+    Equal(AgentToolDisposition.RequiresApproval, write.Disposition, "write-like tools should require approval");
+    Equal(AgentRiskLevel.Medium, write.RiskLevel, "write-like tools should be medium risk");
+
+    var push = gate.Evaluate("push");
+    Equal(AgentToolDisposition.RequiresApproval, push.Disposition, "push should require explicit approval");
+    Equal(AgentRiskLevel.High, push.RiskLevel, "push should be high risk");
+
+    var unknown = gate.Evaluate("desktop_control");
+    Equal(AgentToolDisposition.Blocked, unknown.Disposition, "unknown tools should be blocked");
+    return Task.CompletedTask;
+}
+
+static async Task AgentLoopWritesStateLogAndTrace()
+{
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    File.WriteAllText(Path.Combine(root, "README.md"), "agent docs");
+    var settings = NewSettings(temp);
+    settings.Settings.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new FakeAgentLlm());
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-agent");
+
+    var state = await service.CreateTaskAsync("Review docs", options);
+    var step = await service.RunStepAsync(state.TaskId, options);
+
+    Equal(AgentTaskStatus.WaitingForUser, step.State.Status, "approval-required tool should pause task");
+    True(step.State.CompletedSteps.Contains("inspected context"), "state update should record completed step");
+    True(step.State.ToolResults.Any(t => t.Tool == "safety_gate"), "safety gate result should be recorded");
+    True(File.Exists(Path.Combine(store.GetTaskDirectory(state.TaskId), "agent.log")), "agent log should be written");
+    True(File.Exists(Path.Combine(store.GetTaskDirectory(state.TaskId), "agent.trace.jsonl")), "agent trace should be written");
+
+    await service.AppendApprovalAsync(state.TaskId, "draft_patch", approved: false);
+    var reloaded = await store.LoadAsync(state.TaskId);
+    True(reloaded?.ApprovalHistory.Count == 1, "approval history should persist");
+}
+
 static async Task RuntimeProfileValidation()
 {
     using var temp = new TempDir();
@@ -582,6 +736,20 @@ static async Task ThrowsAsync<T>(Func<Task> action) where T : Exception
     throw new InvalidOperationException($"Expected {typeof(T).Name}.");
 }
 
+static void Throws<T>(Action action) where T : Exception
+{
+    try
+    {
+        action();
+    }
+    catch (T)
+    {
+        return;
+    }
+
+    throw new InvalidOperationException($"Expected {typeof(T).Name}.");
+}
+
 static void Equal<T>(T expected, T actual, string message)
 {
     if (!EqualityComparer<T>.Default.Equals(expected, actual))
@@ -685,6 +853,63 @@ sealed class FakeSystemInfo : ISystemInfoService
         DataRootTotalBytes = 2048,
         Components = [new ComponentStatus { Name = "Test", Status = "OK" }]
     });
+}
+
+sealed class FakeAgentContextBuilder : IAgentContextBuilder
+{
+    public Task<AgentContextPack> BuildAsync(AgentTaskState state, AgentWorkspaceOptions options, CancellationToken ct = default) =>
+        Task.FromResult(new AgentContextPack
+        {
+            CurrentGoal = state.Goal,
+            ActiveStep = state.ActiveStep,
+            Constraints = state.Constraints,
+            TaskStateSummary = state.Summary,
+            RetrievedFiles =
+            [
+                new AgentRetrievedItem("workspace", "README.md", "agent docs", 0, DateTime.UtcNow)
+            ]
+        });
+}
+
+sealed class FakeAgentLlm : ILlmService
+{
+    public string ProviderName => "FakeAgent";
+    public bool IsConfigured => true;
+    public Task<List<LlmModel>> GetModelsAsync(CancellationToken ct = default) =>
+        Task.FromResult(new List<LlmModel> { new() { Id = "fake-agent", Name = "Fake Agent", Provider = "Test" } });
+
+    public async IAsyncEnumerable<string> StreamChatAsync(
+        string modelId,
+        IReadOnlyList<ChatMessage> messages,
+        string? systemPrompt = null,
+        double temperature = 0.7,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        await Task.Delay(1, ct);
+        yield return """
+            {
+              "thought_summary": "Read the available context and found the docs.",
+              "current_step": "Wait for approval before any write.",
+              "next_action": {
+                "type": "tool",
+                "tool_name": "draft_patch",
+                "arguments": { "path": "README.md" },
+                "requires_approval": true,
+                "risk_level": "medium"
+              },
+              "state_update": {
+                "completed": ["inspected context"],
+                "pending": ["draft patch"],
+                "new_facts": ["workspace has README"],
+                "blockers": []
+              },
+              "user_message": "I found the relevant docs and can draft a patch for review."
+            }
+            """;
+    }
+
+    public Task PullModelAsync(string modelId, IProgress<string>? progress = null, CancellationToken ct = default) => Task.CompletedTask;
+    public Task DeleteModelAsync(string modelId, CancellationToken ct = default) => Task.CompletedTask;
 }
 
 sealed class FakeEmbeddingService : IEmbeddingService

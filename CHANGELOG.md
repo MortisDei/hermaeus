@@ -14,6 +14,11 @@ Pre-1.0 versions may still change internal APIs and storage details.
 - Web ingest HTML text extraction with script/style stripping, small page
   limits, URL deduplication, and regression coverage for the default-disabled
   posture.
+- Experimental Aether Agent workbench with explicit task state, compact context
+  packs, local task logs/traces, read-only workspace tools, safety gating, and
+  optional RAG-backed retrieval.
+- Agent regression coverage for task-state serialization, workspace path
+  safety, context packing, tool policy, and the fake-model agent loop.
 
 ## [0.8.4-alpha] - 2026-05-12
 

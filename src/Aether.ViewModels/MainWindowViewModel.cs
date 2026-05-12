@@ -13,6 +13,7 @@ public partial class MainWindowViewModel : ObservableObject
     private bool _refreshingFolderFilters;
 
     public ChatViewModel            Chat     { get; }
+    public AgentViewModel           Agent    { get; }
     public SettingsViewModel        Settings { get; }
     public ModelManagementViewModel Models   { get; }
     public RagViewModel             Rag      { get; }
@@ -34,6 +35,7 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty] private bool   _showQuickChat;
 
     public bool ShowChat     => ActivePanel == "chat";
+    public bool ShowAgent    => ActivePanel == "agent";
     public bool ShowSettings => ActivePanel == "settings";
     public bool ShowModels   => ActivePanel == "models";
     public bool ShowRag      => ActivePanel == "rag";
@@ -44,6 +46,7 @@ public partial class MainWindowViewModel : ObservableObject
     public object ActiveViewModel => ActivePanel switch
     {
         "settings" => Settings,
+        "agent"    => Agent,
         "models"   => Models,
         "rag"      => Rag,
         "services" => Services,
@@ -56,6 +59,7 @@ public partial class MainWindowViewModel : ObservableObject
     public MainWindowViewModel(
         IConversationStore store,
         ChatViewModel chat,
+        AgentViewModel agent,
         SettingsViewModel settings,
         ModelManagementViewModel models,
         RagViewModel rag,
@@ -67,7 +71,7 @@ public partial class MainWindowViewModel : ObservableObject
     {
         _sync = SynchronizationContext.Current;
         _toasts = toasts;
-        _store = store; Chat = chat; Settings = settings;
+        _store = store; Chat = chat; Agent = agent; Settings = settings;
         Models = models; Rag = rag; Services = services; Tasks = tasks;
         Benchmarks = benchmarks; SystemOverview = systemOverview;
         Chat.ConversationSaved += OnConversationSaved;
@@ -83,6 +87,7 @@ public partial class MainWindowViewModel : ObservableObject
             await LoadConversationsAsync();
             ShowQuickChat = Settings.ShowQuickChat;
             await Rag.LoadDatasetsAsync();
+            await Agent.LoadAsync();
             await Services.AutoStartAllAsync();
             await Chat.LoadModelsAsync();
         }
@@ -253,6 +258,11 @@ public partial class MainWindowViewModel : ObservableObject
         ActivePanel = "chat";
         await Chat.LoadModelsAsync();
     }
+    [RelayCommand] private async Task ShowAgentPanelAsync()
+    {
+        ActivePanel = "agent";
+        await Agent.LoadAsync();
+    }
     [RelayCommand] private void ShowRagPanel()         => ActivePanel = "rag";
     [RelayCommand] private void ShowModelsPanel()      { ActivePanel = "models"; _ = Models.RefreshCommand.ExecuteAsync(null); }
     [RelayCommand] private void ShowServicesPanel()    => ActivePanel = "services";
@@ -297,6 +307,7 @@ public partial class MainWindowViewModel : ObservableObject
     partial void OnActivePanelChanged(string value)
     {
         OnPropertyChanged(nameof(ShowChat));
+        OnPropertyChanged(nameof(ShowAgent));
         OnPropertyChanged(nameof(ShowSettings));
         OnPropertyChanged(nameof(ShowModels));
         OnPropertyChanged(nameof(ShowRag));

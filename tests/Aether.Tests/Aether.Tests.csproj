@@ -8,6 +8,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Aether.Core/Aether.Core.csproj" />
+    <ProjectReference Include="../../src/Aether.Agent/Aether.Agent.csproj" />
     <ProjectReference Include="../../src/Aether.Rag/Aether.Rag.csproj" />
     <ProjectReference Include="../../src/Aether.Services/Aether.Services.csproj" />
     <ProjectReference Include="../../src/Aether.ViewModels/Aether.ViewModels.csproj" />

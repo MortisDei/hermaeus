@@ -1,0 +1,166 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Aether.ViewModels"
+             x:Class="Aether.Desktop.Views.AgentView"
+             x:DataType="vm:AgentViewModel">
+    <Grid RowDefinitions="Auto,*">
+        <Border Grid.Row="0" Padding="12,8"
+                BorderThickness="0,0,0,1"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="8">
+                <TextBlock Grid.Column="0"
+                           Text="Agent"
+                           FontSize="14"
+                           FontWeight="SemiBold"
+                           VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1"
+                           Text="{Binding CurrentStep}"
+                           FontSize="12"
+                           Opacity="0.5"
+                           VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis" />
+                <Button Grid.Column="2"
+                        Command="{Binding RunStepCommand}"
+                        Content="Run Step"
+                        Padding="12,6"
+                        CornerRadius="6" />
+                <Button Grid.Column="3"
+                        Command="{Binding StopCommand}"
+                        Content="Stop"
+                        Padding="12,6"
+                        CornerRadius="6" />
+            </Grid>
+        </Border>
+
+        <ScrollViewer Grid.Row="1" Padding="24,16">
+            <StackPanel Spacing="16">
+                <Grid ColumnDefinitions="110,*" RowDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="12" RowSpacing="8">
+                    <TextBlock Grid.Row="0" Grid.Column="0"
+                               Text="Goal"
+                               VerticalAlignment="Top"
+                               Opacity="0.6" />
+                    <TextBox Grid.Row="0" Grid.Column="1"
+                             Text="{Binding GoalText}"
+                             Watermark="Describe the task for Aether Agent..."
+                             AcceptsReturn="True"
+                             MinHeight="82"
+                             TextWrapping="Wrap"
+                             IsEnabled="{Binding !IsRunning}" />
+
+                    <TextBlock Grid.Row="1" Grid.Column="0"
+                               Text="Workspace"
+                               VerticalAlignment="Center"
+                               Opacity="0.6" />
+                    <TextBox Grid.Row="1" Grid.Column="1"
+                             Text="{Binding WorkspaceRoot}"
+                             Watermark="/path/to/project"
+                             IsEnabled="{Binding !IsRunning}" />
+
+                    <TextBlock Grid.Row="2" Grid.Column="0"
+                               Text="Model"
+                               VerticalAlignment="Center"
+                               Opacity="0.6" />
+                    <ComboBox Grid.Row="2" Grid.Column="1"
+                              ItemsSource="{Binding AvailableModels}"
+                              SelectedItem="{Binding SelectedModel}"
+                              IsEnabled="{Binding !IsRunning}"
+                              MaxWidth="360"
+                              HorizontalAlignment="Left">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding Name}" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+
+                    <TextBlock Grid.Row="3" Grid.Column="0"
+                               Text="RAG dataset"
+                               VerticalAlignment="Center"
+                               Opacity="0.6" />
+                    <ComboBox Grid.Row="3" Grid.Column="1"
+                              ItemsSource="{Binding Datasets}"
+                              SelectedItem="{Binding SelectedDataset}"
+                              IsEnabled="{Binding !IsRunning}"
+                              MaxWidth="360"
+                              HorizontalAlignment="Left"
+                              PlaceholderText="Optional retrieval dataset">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding Name}" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                </Grid>
+
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button Command="{Binding StartCommand}"
+                            Content="Start Agent"
+                            Padding="14,8"
+                            CornerRadius="6" />
+                    <TextBlock Text="{Binding StatusMessage}"
+                               VerticalAlignment="Center"
+                               FontSize="12"
+                               Opacity="0.75"
+                               TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+
+                <Expander Header="Retrieved Context" IsExpanded="True">
+                    <ItemsControl ItemsSource="{Binding RetrievedContext}" Margin="0,8,0,0">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:AgentContextItemViewModel">
+                                <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="6"
+                                        Padding="10"
+                                        Margin="0,0,0,6">
+                                    <StackPanel Spacing="3">
+                                        <Grid ColumnDefinitions="*,Auto">
+                                            <TextBlock Grid.Column="0"
+                                                       Text="{Binding Title}"
+                                                       FontWeight="SemiBold"
+                                                       FontSize="13" />
+                                            <TextBlock Grid.Column="1"
+                                                       Text="{Binding Source}"
+                                                       FontSize="11"
+                                                       Opacity="0.5" />
+                                        </Grid>
+                                        <TextBlock Text="{Binding Content}"
+                                                   TextWrapping="Wrap"
+                                                   FontSize="12"
+                                                   Opacity="0.65"
+                                                   MaxHeight="92" />
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </Expander>
+
+                <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+                    <Expander Grid.Column="0" Header="Task State" IsExpanded="True">
+                        <SelectableTextBlock Text="{Binding TaskStatePreview}"
+                                             FontFamily="Consolas,monospace"
+                                             FontSize="11"
+                                             TextWrapping="Wrap"
+                                             Margin="0,8,0,0" />
+                    </Expander>
+                    <Expander Grid.Column="1" Header="Next Action" IsExpanded="True">
+                        <SelectableTextBlock Text="{Binding NextActionPreview}"
+                                             FontFamily="Consolas,monospace"
+                                             FontSize="11"
+                                             TextWrapping="Wrap"
+                                             Margin="0,8,0,0" />
+                    </Expander>
+                </Grid>
+
+                <Expander Header="Agent Log">
+                    <SelectableTextBlock Text="{Binding LogPreview}"
+                                         FontFamily="Consolas,monospace"
+                                         FontSize="11"
+                                         TextWrapping="Wrap"
+                                         Margin="0,8,0,0" />
+                </Expander>
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</UserControl>

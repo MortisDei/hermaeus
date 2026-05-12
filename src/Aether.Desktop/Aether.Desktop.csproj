@@ -21,6 +21,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Aether.Core/Aether.Core.csproj" />
+    <ProjectReference Include="../Aether.Agent/Aether.Agent.csproj" />
     <ProjectReference Include="../Aether.Services/Aether.Services.csproj" />
     <ProjectReference Include="../Aether.ViewModels/Aether.ViewModels.csproj" />
     <ProjectReference Include="../Aether.Rag/Aether.Rag.csproj" />
