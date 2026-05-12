@@ -214,6 +214,8 @@ public partial class SettingsView : UserControl
         var available = Math.Max(320, Bounds.Width - 96);
         var cardWidth = available < 900 ? available : Math.Min(464, (available - 20) / 2);
         foreach (var child in SettingsCards.Children.OfType<Border>())
-            child.Width = cardWidth;
+            child.Width = Grid.GetColumnSpan(child) > 1
+                ? available
+                : cardWidth;
     }
 }

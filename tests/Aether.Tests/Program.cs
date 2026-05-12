@@ -12,6 +12,7 @@ using Aether.Services;
 using Aether.Services.ProcessManagement;
 using Aether.ViewModels;
 using System.Net;
+using System.Security.Cryptography;
 
 var tests = new (string Name, Func<Task> Run)[]
 {
@@ -28,6 +29,11 @@ var tests = new (string Name, Func<Task> Run)[]
     ("local AI setup script handling is approval gated", LocalAiSetupScriptHandlingIsApprovalGated),
     ("local AI setup command previews stay shell-free", LocalAiSetupCommandPreviewsStayShellFree),
     ("XTTS API template has required endpoints", XttsApiTemplateHasRequiredEndpoints),
+    ("trust scan classifies inside AI root as low risk", TrustScanInsideAiRootIsLowRisk),
+    ("trust scan warns outside AI root but allows", TrustScanOutsideAiRootWarns),
+    ("trust scan reports missing executable", TrustScanReportsMissingExecutable),
+    ("trust scan keeps unset AI root neutral", TrustScanUnsetAiRootIsNeutral),
+    ("trust scan detects network-facing extra args", TrustScanDetectsNetworkExtraArgs),
     ("source strings avoid long dashes", SourceStringsAvoidLongDashes),
     ("settings apply local ai assets persists paths", SettingsApplyLocalAiAssetsPersistsPaths),
     ("secret store falls back without plaintext", SecretStoreFallbackWithoutPlaintext),
@@ -408,13 +414,109 @@ static Task XttsApiTemplateHasRequiredEndpoints()
     return Task.CompletedTask;
 }
 
+static async Task TrustScanInsideAiRootIsLowRisk()
+{
+    using var temp = new TempDir();
+    var root = temp.PathFor("AI");
+    var bin = Path.Combine(root, "runtimes", "llama-server");
+    var model = Path.Combine(root, "Models", "tiny.gguf");
+    Directory.CreateDirectory(Path.GetDirectoryName(bin)!);
+    Directory.CreateDirectory(Path.GetDirectoryName(model)!);
+    await File.WriteAllTextAsync(bin, "trusted");
+    await File.WriteAllTextAsync(model, "model");
+
+    var settings = new AppSettings { LocalAiAssetsRoot = root };
+    settings.ManagedServers.Clear();
+    settings.ManagedServers.Add(new ServerConfig { Name = "Chat", ExecutablePath = bin, ModelPath = model });
+
+    var report = await new TrustService().ScanAsync(settings);
+    var executable = report.Items.Single(i => i.Label == "Chat executable");
+    Equal(TrustItemStatus.Ready, executable.Status, "inside executable should be ready");
+    Equal(TrustRiskLevel.Low, executable.RiskLevel, "inside executable should be low risk");
+    Equal(true, executable.IsInsideAiRoot, "inside executable should be scoped to AI root");
+    Equal(ExpectedSha256("trusted"), executable.Sha256, "SHA256 should be stable");
+}
+
+static async Task TrustScanOutsideAiRootWarns()
+{
+    using var temp = new TempDir();
+    var root = temp.PathFor("AI");
+    var external = temp.PathFor("tools/llama-server");
+    Directory.CreateDirectory(root);
+    Directory.CreateDirectory(Path.GetDirectoryName(external)!);
+    await File.WriteAllTextAsync(external, "external");
+
+    var settings = new AppSettings { LocalAiAssetsRoot = root };
+    settings.ManagedServers.Clear();
+    settings.ManagedServers.Add(new ServerConfig { Name = "Chat", ExecutablePath = external, ModelPath = string.Empty });
+
+    var report = await new TrustService().ScanAsync(settings);
+    var executable = report.Items.Single(i => i.Label == "Chat executable");
+    Equal(TrustItemStatus.Warning, executable.Status, "outside executable should warn");
+    Equal(TrustRiskLevel.Medium, executable.RiskLevel, "outside executable should be medium risk");
+    Equal(false, executable.IsInsideAiRoot, "outside executable should report outside AI root");
+}
+
+static async Task TrustScanReportsMissingExecutable()
+{
+    using var temp = new TempDir();
+    var root = temp.PathFor("AI");
+    Directory.CreateDirectory(root);
+
+    var settings = new AppSettings { LocalAiAssetsRoot = root };
+    settings.ManagedServers.Clear();
+    settings.ManagedServers.Add(new ServerConfig { Name = "Chat", ExecutablePath = temp.PathFor("missing/llama-server"), ModelPath = string.Empty });
+
+    var report = await new TrustService().ScanAsync(settings);
+    var executable = report.Items.Single(i => i.Label == "Chat executable");
+    Equal(TrustItemStatus.Missing, executable.Status, "missing executable should be reported");
+    Equal(TrustRiskLevel.High, executable.RiskLevel, "missing executable should be high risk");
+}
+
+static async Task TrustScanUnsetAiRootIsNeutral()
+{
+    using var temp = new TempDir();
+    var executable = temp.PathFor("llama-server");
+    Directory.CreateDirectory(Path.GetDirectoryName(executable)!);
+    await File.WriteAllTextAsync(executable, "tool");
+
+    var settings = new AppSettings();
+    settings.ManagedServers.Clear();
+    settings.ManagedServers.Add(new ServerConfig { Name = "Chat", ExecutablePath = executable, ModelPath = string.Empty });
+
+    var report = await new TrustService().ScanAsync(settings);
+    var item = report.Items.Single(i => i.Label == "Chat executable");
+    Equal(TrustItemStatus.Ready, item.Status, "unset AI root should not warn for existing files");
+    Equal(null, item.IsInsideAiRoot, "unset AI root should have neutral scope");
+}
+
+static Task TrustScanDetectsNetworkExtraArgs()
+{
+    var warnings = new TrustService().AnalyzeServerExtraArgs(
+        new ServerConfig { Name = "Chat", ExtraArgs = "--host 0.0.0.0 --alias local" },
+        DateTime.UtcNow);
+
+    Equal(1, warnings.Count, "network-facing host should produce one warning");
+    Equal(TrustRiskLevel.High, warnings[0].RiskLevel, "network exposure should be high risk");
+    False(warnings[0].Target.Contains(';', StringComparison.Ordinal), "trust warnings should not synthesize shell separators");
+    return Task.CompletedTask;
+}
+
 static Task SourceStringsAvoidLongDashes()
 {
     var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../"));
     var src = Path.Combine(root, "src");
-    var offenders = Directory.EnumerateFiles(src, "*.*", SearchOption.AllDirectories)
+    var explicitDocs = new[]
+    {
+        Path.Combine(root, "README.md"),
+        Path.Combine(root, "CHANGELOG.md"),
+        Path.Combine(root, "docs", "security-review.md")
+    };
+    var files = Directory.EnumerateFiles(src, "*.*", SearchOption.AllDirectories)
         .Where(path => path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)
             || path.EndsWith(".axaml", StringComparison.OrdinalIgnoreCase))
+        .Concat(explicitDocs.Where(File.Exists));
+    var offenders = files
         .SelectMany(path => File.ReadLines(path).Select((line, index) => (path, line, index)))
         .Where(item => item.line.Contains('\u2014') || item.line.Contains('\u2013'))
         .Select(item => $"{item.path}:{item.index + 1}")
@@ -422,6 +524,9 @@ static Task SourceStringsAvoidLongDashes()
     Equal(0, offenders.Count, $"source should avoid em dash and en dash characters: {string.Join(", ", offenders)}");
     return Task.CompletedTask;
 }
+
+static string ExpectedSha256(string content) =>
+    Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(content))).ToLowerInvariant();
 
 static async Task SecretStoreFallbackWithoutPlaintext()
 {
@@ -869,7 +974,7 @@ static Task ServerProcessArgumentsAreSafe()
 static SettingsService NewSettings(TempDir temp) => new(temp.PathFor("settings/settings.json"));
 
 static SettingsViewModel NewSettingsViewModel(ISettingsService settings, ISecretStore secrets) =>
-    new(settings, new FakeTts(), new FakeToasts(), new BackupService(settings), secrets, new XttsProcessManager(), new LocalAiSetupService());
+    new(settings, new FakeTts(), new FakeToasts(), new BackupService(settings), secrets, new XttsProcessManager(), new LocalAiSetupService(), new TrustService());
 
 static async Task ThrowsAsync<T>(Func<Task> action) where T : Exception
 {

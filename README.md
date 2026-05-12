@@ -1,6 +1,6 @@
 # Aether
 
-Version: `0.8.5-alpha`
+Version: `0.8.6-alpha`
 
 A native, local-first Avalonia desktop AI workspace for `llama.cpp`, Ollama,
 OpenAI-compatible APIs, Oghma-grade RAG, agentic task work, and XTTS voice
@@ -45,6 +45,8 @@ playback.
 - Toast notifications throughout the app.
 - Configurable data root with migration, backup, restore, and conflict refusal.
 - Configurable local AI assets root for models, XTTS, venvs, and encoders.
+- Trust & Safety scan for configured local tools, hashes, AI-root scope, and
+  network exposure warnings.
 - OS-backed secret references and redacted process logs.
 - Data-safety test harness for migration, backup/restore, and redaction.
 
@@ -100,7 +102,7 @@ The **Agent** workspace is an experimental local-first task runner inspired by
 the Aether Agent design pack. It works one goal at a time and keeps state
 outside the model instead of relying on whole-chat-history context.
 
-The current `0.8.5-alpha` slice is read-first:
+The current Agent slice is read-first:
 
 - builds explicit task state and compact context packs
 - searches and reads bounded text files under a selected workspace root
@@ -157,6 +159,8 @@ Security hardening currently includes:
 
 - localhost binding for managed services
 - shell-free process launch via `ProcessStartInfo.ArgumentList`
+- Trust & Safety scan for configured executables, scripts, model paths, XTTS
+  paths, hashes, AI-root scope, runtime endpoints, and network-facing extra args
 - unsafe restore path checks
 - API-key and home-path redaction in visible server logs
 - OS credential-store integration for API keys where available:
@@ -256,6 +260,7 @@ docs/                   Security notes, RAG/eval docs, internal planning notes
 - Linux and Windows archive packaging is available; signed installers/update
   metadata remain future public-release hardening.
 - Security review and threat model refresh is complete for the current alpha;
-  remaining hardening items are tracked in [docs/security-review.md](docs/security-review.md).
+  Trust & Safety warnings are available and remaining hardening items are
+  tracked in [docs/security-review.md](docs/security-review.md).
 - Windows system-wide global hotkeys are available; Linux remains deferred until
   a reliable compositor registration API is available.

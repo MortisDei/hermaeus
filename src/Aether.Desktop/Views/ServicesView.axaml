@@ -188,12 +188,12 @@
                                     <TextBlock Grid.Row="0" Grid.Column="0"
                                                Text="Executable" VerticalAlignment="Center"
                                                Opacity="0.6" FontSize="13" />
-                                    <TextBox Grid.Row="0" Grid.Column="1"
-                                             Text="{Binding ExecutablePath}"
-                                             Watermark="llama-server  or  /full/path/llama-server"
-                                             FontSize="13" CornerRadius="6" Padding="10,6"
-                                             IsEnabled="{Binding CanEdit}"
-                                             ToolTip.Tip="{Binding ExecutablePath}" />
+                                        <TextBox Grid.Row="0" Grid.Column="1"
+                                                 Text="{Binding ExecutablePath}"
+                                                 Watermark="llama-server  or  /full/path/llama-server"
+                                                 FontSize="13" CornerRadius="6" Padding="10,6"
+                                                 IsEnabled="{Binding CanEdit}"
+                                                 ToolTip.Tip="Full path or PATH command for llama-server. Trust scan can hash local files and warn outside the AI root." />
                                     <Button Grid.Row="0" Grid.Column="2"
                                             Classes="icon-btn"
                                             Command="{Binding BrowseExecutableCommand}"
@@ -207,12 +207,12 @@
                                     <TextBlock Grid.Row="1" Grid.Column="0"
                                                Text="Model (.gguf)" VerticalAlignment="Center"
                                                Opacity="0.6" FontSize="13" />
-                                    <TextBox Grid.Row="1" Grid.Column="1"
-                                             Text="{Binding ModelPath}"
-                                             Watermark="/path/to/model.gguf"
-                                             FontSize="13" CornerRadius="6" Padding="10,6"
-                                             IsEnabled="{Binding CanEdit}"
-                                             ToolTip.Tip="{Binding ModelPath}" />
+                                        <TextBox Grid.Row="1" Grid.Column="1"
+                                                 Text="{Binding ModelPath}"
+                                                 Watermark="/path/to/model.gguf"
+                                                 FontSize="13" CornerRadius="6" Padding="10,6"
+                                                 IsEnabled="{Binding CanEdit}"
+                                                 ToolTip.Tip="GGUF model file or folder. Prefer model files under your configured AI assets root." />
                                     <Button Grid.Row="1" Grid.Column="2"
                                             Classes="icon-btn"
                                             Command="{Binding BrowseModelCommand}"
@@ -289,7 +289,8 @@
                                              Text="{Binding ExtraArgs}"
                                              Watermark="--flash-attn --mlock  etc."
                                              FontSize="13" CornerRadius="6" Padding="10,6"
-                                             IsEnabled="{Binding CanEdit}" />
+                                             IsEnabled="{Binding CanEdit}"
+                                             ToolTip.Tip="Extra llama-server arguments are passed without a shell. Network flags such as --host 0.0.0.0 produce a trust warning." />
 
                                 </Grid>
 
@@ -312,6 +313,11 @@
                                 <TextBlock IsVisible="{Binding AutoTuneStatus, Converter={x:Static views:NotEmptyConverter.Instance}}"
                                            Text="{Binding AutoTuneStatus}"
                                            FontSize="12" Opacity="0.7"
+                                           TextWrapping="Wrap" />
+                                <TextBlock IsVisible="{Binding ExtraArgsTrustWarning, Converter={x:Static views:NotEmptyConverter.Instance}}"
+                                           Text="{Binding ExtraArgsTrustWarning}"
+                                           FontSize="12"
+                                           Foreground="{DynamicResource SystemFillColorCautionBrush}"
                                            TextWrapping="Wrap" />
 
                                 <!-- ── Log panel ─────────────────────────── -->

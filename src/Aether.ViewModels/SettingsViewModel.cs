@@ -17,6 +17,7 @@ public partial class SettingsViewModel : ObservableObject
     private readonly ISecretStore _secrets;
     private readonly XttsProcessManager _xttsProcess;
     private readonly ILocalAiSetupService _localAiSetup;
+    private readonly ITrustService _trust;
     private readonly SynchronizationContext? _sync;
 
     [ObservableProperty] private string _llamaCppBaseUrl      = "http://localhost:8080";
@@ -64,12 +65,16 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private bool _localAiSetupBusy;
     [ObservableProperty] private string _localAiSetupLog = string.Empty;
     [ObservableProperty] private string _localAiSetupSummary = "Scan a local AI folder to see readiness.";
+    [ObservableProperty] private bool _trustScanBusy;
+    [ObservableProperty] private string _trustSummary = "Run a trust scan to review configured local tools.";
+    [ObservableProperty] private string _trustLastScanned = string.Empty;
 
     public string[] Themes { get; } = ["System", "Dark", "Light"];
     public string[] TtsDevices { get; } = ["cpu", "auto", "cuda"];
     public ObservableCollection<string> TtsVoices { get; } = ["default"];
     public ObservableCollection<LocalAiReadinessItem> LocalAiReadinessItems { get; } = [];
     public ObservableCollection<LocalAiSetupAction> LocalAiSetupActions { get; } = [];
+    public ObservableCollection<TrustItem> TrustItems { get; } = [];
     public Action? RequestDataRootPicker { get; set; }
     public Action? RequestLocalAiAssetsRootPicker { get; set; }
     public Action? RequestBackupDirectoryPicker { get; set; }
@@ -91,7 +96,8 @@ public partial class SettingsViewModel : ObservableObject
         IBackupService backups,
         ISecretStore secrets,
         XttsProcessManager xttsProcess,
-        ILocalAiSetupService localAiSetup)
+        ILocalAiSetupService localAiSetup,
+        ITrustService trust)
     {
         _svc = svc;
         _tts = tts;
@@ -100,6 +106,7 @@ public partial class SettingsViewModel : ObservableObject
         _secrets = secrets;
         _xttsProcess = xttsProcess;
         _localAiSetup = localAiSetup;
+        _trust = trust;
         _sync = SynchronizationContext.Current;
         _xttsProcess.StatusChanged += OnXttsStatusChanged;
         Reload();
@@ -395,6 +402,35 @@ public partial class SettingsViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private async Task RescanTrustAsync()
+    {
+        SyncSettingsForTrustScan();
+        TrustScanBusy = true;
+        try
+        {
+            var report = await _trust.ScanAsync(_svc.Settings);
+            TrustItems.Clear();
+            foreach (var item in report.Items)
+                TrustItems.Add(item);
+            TrustSummary = report.Summary;
+            TrustLastScanned = $"Last scan: {report.ScannedAt.ToLocalTime():g}";
+            if (report.WarningCount > 0 || report.MissingCount > 0)
+                _toasts.Show("Trust scan warnings", report.Summary, ToastKind.Warning, 7000);
+            else
+                _toasts.Show("Trust scan complete", report.Summary, ToastKind.Success, 5000);
+        }
+        catch (Exception ex)
+        {
+            SettingsError = ex.Message;
+            _toasts.Show("Trust scan failed", ex.Message, ToastKind.Error, 7000);
+        }
+        finally
+        {
+            TrustScanBusy = false;
+        }
+    }
+
+    [RelayCommand]
     private void BrowseTtsVoiceDirectory() => RequestTtsVoiceDirectoryPicker?.Invoke();
 
     [RelayCommand]
@@ -536,6 +572,17 @@ public partial class SettingsViewModel : ObservableObject
         s.TtsVoiceDirectory = TtsVoiceDirectory.Trim();
         s.RagRerankerModelPath = RagRerankerModelPath.Trim();
         await _svc.SaveAsync(s.DataRootDirectory);
+    }
+
+    private void SyncSettingsForTrustScan()
+    {
+        var s = _svc.Settings;
+        s.LocalAiAssetsRoot = LocalAiAssetsRoot.Trim();
+        s.TtsPythonPath = TtsPythonPath.Trim();
+        s.TtsScriptPath = TtsScriptPath.Trim();
+        s.TtsModelDirectory = TtsModelDirectory.Trim();
+        s.TtsOutputDirectory = TtsOutputDirectory.Trim();
+        s.TtsVoiceDirectory = TtsVoiceDirectory.Trim();
     }
 
     private void ApplySetupResult(LocalAiSetupAction action, LocalAiSetupResult result)

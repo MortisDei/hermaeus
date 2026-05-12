@@ -1,6 +1,6 @@
 # Aether Security Review And Threat Model
 
-Last refreshed for `0.8.5-alpha`.
+Last refreshed for `0.8.6-alpha`.
 
 Aether is a local-first desktop application. The primary security goal is to
 keep user data, model paths, API keys, local runtimes, and generated voice audio
@@ -149,11 +149,12 @@ Current mitigations:
 
 - Aether never shell-interpolates configured paths.
 - Missing paths fail clearly.
+- Trust & Safety shows configured executable/script/model paths, hashes, AI-root
+  scope, runtime endpoints, and network exposure warnings.
 - Managed child processes are killed on stop/dispose.
 
 Required follow-up:
 
-- Show trust warnings for executables outside configured local AI assets root.
 - Consider hash display/pinning for known local runtime binaries.
 
 ## Release Gate Status
@@ -162,7 +163,7 @@ Security review and threat model refresh was completed for `0.8.4-alpha` as an
 engineering documentation gate. The following items remain public-release
 hardening work:
 
-- Extra-args warning/blocking for network-affecting `llama-server` flags.
+- Optional blocking policy for network-affecting `llama-server` flags.
 - Stronger RAG file-size enforcement and broader text sanitization.
 - Broader redaction fixtures for provider-specific secrets.
 - Signed packages/installers and trusted checksum publication.

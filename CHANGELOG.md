@@ -5,7 +5,16 @@ All notable changes to Aether will be documented in this file.
 The project follows semantic versioning once public release candidates begin.
 Pre-1.0 versions may still change internal APIs and storage details.
 
-## [0.8.5-alpha] - Unreleased
+## [0.8.6-alpha] - Unreleased
+
+### Added
+
+- Settings Trust & Safety scan for configured local executables, scripts,
+  models, XTTS paths, runtime endpoints, hashes, and AI-root scope warnings.
+- Advisory trust warnings for network-facing `llama-server` extra args such as
+  `--host 0.0.0.0`.
+
+## [0.8.5-alpha] - 2026-05-12
 
 ### Added
 

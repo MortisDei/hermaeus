@@ -13,6 +13,8 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
 {
     private readonly ServerProcessManager  _mgr;
     private readonly ISettingsService      _settings;
+    private readonly ITrustService         _trust;
+    private readonly IToastService         _toasts;
     private readonly ServerConfig          _config;
 
     [ObservableProperty] private string       _name;
@@ -48,6 +50,14 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
         _config.EmbeddingsMode != EmbeddingsMode ||
         _config.AutoStart != AutoStart ||
         _config.ExtraArgs != ExtraArgs;
+    public string ExtraArgsTrustWarning
+    {
+        get
+        {
+            var warning = _trust.AnalyzeServerExtraArgs(BuildConfig(), DateTime.UtcNow).FirstOrDefault();
+            return warning?.Recommendation ?? string.Empty;
+        }
+    }
 
     public string StatusLabel => Status switch
     {
@@ -60,11 +70,18 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
     public Action<string>? RequestFilePicker  { get; set; }
     public Action<string>? RequestFolderPicker { get; set; }
 
-    public ServerProcessViewModel(ServerConfig config, ISettingsService settings, IRedactionService redactor)
+    public ServerProcessViewModel(
+        ServerConfig config,
+        ISettingsService settings,
+        IRedactionService redactor,
+        ITrustService trust,
+        IToastService toasts)
     {
         _mgr = new ServerProcessManager(redactor);
         _config   = config;
         _settings = settings;
+        _trust = trust;
+        _toasts = toasts;
 
         _name           = config.Name;
         _executablePath = config.ExecutablePath;
@@ -109,6 +126,7 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
     {
         SyncToConfig();
         await _settings.SaveAsync();
+        WarnForExtraArgs();
     }
 
     [RelayCommand]
@@ -198,6 +216,7 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
         _config.AutoStart      = AutoStart;
         _config.ExtraArgs      = ExtraArgs;
         OnPropertyChanged(nameof(HasUnsavedChanges));
+        OnPropertyChanged(nameof(ExtraArgsTrustWarning));
     }
 
     private ServerConfig BuildConfig() => new()
@@ -238,7 +257,18 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
     partial void OnThreadsChanged(int value) => OnPropertyChanged(nameof(HasUnsavedChanges));
     partial void OnEmbeddingsModeChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
     partial void OnAutoStartChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
-    partial void OnExtraArgsChanged(string value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnExtraArgsChanged(string value)
+    {
+        OnPropertyChanged(nameof(HasUnsavedChanges));
+        OnPropertyChanged(nameof(ExtraArgsTrustWarning));
+    }
+
+    private void WarnForExtraArgs()
+    {
+        var warning = _trust.AnalyzeServerExtraArgs(BuildConfig(), DateTime.UtcNow).FirstOrDefault();
+        if (warning is not null)
+            _toasts.Show("Network exposure warning", warning.Recommendation, ToastKind.Warning, 7000);
+    }
 
     private static string MergeExtraArgs(string current, string arg)
     {
@@ -261,6 +291,7 @@ public partial class ServicesViewModel : ObservableObject
     private readonly IRuntimeProfileService _runtimeProfiles;
     private readonly IToastService _toasts;
     private readonly IRedactionService _redactor;
+    private readonly ITrustService _trust;
 
     public ObservableCollection<ServerProcessViewModel> Servers { get; } = [];
     public ObservableCollection<RuntimeProfileViewModel> RuntimeProfiles { get; } = [];
@@ -277,12 +308,14 @@ public partial class ServicesViewModel : ObservableObject
         ISettingsService settings,
         IRuntimeProfileService runtimeProfiles,
         IToastService toasts,
-        IRedactionService redactor)
+        IRedactionService redactor,
+        ITrustService trust)
     {
         _settings = settings;
         _runtimeProfiles = runtimeProfiles;
         _toasts = toasts;
         _redactor = redactor;
+        _trust = trust;
         Rebuild();
         _settings.SettingsChanged += (_, _) => Rebuild();
     }
@@ -309,7 +342,7 @@ public partial class ServicesViewModel : ObservableObject
         {
             var vm = existing.TryGetValue(cfg.Id, out var current)
                 ? current
-                : new ServerProcessViewModel(cfg, _settings, _redactor);
+                : new ServerProcessViewModel(cfg, _settings, _redactor, _trust, _toasts);
 
             vm.PropertyChanged += OnServerPropertyChanged;
             Servers.Add(vm);
