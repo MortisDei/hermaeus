@@ -221,8 +221,6 @@ docs/                   Security notes, RAG/eval docs, internal planning notes
 ## Public Release Gates
 
 - Concrete local-first OCR loader.
-- Optional web URL loader is available and remains opt-in, disabled by default,
-  and limited to explicitly listed HTTP(S) pages.
 - Linux and Windows archive packaging is available; signed installers/update
   metadata remain future public-release hardening.
 - Security review and threat model refresh is complete for the current alpha;
