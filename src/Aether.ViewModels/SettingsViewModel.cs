@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using Aether.Core.Services;
+using Aether.Services;
 using Aether.Services.ProcessManagement;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -31,6 +32,9 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private bool   _isSaved;
     [ObservableProperty] private string _dataRootDirectory = string.Empty;
     [ObservableProperty] private string _dataMigrationPreview = string.Empty;
+    [ObservableProperty] private string _localAiAssetsRoot = string.Empty;
+    [ObservableProperty] private string _localAiAssetsStatus = "Choose a local AI assets folder first.";
+    [ObservableProperty] private string _ragRerankerModelPath = string.Empty;
     [ObservableProperty] private string _backupDirectory = string.Empty;
     [ObservableProperty] private string _restoreBackupPath = string.Empty;
     [ObservableProperty] private bool   _ttsEnabled = true;
@@ -54,6 +58,7 @@ public partial class SettingsViewModel : ObservableObject
     public string[] TtsDevices { get; } = ["cpu", "auto", "cuda"];
     public ObservableCollection<string> TtsVoices { get; } = ["default"];
     public Action? RequestDataRootPicker { get; set; }
+    public Action? RequestLocalAiAssetsRootPicker { get; set; }
     public Action? RequestBackupDirectoryPicker { get; set; }
     public Action? RequestRestoreBackupPicker { get; set; }
     public Action? RequestTtsScriptPicker { get; set; }
@@ -114,6 +119,8 @@ public partial class SettingsViewModel : ObservableObject
         SelectedTheme       = s.Theme;
         CtrlEnterToSend     = s.CtrlEnterToSend;
         DataRootDirectory   = s.DataRootDirectory;
+        LocalAiAssetsRoot   = s.LocalAiAssetsRoot;
+        RagRerankerModelPath = s.RagRerankerModelPath;
         TtsEnabled          = s.TtsEnabled;
         TtsServiceUrl       = s.TtsServiceUrl;
         TtsSpeaker          = s.TtsSpeaker;
@@ -129,6 +136,7 @@ public partial class SettingsViewModel : ObservableObject
         TtsStatus           = _xttsProcess.StatusLabel;
         OnPropertyChanged(nameof(IsTtsRunning));
         UpdateMigrationPreview();
+        UpdateLocalAiAssetsStatus();
     }
 
     [RelayCommand]
@@ -151,6 +159,8 @@ public partial class SettingsViewModel : ObservableObject
         s.Theme               = SelectedTheme;
         s.CtrlEnterToSend     = CtrlEnterToSend;
         s.DataRootDirectory   = DataRootDirectory.Trim();
+        s.LocalAiAssetsRoot   = LocalAiAssetsRoot.Trim();
+        s.RagRerankerModelPath = RagRerankerModelPath.Trim();
         s.TtsEnabled          = TtsEnabled;
         s.TtsServiceUrl       = TtsServiceUrl;
         s.TtsSpeaker          = TtsSpeaker;
@@ -189,6 +199,30 @@ public partial class SettingsViewModel : ObservableObject
 
     [RelayCommand]
     private void BrowseDataRoot() => RequestDataRootPicker?.Invoke();
+
+    [RelayCommand]
+    private void BrowseLocalAiAssetsRoot() => RequestLocalAiAssetsRootPicker?.Invoke();
+
+    [RelayCommand]
+    private void ApplyLocalAiAssets()
+    {
+        SettingsError = string.Empty;
+        var layout = LocalAiAssetLocator.Detect(LocalAiAssetsRoot);
+        if (string.IsNullOrWhiteSpace(layout.Root) || !Directory.Exists(layout.Root))
+        {
+            SettingsError = "Choose an existing local AI assets folder first.";
+            _toasts.Show("AI assets not applied", SettingsError, ToastKind.Warning);
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(layout.TtsScriptPath)) TtsScriptPath = layout.TtsScriptPath;
+        if (!string.IsNullOrWhiteSpace(layout.TtsPythonPath)) TtsPythonPath = layout.TtsPythonPath;
+        if (!string.IsNullOrWhiteSpace(layout.TtsVoiceDirectory)) TtsVoiceDirectory = layout.TtsVoiceDirectory;
+        if (!string.IsNullOrWhiteSpace(layout.TtsOutputDirectory)) TtsOutputDirectory = layout.TtsOutputDirectory;
+        if (!string.IsNullOrWhiteSpace(layout.RerankerDirectory)) RagRerankerModelPath = layout.RerankerDirectory;
+        UpdateLocalAiAssetsStatus();
+        _toasts.Show("AI assets applied", layout.Summary, ToastKind.Success, 5500);
+    }
 
     [RelayCommand]
     private void BrowseBackupDirectory() => RequestBackupDirectoryPicker?.Invoke();
@@ -244,6 +278,17 @@ public partial class SettingsViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanStartTts))]
     private async Task StartTtsAsync()
     {
+        if (string.IsNullOrWhiteSpace(TtsScriptPath))
+        {
+            RequestTtsScriptPicker?.Invoke();
+            if (string.IsNullOrWhiteSpace(TtsScriptPath))
+            {
+                SettingsError = "Choose the XTTS API server script before starting XTTS.";
+                _toasts.Show("XTTS path needed", SettingsError, ToastKind.Warning);
+                return;
+            }
+        }
+
         await SaveAsync();
         if (!string.IsNullOrWhiteSpace(SettingsError)) return;
 
@@ -330,6 +375,7 @@ public partial class SettingsViewModel : ObservableObject
     private bool CanStopTts() => IsTtsRunning;
 
     partial void OnDataRootDirectoryChanged(string value) => UpdateMigrationPreview();
+    partial void OnLocalAiAssetsRootChanged(string value) => UpdateLocalAiAssetsStatus();
 
     private void UpdateMigrationPreview()
     {
@@ -347,5 +393,10 @@ public partial class SettingsViewModel : ObservableObject
         return string.IsNullOrWhiteSpace(configured)
             ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Aether")
             : Path.GetFullPath(configured);
+    }
+
+    private void UpdateLocalAiAssetsStatus()
+    {
+        LocalAiAssetsStatus = LocalAiAssetLocator.Detect(LocalAiAssetsRoot).Summary;
     }
 }

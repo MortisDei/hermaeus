@@ -5,7 +5,20 @@ All notable changes to Aether will be documented in this file.
 The project follows semantic versioning once public release candidates begin.
 Pre-1.0 versions may still change internal APIs and storage details.
 
-## [0.8.0-alpha] - Unreleased
+## [0.8.1-alpha] - Unreleased
+
+### Added
+
+- Configurable local AI assets root for models, XTTS, venvs, and encoders.
+- Detected-path application for XTTS script/python/voices/output and ONNX
+  reranker assets.
+
+### Changed
+
+- Removed machine-specific XTTS script defaults; Aether now asks for a path
+  when XTTS is started without one.
+
+## [0.8.0-alpha]
 
 ### Added
 

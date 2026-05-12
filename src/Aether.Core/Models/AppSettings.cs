@@ -17,6 +17,7 @@ public class AppSettings
     public bool   CtrlEnterToSend      { get; set; } = false;
     public double FontSize             { get; set; } = 14;
     public string DataRootDirectory    { get; set; } = string.Empty;
+    public string LocalAiAssetsRoot    { get; set; } = string.Empty;
     public bool   RagEnabled           { get; set; } = false;
     public string RagServiceUrl        { get; set; } = "http://localhost:8765";
     public bool   RagRerankerEnabled   { get; set; } = true;
@@ -28,7 +29,7 @@ public class AppSettings
     public string TtsServiceUrl        { get; set; } = "http://127.0.0.1:8020";
     public string TtsSpeaker           { get; set; } = string.Empty;
     public string TtsPythonPath        { get; set; } = "";
-    public string TtsScriptPath        { get; set; } = "/mnt/f71464b5-ebe7-4493-9d8d-88ba809a738b/GitHub/apocrypha/xtts_api_server.py";
+    public string TtsScriptPath        { get; set; } = string.Empty;
     public string TtsOutputDirectory   { get; set; } = "";
     public string TtsDevice            { get; set; } = "cpu";
     public string TtsModelVersion      { get; set; } = "2.0.3";

@@ -11,7 +11,8 @@ var tests = new (string Name, Func<Task> Run)[]
     ("redaction hides common secrets and home path", RedactionHidesSecrets),
     ("benchmark db creates starter suites and records runs", BenchmarkDbCreatesAndRecordsRuns),
     ("benchmark scoring and ranking are deterministic", BenchmarkScoringAndRanking),
-    ("system info returns safe fallback values", SystemInfoSafeFallback)
+    ("system info returns safe fallback values", SystemInfoSafeFallback),
+    ("local ai assets detect and apply paths", LocalAiAssetsDetectAndApplyPaths)
 };
 
 var failed = 0;
@@ -231,6 +232,37 @@ static async Task SystemInfoSafeFallback()
     True(!string.IsNullOrWhiteSpace(snapshot.OSDescription), "OS should be populated");
     True(!string.IsNullOrWhiteSpace(snapshot.DataRoot), "data root should be populated");
     True(snapshot.Components.Count > 0, "component statuses should be populated");
+}
+
+static Task LocalAiAssetsDetectAndApplyPaths()
+{
+    using var temp = new TempDir();
+    var root = temp.PathFor("ai");
+    var tts = Path.Combine(root, "tts");
+    var venv = Path.Combine(tts, "venv", OperatingSystem.IsWindows() ? "Scripts" : "bin");
+    var voices = Path.Combine(tts, "voices");
+    var output = Path.Combine(tts, "output");
+    var encoder = Path.Combine(root, "encoders", "ms-marco-MiniLM-L6-v2");
+    Directory.CreateDirectory(venv);
+    Directory.CreateDirectory(voices);
+    Directory.CreateDirectory(output);
+    Directory.CreateDirectory(encoder);
+    File.WriteAllText(Path.Combine(tts, "xtts_api_server.py"), "print('xtts')");
+    File.WriteAllText(Path.Combine(venv, OperatingSystem.IsWindows() ? "python.exe" : "python"), string.Empty);
+    File.WriteAllText(Path.Combine(encoder, "model_O4.onnx"), string.Empty);
+    File.WriteAllText(Path.Combine(encoder, "vocab.txt"), string.Empty);
+
+    var layout = LocalAiAssetLocator.Detect(root);
+    Equal(5, layout.FoundCount, "known asset paths should be detected");
+
+    var settings = new AppSettings { LocalAiAssetsRoot = root };
+    LocalAiAssetLocator.ApplyDetected(settings);
+    True(settings.TtsScriptPath.EndsWith("xtts_api_server.py", StringComparison.Ordinal), "XTTS script should be applied");
+    True(settings.TtsPythonPath.EndsWith(OperatingSystem.IsWindows() ? "python.exe" : "python", StringComparison.Ordinal), "XTTS venv python should be applied");
+    Equal(voices, settings.TtsVoiceDirectory, "voice directory should be applied");
+    Equal(output, settings.TtsOutputDirectory, "output directory should be applied");
+    Equal(encoder, settings.RagRerankerModelPath, "reranker directory should be applied");
+    return Task.CompletedTask;
 }
 
 static SettingsService NewSettings(TempDir temp) => new(temp.PathFor("settings/settings.json"));

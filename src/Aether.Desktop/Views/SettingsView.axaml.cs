@@ -46,6 +46,21 @@ public partial class SettingsView : UserControl
                 vm.DataRootDirectory = folders[0].Path.LocalPath;
         };
 
+        vm.RequestLocalAiAssetsRootPicker = async () =>
+        {
+            var top = TopLevel.GetTopLevel(this);
+            if (top is null) return;
+
+            var folders = await top.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+            {
+                Title = "Choose local AI assets folder",
+                AllowMultiple = false
+            });
+
+            if (folders.Count > 0)
+                vm.LocalAiAssetsRoot = folders[0].Path.LocalPath;
+        };
+
         vm.RequestBackupDirectoryPicker = async () =>
         {
             var top = TopLevel.GetTopLevel(this);

@@ -124,9 +124,6 @@ public sealed class XttsProcessManager : IDisposable
         if (!string.IsNullOrWhiteSpace(scriptPath) && File.Exists(scriptPath.Trim()))
             return Path.GetFullPath(scriptPath.Trim());
 
-        var known = "/mnt/f71464b5-ebe7-4493-9d8d-88ba809a738b/GitHub/apocrypha/xtts_api_server.py";
-        if (File.Exists(known)) return known;
-
         throw new FileNotFoundException("Set the XTTS API server script path first.", scriptPath);
     }
 

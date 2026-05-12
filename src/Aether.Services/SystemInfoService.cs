@@ -47,6 +47,16 @@ public sealed class SystemInfoService : ISystemInfoService
             snapshot.Gpus.Add(new GpuInfo { Name = "GPU probe unavailable", Provider = "best-effort", Status = "unavailable" });
 
         snapshot.Components.Add(new ComponentStatus { Name = "Data root", Status = "Ready", Detail = dataRoot });
+        snapshot.Components.Add(new ComponentStatus
+        {
+            Name = "Local AI assets",
+            Status = string.IsNullOrWhiteSpace(_settings.Settings.LocalAiAssetsRoot)
+                ? "Not set"
+                : Directory.Exists(_settings.Settings.LocalAiAssetsRoot) ? "Ready" : "Missing",
+            Detail = string.IsNullOrWhiteSpace(_settings.Settings.LocalAiAssetsRoot)
+                ? "Choose an assets folder in Settings"
+                : Path.GetFullPath(_settings.Settings.LocalAiAssetsRoot)
+        });
         snapshot.Components.Add(new ComponentStatus { Name = "Chat database", Status = File.Exists(Path.Combine(dataRoot, "conversations.db")) ? "Present" : "Not created", Detail = FormatBytes(snapshot.DatabaseBytes) });
         snapshot.Components.Add(new ComponentStatus { Name = "Benchmark database", Status = File.Exists(Path.Combine(dataRoot, "benchmarks.db")) ? "Present" : "Not created", Detail = Path.Combine(dataRoot, "benchmarks.db") });
         snapshot.Components.Add(new ComponentStatus { Name = "Free storage", Status = drive.AvailableFreeSpace > 10L * 1024 * 1024 * 1024 ? "OK" : "Low", Detail = FormatBytes(drive.AvailableFreeSpace) });

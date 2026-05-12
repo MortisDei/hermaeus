@@ -1,6 +1,6 @@
 # Aether
 
-Version: `0.8.0-alpha`
+Version: `0.8.1-alpha`
 
 A native, local-first Avalonia desktop AI workspace for `llama.cpp`, Ollama,
 OpenAI-compatible APIs, Oghma-grade RAG, and XTTS voice playback.
@@ -36,6 +36,7 @@ OpenAI-compatible APIs, Oghma-grade RAG, and XTTS voice playback.
 - Local tasks, reminders, and app-running scheduled automations.
 - Toast notifications throughout the app.
 - Configurable data root with migration, backup, restore, and conflict refusal.
+- Configurable local AI assets root for models, XTTS, venvs, and encoders.
 - Local secret references and redacted process logs.
 - Data-safety test harness for migration, backup/restore, and redaction.
 
@@ -85,6 +86,7 @@ and `should_refuse`.
 
 In **Settings**, configure XTTS v2:
 
+- local AI assets folder, or explicit paths
 - service URL
 - Python/script path
 - device (`cpu`, `auto`, `cuda`)
@@ -107,6 +109,11 @@ Default data root:
 Settings can move the data root. Aether previews the move, refuses conflicting
 target databases, and migrates `conversations.db*` together. Backups are ZIP
 archives of the data root excluding the local secret file.
+
+Settings can also point at a separate local AI assets folder for large model,
+voice, virtualenv, and encoder files. Aether never assumes a machine-specific
+path; choose the folder once, then use **Apply Detected Paths** to populate
+XTTS and reranker paths where matching assets are found.
 
 Security hardening currently includes:
 
