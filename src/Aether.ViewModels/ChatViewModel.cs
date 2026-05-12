@@ -35,6 +35,13 @@ public partial class ChatViewModel : ObservableObject
     [ObservableProperty] private string    _performanceLog = string.Empty;
     [ObservableProperty] private string    _attachmentStatus = string.Empty;
     [ObservableProperty] private bool      _isContextDragOver;
+    [ObservableProperty] private string    _contextUsageLabel = string.Empty;
+    [ObservableProperty] private string    _contextUsageTooltip = string.Empty;
+    [ObservableProperty] private double    _contextUsagePercent;
+    [ObservableProperty] private string    _contextUsageKind = "Estimated";
+    [ObservableProperty] private string    _contextUsageWarningLevel = "None";
+    [ObservableProperty] private bool      _isContextUsageWarning;
+    [ObservableProperty] private bool      _isContextUsageCritical;
 
     public event EventHandler?        ScrollToBottom;
     public event EventHandler<string>? ConversationSaved;
@@ -57,7 +64,10 @@ public partial class ChatViewModel : ObservableObject
         {
             OnPropertyChanged(nameof(HasContextAttachments));
             SendCommand.NotifyCanExecuteChanged();
+            RefreshEstimatedContextUsage();
         };
+        Messages.CollectionChanged += (_, _) => RefreshEstimatedContextUsage();
+        RefreshEstimatedContextUsage();
     }
 
     public async Task LoadModelsAsync(bool force = false)
@@ -124,6 +134,7 @@ public partial class ChatViewModel : ObservableObject
 
         var promptText = ChatContextAttachment.BuildPrompt(text, attachments);
         var displayText = ChatContextAttachment.BuildDisplayMessage(text, attachments);
+        UpdateContextUsage(new ChatTokenUsage(EstimateTokensForSend(promptText), 0, EstimateTokensForSend(promptText)), "Estimated");
         Messages.Add(new MessageViewModel { Role = "user", Content = displayText });
         InputText = string.Empty;
         ClearContextAttachments();
@@ -153,19 +164,31 @@ public partial class ChatViewModel : ObservableObject
             if (history.Count > 0 && history[^1].Role == "user")
                 history[^1] = history[^1] with { Content = promptText };
 
-            await foreach (var token in _llm.StreamChatAsync(
+            ChatTokenUsage? reportedUsage = null;
+            await foreach (var evt in _llm.StreamChatEventsAsync(
                 selectedModelId, history,
                 string.IsNullOrWhiteSpace(SystemPrompt) ? null : SystemPrompt,
                 Temperature, _cts.Token))
             {
-                firstTokenMs ??= responseClock.ElapsedMilliseconds;
-                AppendStreamToken(asst, token, force: false);
+                if (evt.Usage is not null)
+                {
+                    reportedUsage = evt.Usage;
+                    UpdateContextUsage(evt.Usage, "Reported by provider");
+                }
+
+                if (!string.IsNullOrEmpty(evt.ContentDelta))
+                {
+                    firstTokenMs ??= responseClock.ElapsedMilliseconds;
+                    AppendStreamToken(asst, evt.ContentDelta, force: false);
+                }
             }
             AppendStreamToken(asst, string.Empty, force: true);
             responseClock.Stop();
             asst.DurationMs = responseClock.ElapsedMilliseconds;
             PerformanceLog = $"first token {firstTokenMs ?? 0} ms · full {asst.DurationMs} ms · render batches {renderBatches}";
             asst.IsStreaming = false;
+            if (reportedUsage is null)
+                RefreshEstimatedContextUsage();
             await PersistAsync();
         }
         catch (OperationCanceledException)
@@ -296,6 +319,58 @@ public partial class ChatViewModel : ObservableObject
         && SelectedModel is not null
         && (!string.IsNullOrWhiteSpace(InputText) || ContextAttachments.Any(a => a.IsReady));
 
+    public static int EstimateTokens(string text) =>
+        string.IsNullOrEmpty(text) ? 0 : Math.Max(1, (int)Math.Ceiling(text.Length / 4.0));
+
+    private int EstimateTokensForSend(string promptText)
+    {
+        var total = EstimateTokens(SystemPrompt) + EstimateTokens(promptText);
+        foreach (var message in Messages.Where(m => !m.IsStreaming))
+            total += EstimateTokens(message.Content);
+        return total;
+    }
+
+    private void RefreshEstimatedContextUsage()
+    {
+        var total = EstimateTokens(SystemPrompt) + EstimateTokens(InputText);
+        foreach (var message in Messages.Where(m => !m.IsStreaming))
+            total += EstimateTokens(message.Content);
+        foreach (var attachment in ContextAttachments.Where(a => a.IsReady))
+            total += EstimateTokens(attachment.Content);
+
+        UpdateContextUsage(new ChatTokenUsage(total, 0, total), "Estimated");
+    }
+
+    private void UpdateContextUsage(ChatTokenUsage usage, string kind)
+    {
+        var limit = ResolveContextWindowLimit();
+        var total = usage.TotalTokens > 0 ? usage.TotalTokens : usage.PromptTokens + usage.CompletionTokens;
+        ContextUsageKind = kind;
+        ContextUsageLabel = $"{total:N0} / {limit:N0} tokens";
+        ContextUsagePercent = limit <= 0 ? 0 : Math.Clamp(total * 100.0 / limit, 0, 999);
+        ContextUsageWarningLevel = ContextUsagePercent >= 95 ? "Critical" :
+            ContextUsagePercent >= 80 ? "Warning" : "None";
+        IsContextUsageCritical = ContextUsageWarningLevel == "Critical";
+        IsContextUsageWarning = ContextUsageWarningLevel == "Warning";
+        ContextUsageTooltip = kind == "Reported by provider"
+            ? $"Reported by provider. Prompt {usage.PromptTokens:N0}, completion {usage.CompletionTokens:N0}, total {total:N0}."
+            : $"Estimated locally from visible chat, system prompt, draft input, and ready attachments. About {ContextUsagePercent:F0}% of the selected context window.";
+    }
+
+    private int ResolveContextWindowLimit()
+    {
+        if (SelectedModel?.DefaultContextSize is { } modelLimit && modelLimit > 0)
+            return modelLimit;
+
+        var chatServer = _settings.Settings.ManagedServers
+            .FirstOrDefault(s => s.Name.Equals("Chat", StringComparison.OrdinalIgnoreCase)
+                && !s.EmbeddingsMode);
+        if (chatServer?.ContextSize is > 0)
+            return chatServer.ContextSize;
+
+        return Math.Max(1, _settings.Settings.MaxTokens);
+    }
+
     private async Task PersistAsync()
     {
         if (Messages.Count == 0) return;
@@ -338,7 +413,11 @@ public partial class ChatViewModel : ObservableObject
         ConversationSaved?.Invoke(this, CurrentConversationId);
     }
 
-    partial void OnInputTextChanged(string value)        => SendCommand.NotifyCanExecuteChanged();
+    partial void OnInputTextChanged(string value)
+    {
+        SendCommand.NotifyCanExecuteChanged();
+        RefreshEstimatedContextUsage();
+    }
     partial void OnSelectedModelChanged(LlmModel? value)
     {
         if (value?.DefaultTemperature is { } temp)
@@ -346,6 +425,7 @@ public partial class ChatViewModel : ObservableObject
         if (value?.DefaultMaxTokens is { } max && max > 0)
             _settings.Settings.MaxTokens = max;
         SendCommand.NotifyCanExecuteChanged();
+        RefreshEstimatedContextUsage();
     }
     partial void OnIsGeneratingChanged(bool value)       => SendCommand.NotifyCanExecuteChanged();
 }

@@ -92,6 +92,21 @@ public sealed class CompositeLlmService : ILlmService
             : _llamaCpp.StreamChatAsync(modelId, messages, systemPrompt, temperature, ct);
     }
 
+    public IAsyncEnumerable<LlmStreamEvent> StreamChatEventsAsync(
+        string modelId, IReadOnlyList<ChatMessage> messages,
+        string? systemPrompt = null, double temperature = 0.7,
+        CancellationToken ct = default)
+    {
+        if (OllamaService.IsOllamaModelId(modelId))
+            return _ollama.StreamChatEventsAsync(modelId, messages, systemPrompt, temperature, ct);
+
+        var isOpenAi = modelId.StartsWith("gpt") || modelId.StartsWith("o1") ||
+                       modelId.StartsWith("o3") || modelId.StartsWith("o4");
+        return isOpenAi
+            ? _openAi.StreamChatEventsAsync(modelId, messages, systemPrompt, temperature, ct)
+            : _llamaCpp.StreamChatEventsAsync(modelId, messages, systemPrompt, temperature, ct);
+    }
+
     public Task PullModelAsync(string m, IProgress<string>? p = null, CancellationToken ct = default)
         => Task.CompletedTask;
     public Task DeleteModelAsync(string m, CancellationToken ct = default)

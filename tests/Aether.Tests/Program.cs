@@ -11,8 +11,10 @@ using Aether.Rag.Storage;
 using Aether.Services;
 using Aether.Services.ProcessManagement;
 using Aether.ViewModels;
+using Aether.Desktop.Controls;
 using System.Net;
 using System.Security.Cryptography;
+using System.Text.Json;
 
 var tests = new (string Name, Func<Task> Run)[]
 {
@@ -32,6 +34,10 @@ var tests = new (string Name, Func<Task> Run)[]
     ("chat context attachments build prompt and persist summary", ChatContextAttachmentsBuildPromptAndPersistSummary),
     ("chat context attachments enforce limits and binary skip", ChatContextAttachmentsEnforceLimitsAndBinarySkip),
     ("chat context attachments remove and clear", ChatContextAttachmentsRemoveAndClear),
+    ("markdown code fence aliases normalize", MarkdownCodeFenceAliasesNormalize),
+    ("LLM stream usage payloads and parsers", LlmStreamUsagePayloadsAndParsers),
+    ("chat context usage updates from provider", ChatContextUsageUpdatesFromProvider),
+    ("chat context usage estimates pending context", ChatContextUsageEstimatesPendingContext),
     ("trust scan classifies inside AI root as low risk", TrustScanInsideAiRootIsLowRisk),
     ("trust scan warns outside AI root but allows", TrustScanOutsideAiRootWarns),
     ("trust scan reports missing executable", TrustScanReportsMissingExecutable),
@@ -490,6 +496,98 @@ static async Task ChatContextAttachmentsRemoveAndClear()
     Equal(1, vm.ContextAttachments.Count, "remove should drop one attachment");
     vm.ClearContextAttachmentsCommand.Execute(null);
     Equal(0, vm.ContextAttachments.Count, "clear should remove all attachments");
+}
+
+static Task MarkdownCodeFenceAliasesNormalize()
+{
+    Equal("C#", MarkdownViewer.NormalizeFenceLanguage("cs"), "cs fence should map to C#");
+    Equal("Python", MarkdownViewer.NormalizeFenceLanguage("python"), "python fence should map to Python");
+    Equal("JavaScript", MarkdownViewer.NormalizeFenceLanguage("typescript"), "typescript fence should map to JavaScript highlighting");
+    Equal("Bash", MarkdownViewer.NormalizeFenceLanguage("sh"), "sh fence should map to Bash");
+    Equal("JavaScript", MarkdownViewer.NormalizeFenceLanguage("json"), "json fence should use JavaScript highlighting fallback");
+    Equal("SQL", MarkdownViewer.NormalizeFenceLanguage("sql"), "sql fence should map to SQL");
+    Equal(null, MarkdownViewer.NormalizeFenceLanguage("made-up-language"), "unknown fences should safely fall back");
+    return Task.CompletedTask;
+}
+
+static Task LlmStreamUsagePayloadsAndParsers()
+{
+    var payloadJson = JsonSerializer.Serialize(LlamaCppService.BuildChatPayload(
+        "model",
+        [new ChatMessage("user", "hello")],
+        "system",
+        0.2,
+        128));
+    True(payloadJson.Contains("\"stream_options\"", StringComparison.Ordinal), "llama.cpp payload should request stream options");
+    True(payloadJson.Contains("\"include_usage\":true", StringComparison.Ordinal), "llama.cpp payload should request usage chunks");
+
+    var openAiPayloadJson = JsonSerializer.Serialize(OpenAiService.BuildChatPayload(
+        "gpt-test",
+        [new ChatMessage("user", "hello")],
+        null,
+        0.7,
+        256));
+    True(openAiPayloadJson.Contains("\"include_usage\":true", StringComparison.Ordinal), "OpenAI payload should request usage chunks");
+
+    var evt = OpenAiService.ParseStreamEvent("""
+        {"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":5,"total_tokens":17}}
+        """);
+    Equal(17, evt?.Usage?.TotalTokens, "OpenAI-compatible usage chunk should parse total tokens");
+    Equal(true, evt?.IsFinal, "usage chunk should be final");
+
+    var textEvt = LlamaCppService.ParseStreamEvent("""
+        {"choices":[{"delta":{"content":"hello"},"finish_reason":null}],"usage":null}
+        """);
+    Equal("hello", textEvt?.ContentDelta, "content chunks should still parse text");
+
+    var ollamaUsage = OllamaService.ParseUsageForTest("""
+        {"done":true,"prompt_eval_count":11,"eval_count":7}
+        """);
+    Equal(18, ollamaUsage?.TotalTokens, "Ollama final counts should parse usage");
+    return Task.CompletedTask;
+}
+
+static async Task ChatContextUsageUpdatesFromProvider()
+{
+    using var temp = new TempDir();
+    var settings = NewSettings(temp);
+    settings.Settings.DataRootDirectory = temp.PathFor("data");
+    settings.Settings.ManagedServers[0].ContextSize = 100;
+    var store = new ConversationStore(settings);
+    await store.InitializeAsync();
+    var vm = new ChatViewModel(new UsageLlm(), store, settings, new FakeTts(), new ModelProfileService(settings));
+    await vm.LoadModelsAsync(force: true);
+
+    vm.InputText = "hello";
+    await vm.SendCommand.ExecuteAsync(null);
+
+    Equal("Reported by provider", vm.ContextUsageKind, "exact provider usage should win after stream completes");
+    Equal("40 / 100 tokens", vm.ContextUsageLabel, "reported usage should be shown against selected context window");
+    True(vm.ContextUsageTooltip.Contains("Prompt 30", StringComparison.Ordinal), "tooltip should show prompt token count");
+}
+
+static async Task ChatContextUsageEstimatesPendingContext()
+{
+    using var temp = new TempDir();
+    var settings = NewSettings(temp);
+    settings.Settings.DataRootDirectory = temp.PathFor("data");
+    settings.Settings.ManagedServers[0].ContextSize = 100;
+    var store = new ConversationStore(settings);
+    await store.InitializeAsync();
+    var vm = new ChatViewModel(new CapturingLlm(), store, settings, new FakeTts(), new ModelProfileService(settings));
+    await vm.LoadModelsAsync(force: true);
+
+    var file = temp.PathFor("context.cs");
+    await File.WriteAllTextAsync(file, new string('a', 120));
+    vm.InputText = new string('b', 220);
+    await vm.AddContextFilesAsync([file]);
+
+    Equal("Estimated", vm.ContextUsageKind, "pending context should be locally estimated");
+    True(vm.IsContextUsageWarning, "80 percent estimate should warn");
+    False(vm.IsContextUsageCritical, "80 percent estimate should not be critical");
+
+    vm.InputText = new string('c', 380);
+    True(vm.IsContextUsageCritical, "95 percent estimate should be critical");
 }
 
 static async Task TrustScanInsideAiRootIsLowRisk()
@@ -1255,6 +1353,44 @@ sealed class CapturingLlm : ILlmService
         LastMessages = messages.ToList();
         await Task.Delay(1, ct);
         yield return "captured";
+    }
+
+    public Task PullModelAsync(string modelId, IProgress<string>? progress = null, CancellationToken ct = default) => Task.CompletedTask;
+    public Task DeleteModelAsync(string modelId, CancellationToken ct = default) => Task.CompletedTask;
+}
+
+sealed class UsageLlm : ILlmService
+{
+    public string ProviderName => "Usage";
+    public bool IsConfigured => true;
+
+    public Task<List<LlmModel>> GetModelsAsync(CancellationToken ct = default) =>
+        Task.FromResult(new List<LlmModel> { new() { Id = "usage", Name = "Usage", Provider = "Test", DefaultContextSize = 100 } });
+
+    public async IAsyncEnumerable<string> StreamChatAsync(
+        string modelId,
+        IReadOnlyList<ChatMessage> messages,
+        string? systemPrompt = null,
+        double temperature = 0.7,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        await foreach (var evt in StreamChatEventsAsync(modelId, messages, systemPrompt, temperature, ct))
+        {
+            if (!string.IsNullOrEmpty(evt.ContentDelta))
+                yield return evt.ContentDelta;
+        }
+    }
+
+    public async IAsyncEnumerable<LlmStreamEvent> StreamChatEventsAsync(
+        string modelId,
+        IReadOnlyList<ChatMessage> messages,
+        string? systemPrompt = null,
+        double temperature = 0.7,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        await Task.Delay(1, ct);
+        yield return new LlmStreamEvent("ok");
+        yield return new LlmStreamEvent(Usage: new ChatTokenUsage(30, 10, 40), IsFinal: true);
     }
 
     public Task PullModelAsync(string modelId, IProgress<string>? progress = null, CancellationToken ct = default) => Task.CompletedTask;

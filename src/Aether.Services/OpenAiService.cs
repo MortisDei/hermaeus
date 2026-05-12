@@ -61,10 +61,35 @@ public sealed class OpenAiService : IDisposable
         CancellationToken ct = default)
     {
         if (!IsConfigured) return YieldError("*OpenAI API key not configured.*");
-        return StreamChatInternal(modelId, messages, systemPrompt, temperature, ct);
+        return StreamTextInternal(modelId, messages, systemPrompt, temperature, ct);
     }
 
-    private async IAsyncEnumerable<string> StreamChatInternal(
+    public IAsyncEnumerable<LlmStreamEvent> StreamChatEventsAsync(
+        string modelId,
+        IReadOnlyList<ChatMessage> messages,
+        string? systemPrompt = null,
+        double temperature = 0.7,
+        CancellationToken ct = default)
+    {
+        if (!IsConfigured) return YieldEventError("*OpenAI API key not configured.*");
+        return StreamEventsInternal(modelId, messages, systemPrompt, temperature, ct);
+    }
+
+    private async IAsyncEnumerable<string> StreamTextInternal(
+        string modelId,
+        IReadOnlyList<ChatMessage> messages,
+        string? systemPrompt,
+        double temperature,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        await foreach (var evt in StreamEventsInternal(modelId, messages, systemPrompt, temperature, ct))
+        {
+            if (!string.IsNullOrEmpty(evt.ContentDelta))
+                yield return evt.ContentDelta;
+        }
+    }
+
+    private async IAsyncEnumerable<LlmStreamEvent> StreamEventsInternal(
         string modelId,
         IReadOnlyList<ChatMessage> messages,
         string? systemPrompt,
@@ -75,7 +100,7 @@ public sealed class OpenAiService : IDisposable
         
         if (!success)
         {
-            yield return error;
+            yield return new LlmStreamEvent(error, IsFinal: true);
             yield break;
         }
 
@@ -91,9 +116,9 @@ public sealed class OpenAiService : IDisposable
                 var json = line[6..];
                 if (json == "[DONE]") break;
 
-                var chunk = JsonSerializer.Deserialize<StreamChunk>(json, JsonOpts);
-                var c = chunk?.Choices?[0]?.Delta?.Content;
-                if (!string.IsNullOrEmpty(c)) yield return c;
+                var evt = ParseStreamEvent(json);
+                if (evt is not null)
+                    yield return evt;
             }
         }
     }
@@ -108,12 +133,7 @@ public sealed class OpenAiService : IDisposable
         try
         {
             await AuthAsync(ct);
-            var msgs = messages.Select(m => new { role = m.Role, content = m.Content }).ToList<object>();
-            if (!string.IsNullOrWhiteSpace(systemPrompt))
-                msgs.Insert(0, new { role = "system", content = systemPrompt });
-
-            var payload = new { model = modelId, messages = msgs, stream = true,
-                                temperature, max_tokens = _settings.Settings.MaxTokens };
+            var payload = BuildChatPayload(modelId, messages, systemPrompt, temperature, _settings.Settings.MaxTokens);
             var req = new HttpRequestMessage(HttpMethod.Post, $"{Base}/v1/chat/completions")
                 { Content = JsonContent.Create(payload, options: JsonOpts) };
             var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
@@ -126,9 +146,50 @@ public sealed class OpenAiService : IDisposable
         }
     }
 
+    public static object BuildChatPayload(
+        string modelId,
+        IReadOnlyList<ChatMessage> messages,
+        string? systemPrompt,
+        double temperature,
+        int maxTokens)
+    {
+        var msgs = messages.Select(m => new { role = m.Role, content = m.Content }).ToList<object>();
+        if (!string.IsNullOrWhiteSpace(systemPrompt))
+            msgs.Insert(0, new { role = "system", content = systemPrompt });
+
+        return new
+        {
+            model = modelId,
+            messages = msgs,
+            stream = true,
+            stream_options = new { include_usage = true },
+            temperature,
+            max_tokens = maxTokens
+        };
+    }
+
+    public static LlmStreamEvent? ParseStreamEvent(string json)
+    {
+        var chunk = JsonSerializer.Deserialize<StreamChunk>(json, JsonOpts);
+        var c = chunk?.Choices?.FirstOrDefault()?.Delta?.Content ?? string.Empty;
+        var usage = chunk?.Usage is null
+            ? null
+            : new ChatTokenUsage(chunk.Usage.PromptTokens, chunk.Usage.CompletionTokens, chunk.Usage.TotalTokens);
+        var isFinal = usage is not null || chunk?.Choices?.FirstOrDefault()?.FinishReason is not null;
+        if (string.IsNullOrEmpty(c) && usage is null && !isFinal)
+            return null;
+        return new LlmStreamEvent(c, usage, isFinal);
+    }
+
     private static async IAsyncEnumerable<string> YieldError(string message)
     {
         yield return message;
+    }
+
+    private static async IAsyncEnumerable<LlmStreamEvent> YieldEventError(string message)
+    {
+        yield return new LlmStreamEvent(message, IsFinal: true);
+        await Task.CompletedTask;
     }
 
     public Task PullModelAsync(string m, IProgress<string>? p = null, CancellationToken ct = default) => Task.CompletedTask;
@@ -137,7 +198,15 @@ public sealed class OpenAiService : IDisposable
 
     private record ModelsResponse([property: JsonPropertyName("data")] List<ModelData>? Data);
     private record ModelData([property: JsonPropertyName("id")] string Id);
-    private record StreamChunk([property: JsonPropertyName("choices")] List<Choice>? Choices);
-    private record Choice([property: JsonPropertyName("delta")] Delta? Delta);
+    private record StreamChunk(
+        [property: JsonPropertyName("choices")] List<Choice>? Choices,
+        [property: JsonPropertyName("usage")] UsageData? Usage);
+    private record Choice(
+        [property: JsonPropertyName("delta")] Delta? Delta,
+        [property: JsonPropertyName("finish_reason")] string? FinishReason);
     private record Delta([property: JsonPropertyName("content")] string? Content);
+    private record UsageData(
+        [property: JsonPropertyName("prompt_tokens")] int PromptTokens,
+        [property: JsonPropertyName("completion_tokens")] int CompletionTokens,
+        [property: JsonPropertyName("total_tokens")] int TotalTokens);
 }

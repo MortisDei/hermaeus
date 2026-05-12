@@ -17,6 +17,10 @@ Pre-1.0 versions may still change internal APIs and storage details.
   attach/drop UI, bounded reads, skipped-file status, and history summaries.
 - Digital PDF support in local RAG directory ingest through managed PdfPig text
   extraction, with image-only PDFs skipped as health warnings.
+- Syntax-highlighted fenced Markdown code blocks in chat and RAG answers through
+  AvaloniaEdit.
+- Chat context usage indicator with provider-reported token usage when
+  available and local estimates while drafting.
 
 ## [0.8.5-alpha] - 2026-05-12
 

@@ -11,6 +11,12 @@
             <Setter Property="Background" Value="{DynamicResource SubtleFillColorTertiaryBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
         </Style>
+        <Style Selector="TextBlock.context-usage-warning">
+            <Setter Property="Foreground" Value="#FFD166" />
+        </Style>
+        <Style Selector="TextBlock.context-usage-critical">
+            <Setter Property="Foreground" Value="#EF5350" />
+        </Style>
     </UserControl.Styles>
 
     <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
@@ -206,7 +212,7 @@
                             FontSize="11"
                             Padding="8,4" />
                 </Grid>
-                <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="8">
+                <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="8">
                     <Button Grid.Column="0" Classes="icon-btn"
                             Command="{Binding AttachContextFilesCommand}"
                             ToolTip.Tip="Attach text/code files as direct context">
@@ -221,17 +227,28 @@
                              Watermark="Message or drop text/code files here..."
                              KeyDown="OnInputKeyDown" />
 
-                    <Button Grid.Column="2" Classes="send-btn"
+                    <TextBlock Grid.Column="2"
+                               Text="{Binding ContextUsageLabel}"
+                               ToolTip.Tip="{Binding ContextUsageTooltip}"
+                               Classes.context-usage-warning="{Binding IsContextUsageWarning}"
+                               Classes.context-usage-critical="{Binding IsContextUsageCritical}"
+                               FontSize="11"
+                               Opacity="0.72"
+                               VerticalAlignment="Center"
+                               MinWidth="112"
+                               TextAlignment="Right" />
+
+                    <Button Grid.Column="3" Classes="send-btn"
                             Command="{Binding SendCommand}"
                             IsVisible="{Binding !IsGenerating}"
                             Content="Send" />
 
-                    <Button Grid.Column="2" Classes="send-btn"
+                    <Button Grid.Column="3" Classes="send-btn"
                             Command="{Binding StopCommand}"
                             IsVisible="{Binding IsGenerating}"
                             Content="Stop" />
 
-                    <Button Grid.Column="3" Classes="icon-btn"
+                    <Button Grid.Column="4" Classes="icon-btn"
                             Command="{Binding RegenerateCommand}"
                             IsEnabled="{Binding !IsGenerating}"
                             IsVisible="{Binding HasMessages}"

@@ -14,7 +14,8 @@ playback.
 - Local-first data and runtime control.
 - Direct `llama.cpp` / `llama-server` management.
 - Ollama and OpenAI-compatible runtime profiles.
-- Native markdown rendering with virtualized long chats.
+- Native markdown rendering with virtualized long chats and syntax-highlighted
+  fenced code blocks.
 - Oghma-grade RAG: hybrid retrieval, ONNX reranking, parent-child context,
   citations, traces, evals.
 - Aether Agent: read-first task workbench with explicit state, compact context,
@@ -25,6 +26,8 @@ playback.
 
 - Chat history with rename, delete, search, folders, tags, pins, archive, and
   direct file context injection for selected text/code files.
+- Chat context usage indicator with provider-reported usage where available and
+  local estimates before send.
 - Model profiles with display names, descriptions, tags, visibility, and defaults.
 - Runtime profiles for `llama.cpp`, Ollama, and OpenAI-compatible endpoints.
 - Managed `llama-server` start/stop, auto-start, logs, and GPU auto-tune.
@@ -72,6 +75,12 @@ an attachment summary in conversation history.
 
 This is not RAG: attachments are not indexed, embedded, watched, or mutated.
 Large, unsupported, or binary-looking files are skipped with visible status.
+
+The chat bar also shows current context usage against the selected context
+window. It uses provider-reported token usage when available and falls back to a
+local estimate for draft input, visible history, system prompt, and ready file
+attachments. At high usage, Aether warns so a fresh conversation can avoid
+quality loss.
 
 ## Runtimes
 

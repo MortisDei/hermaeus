@@ -50,10 +50,34 @@ public sealed class OllamaService : IDisposable
         double temperature = 0.7,
         CancellationToken ct = default)
     {
-        return StreamChatInternal(modelId, messages, systemPrompt, temperature, ct);
+        return StreamTextInternal(modelId, messages, systemPrompt, temperature, ct);
     }
 
-    private async IAsyncEnumerable<string> StreamChatInternal(
+    public IAsyncEnumerable<LlmStreamEvent> StreamChatEventsAsync(
+        string modelId,
+        IReadOnlyList<ChatMessage> messages,
+        string? systemPrompt = null,
+        double temperature = 0.7,
+        CancellationToken ct = default)
+    {
+        return StreamEventsInternal(modelId, messages, systemPrompt, temperature, ct);
+    }
+
+    private async IAsyncEnumerable<string> StreamTextInternal(
+        string modelId,
+        IReadOnlyList<ChatMessage> messages,
+        string? systemPrompt,
+        double temperature,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        await foreach (var evt in StreamEventsInternal(modelId, messages, systemPrompt, temperature, ct))
+        {
+            if (!string.IsNullOrEmpty(evt.ContentDelta))
+                yield return evt.ContentDelta;
+        }
+    }
+
+    private async IAsyncEnumerable<LlmStreamEvent> StreamEventsInternal(
         string modelId,
         IReadOnlyList<ChatMessage> messages,
         string? systemPrompt,
@@ -64,7 +88,7 @@ public sealed class OllamaService : IDisposable
         var profile = _profiles.Profiles.FirstOrDefault(p => p.Id == profileId);
         if (profile is null)
         {
-            yield return "*Ollama runtime profile not found.*";
+            yield return new LlmStreamEvent("*Ollama runtime profile not found.*", IsFinal: true);
             yield break;
         }
 
@@ -90,9 +114,28 @@ public sealed class OllamaService : IDisposable
             if (string.IsNullOrWhiteSpace(line)) continue;
             var chunk = JsonSerializer.Deserialize<ChatChunk>(line);
             if (!string.IsNullOrEmpty(chunk?.Message?.Content))
-                yield return chunk.Message.Content;
-            if (chunk?.Done == true) yield break;
+                yield return new LlmStreamEvent(chunk.Message.Content);
+            if (chunk?.Done == true)
+            {
+                if (ToUsage(chunk) is { } usage)
+                    yield return new LlmStreamEvent(Usage: usage, IsFinal: true);
+                else
+                    yield return new LlmStreamEvent(IsFinal: true);
+                yield break;
+            }
         }
+    }
+
+    public static ChatTokenUsage? ParseUsageForTest(string json) =>
+        ToUsage(JsonSerializer.Deserialize<ChatChunk>(json));
+
+    private static ChatTokenUsage? ToUsage(ChatChunk? chunk)
+    {
+        if (chunk is null) return null;
+        var prompt = chunk.PromptEvalCount ?? 0;
+        var completion = chunk.EvalCount ?? 0;
+        var total = prompt + completion;
+        return total <= 0 ? null : new ChatTokenUsage(prompt, completion, total);
     }
 
     public static bool IsOllamaModelId(string id) => id.StartsWith("ollama:", StringComparison.OrdinalIgnoreCase);
@@ -112,6 +155,8 @@ public sealed class OllamaService : IDisposable
         [property: JsonPropertyName("modified_at")] DateTime? ModifiedAt);
     private sealed record ChatChunk(
         [property: JsonPropertyName("message")] ChatMessageChunk? Message,
-        [property: JsonPropertyName("done")] bool Done);
+        [property: JsonPropertyName("done")] bool Done,
+        [property: JsonPropertyName("prompt_eval_count")] int? PromptEvalCount,
+        [property: JsonPropertyName("eval_count")] int? EvalCount);
     private sealed record ChatMessageChunk([property: JsonPropertyName("content")] string Content);
 }

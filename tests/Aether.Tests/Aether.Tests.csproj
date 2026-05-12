@@ -12,5 +12,6 @@
     <ProjectReference Include="../../src/Aether.Rag/Aether.Rag.csproj" />
     <ProjectReference Include="../../src/Aether.Services/Aether.Services.csproj" />
     <ProjectReference Include="../../src/Aether.ViewModels/Aether.ViewModels.csproj" />
+    <ProjectReference Include="../../src/Aether.Desktop/Aether.Desktop.csproj" />
   </ItemGroup>
 </Project>

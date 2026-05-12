@@ -1,9 +1,12 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
+using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
+using AvaloniaEdit;
+using AvaloniaEdit.Highlighting;
 using Markdig;
 using Markdig.Syntax;
 using Markdig.Syntax.Inlines;
@@ -200,12 +203,20 @@ public sealed class MarkdownViewer : ContentControl
             }
             : null;
 
-        var codeBlock = new SelectableTextBlock
+        var codeBlock = new TextEditor
         {
             Text = code,
             FontFamily = MonoFamily,
             FontSize = FontSize - 1,
-            TextWrapping = TextWrapping.Wrap
+            IsReadOnly = true,
+            ShowLineNumbers = false,
+            SyntaxHighlighting = ResolveHighlighting(lang),
+            Background = Brushes.Transparent,
+            Foreground = Brushes.WhiteSmoke,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            MinHeight = Math.Max(28, (FontSize + 4) * Math.Max(1, code.Split('\n').Length)),
+            MaxHeight = 420
         };
 
         Control child = header is not null
@@ -221,6 +232,45 @@ public sealed class MarkdownViewer : ContentControl
             Margin = new Thickness(0, 4),
             Child = child
         };
+    }
+
+    public static string? NormalizeFenceLanguage(string? lang)
+    {
+        var key = (lang ?? string.Empty)
+            .Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault()?
+            .Trim()
+            .TrimStart('.')
+            .ToLowerInvariant();
+        return key switch
+        {
+            "cs" or "csharp" => "C#",
+            "fs" or "fsharp" => "F#",
+            "vb" or "visualbasic" => "VB",
+            "py" or "python" => "Python",
+            "js" or "javascript" => "JavaScript",
+            "ts" or "typescript" => "JavaScript",
+            "bash" or "sh" or "shell" or "zsh" => "Bash",
+            "json" => "JavaScript",
+            "xml" or "xaml" or "axaml" => "XML",
+            "html" or "htm" => "HTML",
+            "css" or "scss" => "CSS",
+            "sql" => "SQL",
+            "diff" or "patch" => "Patch",
+            "md" or "markdown" => "MarkDown",
+            "cpp" or "cxx" or "cc" or "hpp" or "h" => "C++",
+            "c" => "C++",
+            "java" => "Java",
+            _ => null
+        };
+    }
+
+    private static IHighlightingDefinition? ResolveHighlighting(string? lang)
+    {
+        var normalized = NormalizeFenceLanguage(lang);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return null;
+        return HighlightingManager.Instance.GetDefinition(normalized);
     }
 
     private Panel RenderList(ListBlock list)
