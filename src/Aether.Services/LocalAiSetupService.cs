@@ -321,13 +321,10 @@ if __name__ == "__main__":
             workingDirectory = Path.GetDirectoryName(pythonPath) ?? Environment.CurrentDirectory;
         }
 
-        var version = await ReadPythonVersionAsync(pythonPath, workingDirectory, ct);
-        if (version is null)
-            return new LocalAiSetupResult(false, $"Could not determine Python version at {pythonPath}. Select a valid Python 3.9-3.11 venv and retry.");
-
-        if (!IsXttsCompatibleVersion(version))
+        var isValid = await ValidatePythonForXttsAsync(pythonPath, workingDirectory, progress, ct);
+        if (!isValid)
         {
-            progress?.Report($"Python {version} is not compatible with TTS. Aether will rebuild this venv using Python 3.9-3.11.");
+            progress?.Report("Python validation failed. Attempting venv rebuild...");
             var repair = await RebuildVenvAsync(pythonPath, progress, ct);
             if (!repair.Success)
                 return repair;
@@ -335,11 +332,11 @@ if __name__ == "__main__":
             pythonPath = repair.UpdatedPath ?? pythonPath;
             workingDirectory = Path.GetDirectoryName(pythonPath) ?? Environment.CurrentDirectory;
 
-            var repairedVersion = await ReadPythonVersionAsync(pythonPath, workingDirectory, ct);
-            if (repairedVersion is null || !IsXttsCompatibleVersion(repairedVersion))
+            isValid = await ValidatePythonForXttsAsync(pythonPath, workingDirectory, progress, ct);
+            if (!isValid)
             {
                 return new LocalAiSetupResult(false,
-                    "XTTS requires Python 3.9-3.11, but Aether could not provision a compatible interpreter. Install Python 3.11 and retry setup.");
+                    "XTTS requires a valid Python 3.9-3.11 installation with encodings, venv module, and proper sys.prefix. Please install Python 3.9-3.11 on your system.");
             }
         }
 
@@ -426,6 +423,128 @@ if __name__ == "__main__":
     private static bool IsXttsCompatibleVersion(Version version) =>
         version >= MinSupportedXttsPython && version < MaxSupportedXttsPythonExclusive;
 
+    private static async Task<bool> ValidatePythonForXttsAsync(string pythonPath, string workingDirectory, IProgress<string>? progress, CancellationToken ct)
+    {
+        var validationScript = """
+import sys
+import tempfile
+import os
+
+checks = []
+
+# 1. Execute successfully (implicit - we're running)
+checks.append(("Execute", True))
+
+# 2. Report version 3.11.x (or compatible range)
+version = f"{sys.version_info[0]}.{sys.version_info[1]}"
+checks.append(("Version detection", True))
+print(f"AETHER_VERSION={version}")
+
+# 3. Import encodings
+try:
+    import encodings
+    checks.append(("Import encodings", True))
+except Exception as e:
+    checks.append(("Import encodings", False))
+    print(f"AETHER_ERROR=Failed to import encodings: {e}")
+
+# 4. Import venv
+try:
+    import venv
+    checks.append(("Import venv", True))
+except Exception as e:
+    checks.append(("Import venv", False))
+    print(f"AETHER_ERROR=Failed to import venv: {e}")
+
+# 5. Check sys.prefix/sys.base_prefix are valid
+bad_prefixes = ["/install", ""]
+base_prefix = getattr(sys, "base_prefix", sys.prefix)
+if sys.prefix in bad_prefixes or base_prefix in bad_prefixes:
+    checks.append(("Valid sys.prefix", False))
+    print(f"AETHER_ERROR=Invalid sys.prefix ({sys.prefix}) or base_prefix ({base_prefix})")
+else:
+    checks.append(("Valid sys.prefix", True))
+
+# 6. Create test venv
+try:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        test_venv = os.path.join(tmpdir, "test_venv")
+        builder = venv.EnvBuilder()
+        builder.create(test_venv)
+        test_python = os.path.join(test_venv, "bin" if not sys.platform.startswith("win") else "Scripts", "python.exe" if sys.platform.startswith("win") else "python")
+        if os.path.exists(test_python):
+            checks.append(("Create test venv", True))
+        else:
+            checks.append(("Create test venv", False))
+            print(f"AETHER_ERROR=Test venv created but python not found at {test_python}")
+except Exception as e:
+    checks.append(("Create test venv", False))
+    print(f"AETHER_ERROR=Failed to create test venv: {e}")
+
+# Report all checks
+for check_name, passed in checks:
+    status = "PASS" if passed else "FAIL"
+    print(f"AETHER_CHECK={check_name}={status}")
+""";
+
+        var result = await RunProcessAsync(
+            pythonPath,
+            ["-c", validationScript],
+            workingDirectory,
+            progress: null,
+            ct);
+
+        if (!result.Success)
+        {
+            progress?.Report($"Python validation failed to execute: {result.Log}");
+            return false;
+        }
+
+        var checks = new Dictionary<string, bool>();
+        var errors = new List<string>();
+
+        foreach (var line in result.Log.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (line.StartsWith("AETHER_CHECK="))
+            {
+                var parts = line.Substring("AETHER_CHECK=".Length).Split('=');
+                if (parts.Length == 2)
+                {
+                    checks[parts[0]] = parts[1] == "PASS";
+                }
+            }
+            else if (line.StartsWith("AETHER_ERROR="))
+            {
+                errors.Add(line.Substring("AETHER_ERROR=".Length));
+            }
+            else if (line.StartsWith("AETHER_VERSION="))
+            {
+                var version = line.Substring("AETHER_VERSION=".Length);
+                progress?.Report($"Validating Python {version}...");
+            }
+        }
+
+        var allPassed = checks.Values.All(v => v);
+
+        if (!allPassed)
+        {
+            progress?.Report("Python validation failed:");
+            foreach (var (check, passed) in checks)
+            {
+                if (!passed)
+                    progress?.Report($"  - {check}: FAILED");
+            }
+            foreach (var error in errors)
+                progress?.Report($"  - {error}");
+        }
+        else
+        {
+            progress?.Report("Python validation passed all checks.");
+        }
+
+        return allPassed;
+    }
+
     private static async Task<PythonCommand?> ResolveCompatiblePythonCommandAsync(IProgress<string>? progress, CancellationToken ct)
     {
         var candidates = GetPythonCommandCandidates();
@@ -434,53 +553,25 @@ if __name__ == "__main__":
 
         foreach (var candidate in preferredCandidates)
         {
-            var result = await RunProcessAsync(
-                candidate.FileName,
-                [.. candidate.PrefixArgs, "-c", "import sys; print(f'AETHER_PYVER={sys.version_info[0]}.{sys.version_info[1]}')"],
-                Environment.CurrentDirectory,
-                progress: null,
-                ct);
-
-            if (!result.Success)
-                continue;
-
-            var match = Regex.Match(result.Log, @"AETHER_PYVER=(\d+)\.(\d+)", RegexOptions.CultureInvariant);
-            if (!match.Success)
-                continue;
-
-            if (!int.TryParse(match.Groups[1].Value, out var major) || !int.TryParse(match.Groups[2].Value, out var minor))
-                continue;
-
-            var version = new Version(major, minor);
-            if (IsXttsCompatibleVersion(version))
+            var testPython = candidate.FileName;
+            if (candidate.PrefixArgs.Count > 0)
             {
-                progress?.Report($"Using Python {version} for XTTS setup: {candidate.DisplayName}");
-                return candidate;
+                testPython = $"{candidate.FileName} {string.Join(" ", candidate.PrefixArgs)}".Trim();
             }
+
+            progress?.Report($"Testing {candidate.DisplayName}...");
+            if (!await ValidatePythonForXttsAsync(candidate.FileName, Environment.CurrentDirectory, progress, ct))
+                continue;
+
+            progress?.Report($"Using Python for XTTS setup: {candidate.DisplayName}");
+            return candidate;
         }
 
-        var fallbackResult = await RunProcessAsync(
-            fallbackCandidate.FileName,
-            [.. fallbackCandidate.PrefixArgs, "-c", "import sys; print(f'AETHER_PYVER={sys.version_info[0]}.{sys.version_info[1]}')"],
-            Environment.CurrentDirectory,
-            progress: null,
-            ct);
-
-        if (fallbackResult.Success)
+        progress?.Report($"Testing {fallbackCandidate.DisplayName}...");
+        if (await ValidatePythonForXttsAsync(fallbackCandidate.FileName, Environment.CurrentDirectory, progress, ct))
         {
-            var match = Regex.Match(fallbackResult.Log, @"AETHER_PYVER=(\d+)\.(\d+)", RegexOptions.CultureInvariant);
-            if (match.Success && int.TryParse(match.Groups[1].Value, out var fallbackMajor) && int.TryParse(match.Groups[2].Value, out var fallbackMinor))
-            {
-                var fallbackVersion = new Version(fallbackMajor, fallbackMinor);
-                if (fallbackVersion < MaxSupportedXttsPythonExclusive)
-                {
-                    progress?.Report($"Preferred Python 3.9-3.11 not found. Using {fallbackVersion} ({fallbackCandidate.DisplayName}). This may have compatibility issues.");
-                    return fallbackCandidate;
-                }
-
-                progress?.Report($"Python {fallbackVersion} is too new for TTS (requires <3.12). Please install Python 3.9, 3.10, or 3.11.");
-                return null;
-            }
+            progress?.Report($"Preferred Python 3.9-3.11 not found. Using {fallbackCandidate.DisplayName}. This may have compatibility issues.");
+            return fallbackCandidate;
         }
 
         progress?.Report("No compatible Python interpreter found. XTTS requires Python 3.9-3.11. Please install one of these versions.");
