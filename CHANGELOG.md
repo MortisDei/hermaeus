@@ -5,7 +5,15 @@ All notable changes to Aether will be documented in this file.
 The project follows semantic versioning once public release candidates begin.
 Pre-1.0 versions may still change internal APIs and storage details.
 
-## [0.8.2-alpha] - Unreleased
+## [0.8.3-alpha] - Unreleased
+
+### Added
+
+- OS credential-store integration for secrets via Linux Secret Service,
+  macOS Keychain, and Windows Credential Manager.
+- Local fallback secret vault remains available when no OS store is present.
+
+## [0.8.2-alpha]
 
 ### Added
 
@@ -54,7 +62,6 @@ Pre-1.0 versions may still change internal APIs and storage details.
 
 ### 1.0 Release Gates
 
-- OS keychain integration for secrets.
 - Concrete local-first OCR ingestion.
 - Optional web loader that is disabled by default.
 - Linux and Windows packaging.

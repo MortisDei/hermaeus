@@ -14,13 +14,17 @@
 - Closing the main window exits Aether and stops managed local runtime/TTS
   processes. Minimize-to-tray does not change close-button shutdown behavior.
 - Tray actions expose explicit Stop Services and Quit commands.
+- API keys are stored as secret references backed by OS credential stores where
+  available: Linux Secret Service, macOS Keychain, and Windows Credential
+  Manager. If unavailable, Aether falls back to a user-only local vault that is
+  excluded from backups.
 
 ## Required Next Checks
 
 | Area | Risk | Action |
 | --- | --- | --- |
 | Data root selection | Accidental overwrite or unsafe path | Refuse existing target DB unless import/merge is explicit |
-| API keys | Secrets stored in JSON settings | Move secrets to OS credential store or encrypted local vault |
+| API keys | Secrets unavailable if OS credential service is locked/missing | Keep local fallback vault excluded from backup and show status in UI |
 | Extra args | User can pass unsafe server flags | Add warning badges for host/network flags and env-changing args |
 | Remote endpoints | User can point at untrusted APIs | Show trust level and disable secret forwarding by default |
 | RAG ingest | Huge/binary/untrusted files | Size limits, file type allowlist, HTML/script stripping |

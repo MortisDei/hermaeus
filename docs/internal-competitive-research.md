@@ -29,7 +29,7 @@ preserving Aether's native desktop, local-first direction.
 | Model benchmarks | Model rankings, leaderboards, analytics | **Completed v1** | Saved benchmark suites/runs, deterministic quality checks, speed/resource metrics, rerun/export, local rankings. |
 | System overview | Admin/system dashboards | **Completed v1** | App/runtime storage, CPU/RAM, database footprint, components, and best-effort GPU/VRAM status. |
 | Storage | Configurable data root, backup/restore | **Completed v1** | Data root migration, dry-run preview, conflict refusal, zip backup/restore. |
-| Security | Secrets, path checks, log redaction | **Partial** | Local secret refs, user-only secret file on Unix, unsafe restore/path checks, log redaction, initial data-safety tests. OS keychain remains. |
+| Security | Secrets, path checks, log redaction | **Partial** | OS-backed secret refs with local fallback, unsafe restore/path checks, log redaction, initial data-safety tests. |
 | Performance | Stream/render stability | **Completed v1** | Model-list memoization, markdown render throttling, response timing logs. |
 
 ## Aether Advantages To Preserve
@@ -47,6 +47,5 @@ preserving Aether's native desktop, local-first direction.
 
 - System-wide quick-chat hotkey integration where OS/compositor APIs are reliable.
 - Concrete local-first OCR and optional web loaders.
-- OS credential-store integration beyond Aether's local secret reference store.
 - Expanded automated tests for RAG eval, runtime validation, secret migration,
   and process argument safety.

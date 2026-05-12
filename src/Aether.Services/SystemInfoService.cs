@@ -9,10 +9,12 @@ namespace Aether.Services;
 public sealed class SystemInfoService : ISystemInfoService
 {
     private readonly ISettingsService _settings;
+    private readonly ISecretStore? _secrets;
 
-    public SystemInfoService(ISettingsService settings)
+    public SystemInfoService(ISettingsService settings, ISecretStore? secrets = null)
     {
         _settings = settings;
+        _secrets = secrets;
     }
 
     public async Task<SystemSnapshot> CaptureAsync(CancellationToken ct = default)
@@ -57,6 +59,11 @@ public sealed class SystemInfoService : ISystemInfoService
                 ? "Choose an assets folder in Settings"
                 : Path.GetFullPath(_settings.Settings.LocalAiAssetsRoot)
         });
+        if (_secrets is not null)
+        {
+            var backend = await _secrets.BackendLabelAsync(ct);
+            snapshot.Components.Add(new ComponentStatus { Name = "Secrets", Status = "Ready", Detail = backend });
+        }
         snapshot.Components.Add(new ComponentStatus { Name = "Chat database", Status = File.Exists(Path.Combine(dataRoot, "conversations.db")) ? "Present" : "Not created", Detail = FormatBytes(snapshot.DatabaseBytes) });
         snapshot.Components.Add(new ComponentStatus { Name = "Benchmark database", Status = File.Exists(Path.Combine(dataRoot, "benchmarks.db")) ? "Present" : "Not created", Detail = Path.Combine(dataRoot, "benchmarks.db") });
         snapshot.Components.Add(new ComponentStatus { Name = "Free storage", Status = drive.AvailableFreeSpace > 10L * 1024 * 1024 * 1024 ? "OK" : "Low", Detail = FormatBytes(drive.AvailableFreeSpace) });

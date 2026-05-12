@@ -1,6 +1,6 @@
 # Aether
 
-Version: `0.8.2-alpha`
+Version: `0.8.3-alpha`
 
 A native, local-first Avalonia desktop AI workspace for `llama.cpp`, Ollama,
 OpenAI-compatible APIs, Oghma-grade RAG, and XTTS voice playback.
@@ -38,7 +38,7 @@ OpenAI-compatible APIs, Oghma-grade RAG, and XTTS voice playback.
 - Toast notifications throughout the app.
 - Configurable data root with migration, backup, restore, and conflict refusal.
 - Configurable local AI assets root for models, XTTS, venvs, and encoders.
-- Local secret references and redacted process logs.
+- OS-backed secret references and redacted process logs.
 - Data-safety test harness for migration, backup/restore, and redaction.
 
 ## Quick Start
@@ -122,7 +122,10 @@ Security hardening currently includes:
 - shell-free process launch via `ProcessStartInfo.ArgumentList`
 - unsafe restore path checks
 - API-key and home-path redaction in visible server logs
-- local secret references for OpenAI keys
+- OS credential-store integration for API keys where available:
+  Linux Secret Service via `secret-tool`, macOS Keychain via `security`, and
+  Windows Credential Manager. A user-only local fallback vault is used when no
+  OS store is available.
 - data-safety tests for migration, backup/restore, and redaction
 
 ## Tray And Hotkeys
@@ -193,7 +196,6 @@ docs/                   Security notes, RAG/eval docs, internal planning notes
 
 ## Public Release Gates
 
-- OS keychain integration for secrets.
 - Concrete local-first OCR loader.
 - Optional web loader kept opt-in and disabled by default.
 - Linux and Windows packaging.

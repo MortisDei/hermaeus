@@ -12,7 +12,8 @@ var tests = new (string Name, Func<Task> Run)[]
     ("benchmark db creates starter suites and records runs", BenchmarkDbCreatesAndRecordsRuns),
     ("benchmark scoring and ranking are deterministic", BenchmarkScoringAndRanking),
     ("system info returns safe fallback values", SystemInfoSafeFallback),
-    ("local ai assets detect and apply paths", LocalAiAssetsDetectAndApplyPaths)
+    ("local ai assets detect and apply paths", LocalAiAssetsDetectAndApplyPaths),
+    ("secret store falls back without plaintext", SecretStoreFallbackWithoutPlaintext)
 };
 
 var failed = 0;
@@ -263,6 +264,32 @@ static Task LocalAiAssetsDetectAndApplyPaths()
     Equal(output, settings.TtsOutputDirectory, "output directory should be applied");
     Equal(encoder, settings.RagRerankerModelPath, "reranker directory should be applied");
     return Task.CompletedTask;
+}
+
+static async Task SecretStoreFallbackWithoutPlaintext()
+{
+    using var temp = new TempDir();
+    var previous = Environment.GetEnvironmentVariable("AETHER_DISABLE_OS_KEYCHAIN");
+    Environment.SetEnvironmentVariable("AETHER_DISABLE_OS_KEYCHAIN", "1");
+    try
+    {
+        var settings = NewSettings(temp);
+        settings.Settings.DataRootDirectory = temp.PathFor("data");
+        var store = new SecretStore(settings);
+        var reference = await store.StoreAsync("openai-api-key", "sk-test-secret");
+        Equal(true, store.IsReference(reference), "stored secret should return a reference");
+        Equal("sk-test-secret", await store.ResolveAsync(reference), "secret reference should resolve");
+        Equal("Local fallback file", await store.BackendLabelAsync(), "disabled keychain should use fallback label");
+
+        var localVault = Path.Combine(settings.Settings.DataRootDirectory, "secrets.local.json");
+        True(File.Exists(localVault), "fallback vault should exist");
+        var json = await File.ReadAllTextAsync(localVault);
+        False(json.Contains("sk-test-secret", StringComparison.Ordinal), "fallback vault should not contain plaintext");
+    }
+    finally
+    {
+        Environment.SetEnvironmentVariable("AETHER_DISABLE_OS_KEYCHAIN", previous);
+    }
 }
 
 static SettingsService NewSettings(TempDir temp) => new(temp.PathFor("settings/settings.json"));
