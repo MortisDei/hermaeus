@@ -5,7 +5,7 @@
              x:Class="Aether.Desktop.Views.BenchmarkView"
              x:DataType="vm:BenchmarkViewModel">
     <Grid Margin="24"
-          ColumnDefinitions="260,*,360"
+          ColumnDefinitions="260,340,*"
           RowDefinitions="Auto,*"
           ColumnSpacing="16"
           RowSpacing="14">
@@ -27,6 +27,7 @@
             <Grid RowDefinitions="Auto,*,Auto,Auto" RowSpacing="10">
                 <TextBlock Text="Suites" FontWeight="SemiBold" />
                 <ListBox Grid.Row="1"
+                         MaxHeight="340"
                          ItemsSource="{Binding Suites}"
                          SelectedItem="{Binding SelectedSuite}">
                     <ListBox.ItemTemplate>
@@ -46,7 +47,7 @@
                 </ListBox>
                 <TextBlock Grid.Row="2" Text="Run history" FontWeight="SemiBold" />
                 <ListBox Grid.Row="3"
-                         MaxHeight="220"
+                         MaxHeight="180"
                          ItemsSource="{Binding Runs}"
                          SelectedItem="{Binding SelectedRun}">
                     <ListBox.ItemTemplate>
@@ -71,7 +72,8 @@
                     <StackPanel Spacing="12">
                         <TextBlock Text="Run Setup" FontWeight="SemiBold" FontSize="16" />
                         <ComboBox ItemsSource="{Binding Models}"
-                                  SelectedItem="{Binding SelectedModel}">
+                                  SelectedItem="{Binding SelectedModel}"
+                                  HorizontalAlignment="Stretch">
                             <ComboBox.ItemTemplate>
                                 <DataTemplate DataType="models:LlmModel">
                                     <StackPanel Orientation="Horizontal" Spacing="8">
@@ -90,17 +92,20 @@
                                            Minimum="0"
                                            Maximum="2"
                                            Increment="0.1"
-                                           FormatString="F1" />
+                                           FormatString="F1"
+                                           MinWidth="88" />
                             <NumericUpDown Grid.Row="1" Grid.Column="1"
                                            Value="{Binding TimeoutSeconds}"
                                            Minimum="10"
                                            Maximum="900"
-                                           Increment="10" />
+                                           Increment="10"
+                                           MinWidth="88" />
                             <NumericUpDown Grid.Row="1" Grid.Column="2"
                                            Value="{Binding MaxCases}"
                                            Minimum="0"
                                            Maximum="100"
-                                           Increment="1" />
+                                           Increment="1"
+                                           MinWidth="88" />
                         </Grid>
                         <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
                             <CheckBox Grid.Column="0"

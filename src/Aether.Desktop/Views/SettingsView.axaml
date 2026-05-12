@@ -1,5 +1,6 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:m="using:Aether.Core.Models"
              xmlns:vm="using:Aether.ViewModels"
              x:Class="Aether.Desktop.Views.SettingsView"
              x:DataType="vm:SettingsViewModel">
@@ -10,11 +11,17 @@
                   HorizontalScrollBarVisibility="Disabled">
         <StackPanel MaxWidth="960" Spacing="20">
 
-            <StackPanel Spacing="4" Margin="0,0,0,8">
-                <TextBlock Text="Settings" Classes="page-title" />
-                <TextBlock Text="Tune models, storage, voice and interface defaults for a local-first workspace."
-                           Classes="page-subtitle" />
-            </StackPanel>
+            <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10" Margin="0,0,0,8">
+                <StackPanel Grid.Column="0" Spacing="4">
+                    <TextBlock Text="Settings" Classes="page-title" />
+                    <TextBlock Text="Tune models, storage, voice and interface defaults for a local-first workspace."
+                               Classes="page-subtitle" />
+                </StackPanel>
+                <Button Grid.Column="1" Command="{Binding SaveCommand}" Content="Save"
+                        FontSize="13" Padding="16,8" CornerRadius="8" />
+                <Button Grid.Column="2" Command="{Binding ResetCommand}" Content="Reset"
+                        FontSize="13" Padding="16,8" CornerRadius="8" />
+            </Grid>
 
             <Grid x:Name="SettingsCards"
                   ColumnDefinitions="*,*"
@@ -101,12 +108,13 @@
                                       Width="15" Height="15" />
                         </Button>
                     </Grid>
-                    <Grid ColumnDefinitions="110,*,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
+                    <Grid ColumnDefinitions="110,*,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
                           RowSpacing="8" ColumnSpacing="12">
                         <TextBlock Grid.Row="0" Grid.Column="0" Text="Base URL"
                                    VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
                         <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding TtsServiceUrl}"
                                  Watermark="http://127.0.0.1:8020"
+                                 ToolTip.Tip="Local XTTS API endpoint Aether will call for voice playback."
                                  FontSize="13" CornerRadius="6" Padding="10,6" />
                         <TextBlock Grid.Row="1" Grid.Column="0" Text="Speaker"
                                    VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
@@ -127,52 +135,79 @@
                         <TextBlock Grid.Row="3" Grid.Column="0" Text="Version"
                                    VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
                         <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding TtsModelVersion}"
+                                 ToolTip.Tip="XTTS model version used when the API script loads by model name."
                                  Watermark="2.0.3" FontSize="13" CornerRadius="6" Padding="10,6" />
-                        <TextBlock Grid.Row="4" Grid.Column="0" Text="Script"
+                        <TextBlock Grid.Row="4" Grid.Column="0" Text="Python"
                                    VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
-                        <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding TtsScriptPath}"
-                                 Watermark="/path/to/xtts_api_server.py" FontSize="13" CornerRadius="6" Padding="10,6" />
+                        <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding TtsPythonPath, UpdateSourceTrigger=PropertyChanged}"
+                                 Watermark="/path/to/venv/bin/python"
+                                 ToolTip.Tip="Python executable in the XTTS venv. Local AI Setup can create one after approval."
+                                 FontSize="13" CornerRadius="6" Padding="10,6" />
                         <Button Grid.Row="4" Grid.Column="2"
+                                Classes="icon-btn"
+                                Command="{Binding BrowseTtsPythonCommand}"
+                                ToolTip.Tip="Choose XTTS venv Python">
+                            <PathIcon Data="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z"
+                                      Width="15" Height="15" />
+                        </Button>
+                        <TextBlock Grid.Row="5" Grid.Column="0" Text="Script"
+                                   VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
+                        <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding TtsScriptPath, UpdateSourceTrigger=PropertyChanged}"
+                                 Watermark="/path/to/xtts_api_server.py" FontSize="13" CornerRadius="6" Padding="10,6" />
+                        <Button Grid.Row="5" Grid.Column="2"
                                 Classes="icon-btn"
                                 Command="{Binding BrowseTtsScriptCommand}"
                                 ToolTip.Tip="Choose XTTS script">
                             <PathIcon Data="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z"
                                       Width="15" Height="15" />
                         </Button>
-                        <TextBlock Grid.Row="5" Grid.Column="0" Text="Output"
+                        <TextBlock Grid.Row="6" Grid.Column="0" Text="Model dir"
                                    VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
-                        <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding TtsOutputDirectory}"
+                        <TextBox Grid.Row="6" Grid.Column="1" Text="{Binding TtsModelDirectory, UpdateSourceTrigger=PropertyChanged}"
+                                 Watermark="XTTS v2 model folder"
+                                 ToolTip.Tip="Folder containing XTTS v2 config and model files."
+                                 FontSize="13" CornerRadius="6" Padding="10,6" />
+                        <Button Grid.Row="6" Grid.Column="2"
+                                Classes="icon-btn"
+                                Command="{Binding BrowseTtsModelDirectoryCommand}"
+                                ToolTip.Tip="Choose XTTS model folder">
+                            <PathIcon Data="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z"
+                                      Width="15" Height="15" />
+                        </Button>
+                        <TextBlock Grid.Row="7" Grid.Column="0" Text="Output"
+                                   VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
+                        <TextBox Grid.Row="7" Grid.Column="1" Text="{Binding TtsOutputDirectory, UpdateSourceTrigger=PropertyChanged}"
                                  Watermark="Default Aether XTTS folder" FontSize="13" CornerRadius="6" Padding="10,6" />
-                        <Button Grid.Row="5" Grid.Column="2"
+                        <Button Grid.Row="7" Grid.Column="2"
                                 Classes="icon-btn"
                                 Command="{Binding BrowseTtsOutputCommand}"
                                 ToolTip.Tip="Choose XTTS output folder">
                             <PathIcon Data="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z"
                                       Width="15" Height="15" />
                         </Button>
-                        <TextBlock Grid.Row="6" Grid.Column="0" Text="Voices"
+                        <TextBlock Grid.Row="8" Grid.Column="0" Text="Voices"
                                    VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
-                        <TextBox Grid.Row="6" Grid.Column="1" Text="{Binding TtsVoiceDirectory}"
+                        <TextBox Grid.Row="8" Grid.Column="1" Text="{Binding TtsVoiceDirectory, UpdateSourceTrigger=PropertyChanged}"
                                  Watermark="Default Aether voice folder" FontSize="13" CornerRadius="6" Padding="10,6" />
-                        <Button Grid.Row="6" Grid.Column="2"
+                        <Button Grid.Row="8" Grid.Column="2"
                                 Classes="icon-btn"
                                 Command="{Binding BrowseTtsVoiceDirectoryCommand}"
                                 ToolTip.Tip="Choose XTTS voice sample folder">
                             <PathIcon Data="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z"
                                       Width="15" Height="15" />
                         </Button>
-                        <TextBlock Grid.Row="7" Grid.Column="0" Text="Preview"
+                        <TextBlock Grid.Row="9" Grid.Column="0" Text="Preview"
                                    VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
-                        <TextBox Grid.Row="7" Grid.Column="1" Text="{Binding TtsPreviewText}"
+                        <TextBox Grid.Row="9" Grid.Column="1" Text="{Binding TtsPreviewText}"
                                  Watermark="Preview sentence" FontSize="13" CornerRadius="6" Padding="10,6" />
-                        <Button Grid.Row="7" Grid.Column="2"
+                        <Button Grid.Row="9" Grid.Column="2"
                                 Command="{Binding PreviewTtsVoiceCommand}"
                                 Content="Play" FontSize="12" Padding="10,5" CornerRadius="6" />
-                        <TextBlock Grid.Row="8" Grid.Column="0" Text="Clone"
+                        <TextBlock Grid.Row="10" Grid.Column="0" Text="Clone"
                                    VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
-                        <TextBox Grid.Row="8" Grid.Column="1" Text="{Binding TtsCloneDisplayName}"
+                        <TextBox Grid.Row="10" Grid.Column="1" Text="{Binding TtsCloneDisplayName}"
                                  Watermark="Imported voice name" FontSize="13" CornerRadius="6" Padding="10,6" />
-                        <Button Grid.Row="8" Grid.Column="2"
+                        <Button Grid.Row="10" Grid.Column="2"
                                 Command="{Binding ImportTtsVoiceSampleCommand}"
                                 Content="Import" FontSize="12" Padding="10,5" CornerRadius="6" />
                     </Grid>
@@ -189,8 +224,9 @@
                         <TextBlock Grid.Column="0" Text="Data folder"
                                    VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
                         <TextBox Grid.Column="1"
-                                 Text="{Binding DataRootDirectory}"
+                                 Text="{Binding DataRootDirectory, UpdateSourceTrigger=PropertyChanged}"
                                  Watermark="Default OS app data folder"
+                                 ToolTip.Tip="Optional data root for conversations, RAG, tasks and local app state."
                                  FontSize="13" CornerRadius="6" Padding="10,6" />
                         <Button Grid.Column="2"
                                 Classes="icon-btn"
@@ -206,8 +242,9 @@
                         <TextBlock Grid.Column="0" Text="AI assets"
                                    VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
                         <TextBox Grid.Column="1"
-                                 Text="{Binding LocalAiAssetsRoot}"
+                                 Text="{Binding LocalAiAssetsRoot, UpdateSourceTrigger=PropertyChanged}"
                                  Watermark="Folder containing local models, XTTS, venvs, encoders"
+                                 ToolTip.Tip="Point Aether at your local AI folder. The scan is read-only until you approve setup actions."
                                  FontSize="13" CornerRadius="6" Padding="10,6" />
                         <Button Grid.Column="2"
                                 Classes="icon-btn"
@@ -221,11 +258,84 @@
                         <Button Command="{Binding ApplyLocalAiAssetsCommand}"
                                 Content="Apply Detected Paths"
                                 FontSize="12" Padding="12,5" CornerRadius="6" />
+                        <Button Command="{Binding ScanLocalAiSetupCommand}"
+                                Content="Scan Setup"
+                                IsEnabled="{Binding !LocalAiSetupBusy}"
+                                ToolTip.Tip="Scan the selected AI folder and list missing setup pieces."
+                                FontSize="12" Padding="12,5" CornerRadius="6" />
                         <TextBlock Text="{Binding LocalAiAssetsStatus}"
                                    VerticalAlignment="Center"
                                    FontSize="11" Opacity="0.45"
                                    TextWrapping="Wrap" />
                     </StackPanel>
+                    <Expander Header="Local AI Setup"
+                              IsExpanded="True"
+                              ToolTip.Tip="Approval-gated helper for venv, XTTS API script and support folders.">
+                        <StackPanel Spacing="10" Margin="0,8,0,0">
+                            <TextBlock Text="{Binding LocalAiSetupSummary}"
+                                       FontSize="12" Opacity="0.62" TextWrapping="Wrap" />
+                            <ItemsControl ItemsSource="{Binding LocalAiReadinessItems}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate DataType="m:LocalAiReadinessItem">
+                                        <Grid ColumnDefinitions="110,78,*" ColumnSpacing="8" Margin="0,0,0,5">
+                                            <TextBlock Grid.Column="0" Text="{Binding Label}" FontSize="12" FontWeight="SemiBold" />
+                                            <TextBlock Grid.Column="1" Text="{Binding StatusLabel}" FontSize="12" Opacity="0.78" />
+                                            <TextBlock Grid.Column="2" Text="{Binding Detail}" FontSize="12" Opacity="0.55"
+                                                       TextWrapping="Wrap" ToolTip.Tip="{Binding Hint}" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <ItemsControl ItemsSource="{Binding LocalAiSetupActions}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate DataType="m:LocalAiSetupAction">
+                                        <Border CornerRadius="6" Padding="10" Margin="0,0,0,8"
+                                                Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                                                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                                BorderThickness="1">
+                                            <StackPanel Spacing="7">
+                                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                                    <StackPanel Grid.Column="0" Spacing="2">
+                                                        <TextBlock Text="{Binding Title}" FontSize="12" FontWeight="SemiBold" />
+                                                        <TextBlock Text="{Binding TargetPath}" FontSize="11" Opacity="0.58"
+                                                                   TextWrapping="Wrap" />
+                                                    </StackPanel>
+                                                    <Button Grid.Column="1"
+                                                            Content="Approve"
+                                                            IsEnabled="{Binding CanRun}"
+                                                            Command="{Binding $parent[ItemsControl].DataContext.RunLocalAiSetupActionCommand}"
+                                                            CommandParameter="{Binding}"
+                                                            ToolTip.Tip="Run this setup action after reviewing target, risk and command."
+                                                            FontSize="12" Padding="10,5" CornerRadius="6" />
+                                                </Grid>
+                                                <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
+                                                    <TextBlock Grid.Column="0" Text="{Binding RiskLabel}" FontSize="11" Opacity="0.75" />
+                                                    <TextBlock Grid.Column="1" Text="{Binding ExpectedResult}" FontSize="11" Opacity="0.55"
+                                                               TextWrapping="Wrap" />
+                                                </Grid>
+                                                <TextBlock Text="{Binding CommandPreviewText}"
+                                                           FontFamily="Consolas, Cascadia Mono, monospace"
+                                                           FontSize="11" Opacity="0.68" TextWrapping="Wrap" />
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                <TextBox Grid.Column="0" Text="{Binding LocalAiSetupLog}"
+                                         AcceptsReturn="True" TextWrapping="Wrap"
+                                         MinHeight="74" MaxHeight="160"
+                                         IsReadOnly="True"
+                                         FontFamily="Consolas, Cascadia Mono, monospace"
+                                         FontSize="11" />
+                                <Button Grid.Column="1" Command="{Binding CopyLocalAiSetupCommandsCommand}"
+                                        Content="Copy"
+                                        VerticalAlignment="Top"
+                                        ToolTip.Tip="Copy the current setup command previews."
+                                        FontSize="12" Padding="10,5" CornerRadius="6" />
+                            </Grid>
+                        </StackPanel>
+                    </Expander>
                     <Grid ColumnDefinitions="110,*,Auto" ColumnSpacing="8">
                         <TextBlock Grid.Column="0" Text="Backup to"
                                    VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
@@ -338,10 +448,6 @@
             </Grid>
 
             <StackPanel Orientation="Horizontal" Spacing="10">
-                <Button Command="{Binding SaveCommand}" Content="Save"
-                        FontSize="13" Padding="16,8" CornerRadius="8" />
-                <Button Command="{Binding ResetCommand}" Content="Reset"
-                        FontSize="13" Padding="16,8" CornerRadius="8" />
                 <TextBlock Text="Saved" IsVisible="{Binding IsSaved}"
                            VerticalAlignment="Center" FontSize="13"
                            Foreground="{DynamicResource AccentFillColorDefaultBrush}" />

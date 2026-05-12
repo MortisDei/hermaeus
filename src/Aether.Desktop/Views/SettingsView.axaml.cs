@@ -116,6 +116,26 @@ public partial class SettingsView : UserControl
                 vm.TtsScriptPath = files[0].Path.LocalPath;
         };
 
+        vm.RequestTtsPythonPicker = async () =>
+        {
+            var top = TopLevel.GetTopLevel(this);
+            if (top is null) return;
+
+            var files = await top.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+            {
+                Title = "Choose XTTS venv Python",
+                AllowMultiple = false,
+                FileTypeFilter =
+                [
+                    new FilePickerFileType("Python") { Patterns = OperatingSystem.IsWindows() ? ["python.exe"] : ["python"] },
+                    new FilePickerFileType("All files") { Patterns = ["*"] }
+                ]
+            });
+
+            if (files.Count > 0)
+                vm.TtsPythonPath = files[0].Path.LocalPath;
+        };
+
         vm.RequestTtsOutputPicker = async () =>
         {
             var top = TopLevel.GetTopLevel(this);
@@ -129,6 +149,21 @@ public partial class SettingsView : UserControl
 
             if (folders.Count > 0)
                 vm.TtsOutputDirectory = folders[0].Path.LocalPath;
+        };
+
+        vm.RequestTtsModelDirectoryPicker = async () =>
+        {
+            var top = TopLevel.GetTopLevel(this);
+            if (top is null) return;
+
+            var folders = await top.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+            {
+                Title = "Choose XTTS v2 model folder",
+                AllowMultiple = false
+            });
+
+            if (folders.Count > 0)
+                vm.TtsModelDirectory = folders[0].Path.LocalPath;
         };
 
         vm.RequestTtsVoiceDirectoryPicker = async () =>
@@ -164,6 +199,13 @@ public partial class SettingsView : UserControl
 
             if (files.Count > 0)
                 await vm.ImportTtsVoiceSampleAsync(files[0].Path.LocalPath);
+        };
+
+        vm.RequestCopyToClipboard = async text =>
+        {
+            var top = TopLevel.GetTopLevel(this);
+            if (top?.Clipboard is not null)
+                await top.Clipboard.SetTextAsync(text);
         };
     }
 

@@ -24,6 +24,12 @@ var tests = new (string Name, Func<Task> Run)[]
     ("benchmark scoring and ranking are deterministic", BenchmarkScoringAndRanking),
     ("system info returns safe fallback values", SystemInfoSafeFallback),
     ("local ai assets detect and apply paths", LocalAiAssetsDetectAndApplyPaths),
+    ("local AI setup detects Aether folder layout", LocalAiSetupDetectsFolderLayout),
+    ("local AI setup script handling is approval gated", LocalAiSetupScriptHandlingIsApprovalGated),
+    ("local AI setup command previews stay shell-free", LocalAiSetupCommandPreviewsStayShellFree),
+    ("XTTS API template has required endpoints", XttsApiTemplateHasRequiredEndpoints),
+    ("source strings avoid long dashes", SourceStringsAvoidLongDashes),
+    ("settings apply local ai assets persists paths", SettingsApplyLocalAiAssetsPersistsPaths),
     ("secret store falls back without plaintext", SecretStoreFallbackWithoutPlaintext),
     ("RAG BM25 scoring ranks exact term matches", RagBm25ScoringRanksMatches),
     ("RAG hybrid scoring fuses semantic and lexical ranks", RagHybridScoringFusesRanks),
@@ -36,6 +42,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("agent tool policy gates risky actions", AgentToolPolicyGatesRiskyActions),
     ("agent loop writes state log and trace", AgentLoopWritesStateLogAndTrace),
     ("runtime profile normalization and unsafe host validation", RuntimeProfileValidation),
+    ("runtime profile defaults are deduplicated", RuntimeProfilesAreDeduplicated),
     ("settings save migrates OpenAI key to secret reference", SettingsSaveMigratesOpenAiKey),
     ("settings save preserves existing secret reference", SettingsSavePreservesExistingSecretReference),
     ("settings save persists global hotkey preference", SettingsSavePersistsGlobalHotkeyPreference),
@@ -289,6 +296,130 @@ static Task LocalAiAssetsDetectAndApplyPaths()
     Equal(voices, settings.TtsVoiceDirectory, "voice directory should be applied");
     Equal(output, settings.TtsOutputDirectory, "output directory should be applied");
     Equal(encoder, settings.RagRerankerModelPath, "reranker directory should be applied");
+    return Task.CompletedTask;
+}
+
+static async Task SettingsApplyLocalAiAssetsPersistsPaths()
+{
+    using var temp = new TempDir();
+    var root = temp.PathFor("ai");
+    var tts = Path.Combine(root, "tts");
+    var venv = Path.Combine(tts, "venv", OperatingSystem.IsWindows() ? "Scripts" : "bin");
+    var voices = Path.Combine(tts, "voices");
+    var output = Path.Combine(tts, "output");
+    Directory.CreateDirectory(venv);
+    Directory.CreateDirectory(voices);
+    Directory.CreateDirectory(output);
+    File.WriteAllText(Path.Combine(tts, "xtts_api_server.py"), "print('xtts')");
+    File.WriteAllText(Path.Combine(venv, OperatingSystem.IsWindows() ? "python.exe" : "python"), string.Empty);
+
+    var settings = NewSettings(temp);
+    settings.Settings.DataRootDirectory = temp.PathFor("data");
+    var vm = NewSettingsViewModel(settings, new FakeSecretStore());
+    vm.LocalAiAssetsRoot = root;
+    await vm.ApplyLocalAiAssetsCommand.ExecuteAsync(null);
+
+    Equal(root, settings.Settings.LocalAiAssetsRoot, "local AI assets root should save immediately when paths are applied");
+    True(settings.Settings.TtsScriptPath.EndsWith("xtts_api_server.py", StringComparison.Ordinal),
+        "applied XTTS script should persist to settings");
+    Equal(voices, settings.Settings.TtsVoiceDirectory, "applied voice directory should persist to settings");
+    Equal(output, settings.Settings.TtsOutputDirectory, "applied output directory should persist to settings");
+}
+
+static async Task LocalAiSetupDetectsFolderLayout()
+{
+    using var temp = new TempDir();
+    var root = temp.PathFor("AI");
+    var models = Path.Combine(root, "Models");
+    var venv = Path.Combine(root, "venv", OperatingSystem.IsWindows() ? "Scripts" : "bin");
+    var xtts = Path.Combine(root, "TTS", "multi-dataset--xtts_v2");
+    Directory.CreateDirectory(models);
+    Directory.CreateDirectory(venv);
+    Directory.CreateDirectory(xtts);
+    File.WriteAllText(Path.Combine(models, "local.gguf"), string.Empty);
+    File.WriteAllText(Path.Combine(venv, OperatingSystem.IsWindows() ? "python.exe" : "python"), string.Empty);
+    File.WriteAllText(Path.Combine(xtts, "config.json"), "{}");
+    File.WriteAllText(Path.Combine(xtts, "model.pth"), string.Empty);
+
+    var settings = new AppSettings { LocalAiAssetsRoot = root };
+    var report = await new LocalAiSetupService().ScanAsync(settings);
+
+    True(report.Items.Any(i => i.Key == "models" && i.Status == LocalAiReadinessStatus.Found), "GGUF model folder should be found");
+    True(report.Items.Any(i => i.Key == "venv" && i.Status == LocalAiReadinessStatus.Found), "root venv python should be found");
+    True(report.Items.Any(i => i.Key == "xtts-model" && i.Status == LocalAiReadinessStatus.Found), "XTTS v2 model folder should be found");
+    True(report.Items.Any(i => i.Key == "xtts-script" && i.Status == LocalAiReadinessStatus.Missing), "missing XTTS API script should be reported separately");
+    True(report.Actions.Any(a => a.Kind == LocalAiSetupActionKind.CreateXttsApiScript), "script creation action should be offered");
+}
+
+static async Task LocalAiSetupScriptHandlingIsApprovalGated()
+{
+    using var temp = new TempDir();
+    var root = temp.PathFor("AI");
+    var script = Path.Combine(root, "TTS", "xtts_api_server.py");
+    Directory.CreateDirectory(Path.GetDirectoryName(script)!);
+    File.WriteAllText(script, "existing");
+
+    var service = new LocalAiSetupService();
+    var action = new LocalAiSetupAction(
+        "create-xtts-script",
+        LocalAiSetupActionKind.CreateXttsApiScript,
+        "Create XTTS API script",
+        script,
+        ["write-file", script],
+        LocalAiSetupRiskLevel.Medium,
+        "Create script",
+        false,
+        true,
+        true);
+
+    var refused = await service.RunActionAsync(action, new AppSettings(), allowOverwrite: false);
+    False(refused.Success, "existing script should not be overwritten without explicit overwrite approval");
+    Equal("existing", File.ReadAllText(script), "existing script content should be preserved");
+
+    var allowed = await service.RunActionAsync(action, new AppSettings(), allowOverwrite: true);
+    True(allowed.Success, "explicit overwrite approval should allow script update");
+    True(File.ReadAllText(script).Contains("/v1/audio/speech", StringComparison.Ordinal), "generated script should replace content when overwrite is allowed");
+}
+
+static async Task LocalAiSetupCommandPreviewsStayShellFree()
+{
+    using var temp = new TempDir();
+    var root = temp.PathFor("AI folder");
+    Directory.CreateDirectory(root);
+    var report = await new LocalAiSetupService().ScanAsync(new AppSettings { LocalAiAssetsRoot = root });
+
+    var install = report.Actions.Single(a => a.Kind == LocalAiSetupActionKind.InstallXttsDependencies);
+    ContainsInOrder(install.CommandPreview, "-m", "pip", "install preview should use ArgumentList-style tokens");
+    ContainsInOrder(install.CommandPreview, "pip", "install", "install preview should use ArgumentList-style tokens");
+    False(install.CommandPreview.Any(a => a.Contains(';', StringComparison.Ordinal) || a.Contains("&&", StringComparison.Ordinal)),
+        "command preview should not synthesize shell separators");
+    True(install.RequiresNetwork, "package installation should be marked as network using");
+    Equal(LocalAiSetupRiskLevel.High, install.RiskLevel, "package installation should be high risk");
+}
+
+static Task XttsApiTemplateHasRequiredEndpoints()
+{
+    var script = new LocalAiSetupService().BuildXttsApiScript();
+    True(script.Contains("@app.get(\"/health\")", StringComparison.Ordinal), "script should expose health endpoint");
+    True(script.Contains("@app.post(\"/v1/audio/speech\")", StringComparison.Ordinal), "script should expose speech endpoint");
+    True(script.Contains("@app.get(\"/voices\")", StringComparison.Ordinal), "script should expose voice listing endpoint");
+    True(script.Contains("--model-dir", StringComparison.Ordinal), "script should accept model directory argument");
+    False(script.Contains("/mnt/Gaming/AI", StringComparison.Ordinal), "template should not hardcode a developer AI folder");
+    return Task.CompletedTask;
+}
+
+static Task SourceStringsAvoidLongDashes()
+{
+    var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../"));
+    var src = Path.Combine(root, "src");
+    var offenders = Directory.EnumerateFiles(src, "*.*", SearchOption.AllDirectories)
+        .Where(path => path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith(".axaml", StringComparison.OrdinalIgnoreCase))
+        .SelectMany(path => File.ReadLines(path).Select((line, index) => (path, line, index)))
+        .Where(item => item.line.Contains('\u2014') || item.line.Contains('\u2013'))
+        .Select(item => $"{item.path}:{item.index + 1}")
+        .ToList();
+    Equal(0, offenders.Count, $"source should avoid em dash and en dash characters: {string.Join(", ", offenders)}");
     return Task.CompletedTask;
 }
 
@@ -624,6 +755,24 @@ static async Task RuntimeProfileValidation()
     True(unsafeProfile.HasUnsafeHost, "runtime profile view model should flag 0.0.0.0");
 }
 
+static Task RuntimeProfilesAreDeduplicated()
+{
+    using var temp = new TempDir();
+    var settings = NewSettings(temp);
+    settings.Settings.RuntimeProfiles =
+    [
+        new RuntimeProfile { Id = "llama-a", Name = "llama.cpp local", Kind = RuntimeKind.LlamaCpp, BaseUrl = "http://localhost:8080" },
+        new RuntimeProfile { Id = "llama-b", Name = "llama.cpp local", Kind = RuntimeKind.LlamaCpp, BaseUrl = "http://localhost:8080/" },
+        new RuntimeProfile { Id = "ollama", Name = "Ollama local", Kind = RuntimeKind.Ollama, BaseUrl = "http://127.0.0.1:11434" },
+        new RuntimeProfile { Id = "ollama", Name = "Ollama local", Kind = RuntimeKind.Ollama, BaseUrl = "http://127.0.0.1:11434" }
+    ];
+
+    var service = new RuntimeProfileService(settings);
+    Equal(2, service.Profiles.Count, "duplicate runtime defaults should be collapsed");
+    Equal(2, settings.Settings.RuntimeProfiles.Count, "dedupe should update backing settings list");
+    return Task.CompletedTask;
+}
+
 static async Task SettingsSaveMigratesOpenAiKey()
 {
     using var temp = new TempDir();
@@ -720,7 +869,7 @@ static Task ServerProcessArgumentsAreSafe()
 static SettingsService NewSettings(TempDir temp) => new(temp.PathFor("settings/settings.json"));
 
 static SettingsViewModel NewSettingsViewModel(ISettingsService settings, ISecretStore secrets) =>
-    new(settings, new FakeTts(), new FakeToasts(), new BackupService(settings), secrets, new XttsProcessManager());
+    new(settings, new FakeTts(), new FakeToasts(), new BackupService(settings), secrets, new XttsProcessManager(), new LocalAiSetupService());
 
 static async Task ThrowsAsync<T>(Func<Task> action) where T : Exception
 {

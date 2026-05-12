@@ -19,6 +19,7 @@ public sealed class RuntimeProfileService : IRuntimeProfileService, IDisposable
         get
         {
             EnsureDefaults();
+            DeduplicateProfiles();
             return _settings.Settings.RuntimeProfiles;
         }
     }
@@ -77,6 +78,7 @@ public sealed class RuntimeProfileService : IRuntimeProfileService, IDisposable
     private void EnsureDefaults()
     {
         var profiles = _settings.Settings.RuntimeProfiles;
+        DeduplicateProfiles();
         if (profiles.Count > 0) return;
 
         profiles.Add(new RuntimeProfile
@@ -103,6 +105,20 @@ public sealed class RuntimeProfileService : IRuntimeProfileService, IDisposable
             ApiKey = _settings.Settings.OpenAiApiKey,
             Enabled = _settings.Settings.OpenAiEnabled
         });
+    }
+
+    private void DeduplicateProfiles()
+    {
+        var profiles = _settings.Settings.RuntimeProfiles;
+        var seenIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seenKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (var i = profiles.Count - 1; i >= 0; i--)
+        {
+            var normalized = NormalizeProfile(profiles[i]);
+            var key = $"{normalized.Kind}|{normalized.Name}|{normalized.BaseUrl}";
+            if (!seenIds.Add(normalized.Id) || !seenKeys.Add(key))
+                profiles.RemoveAt(i);
+        }
     }
 
     public static RuntimeProfile NormalizeProfile(RuntimeProfile profile) => new()

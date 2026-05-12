@@ -33,8 +33,9 @@
         </Border>
 
         <ScrollViewer Grid.Row="1" Padding="24,16">
-            <StackPanel Spacing="16">
-                <Grid ColumnDefinitions="110,*" RowDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="12" RowSpacing="8">
+            <StackPanel Spacing="16" MaxWidth="980" HorizontalAlignment="Stretch">
+                <Grid ColumnDefinitions="110,*" RowDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="12" RowSpacing="8"
+                      HorizontalAlignment="Stretch">
                     <TextBlock Grid.Row="0" Grid.Column="0"
                                Text="Goal"
                                VerticalAlignment="Top"
@@ -44,6 +45,7 @@
                              Watermark="Describe the task for Aether Agent..."
                              AcceptsReturn="True"
                              MinHeight="82"
+                             MaxHeight="120"
                              TextWrapping="Wrap"
                              IsEnabled="{Binding !IsRunning}" />
 
@@ -104,7 +106,7 @@
                                TextTrimming="CharacterEllipsis" />
                 </StackPanel>
 
-                <Expander Header="Retrieved Context" IsExpanded="True">
+                <Expander Header="Retrieved Context" IsExpanded="True" HorizontalAlignment="Stretch">
                     <ItemsControl ItemsSource="{Binding RetrievedContext}" Margin="0,8,0,0">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="vm:AgentContextItemViewModel">
@@ -136,11 +138,12 @@
                     </ItemsControl>
                 </Expander>
 
-                <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+                <Grid ColumnDefinitions="*,*" ColumnSpacing="12" HorizontalAlignment="Stretch">
                     <Expander Grid.Column="0" Header="Task State" IsExpanded="True">
                         <SelectableTextBlock Text="{Binding TaskStatePreview}"
                                              FontFamily="Consolas,monospace"
                                              FontSize="11"
+                                             MinHeight="150"
                                              TextWrapping="Wrap"
                                              Margin="0,8,0,0" />
                     </Expander>
@@ -148,15 +151,17 @@
                         <SelectableTextBlock Text="{Binding NextActionPreview}"
                                              FontFamily="Consolas,monospace"
                                              FontSize="11"
+                                             MinHeight="150"
                                              TextWrapping="Wrap"
                                              Margin="0,8,0,0" />
                     </Expander>
                 </Grid>
 
-                <Expander Header="Agent Log">
+                <Expander Header="Agent Log" HorizontalAlignment="Stretch">
                     <SelectableTextBlock Text="{Binding LogPreview}"
                                          FontFamily="Consolas,monospace"
                                          FontSize="11"
+                                         MinHeight="120"
                                          TextWrapping="Wrap"
                                          Margin="0,8,0,0" />
                 </Expander>

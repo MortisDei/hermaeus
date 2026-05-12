@@ -77,6 +77,7 @@ public partial class App : Application
         s.AddSingleton<ISecretStore,       SecretStore>();
         s.AddSingleton<IRedactionService,  RedactionService>();
         s.AddSingleton<IBackupService,     BackupService>();
+        s.AddSingleton<ILocalAiSetupService, LocalAiSetupService>();
         s.AddSingleton<ISystemInfoService, SystemInfoService>();
         s.AddSingleton<IBenchmarkService,  BenchmarkService>();
         s.AddSingleton<IConversationStore, ConversationStore>();

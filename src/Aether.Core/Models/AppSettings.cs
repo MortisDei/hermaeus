@@ -30,6 +30,7 @@ public class AppSettings
     public string TtsSpeaker           { get; set; } = string.Empty;
     public string TtsPythonPath        { get; set; } = "";
     public string TtsScriptPath        { get; set; } = string.Empty;
+    public string TtsModelDirectory    { get; set; } = string.Empty;
     public string TtsOutputDirectory   { get; set; } = "";
     public string TtsDevice            { get; set; } = "cpu";
     public string TtsModelVersion      { get; set; } = "2.0.3";

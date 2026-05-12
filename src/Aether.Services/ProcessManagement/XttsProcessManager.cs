@@ -45,6 +45,11 @@ public sealed class XttsProcessManager : IDisposable
         psi.ArgumentList.Add(settings.TtsDevice);
         psi.ArgumentList.Add("--output-dir");
         psi.ArgumentList.Add(outputDir);
+        if (!string.IsNullOrWhiteSpace(settings.TtsModelDirectory))
+        {
+            psi.ArgumentList.Add("--model-dir");
+            psi.ArgumentList.Add(Path.GetFullPath(settings.TtsModelDirectory.Trim()));
+        }
         if (settings.TtsPreload)
             psi.ArgumentList.Add("--preload");
 

@@ -120,6 +120,7 @@ In **Settings**, configure XTTS v2:
 - local AI assets folder, or explicit paths
 - service URL
 - Python/script path
+- XTTS model directory
 - device (`cpu`, `auto`, `cuda`)
 - model version
 - voice folder
@@ -127,6 +128,11 @@ In **Settings**, configure XTTS v2:
 
 Voice preview uses in-memory generated audio. Aether does not persist generated
 WAV responses. Imported clone samples are copied only when explicitly imported.
+
+Local AI Setup can scan a selected AI folder and show readiness for GGUF models,
+Python venv, XTTS v2 model files, XTTS API script, voices, output folders, and
+the optional RAG reranker. Missing setup actions are approval-gated and show the
+target path, command preview, risk, and expected result before Aether runs them.
 
 ## Data, Backup, Security
 
@@ -144,7 +150,8 @@ archives of the data root excluding the local secret file.
 Settings can also point at a separate local AI assets folder for large model,
 voice, virtualenv, and encoder files. Aether never assumes a machine-specific
 path; choose the folder once, then use **Apply Detected Paths** to populate
-XTTS and reranker paths where matching assets are found.
+XTTS and reranker paths where matching assets are found, or use **Scan Setup**
+to create missing local support files after approval.
 
 Security hardening currently includes:
 

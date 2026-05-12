@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using Aether.Core.Models;
 using Aether.Core.Services;
 using Aether.Services;
 using Aether.Services.ProcessManagement;
@@ -15,6 +16,7 @@ public partial class SettingsViewModel : ObservableObject
     private readonly IBackupService _backups;
     private readonly ISecretStore _secrets;
     private readonly XttsProcessManager _xttsProcess;
+    private readonly ILocalAiSetupService _localAiSetup;
     private readonly SynchronizationContext? _sync;
 
     [ObservableProperty] private string _llamaCppBaseUrl      = "http://localhost:8080";
@@ -42,6 +44,7 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private string _ttsSpeaker = string.Empty;
     [ObservableProperty] private string _ttsPythonPath = string.Empty;
     [ObservableProperty] private string _ttsScriptPath = string.Empty;
+    [ObservableProperty] private string _ttsModelDirectory = string.Empty;
     [ObservableProperty] private string _ttsOutputDirectory = string.Empty;
     [ObservableProperty] private string _ttsVoiceDirectory = string.Empty;
     [ObservableProperty] private string _ttsDevice = "cpu";
@@ -58,18 +61,26 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private string _globalHotkeyStatus = "System-wide hotkeys are off.";
     [ObservableProperty] private string _ttsStatus = "Stopped";
     [ObservableProperty] private string _settingsError = string.Empty;
+    [ObservableProperty] private bool _localAiSetupBusy;
+    [ObservableProperty] private string _localAiSetupLog = string.Empty;
+    [ObservableProperty] private string _localAiSetupSummary = "Scan a local AI folder to see readiness.";
 
     public string[] Themes { get; } = ["System", "Dark", "Light"];
     public string[] TtsDevices { get; } = ["cpu", "auto", "cuda"];
     public ObservableCollection<string> TtsVoices { get; } = ["default"];
+    public ObservableCollection<LocalAiReadinessItem> LocalAiReadinessItems { get; } = [];
+    public ObservableCollection<LocalAiSetupAction> LocalAiSetupActions { get; } = [];
     public Action? RequestDataRootPicker { get; set; }
     public Action? RequestLocalAiAssetsRootPicker { get; set; }
     public Action? RequestBackupDirectoryPicker { get; set; }
     public Action? RequestRestoreBackupPicker { get; set; }
+    public Action? RequestTtsPythonPicker { get; set; }
     public Action? RequestTtsScriptPicker { get; set; }
+    public Action? RequestTtsModelDirectoryPicker { get; set; }
     public Action? RequestTtsOutputPicker { get; set; }
     public Action? RequestTtsVoiceDirectoryPicker { get; set; }
     public Action? RequestTtsVoiceSamplePicker { get; set; }
+    public Action<string>? RequestCopyToClipboard { get; set; }
 
     public bool IsTtsRunning => _xttsProcess.IsRunning;
 
@@ -79,7 +90,8 @@ public partial class SettingsViewModel : ObservableObject
         IToastService toasts,
         IBackupService backups,
         ISecretStore secrets,
-        XttsProcessManager xttsProcess)
+        XttsProcessManager xttsProcess,
+        ILocalAiSetupService localAiSetup)
     {
         _svc = svc;
         _tts = tts;
@@ -87,6 +99,7 @@ public partial class SettingsViewModel : ObservableObject
         _backups = backups;
         _secrets = secrets;
         _xttsProcess = xttsProcess;
+        _localAiSetup = localAiSetup;
         _sync = SynchronizationContext.Current;
         _xttsProcess.StatusChanged += OnXttsStatusChanged;
         Reload();
@@ -131,6 +144,7 @@ public partial class SettingsViewModel : ObservableObject
         TtsSpeaker          = s.TtsSpeaker;
         TtsPythonPath       = s.TtsPythonPath;
         TtsScriptPath       = s.TtsScriptPath;
+        TtsModelDirectory   = s.TtsModelDirectory;
         TtsOutputDirectory  = s.TtsOutputDirectory;
         TtsVoiceDirectory   = s.TtsVoiceDirectory;
         TtsDevice           = s.TtsDevice;
@@ -175,6 +189,7 @@ public partial class SettingsViewModel : ObservableObject
         s.TtsSpeaker          = TtsSpeaker;
         s.TtsPythonPath       = TtsPythonPath.Trim();
         s.TtsScriptPath       = TtsScriptPath.Trim();
+        s.TtsModelDirectory   = TtsModelDirectory.Trim();
         s.TtsOutputDirectory  = TtsOutputDirectory.Trim();
         s.TtsVoiceDirectory   = TtsVoiceDirectory.Trim();
         s.TtsDevice           = TtsDevice;
@@ -217,7 +232,7 @@ public partial class SettingsViewModel : ObservableObject
     private void BrowseLocalAiAssetsRoot() => RequestLocalAiAssetsRootPicker?.Invoke();
 
     [RelayCommand]
-    private void ApplyLocalAiAssets()
+    private async Task ApplyLocalAiAssetsAsync()
     {
         SettingsError = string.Empty;
         var layout = LocalAiAssetLocator.Detect(LocalAiAssetsRoot);
@@ -230,11 +245,14 @@ public partial class SettingsViewModel : ObservableObject
 
         if (!string.IsNullOrWhiteSpace(layout.TtsScriptPath)) TtsScriptPath = layout.TtsScriptPath;
         if (!string.IsNullOrWhiteSpace(layout.TtsPythonPath)) TtsPythonPath = layout.TtsPythonPath;
+        if (!string.IsNullOrWhiteSpace(layout.TtsModelDirectory)) TtsModelDirectory = layout.TtsModelDirectory;
         if (!string.IsNullOrWhiteSpace(layout.TtsVoiceDirectory)) TtsVoiceDirectory = layout.TtsVoiceDirectory;
         if (!string.IsNullOrWhiteSpace(layout.TtsOutputDirectory)) TtsOutputDirectory = layout.TtsOutputDirectory;
         if (!string.IsNullOrWhiteSpace(layout.RerankerDirectory)) RagRerankerModelPath = layout.RerankerDirectory;
         UpdateLocalAiAssetsStatus();
-        _toasts.Show("AI assets applied", layout.Summary, ToastKind.Success, 5500);
+        await SaveAsync();
+        if (string.IsNullOrWhiteSpace(SettingsError))
+            _toasts.Show("AI assets applied", layout.Summary, ToastKind.Success, 5500);
     }
 
     [RelayCommand]
@@ -280,7 +298,101 @@ public partial class SettingsViewModel : ObservableObject
     private void BrowseTtsScript() => RequestTtsScriptPicker?.Invoke();
 
     [RelayCommand]
+    private void BrowseTtsPython() => RequestTtsPythonPicker?.Invoke();
+
+    [RelayCommand]
+    private void BrowseTtsModelDirectory() => RequestTtsModelDirectoryPicker?.Invoke();
+
+    [RelayCommand]
     private void BrowseTtsOutput() => RequestTtsOutputPicker?.Invoke();
+
+    [RelayCommand]
+    private async Task ScanLocalAiSetupAsync()
+    {
+        await SaveLocalAiPathsForSetupAsync();
+        LocalAiSetupBusy = true;
+        LocalAiSetupLog = string.Empty;
+        try
+        {
+            var report = await _localAiSetup.ScanAsync(_svc.Settings);
+            LocalAiReadinessItems.Clear();
+            foreach (var item in report.Items)
+                LocalAiReadinessItems.Add(item);
+            LocalAiSetupActions.Clear();
+            foreach (var action in report.Actions)
+                LocalAiSetupActions.Add(action);
+            LocalAiSetupSummary = report.Summary;
+            LocalAiSetupLog = string.IsNullOrWhiteSpace(report.SetupCommands)
+                ? "No setup actions are currently recommended."
+                : report.SetupCommands;
+            _toasts.Show("AI folder scanned", report.Summary, ToastKind.Info, 5500);
+        }
+        catch (Exception ex)
+        {
+            SettingsError = ex.Message;
+            _toasts.Show("AI scan failed", ex.Message, ToastKind.Error, 7000);
+        }
+        finally
+        {
+            LocalAiSetupBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task RunLocalAiSetupActionAsync(LocalAiSetupAction? action)
+    {
+        if (action is null) return;
+        if (!action.CanRun)
+        {
+            _toasts.Show("Setup action not ready", action.ExpectedResult, ToastKind.Warning, 6000);
+            return;
+        }
+
+        await SaveLocalAiPathsForSetupAsync();
+        LocalAiSetupBusy = true;
+        LocalAiSetupLog = $"Approved: {action.Title}{Environment.NewLine}{action.CommandPreviewText}{Environment.NewLine}";
+        try
+        {
+            var progress = new Progress<string>(line =>
+            {
+                LocalAiSetupLog += line + Environment.NewLine;
+            });
+            var result = await _localAiSetup.RunActionAsync(action, _svc.Settings, allowOverwrite: false, progress: progress);
+            LocalAiSetupLog += result.Log;
+            if (!result.Success)
+            {
+                _toasts.Show("Setup action stopped", result.Log, ToastKind.Warning, 7000);
+                return;
+            }
+
+            ApplySetupResult(action, result);
+            await SaveAsync();
+            await ScanLocalAiSetupAsync();
+            _toasts.Show("Setup action complete", action.ExpectedResult, ToastKind.Success, 6000);
+        }
+        catch (Exception ex)
+        {
+            SettingsError = ex.Message;
+            _toasts.Show("Setup action failed", ex.Message, ToastKind.Error, 7000);
+        }
+        finally
+        {
+            LocalAiSetupBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private void CopyLocalAiSetupCommands()
+    {
+        var text = LocalAiSetupActions.Count == 0
+            ? LocalAiSetupLog
+            : string.Join(Environment.NewLine, LocalAiSetupActions.Select(action => action.CommandPreviewText));
+        if (string.IsNullOrWhiteSpace(text))
+            return;
+
+        RequestCopyToClipboard?.Invoke(text);
+        _toasts.Show("Setup commands copied", "Review commands before running them outside Aether.", ToastKind.Info);
+    }
 
     [RelayCommand]
     private void BrowseTtsVoiceDirectory() => RequestTtsVoiceDirectoryPicker?.Invoke();
@@ -411,5 +523,40 @@ public partial class SettingsViewModel : ObservableObject
     private void UpdateLocalAiAssetsStatus()
     {
         LocalAiAssetsStatus = LocalAiAssetLocator.Detect(LocalAiAssetsRoot).Summary;
+    }
+
+    private async Task SaveLocalAiPathsForSetupAsync()
+    {
+        var s = _svc.Settings;
+        s.LocalAiAssetsRoot = LocalAiAssetsRoot.Trim();
+        s.TtsPythonPath = TtsPythonPath.Trim();
+        s.TtsScriptPath = TtsScriptPath.Trim();
+        s.TtsModelDirectory = TtsModelDirectory.Trim();
+        s.TtsOutputDirectory = TtsOutputDirectory.Trim();
+        s.TtsVoiceDirectory = TtsVoiceDirectory.Trim();
+        s.RagRerankerModelPath = RagRerankerModelPath.Trim();
+        await _svc.SaveAsync(s.DataRootDirectory);
+    }
+
+    private void ApplySetupResult(LocalAiSetupAction action, LocalAiSetupResult result)
+    {
+        if (string.IsNullOrWhiteSpace(result.UpdatedPath))
+            return;
+
+        switch (action.Kind)
+        {
+            case LocalAiSetupActionKind.CreateVenv:
+                TtsPythonPath = result.UpdatedPath;
+                break;
+            case LocalAiSetupActionKind.CreateXttsApiScript:
+                TtsScriptPath = result.UpdatedPath;
+                break;
+            case LocalAiSetupActionKind.CreateDirectory when action.Id == "create-voices":
+                TtsVoiceDirectory = result.UpdatedPath;
+                break;
+            case LocalAiSetupActionKind.CreateDirectory when action.Id == "create-output":
+                TtsOutputDirectory = result.UpdatedPath;
+                break;
+        }
     }
 }

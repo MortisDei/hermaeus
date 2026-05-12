@@ -19,6 +19,11 @@ Pre-1.0 versions may still change internal APIs and storage details.
   optional RAG-backed retrieval.
 - Agent regression coverage for task-state serialization, workspace path
   safety, context packing, tool policy, and the fake-model agent loop.
+- Approval-gated Local AI Setup assistant for scanning an AI folder, detecting
+  models, venvs, XTTS v2 assets, voices, output folders, and rerankers.
+- Structured setup actions for creating a venv, creating XTTS support folders,
+  installing XTTS packages, and generating an XTTS v2 API script after explicit
+  user approval.
 
 ## [0.8.4-alpha] - 2026-05-12
 

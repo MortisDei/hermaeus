@@ -61,7 +61,7 @@ public sealed class ServerProcessManager : IDisposable
             _process.BeginOutputReadLine();
             _process.BeginErrorReadLine();
 
-            Emit($"[aether] Launched PID {_process.Id} — waiting for /health on port {cfg.Port}...");
+            Emit($"[aether] Launched PID {_process.Id} - waiting for /health on port {cfg.Port}...");
             Emit($"[aether] Model: {cfg.ModelPath}");
 
             _monitorCts = CancellationTokenSource.CreateLinkedTokenSource(ct);

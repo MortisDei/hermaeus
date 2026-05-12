@@ -85,6 +85,7 @@ public partial class MainWindowViewModel : ObservableObject
         try
         {
             await LoadConversationsAsync();
+            Settings.Reload();
             ShowQuickChat = Settings.ShowQuickChat;
             await Rag.LoadDatasetsAsync();
             await Agent.LoadAsync();
