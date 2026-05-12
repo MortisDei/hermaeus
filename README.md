@@ -213,5 +213,3 @@ docs/                   Security notes, RAG/eval docs, internal planning notes
   remaining hardening items are tracked in [docs/security-review.md](docs/security-review.md).
 - System-wide global hotkey support where the OS/compositor exposes a reliable
   registration API.
-- Expanded tests for RAG scoring, runtime validation, secret migration, and
-  process argument safety.

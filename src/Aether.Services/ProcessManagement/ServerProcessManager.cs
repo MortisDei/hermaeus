@@ -214,7 +214,7 @@ public sealed class ServerProcessManager : IDisposable
             WorkingDirectory       = GetWorkingDirectory(cfg.ExecutablePath)
         };
 
-        foreach (var arg in BuildArgs(cfg))
+        foreach (var arg in BuildLaunchArguments(cfg))
             startInfo.ArgumentList.Add(arg);
 
         return new Process
@@ -224,7 +224,7 @@ public sealed class ServerProcessManager : IDisposable
         };
     }
 
-    private static List<string> BuildArgs(ServerConfig cfg)
+    public static IReadOnlyList<string> BuildLaunchArguments(ServerConfig cfg)
     {
         var parts = new List<string>();
 

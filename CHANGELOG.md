@@ -19,6 +19,8 @@ Pre-1.0 versions may still change internal APIs and storage details.
   builds.
 - Refreshed security review and threat model for secrets, local runtimes,
   backup/restore, RAG ingest, tray behavior, and packaging.
+- Expanded tests for RAG BM25/hybrid scoring, runtime profile validation,
+  secret reference migration, and shell-free process argument construction.
 
 ## [0.8.3-alpha]
 

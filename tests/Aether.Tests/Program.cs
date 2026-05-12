@@ -1,6 +1,10 @@
 using Aether.Core.Models;
 using Aether.Core.Services;
+using Aether.Rag.Models;
+using Aether.Rag.Retrieval;
 using Aether.Services;
+using Aether.Services.ProcessManagement;
+using Aether.ViewModels;
 
 var tests = new (string Name, Func<Task> Run)[]
 {
@@ -13,7 +17,13 @@ var tests = new (string Name, Func<Task> Run)[]
     ("benchmark scoring and ranking are deterministic", BenchmarkScoringAndRanking),
     ("system info returns safe fallback values", SystemInfoSafeFallback),
     ("local ai assets detect and apply paths", LocalAiAssetsDetectAndApplyPaths),
-    ("secret store falls back without plaintext", SecretStoreFallbackWithoutPlaintext)
+    ("secret store falls back without plaintext", SecretStoreFallbackWithoutPlaintext),
+    ("RAG BM25 scoring ranks exact term matches", RagBm25ScoringRanksMatches),
+    ("RAG hybrid scoring fuses semantic and lexical ranks", RagHybridScoringFusesRanks),
+    ("runtime profile normalization and unsafe host validation", RuntimeProfileValidation),
+    ("settings save migrates OpenAI key to secret reference", SettingsSaveMigratesOpenAiKey),
+    ("settings save preserves existing secret reference", SettingsSavePreservesExistingSecretReference),
+    ("server process arguments stay shell-free and ordered", ServerProcessArgumentsAreSafe)
 };
 
 var failed = 0;
@@ -292,7 +302,169 @@ static async Task SecretStoreFallbackWithoutPlaintext()
     }
 }
 
+static Task RagBm25ScoringRanksMatches()
+{
+    var chunks = new[]
+    {
+        new RagChunk { Id = "wrong", Content = "bananas and pears only" },
+        new RagChunk { Id = "right", Content = "local llama embeddings answer the query" },
+        new RagChunk { Id = "also", Content = "llama local local context" }
+    };
+    var stats = Bm25Scorer.BuildStats(chunks);
+    var scored = new Bm25Scorer().Score("local llama", chunks, stats);
+
+    Equal("also", scored[0].Chunk.Id, "repeated exact term match should rank first");
+    True(scored[0].Score > scored[^1].Score, "matching chunk should outscore unrelated chunk");
+    Equal(3, stats.TotalDocuments, "BM25 stats should include all documents");
+    True(stats.DocumentFrequencies.ContainsKey("llama"), "BM25 stats should track query terms");
+    return Task.CompletedTask;
+}
+
+static Task RagHybridScoringFusesRanks()
+{
+    var semanticWinner = new RagChunk { Id = "semantic", Content = "semantic match" };
+    var lexicalWinner = new RagChunk { Id = "lexical", Content = "lexical match" };
+    var shared = new RagChunk { Id = "shared", Content = "appears in both lists" };
+
+    var fused = HybridRetriever.Fuse(
+        [
+            new ScoredChunk(semanticWinner, 0.99f, ScoreSource.Semantic),
+            new ScoredChunk(shared, 0.90f, ScoreSource.Semantic)
+        ],
+        [
+            new ScoredChunk(lexicalWinner, 12f, ScoreSource.Bm25),
+            new ScoredChunk(shared, 10f, ScoreSource.Bm25)
+        ],
+        topK: 3);
+
+    Equal(3, fused.Count, "hybrid fusion should include unique chunks from both rankings");
+    Equal(ScoreSource.Hybrid, fused[0].Source, "fused result should be labelled hybrid");
+    True(fused.Any(s => s.Chunk.Id == "semantic"), "semantic-only result should survive fusion");
+    True(fused.Any(s => s.Chunk.Id == "lexical"), "BM25-only result should survive fusion");
+    True(fused.Any(s => s.Chunk.Id == "shared"), "shared result should survive fusion");
+    True(fused[0].Score >= fused[^1].Score, "fused results should be sorted");
+    return Task.CompletedTask;
+}
+
+static async Task RuntimeProfileValidation()
+{
+    using var temp = new TempDir();
+    var settings = NewSettings(temp);
+    var service = new RuntimeProfileService(settings);
+    var profile = new RuntimeProfile
+    {
+        Id = "runtime-1",
+        Name = "  Custom Runtime  ",
+        Kind = RuntimeKind.OpenAiCompatible,
+        BaseUrl = "  https://example.test/v1/  ",
+        ApiKey = " secret:runtime ",
+        Enabled = true,
+        LinkedServerId = " server-1 "
+    };
+
+    await service.SaveAsync(profile);
+    var saved = settings.Settings.RuntimeProfiles.Single(p => p.Id == "runtime-1");
+    Equal("Custom Runtime", saved.Name, "runtime profile name should be trimmed");
+    Equal("https://example.test/v1", saved.BaseUrl, "runtime profile URL should be trimmed");
+    Equal("secret:runtime", saved.ApiKey, "runtime profile API key should be trimmed");
+    Equal("server-1", saved.LinkedServerId, "linked server id should be trimmed");
+
+    var defaulted = RuntimeProfileService.NormalizeProfile(new RuntimeProfile
+    {
+        Id = string.Empty,
+        Name = " ",
+        Kind = RuntimeKind.LlamaCpp,
+        BaseUrl = " "
+    });
+    True(Guid.TryParse(defaulted.Id, out _), "blank runtime id should be replaced");
+    Equal("LlamaCpp", defaulted.Name, "blank runtime name should default to kind");
+    Equal("http://127.0.0.1:8080", defaulted.BaseUrl, "blank runtime URL should default to loopback");
+
+    var unsafeProfile = new RuntimeProfileViewModel(new RuntimeProfile { BaseUrl = "http://0.0.0.0:8080" });
+    True(unsafeProfile.HasUnsafeHost, "runtime profile view model should flag 0.0.0.0");
+}
+
+static async Task SettingsSaveMigratesOpenAiKey()
+{
+    using var temp = new TempDir();
+    var previous = Environment.GetEnvironmentVariable("AETHER_DISABLE_OS_KEYCHAIN");
+    Environment.SetEnvironmentVariable("AETHER_DISABLE_OS_KEYCHAIN", "1");
+    try
+    {
+        var settings = NewSettings(temp);
+        settings.Settings.DataRootDirectory = temp.PathFor("data");
+        settings.Settings.OpenAiApiKey = "sk-plain-key-123456";
+        var secrets = new SecretStore(settings);
+        var vm = NewSettingsViewModel(settings, secrets);
+
+        Equal("sk-plain-key-123456", vm.OpenAiApiKey, "plaintext setting should load into editable field");
+        await vm.SaveCommand.ExecuteAsync(null);
+
+        True(secrets.IsReference(settings.Settings.OpenAiApiKey), "save should migrate plaintext key to a secret reference");
+        Equal("sk-plain-key-123456", await secrets.ResolveAsync(settings.Settings.OpenAiApiKey), "migrated reference should resolve");
+        var localVault = Path.Combine(settings.Settings.DataRootDirectory, "secrets.local.json");
+        False((await File.ReadAllTextAsync(localVault)).Contains("sk-plain-key-123456", StringComparison.Ordinal),
+            "migrated local vault should not contain plaintext");
+    }
+    finally
+    {
+        Environment.SetEnvironmentVariable("AETHER_DISABLE_OS_KEYCHAIN", previous);
+    }
+}
+
+static async Task SettingsSavePreservesExistingSecretReference()
+{
+    using var temp = new TempDir();
+    var previous = Environment.GetEnvironmentVariable("AETHER_DISABLE_OS_KEYCHAIN");
+    Environment.SetEnvironmentVariable("AETHER_DISABLE_OS_KEYCHAIN", "1");
+    try
+    {
+        var settings = NewSettings(temp);
+        settings.Settings.DataRootDirectory = temp.PathFor("data");
+        var secrets = new SecretStore(settings);
+        var reference = await secrets.StoreAsync("openai-api-key", "sk-existing-secret");
+        settings.Settings.OpenAiApiKey = reference;
+
+        var vm = NewSettingsViewModel(settings, secrets);
+        Equal(string.Empty, vm.OpenAiApiKey, "existing secret reference should not be displayed");
+        await vm.SaveCommand.ExecuteAsync(null);
+
+        Equal(reference, settings.Settings.OpenAiApiKey, "blank API key field should preserve existing reference");
+        Equal("sk-existing-secret", await secrets.ResolveAsync(reference), "preserved reference should still resolve");
+    }
+    finally
+    {
+        Environment.SetEnvironmentVariable("AETHER_DISABLE_OS_KEYCHAIN", previous);
+    }
+}
+
+static Task ServerProcessArgumentsAreSafe()
+{
+    var args = ServerProcessManager.BuildLaunchArguments(new ServerConfig
+    {
+        ModelPath = "/models/local model.gguf",
+        Port = 9090,
+        ContextSize = 8192,
+        Threads = 6,
+        GpuLayers = 12,
+        EmbeddingsMode = true,
+        ExtraArgs = "--alias \"local model\" --host 0.0.0.0 --flag"
+    }).ToList();
+
+    Equal("-m", args[0], "model flag should be first");
+    Equal("/models/local model.gguf", args[1], "model path with spaces should remain one argument");
+    ContainsInOrder(args, "--host", "127.0.0.1", "managed host should be loopback by default");
+    ContainsInOrder(args, "--alias", "local model", "quoted extra arg should remain one argument");
+    ContainsInOrder(args, "--host", "0.0.0.0", "extra args should be preserved as data arguments");
+    False(args.Any(a => a.Contains(';', StringComparison.Ordinal)), "argument builder should not synthesize shell separators");
+    True(args.Contains("--embeddings"), "embeddings mode should add embeddings flag");
+    return Task.CompletedTask;
+}
+
 static SettingsService NewSettings(TempDir temp) => new(temp.PathFor("settings/settings.json"));
+
+static SettingsViewModel NewSettingsViewModel(ISettingsService settings, ISecretStore secrets) =>
+    new(settings, new FakeTts(), new FakeToasts(), new BackupService(settings), secrets, new XttsProcessManager());
 
 static async Task ThrowsAsync<T>(Func<Task> action) where T : Exception
 {
@@ -321,6 +493,17 @@ static void True(bool value, string message)
 }
 
 static void False(bool value, string message) => True(!value, message);
+
+static void ContainsInOrder(IReadOnlyList<string> values, string first, string second, string message)
+{
+    for (var i = 0; i < values.Count - 1; i++)
+    {
+        if (values[i] == first && values[i + 1] == second)
+            return;
+    }
+
+    throw new InvalidOperationException(message);
+}
 
 sealed class TempDir : IDisposable
 {
@@ -356,6 +539,23 @@ sealed class FakeLlm : ILlmService
 
     public Task PullModelAsync(string modelId, IProgress<string>? progress = null, CancellationToken ct = default) => Task.CompletedTask;
     public Task DeleteModelAsync(string modelId, CancellationToken ct = default) => Task.CompletedTask;
+}
+
+sealed class FakeTts : ITtsService
+{
+    public Task SpeakAsync(string text, CancellationToken ct = default) => Task.CompletedTask;
+    public Task PreviewVoiceAsync(string speaker, string text, CancellationToken ct = default) => Task.CompletedTask;
+    public Task<string> ImportVoiceSampleAsync(string sourcePath, string displayName, CancellationToken ct = default) =>
+        Task.FromResult(displayName);
+    public Task<IReadOnlyList<string>> GetVoicesAsync(CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<string>>(["default"]);
+}
+
+sealed class FakeToasts : IToastService
+{
+    public event Action<ToastMessage>? ToastRaised;
+    public void Show(string title, string message, ToastKind kind = ToastKind.Info, int durationMs = 3500) =>
+        ToastRaised?.Invoke(new ToastMessage(title, message, kind, durationMs));
 }
 
 sealed class FakeSystemInfo : ISystemInfoService

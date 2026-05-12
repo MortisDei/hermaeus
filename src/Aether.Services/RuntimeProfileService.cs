@@ -25,7 +25,7 @@ public sealed class RuntimeProfileService : IRuntimeProfileService, IDisposable
 
     public async Task SaveAsync(RuntimeProfile profile, CancellationToken ct = default)
     {
-        var normalized = Normalize(profile);
+        var normalized = NormalizeProfile(profile);
         var existing = _settings.Settings.RuntimeProfiles.FirstOrDefault(p => p.Id == normalized.Id);
         if (existing is null)
             _settings.Settings.RuntimeProfiles.Add(normalized);
@@ -105,7 +105,7 @@ public sealed class RuntimeProfileService : IRuntimeProfileService, IDisposable
         });
     }
 
-    private static RuntimeProfile Normalize(RuntimeProfile profile) => new()
+    public static RuntimeProfile NormalizeProfile(RuntimeProfile profile) => new()
     {
         Id = string.IsNullOrWhiteSpace(profile.Id) ? Guid.NewGuid().ToString() : profile.Id,
         Name = string.IsNullOrWhiteSpace(profile.Name) ? profile.Kind.ToString() : profile.Name.Trim(),
