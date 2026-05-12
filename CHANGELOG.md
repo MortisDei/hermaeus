@@ -17,6 +17,8 @@ Pre-1.0 versions may still change internal APIs and storage details.
 - App and tray icon assets derived from the Aether branding sheet.
 - Packaging documentation covering runtime requirements and self-contained
   builds.
+- Refreshed security review and threat model for secrets, local runtimes,
+  backup/restore, RAG ingest, tray behavior, and packaging.
 
 ## [0.8.3-alpha]
 

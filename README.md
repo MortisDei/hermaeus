@@ -126,7 +126,11 @@ Security hardening currently includes:
   Linux Secret Service via `secret-tool`, macOS Keychain via `security`, and
   Windows Credential Manager. A user-only local fallback vault is used when no
   OS store is available.
+- refreshed security review and threat model covering secrets, local runtime
+  binding, backup/restore, RAG ingest, tray behavior, and packaging
 - data-safety tests for migration, backup/restore, and redaction
+
+See [docs/security-review.md](docs/security-review.md).
 
 ## Tray And Hotkeys
 
@@ -205,7 +209,8 @@ docs/                   Security notes, RAG/eval docs, internal planning notes
 - Optional web loader kept opt-in and disabled by default.
 - Linux and Windows archive packaging is available; signed installers/update
   metadata remain future public-release hardening.
-- Security review and threat model refresh.
+- Security review and threat model refresh is complete for the current alpha;
+  remaining hardening items are tracked in [docs/security-review.md](docs/security-review.md).
 - System-wide global hotkey support where the OS/compositor exposes a reliable
   registration API.
 - Expanded tests for RAG scoring, runtime validation, secret migration, and
