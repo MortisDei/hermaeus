@@ -125,6 +125,25 @@ Security hardening currently includes:
 - local secret references for OpenAI keys
 - data-safety tests for migration, backup/restore, and redaction
 
+## Tray And Hotkeys
+
+Aether can show a tray icon with quick actions for showing the app, opening
+Quick Chat, starting a new chat, opening Services, stopping managed services,
+and quitting. Minimize-to-tray is separate from close: clicking the window close
+button exits Aether and stops managed `llama-server` / XTTS processes.
+
+Local hotkeys work while Aether is focused:
+
+| Hotkey | Action |
+| --- | --- |
+| `Ctrl+Space` | Toggle Quick Chat |
+| `Ctrl+N` | New chat |
+| `Ctrl+Shift+S` | Open Services |
+| `Esc` | Close Quick Chat |
+
+System-wide global hotkeys are deferred until each OS/compositor path can be
+implemented reliably. Wayland support varies by compositor.
+
 ## Benchmarks And System Overview
 
 The **Benchmarks** workspace runs local prompt suites against selected models and

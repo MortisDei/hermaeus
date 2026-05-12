@@ -11,6 +11,9 @@
   generated WAV files.
 - Alternate data roots migrate the SQLite data files instead of leaving old chat
   databases behind.
+- Closing the main window exits Aether and stops managed local runtime/TTS
+  processes. Minimize-to-tray does not change close-button shutdown behavior.
+- Tray actions expose explicit Stop Services and Quit commands.
 
 ## Required Next Checks
 
@@ -24,6 +27,7 @@
 | Logs | Paths/API errors may expose secrets | Redact API keys/tokens and home path segments in visible logs |
 | Backups | Data loss during relocation | Create `.bak` before migration or before destructive compaction |
 | Permissions | Multi-user machine privacy | Prefer user-only data dir permissions on Linux/Windows |
+| Tray/hotkeys | Background app confusion | Keep close-to-exit explicit; do not hide on close by default |
 
 ## Test Targets
 

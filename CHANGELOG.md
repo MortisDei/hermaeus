@@ -13,6 +13,8 @@ Pre-1.0 versions may still change internal APIs and storage details.
   actions.
 - Local hotkeys for quick chat, new chat, services, and closing quick chat.
 - Settings toggles for tray icon, minimize-to-tray, and local hotkeys.
+- Documentation for tray behavior, local hotkeys, and close-button shutdown
+  semantics.
 
 ## [0.8.1-alpha]
 
