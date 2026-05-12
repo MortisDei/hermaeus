@@ -429,7 +429,10 @@ if __name__ == "__main__":
     private static async Task<PythonCommand?> ResolveCompatiblePythonCommandAsync(IProgress<string>? progress, CancellationToken ct)
     {
         var candidates = GetPythonCommandCandidates();
-        foreach (var candidate in candidates)
+        var preferredCandidates = candidates.Take(candidates.Count - 1).ToList();
+        var fallbackCandidate = candidates.Last();
+
+        foreach (var candidate in preferredCandidates)
         {
             var result = await RunProcessAsync(
                 candidate.FileName,
@@ -449,14 +452,38 @@ if __name__ == "__main__":
                 continue;
 
             var version = new Version(major, minor);
-            if (!IsXttsCompatibleVersion(version))
-                continue;
-
-            progress?.Report($"Using Python {version} for XTTS setup: {candidate.DisplayName}");
-            return candidate;
+            if (IsXttsCompatibleVersion(version))
+            {
+                progress?.Report($"Using Python {version} for XTTS setup: {candidate.DisplayName}");
+                return candidate;
+            }
         }
 
-        progress?.Report("No Python 3.9-3.11 interpreter was detected for XTTS setup.");
+        var fallbackResult = await RunProcessAsync(
+            fallbackCandidate.FileName,
+            [.. fallbackCandidate.PrefixArgs, "-c", "import sys; print(f'AETHER_PYVER={sys.version_info[0]}.{sys.version_info[1]}')"],
+            Environment.CurrentDirectory,
+            progress: null,
+            ct);
+
+        if (fallbackResult.Success)
+        {
+            var match = Regex.Match(fallbackResult.Log, @"AETHER_PYVER=(\d+)\.(\d+)", RegexOptions.CultureInvariant);
+            if (match.Success && int.TryParse(match.Groups[1].Value, out var fallbackMajor) && int.TryParse(match.Groups[2].Value, out var fallbackMinor))
+            {
+                var fallbackVersion = new Version(fallbackMajor, fallbackMinor);
+                if (fallbackVersion < MaxSupportedXttsPythonExclusive)
+                {
+                    progress?.Report($"Preferred Python 3.9-3.11 not found. Using {fallbackVersion} ({fallbackCandidate.DisplayName}). This may have compatibility issues.");
+                    return fallbackCandidate;
+                }
+
+                progress?.Report($"Python {fallbackVersion} is too new for TTS (requires <3.12). Please install Python 3.9, 3.10, or 3.11.");
+                return null;
+            }
+        }
+
+        progress?.Report("No compatible Python interpreter found. XTTS requires Python 3.9-3.11. Please install one of these versions.");
         return null;
     }
 
