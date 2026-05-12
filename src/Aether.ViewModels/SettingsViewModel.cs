@@ -54,6 +54,8 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private bool   _enableTrayIcon = true;
     [ObservableProperty] private bool   _minimizeToTray = true;
     [ObservableProperty] private bool   _enableLocalHotkeys = true;
+    [ObservableProperty] private bool   _enableGlobalHotkeys;
+    [ObservableProperty] private string _globalHotkeyStatus = "System-wide hotkeys are off.";
     [ObservableProperty] private string _ttsStatus = "Stopped";
     [ObservableProperty] private string _settingsError = string.Empty;
 
@@ -139,6 +141,7 @@ public partial class SettingsViewModel : ObservableObject
         EnableTrayIcon      = s.EnableTrayIcon;
         MinimizeToTray      = s.MinimizeToTray;
         EnableLocalHotkeys  = s.EnableLocalHotkeys;
+        EnableGlobalHotkeys = s.EnableGlobalHotkeys;
         TtsStatus           = _xttsProcess.StatusLabel;
         OnPropertyChanged(nameof(IsTtsRunning));
         UpdateMigrationPreview();
@@ -182,6 +185,7 @@ public partial class SettingsViewModel : ObservableObject
         s.EnableTrayIcon      = EnableTrayIcon;
         s.MinimizeToTray      = MinimizeToTray;
         s.EnableLocalHotkeys  = EnableLocalHotkeys;
+        s.EnableGlobalHotkeys = EnableGlobalHotkeys;
         try
         {
             var result = await _svc.SaveAsync(previousDataRoot);

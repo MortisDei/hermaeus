@@ -21,6 +21,8 @@ Pre-1.0 versions may still change internal APIs and storage details.
   backup/restore, RAG ingest, tray behavior, and packaging.
 - Expanded tests for RAG BM25/hybrid scoring, runtime profile validation,
   secret reference migration, and shell-free process argument construction.
+- Opt-in Windows system-wide hotkeys for Quick Chat, New Chat, and Services,
+  with Linux reported as unavailable until reliable compositor support exists.
 
 ## [0.8.3-alpha]
 

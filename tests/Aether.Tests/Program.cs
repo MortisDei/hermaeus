@@ -23,6 +23,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("runtime profile normalization and unsafe host validation", RuntimeProfileValidation),
     ("settings save migrates OpenAI key to secret reference", SettingsSaveMigratesOpenAiKey),
     ("settings save preserves existing secret reference", SettingsSavePreservesExistingSecretReference),
+    ("settings save persists global hotkey preference", SettingsSavePersistsGlobalHotkeyPreference),
     ("server process arguments stay shell-free and ordered", ServerProcessArgumentsAreSafe)
 };
 
@@ -438,6 +439,22 @@ static async Task SettingsSavePreservesExistingSecretReference()
     }
 }
 
+static async Task SettingsSavePersistsGlobalHotkeyPreference()
+{
+    using var temp = new TempDir();
+    var settings = NewSettings(temp);
+    settings.Settings.DataRootDirectory = temp.PathFor("data");
+    var vm = NewSettingsViewModel(settings, new FakeSecretStore());
+
+    vm.EnableGlobalHotkeys = true;
+    await vm.SaveCommand.ExecuteAsync(null);
+    True(settings.Settings.EnableGlobalHotkeys, "global hotkey setting should save when enabled");
+
+    vm.EnableGlobalHotkeys = false;
+    await vm.SaveCommand.ExecuteAsync(null);
+    False(settings.Settings.EnableGlobalHotkeys, "global hotkey setting should save when disabled");
+}
+
 static Task ServerProcessArgumentsAreSafe()
 {
     var args = ServerProcessManager.BuildLaunchArguments(new ServerConfig
@@ -556,6 +573,16 @@ sealed class FakeToasts : IToastService
     public event Action<ToastMessage>? ToastRaised;
     public void Show(string title, string message, ToastKind kind = ToastKind.Info, int durationMs = 3500) =>
         ToastRaised?.Invoke(new ToastMessage(title, message, kind, durationMs));
+}
+
+sealed class FakeSecretStore : ISecretStore
+{
+    public bool IsReference(string value) => value.StartsWith("secret:", StringComparison.OrdinalIgnoreCase);
+    public Task<string> StoreAsync(string name, string secret, CancellationToken ct = default) =>
+        Task.FromResult($"secret:{name}");
+    public Task<string> ResolveAsync(string valueOrReference, CancellationToken ct = default) =>
+        Task.FromResult(valueOrReference);
+    public Task<string> BackendLabelAsync(CancellationToken ct = default) => Task.FromResult("Fake");
 }
 
 sealed class FakeSystemInfo : ISystemInfoService

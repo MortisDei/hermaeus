@@ -34,7 +34,8 @@ OpenAI-compatible APIs, Oghma-grade RAG, and XTTS voice playback.
   components, and best-effort GPU/VRAM visibility.
 - XTTS v2 launch controls, voice selection, voice preview, voice sample import.
 - Local tasks, reminders, and app-running scheduled automations.
-- Tray integration, minimize-to-tray, and local hotkeys.
+- Tray integration, minimize-to-tray, local hotkeys, and Windows system-wide
+  hotkeys.
 - Toast notifications throughout the app.
 - Configurable data root with migration, backup, restore, and conflict refusal.
 - Configurable local AI assets root for models, XTTS, venvs, and encoders.
@@ -148,8 +149,17 @@ Local hotkeys work while Aether is focused:
 | `Ctrl+Shift+S` | Open Services |
 | `Esc` | Close Quick Chat |
 
-System-wide global hotkeys are deferred until each OS/compositor path can be
-implemented reliably. Wayland support varies by compositor.
+System-wide hotkeys are opt-in. On Windows, Aether registers:
+
+| Hotkey | Action |
+| --- | --- |
+| `Ctrl+Alt+Space` | Toggle Quick Chat |
+| `Ctrl+Alt+N` | New chat |
+| `Ctrl+Alt+S` | Open Services |
+
+Linux system-wide hotkeys remain unavailable until a reliable compositor path is
+implemented. Wayland support varies by compositor, so Aether reports the feature
+as unavailable instead of using a brittle fallback.
 
 ## Benchmarks And System Overview
 
@@ -211,5 +221,5 @@ docs/                   Security notes, RAG/eval docs, internal planning notes
   metadata remain future public-release hardening.
 - Security review and threat model refresh is complete for the current alpha;
   remaining hardening items are tracked in [docs/security-review.md](docs/security-review.md).
-- System-wide global hotkey support where the OS/compositor exposes a reliable
-  registration API.
+- Windows system-wide global hotkeys are available; Linux remains deferred until
+  a reliable compositor registration API is available.

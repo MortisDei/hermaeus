@@ -40,6 +40,7 @@ public class AppSettings
     public bool   EnableTrayIcon       { get; set; } = true;
     public bool   MinimizeToTray       { get; set; } = true;
     public bool   EnableLocalHotkeys   { get; set; } = true;
+    public bool   EnableGlobalHotkeys  { get; set; } = false;
     public List<ModelProfile> ModelProfiles { get; set; } = [];
     public List<RuntimeProfile> RuntimeProfiles { get; set; } = [];
     public List<LocalTaskItem> Tasks { get; set; } = [];

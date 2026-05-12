@@ -18,7 +18,7 @@ preserving Aether's native desktop, local-first direction.
 | Models | Model metadata and management | **Completed** | App-owned model profiles: display name, description, tags, visibility, defaults. |
 | Runtime profiles | llama.cpp, Ollama, OpenAI-compatible | **Completed** | Managed llama.cpp process, Ollama `/api/tags` and `/api/chat`, OpenAI-compatible `/v1`. |
 | XTTS | Voice selection/preview/clone workflows | **Completed** | Voice discovery, in-memory playback, preview, imported voice samples. |
-| Quick chat | Desktop quick bar | **Partial** | In-app compact quick-chat surface, tray actions, and focused-window hotkeys are complete. System-wide hotkeys remain OS/compositor-specific. |
+| Quick chat | Desktop quick bar | **Partial** | In-app compact quick-chat surface, tray actions, focused-window hotkeys, and Windows system-wide hotkeys are complete. Linux global hotkeys remain OS/compositor-specific. |
 | Tasks/reminders | Calendar/tasks/automations | **Completed v1** | Local tasks and app-running scheduled automations with toast reminders. |
 | RAG ingest | Oghma-grade corpus processing | **Completed v1** | Text/markdown ingest, title/source embedding injection, parent-child, reindex diffing, health warnings. |
 | OCR/web ingest | OCR and web loaders | **Partial** | Provider config and placeholders exist; concrete local-first OCR and optional web loader execution deferred. |
@@ -45,7 +45,7 @@ preserving Aether's native desktop, local-first direction.
 
 ## Deferred
 
-- System-wide quick-chat hotkey integration where OS/compositor APIs are reliable.
+- Linux system-wide quick-chat hotkey integration where compositor APIs are reliable.
 - Concrete local-first OCR and optional web loaders.
 - Expanded automated tests for RAG eval, runtime validation, secret migration,
   and process argument safety.

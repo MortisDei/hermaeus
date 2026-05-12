@@ -2,12 +2,14 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Platform;
 using Aether.ViewModels;
+using System.ComponentModel;
 
 namespace Aether.Desktop;
 
 public sealed class DesktopIntegrationService : IDisposable
 {
     private readonly MainWindowViewModel _vm;
+    private readonly GlobalHotkeyService _globalHotkeys = new();
     private Window? _window;
     private TrayIcon? _tray;
     private bool _isQuitting;
@@ -20,6 +22,7 @@ public sealed class DesktopIntegrationService : IDisposable
     public void Attach(Window window)
     {
         _window = window;
+        _vm.Settings.PropertyChanged += OnSettingsPropertyChanged;
         window.KeyDown += OnKeyDown;
         window.PropertyChanged += (_, e) =>
         {
@@ -33,6 +36,7 @@ public sealed class DesktopIntegrationService : IDisposable
         };
 
         EnsureTray();
+        ConfigureGlobalHotkeys();
     }
 
     public void Quit()
@@ -56,7 +60,15 @@ public sealed class DesktopIntegrationService : IDisposable
     {
         if (_window is not null)
             _window.KeyDown -= OnKeyDown;
+        _vm.Settings.PropertyChanged -= OnSettingsPropertyChanged;
         _tray?.Dispose();
+        _globalHotkeys.Dispose();
+    }
+
+    private void OnSettingsPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(SettingsViewModel.EnableGlobalHotkeys))
+            ConfigureGlobalHotkeys();
     }
 
     private void OnKeyDown(object? sender, KeyEventArgs e)
@@ -110,6 +122,43 @@ public sealed class DesktopIntegrationService : IDisposable
         };
         tray.Clicked += (_, _) => ShowAndActivate();
         _tray = tray;
+    }
+
+    private void ConfigureGlobalHotkeys()
+    {
+        if (_window is null)
+            return;
+
+        if (!_vm.Settings.EnableGlobalHotkeys)
+        {
+            _globalHotkeys.Unregister();
+            _vm.Settings.GlobalHotkeyStatus = GlobalHotkeyService.IsSupported
+                ? "System-wide hotkeys are off."
+                : "System-wide hotkeys are unavailable on this OS/compositor.";
+            return;
+        }
+
+        var result = _globalHotkeys.Register(
+            _window,
+            () =>
+            {
+                ShowAndActivate();
+                _vm.ToggleQuickChatSurface();
+            },
+            () =>
+            {
+                ShowAndActivate();
+                _vm.OpenNewConversation();
+            },
+            () =>
+            {
+                ShowAndActivate();
+                _vm.OpenServicesPanel();
+            });
+
+        _vm.Settings.GlobalHotkeyStatus = result.Message;
+        if (!result.Active)
+            _vm.Settings.EnableGlobalHotkeys = false;
     }
 
     private NativeMenu BuildMenu()

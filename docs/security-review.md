@@ -61,7 +61,7 @@ penetration-test report.
 | Logs | Visible process logs pass through API-key and home-path redaction. Log buffers are capped. | Redaction is best effort and may miss provider-specific token formats or sensitive filenames outside the home path. |
 | RAG ingest | Only `.txt` and `.md` files are loaded. Large files are flagged in ingest health. Prompt templates must include one context/question shape. | Large files are warned, not refused. Markdown is treated as text and no HTML/script stripping exists yet. |
 | XTTS | Generated voice preview audio is handled in memory by the app workflow. Managed XTTS process is killed on stop/exit. | Configured XTTS output directory exists for server operation and could contain files created by the external XTTS server. |
-| Tray and hotkeys | Close exits and stops managed services. Minimize-to-tray is explicit. Tray menu includes Stop Services and Quit. Local hotkeys only work while focused. | Global hotkey registration remains deferred because OS/compositor behavior varies. |
+| Tray and hotkeys | Close exits and stops managed services. Minimize-to-tray is explicit. Tray menu includes Stop Services and Quit. Local hotkeys only work while focused. Windows global hotkeys are opt-in and registered through the OS hotkey API. | Linux global hotkeys remain deferred because Wayland/X11 compositor behavior varies. |
 | Packaging | Linux/Windows archives include README, license, notice, commercial terms, and checksums. Linux desktop install is user-local. | Archives are unsigned; users must verify checksums from a trusted channel. |
 
 ## Threat Scenarios
