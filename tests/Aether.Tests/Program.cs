@@ -1,10 +1,14 @@
 using Aether.Core.Models;
 using Aether.Core.Services;
 using Aether.Rag.Models;
+using Aether.Rag.Pipeline;
 using Aether.Rag.Retrieval;
+using Aether.Rag.Embeddings;
+using Aether.Rag.Storage;
 using Aether.Services;
 using Aether.Services.ProcessManagement;
 using Aether.ViewModels;
+using System.Net;
 
 var tests = new (string Name, Func<Task> Run)[]
 {
@@ -20,6 +24,9 @@ var tests = new (string Name, Func<Task> Run)[]
     ("secret store falls back without plaintext", SecretStoreFallbackWithoutPlaintext),
     ("RAG BM25 scoring ranks exact term matches", RagBm25ScoringRanksMatches),
     ("RAG hybrid scoring fuses semantic and lexical ranks", RagHybridScoringFusesRanks),
+    ("RAG web loader stays disabled by default", RagWebLoaderDisabledByDefault),
+    ("RAG web loader parses explicit opt-in URLs", RagWebLoaderParsesOptInUrls),
+    ("RAG web ingest strips HTML and stores chunks", RagWebIngestStripsHtmlAndStoresChunks),
     ("runtime profile normalization and unsafe host validation", RuntimeProfileValidation),
     ("settings save migrates OpenAI key to secret reference", SettingsSaveMigratesOpenAiKey),
     ("settings save preserves existing secret reference", SettingsSavePreservesExistingSecretReference),
@@ -347,6 +354,84 @@ static Task RagHybridScoringFusesRanks()
     return Task.CompletedTask;
 }
 
+static Task RagWebLoaderDisabledByDefault()
+{
+    var config = new RagDatasetConfig();
+
+    False(config.EnableWebLoader, "web loader should be disabled by default");
+    Equal(RagExtractionMode.TextMarkdown, config.ExtractionMode, "default extraction should stay local text/markdown");
+    Equal(0, RagPipeline.ParseWebUrls(config).Count, "disabled web loader should parse no URLs");
+    return Task.CompletedTask;
+}
+
+static Task RagWebLoaderParsesOptInUrls()
+{
+    var config = new RagDatasetConfig
+    {
+        EnableWebLoader = true,
+        WebMaxPages = 2,
+        WebUrlList = """
+            https://example.test/a
+            https://example.test/a
+            http://example.test/b
+            https://example.test/c
+            """
+    };
+
+    var urls = RagPipeline.ParseWebUrls(config);
+    Equal(2, urls.Count, "web loader should dedupe URLs and honor page limit");
+    Equal("https://example.test/a", urls[0].ToString().TrimEnd('/'), "first URL should be preserved");
+    Equal("http://example.test/b", urls[1].ToString().TrimEnd('/'), "second unique URL should be preserved");
+
+    var text = RagPipeline.ExtractTextFromHtml("<html><head><title>A</title><style>.x{}</style><script>alert(1)</script></head><body>Hello &amp; goodbye</body></html>");
+    True(text.Contains("Hello & goodbye", StringComparison.Ordinal), "visible HTML text should be decoded");
+    False(text.Contains("alert", StringComparison.OrdinalIgnoreCase), "script text should be stripped");
+    False(text.Contains(".x", StringComparison.Ordinal), "style text should be stripped");
+    return Task.CompletedTask;
+}
+
+static async Task RagWebIngestStripsHtmlAndStoresChunks()
+{
+    using var temp = new TempDir();
+    var settings = NewSettings(temp);
+    settings.Settings.DataRootDirectory = temp.PathFor("data");
+    var store = new SqliteRagStore(settings);
+    await store.InitializeAsync();
+
+    using var http = new HttpClient(new FakeHttpHandler("""
+        <html>
+          <head>
+            <title>Example Title</title>
+            <script>secretScript()</script>
+            <style>.hidden{display:none}</style>
+          </head>
+          <body><main>Visible local-first documentation page.</main></body>
+        </html>
+        """));
+    var pipeline = new RagPipeline(store, new FakeEmbeddingService(), http);
+    var dataset = new RagDataset
+    {
+        Name = "web",
+        Config = new RagDatasetConfig
+        {
+            EnableWebLoader = true,
+            ExtractionMode = RagExtractionMode.WebUrl,
+            WebUrlList = "https://example.test/docs",
+            WebMaxPages = 1
+        }
+    };
+
+    await pipeline.IngestWebAsync(dataset);
+    var chunks = await store.GetChunksAsync(dataset.Id, includeEmbeddings: false);
+    True(chunks.Count > 0, "web ingest should store chunks");
+    True(chunks[0].Content.Contains("Visible local-first documentation page", StringComparison.Ordinal),
+        "stored chunk should include visible page text");
+    False(chunks[0].Content.Contains("secretScript", StringComparison.Ordinal),
+        "stored chunk should not include script text");
+    Equal("Example Title", chunks[0].SourceTitle, "web title should be stored as source title");
+    Equal(chunks.Count, dataset.ChunkCount, "dataset chunk count should match stored chunks");
+}
+
 static async Task RuntimeProfileValidation()
 {
     using var temp = new TempDir();
@@ -600,4 +685,31 @@ sealed class FakeSystemInfo : ISystemInfoService
         DataRootTotalBytes = 2048,
         Components = [new ComponentStatus { Name = "Test", Status = "OK" }]
     });
+}
+
+sealed class FakeEmbeddingService : IEmbeddingService
+{
+    public int Dimensions => 4;
+
+    public Task<float[]> EmbedAsync(string text, CancellationToken ct = default) =>
+        Task.FromResult(new[] { 1f, text.Length % 7, text.Length % 11, 0.5f });
+
+    public Task<List<float[]>> EmbedBatchAsync(IReadOnlyList<string> texts, CancellationToken ct = default) =>
+        Task.FromResult(texts.Select(t => new[] { 1f, t.Length % 7, t.Length % 11, 0.5f }).ToList());
+}
+
+sealed class FakeHttpHandler : HttpMessageHandler
+{
+    private readonly string _body;
+
+    public FakeHttpHandler(string body) => _body = body;
+
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(_body, System.Text.Encoding.UTF8, "text/html")
+        };
+        return Task.FromResult(response);
+    }
 }

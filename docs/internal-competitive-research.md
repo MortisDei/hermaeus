@@ -20,8 +20,8 @@ preserving Aether's native desktop, local-first direction.
 | XTTS | Voice selection/preview/clone workflows | **Completed** | Voice discovery, in-memory playback, preview, imported voice samples. |
 | Quick chat | Desktop quick bar | **Partial** | In-app compact quick-chat surface, tray actions, focused-window hotkeys, and Windows system-wide hotkeys are complete. Linux global hotkeys remain OS/compositor-specific. |
 | Tasks/reminders | Calendar/tasks/automations | **Completed v1** | Local tasks and app-running scheduled automations with toast reminders. |
-| RAG ingest | Oghma-grade corpus processing | **Completed v1** | Text/markdown ingest, title/source embedding injection, parent-child, reindex diffing, health warnings. |
-| OCR/web ingest | OCR and web loaders | **Partial** | Provider config and placeholders exist; concrete local-first OCR and optional web loader execution deferred. |
+| RAG ingest | Oghma-grade corpus processing | **Completed v1** | Text/markdown ingest, optional explicit web URLs, title/source embedding injection, parent-child, reindex diffing, health warnings. |
+| OCR/web ingest | OCR and web loaders | **Partial** | Optional web URL loader is implemented and disabled by default; concrete local-first OCR remains deferred. |
 | RAG retrieval | Hybrid, rerank, grounding | **Completed v1** | Wide semantic scan, full-corpus BM25, RRF fusion, ONNX cross-encoder reranker, grounding score. |
 | Citations | Source chips, overflow, drawer | **Completed** | `[1] [2] [3] +N`, source inspector, copy source/path. |
 | RAG traces | Retrieval diagnostics | **Completed** | Query traces persisted with chunks, scores, context, model, latency. |
@@ -46,6 +46,4 @@ preserving Aether's native desktop, local-first direction.
 ## Deferred
 
 - Linux system-wide quick-chat hotkey integration where compositor APIs are reliable.
-- Concrete local-first OCR and optional web loaders.
-- Expanded automated tests for RAG eval, runtime validation, secret migration,
-  and process argument safety.
+- Concrete local-first OCR.

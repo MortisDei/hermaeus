@@ -1,6 +1,6 @@
 # Aether
 
-Version: `0.8.4-alpha`
+Version: `0.8.5-alpha`
 
 A native, local-first Avalonia desktop AI workspace for `llama.cpp`, Ollama,
 OpenAI-compatible APIs, Oghma-grade RAG, and XTTS voice playback.
@@ -24,7 +24,8 @@ OpenAI-compatible APIs, Oghma-grade RAG, and XTTS voice playback.
 - Model profiles with display names, descriptions, tags, visibility, and defaults.
 - Runtime profiles for `llama.cpp`, Ollama, and OpenAI-compatible endpoints.
 - Managed `llama-server` start/stop, auto-start, logs, and GPU auto-tune.
-- RAG ingest for text/markdown, reindex diffing, corpus health warnings.
+- RAG ingest for text/markdown, optional explicit web URLs, reindex diffing,
+  corpus health warnings.
 - RAG citations with `[1] [2] [3] +N`, source inspector, copy source/path.
 - RAG query traces, ONNX cross-encoder reranking, and native eval harness for
   `gold.json` / `stress.json`.
@@ -79,6 +80,10 @@ start the Chat service. For GPU acceleration, set GPU layers manually or use
 3. Ask questions against the dataset.
 4. Inspect citations, source text, grounding score, and query traces.
 5. Run eval sets from the Eval Harness panel.
+
+The optional web loader is off by default. When enabled for a dataset, Aether
+fetches only the HTTP(S) pages explicitly listed in the ingest panel; it does
+not crawl links or use a remote scraping service.
 
 Eval files can be either an array of cases or an object with `cases` /
 `questions`. Cases support `question`, `expected_sources`, `answer_keywords`,
@@ -216,7 +221,8 @@ docs/                   Security notes, RAG/eval docs, internal planning notes
 ## Public Release Gates
 
 - Concrete local-first OCR loader.
-- Optional web loader kept opt-in and disabled by default.
+- Optional web URL loader is available and remains opt-in, disabled by default,
+  and limited to explicitly listed HTTP(S) pages.
 - Linux and Windows archive packaging is available; signed installers/update
   metadata remain future public-release hardening.
 - Security review and threat model refresh is complete for the current alpha;

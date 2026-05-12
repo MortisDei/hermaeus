@@ -5,7 +5,17 @@ All notable changes to Aether will be documented in this file.
 The project follows semantic versioning once public release candidates begin.
 Pre-1.0 versions may still change internal APIs and storage details.
 
-## [0.8.4-alpha] - Unreleased
+## [0.8.5-alpha] - Unreleased
+
+### Added
+
+- Optional RAG web URL loader that stays disabled by default and only ingests
+  explicitly listed HTTP(S) pages when enabled for a dataset.
+- Web ingest HTML text extraction with script/style stripping, small page
+  limits, URL deduplication, and regression coverage for the default-disabled
+  posture.
+
+## [0.8.4-alpha] - 2026-05-12
 
 ### Added
 

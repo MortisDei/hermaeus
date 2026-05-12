@@ -55,6 +55,9 @@ public partial class RagViewModel : ObservableObject
     [ObservableProperty] private bool        _isIngesting;
     [ObservableProperty] private string      _ingestPath      = string.Empty;
     [ObservableProperty] private string      _newDatasetName  = string.Empty;
+    [ObservableProperty] private bool        _enableWebLoader;
+    [ObservableProperty] private string      _webUrlList      = string.Empty;
+    [ObservableProperty] private int         _webMaxPages     = 5;
     [ObservableProperty] private string      _statusMessage   = string.Empty;
     [ObservableProperty] private bool        _isError;
     [ObservableProperty] private int         _ingestDone;
@@ -80,6 +83,7 @@ public partial class RagViewModel : ObservableObject
 
     public event EventHandler? ScrollToBottom;
     public Action<string>? RequestCopyToClipboard { get; set; }
+    public bool IsLocalIngest => !EnableWebLoader;
 
     public RagViewModel(RagQueryService query, RagPipeline pipeline, RagEvalService eval, IToastService toasts)
     {
@@ -159,7 +163,9 @@ public partial class RagViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanIngest))]
     private async Task IngestAsync()
     {
-        if (string.IsNullOrWhiteSpace(IngestPath) || string.IsNullOrWhiteSpace(NewDatasetName)) return;
+        if (string.IsNullOrWhiteSpace(NewDatasetName)) return;
+        if (EnableWebLoader && string.IsNullOrWhiteSpace(WebUrlList)) return;
+        if (!EnableWebLoader && string.IsNullOrWhiteSpace(IngestPath)) return;
 
         IsIngesting = true;
         IsError = false;
@@ -170,29 +176,45 @@ public partial class RagViewModel : ObservableObject
             var ds = new RagDataset
             {
                 Name        = NewDatasetName.Trim(),
-                Description = $"Ingested from {IngestPath}",
+                Description = EnableWebLoader
+                    ? "Ingested from explicitly configured web URLs"
+                    : $"Ingested from {IngestPath}",
                 Config      = new RagDatasetConfig
                 {
-                    UseParentChild = UseParentChild
+                    UseParentChild = UseParentChild,
+                    EnableWebLoader = EnableWebLoader,
+                    WebUrlList = EnableWebLoader ? WebUrlList.Trim() : string.Empty,
+                    WebMaxPages = Math.Clamp(WebMaxPages <= 0 ? 5 : WebMaxPages, 1, 20),
+                    ExtractionMode = EnableWebLoader
+                        ? RagExtractionMode.WebUrl
+                        : RagExtractionMode.TextMarkdown
                 }
             };
 
-            await _pipeline.IngestDirectoryAsync(
-                ds,
-                IngestPath,
-                new Progress<IngestProgress>(p =>
-                {
-                    IngestStage = p.Stage;
-                    IngestDone  = p.Done;
-                    IngestTotal = p.Total;
-                    StatusMessage = p.Detail;
-                }),
-                CancellationToken.None);
+            var progress = new Progress<IngestProgress>(p =>
+            {
+                IngestStage = p.Stage;
+                IngestDone  = p.Done;
+                IngestTotal = p.Total;
+                StatusMessage = p.Detail;
+            });
+
+            if (EnableWebLoader)
+            {
+                await _pipeline.IngestWebAsync(ds, progress, CancellationToken.None);
+            }
+            else
+            {
+                await _pipeline.IngestDirectoryAsync(ds, IngestPath, progress, CancellationToken.None);
+            }
 
             await LoadDatasetsAsync();
             SelectedDataset = Datasets.FirstOrDefault(d => d.Name == ds.Name);
             NewDatasetName  = string.Empty;
-            IngestPath      = string.Empty;
+            if (EnableWebLoader)
+                WebUrlList = string.Empty;
+            else
+                IngestPath = string.Empty;
             StatusMessage   = "Ingestion complete.";
             _toasts.Show("RAG ingest complete", $"Dataset \"{ds.Name}\" is ready.", ToastKind.Success);
         }
@@ -291,8 +313,10 @@ public partial class RagViewModel : ObservableObject
     private bool CanQuery()  => !IsQuerying && !IsIngesting && SelectedDataset is not null
                                 && !string.IsNullOrWhiteSpace(QuestionText);
     private bool CanIngest() => !IsIngesting && !IsQuerying
-                                && !string.IsNullOrWhiteSpace(IngestPath)
-                                && !string.IsNullOrWhiteSpace(NewDatasetName);
+                                && !string.IsNullOrWhiteSpace(NewDatasetName)
+                                && (EnableWebLoader
+                                    ? !string.IsNullOrWhiteSpace(WebUrlList)
+                                    : !string.IsNullOrWhiteSpace(IngestPath));
     private bool CanRunEval() => !IsEvaluating && SelectedDataset is not null && File.Exists(EvalPath);
 
     private void ParseSources(string header)
@@ -383,6 +407,12 @@ public partial class RagViewModel : ObservableObject
     partial void OnIsQueryingChanged(bool value) => QueryCommand.NotifyCanExecuteChanged();
     partial void OnIngestPathChanged(string value) => IngestCommand.NotifyCanExecuteChanged();
     partial void OnNewDatasetNameChanged(string value) => IngestCommand.NotifyCanExecuteChanged();
+    partial void OnWebUrlListChanged(string value) => IngestCommand.NotifyCanExecuteChanged();
+    partial void OnEnableWebLoaderChanged(bool value)
+    {
+        OnPropertyChanged(nameof(IsLocalIngest));
+        IngestCommand.NotifyCanExecuteChanged();
+    }
     partial void OnEvalPathChanged(string value)
     {
         RunRetrievalEvalCommand.NotifyCanExecuteChanged();

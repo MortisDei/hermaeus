@@ -4,6 +4,8 @@ using Aether.Rag.Models;
 using Aether.Rag.Retrieval;
 using Aether.Rag.Storage;
 using System.Security.Cryptography;
+using System.Net;
+using System.Text.RegularExpressions;
 
 namespace Aether.Rag.Pipeline;
 
@@ -18,13 +20,21 @@ public sealed class RagPipeline
     private readonly SqliteRagStore   _store;
     private readonly IEmbeddingService _embed;
     private readonly ParagraphChunker  _chunker = new();
+    private readonly HttpClient _http;
 
     private const int EmbedBatchSize = 10;
+    private const int MaxWebPageBytes = 2 * 1024 * 1024;
 
     public RagPipeline(SqliteRagStore store, IEmbeddingService embed)
+        : this(store, embed, new HttpClient { Timeout = TimeSpan.FromSeconds(15) })
+    {
+    }
+
+    public RagPipeline(SqliteRagStore store, IEmbeddingService embed, HttpClient http)
     {
         _store = store;
         _embed = embed;
+        _http = http;
     }
 
     public async Task IngestDirectoryAsync(
@@ -168,6 +178,91 @@ public sealed class RagPipeline
             $"{allChunks.Count} chunks indexed from {files.Count} files. Health: {BuildHealthSummary(health)}"));
     }
 
+    public async Task IngestWebAsync(
+        RagDataset dataset,
+        IProgress<IngestProgress>? progress = null,
+        CancellationToken ct = default)
+    {
+        ValidateIngestConfig(dataset.Config);
+        if (!dataset.Config.EnableWebLoader)
+            throw new InvalidOperationException("Web loader is disabled for this dataset.");
+        if (dataset.Config.ExtractionMode is not RagExtractionMode.WebUrl)
+            throw new InvalidOperationException("Web ingest requires WebUrl extraction mode.");
+
+        var urls = ParseWebUrls(dataset.Config);
+        if (urls.Count == 0)
+            throw new InvalidOperationException("Add at least one http:// or https:// URL before running web ingest.");
+
+        progress?.Report(new IngestProgress("Fetching", 0, urls.Count, $"Fetching {urls.Count} web page(s)"));
+        var documents = new List<WebDocument>();
+        for (var i = 0; i < urls.Count; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var doc = await FetchWebDocumentAsync(urls[i], ct);
+            documents.Add(doc);
+            progress?.Report(new IngestProgress("Fetching", i + 1, urls.Count, doc.Title));
+        }
+
+        var allChunks = new List<RagChunk>();
+        var parentChunks = new List<RagChunk>();
+        var sourcePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        progress?.Report(new IngestProgress("Chunking", 0, documents.Count, $"Chunking {documents.Count} web page(s)"));
+
+        for (var i = 0; i < documents.Count; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var doc = documents[i];
+            var sourceHash = ComputeHash(doc.Content);
+            var textChunks = _chunker.Chunk(doc.Content, doc.Url.ToString(), doc.Title, dataset.Config);
+            sourcePaths.Add(doc.Url.ToString());
+
+            foreach (var tc in textChunks)
+            {
+                var chunk = new RagChunk
+                {
+                    DatasetId = dataset.Id,
+                    SourceFile = doc.Url.Host,
+                    SourcePath = doc.Url.ToString(),
+                    SourceHash = sourceHash,
+                    SourceModifiedUtc = DateTime.UtcNow,
+                    SourceTitle = doc.Title,
+                    Content = tc.Content,
+                    ChunkIndex = tc.Index,
+                    ChunkTotal = tc.Total,
+                    TokenCount = ParagraphChunker.EstimateTokens(tc.Content)
+                };
+
+                if (tc.ParentContent is not null)
+                {
+                    var parentId = Guid.NewGuid().ToString();
+                    parentChunks.Add(new RagChunk
+                    {
+                        Id = parentId,
+                        DatasetId = dataset.Id,
+                        SourceFile = chunk.SourceFile,
+                        SourcePath = chunk.SourcePath,
+                        SourceHash = chunk.SourceHash,
+                        SourceModifiedUtc = chunk.SourceModifiedUtc,
+                        SourceTitle = chunk.SourceTitle,
+                        Content = tc.ParentContent,
+                        ChunkIndex = tc.Index,
+                        ChunkTotal = tc.Total,
+                        TokenCount = ParagraphChunker.EstimateTokens(tc.ParentContent)
+                    });
+                    chunk.ParentId = parentId;
+                }
+
+                allChunks.Add(chunk);
+            }
+
+            progress?.Report(new IngestProgress("Chunking", i + 1, documents.Count, $"{doc.Title} -> {textChunks.Count} chunks"));
+        }
+
+        await EmbedAndStoreAsync(dataset, allChunks, parentChunks, sourcePaths, progress, ct);
+        progress?.Report(new IngestProgress("Done", allChunks.Count, allChunks.Count,
+            $"{allChunks.Count} chunks indexed from {documents.Count} web page(s)."));
+    }
+
     private static string BuildEmbeddingText(RagChunk chunk, RagDatasetConfig cfg)
     {
         if (!cfg.PrependTitleToEmbedding || string.IsNullOrWhiteSpace(chunk.SourceTitle))
@@ -188,6 +283,119 @@ public sealed class RagPipeline
         if (template.Split("{context}", StringSplitOptions.None).Length > 2)
             throw new InvalidOperationException("RAG prompt template includes {context} more than once.");
     }
+
+    public static IReadOnlyList<Uri> ParseWebUrls(RagDatasetConfig config)
+    {
+        if (!config.EnableWebLoader)
+            return [];
+
+        var max = Math.Clamp(config.WebMaxPages <= 0 ? 5 : config.WebMaxPages, 1, 20);
+        var urls = new List<Uri>();
+        foreach (var line in (config.WebUrlList ?? string.Empty)
+            .Split(['\r', '\n', ',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (!Uri.TryCreate(line, UriKind.Absolute, out var uri))
+                throw new InvalidOperationException($"Invalid web URL: {line}");
+            if (!string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"Unsupported web URL scheme: {uri.Scheme}");
+            if (!urls.Any(u => Uri.Compare(u, uri, UriComponents.AbsoluteUri, UriFormat.SafeUnescaped, StringComparison.OrdinalIgnoreCase) == 0))
+                urls.Add(uri);
+            if (urls.Count >= max)
+                break;
+        }
+
+        return urls;
+    }
+
+    public static string ExtractTextFromHtml(string html)
+    {
+        if (string.IsNullOrWhiteSpace(html)) return string.Empty;
+        var text = Regex.Replace(html, @"<script\b[^>]*>.*?</script>", " ", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        text = Regex.Replace(text, @"<style\b[^>]*>.*?</style>", " ", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        text = Regex.Replace(text, @"<[^>]+>", " ");
+        text = WebUtility.HtmlDecode(text);
+        return Regex.Replace(text, @"\s+", " ").Trim();
+    }
+
+    private async Task<WebDocument> FetchWebDocumentAsync(Uri url, CancellationToken ct)
+    {
+        using var response = await _http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
+        response.EnsureSuccessStatusCode();
+        var mediaType = response.Content.Headers.ContentType?.MediaType ?? string.Empty;
+        if (!string.IsNullOrWhiteSpace(mediaType)
+            && !mediaType.Contains("html", StringComparison.OrdinalIgnoreCase)
+            && !mediaType.Contains("text", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"Unsupported content type for {url}: {mediaType}");
+        }
+
+        var bytes = await response.Content.ReadAsByteArrayAsync(ct);
+        if (bytes.Length > MaxWebPageBytes)
+            throw new InvalidOperationException($"Web page is too large: {url}");
+
+        var raw = System.Text.Encoding.UTF8.GetString(bytes);
+        var text = mediaType.Contains("html", StringComparison.OrdinalIgnoreCase)
+            ? ExtractTextFromHtml(raw)
+            : raw.Trim();
+        if (string.IsNullOrWhiteSpace(text))
+            throw new InvalidOperationException($"No readable text found at {url}");
+
+        var title = ExtractTitle(raw) ?? url.Host;
+        return new WebDocument(url, title, text);
+    }
+
+    private static string? ExtractTitle(string html)
+    {
+        var match = Regex.Match(html, @"<title\b[^>]*>(.*?)</title>", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        if (!match.Success) return null;
+        var title = WebUtility.HtmlDecode(Regex.Replace(match.Groups[1].Value, @"\s+", " ").Trim());
+        return string.IsNullOrWhiteSpace(title) ? null : title;
+    }
+
+    private async Task EmbedAndStoreAsync(
+        RagDataset dataset,
+        List<RagChunk> allChunks,
+        List<RagChunk> parentChunks,
+        HashSet<string> changedSourcePaths,
+        IProgress<IngestProgress>? progress,
+        CancellationToken ct)
+    {
+        int total = allChunks.Count;
+        progress?.Report(new IngestProgress("Embedding", 0, total, $"Embedding {total} chunks..."));
+
+        for (int i = 0; i < allChunks.Count; i += EmbedBatchSize)
+        {
+            ct.ThrowIfCancellationRequested();
+            var batch = allChunks.Skip(i).Take(EmbedBatchSize).ToList();
+            var texts = batch.Select(c => BuildEmbeddingText(c, dataset.Config)).ToList();
+            var embeddings = await _embed.EmbedBatchAsync(texts, ct);
+
+            for (int j = 0; j < batch.Count; j++)
+                batch[j].Embedding = embeddings[j];
+
+            progress?.Report(new IngestProgress("Embedding", Math.Min(i + EmbedBatchSize, total), total,
+                $"Batch {i / EmbedBatchSize + 1}"));
+        }
+
+        progress?.Report(new IngestProgress("Storing", 0, total, "Writing to SQLite..."));
+        await _store.SaveDatasetAsync(dataset, ct);
+        await _store.DeleteChunksForSourcesAsync(dataset.Id, changedSourcePaths, ct);
+
+        if (parentChunks.Count > 0)
+            await _store.SaveChunksBatchAsync(parentChunks, ct);
+
+        await _store.SaveChunksBatchAsync(allChunks, ct);
+
+        progress?.Report(new IngestProgress("Indexing", 0, 1, "Building BM25 stats..."));
+        var stats = Bm25Scorer.BuildStats(allChunks);
+        await _store.SaveBm25StatsAsync(dataset.Id, stats, ct);
+
+        dataset.ChunkCount = allChunks.Count;
+        await _store.SaveDatasetAsync(dataset, ct);
+    }
+
+    private sealed record WebDocument(Uri Url, string Title, string Content);
 
     private static string ComputeHash(string text)
     {

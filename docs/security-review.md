@@ -1,6 +1,6 @@
 # Aether Security Review And Threat Model
 
-Last refreshed for `0.8.4-alpha`.
+Last refreshed for `0.8.5-alpha`.
 
 Aether is a local-first desktop application. The primary security goal is to
 keep user data, model paths, API keys, local runtimes, and generated voice audio
@@ -28,7 +28,9 @@ penetration-test report.
   and model paths are user supplied.
 - Remote OpenAI-compatible endpoints and Ollama endpoints are user supplied and
   should be treated as external services.
-- RAG ingest accepts only local text/markdown files in the current build.
+- RAG ingest defaults to local text/markdown files. Optional web URL ingest is
+  disabled by default and only fetches explicitly listed HTTP(S) pages when
+  enabled for a dataset.
 - Package archives are generated locally and are not signed installers.
 
 ### In-Scope Threats
@@ -59,7 +61,7 @@ penetration-test report.
 | Process launch | `llama-server`, XTTS, and secret backend helpers use `ProcessStartInfo.ArgumentList` / no shell execution. | Extra args are still user-controlled runtime behavior and can weaken local-only assumptions. |
 | Local server binding | Managed `llama-server` always receives `--host 127.0.0.1` before user extra args. Health checks target `127.0.0.1`. | If `llama.cpp` accepts later duplicate host flags, extra args could override the bind address. Add explicit warning/blocking before public release. |
 | Logs | Visible process logs pass through API-key and home-path redaction. Log buffers are capped. | Redaction is best effort and may miss provider-specific token formats or sensitive filenames outside the home path. |
-| RAG ingest | Only `.txt` and `.md` files are loaded. Large files are flagged in ingest health. Prompt templates must include one context/question shape. | Large files are warned, not refused. Markdown is treated as text and no HTML/script stripping exists yet. |
+| RAG ingest | Local `.txt`/`.md` ingest is the default. Optional web URL ingest is off by default, accepts only explicit HTTP(S) URLs, caps pages, strips script/style blocks from HTML, and validates prompt templates. | Large local files are warned, not refused. Web text extraction is intentionally simple and should not be treated as a browser sandbox or crawler. |
 | XTTS | Generated voice preview audio is handled in memory by the app workflow. Managed XTTS process is killed on stop/exit. | Configured XTTS output directory exists for server operation and could contain files created by the external XTTS server. |
 | Tray and hotkeys | Close exits and stops managed services. Minimize-to-tray is explicit. Tray menu includes Stop Services and Quit. Local hotkeys only work while focused. Windows global hotkeys are opt-in and registered through the OS hotkey API. | Linux global hotkeys remain deferred because Wayland/X11 compositor behavior varies. |
 | Packaging | Linux/Windows archives include README, license, notice, commercial terms, and checksums. Linux desktop install is user-local. | Archives are unsigned; users must verify checksums from a trusted channel. |
@@ -124,16 +126,19 @@ causes resource exhaustion, or injects hostile prompt content.
 
 Current mitigations:
 
-- Current ingest implementation only enumerates `.txt` and `.md`.
+- Current local ingest implementation only enumerates `.txt` and `.md`.
+- Optional web ingest must be explicitly enabled per dataset and only accepts
+  listed HTTP(S) URLs.
 - Source paths are explicit in citations and query traces.
 - Oversized files are counted and surfaced in ingest health.
+- Web pages are capped and script/style blocks are stripped before chunking.
 - Prompt template shape is validated.
 
 Required follow-up:
 
 - Enforce configurable file-size limits instead of warning only.
-- Add HTML/script stripping before enabling web or HTML ingestion.
-- Keep optional web loader disabled by default.
+- Add domain allow-listing or stronger provenance controls if web ingest grows
+  beyond explicit single-page fetches.
 
 ### Malicious Local Executable Path
 
@@ -153,12 +158,12 @@ Required follow-up:
 
 ## Release Gate Status
 
-Security review and threat model refresh is complete for `0.8.4-alpha` as an
+Security review and threat model refresh was completed for `0.8.4-alpha` as an
 engineering documentation gate. The following items remain public-release
 hardening work:
 
 - Extra-args warning/blocking for network-affecting `llama-server` flags.
-- Stronger RAG file-size enforcement and text sanitization.
+- Stronger RAG file-size enforcement and broader text sanitization.
 - Broader redaction fixtures for provider-specific secrets.
 - Signed packages/installers and trusted checksum publication.
 - Restore preview/manifest support.
