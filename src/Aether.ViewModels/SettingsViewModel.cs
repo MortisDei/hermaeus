@@ -14,6 +14,7 @@ public partial class SettingsViewModel : ObservableObject
     private readonly IBackupService _backups;
     private readonly ISecretStore _secrets;
     private readonly XttsProcessManager _xttsProcess;
+    private readonly SynchronizationContext? _sync;
 
     [ObservableProperty] private string _llamaCppBaseUrl      = "http://localhost:8080";
     [ObservableProperty] private bool   _llamaCppEnabled      = true;
@@ -76,14 +77,25 @@ public partial class SettingsViewModel : ObservableObject
         _backups = backups;
         _secrets = secrets;
         _xttsProcess = xttsProcess;
-        _xttsProcess.StatusChanged += () =>
-        {
-            TtsStatus = _xttsProcess.StatusLabel;
-            OnPropertyChanged(nameof(IsTtsRunning));
-            StartTtsCommand.NotifyCanExecuteChanged();
-            StopTtsCommand.NotifyCanExecuteChanged();
-        };
+        _sync = SynchronizationContext.Current;
+        _xttsProcess.StatusChanged += OnXttsStatusChanged;
         Reload();
+    }
+
+    private void OnXttsStatusChanged()
+    {
+        if (_sync is not null)
+            _sync.Post(_ => ApplyXttsStatus(), null);
+        else
+            ApplyXttsStatus();
+    }
+
+    private void ApplyXttsStatus()
+    {
+        TtsStatus = _xttsProcess.StatusLabel;
+        OnPropertyChanged(nameof(IsTtsRunning));
+        StartTtsCommand.NotifyCanExecuteChanged();
+        StopTtsCommand.NotifyCanExecuteChanged();
     }
 
     public void Reload()
@@ -311,6 +323,8 @@ public partial class SettingsViewModel : ObservableObject
     }
 
     [RelayCommand] private void Reset() => Reload();
+
+    public void Shutdown() => _xttsProcess.Stop();
 
     private bool CanStartTts() => !IsTtsRunning;
     private bool CanStopTts() => IsTtsRunning;

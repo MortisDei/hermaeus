@@ -55,13 +55,21 @@ public sealed class XttsProcessManager : IDisposable
             StatusChanged?.Invoke();
         };
 
-        if (!_process.Start())
-            throw new InvalidOperationException("Failed to start XTTS v2 server.");
+        try
+        {
+            if (!_process.Start())
+                throw new InvalidOperationException("Failed to start XTTS v2 server.");
 
-        _healthCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        await WaitForHealthAsync(settings.TtsServiceUrl, _healthCts.Token);
-        StatusLabel = "Running";
-        StatusChanged?.Invoke();
+            _healthCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            await WaitForHealthAsync(settings.TtsServiceUrl, _healthCts.Token);
+            StatusLabel = "Running";
+            StatusChanged?.Invoke();
+        }
+        catch
+        {
+            Stop();
+            throw;
+        }
     }
 
     public void Stop()

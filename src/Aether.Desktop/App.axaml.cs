@@ -37,6 +37,11 @@ public partial class App : Application
             var window = new MainWindow { DataContext = vm };
             desktop.MainWindow = window;
             window.Opened += async (_, _) => await InitializeAppAsync(sp, vm);
+            desktop.Exit += (_, _) =>
+            {
+                vm.Shutdown();
+                sp.Dispose();
+            };
         }
 
         base.OnFrameworkInitializationCompleted();

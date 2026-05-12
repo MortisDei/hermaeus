@@ -89,7 +89,11 @@ public partial class MainWindowViewModel : ObservableObject
         finally { IsLoading = false; }
     }
 
-    public void Shutdown() => Services.StopAll();
+    public void Shutdown()
+    {
+        Services.StopAll();
+        Settings.Shutdown();
+    }
 
     private async Task LoadConversationsAsync()
     {
