@@ -281,7 +281,81 @@ if __name__ == "__main__":
         if (!File.Exists(pythonPath))
             return Task.FromResult(new LocalAiSetupResult(false, $"Python was not found at {pythonPath}. Create or choose a venv first."));
 
-        return RunProcessAsync(pythonPath, ["-m", "pip", "install", ..XttsPackages], Path.GetDirectoryName(pythonPath) ?? Environment.CurrentDirectory, progress, ct);
+        return InstallXttsWithRepairAsync(pythonPath, progress, ct);
+    }
+
+    private static async Task<LocalAiSetupResult> InstallXttsWithRepairAsync(string pythonPath, IProgress<string>? progress, CancellationToken ct)
+    {
+        var workingDirectory = Path.GetDirectoryName(pythonPath) ?? Environment.CurrentDirectory;
+        var preflight = await RunProcessAsync(
+            pythonPath,
+            ["-c", "import encodings, sys; print(sys.executable)"],
+            workingDirectory,
+            progress,
+            ct);
+
+        if (!preflight.Success)
+        {
+            progress?.Report("Detected a broken Python runtime. Aether will rebuild this venv and retry installation.");
+            var repair = await RebuildVenvAsync(pythonPath, progress, ct);
+            if (!repair.Success)
+            {
+                var combinedLog = $"{preflight.Log.TrimEnd()}{Environment.NewLine}{repair.Log}";
+                return new LocalAiSetupResult(false, combinedLog, repair.UpdatedPath);
+            }
+        }
+
+        return await RunProcessAsync(
+            pythonPath,
+            ["-m", "pip", "install", ..XttsPackages],
+            workingDirectory,
+            progress,
+            ct);
+    }
+
+    private static async Task<LocalAiSetupResult> RebuildVenvAsync(string pythonPath, IProgress<string>? progress, CancellationToken ct)
+    {
+        var venvRoot = GetVenvRootFromPythonPath(pythonPath);
+        if (string.IsNullOrWhiteSpace(venvRoot) || !Directory.Exists(venvRoot))
+            return new LocalAiSetupResult(false, $"Cannot repair Python runtime at {pythonPath}. Select a venv Python path and retry.");
+
+        var parent = Path.GetDirectoryName(venvRoot);
+        if (string.IsNullOrWhiteSpace(parent))
+            return new LocalAiSetupResult(false, $"Cannot determine parent folder for venv at {venvRoot}.");
+
+        var backup = venvRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            + $".broken-{DateTime.UtcNow:yyyyMMddHHmmss}";
+
+        Directory.Move(venvRoot, backup);
+        progress?.Report($"Backed up broken venv: {backup}");
+
+        var recreate = await RunProcessAsync(
+            DefaultPythonCommand(),
+            ["-m", "venv", venvRoot],
+            parent,
+            progress,
+            ct);
+
+        if (!recreate.Success)
+            return recreate;
+
+        var repairedPython = PythonPathForVenv(venvRoot);
+        if (!File.Exists(repairedPython))
+            return new LocalAiSetupResult(false, $"Venv rebuild finished but Python was not found at {repairedPython}.");
+
+        return new LocalAiSetupResult(true, $"Rebuilt Python venv at {venvRoot}", repairedPython);
+    }
+
+    private static string GetVenvRootFromPythonPath(string pythonPath)
+    {
+        if (string.IsNullOrWhiteSpace(pythonPath))
+            return string.Empty;
+
+        var binDir = Path.GetDirectoryName(pythonPath);
+        if (string.IsNullOrWhiteSpace(binDir))
+            return string.Empty;
+
+        return Path.GetDirectoryName(binDir) ?? string.Empty;
     }
 
     private LocalAiSetupResult CreateXttsApiScript(string target, AppSettings settings, bool allowOverwrite, IProgress<string>? progress)
