@@ -90,7 +90,15 @@ public partial class SettingsViewModel : ObservableObject
     public Action? RequestTtsVoiceSamplePicker { get; set; }
     public Action<string>? RequestCopyToClipboard { get; set; }
 
-    public bool IsTtsRunning => _xttsProcess.IsRunning;
+    public bool IsTtsRunning => IsLegacyVoiceBackend && _xttsProcess.IsRunning;
+    public bool IsLegacyVoiceBackend
+    {
+        get
+        {
+            var provider = VoiceProviders.FirstOrDefault(p => p.Name.Equals(SelectedVoiceProvider, StringComparison.OrdinalIgnoreCase));
+            return provider is not null && provider.Id == VoiceProvider.XttsV2;
+        }
+    }
 
     public SettingsViewModel(
         ISettingsService svc,
@@ -127,7 +135,7 @@ public partial class SettingsViewModel : ObservableObject
 
     private void ApplyXttsStatus()
     {
-        TtsStatus = _xttsProcess.StatusLabel;
+        TtsStatus = IsLegacyVoiceBackend ? _xttsProcess.StatusLabel : "Ready";
         OnPropertyChanged(nameof(IsTtsRunning));
         StartTtsCommand.NotifyCanExecuteChanged();
         StopTtsCommand.NotifyCanExecuteChanged();
@@ -168,12 +176,13 @@ public partial class SettingsViewModel : ObservableObject
         MinimizeToTray      = s.MinimizeToTray;
         EnableLocalHotkeys  = s.EnableLocalHotkeys;
         EnableGlobalHotkeys = s.EnableGlobalHotkeys;
-        TtsStatus           = _xttsProcess.StatusLabel;
+        TtsStatus           = IsLegacyVoiceBackend ? _xttsProcess.StatusLabel : "Ready";
         OnPropertyChanged(nameof(IsTtsRunning));
         VoiceProviders.Clear();
         foreach (var provider in _voiceProviderRegistry.GetAvailableProviders())
             VoiceProviders.Add(provider);
         SelectedVoiceProvider = s.VoiceProvider;
+        OnPropertyChanged(nameof(IsLegacyVoiceBackend));
         UpdateMigrationPreview();
         UpdateLocalAiAssetsStatus();
     }
@@ -333,6 +342,8 @@ public partial class SettingsViewModel : ObservableObject
             await _voiceProviderRegistry.SetActiveProviderAsync(provider.Id);
             SelectedVoiceProvider = provider.Name;
             await SaveAsync();
+            await RefreshTtsVoicesAsync();
+            OnPropertyChanged(nameof(IsLegacyVoiceBackend));
             _toasts.Show("Voice provider changed", $"Now using {provider.Name}.", ToastKind.Success, 4000);
         }
         catch (Exception ex)
@@ -468,6 +479,12 @@ public partial class SettingsViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanStartTts))]
     private async Task StartTtsAsync()
     {
+        if (!IsLegacyVoiceBackend)
+        {
+            _toasts.Show("No voice server needed", "Kokoro and F5-TTS generate directly without a background server.", ToastKind.Info, 5000);
+            return;
+        }
+
         if (string.IsNullOrWhiteSpace(TtsScriptPath))
         {
             RequestTtsScriptPicker?.Invoke();
@@ -498,6 +515,12 @@ public partial class SettingsViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanStopTts))]
     private void StopTts()
     {
+        if (!IsLegacyVoiceBackend)
+        {
+            _toasts.Show("No voice server running", "The current provider does not use a background XTTS server.", ToastKind.Info, 4000);
+            return;
+        }
+
         _xttsProcess.Stop();
         _toasts.Show("XTTS v2 stopped", "The local voice server was stopped.", ToastKind.Info);
     }
@@ -518,8 +541,8 @@ public partial class SettingsViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            SettingsError = $"Could not load XTTS voices: {ex.Message}";
-            _toasts.Show("XTTS voices unavailable", ex.Message, ToastKind.Warning);
+            SettingsError = $"Could not load voice list: {ex.Message}";
+            _toasts.Show("Voice list unavailable", ex.Message, ToastKind.Warning);
         }
     }
 
@@ -561,11 +584,18 @@ public partial class SettingsViewModel : ObservableObject
 
     public void Shutdown() => _xttsProcess.Stop();
 
-    private bool CanStartTts() => !IsTtsRunning;
-    private bool CanStopTts() => IsTtsRunning;
+    private bool CanStartTts() => IsLegacyVoiceBackend && !IsTtsRunning;
+    private bool CanStopTts() => IsLegacyVoiceBackend && IsTtsRunning;
 
     partial void OnDataRootDirectoryChanged(string value) => UpdateMigrationPreview();
     partial void OnLocalAiAssetsRootChanged(string value) => UpdateLocalAiAssetsStatus();
+    partial void OnSelectedVoiceProviderChanged(string value)
+    {
+        TtsStatus = IsLegacyVoiceBackend ? _xttsProcess.StatusLabel : "Ready";
+        OnPropertyChanged(nameof(IsLegacyVoiceBackend));
+        StartTtsCommand.NotifyCanExecuteChanged();
+        StopTtsCommand.NotifyCanExecuteChanged();
+    }
 
     private void UpdateMigrationPreview()
     {

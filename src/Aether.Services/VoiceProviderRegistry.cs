@@ -1,4 +1,3 @@
-using System.Collections.Frozen;
 using Aether.Core.Models;
 using Aether.Core.Services;
 
@@ -8,7 +7,6 @@ public sealed class VoiceProviderRegistry : IVoiceProviderRegistry
 {
     private readonly ISettingsService _settingsService;
     private readonly Dictionary<VoiceProvider, ITtsService> _providers;
-    private readonly Dictionary<VoiceProvider, VoiceProviderInfo> _providerInfos;
     private VoiceProvider _activeProvider;
 
     public VoiceProviderRegistry(
@@ -25,43 +23,32 @@ public sealed class VoiceProviderRegistry : IVoiceProviderRegistry
             { VoiceProvider.F5Tts, f5Tts }
         };
 
-        _providerInfos = new()
-        {
-            {
-                VoiceProvider.Kokoro,
-                new VoiceProviderInfo(
-                    VoiceProvider.Kokoro,
-                    "Kokoro",
-                    "Fast local TTS readback. Lightweight, recommended default.",
-                    VoiceProviderCategory.Recommended,
-                    kokoro.IsInstalled)
-            },
-            {
-                VoiceProvider.F5Tts,
-                new VoiceProviderInfo(
-                    VoiceProvider.F5Tts,
-                    "F5-TTS",
-                    "Modern voice cloning backend. Higher quality, heavier install. Noncommercial pretrained model license.",
-                    VoiceProviderCategory.Advanced,
-                    f5Tts.IsInstalled)
-            },
-            {
-                VoiceProvider.XttsV2,
-                new VoiceProviderInfo(
-                    VoiceProvider.XttsV2,
-                    "XTTS v2",
-                    "Legacy Coqui voice cloning backend. Best compatibility with existing workflows, requires Python 3.11.",
-                    VoiceProviderCategory.Legacy,
-                    xttsV2.IsInstalled)
-            }
-        };
-
         _activeProvider = ParseProviderFromSettings(settingsService.Settings.VoiceProvider);
     }
 
     public IReadOnlyList<VoiceProviderInfo> GetAvailableProviders()
     {
-        return _providerInfos.Values
+        return new List<VoiceProviderInfo>
+        {
+            new VoiceProviderInfo(
+                VoiceProvider.Kokoro,
+                "Kokoro",
+                "Fast local readback. Tiny, Apache-licensed, and low-drama.",
+                VoiceProviderCategory.Recommended,
+                ((KokoroVoiceProvider)_providers[VoiceProvider.Kokoro]).IsInstalled),
+            new VoiceProviderInfo(
+                VoiceProvider.F5Tts,
+                "F5-TTS",
+                "Advanced cloning and experimental high-quality voices. Pretrained models are CC-BY-NC.",
+                VoiceProviderCategory.Advanced,
+                ((F5TtsVoiceProvider)_providers[VoiceProvider.F5Tts]).IsInstalled),
+            new VoiceProviderInfo(
+                VoiceProvider.XttsV2,
+                "XTTS v2",
+                "Legacy Coqui-compatible voice cloning backend. Best compatibility with existing workflows, requires Python 3.11.",
+                VoiceProviderCategory.Legacy,
+                ((XttsV2VoiceProvider)_providers[VoiceProvider.XttsV2]).IsInstalled)
+        }
             .OrderBy(p => (int)p.Category)
             .ThenBy(p => p.Name)
             .ToList();
@@ -81,14 +68,16 @@ public sealed class VoiceProviderRegistry : IVoiceProviderRegistry
 
     public VoiceProviderConfig? GetProviderConfig(VoiceProvider provider)
     {
-        // TODO: Store and retrieve provider-specific configs
-        return null;
+        var key = provider.ToString();
+        return _settingsService.Settings.VoiceProviderConfigs.TryGetValue(key, out var config)
+            ? config
+            : new VoiceProviderConfig(key);
     }
 
-    public Task SetProviderConfigAsync(VoiceProvider provider, VoiceProviderConfig config)
+    public async Task SetProviderConfigAsync(VoiceProvider provider, VoiceProviderConfig config)
     {
-        // TODO: Persist provider-specific configs
-        return Task.CompletedTask;
+        _settingsService.Settings.VoiceProviderConfigs[provider.ToString()] = config;
+        await _settingsService.SaveAsync();
     }
 
     public ITtsService GetActiveTtsService()

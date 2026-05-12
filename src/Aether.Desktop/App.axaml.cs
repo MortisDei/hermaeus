@@ -92,7 +92,7 @@ public partial class App : Application
         s.AddSingleton<KokoroVoiceProvider>();
         s.AddSingleton<F5TtsVoiceProvider>();
         s.AddSingleton<IVoiceProviderRegistry, VoiceProviderRegistry>();
-        s.AddSingleton<ITtsService>(sp => sp.GetRequiredService<IVoiceProviderRegistry>().GetActiveTtsService());
+        s.AddSingleton<ITtsService, VoiceRoutingTtsService>();
         s.AddSingleton<XttsProcessManager>();
         s.AddSingleton<IToastService,      ToastService>();
         s.AddSingleton<IAutomationScheduler, AutomationScheduler>();

@@ -86,28 +86,70 @@
                 </StackPanel>
             </Border>
 
-            <!-- Text to speech -->
+            <!-- Voice Providers -->
             <Border Grid.Row="1" Grid.Column="1" Classes="settings-card">
                 <StackPanel Spacing="12">
                     <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
                         <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
                             <CheckBox IsChecked="{Binding TtsEnabled}" />
-                            <TextBlock Text="XTTS v2" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center" />
-                            <TextBlock Text="{Binding TtsStatus}" FontSize="11" Opacity="0.5" VerticalAlignment="Center" />
+                            <TextBlock Text="Voice providers" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding SelectedVoiceProvider}" FontSize="11" Opacity="0.5" VerticalAlignment="Center" />
                         </StackPanel>
                         <Button Grid.Column="1" Command="{Binding StartTtsCommand}"
-                                IsVisible="{Binding !IsTtsRunning}"
+                                IsVisible="{Binding IsLegacyVoiceBackend}"
+                                IsEnabled="{Binding !IsTtsRunning}"
                                 Content="Start" FontSize="12" Padding="12,5" CornerRadius="6" />
                         <Button Grid.Column="1" Command="{Binding StopTtsCommand}"
-                                IsVisible="{Binding IsTtsRunning}"
+                                IsVisible="{Binding IsLegacyVoiceBackend}"
+                                IsEnabled="{Binding IsTtsRunning}"
                                 Content="Stop" FontSize="12" Padding="12,5" CornerRadius="6" />
                         <Button Grid.Column="2" Classes="icon-btn"
                                 Command="{Binding RefreshTtsVoicesCommand}"
-                                ToolTip.Tip="Refresh XTTS voices">
+                                ToolTip.Tip="Refresh voices for the active provider">
                             <PathIcon Data="M17.65 6.35C16.2 4.9 14.21 4 12 4a8 8 0 0 0-8 8h2.5l-3.5 3.5L-.5 12H2a10 10 0 0 1 17.07-7.07l-1.42 1.42zM6.35 17.65C7.8 19.1 9.79 20 12 20a8 8 0 0 0 8-8h-2.5l3.5-3.5 3.5 3.5H22a10 10 0 0 1-17.07 7.07l1.42-1.42z"
                                       Width="15" Height="15" />
                         </Button>
                     </Grid>
+
+                    <Border CornerRadius="10" Padding="12" Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                            BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
+                        <StackPanel Spacing="10">
+                            <TextBlock Text="Voice Providers" FontSize="12" FontWeight="SemiBold" />
+                            <ItemsControl ItemsSource="{Binding VoiceProviders}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <WrapPanel ItemWidth="240" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate DataType="m:VoiceProviderInfo">
+                                        <Border CornerRadius="8" Padding="10" Margin="0,0,10,10"
+                                                Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                                                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                                BorderThickness="1">
+                                            <StackPanel Spacing="8">
+                                                <StackPanel Spacing="2">
+                                                    <TextBlock Text="{Binding Name}" FontSize="13" FontWeight="SemiBold" />
+                                                    <TextBlock Text="{Binding CategoryLabel}" FontSize="11" Opacity="0.65" />
+                                                </StackPanel>
+                                                <TextBlock Text="{Binding Description}" FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
+                                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                                    <TextBlock Grid.Column="0" Text="{Binding IsInstalled, StringFormat=Ready: {0}}" FontSize="11" Opacity="0.65" />
+                                                    <Button Grid.Column="1"
+                                                            Command="{Binding $parent[ItemsControl].DataContext.SetActiveVoiceProviderCommand}"
+                                                            CommandParameter="{Binding}"
+                                                            Content="Use"
+                                                            FontSize="11" Padding="10,5" CornerRadius="6" />
+                                                </Grid>
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Border>
+
+                    <TextBlock Text="Legacy XTTS v2 settings" FontSize="12" FontWeight="SemiBold" />
                     <Grid ColumnDefinitions="110,*,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
                           RowSpacing="8" ColumnSpacing="12">
                         <TextBlock Grid.Row="0" Grid.Column="0" Text="Base URL"
@@ -217,14 +259,13 @@
             </Border>
 
             <!-- Defaults -->
-            <Border Grid.Row="2" Grid.Column="0" Classes="settings-card">
+            <Border Grid.Row="1" Grid.Column="1" Classes="settings-card">
                 <StackPanel Spacing="12">
                     <TextBlock Text="Data Storage" FontSize="14" FontWeight="SemiBold" />
                     <Grid ColumnDefinitions="110,*,Auto" ColumnSpacing="8">
                         <TextBlock Grid.Column="0" Text="Data folder"
                                    VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
-                        <TextBox Grid.Column="1"
-                                 Text="{Binding DataRootDirectory, UpdateSourceTrigger=PropertyChanged}"
+                        <TextBox Grid.Column="1" Text="{Binding DataRootDirectory, UpdateSourceTrigger=PropertyChanged}"
                                  Watermark="Default OS app data folder"
                                  ToolTip.Tip="Optional data root for conversations, RAG, tasks and local app state."
                                  FontSize="13" CornerRadius="6" Padding="10,6" />
