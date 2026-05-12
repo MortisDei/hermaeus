@@ -5,7 +5,24 @@ All notable changes to Aether will be documented in this file.
 The project follows semantic versioning once public release candidates begin.
 Pre-1.0 versions may still change internal APIs and storage details.
 
-## [0.8.6-alpha] - Unreleased
+## [0.8.7-alpha] - Unreleased
+
+### Added
+
+- Voice provider groundwork for a pluggable local voice layer, with Kokoro as
+  the recommended default readback engine, F5-TTS as the advanced cloning
+  option, and XTTS v2 retained as the legacy compatibility backend.
+- Voice setup terminology updates from XTTS-only wording to voice-provider
+  wording in preparation for the pluggable layer.
+- XTTS validation and repair improvements that require Python 3.11 and detect
+  broken or incompatible venvs before install.
+
+### Changed
+
+- XTTS setup actions are now framed as voice backend setup rather than a boxed-
+  in single-provider workflow.
+
+## [0.8.6-alpha] - 2026-05-12
 
 ### Added
 

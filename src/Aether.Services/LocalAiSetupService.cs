@@ -252,11 +252,11 @@ if __name__ == "__main__":
             "Creates an isolated Python environment under the selected AI folder.", false, true, true);
 
     private static LocalAiSetupAction InstallXttsAction(string pythonPath, bool canRun) =>
-        new("install-xtts", LocalAiSetupActionKind.InstallXttsDependencies, "Install XTTS packages", pythonPath,
+        new("install-voice-backend", LocalAiSetupActionKind.InstallXttsDependencies, "Install Voice Backend Packages", pythonPath,
             [pythonPath, "-m", "pip", "install", ..XttsPackages], LocalAiSetupRiskLevel.High,
             canRun
-                ? "Installs Python packages into the selected venv. This may use the network."
-                : "Create or choose a venv before installing XTTS packages.",
+                ? "Installs voice backend packages into the selected venv. This may use the network."
+                : "Create or choose a venv before installing voice backend packages.",
             true, true, canRun);
 
     private static LocalAiSetupAction CreateScriptAction(string target) =>

@@ -88,7 +88,11 @@ public partial class App : Application
         s.AddSingleton<OllamaService>();
         s.AddSingleton<ILlmService,        CompositeLlmService>();
         s.AddSingleton<IModelProfileService, ModelProfileService>();
-        s.AddSingleton<ITtsService,        XttsService>();
+        s.AddSingleton<XttsV2VoiceProvider>();
+        s.AddSingleton<KokoroVoiceProvider>();
+        s.AddSingleton<F5TtsVoiceProvider>();
+        s.AddSingleton<IVoiceProviderRegistry, VoiceProviderRegistry>();
+        s.AddSingleton<ITtsService>(sp => sp.GetRequiredService<IVoiceProviderRegistry>().GetActiveTtsService());
         s.AddSingleton<XttsProcessManager>();
         s.AddSingleton<IToastService,      ToastService>();
         s.AddSingleton<IAutomationScheduler, AutomationScheduler>();

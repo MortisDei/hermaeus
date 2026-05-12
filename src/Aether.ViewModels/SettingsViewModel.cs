@@ -12,6 +12,7 @@ public partial class SettingsViewModel : ObservableObject
 {
     private readonly ISettingsService _svc;
     private readonly ITtsService _tts;
+    private readonly IVoiceProviderRegistry _voiceProviderRegistry;
     private readonly IToastService _toasts;
     private readonly IBackupService _backups;
     private readonly ISecretStore _secrets;
@@ -62,6 +63,7 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private string _globalHotkeyStatus = "System-wide hotkeys are off.";
     [ObservableProperty] private string _ttsStatus = "Stopped";
     [ObservableProperty] private string _settingsError = string.Empty;
+    [ObservableProperty] private string _selectedVoiceProvider = "Kokoro";
     [ObservableProperty] private bool _localAiSetupBusy;
     [ObservableProperty] private string _localAiSetupLog = string.Empty;
     [ObservableProperty] private string _localAiSetupSummary = "Scan a local AI folder to see readiness.";
@@ -72,6 +74,7 @@ public partial class SettingsViewModel : ObservableObject
     public string[] Themes { get; } = ["System", "Dark", "Light"];
     public string[] TtsDevices { get; } = ["cpu", "auto", "cuda"];
     public ObservableCollection<string> TtsVoices { get; } = ["default"];
+    public ObservableCollection<VoiceProviderInfo> VoiceProviders { get; } = [];
     public ObservableCollection<LocalAiReadinessItem> LocalAiReadinessItems { get; } = [];
     public ObservableCollection<LocalAiSetupAction> LocalAiSetupActions { get; } = [];
     public ObservableCollection<TrustItem> TrustItems { get; } = [];
@@ -92,6 +95,7 @@ public partial class SettingsViewModel : ObservableObject
     public SettingsViewModel(
         ISettingsService svc,
         ITtsService tts,
+        IVoiceProviderRegistry voiceProviderRegistry,
         IToastService toasts,
         IBackupService backups,
         ISecretStore secrets,
@@ -101,6 +105,7 @@ public partial class SettingsViewModel : ObservableObject
     {
         _svc = svc;
         _tts = tts;
+        _voiceProviderRegistry = voiceProviderRegistry;
         _toasts = toasts;
         _backups = backups;
         _secrets = secrets;
@@ -165,6 +170,10 @@ public partial class SettingsViewModel : ObservableObject
         EnableGlobalHotkeys = s.EnableGlobalHotkeys;
         TtsStatus           = _xttsProcess.StatusLabel;
         OnPropertyChanged(nameof(IsTtsRunning));
+        VoiceProviders.Clear();
+        foreach (var provider in _voiceProviderRegistry.GetAvailableProviders())
+            VoiceProviders.Add(provider);
+        SelectedVoiceProvider = s.VoiceProvider;
         UpdateMigrationPreview();
         UpdateLocalAiAssetsStatus();
     }
@@ -203,6 +212,7 @@ public partial class SettingsViewModel : ObservableObject
         s.TtsModelVersion     = TtsModelVersion.Trim();
         s.TtsPreload          = TtsPreload;
         s.StartMinimized      = StartMinimized;
+        s.VoiceProvider       = SelectedVoiceProvider;
         s.ShowQuickChat       = ShowQuickChat;
         s.EnableTrayIcon      = EnableTrayIcon;
         s.MinimizeToTray      = MinimizeToTray;
@@ -312,6 +322,25 @@ public partial class SettingsViewModel : ObservableObject
 
     [RelayCommand]
     private void BrowseTtsOutput() => RequestTtsOutputPicker?.Invoke();
+
+    [RelayCommand]
+    private async Task SetActiveVoiceProviderAsync(VoiceProviderInfo? provider)
+    {
+        if (provider is null) return;
+
+        try
+        {
+            await _voiceProviderRegistry.SetActiveProviderAsync(provider.Id);
+            SelectedVoiceProvider = provider.Name;
+            await SaveAsync();
+            _toasts.Show("Voice provider changed", $"Now using {provider.Name}.", ToastKind.Success, 4000);
+        }
+        catch (Exception ex)
+        {
+            SettingsError = ex.Message;
+            _toasts.Show("Provider change failed", ex.Message, ToastKind.Error, 6000);
+        }
+    }
 
     [RelayCommand]
     private async Task ScanLocalAiSetupAsync()

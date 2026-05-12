@@ -1243,7 +1243,7 @@ static Task ServerProcessArgumentsAreSafe()
 static SettingsService NewSettings(TempDir temp) => new(temp.PathFor("settings/settings.json"));
 
 static SettingsViewModel NewSettingsViewModel(ISettingsService settings, ISecretStore secrets) =>
-    new(settings, new FakeTts(), new FakeToasts(), new BackupService(settings), secrets, new XttsProcessManager(), new LocalAiSetupService(), new TrustService());
+    new(settings, new FakeTts(), new FakeVoiceProviderRegistry(settings), new FakeToasts(), new BackupService(settings), secrets, new XttsProcessManager(), new LocalAiSetupService(), new TrustService());
 
 static async Task ThrowsAsync<T>(Func<Task> action) where T : Exception
 {
@@ -1405,6 +1405,36 @@ sealed class FakeTts : ITtsService
         Task.FromResult(displayName);
     public Task<IReadOnlyList<string>> GetVoicesAsync(CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<string>>(["default"]);
+}
+
+sealed class FakeVoiceProviderRegistry : IVoiceProviderRegistry
+{
+    private readonly ISettingsService _settings;
+
+    public FakeVoiceProviderRegistry(ISettingsService settings) => _settings = settings;
+
+    public IReadOnlyList<VoiceProviderInfo> GetAvailableProviders() =>
+    [
+        new(VoiceProvider.Kokoro, "Kokoro", "Fast local readback.", VoiceProviderCategory.Recommended, true),
+        new(VoiceProvider.F5Tts, "F5-TTS", "Advanced cloning.", VoiceProviderCategory.Advanced, false),
+        new(VoiceProvider.XttsV2, "XTTS v2", "Legacy cloning.", VoiceProviderCategory.Legacy, true)
+    ];
+
+    public VoiceProvider GetActiveProvider() => Enum.TryParse<VoiceProvider>(_settings.Settings.VoiceProvider, out var provider)
+        ? provider
+        : VoiceProvider.Kokoro;
+
+    public Task SetActiveProviderAsync(VoiceProvider provider)
+    {
+        _settings.Settings.VoiceProvider = provider.ToString();
+        return Task.CompletedTask;
+    }
+
+    public VoiceProviderConfig? GetProviderConfig(VoiceProvider provider) => new(provider.ToString());
+
+    public Task SetProviderConfigAsync(VoiceProvider provider, VoiceProviderConfig config) => Task.CompletedTask;
+
+    public ITtsService GetActiveTtsService() => new FakeTts();
 }
 
 sealed class FakeToasts : IToastService

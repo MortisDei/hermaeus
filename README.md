@@ -1,10 +1,10 @@
 # Aether
 
-Version: `0.8.6-alpha`
+Version: `0.8.7-alpha`
 
 A native, local-first Avalonia desktop AI workspace for `llama.cpp`, Ollama,
-OpenAI-compatible APIs, Oghma-grade RAG, agentic task work, and XTTS voice
-playback.
+OpenAI-compatible APIs, Oghma-grade RAG, agentic task work, and pluggable
+local voice providers.
 
 > Built with Avalonia UI + .NET 10. Linux Wayland/X11 and Windows.
 
@@ -20,7 +20,7 @@ playback.
   citations, traces, evals.
 - Aether Agent: read-first task workbench with explicit state, compact context,
   retrieval, safety gates, and local logs.
-- XTTS v2 readback with memory-only generated audio.
+- Pluggable local voice providers for readback and cloning workflows.
 
 ## Features
 
@@ -42,7 +42,8 @@ playback.
   rankings, reruns, and Markdown/JSON/CSV export.
 - System overview for app version, CPU, RAM, storage, databases, managed
   components, and best-effort GPU/VRAM visibility.
-- XTTS v2 launch controls, voice selection, voice preview, voice sample import.
+- Voice provider controls for Kokoro, F5-TTS, and XTTS v2, with preview and
+  voice sample import.
 - Local tasks, reminders, and app-running scheduled automations.
 - Tray integration, minimize-to-tray, local hotkeys, and Windows system-wide
   hotkeys.
@@ -139,9 +140,16 @@ Writes, command execution, installs, network actions, commit, and push are not
 executed by this alpha agent. They are surfaced as approval-required or blocked
 next actions for a later automation slice.
 
-## XTTS
+## Voice Providers
 
-In **Settings**, configure XTTS v2:
+In **Settings**, choose a voice provider:
+
+- **Kokoro** - recommended default for fast local readback.
+- **F5-TTS** - advanced voice cloning mode with heavier install requirements.
+- **XTTS v2** - legacy Coqui-compatible voice cloning backend, best kept for
+  existing workflows that already depend on it.
+
+XTTS v2 still supports the familiar local AI assets setup:
 
 - local AI assets folder, or explicit paths
 - service URL
@@ -159,6 +167,10 @@ Local AI Setup can scan a selected AI folder and show readiness for GGUF models,
 Python venv, XTTS v2 model files, XTTS API script, voices, output folders, and
 the optional RAG reranker. Missing setup actions are approval-gated and show the
 target path, command preview, risk, and expected result before Aether runs them.
+
+Voice provider setup is moving toward a pluggable layer, with Kokoro as the
+preferred built-in readback path and XTTS v2 retained as the legacy cloning
+backend.
 
 ## Data, Backup, Security
 
