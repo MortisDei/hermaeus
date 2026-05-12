@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using System.Text.RegularExpressions;
 using Aether.Core.Models;
 using Aether.Core.Services;
 
@@ -8,6 +9,8 @@ namespace Aether.Services;
 public sealed class LocalAiSetupService : ILocalAiSetupService
 {
     private static readonly string[] XttsPackages = ["TTS", "fastapi", "uvicorn", "soundfile"];
+    private static readonly Version MinSupportedXttsPython = new(3, 9);
+    private static readonly Version MaxSupportedXttsPythonExclusive = new(3, 12);
 
     public Task<LocalAiReadinessReport> ScanAsync(AppSettings settings, CancellationToken ct = default)
     {
@@ -272,7 +275,17 @@ if __name__ == "__main__":
             return new LocalAiSetupResult(true, $"Venv already exists at {target}", PythonPathForVenv(target));
 
         Directory.CreateDirectory(Path.GetDirectoryName(target) ?? target);
-        var result = await RunProcessAsync(DefaultPythonCommand(), ["-m", "venv", target], Path.GetDirectoryName(target) ?? Environment.CurrentDirectory, progress, ct);
+        var pythonCommand = await ResolveCompatiblePythonCommandAsync(progress, ct);
+        if (pythonCommand is null)
+            return new LocalAiSetupResult(false,
+                "No compatible Python interpreter was found for XTTS. Install Python 3.9, 3.10, or 3.11 and retry.");
+
+        var result = await RunProcessAsync(
+            pythonCommand.FileName,
+            [.. pythonCommand.PrefixArgs, "-m", "venv", target],
+            Path.GetDirectoryName(target) ?? Environment.CurrentDirectory,
+            progress,
+            ct);
         return result with { UpdatedPath = PythonPathForVenv(target) };
     }
 
@@ -303,6 +316,31 @@ if __name__ == "__main__":
                 var combinedLog = $"{preflight.Log.TrimEnd()}{Environment.NewLine}{repair.Log}";
                 return new LocalAiSetupResult(false, combinedLog, repair.UpdatedPath);
             }
+
+            pythonPath = repair.UpdatedPath ?? pythonPath;
+            workingDirectory = Path.GetDirectoryName(pythonPath) ?? Environment.CurrentDirectory;
+        }
+
+        var version = await ReadPythonVersionAsync(pythonPath, workingDirectory, ct);
+        if (version is null)
+            return new LocalAiSetupResult(false, $"Could not determine Python version at {pythonPath}. Select a valid Python 3.9-3.11 venv and retry.");
+
+        if (!IsXttsCompatibleVersion(version))
+        {
+            progress?.Report($"Python {version} is not compatible with TTS. Aether will rebuild this venv using Python 3.9-3.11.");
+            var repair = await RebuildVenvAsync(pythonPath, progress, ct);
+            if (!repair.Success)
+                return repair;
+
+            pythonPath = repair.UpdatedPath ?? pythonPath;
+            workingDirectory = Path.GetDirectoryName(pythonPath) ?? Environment.CurrentDirectory;
+
+            var repairedVersion = await ReadPythonVersionAsync(pythonPath, workingDirectory, ct);
+            if (repairedVersion is null || !IsXttsCompatibleVersion(repairedVersion))
+            {
+                return new LocalAiSetupResult(false,
+                    "XTTS requires Python 3.9-3.11, but Aether could not provision a compatible interpreter. Install Python 3.11 and retry setup.");
+            }
         }
 
         return await RunProcessAsync(
@@ -329,9 +367,14 @@ if __name__ == "__main__":
         Directory.Move(venvRoot, backup);
         progress?.Report($"Backed up broken venv: {backup}");
 
+        var pythonCommand = await ResolveCompatiblePythonCommandAsync(progress, ct);
+        if (pythonCommand is null)
+            return new LocalAiSetupResult(false,
+                "No compatible Python interpreter was found for XTTS rebuild. Install Python 3.9, 3.10, or 3.11 and retry.");
+
         var recreate = await RunProcessAsync(
-            DefaultPythonCommand(),
-            ["-m", "venv", venvRoot],
+            pythonCommand.FileName,
+            [.. pythonCommand.PrefixArgs, "-m", "venv", venvRoot],
             parent,
             progress,
             ct);
@@ -356,6 +399,87 @@ if __name__ == "__main__":
             return string.Empty;
 
         return Path.GetDirectoryName(binDir) ?? string.Empty;
+    }
+
+    private static async Task<Version?> ReadPythonVersionAsync(string pythonPath, string workingDirectory, CancellationToken ct)
+    {
+        var result = await RunProcessAsync(
+            pythonPath,
+            ["-c", "import sys; print(f'AETHER_PYVER={sys.version_info[0]}.{sys.version_info[1]}')"],
+            workingDirectory,
+            progress: null,
+            ct);
+
+        if (!result.Success)
+            return null;
+
+        var match = Regex.Match(result.Log, @"AETHER_PYVER=(\d+)\.(\d+)", RegexOptions.CultureInvariant);
+        if (!match.Success)
+            return null;
+
+        if (!int.TryParse(match.Groups[1].Value, out var major) || !int.TryParse(match.Groups[2].Value, out var minor))
+            return null;
+
+        return new Version(major, minor);
+    }
+
+    private static bool IsXttsCompatibleVersion(Version version) =>
+        version >= MinSupportedXttsPython && version < MaxSupportedXttsPythonExclusive;
+
+    private static async Task<PythonCommand?> ResolveCompatiblePythonCommandAsync(IProgress<string>? progress, CancellationToken ct)
+    {
+        var candidates = GetPythonCommandCandidates();
+        foreach (var candidate in candidates)
+        {
+            var result = await RunProcessAsync(
+                candidate.FileName,
+                [.. candidate.PrefixArgs, "-c", "import sys; print(f'AETHER_PYVER={sys.version_info[0]}.{sys.version_info[1]}')"],
+                Environment.CurrentDirectory,
+                progress: null,
+                ct);
+
+            if (!result.Success)
+                continue;
+
+            var match = Regex.Match(result.Log, @"AETHER_PYVER=(\d+)\.(\d+)", RegexOptions.CultureInvariant);
+            if (!match.Success)
+                continue;
+
+            if (!int.TryParse(match.Groups[1].Value, out var major) || !int.TryParse(match.Groups[2].Value, out var minor))
+                continue;
+
+            var version = new Version(major, minor);
+            if (!IsXttsCompatibleVersion(version))
+                continue;
+
+            progress?.Report($"Using Python {version} for XTTS setup: {candidate.DisplayName}");
+            return candidate;
+        }
+
+        progress?.Report("No Python 3.9-3.11 interpreter was detected for XTTS setup.");
+        return null;
+    }
+
+    private static IReadOnlyList<PythonCommand> GetPythonCommandCandidates()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return
+            [
+                new PythonCommand("py", ["-3.11"], "py -3.11"),
+                new PythonCommand("py", ["-3.10"], "py -3.10"),
+                new PythonCommand("py", ["-3.9"], "py -3.9"),
+                new PythonCommand("python", [], "python")
+            ];
+        }
+
+        return
+        [
+            new PythonCommand("python3.11", [], "python3.11"),
+            new PythonCommand("python3.10", [], "python3.10"),
+            new PythonCommand("python3.9", [], "python3.9"),
+            new PythonCommand("python3", [], "python3")
+        ];
     }
 
     private LocalAiSetupResult CreateXttsApiScript(string target, AppSettings settings, bool allowOverwrite, IProgress<string>? progress)
@@ -423,6 +547,8 @@ if __name__ == "__main__":
         Path.Combine(venv, OperatingSystem.IsWindows() ? "Scripts" : "bin", OperatingSystem.IsWindows() ? "python.exe" : "python");
 
     private static string DefaultPythonCommand() => OperatingSystem.IsWindows() ? "python" : "python3";
+
+    private sealed record PythonCommand(string FileName, IReadOnlyList<string> PrefixArgs, string DisplayName);
 
     private static string QuoteIfNeeded(string value) =>
         value.Contains(" ", StringComparison.Ordinal) ? $"\"{value}\"" : value;
