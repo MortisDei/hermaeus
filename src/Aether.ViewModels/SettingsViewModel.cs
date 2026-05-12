@@ -51,6 +51,9 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private string _ttsCloneDisplayName = string.Empty;
     [ObservableProperty] private bool   _startMinimized;
     [ObservableProperty] private bool   _showQuickChat;
+    [ObservableProperty] private bool   _enableTrayIcon = true;
+    [ObservableProperty] private bool   _minimizeToTray = true;
+    [ObservableProperty] private bool   _enableLocalHotkeys = true;
     [ObservableProperty] private string _ttsStatus = "Stopped";
     [ObservableProperty] private string _settingsError = string.Empty;
 
@@ -133,6 +136,9 @@ public partial class SettingsViewModel : ObservableObject
         TtsPreload          = s.TtsPreload;
         StartMinimized      = s.StartMinimized;
         ShowQuickChat       = s.ShowQuickChat;
+        EnableTrayIcon      = s.EnableTrayIcon;
+        MinimizeToTray      = s.MinimizeToTray;
+        EnableLocalHotkeys  = s.EnableLocalHotkeys;
         TtsStatus           = _xttsProcess.StatusLabel;
         OnPropertyChanged(nameof(IsTtsRunning));
         UpdateMigrationPreview();
@@ -173,6 +179,9 @@ public partial class SettingsViewModel : ObservableObject
         s.TtsPreload          = TtsPreload;
         s.StartMinimized      = StartMinimized;
         s.ShowQuickChat       = ShowQuickChat;
+        s.EnableTrayIcon      = EnableTrayIcon;
+        s.MinimizeToTray      = MinimizeToTray;
+        s.EnableLocalHotkeys  = EnableLocalHotkeys;
         try
         {
             var result = await _svc.SaveAsync(previousDataRoot);

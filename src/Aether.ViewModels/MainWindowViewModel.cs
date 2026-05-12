@@ -244,6 +244,10 @@ public partial class MainWindowViewModel : ObservableObject
 
     [RelayCommand] private void ToggleSidebar()       => IsSidebarOpen = !IsSidebarOpen;
     [RelayCommand] private void ToggleQuickChat()     => ShowQuickChat = !ShowQuickChat;
+    public void HideQuickChat() => ShowQuickChat = false;
+    public void ToggleQuickChatSurface() => ShowQuickChat = !ShowQuickChat;
+    public void OpenNewConversation() => NewConversation();
+    public void OpenServicesPanel() => ShowServicesPanel();
     [RelayCommand] private async Task ShowChatPanelAsync()
     {
         ActivePanel = "chat";

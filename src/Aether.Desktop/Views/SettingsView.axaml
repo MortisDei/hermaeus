@@ -309,9 +309,22 @@
                     <CheckBox IsChecked="{Binding ShowQuickChat}"
                               Content="Show compact quick-chat surface"
                               FontSize="13" />
+                    <CheckBox IsChecked="{Binding EnableTrayIcon}"
+                              Content="Show tray icon"
+                              FontSize="13" />
+                    <CheckBox IsChecked="{Binding MinimizeToTray}"
+                              Content="Minimize to tray"
+                              FontSize="13" />
+                    <CheckBox IsChecked="{Binding EnableLocalHotkeys}"
+                              Content="Enable local hotkeys"
+                              FontSize="13" />
                     <CheckBox IsChecked="{Binding StartMinimized}"
                               Content="Start minimized"
                               FontSize="13" />
+                    <TextBlock Text="Local hotkeys: Ctrl+Space toggles quick chat, Ctrl+N starts a chat, Ctrl+Shift+S opens Services, Esc closes quick chat."
+                               FontSize="11"
+                               Opacity="0.45"
+                               TextWrapping="Wrap" />
                 </StackPanel>
             </Border>
 

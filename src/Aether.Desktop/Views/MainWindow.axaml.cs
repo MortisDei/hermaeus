@@ -10,6 +10,7 @@ namespace Aether.Desktop.Views;
 public partial class MainWindow : Window
 {
     public static readonly IValueConverter AnyRunning = new AnyRunningConverter();
+    public DesktopIntegrationService? DesktopIntegration { get; set; }
 
     public MainWindow()
     {
@@ -25,6 +26,13 @@ public partial class MainWindow : Window
 
     private void OnWindowClosing(object? sender, WindowClosingEventArgs e)
     {
+        if (DesktopIntegration?.ShouldCancelCloseForTray() == true)
+        {
+            e.Cancel = true;
+            Hide();
+            return;
+        }
+
         if (DataContext is MainWindowViewModel vm)
             vm.Shutdown();
     }

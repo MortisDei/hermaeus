@@ -20,6 +20,7 @@ namespace Aether.Desktop;
 public partial class App : Application
 {
     private ServiceProvider? _services;
+    private DesktopIntegrationService? _desktopIntegration;
 
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
 
@@ -35,10 +36,14 @@ public partial class App : Application
         {
             var vm     = sp.GetRequiredService<MainWindowViewModel>();
             var window = new MainWindow { DataContext = vm };
+            _desktopIntegration = new DesktopIntegrationService(vm);
+            window.DesktopIntegration = _desktopIntegration;
+            _desktopIntegration.Attach(window);
             desktop.MainWindow = window;
             window.Opened += async (_, _) => await InitializeAppAsync(sp, vm);
             desktop.Exit += (_, _) =>
             {
+                _desktopIntegration?.Dispose();
                 vm.Shutdown();
                 sp.Dispose();
             };

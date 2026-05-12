@@ -37,6 +37,9 @@ public class AppSettings
     public string TtsVoiceDirectory    { get; set; } = "";
     public bool   StartMinimized       { get; set; } = false;
     public bool   ShowQuickChat        { get; set; } = false;
+    public bool   EnableTrayIcon       { get; set; } = true;
+    public bool   MinimizeToTray       { get; set; } = true;
+    public bool   EnableLocalHotkeys   { get; set; } = true;
     public List<ModelProfile> ModelProfiles { get; set; } = [];
     public List<RuntimeProfile> RuntimeProfiles { get; set; } = [];
     public List<LocalTaskItem> Tasks { get; set; } = [];

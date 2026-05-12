@@ -5,7 +5,16 @@ All notable changes to Aether will be documented in this file.
 The project follows semantic versioning once public release candidates begin.
 Pre-1.0 versions may still change internal APIs and storage details.
 
-## [0.8.1-alpha] - Unreleased
+## [0.8.2-alpha] - Unreleased
+
+### Added
+
+- Tray icon with show, quick chat, new chat, services, stop services, and quit
+  actions.
+- Local hotkeys for quick chat, new chat, services, and closing quick chat.
+- Settings toggles for tray icon, minimize-to-tray, and local hotkeys.
+
+## [0.8.1-alpha]
 
 ### Added
 

@@ -1,6 +1,6 @@
 # Aether
 
-Version: `0.8.1-alpha`
+Version: `0.8.2-alpha`
 
 A native, local-first Avalonia desktop AI workspace for `llama.cpp`, Ollama,
 OpenAI-compatible APIs, Oghma-grade RAG, and XTTS voice playback.
@@ -34,6 +34,7 @@ OpenAI-compatible APIs, Oghma-grade RAG, and XTTS voice playback.
   components, and best-effort GPU/VRAM visibility.
 - XTTS v2 launch controls, voice selection, voice preview, voice sample import.
 - Local tasks, reminders, and app-running scheduled automations.
+- Tray integration, minimize-to-tray, and local hotkeys.
 - Toast notifications throughout the app.
 - Configurable data root with migration, backup, restore, and conflict refusal.
 - Configurable local AI assets root for models, XTTS, venvs, and encoders.
@@ -178,6 +179,7 @@ docs/                   Security notes, RAG/eval docs, internal planning notes
 - Optional web loader kept opt-in and disabled by default.
 - Linux and Windows packaging.
 - Security review and threat model refresh.
-- Global quick-chat hotkey and tray integration.
+- System-wide global hotkey support where the OS/compositor exposes a reliable
+  registration API.
 - Expanded tests for RAG scoring, runtime validation, secret migration, and
   process argument safety.
