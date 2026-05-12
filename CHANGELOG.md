@@ -13,6 +13,10 @@ Pre-1.0 versions may still change internal APIs and storage details.
   models, XTTS paths, runtime endpoints, hashes, and AI-root scope warnings.
 - Advisory trust warnings for network-facing `llama-server` extra args such as
   `--host 0.0.0.0`.
+- Direct chat file context injection for selected local text/code files, with
+  attach/drop UI, bounded reads, skipped-file status, and history summaries.
+- Digital PDF support in local RAG directory ingest through managed PdfPig text
+  extraction, with image-only PDFs skipped as health warnings.
 
 ## [0.8.5-alpha] - 2026-05-12
 

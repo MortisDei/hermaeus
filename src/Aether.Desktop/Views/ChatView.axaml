@@ -6,6 +6,13 @@
              x:Class="Aether.Desktop.Views.ChatView"
              x:DataType="vm:ChatViewModel">
 
+    <UserControl.Styles>
+        <Style Selector="Border.context-drop-active">
+            <Setter Property="Background" Value="{DynamicResource SubtleFillColorTertiaryBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+        </Style>
+    </UserControl.Styles>
+
     <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
 
         <!-- ── Model / options bar ────────────────────────────────────────── -->
@@ -137,35 +144,103 @@
         <Border Grid.Row="4"
                 Padding="16,10"
                 BorderThickness="0,1,0,0"
-                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
-            <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                Classes.context-drop-active="{Binding IsContextDragOver}"
+                DragDrop.AllowDrop="True"
+                DragDrop.DragOver="OnContextDragOver"
+                DragDrop.DragLeave="OnContextDragLeave"
+                DragDrop.Drop="OnContextDrop">
+            <StackPanel Spacing="8">
+                <ItemsControl ItemsSource="{Binding ContextAttachments}"
+                              IsVisible="{Binding HasContextAttachments}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <WrapPanel />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="vm:ChatContextAttachment">
+                            <Border CornerRadius="6"
+                                    Margin="0,0,8,6"
+                                    Padding="8,5"
+                                    Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                    BorderThickness="1"
+                                    ToolTip.Tip="{Binding StatusMessage}">
+                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                                    <StackPanel Grid.Column="0" Spacing="1">
+                                        <TextBlock Text="{Binding ChipText}"
+                                                   FontSize="12"
+                                                   FontWeight="SemiBold"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   MaxWidth="240" />
+                                        <TextBlock Text="{Binding StatusMessage}"
+                                                   FontSize="10"
+                                                   Opacity="0.55"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   MaxWidth="240" />
+                                    </StackPanel>
+                                    <Button Grid.Column="1"
+                                            Classes="icon-btn"
+                                            Command="{Binding $parent[ItemsControl].DataContext.RemoveContextAttachmentCommand}"
+                                            CommandParameter="{Binding}"
+                                            ToolTip.Tip="Remove attached context">
+                                        <PathIcon Data="M18.3 5.71 16.89 4.3 12 9.17 7.11 4.3 5.7 5.71 10.59 10.6 5.7 15.49 7.11 16.9 12 12.01 16.89 16.9 18.3 15.49 13.41 10.6z"
+                                                  Width="11" Height="11" />
+                                    </Button>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <Grid ColumnDefinitions="*,Auto"
+                      IsVisible="{Binding AttachmentStatus, Converter={x:Static views:NotEmptyConverter.Instance}}">
+                    <TextBlock Grid.Column="0"
+                               Text="{Binding AttachmentStatus}"
+                               FontSize="11"
+                               Opacity="0.55"
+                               VerticalAlignment="Center" />
+                    <Button Grid.Column="1"
+                            Command="{Binding ClearContextAttachmentsCommand}"
+                            Content="Clear attachments"
+                            FontSize="11"
+                            Padding="8,4" />
+                </Grid>
+                <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="8">
+                    <Button Grid.Column="0" Classes="icon-btn"
+                            Command="{Binding AttachContextFilesCommand}"
+                            ToolTip.Tip="Attach text/code files as direct context">
+                        <PathIcon Data="M16.5 6.5v8.25a4.75 4.75 0 0 1-9.5 0V5.5a3.5 3.5 0 0 1 7 0v8.5a2.25 2.25 0 0 1-4.5 0V6h2v8a.25.25 0 0 0 .5 0V5.5a1.5 1.5 0 0 0-3 0v9.25a2.75 2.75 0 0 0 5.5 0V6.5h2z"
+                                  Width="16" Height="16" />
+                    </Button>
 
-                <TextBox Grid.Column="0"
-                         x:Name="InputBox"
-                         Classes="chat-input"
-                         Text="{Binding InputText}"
-                         Watermark="Message…"
-                         KeyDown="OnInputKeyDown" />
+                    <TextBox Grid.Column="1"
+                             x:Name="InputBox"
+                             Classes="chat-input"
+                             Text="{Binding InputText}"
+                             Watermark="Message or drop text/code files here..."
+                             KeyDown="OnInputKeyDown" />
 
-                <Button Grid.Column="1" Classes="send-btn"
-                        Command="{Binding SendCommand}"
-                        IsVisible="{Binding !IsGenerating}"
-                        Content="Send" />
+                    <Button Grid.Column="2" Classes="send-btn"
+                            Command="{Binding SendCommand}"
+                            IsVisible="{Binding !IsGenerating}"
+                            Content="Send" />
 
-                <Button Grid.Column="1" Classes="send-btn"
-                        Command="{Binding StopCommand}"
-                        IsVisible="{Binding IsGenerating}"
-                        Content="Stop" />
+                    <Button Grid.Column="2" Classes="send-btn"
+                            Command="{Binding StopCommand}"
+                            IsVisible="{Binding IsGenerating}"
+                            Content="Stop" />
 
-                <Button Grid.Column="2" Classes="icon-btn"
-                        Command="{Binding RegenerateCommand}"
-                        IsEnabled="{Binding !IsGenerating}"
-                        IsVisible="{Binding HasMessages}"
-                        ToolTip.Tip="Regenerate last response">
-                    <PathIcon Data="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"
-                              Width="16" Height="16" />
-                </Button>
-            </Grid>
+                    <Button Grid.Column="3" Classes="icon-btn"
+                            Command="{Binding RegenerateCommand}"
+                            IsEnabled="{Binding !IsGenerating}"
+                            IsVisible="{Binding HasMessages}"
+                            ToolTip.Tip="Regenerate last response">
+                        <PathIcon Data="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"
+                                  Width="16" Height="16" />
+                    </Button>
+                </Grid>
+            </StackPanel>
         </Border>
     </Grid>
 </UserControl>

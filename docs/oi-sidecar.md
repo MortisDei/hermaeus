@@ -1,4 +1,4 @@
-# Oghma Infinium — FastAPI Sidecar
+# Oghma Infinium - FastAPI Sidecar
 
 Drop `oi_api.py` into the root of your `oghma-infinium` repo to expose `oi`
 as a REST service that Aether can call.

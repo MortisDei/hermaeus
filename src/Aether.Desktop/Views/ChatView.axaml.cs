@@ -1,5 +1,6 @@
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Aether.ViewModels;
 
@@ -32,6 +33,35 @@ public partial class ChatView : UserControl
                 if (TopLevel.GetTopLevel(this)?.Clipboard is { } cb)
                     await cb.SetTextAsync(text);
             };
+
+            _vm.RequestContextFilePicker = async () =>
+            {
+                var top = TopLevel.GetTopLevel(this);
+                if (top is null) return;
+
+                var files = await top.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+                {
+                    Title = "Attach files as chat context",
+                    AllowMultiple = true,
+                    FileTypeFilter =
+                    [
+                        new FilePickerFileType("Text and code files")
+                        {
+                            Patterns =
+                            [
+                                "*.txt", "*.md", "*.cs", "*.fs", "*.vb", "*.csproj", "*.props", "*.json",
+                                "*.xml", "*.xaml", "*.axaml", "*.yaml", "*.yml", "*.toml", "*.sh", "*.ps1",
+                                "*.py", "*.js", "*.jsx", "*.ts", "*.tsx", "*.css", "*.html", "*.razor",
+                                "*.sql", "*.rs", "*.go", "*.java", "*.c", "*.h", "*.cpp", "*.hpp"
+                            ]
+                        },
+                        new FilePickerFileType("All files") { Patterns = ["*"] }
+                    ]
+                });
+
+                if (files.Count > 0)
+                    await _vm.AddContextFilesAsync(files.Select(f => f.Path.LocalPath));
+            };
         };
     }
 
@@ -44,5 +74,38 @@ public partial class ChatView : UserControl
             if (_vm.SendCommand.CanExecute(null))
                 _vm.SendCommand.Execute(null);
         }
+    }
+
+    private void OnContextDragOver(object? sender, DragEventArgs e)
+    {
+        var hasFiles = e.Data.Contains(DataFormats.Files);
+        e.DragEffects = hasFiles ? DragDropEffects.Copy : DragDropEffects.None;
+        if (_vm is not null)
+            _vm.IsContextDragOver = hasFiles;
+        e.Handled = true;
+    }
+
+    private void OnContextDragLeave(object? sender, DragEventArgs e)
+    {
+        if (_vm is not null)
+            _vm.IsContextDragOver = false;
+        e.Handled = true;
+    }
+
+    private async void OnContextDrop(object? sender, DragEventArgs e)
+    {
+        if (_vm is not null)
+            _vm.IsContextDragOver = false;
+        if (_vm is null || !e.Data.Contains(DataFormats.Files)) return;
+        var files = e.Data.GetFiles();
+        if (files is null) return;
+
+        var paths = files
+            .OfType<IStorageFile>()
+            .Select(file => file.Path.LocalPath)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .ToList();
+        if (paths.Count > 0)
+            await _vm.AddContextFilesAsync(paths);
     }
 }

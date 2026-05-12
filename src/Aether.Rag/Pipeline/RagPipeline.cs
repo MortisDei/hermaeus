@@ -49,11 +49,12 @@ public sealed class RagPipeline
 
         var files = Directory.GetFiles(directory, "*.txt", SearchOption.AllDirectories)
             .Concat(Directory.GetFiles(directory, "*.md", SearchOption.AllDirectories))
+            .Concat(Directory.GetFiles(directory, "*.pdf", SearchOption.AllDirectories))
             .OrderBy(f => f)
             .ToList();
 
         if (files.Count == 0)
-            throw new InvalidOperationException($"No .txt or .md files found in {directory}");
+            throw new InvalidOperationException($"No .txt, .md, or .pdf files found in {directory}");
 
         progress?.Report(new IngestProgress("Chunking", 0, files.Count, $"Found {files.Count} files"));
 
@@ -66,21 +67,22 @@ public sealed class RagPipeline
         for (int fi = 0; fi < files.Count; fi++)
         {
             ct.ThrowIfCancellationRequested();
-            var file  = files[fi];
-            var title = Path.GetFileNameWithoutExtension(file);
-            var text  = await File.ReadAllTextAsync(file, ct);
-            var sourcePath = Path.GetFullPath(file);
-            var sourceHash = ComputeHash(text);
-            var modifiedUtc = File.GetLastWriteTimeUtc(file);
+            var file = files[fi];
+            var document = await LoadLocalDocumentAsync(file, health, ct);
+            if (document is null)
+            {
+                progress?.Report(new IngestProgress("Chunking", fi + 1, files.Count, $"Skipped {Path.GetFileName(file)}"));
+                continue;
+            }
 
             if (new FileInfo(file).Length > 50 * 1024 * 1024)
             {
                 health.OversizedFileCount++;
-                health.Warnings.Add($"Large file: {sourcePath}");
+                health.Warnings.Add($"Large file: {document.SourcePath}");
             }
 
-            var textChunks = _chunker.Chunk(text, file, title, dataset.Config);
-            changedSourcePaths.Add(sourcePath);
+            var textChunks = _chunker.Chunk(document.Text, file, document.Title, dataset.Config);
+            changedSourcePaths.Add(document.SourcePath);
 
             foreach (var tc in textChunks)
             {
@@ -90,11 +92,11 @@ public sealed class RagPipeline
                 var chunk = new RagChunk
                 {
                     DatasetId   = dataset.Id,
-                    SourceFile  = Path.GetFileName(file),
-                    SourcePath  = sourcePath,
-                    SourceHash  = sourceHash,
-                    SourceModifiedUtc = modifiedUtc,
-                    SourceTitle = title,
+                    SourceFile  = document.SourceFile,
+                    SourcePath  = document.SourcePath,
+                    SourceHash  = document.SourceHash,
+                    SourceModifiedUtc = document.ModifiedUtc,
+                    SourceTitle = document.Title,
                     Content     = tc.Content,
                     ChunkIndex  = tc.Index,
                     ChunkTotal  = tc.Total,
@@ -126,7 +128,7 @@ public sealed class RagPipeline
                 allChunks.Add(chunk);
             }
 
-            progress?.Report(new IngestProgress("Chunking", fi + 1, files.Count, $"{title} → {textChunks.Count} chunks"));
+            progress?.Report(new IngestProgress("Chunking", fi + 1, files.Count, $"{document.Title} -> {textChunks.Count} chunks"));
         }
 
         health.DuplicateChunkCount = allChunks
@@ -158,6 +160,7 @@ public sealed class RagPipeline
         // ── 3. Store ──────────────────────────────────────────────────────
         progress?.Report(new IngestProgress("Storing", 0, total, "Writing to SQLite..."));
 
+        await _store.SaveDatasetAsync(dataset, ct);
         await _store.DeleteChunksForSourcesAsync(dataset.Id, changedSourcePaths, ct);
 
         if (parentChunks.Count > 0)
@@ -395,7 +398,55 @@ public sealed class RagPipeline
         await _store.SaveDatasetAsync(dataset, ct);
     }
 
+    private static async Task<LocalDocument?> LoadLocalDocumentAsync(string file, RagIngestHealth health, CancellationToken ct)
+    {
+        var sourcePath = Path.GetFullPath(file);
+        var title = Path.GetFileNameWithoutExtension(file);
+        var extension = Path.GetExtension(file);
+        string text;
+
+        if (extension.Equals(".pdf", StringComparison.OrdinalIgnoreCase))
+        {
+            var extracted = await PdfTextExtractor.ExtractAsync(file, ct);
+            if (!extracted.HasText)
+            {
+                health.UnsupportedFileCount++;
+                health.Warnings.Add($"No extractable PDF text: {sourcePath}");
+                return null;
+            }
+
+            text = extracted.Text;
+        }
+        else
+        {
+            text = await File.ReadAllTextAsync(file, ct);
+        }
+
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            health.EmptyChunkCount++;
+            health.Warnings.Add($"No readable text: {sourcePath}");
+            return null;
+        }
+
+        return new LocalDocument(
+            Path.GetFileName(file),
+            sourcePath,
+            title,
+            text,
+            ComputeHash(text),
+            File.GetLastWriteTimeUtc(file));
+    }
+
     private sealed record WebDocument(Uri Url, string Title, string Content);
+
+    private sealed record LocalDocument(
+        string SourceFile,
+        string SourcePath,
+        string Title,
+        string Text,
+        string SourceHash,
+        DateTime ModifiedUtc);
 
     private static string ComputeHash(string text)
     {

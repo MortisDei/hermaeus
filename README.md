@@ -23,12 +23,13 @@ playback.
 
 ## Features
 
-- Chat history with rename, delete, search, folders, tags, pins, and archive.
+- Chat history with rename, delete, search, folders, tags, pins, archive, and
+  direct file context injection for selected text/code files.
 - Model profiles with display names, descriptions, tags, visibility, and defaults.
 - Runtime profiles for `llama.cpp`, Ollama, and OpenAI-compatible endpoints.
 - Managed `llama-server` start/stop, auto-start, logs, and GPU auto-tune.
-- RAG ingest for text/markdown, optional explicit web URLs, reindex diffing,
-  corpus health warnings.
+- RAG ingest for text/markdown and digital PDFs, optional explicit web URLs,
+  reindex diffing, corpus health warnings.
 - RAG citations with `[1] [2] [3] +N`, source inspector, copy source/path.
 - RAG query traces, ONNX cross-encoder reranking, and native eval harness for
   `gold.json` / `stress.json`.
@@ -62,6 +63,16 @@ Use **Services** to point Aether at `llama-server` and a `.gguf` model, then
 start the Chat service. For GPU acceleration, set GPU layers manually or use
 **Auto Tune**.
 
+## Chat Context
+
+Chat can attach selected local text/code files directly to the next message.
+Use the attach button or drop files on the input. Aether reads each file once at
+send time, prepends a bounded context block to the model prompt, and stores only
+an attachment summary in conversation history.
+
+This is not RAG: attachments are not indexed, embedded, watched, or mutated.
+Large, unsupported, or binary-looking files are skipped with visible status.
+
 ## Runtimes
 
 ### llama.cpp
@@ -83,7 +94,7 @@ start the Chat service. For GPU acceleration, set GPU layers manually or use
 ## RAG Workflow
 
 1. Start an embeddings runtime in **Services**.
-2. Open **RAG** and ingest a folder of `.txt` / `.md` files.
+2. Open **RAG** and ingest a folder of `.txt` / `.md` / digital `.pdf` files.
 3. Ask questions against the dataset.
 4. Inspect citations, source text, grounding score, and query traces.
 5. Run eval sets from the Eval Harness panel.
@@ -91,6 +102,10 @@ start the Chat service. For GPU acceleration, set GPU layers manually or use
 The optional web loader is off by default. When enabled for a dataset, Aether
 fetches only the HTTP(S) pages explicitly listed in the ingest panel; it does
 not crawl links or use a remote scraping service.
+
+PDF ingest uses managed PdfPig text extraction for digital PDFs. Scanned or
+image-only PDFs are skipped with health warnings; OCR remains a later release
+gate.
 
 Eval files can be either an array of cases or an object with `cases` /
 `questions`. Cases support `question`, `expected_sources`, `answer_keywords`,

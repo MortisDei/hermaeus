@@ -29,6 +29,9 @@ var tests = new (string Name, Func<Task> Run)[]
     ("local AI setup script handling is approval gated", LocalAiSetupScriptHandlingIsApprovalGated),
     ("local AI setup command previews stay shell-free", LocalAiSetupCommandPreviewsStayShellFree),
     ("XTTS API template has required endpoints", XttsApiTemplateHasRequiredEndpoints),
+    ("chat context attachments build prompt and persist summary", ChatContextAttachmentsBuildPromptAndPersistSummary),
+    ("chat context attachments enforce limits and binary skip", ChatContextAttachmentsEnforceLimitsAndBinarySkip),
+    ("chat context attachments remove and clear", ChatContextAttachmentsRemoveAndClear),
     ("trust scan classifies inside AI root as low risk", TrustScanInsideAiRootIsLowRisk),
     ("trust scan warns outside AI root but allows", TrustScanOutsideAiRootWarns),
     ("trust scan reports missing executable", TrustScanReportsMissingExecutable),
@@ -42,6 +45,9 @@ var tests = new (string Name, Func<Task> Run)[]
     ("RAG web loader stays disabled by default", RagWebLoaderDisabledByDefault),
     ("RAG web loader parses explicit opt-in URLs", RagWebLoaderParsesOptInUrls),
     ("RAG web ingest strips HTML and stores chunks", RagWebIngestStripsHtmlAndStoresChunks),
+    ("RAG digital PDF text extracts", RagDigitalPdfTextExtracts),
+    ("RAG directory ingest includes PDFs", RagDirectoryIngestIncludesPdfs),
+    ("RAG empty PDF warns and continues", RagEmptyPdfWarnsAndContinues),
     ("agent task state serializes schema fields", AgentTaskStateSerializesSchemaFields),
     ("agent workspace tools enforce path safety", AgentWorkspaceToolsEnforcePathSafety),
     ("agent context pack stays bounded", AgentContextPackStaysBounded),
@@ -414,6 +420,78 @@ static Task XttsApiTemplateHasRequiredEndpoints()
     return Task.CompletedTask;
 }
 
+static async Task ChatContextAttachmentsBuildPromptAndPersistSummary()
+{
+    using var temp = new TempDir();
+    var settings = NewSettings(temp);
+    settings.Settings.DataRootDirectory = temp.PathFor("data");
+    var store = new ConversationStore(settings);
+    await store.InitializeAsync();
+    var llm = new CapturingLlm();
+    var vm = new ChatViewModel(llm, store, settings, new FakeTts(), new ModelProfileService(settings));
+    await vm.LoadModelsAsync(force: true);
+
+    var file = temp.PathFor("src/ChatViewModel.cs");
+    Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+    await File.WriteAllTextAsync(file, "public sealed class ChatViewModel { }");
+
+    await vm.AddContextFilesAsync([file]);
+    vm.InputText = "Why is the model selector not updating?";
+    await vm.SendCommand.ExecuteAsync(null);
+
+    var sent = llm.LastMessages.Last(m => m.Role == "user").Content;
+    True(sent.Contains("Attached file context:", StringComparison.Ordinal), "sent prompt should include context header");
+    True(sent.Contains("public sealed class ChatViewModel", StringComparison.Ordinal), "sent prompt should include file content");
+    True(sent.Contains("Why is the model selector not updating?", StringComparison.Ordinal), "sent prompt should include user request");
+
+    var saved = await store.GetByIdAsync(vm.CurrentConversationId);
+    var savedUser = saved?.Messages.First(m => m.Role == "user").Content ?? string.Empty;
+    True(savedUser.Contains("Attached context injected at send time", StringComparison.Ordinal), "saved history should include context summary");
+    True(savedUser.Contains("ChatViewModel.cs", StringComparison.Ordinal), "saved history should include file name");
+    False(savedUser.Contains("public sealed class ChatViewModel", StringComparison.Ordinal), "saved history should not persist full injected content");
+    Equal(0, vm.ContextAttachments.Count, "attachments should clear after send");
+}
+
+static async Task ChatContextAttachmentsEnforceLimitsAndBinarySkip()
+{
+    using var temp = new TempDir();
+    var small = temp.PathFor("small.cs");
+    var large = temp.PathFor("large.cs");
+    var binary = temp.PathFor("binary.cs");
+    Directory.CreateDirectory(Path.GetDirectoryName(small)!);
+    await File.WriteAllTextAsync(small, "class Small {}");
+    await File.WriteAllTextAsync(large, new string('x', ChatContextAttachment.MaxFileBytes + 1));
+    await File.WriteAllBytesAsync(binary, [0, 1, 2, 3, 4]);
+
+    var loaded = await ChatContextAttachment.LoadFilesAsync([small, large, binary]);
+    Equal(3, loaded.Count, "all selected files should produce attachment records");
+    Equal(1, loaded.Count(a => a.IsReady), "only small text file should be ready");
+    True(loaded.Any(a => a.StatusMessage.Contains("over", StringComparison.OrdinalIgnoreCase)), "large file should be skipped");
+    True(loaded.Any(a => a.StatusMessage.Contains("Binary", StringComparison.OrdinalIgnoreCase)), "binary file should be skipped");
+}
+
+static async Task ChatContextAttachmentsRemoveAndClear()
+{
+    using var temp = new TempDir();
+    var settings = NewSettings(temp);
+    settings.Settings.DataRootDirectory = temp.PathFor("data");
+    var store = new ConversationStore(settings);
+    await store.InitializeAsync();
+    var vm = new ChatViewModel(new CapturingLlm(), store, settings, new FakeTts(), new ModelProfileService(settings));
+    var a = temp.PathFor("a.cs");
+    var b = temp.PathFor("b.cs");
+    Directory.CreateDirectory(Path.GetDirectoryName(a)!);
+    await File.WriteAllTextAsync(a, "class A {}");
+    await File.WriteAllTextAsync(b, "class B {}");
+
+    await vm.AddContextFilesAsync([a, b]);
+    Equal(2, vm.ContextAttachments.Count, "two files should be attached");
+    vm.RemoveContextAttachmentCommand.Execute(vm.ContextAttachments[0]);
+    Equal(1, vm.ContextAttachments.Count, "remove should drop one attachment");
+    vm.ClearContextAttachmentsCommand.Execute(null);
+    Equal(0, vm.ContextAttachments.Count, "clear should remove all attachments");
+}
+
 static async Task TrustScanInsideAiRootIsLowRisk()
 {
     using var temp = new TempDir();
@@ -527,6 +605,42 @@ static Task SourceStringsAvoidLongDashes()
 
 static string ExpectedSha256(string content) =>
     Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(content))).ToLowerInvariant();
+
+static void WriteSimplePdf(string path, string text)
+{
+    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+    var escaped = text.Replace("\\", "\\\\", StringComparison.Ordinal)
+        .Replace("(", "\\(", StringComparison.Ordinal)
+        .Replace(")", "\\)", StringComparison.Ordinal);
+    var content = string.IsNullOrEmpty(text)
+        ? string.Empty
+        : $"BT /F1 24 Tf 72 720 Td ({escaped}) Tj ET";
+    var objects = new[]
+    {
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /Resources << /Font << /F1 4 0 R >> >> /MediaBox [0 0 612 792] /Contents 5 0 R >>",
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        $"<< /Length {System.Text.Encoding.ASCII.GetByteCount(content)} >>\nstream\n{content}\nendstream"
+    };
+    var sb = new System.Text.StringBuilder();
+    var offsets = new List<int> { 0 };
+    sb.Append("%PDF-1.4\n");
+    for (var i = 0; i < objects.Length; i++)
+    {
+        offsets.Add(System.Text.Encoding.ASCII.GetByteCount(sb.ToString()));
+        sb.Append(i + 1).Append(" 0 obj\n").Append(objects[i]).Append("\nendobj\n");
+    }
+
+    var xref = System.Text.Encoding.ASCII.GetByteCount(sb.ToString());
+    sb.Append("xref\n0 ").Append(objects.Length + 1).Append('\n');
+    sb.Append("0000000000 65535 f \n");
+    foreach (var offset in offsets.Skip(1))
+        sb.Append(offset.ToString("D10")).Append(" 00000 n \n");
+    sb.Append("trailer\n<< /Size ").Append(objects.Length + 1).Append(" /Root 1 0 R >>\n");
+    sb.Append("startxref\n").Append(xref).Append("\n%%EOF\n");
+    File.WriteAllText(path, sb.ToString(), System.Text.Encoding.ASCII);
+}
 
 static async Task SecretStoreFallbackWithoutPlaintext()
 {
@@ -674,6 +788,63 @@ static async Task RagWebIngestStripsHtmlAndStoresChunks()
         "stored chunk should not include script text");
     Equal("Example Title", chunks[0].SourceTitle, "web title should be stored as source title");
     Equal(chunks.Count, dataset.ChunkCount, "dataset chunk count should match stored chunks");
+}
+
+static async Task RagDigitalPdfTextExtracts()
+{
+    using var temp = new TempDir();
+    var pdf = temp.PathFor("paper.pdf");
+    WriteSimplePdf(pdf, "Digital PDF alpha beta");
+
+    var extracted = await PdfTextExtractor.ExtractAsync(pdf);
+    True(extracted.HasText, "digital PDF should have extractable text");
+    True(extracted.Text.Contains("Digital PDF alpha beta", StringComparison.Ordinal), "PDF text should be extracted");
+}
+
+static async Task RagDirectoryIngestIncludesPdfs()
+{
+    using var temp = new TempDir();
+    var settings = NewSettings(temp);
+    settings.Settings.DataRootDirectory = temp.PathFor("data");
+    var store = new SqliteRagStore(settings);
+    await store.InitializeAsync();
+    var docs = temp.PathFor("docs");
+    Directory.CreateDirectory(docs);
+    await File.WriteAllTextAsync(Path.Combine(docs, "notes.md"), "markdown source alpha");
+    WriteSimplePdf(Path.Combine(docs, "paper.pdf"), "pdf source beta gamma");
+
+    var dataset = new RagDataset { Name = "docs" };
+    var pipeline = new RagPipeline(store, new FakeEmbeddingService());
+    await pipeline.IngestDirectoryAsync(dataset, docs);
+
+    var chunks = await store.GetChunksAsync(dataset.Id, includeEmbeddings: false);
+    True(chunks.Any(c => c.SourceFile == "paper.pdf" && c.Content.Contains("pdf source beta gamma", StringComparison.Ordinal)),
+        "PDF content should be chunked and stored");
+    True(chunks.Any(c => c.SourceFile == "notes.md"), "markdown content should still ingest");
+}
+
+static async Task RagEmptyPdfWarnsAndContinues()
+{
+    using var temp = new TempDir();
+    var settings = NewSettings(temp);
+    settings.Settings.DataRootDirectory = temp.PathFor("data");
+    var store = new SqliteRagStore(settings);
+    await store.InitializeAsync();
+    var docs = temp.PathFor("docs");
+    Directory.CreateDirectory(docs);
+    await File.WriteAllTextAsync(Path.Combine(docs, "notes.txt"), "plain text survives with enough content to chunk");
+    WriteSimplePdf(Path.Combine(docs, "scan.pdf"), string.Empty);
+    var progressLines = new List<string>();
+
+    var dataset = new RagDataset { Name = "docs" };
+    var pipeline = new RagPipeline(store, new FakeEmbeddingService());
+    await pipeline.IngestDirectoryAsync(dataset, docs, new Progress<IngestProgress>(p => progressLines.Add(p.Detail)));
+
+    var chunks = await store.GetChunksAsync(dataset.Id, includeEmbeddings: false);
+    True(chunks.Any(c => c.SourceFile == "notes.txt"), "text file should still ingest when PDF has no text");
+    False(chunks.Any(c => c.SourceFile == "scan.pdf"), "empty PDF should not store chunks");
+    True(progressLines.Any(line => line.Contains("No extractable PDF text", StringComparison.Ordinal)),
+        "empty PDF should surface a health warning");
 }
 
 static async Task AgentTaskStateSerializesSchemaFields()
@@ -1059,6 +1230,31 @@ sealed class FakeLlm : ILlmService
         await Task.Delay(1, ct);
         yield return "local ";
         yield return "ready alpha beta 42";
+    }
+
+    public Task PullModelAsync(string modelId, IProgress<string>? progress = null, CancellationToken ct = default) => Task.CompletedTask;
+    public Task DeleteModelAsync(string modelId, CancellationToken ct = default) => Task.CompletedTask;
+}
+
+sealed class CapturingLlm : ILlmService
+{
+    public string ProviderName => "Capture";
+    public bool IsConfigured => true;
+    public IReadOnlyList<ChatMessage> LastMessages { get; private set; } = [];
+
+    public Task<List<LlmModel>> GetModelsAsync(CancellationToken ct = default) =>
+        Task.FromResult(new List<LlmModel> { new() { Id = "capture", Name = "Capture", Provider = "Test" } });
+
+    public async IAsyncEnumerable<string> StreamChatAsync(
+        string modelId,
+        IReadOnlyList<ChatMessage> messages,
+        string? systemPrompt = null,
+        double temperature = 0.7,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        LastMessages = messages.ToList();
+        await Task.Delay(1, ct);
+        yield return "captured";
     }
 
     public Task PullModelAsync(string modelId, IProgress<string>? progress = null, CancellationToken ct = default) => Task.CompletedTask;

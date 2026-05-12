@@ -21,6 +21,7 @@ public partial class ChatViewModel : ObservableObject
 
     public ObservableCollection<MessageViewModel> Messages        { get; } = [];
     public ObservableCollection<LlmModel>         AvailableModels { get; } = [];
+    public ObservableCollection<ChatContextAttachment> ContextAttachments { get; } = [];
 
     [ObservableProperty] private string    _inputText = string.Empty;
     [ObservableProperty] private bool      _isGenerating;
@@ -32,10 +33,14 @@ public partial class ChatViewModel : ObservableObject
     [ObservableProperty] private double    _temperature = 0.7;
     [ObservableProperty] private bool      _hasMessages;
     [ObservableProperty] private string    _performanceLog = string.Empty;
+    [ObservableProperty] private string    _attachmentStatus = string.Empty;
+    [ObservableProperty] private bool      _isContextDragOver;
 
     public event EventHandler?        ScrollToBottom;
     public event EventHandler<string>? ConversationSaved;
     public Action<string>?            RequestCopyToClipboard { get; set; }
+    public Action?                    RequestContextFilePicker { get; set; }
+    public bool HasContextAttachments => ContextAttachments.Count > 0;
 
     public ChatViewModel(
         ILlmService llm,
@@ -48,6 +53,11 @@ public partial class ChatViewModel : ObservableObject
         _temperature  = settings.Settings.Temperature;
         _systemPrompt = settings.Settings.DefaultSystemPrompt;
         Messages.CollectionChanged += (_, _) => HasMessages = Messages.Count > 0;
+        ContextAttachments.CollectionChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(HasContextAttachments));
+            SendCommand.NotifyCanExecuteChanged();
+        };
     }
 
     public async Task LoadModelsAsync(bool force = false)
@@ -109,10 +119,14 @@ public partial class ChatViewModel : ObservableObject
     private async Task SendAsync()
     {
         var text = InputText.Trim();
-        if (string.IsNullOrEmpty(text) || SelectedModel is null) return;
+        var attachments = ContextAttachments.ToList();
+        if ((string.IsNullOrEmpty(text) && !attachments.Any(a => a.IsReady)) || SelectedModel is null) return;
 
-        Messages.Add(new MessageViewModel { Role = "user", Content = text });
+        var promptText = ChatContextAttachment.BuildPrompt(text, attachments);
+        var displayText = ChatContextAttachment.BuildDisplayMessage(text, attachments);
+        Messages.Add(new MessageViewModel { Role = "user", Content = displayText });
         InputText = string.Empty;
+        ClearContextAttachments();
 
         var selectedModelId = SelectedModel.Id;
         var asst = new MessageViewModel
@@ -136,6 +150,8 @@ public partial class ChatViewModel : ObservableObject
         {
             var history = Messages.Where(m => !m.IsStreaming)
                 .Select(m => new ChatMessage(m.Role, m.Content)).ToList();
+            if (history.Count > 0 && history[^1].Role == "user")
+                history[^1] = history[^1] with { Content = promptText };
 
             await foreach (var token in _llm.StreamChatAsync(
                 selectedModelId, history,
@@ -187,6 +203,37 @@ public partial class ChatViewModel : ObservableObject
 
     [RelayCommand]
     private void Stop() => _cts?.Cancel();
+
+    [RelayCommand]
+    private void AttachContextFiles() => RequestContextFilePicker?.Invoke();
+
+    public async Task AddContextFilesAsync(IEnumerable<string> paths, CancellationToken ct = default)
+    {
+        var loaded = await ChatContextAttachment.LoadFilesAsync(paths, ct);
+        foreach (var item in loaded)
+            ContextAttachments.Add(item);
+
+        var ready = loaded.Count(a => a.IsReady);
+        var skipped = loaded.Count - ready;
+        AttachmentStatus = skipped == 0
+            ? $"{ready} file(s) ready for direct chat context."
+            : $"{ready} file(s) ready, {skipped} skipped.";
+    }
+
+    [RelayCommand]
+    private void RemoveContextAttachment(ChatContextAttachment? attachment)
+    {
+        if (attachment is not null)
+            ContextAttachments.Remove(attachment);
+        AttachmentStatus = ContextAttachments.Count == 0 ? string.Empty : AttachmentStatus;
+    }
+
+    [RelayCommand]
+    private void ClearContextAttachments()
+    {
+        ContextAttachments.Clear();
+        AttachmentStatus = string.Empty;
+    }
 
     [RelayCommand]
     private void CopyMessage(MessageViewModel? msg)
@@ -245,7 +292,9 @@ public partial class ChatViewModel : ObservableObject
     private void ToggleSystemPrompt() => ShowSystemPrompt = !ShowSystemPrompt;
 
     private bool CanSend() =>
-        !IsGenerating && !string.IsNullOrWhiteSpace(InputText) && SelectedModel is not null;
+        !IsGenerating
+        && SelectedModel is not null
+        && (!string.IsNullOrWhiteSpace(InputText) || ContextAttachments.Any(a => a.IsReady));
 
     private async Task PersistAsync()
     {
