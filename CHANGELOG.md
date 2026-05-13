@@ -50,6 +50,12 @@ Pre-1.0 versions may still change internal APIs and storage details.
   extra colons that would cause silent truncation; add ParseIdGuarded variant
   for safer model name extraction.
 - Fix test harness and CI-only fakes to match new voice provider APIs and
+- Restructure AppSettings into hierarchical configuration objects: TtsSettings
+  (voice provider, TTS configuration), RagSettings (RAG service, reranking),
+  LlmSettings (LLM providers, model defaults), UiSettings (theme, hotkeys, tray),
+  and DataManagementSettings (storage paths). This improves maintainability and
+  reduces cognitive load by grouping related settings under semantic namespaces
+  throughout Core, Services, ViewModels, and tests.
   Python validator constructor; repaired several setup & log view bindings.
 
 
