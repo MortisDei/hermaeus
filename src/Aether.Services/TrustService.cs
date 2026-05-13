@@ -2,6 +2,7 @@ using System.Net;
 using System.Security.Cryptography;
 using Aether.Core.Models;
 using Aether.Core.Services;
+using Aether.Services.ProcessManagement;
 
 namespace Aether.Services;
 
@@ -40,7 +41,7 @@ public sealed class TrustService : ITrustService
 
     public IReadOnlyList<TrustItem> AnalyzeServerExtraArgs(ServerConfig server, DateTime scannedAt)
     {
-        var args = SplitArgs(server.ExtraArgs).ToList();
+        var args = ExtraArgsParser.Split(server.ExtraArgs).ToList();
         if (args.Count == 0)
             return [];
 
@@ -208,34 +209,6 @@ public sealed class TrustService : ITrustService
 
     private static bool LooksLikePath(string value) =>
         value.Contains(Path.DirectorySeparatorChar) || value.Contains(Path.AltDirectorySeparatorChar);
-
-    private static IEnumerable<string> SplitArgs(string extraArgs)
-    {
-        var current = new System.Text.StringBuilder();
-        var inQuotes = false;
-
-        foreach (var ch in extraArgs.Trim())
-        {
-            if (ch == '"')
-            {
-                inQuotes = !inQuotes;
-                continue;
-            }
-
-            if (char.IsWhiteSpace(ch) && !inQuotes)
-            {
-                if (current.Length == 0) continue;
-                yield return current.ToString();
-                current.Clear();
-                continue;
-            }
-
-            current.Append(ch);
-        }
-
-        if (current.Length > 0)
-            yield return current.ToString();
-    }
 
     private enum PathTargetKind
     {

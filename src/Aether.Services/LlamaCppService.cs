@@ -9,6 +9,7 @@ namespace Aether.Services;
 
 public sealed class LlamaCppService : IDisposable
 {
+    private const string ProviderTagValue = "llama.cpp";
     private readonly HttpClient _http;
     private readonly ISettingsService _settings;
 
@@ -37,7 +38,7 @@ public sealed class LlamaCppService : IDisposable
             resp.EnsureSuccessStatusCode();
             var data = await resp.Content.ReadFromJsonAsync<ModelsResponse>(JsonOpts, ct);
             return data?.Data?
-                .Select(m => new LlmModel { Id = m.Id, Name = m.Id, Provider = "llama.cpp" })
+                .Select(m => new LlmModel { Id = m.Id, Name = m.Id, Provider = "llama.cpp", ProviderTag = ProviderTagValue })
                 .ToList() ?? [];
         }
         catch { return []; }

@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using Aether.Core.Models;
 using Aether.Core.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -9,8 +10,9 @@ public partial class MainWindowViewModel : ObservableObject
 {
     private readonly IConversationStore _store;
     private readonly IToastService _toasts;
+    private readonly IRuntimeLogService _logs;
     private readonly SynchronizationContext? _sync;
-        private readonly ISettingsService _settingsService;
+    private readonly ISettingsService _settingsService;
     private bool _refreshingFolderFilters;
 
     public ChatViewModel            Chat     { get; }
@@ -80,19 +82,21 @@ public partial class MainWindowViewModel : ObservableObject
         DoctorViewModel doctor,
         LogsViewModel logs,
         SetupWizardViewModel wizard,
-            ISettingsService settingsService,
-        IToastService toasts)
+        ISettingsService settingsService,
+        IToastService toasts,
+        IRuntimeLogService runtimeLogs)
     {
         _sync = SynchronizationContext.Current;
         _toasts = toasts;
-            _settingsService = settingsService;
+        _logs = runtimeLogs;
+        _settingsService = settingsService;
         _store = store; Chat = chat; Agent = agent; Settings = settings;
         Models = models; Rag = rag; Services = services; Tasks = tasks;
         Benchmarks = benchmarks; SystemOverview = systemOverview; Doctor = doctor; Logs = logs; Wizard = wizard;
         Doctor.RequestNavigate = panel => ActivePanel = panel;
         Wizard.WizardCompleted += () => ActivePanel = "chat";
         Chat.ConversationSaved += OnConversationSaved;
-        Services.ServerAvailabilityChanged += (_, _) => _ = RefreshModelsAfterServerChangeAsync();
+        Services.ServerAvailabilityChanged += (_, _) => RunBackgroundTaskAsync("refresh models after server availability change", RefreshModelsAfterServerChangeAsync);
         _toasts.ToastRaised += OnToastRaised;
     }
 
@@ -284,15 +288,15 @@ public partial class MainWindowViewModel : ObservableObject
         await Agent.LoadAsync();
     }
     [RelayCommand] private void ShowRagPanel()         => ActivePanel = "rag";
-    [RelayCommand] private void ShowModelsPanel()      { ActivePanel = "models"; _ = Models.RefreshCommand.ExecuteAsync(null); }
+    [RelayCommand] private void ShowModelsPanel()      { ActivePanel = "models"; RunBackgroundTaskAsync("refresh models panel", () => Models.RefreshCommand.ExecuteAsync(null)); }
     [RelayCommand] private void ShowServicesPanel()    => ActivePanel = "services";
     [RelayCommand] private void ShowTasksPanel()       { Tasks.Reload(); ActivePanel = "tasks"; }
-    [RelayCommand] private void ShowBenchmarksPanel()  { ActivePanel = "benchmarks"; _ = Benchmarks.LoadCommand.ExecuteAsync(null); }
-    [RelayCommand] private void ShowSystemPanel()      { ActivePanel = "system"; _ = SystemOverview.RefreshCommand.ExecuteAsync(null); }
+    [RelayCommand] private void ShowBenchmarksPanel()  { ActivePanel = "benchmarks"; RunBackgroundTaskAsync("load benchmarks panel", () => Benchmarks.LoadCommand.ExecuteAsync(null)); }
+    [RelayCommand] private void ShowSystemPanel()      { ActivePanel = "system"; RunBackgroundTaskAsync("refresh system panel", () => SystemOverview.RefreshCommand.ExecuteAsync(null)); }
     [RelayCommand] private void ShowDoctorPanel()
     {
         ActivePanel = "doctor";
-        _ = Doctor.ScanCommand.ExecuteAsync(null);
+        RunBackgroundTaskAsync("run doctor scan", () => Doctor.ScanCommand.ExecuteAsync(null));
     }
     [RelayCommand] private void ShowLogsPanel()        => ActivePanel = "logs";
     [RelayCommand] private void ShowWizardPanel()      => ActivePanel = "wizard";
@@ -391,6 +395,8 @@ public partial class MainWindowViewModel : ObservableObject
         }
         catch (Exception ex)
         {
+            _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Error, RuntimeLogCategory.Service,
+                $"Model refresh failed: {ex.Message}"));
             _toasts.Show("Model refresh failed", ex.Message, ToastKind.Warning, 7000);
         }
     }
@@ -422,5 +428,23 @@ public partial class MainWindowViewModel : ObservableObject
             }
         }, null);
         return tcs.Task;
+    }
+
+    private void RunBackgroundTaskAsync(string operation, Func<Task> action)
+    {
+        _ = RunBackgroundTaskCoreAsync(operation, action);
+    }
+
+    private async Task RunBackgroundTaskCoreAsync(string operation, Func<Task> action)
+    {
+        try
+        {
+            await action();
+        }
+        catch (Exception ex)
+        {
+            _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Error, RuntimeLogCategory.Service,
+                $"{operation} failed: {ex.Message}"));
+        }
     }
 }

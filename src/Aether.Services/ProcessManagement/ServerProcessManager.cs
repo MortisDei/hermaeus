@@ -257,7 +257,7 @@ public sealed class ServerProcessManager : IDisposable
             parts.Add("--embeddings");
 
         if (!string.IsNullOrWhiteSpace(cfg.ExtraArgs))
-            parts.AddRange(SplitExtraArgs(cfg.ExtraArgs));
+            parts.AddRange(ExtraArgsParser.Split(cfg.ExtraArgs));
 
         return parts;
     }
@@ -356,34 +356,6 @@ public sealed class ServerProcessManager : IDisposable
         }
 
         return null;
-    }
-
-    private static IEnumerable<string> SplitExtraArgs(string extraArgs)
-    {
-        var current = new StringBuilder();
-        var inQuotes = false;
-
-        foreach (var ch in extraArgs.Trim())
-        {
-            if (ch == '"')
-            {
-                inQuotes = !inQuotes;
-                continue;
-            }
-
-            if (char.IsWhiteSpace(ch) && !inQuotes)
-            {
-                if (current.Length == 0) continue;
-                yield return current.ToString();
-                current.Clear();
-                continue;
-            }
-
-            current.Append(ch);
-        }
-
-        if (current.Length > 0)
-            yield return current.ToString();
     }
 
     // ── Health poll ───────────────────────────────────────────────────────────

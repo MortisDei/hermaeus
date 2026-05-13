@@ -20,10 +20,12 @@ public partial class SetupWizardViewModel : ObservableObject
     [ObservableProperty] private string _modelFolder = string.Empty;
     [ObservableProperty] private string _selectedRuntimeId = string.Empty;
     [ObservableProperty] private VoiceProviderInfo? _selectedVoiceProvider;
-        [ObservableProperty] private RuntimeProfileViewModel? _selectedRuntime;
+    [ObservableProperty] private RuntimeProfileViewModel? _selectedRuntime;
     [ObservableProperty] private string _doctorSummary = "Run Doctor to verify the setup.";
     [ObservableProperty] private bool _doctorRan;
     [ObservableProperty] private bool _isDoctorRunning;
+
+    private bool _syncingRuntimeSelection;
 
     public ObservableCollection<string> Steps { get; } =
     [
@@ -56,21 +58,6 @@ public partial class SetupWizardViewModel : ObservableObject
         _doctor = doctor;
         _toasts = toasts;
         LoadFromSettings();
-        this.PropertyChanged += (s, e) =>
-        {
-            if (e.PropertyName == nameof(SelectedRuntime))
-            {
-                var newValue = SelectedRuntime;
-                if (newValue is not null && SelectedRuntimeId != newValue.Id)
-                    SelectedRuntimeId = newValue.Id;
-            }
-            else if (e.PropertyName == nameof(SelectedRuntimeId))
-            {
-                var id = SelectedRuntimeId;
-                if (!string.IsNullOrEmpty(id) && SelectedRuntime?.Id != id)
-                    SelectedRuntime = RuntimeOptions.FirstOrDefault(p => p.Id == id);
-            }
-        };
     }
 
     public void LoadFromSettings()
@@ -86,7 +73,6 @@ public partial class SetupWizardViewModel : ObservableObject
         SelectedRuntimeId = RuntimeOptions.FirstOrDefault(p => p.Enabled)?.Id
             ?? RuntimeOptions.FirstOrDefault()?.Id
             ?? string.Empty;
-    SelectedRuntime = RuntimeOptions.FirstOrDefault(p => p.Id == SelectedRuntimeId);
 
         VoiceOptions.Clear();
         foreach (var provider in _voiceProviders.GetAvailableProviders())
@@ -158,6 +144,40 @@ public partial class SetupWizardViewModel : ObservableObject
         }
     }
 
+    partial void OnSelectedRuntimeChanged(RuntimeProfileViewModel? value)
+    {
+        if (_syncingRuntimeSelection)
+            return;
+
+        try
+        {
+            _syncingRuntimeSelection = true;
+            if (value is not null && SelectedRuntimeId != value.Id)
+                SelectedRuntimeId = value.Id;
+        }
+        finally
+        {
+            _syncingRuntimeSelection = false;
+        }
+    }
+
+    partial void OnSelectedRuntimeIdChanged(string value)
+    {
+        if (_syncingRuntimeSelection)
+            return;
+
+        try
+        {
+            _syncingRuntimeSelection = true;
+            if (!string.IsNullOrEmpty(value) && SelectedRuntime?.Id != value)
+                SelectedRuntime = RuntimeOptions.FirstOrDefault(p => p.Id == value);
+        }
+        finally
+        {
+            _syncingRuntimeSelection = false;
+        }
+    }
+
     private async Task ApplyStepAsync(int step)
     {
         switch (step)
@@ -190,5 +210,4 @@ public partial class SetupWizardViewModel : ObservableObject
         }
     }
 
-    
 }

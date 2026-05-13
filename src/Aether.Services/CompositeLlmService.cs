@@ -5,12 +5,16 @@ namespace Aether.Services;
 
 public sealed class CompositeLlmService : ILlmService
 {
+    private const string OpenAiProviderTagValue = "openai";
+    private const string LlamaCppProviderTagValue = "llama.cpp";
+    private const string OllamaProviderTagValue = "ollama";
     private readonly LlamaCppService _llamaCpp;
     private readonly OpenAiService _openAi;
     private readonly OllamaService _ollama;
     private readonly ISettingsService _settings;
     private readonly IRuntimeProfileService _runtimeProfiles;
     private readonly List<LlmModel> _cachedModels = [];
+    private readonly Dictionary<string, string> _providerTagsByModelId = new(StringComparer.OrdinalIgnoreCase);
     private DateTime _cacheUntilUtc = DateTime.MinValue;
 
     public string ProviderName => "Composite";
@@ -40,6 +44,12 @@ public sealed class CompositeLlmService : ILlmService
         all.AddRange(await GetWithTimeoutAsync(_ollama.GetModelsAsync, ct));
         _cachedModels.Clear();
         _cachedModels.AddRange(all.Select(Clone));
+        _providerTagsByModelId.Clear();
+        foreach (var model in _cachedModels)
+        {
+            if (!string.IsNullOrWhiteSpace(model.ProviderTag))
+                _providerTagsByModelId[model.Id] = model.ProviderTag;
+        }
         _cacheUntilUtc = DateTime.UtcNow.AddSeconds(30);
         return all;
     }
@@ -65,6 +75,7 @@ public sealed class CompositeLlmService : ILlmService
         Id = model.Id,
         Name = model.Name,
         Provider = model.Provider,
+        ProviderTag = model.ProviderTag,
         SizeBytes = model.SizeBytes,
         ModifiedAt = model.ModifiedAt,
         ProfileDisplayName = model.ProfileDisplayName,
@@ -82,14 +93,14 @@ public sealed class CompositeLlmService : ILlmService
         string? systemPrompt = null, double temperature = 0.7,
         CancellationToken ct = default)
     {
-        if (OllamaService.IsOllamaModelId(modelId))
-            return _ollama.StreamChatAsync(modelId, messages, systemPrompt, temperature, ct);
-
-        var isOpenAi = modelId.StartsWith("gpt") || modelId.StartsWith("o1") ||
-                       modelId.StartsWith("o3") || modelId.StartsWith("o4");
-        return isOpenAi
-            ? _openAi.StreamChatAsync(modelId, messages, systemPrompt, temperature, ct)
-            : _llamaCpp.StreamChatAsync(modelId, messages, systemPrompt, temperature, ct);
+        return ResolveProviderTag(modelId) switch
+        {
+            OpenAiProviderTagValue => _openAi.StreamChatAsync(modelId, messages, systemPrompt, temperature, ct),
+            OllamaProviderTagValue => _ollama.StreamChatAsync(modelId, messages, systemPrompt, temperature, ct),
+            LlamaCppProviderTagValue => _llamaCpp.StreamChatAsync(modelId, messages, systemPrompt, temperature, ct),
+            _ when OllamaService.IsOllamaModelId(modelId) => _ollama.StreamChatAsync(modelId, messages, systemPrompt, temperature, ct),
+            _ => _llamaCpp.StreamChatAsync(modelId, messages, systemPrompt, temperature, ct)
+        };
     }
 
     public IAsyncEnumerable<LlmStreamEvent> StreamChatEventsAsync(
@@ -97,18 +108,30 @@ public sealed class CompositeLlmService : ILlmService
         string? systemPrompt = null, double temperature = 0.7,
         CancellationToken ct = default)
     {
-        if (OllamaService.IsOllamaModelId(modelId))
-            return _ollama.StreamChatEventsAsync(modelId, messages, systemPrompt, temperature, ct);
-
-        var isOpenAi = modelId.StartsWith("gpt") || modelId.StartsWith("o1") ||
-                       modelId.StartsWith("o3") || modelId.StartsWith("o4");
-        return isOpenAi
-            ? _openAi.StreamChatEventsAsync(modelId, messages, systemPrompt, temperature, ct)
-            : _llamaCpp.StreamChatEventsAsync(modelId, messages, systemPrompt, temperature, ct);
+        return ResolveProviderTag(modelId) switch
+        {
+            OpenAiProviderTagValue => _openAi.StreamChatEventsAsync(modelId, messages, systemPrompt, temperature, ct),
+            OllamaProviderTagValue => _ollama.StreamChatEventsAsync(modelId, messages, systemPrompt, temperature, ct),
+            LlamaCppProviderTagValue => _llamaCpp.StreamChatEventsAsync(modelId, messages, systemPrompt, temperature, ct),
+            _ when OllamaService.IsOllamaModelId(modelId) => _ollama.StreamChatEventsAsync(modelId, messages, systemPrompt, temperature, ct),
+            _ => _llamaCpp.StreamChatEventsAsync(modelId, messages, systemPrompt, temperature, ct)
+        };
     }
 
     public Task PullModelAsync(string m, IProgress<string>? p = null, CancellationToken ct = default)
         => Task.CompletedTask;
     public Task DeleteModelAsync(string m, CancellationToken ct = default)
         => Task.CompletedTask;
+
+    private string? ResolveProviderTag(string modelId)
+    {
+        if (_providerTagsByModelId.TryGetValue(modelId, out var tag) && !string.IsNullOrWhiteSpace(tag))
+            return tag;
+
+        var model = _cachedModels.FirstOrDefault(m => string.Equals(m.Id, modelId, StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrWhiteSpace(model?.ProviderTag))
+            return model.ProviderTag;
+
+        return null;
+    }
 }

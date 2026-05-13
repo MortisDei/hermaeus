@@ -5,6 +5,7 @@ public class LlmModel
     public string Id { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public string Provider { get; set; } = string.Empty;
+    public string ProviderTag { get; set; } = string.Empty;
     public long SizeBytes { get; set; }
     public DateTime? ModifiedAt { get; set; }
     public string ProfileDisplayName { get; set; } = string.Empty;

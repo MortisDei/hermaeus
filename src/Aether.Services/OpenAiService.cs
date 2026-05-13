@@ -10,6 +10,7 @@ namespace Aether.Services;
 
 public sealed class OpenAiService : IDisposable
 {
+    private const string ProviderTagValue = "openai";
     private readonly HttpClient _http;
     private readonly ISettingsService _settings;
     private readonly ISecretStore _secrets;
@@ -47,7 +48,7 @@ public sealed class OpenAiService : IDisposable
             return data?.Data?
                 .Where(m => m.Id.StartsWith("gpt") || m.Id.StartsWith("o1") ||
                             m.Id.StartsWith("o3") || m.Id.StartsWith("o4"))
-                .Select(m => new LlmModel { Id = m.Id, Name = m.Id, Provider = "OpenAI" })
+                .Select(m => new LlmModel { Id = m.Id, Name = m.Id, Provider = "OpenAI", ProviderTag = ProviderTagValue })
                 .ToList() ?? [];
         }
         catch { return []; }

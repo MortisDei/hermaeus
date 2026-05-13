@@ -19,7 +19,7 @@ namespace Aether.Desktop.Controls;
 /// Handles: headings, paragraphs, bold/italic, inline code, fenced code blocks,
 /// ordered + unordered lists, blockquotes, thematic breaks, links.
 /// </summary>
-public sealed class MarkdownViewer : ContentControl
+public sealed class MarkdownViewer : ContentControl, IDisposable
 {
     public static readonly StyledProperty<string?> MarkdownProperty =
         AvaloniaProperty.Register<MarkdownViewer, string?>(nameof(Markdown));
@@ -43,11 +43,7 @@ public sealed class MarkdownViewer : ContentControl
         {
             Interval = TimeSpan.FromMilliseconds(75)
         };
-        _renderTimer.Tick += (_, _) =>
-        {
-            _renderTimer.Stop();
-            Render();
-        };
+        _renderTimer.Tick += OnRenderTimerTick;
     }
 
     public string? Markdown
@@ -79,6 +75,24 @@ public sealed class MarkdownViewer : ContentControl
                 Render();
             }
         }
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnDetachedFromVisualTree(e);
+        Dispose();
+    }
+
+    public void Dispose()
+    {
+        _renderTimer.Stop();
+        _renderTimer.Tick -= OnRenderTimerTick;
+    }
+
+    private void OnRenderTimerTick(object? sender, EventArgs e)
+    {
+        _renderTimer.Stop();
+        Render();
     }
 
     private void Render()

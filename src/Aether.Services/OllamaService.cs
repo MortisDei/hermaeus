@@ -9,6 +9,7 @@ namespace Aether.Services;
 
 public sealed class OllamaService : IDisposable
 {
+    private const string ProviderTagValue = "ollama";
     private readonly IRuntimeProfileService _profiles;
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(10) };
 
@@ -32,6 +33,7 @@ public sealed class OllamaService : IDisposable
                         Id = BuildId(profile.Id, model.Name),
                         Name = model.Name,
                         Provider = $"Ollama:{profile.Name}",
+                        ProviderTag = ProviderTagValue,
                         SizeBytes = model.Size,
                         ModifiedAt = model.ModifiedAt
                     });
@@ -142,8 +144,15 @@ public sealed class OllamaService : IDisposable
     private static string BuildId(string profileId, string modelName) => $"ollama:{profileId}:{modelName}";
     private static (string ProfileId, string ModelName) ParseId(string id)
     {
-        var parts = id.Split(':', 3);
-        return parts.Length == 3 ? (parts[1], parts[2]) : (string.Empty, id);
+        if (!IsOllamaModelId(id))
+            return (string.Empty, id);
+
+        var firstSeparator = id.IndexOf(':');
+        var secondSeparator = id.IndexOf(':', firstSeparator + 1);
+        if (firstSeparator < 0 || secondSeparator < 0 || secondSeparator == id.Length - 1)
+            return (string.Empty, id);
+
+        return (id[(firstSeparator + 1)..secondSeparator], id[(secondSeparator + 1)..]);
     }
 
     public void Dispose() => _http.Dispose();

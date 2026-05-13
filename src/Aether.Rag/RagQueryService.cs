@@ -30,7 +30,9 @@ public sealed class RagQueryService
     private readonly IReranker         _reranker;
 
     // In-memory chunk cache per dataset  (dataset_id → chunks)
+    private const int MaxCachedDatasets = 8;
     private readonly Dictionary<string, List<RagChunk>> _cache = [];
+    private readonly Queue<string> _cacheOrder = [];
 
     public RagQueryService(
         SqliteRagStore store,
@@ -46,10 +48,71 @@ public sealed class RagQueryService
     public async Task WarmCacheAsync(string datasetId, CancellationToken ct = default)
     {
         var chunks = await _store.GetChunksAsync(datasetId, includeEmbeddings: true, ct);
-        _cache[datasetId] = chunks;
+        StoreCache(datasetId, chunks);
     }
 
-    public void ClearCache(string datasetId) => _cache.Remove(datasetId);
+    public void ClearCache(string datasetId)
+    {
+        _cache.Remove(datasetId);
+        if (_cacheOrder.Count == 0)
+            return;
+
+        var remaining = new Queue<string>();
+        while (_cacheOrder.Count > 0)
+        {
+            var current = _cacheOrder.Dequeue();
+            if (!string.Equals(current, datasetId, StringComparison.OrdinalIgnoreCase))
+                remaining.Enqueue(current);
+        }
+
+        while (remaining.Count > 0)
+            _cacheOrder.Enqueue(remaining.Dequeue());
+    }
+
+    private void StoreCache(string datasetId, List<RagChunk> chunks)
+    {
+        _cache[datasetId] = chunks;
+        TouchCache(datasetId);
+
+        while (_cacheOrder.Count > MaxCachedDatasets)
+        {
+            var oldest = _cacheOrder.Dequeue();
+            _cache.Remove(oldest);
+        }
+    }
+
+    private void TouchCache(string datasetId)
+    {
+        if (_cacheOrder.Count == 0)
+        {
+            _cacheOrder.Enqueue(datasetId);
+            return;
+        }
+
+        var entries = new Queue<string>();
+        var touched = false;
+        while (_cacheOrder.Count > 0)
+        {
+            var current = _cacheOrder.Dequeue();
+            if (string.Equals(current, datasetId, StringComparison.OrdinalIgnoreCase))
+            {
+                touched = true;
+                continue;
+            }
+            entries.Enqueue(current);
+        }
+
+        while (entries.Count > 0)
+            _cacheOrder.Enqueue(entries.Dequeue());
+
+        _cacheOrder.Enqueue(datasetId);
+        if (!touched && _cacheOrder.Count > MaxCachedDatasets)
+        {
+            var oldest = _cacheOrder.Dequeue();
+            if (!string.Equals(oldest, datasetId, StringComparison.OrdinalIgnoreCase))
+                _cache.Remove(oldest);
+        }
+    }
 
     public async Task<List<RagDataset>> GetDatasetsAsync(CancellationToken ct = default)
         => await _store.GetDatasetsAsync(ct);
@@ -66,6 +129,7 @@ public sealed class RagQueryService
         if (!_cache.TryGetValue(datasetId, out var chunks) || chunks.Count == 0)
             await WarmCacheAsync(datasetId, ct);
         chunks = _cache.GetValueOrDefault(datasetId, []);
+        TouchCache(datasetId);
 
         var expandedQuery = await ExpandQueryAsync(datasetId, question, ct);
         var qEmbed = await _embed.EmbedAsync(expandedQuery, ct);
@@ -227,12 +291,14 @@ public sealed class RagQueryService
         => ComputeGroundingScore(answer, context, RagGroundingMode.TokenOverlap);
 
     public static float ComputeGroundingScore(string answer, string context, RagGroundingMode mode)
-    {
-        if (mode == RagGroundingMode.SemanticPlaceholder)
-            return GroundingScore(answer, context);
+        => mode == RagGroundingMode.SemanticPlaceholder
+            ? ScoreTokenOverlap(answer, context)
+            : ScoreTokenOverlap(answer, context);
 
+    private static float ScoreTokenOverlap(string answer, string context)
+    {
         if (string.IsNullOrWhiteSpace(answer)) return 0f;
-        var answerTokens  = Bm25Scorer.Tokenize(answer).ToHashSet();
+        var answerTokens = Bm25Scorer.Tokenize(answer).ToHashSet();
         var contextTokens = Bm25Scorer.Tokenize(context).ToHashSet();
         if (answerTokens.Count == 0) return 0f;
         return (float)answerTokens.Count(t => contextTokens.Contains(t)) / answerTokens.Count;
