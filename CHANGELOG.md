@@ -17,10 +17,12 @@ Pre-1.0 versions may still change internal APIs and storage details.
   RAG, GPU visibility, and secrets, plus diagnostics copy and navigation.
 - Python health validator that rejects broken or non-relocatable Python
   installs and surfaces actionable diagnostics.
- - First-run Setup Wizard: a 6-step guided onboarding that configures
-   data roots, chat backend, model paths, voice provider, and runs the
-   Aether Doctor before starting. The wizard sets `SetupWizardCompleted`
-   to skip on subsequent launches after finish or skip.
+- First-run Setup Wizard: a 6-step guided onboarding that configures data
+  roots, chat backend, model paths, voice provider, and runs the Aether
+  Doctor before starting. The wizard sets `SetupWizardCompleted` to skip on
+  subsequent launches after finish or skip.
+- RAG ingest dry-run, duplicate-source reporting, and per-document ingest
+  summaries surfaced in the RAG panel before writing changes.
 
 ### Fixed
 

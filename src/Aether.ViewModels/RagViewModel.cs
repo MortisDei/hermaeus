@@ -36,6 +36,29 @@ public partial class RagSourceViewModel : ObservableObject
     }
 }
 
+public sealed class RagIngestReportItemViewModel
+{
+    public RagIngestReportItemViewModel(DocumentIngestReport report)
+    {
+        Path = report.Path;
+        Status = report.Status;
+        Message = report.Message;
+    }
+
+    public string Path { get; }
+    public DocumentIngestStatus Status { get; }
+    public string Message { get; }
+    public string StatusLabel => Status switch
+    {
+        DocumentIngestStatus.Added => "Added",
+        DocumentIngestStatus.Replaced => "Replace",
+        DocumentIngestStatus.SkippedUnchanged => "Skipped",
+        DocumentIngestStatus.ReportOnly => "Report",
+        DocumentIngestStatus.Error => "Error",
+        _ => Status.ToString()
+    };
+}
+
 public partial class RagViewModel : ObservableObject
 {
     private readonly RagQueryService _query;
@@ -49,6 +72,7 @@ public partial class RagViewModel : ObservableObject
     public ObservableCollection<RagSourceViewModel> Sources  { get; } = [];
     public ObservableCollection<RagSourceViewModel> VisibleCitationSources { get; } = [];
     public ObservableCollection<RagEvalResultViewModel> EvalResults { get; } = [];
+    public ObservableCollection<RagIngestReportItemViewModel> IngestReportItems { get; } = [];
 
     [ObservableProperty] private RagDataset? _selectedDataset;
     [ObservableProperty] private string      _questionText    = string.Empty;
@@ -220,6 +244,15 @@ public partial class RagViewModel : ObservableObject
             else
             {
                 report = await _pipeline.IngestDirectoryAsync(ds, IngestPath, progress, CancellationToken.None, new IngestOptions { DryRun = IngestDryRun, DuplicatePolicy = IngestPolicy });
+            }
+
+            IngestReportItems.Clear();
+            foreach (var item in report.Documents.Where(d => d.Path != "__health__"))
+                IngestReportItems.Add(new RagIngestReportItemViewModel(item));
+            if (report.Documents.Any(d => d.Path == "__health__"))
+            {
+                var health = report.Documents.First(d => d.Path == "__health__");
+                IngestReportItems.Insert(0, new RagIngestReportItemViewModel(health));
             }
 
             await LoadDatasetsAsync();

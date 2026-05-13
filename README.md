@@ -113,8 +113,12 @@ quality loss.
 
 1. Start an embeddings runtime in **Services**.
 2. Open **RAG** and ingest a folder of `.txt` / `.md` / digital `.pdf` files.
+  Use **Dry run** to preview the ingest report before writing to SQLite, or
+  choose a duplicate policy to skip unchanged sources, replace them, or just
+  report what would happen.
 3. Ask questions against the dataset.
-4. Inspect citations, source text, grounding score, and query traces.
+4. Inspect citations, source text, grounding score, query traces, and the last
+  ingest report.
 5. Run eval sets from the Eval Harness panel.
 
 The optional web loader is off by default. When enabled for a dataset, Aether

@@ -53,6 +53,8 @@ var tests = new (string Name, Func<Task> Run)[]
     ("RAG web ingest strips HTML and stores chunks", RagWebIngestStripsHtmlAndStoresChunks),
     ("RAG digital PDF text extracts", RagDigitalPdfTextExtracts),
     ("RAG directory ingest includes PDFs", RagDirectoryIngestIncludesPdfs),
+    ("RAG directory dry run reports without persisting", RagDirectoryDryRunReportsWithoutPersisting),
+    ("RAG directory skip unchanged avoids duplicate chunks", RagDirectorySkipUnchangedAvoidsDuplicateChunks),
     ("RAG empty PDF warns and continues", RagEmptyPdfWarnsAndContinues),
     ("agent task state serializes schema fields", AgentTaskStateSerializesSchemaFields),
     ("agent workspace tools enforce path safety", AgentWorkspaceToolsEnforcePathSafety),
@@ -919,6 +921,50 @@ static async Task RagDirectoryIngestIncludesPdfs()
     True(chunks.Any(c => c.SourceFile == "paper.pdf" && c.Content.Contains("pdf source beta gamma", StringComparison.Ordinal)),
         "PDF content should be chunked and stored");
     True(chunks.Any(c => c.SourceFile == "notes.md"), "markdown content should still ingest");
+}
+
+static async Task RagDirectoryDryRunReportsWithoutPersisting()
+{
+    using var temp = new TempDir();
+    var settings = NewSettings(temp);
+    settings.Settings.DataRootDirectory = temp.PathFor("data");
+    var store = new SqliteRagStore(settings);
+    await store.InitializeAsync();
+    var docs = temp.PathFor("docs");
+    Directory.CreateDirectory(docs);
+    await File.WriteAllTextAsync(Path.Combine(docs, "preview.md"), "dry run preview alpha beta");
+
+    var dataset = new RagDataset { Name = "preview" };
+    var pipeline = new RagPipeline(store, new FakeEmbeddingService());
+    var report = await pipeline.IngestDirectoryAsync(dataset, docs, options: new IngestOptions { DryRun = true, DuplicatePolicy = IngestDuplicatePolicy.ReportOnly });
+
+    var chunks = await store.GetChunksAsync(dataset.Id, includeEmbeddings: false);
+    Equal(0, chunks.Count, "dry-run ingest should not persist chunks");
+    True(report.Documents.Any(d => d.Status == DocumentIngestStatus.ReportOnly), "dry-run report should include report-only entries");
+    True(report.Documents.Any(d => d.Path.Contains("preview.md", StringComparison.Ordinal)), "dry-run report should include the source path");
+}
+
+static async Task RagDirectorySkipUnchangedAvoidsDuplicateChunks()
+{
+    using var temp = new TempDir();
+    var settings = NewSettings(temp);
+    settings.Settings.DataRootDirectory = temp.PathFor("data");
+    var store = new SqliteRagStore(settings);
+    await store.InitializeAsync();
+    var docs = temp.PathFor("docs");
+    Directory.CreateDirectory(docs);
+    await File.WriteAllTextAsync(Path.Combine(docs, "keep.md"), "unchanged source alpha beta");
+
+    var dataset = new RagDataset { Name = "skip-unchanged" };
+    var pipeline = new RagPipeline(store, new FakeEmbeddingService());
+    await pipeline.IngestDirectoryAsync(dataset, docs, options: new IngestOptions { DuplicatePolicy = IngestDuplicatePolicy.Replace });
+    var before = await store.GetChunksAsync(dataset.Id, includeEmbeddings: false);
+
+    var report = await pipeline.IngestDirectoryAsync(dataset, docs, options: new IngestOptions { DuplicatePolicy = IngestDuplicatePolicy.SkipIfUnchanged });
+    var after = await store.GetChunksAsync(dataset.Id, includeEmbeddings: false);
+
+    Equal(before.Count, after.Count, "unchanged ingest should not duplicate chunks");
+    True(report.Documents.Any(d => d.Status == DocumentIngestStatus.SkippedUnchanged), "report should mention skipped unchanged source");
 }
 
 static async Task RagEmptyPdfWarnsAndContinues()

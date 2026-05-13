@@ -382,6 +382,39 @@
                                            FontSize="11" Opacity="0.4"
                                            VerticalAlignment="Center" />
                             </StackPanel>
+
+                            <Expander Header="Last ingest report"
+                                      IsVisible="{Binding IngestReportItems.Count, Converter={x:Static views:RagView.IsNonZero}}">
+                                <ItemsControl ItemsSource="{Binding IngestReportItems}" Margin="0,6,0,0">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="6"
+                                                    Padding="10"
+                                                    Margin="0,2">
+                                                <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+                                                    <TextBlock Grid.Column="0"
+                                                               Text="{Binding StatusLabel}"
+                                                               FontSize="11"
+                                                               FontWeight="SemiBold"
+                                                               VerticalAlignment="Top" />
+                                                    <StackPanel Grid.Column="1" Spacing="3">
+                                                        <TextBlock Text="{Binding Path}"
+                                                                   FontSize="12"
+                                                                   FontWeight="SemiBold"
+                                                                   TextWrapping="Wrap" />
+                                                        <TextBlock Text="{Binding Message}"
+                                                                   FontSize="11"
+                                                                   Opacity="0.55"
+                                                                   TextWrapping="Wrap" />
+                                                    </StackPanel>
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </Expander>
                         </StackPanel>
                     </Border>
                 </Expander>
