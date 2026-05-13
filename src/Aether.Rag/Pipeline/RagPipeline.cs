@@ -449,19 +449,28 @@ public sealed class RagPipeline
         }
 
         progress?.Report(new IngestProgress("Storing", 0, total, "Writing to SQLite..."));
+        ct.ThrowIfCancellationRequested();
         await _store.SaveDatasetAsync(dataset, ct);
+        ct.ThrowIfCancellationRequested();
         await _store.DeleteChunksForSourcesAsync(dataset.Id, changedSourcePaths, ct);
 
         if (parentChunks.Count > 0)
+        {
+            ct.ThrowIfCancellationRequested();
             await _store.SaveChunksBatchAsync(parentChunks, ct);
+        }
 
+        ct.ThrowIfCancellationRequested();
         await _store.SaveChunksBatchAsync(allChunks, ct);
 
         progress?.Report(new IngestProgress("Indexing", 0, 1, "Building BM25 stats..."));
+        ct.ThrowIfCancellationRequested();
         var stats = Bm25Scorer.BuildStats(allChunks);
+        ct.ThrowIfCancellationRequested();
         await _store.SaveBm25StatsAsync(dataset.Id, stats, ct);
 
         dataset.ChunkCount = allChunks.Count;
+        ct.ThrowIfCancellationRequested();
         await _store.SaveDatasetAsync(dataset, ct);
     }
 
