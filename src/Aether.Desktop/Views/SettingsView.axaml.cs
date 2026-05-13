@@ -113,7 +113,7 @@ public partial class SettingsView : UserControl
             });
 
             if (files.Count > 0)
-                vm.TtsScriptPath = files[0].Path.LocalPath;
+                vm.Tts.TtsScriptPath = files[0].Path.LocalPath;
         };
 
         vm.RequestTtsPythonPicker = async () =>
@@ -133,7 +133,7 @@ public partial class SettingsView : UserControl
             });
 
             if (files.Count > 0)
-                vm.TtsPythonPath = files[0].Path.LocalPath;
+                vm.Tts.TtsPythonPath = files[0].Path.LocalPath;
         };
 
         vm.RequestTtsOutputPicker = async () =>
@@ -148,7 +148,7 @@ public partial class SettingsView : UserControl
             });
 
             if (folders.Count > 0)
-                vm.TtsOutputDirectory = folders[0].Path.LocalPath;
+                vm.Tts.TtsOutputDirectory = folders[0].Path.LocalPath;
         };
 
         vm.RequestTtsModelDirectoryPicker = async () =>
@@ -163,7 +163,7 @@ public partial class SettingsView : UserControl
             });
 
             if (folders.Count > 0)
-                vm.TtsModelDirectory = folders[0].Path.LocalPath;
+                vm.Tts.TtsModelDirectory = folders[0].Path.LocalPath;
         };
 
         vm.RequestTtsVoiceDirectoryPicker = async () =>
@@ -178,7 +178,7 @@ public partial class SettingsView : UserControl
             });
 
             if (folders.Count > 0)
-                vm.TtsVoiceDirectory = folders[0].Path.LocalPath;
+                vm.Tts.TtsVoiceDirectory = folders[0].Path.LocalPath;
         };
 
         vm.RequestTtsVoiceSamplePicker = async () =>
@@ -198,7 +198,7 @@ public partial class SettingsView : UserControl
             });
 
             if (files.Count > 0)
-                await vm.ImportTtsVoiceSampleAsync(files[0].Path.LocalPath);
+                await vm.Tts.ImportTtsVoiceSampleAsync(files[0].Path.LocalPath);
         };
 
         vm.RequestCopyToClipboard = async text =>

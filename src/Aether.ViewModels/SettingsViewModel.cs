@@ -1,6 +1,9 @@
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using Aether.Core.Models;
 using Aether.Core.Services;
 using Aether.Services;
@@ -21,7 +24,6 @@ public partial class SettingsViewModel : ObservableObject
     private readonly XttsProcessManager _xttsProcess;
     private readonly ILocalAiSetupService _localAiSetup;
     private readonly ITrustService _trust;
-    private readonly SynchronizationContext? _sync;
 
     [ObservableProperty] private string _llamaCppBaseUrl      = "http://localhost:8080";
     [ObservableProperty] private bool   _llamaCppEnabled      = true;
@@ -43,19 +45,6 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private string _ragRerankerModelPath = string.Empty;
     [ObservableProperty] private string _backupDirectory = string.Empty;
     [ObservableProperty] private string _restoreBackupPath = string.Empty;
-    [ObservableProperty] private bool   _ttsEnabled = true;
-    [ObservableProperty] private string _ttsServiceUrl = "http://127.0.0.1:8020";
-    [ObservableProperty] private string _ttsSpeaker = string.Empty;
-    [ObservableProperty] private string _ttsPythonPath = string.Empty;
-    [ObservableProperty] private string _ttsScriptPath = string.Empty;
-    [ObservableProperty] private string _ttsModelDirectory = string.Empty;
-    [ObservableProperty] private string _ttsOutputDirectory = string.Empty;
-    [ObservableProperty] private string _ttsVoiceDirectory = string.Empty;
-    [ObservableProperty] private string _ttsDevice = "cpu";
-    [ObservableProperty] private string _ttsModelVersion = "2.0.3";
-    [ObservableProperty] private bool   _ttsPreload;
-    [ObservableProperty] private string _ttsPreviewText = "Aether voice preview is ready.";
-    [ObservableProperty] private string _ttsCloneDisplayName = string.Empty;
     [ObservableProperty] private bool   _startMinimized;
     [ObservableProperty] private bool   _showQuickChat;
     [ObservableProperty] private bool   _enableTrayIcon = true;
@@ -63,9 +52,7 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private bool   _enableLocalHotkeys = true;
     [ObservableProperty] private bool   _enableGlobalHotkeys;
     [ObservableProperty] private string _globalHotkeyStatus = "System-wide hotkeys are off.";
-    [ObservableProperty] private string _ttsStatus = "Stopped";
     [ObservableProperty] private string _settingsError = string.Empty;
-    [ObservableProperty] private string _selectedVoiceProvider = "Kokoro";
     [ObservableProperty] private bool _localAiSetupBusy;
     [ObservableProperty] private string _localAiSetupLog = string.Empty;
     [ObservableProperty] private string _localAiSetupSummary = "Scan a local AI folder to see readiness.";
@@ -79,15 +66,15 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private string _trustSummary = "Run a trust scan to review configured local tools.";
     [ObservableProperty] private string _trustLastScanned = string.Empty;
 
+    public TtsSettingsViewModel Tts { get; }
+
     public string[] Themes { get; } = ["System", "Dark", "Light"];
-    public string[] TtsDevices { get; } = ["cpu", "auto", "cuda"];
-    public ObservableCollection<string> TtsVoices { get; } = ["default"];
-    public ObservableCollection<VoiceProviderInfo> VoiceProviders { get; } = [];
     public ObservableCollection<LocalAiReadinessItem> LocalAiReadinessItems { get; } = [];
     public ObservableCollection<LocalAiSetupAction> LocalAiSetupActions { get; } = [];
     public ObservableCollection<string> LocalAiInstallPlanCreates { get; } = [];
     public ObservableCollection<string> LocalAiInstallPlanInstalls { get; } = [];
     public ObservableCollection<TrustItem> TrustItems { get; } = [];
+
     public Action? RequestDataRootPicker { get; set; }
     public Action? RequestLocalAiAssetsRootPicker { get; set; }
     public Action? RequestBackupDirectoryPicker { get; set; }
@@ -99,16 +86,6 @@ public partial class SettingsViewModel : ObservableObject
     public Action? RequestTtsVoiceDirectoryPicker { get; set; }
     public Action? RequestTtsVoiceSamplePicker { get; set; }
     public Action<string>? RequestCopyToClipboard { get; set; }
-
-    public bool IsTtsRunning => IsLegacyVoiceBackend && _xttsProcess.IsRunning;
-    public bool IsLegacyVoiceBackend
-    {
-        get
-        {
-            var provider = VoiceProviders.FirstOrDefault(p => p.Name.Equals(SelectedVoiceProvider, StringComparison.OrdinalIgnoreCase));
-            return provider is not null && provider.Id == VoiceProvider.XttsV2;
-        }
-    }
 
     public SettingsViewModel(
         ISettingsService svc,
@@ -130,25 +107,9 @@ public partial class SettingsViewModel : ObservableObject
         _xttsProcess = xttsProcess;
         _localAiSetup = localAiSetup;
         _trust = trust;
-        _sync = SynchronizationContext.Current;
-        _xttsProcess.StatusChanged += OnXttsStatusChanged;
+
+        Tts = new TtsSettingsViewModel(_tts, _voiceProviderRegistry, _toasts, _xttsProcess, _secrets, _svc);
         Reload();
-    }
-
-    private void OnXttsStatusChanged()
-    {
-        if (_sync is not null)
-            _sync.Post(_ => ApplyXttsStatus(), null);
-        else
-            ApplyXttsStatus();
-    }
-
-    private void ApplyXttsStatus()
-    {
-        TtsStatus = IsLegacyVoiceBackend ? _xttsProcess.StatusLabel : "Ready";
-        OnPropertyChanged(nameof(IsTtsRunning));
-        StartTtsCommand.NotifyCanExecuteChanged();
-        StopTtsCommand.NotifyCanExecuteChanged();
     }
 
     public void Reload()
@@ -169,30 +130,15 @@ public partial class SettingsViewModel : ObservableObject
         DataRootDirectory   = s.DataManagement.DataRootDirectory;
         LocalAiAssetsRoot   = s.DataManagement.LocalAiAssetsRoot;
         RagRerankerModelPath = s.Rag.RerankerModelPath;
-        TtsEnabled          = s.Tts.Enabled;
-        TtsServiceUrl       = s.Tts.ServiceUrl;
-        TtsSpeaker          = s.Tts.Speaker;
-        TtsPythonPath       = s.Tts.PythonPath;
-        TtsScriptPath       = s.Tts.ScriptPath;
-        TtsModelDirectory   = s.Tts.ModelDirectory;
-        TtsOutputDirectory  = s.Tts.OutputDirectory;
-        TtsVoiceDirectory   = s.Tts.VoiceDirectory;
-        TtsDevice           = s.Tts.Device;
-        TtsModelVersion     = s.Tts.ModelVersion;
-        TtsPreload          = s.Tts.Preload;
+
+        Tts.ReloadFrom(s);
+
         StartMinimized      = s.Ui.StartMinimized;
         ShowQuickChat       = s.Ui.ShowQuickChat;
         EnableTrayIcon      = s.Ui.EnableTrayIcon;
         MinimizeToTray      = s.Ui.MinimizeToTray;
         EnableLocalHotkeys  = s.Ui.EnableLocalHotkeys;
         EnableGlobalHotkeys = s.Ui.EnableGlobalHotkeys;
-        TtsStatus           = IsLegacyVoiceBackend ? _xttsProcess.StatusLabel : "Ready";
-        OnPropertyChanged(nameof(IsTtsRunning));
-        VoiceProviders.Clear();
-        foreach (var provider in _voiceProviderRegistry.GetAvailableProviders())
-            VoiceProviders.Add(provider);
-        SelectedVoiceProvider = s.Tts.VoiceProvider;
-        OnPropertyChanged(nameof(IsLegacyVoiceBackend));
         UpdateMigrationPreview();
         UpdateLocalAiAssetsStatus();
     }
@@ -203,6 +149,7 @@ public partial class SettingsViewModel : ObservableObject
         var s = _svc.Settings;
         var previousDataRoot = s.DataManagement.DataRootDirectory;
         SettingsError = string.Empty;
+
         s.Llm.LlamaCppBaseUrl     = LlamaCppBaseUrl;
         s.Llm.LlamaCppEnabled     = LlamaCppEnabled;
         s.Llm.OpenAiBaseUrl       = OpenAiBaseUrl;
@@ -216,27 +163,31 @@ public partial class SettingsViewModel : ObservableObject
         s.Ui.FontSize            = FontSize;
         s.Ui.Theme               = SelectedTheme;
         s.Ui.CtrlEnterToSend     = CtrlEnterToSend;
+
         s.DataManagement.DataRootDirectory   = DataRootDirectory.Trim();
         s.DataManagement.LocalAiAssetsRoot   = LocalAiAssetsRoot.Trim();
         s.Rag.RerankerModelPath = RagRerankerModelPath.Trim();
-        s.Tts.Enabled          = TtsEnabled;
-        s.Tts.ServiceUrl       = TtsServiceUrl;
-        s.Tts.Speaker          = TtsSpeaker;
-        s.Tts.PythonPath       = TtsPythonPath.Trim();
-        s.Tts.ScriptPath       = TtsScriptPath.Trim();
-        s.Tts.ModelDirectory   = TtsModelDirectory.Trim();
-        s.Tts.OutputDirectory  = TtsOutputDirectory.Trim();
-        s.Tts.VoiceDirectory   = TtsVoiceDirectory.Trim();
-        s.Tts.Device           = TtsDevice;
-        s.Tts.ModelVersion     = TtsModelVersion.Trim();
-        s.Tts.Preload          = TtsPreload;
+
+        s.Tts.Enabled = Tts.TtsEnabled;
+        s.Tts.ServiceUrl = Tts.TtsServiceUrl;
+        s.Tts.Speaker = Tts.TtsSpeaker;
+        s.Tts.PythonPath = Tts.TtsPythonPath.Trim();
+        s.Tts.ScriptPath = Tts.TtsScriptPath.Trim();
+        s.Tts.ModelDirectory = Tts.TtsModelDirectory.Trim();
+        s.Tts.OutputDirectory = Tts.TtsOutputDirectory.Trim();
+        s.Tts.VoiceDirectory = Tts.TtsVoiceDirectory.Trim();
+        s.Tts.Device = Tts.TtsDevice;
+        s.Tts.ModelVersion = Tts.TtsModelVersion.Trim();
+        s.Tts.Preload = Tts.TtsPreload;
+        s.Tts.VoiceProvider = Tts.SelectedVoiceProvider;
+
         s.Ui.StartMinimized      = StartMinimized;
-        s.Tts.VoiceProvider       = SelectedVoiceProvider;
         s.Ui.ShowQuickChat       = ShowQuickChat;
         s.Ui.EnableTrayIcon      = EnableTrayIcon;
         s.Ui.MinimizeToTray      = MinimizeToTray;
         s.Ui.EnableLocalHotkeys  = EnableLocalHotkeys;
         s.Ui.EnableGlobalHotkeys = EnableGlobalHotkeys;
+
         try
         {
             var result = await _svc.SaveAsync(previousDataRoot);
@@ -279,11 +230,11 @@ public partial class SettingsViewModel : ObservableObject
             return;
         }
 
-        if (!string.IsNullOrWhiteSpace(layout.TtsScriptPath)) TtsScriptPath = layout.TtsScriptPath;
-        if (!string.IsNullOrWhiteSpace(layout.TtsPythonPath)) TtsPythonPath = layout.TtsPythonPath;
-        if (!string.IsNullOrWhiteSpace(layout.TtsModelDirectory)) TtsModelDirectory = layout.TtsModelDirectory;
-        if (!string.IsNullOrWhiteSpace(layout.TtsVoiceDirectory)) TtsVoiceDirectory = layout.TtsVoiceDirectory;
-        if (!string.IsNullOrWhiteSpace(layout.TtsOutputDirectory)) TtsOutputDirectory = layout.TtsOutputDirectory;
+        if (!string.IsNullOrWhiteSpace(layout.TtsScriptPath)) Tts.TtsScriptPath = layout.TtsScriptPath;
+        if (!string.IsNullOrWhiteSpace(layout.TtsPythonPath)) Tts.TtsPythonPath = layout.TtsPythonPath;
+        if (!string.IsNullOrWhiteSpace(layout.TtsModelDirectory)) Tts.TtsModelDirectory = layout.TtsModelDirectory;
+        if (!string.IsNullOrWhiteSpace(layout.TtsVoiceDirectory)) Tts.TtsVoiceDirectory = layout.TtsVoiceDirectory;
+        if (!string.IsNullOrWhiteSpace(layout.TtsOutputDirectory)) Tts.TtsOutputDirectory = layout.TtsOutputDirectory;
         if (!string.IsNullOrWhiteSpace(layout.RerankerDirectory)) RagRerankerModelPath = layout.RerankerDirectory;
         UpdateLocalAiAssetsStatus();
         await SaveAsync();
@@ -342,26 +293,7 @@ public partial class SettingsViewModel : ObservableObject
     [RelayCommand]
     private void BrowseTtsOutput() => RequestTtsOutputPicker?.Invoke();
 
-    [RelayCommand]
-    private async Task SetActiveVoiceProviderAsync(VoiceProviderInfo? provider)
-    {
-        if (provider is null) return;
-
-        try
-        {
-            await _voiceProviderRegistry.SetActiveProviderAsync(provider.Id);
-            SelectedVoiceProvider = provider.Name;
-            await SaveAsync();
-            await RefreshTtsVoicesAsync();
-            OnPropertyChanged(nameof(IsLegacyVoiceBackend));
-            _toasts.Show("Voice provider changed", $"Now using {provider.Name}.", ToastKind.Success, 4000);
-        }
-        catch (Exception ex)
-        {
-            SettingsError = ex.Message;
-            _toasts.Show("Provider change failed", ex.Message, ToastKind.Error, 6000);
-        }
-    }
+    
 
     [RelayCommand]
     private async Task ScanLocalAiSetupAsync()
@@ -558,126 +490,9 @@ public partial class SettingsViewModel : ObservableObject
     [RelayCommand]
     private void ImportTtsVoiceSample() => RequestTtsVoiceSamplePicker?.Invoke();
 
-    [RelayCommand(CanExecute = nameof(CanStartTts))]
-    private async Task StartTtsAsync()
-    {
-        if (!IsLegacyVoiceBackend)
-        {
-            _toasts.Show("No voice server needed", "Kokoro and F5-TTS generate directly without a background server.", ToastKind.Info, 5000);
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(TtsScriptPath))
-        {
-            RequestTtsScriptPicker?.Invoke();
-            if (string.IsNullOrWhiteSpace(TtsScriptPath))
-            {
-                SettingsError = "Choose the XTTS API server script before starting XTTS.";
-                _toasts.Show("XTTS path needed", SettingsError, ToastKind.Warning);
-                return;
-            }
-        }
-
-        await SaveAsync();
-        if (!string.IsNullOrWhiteSpace(SettingsError)) return;
-
-        try
-        {
-            await _xttsProcess.StartAsync(_svc.Settings);
-            _toasts.Show("XTTS v2 started", $"Listening at {TtsServiceUrl}", ToastKind.Success);
-            await RefreshTtsVoicesAsync();
-        }
-        catch (Exception ex)
-        {
-            SettingsError = ex.Message;
-            _toasts.Show("XTTS v2 failed", ex.Message, ToastKind.Error, 7000);
-        }
-    }
-
-    [RelayCommand(CanExecute = nameof(CanStopTts))]
-    private void StopTts()
-    {
-        if (!IsLegacyVoiceBackend)
-        {
-            _toasts.Show("No voice server running", "The current provider does not use a background XTTS server.", ToastKind.Info, 4000);
-            return;
-        }
-
-        _xttsProcess.Stop();
-        _toasts.Show("XTTS v2 stopped", "The local voice server was stopped.", ToastKind.Info);
-    }
-
-    [RelayCommand]
-    private async Task RefreshTtsVoicesAsync()
-    {
-        SettingsError = string.Empty;
-        try
-        {
-            var voices = await _tts.GetVoicesAsync();
-            TtsVoices.Clear();
-            foreach (var voice in voices)
-                TtsVoices.Add(voice);
-
-            if (!string.IsNullOrWhiteSpace(TtsSpeaker) && !TtsVoices.Contains(TtsSpeaker))
-                TtsVoices.Add(TtsSpeaker);
-        }
-        catch (Exception ex)
-        {
-            SettingsError = $"Could not load voice list: {ex.Message}";
-            _toasts.Show("Voice list unavailable", ex.Message, ToastKind.Warning);
-        }
-    }
-
-    [RelayCommand]
-    private async Task PreviewTtsVoiceAsync()
-    {
-        await SaveAsync();
-        if (!string.IsNullOrWhiteSpace(SettingsError)) return;
-
-        try
-        {
-            await _tts.PreviewVoiceAsync(TtsSpeaker, TtsPreviewText);
-            _toasts.Show("Voice preview played", string.IsNullOrWhiteSpace(TtsSpeaker) ? "default" : TtsSpeaker, ToastKind.Success);
-        }
-        catch (Exception ex)
-        {
-            SettingsError = ex.Message;
-            _toasts.Show("Voice preview failed", ex.Message, ToastKind.Error, 7000);
-        }
-    }
-
-    public async Task ImportTtsVoiceSampleAsync(string sourcePath)
-    {
-        try
-        {
-            var imported = await _tts.ImportVoiceSampleAsync(sourcePath, TtsCloneDisplayName);
-            TtsSpeaker = imported;
-            await RefreshTtsVoicesAsync();
-            _toasts.Show("Voice imported", Path.GetFileName(imported), ToastKind.Success);
-        }
-        catch (Exception ex)
-        {
-            SettingsError = ex.Message;
-            _toasts.Show("Voice import failed", ex.Message, ToastKind.Error, 7000);
-        }
-    }
-
     [RelayCommand] private void Reset() => Reload();
 
     public void Shutdown() => _xttsProcess.Stop();
-
-    private bool CanStartTts() => IsLegacyVoiceBackend && !IsTtsRunning;
-    private bool CanStopTts() => IsLegacyVoiceBackend && IsTtsRunning;
-
-    partial void OnDataRootDirectoryChanged(string value) => UpdateMigrationPreview();
-    partial void OnLocalAiAssetsRootChanged(string value) => UpdateLocalAiAssetsStatus();
-    partial void OnSelectedVoiceProviderChanged(string value)
-    {
-        TtsStatus = IsLegacyVoiceBackend ? _xttsProcess.StatusLabel : "Ready";
-        OnPropertyChanged(nameof(IsLegacyVoiceBackend));
-        StartTtsCommand.NotifyCanExecuteChanged();
-        StopTtsCommand.NotifyCanExecuteChanged();
-    }
 
     private void UpdateMigrationPreview()
     {
@@ -706,11 +521,11 @@ public partial class SettingsViewModel : ObservableObject
     {
         var s = _svc.Settings;
         s.DataManagement.LocalAiAssetsRoot = LocalAiAssetsRoot.Trim();
-        s.Tts.PythonPath = TtsPythonPath.Trim();
-        s.Tts.ScriptPath = TtsScriptPath.Trim();
-        s.Tts.ModelDirectory = TtsModelDirectory.Trim();
-        s.Tts.OutputDirectory = TtsOutputDirectory.Trim();
-        s.Tts.VoiceDirectory = TtsVoiceDirectory.Trim();
+        s.Tts.PythonPath = Tts.TtsPythonPath.Trim();
+        s.Tts.ScriptPath = Tts.TtsScriptPath.Trim();
+        s.Tts.ModelDirectory = Tts.TtsModelDirectory.Trim();
+        s.Tts.OutputDirectory = Tts.TtsOutputDirectory.Trim();
+        s.Tts.VoiceDirectory = Tts.TtsVoiceDirectory.Trim();
         s.Rag.RerankerModelPath = RagRerankerModelPath.Trim();
         await _svc.SaveAsync(s.DataManagement.DataRootDirectory);
     }
@@ -719,11 +534,11 @@ public partial class SettingsViewModel : ObservableObject
     {
         var s = _svc.Settings;
         s.DataManagement.LocalAiAssetsRoot = LocalAiAssetsRoot.Trim();
-        s.Tts.PythonPath = TtsPythonPath.Trim();
-        s.Tts.ScriptPath = TtsScriptPath.Trim();
-        s.Tts.ModelDirectory = TtsModelDirectory.Trim();
-        s.Tts.OutputDirectory = TtsOutputDirectory.Trim();
-        s.Tts.VoiceDirectory = TtsVoiceDirectory.Trim();
+        s.Tts.PythonPath = Tts.TtsPythonPath.Trim();
+        s.Tts.ScriptPath = Tts.TtsScriptPath.Trim();
+        s.Tts.ModelDirectory = Tts.TtsModelDirectory.Trim();
+        s.Tts.OutputDirectory = Tts.TtsOutputDirectory.Trim();
+        s.Tts.VoiceDirectory = Tts.TtsVoiceDirectory.Trim();
     }
 
     private void ApplySetupResult(LocalAiSetupAction action, LocalAiSetupResult result)
@@ -734,16 +549,16 @@ public partial class SettingsViewModel : ObservableObject
         switch (action.Kind)
         {
             case LocalAiSetupActionKind.CreateVenv:
-                TtsPythonPath = result.UpdatedPath;
+                Tts.TtsPythonPath = result.UpdatedPath;
                 break;
             case LocalAiSetupActionKind.CreateXttsApiScript:
-                TtsScriptPath = result.UpdatedPath;
+                Tts.TtsScriptPath = result.UpdatedPath;
                 break;
             case LocalAiSetupActionKind.CreateDirectory when action.Id == "create-voices":
-                TtsVoiceDirectory = result.UpdatedPath;
+                Tts.TtsVoiceDirectory = result.UpdatedPath;
                 break;
             case LocalAiSetupActionKind.CreateDirectory when action.Id == "create-output":
-                TtsOutputDirectory = result.UpdatedPath;
+                Tts.TtsOutputDirectory = result.UpdatedPath;
                 break;
         }
     }

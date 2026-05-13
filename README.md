@@ -191,6 +191,10 @@ preferred built-in readback path and XTTS v2 retained as the legacy cloning
 backend. Aether Doctor now validates the configured Python and voice backend
 health before installs or playback.
 
+Note: TTS settings were recently refactored into a dedicated `TtsSettingsViewModel`.
+The Settings view now binds to `Tts.*` for TTS configuration and commands,
+improving separation of concerns and making the TTS logic easier to test.
+
 ## Data, Backup, Security
 
 Default data root:

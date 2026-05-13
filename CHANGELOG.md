@@ -58,6 +58,9 @@ Pre-1.0 versions may still change internal APIs and storage details.
   throughout Core, Services, ViewModels, and tests.
   Python validator constructor; repaired several setup & log view bindings.
 
+- Refactor: extract TTS settings and commands into `TtsSettingsViewModel`; clean
+  `SettingsViewModel`, update Settings view bindings, and move XTTS status handling
+  into the nested viewmodel to improve separation of concerns and testability.
 
 
 

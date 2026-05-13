@@ -91,20 +91,20 @@
                 <StackPanel Spacing="12">
                     <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
                         <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
-                            <CheckBox IsChecked="{Binding TtsEnabled}" />
+                            <CheckBox IsChecked="{Binding Tts.TtsEnabled}" />
                             <TextBlock Text="Voice providers" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center" />
-                            <TextBlock Text="{Binding SelectedVoiceProvider}" FontSize="11" Opacity="0.5" VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding Tts.SelectedVoiceProvider}" FontSize="11" Opacity="0.5" VerticalAlignment="Center" />
                         </StackPanel>
-                        <Button Grid.Column="1" Command="{Binding StartTtsCommand}"
+                        <Button Grid.Column="1" Command="{Binding Tts.StartTtsCommand}"
                                 IsVisible="{Binding IsLegacyVoiceBackend}"
                                 IsEnabled="{Binding !IsTtsRunning}"
                                 Content="Start" FontSize="12" Padding="12,5" CornerRadius="6" />
-                        <Button Grid.Column="1" Command="{Binding StopTtsCommand}"
+                        <Button Grid.Column="1" Command="{Binding Tts.StopTtsCommand}"
                                 IsVisible="{Binding IsLegacyVoiceBackend}"
                                 IsEnabled="{Binding IsTtsRunning}"
                                 Content="Stop" FontSize="12" Padding="12,5" CornerRadius="6" />
                         <Button Grid.Column="2" Classes="icon-btn"
-                                Command="{Binding RefreshTtsVoicesCommand}"
+                            Command="{Binding Tts.RefreshTtsVoicesCommand}"
                                 ToolTip.Tip="Refresh voices for the active provider">
                             <PathIcon Data="M17.65 6.35C16.2 4.9 14.21 4 12 4a8 8 0 0 0-8 8h2.5l-3.5 3.5L-.5 12H2a10 10 0 0 1 17.07-7.07l-1.42 1.42zM6.35 17.65C7.8 19.1 9.79 20 12 20a8 8 0 0 0 8-8h-2.5l3.5-3.5 3.5 3.5H22a10 10 0 0 1-17.07 7.07l1.42-1.42z"
                                       Width="15" Height="15" />
@@ -115,7 +115,7 @@
                             BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
                         <StackPanel Spacing="10">
                             <TextBlock Text="Voice Providers" FontSize="12" FontWeight="SemiBold" />
-                            <ItemsControl ItemsSource="{Binding VoiceProviders}">
+                            <ItemsControl ItemsSource="{Binding Tts.VoiceProviders}">
                                 <ItemsControl.ItemsPanel>
                                     <ItemsPanelTemplate>
                                         <WrapPanel ItemWidth="240" />
@@ -136,7 +136,7 @@
                                                 <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
                                                     <TextBlock Grid.Column="0" Text="{Binding IsInstalled, StringFormat=Ready: {0}}" FontSize="11" Opacity="0.65" />
                                                     <Button Grid.Column="1"
-                                                            Command="{Binding $parent[ItemsControl].DataContext.SetActiveVoiceProviderCommand}"
+                                                            Command="{Binding $parent[ItemsControl].DataContext.Tts.SetActiveVoiceProviderCommand}"
                                                             CommandParameter="{Binding}"
                                                             Content="Use"
                                                             FontSize="11" Padding="10,5" CornerRadius="6" />
@@ -154,34 +154,34 @@
                           RowSpacing="8" ColumnSpacing="12">
                         <TextBlock Grid.Row="0" Grid.Column="0" Text="Base URL"
                                    VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
-                        <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding TtsServiceUrl}"
+                        <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding Tts.TtsServiceUrl}"
                                  Watermark="http://127.0.0.1:8020"
                                  ToolTip.Tip="Local XTTS API endpoint Aether will call for voice playback."
                                  FontSize="13" CornerRadius="6" Padding="10,6" />
                         <TextBlock Grid.Row="1" Grid.Column="0" Text="Speaker"
                                    VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
                         <ComboBox Grid.Row="1" Grid.Column="1"
-                                  ItemsSource="{Binding TtsVoices}"
-                                  SelectedItem="{Binding TtsSpeaker}"
+                                  ItemsSource="{Binding Tts.TtsVoices}"
+                                  SelectedItem="{Binding Tts.TtsSpeaker}"
                                   FontSize="13" />
                         <TextBlock Grid.Row="2" Grid.Column="0" Text="Device"
                                    VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
                         <ComboBox Grid.Row="2" Grid.Column="1"
-                                  ItemsSource="{Binding TtsDevices}"
-                                  SelectedItem="{Binding TtsDevice}"
+                                  ItemsSource="{Binding Tts.TtsDevices}"
+                                  SelectedItem="{Binding Tts.TtsDevice}"
                                   FontSize="13" />
                         <CheckBox Grid.Row="2" Grid.Column="2"
-                                  IsChecked="{Binding TtsPreload}"
+                                  IsChecked="{Binding Tts.TtsPreload}"
                                   Content="Preload"
                                   FontSize="12" VerticalAlignment="Center" />
                         <TextBlock Grid.Row="3" Grid.Column="0" Text="Version"
                                    VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
-                        <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding TtsModelVersion}"
+                        <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding Tts.TtsModelVersion}"
                                  ToolTip.Tip="XTTS model version used when the API script loads by model name."
                                  Watermark="2.0.3" FontSize="13" CornerRadius="6" Padding="10,6" />
                         <TextBlock Grid.Row="4" Grid.Column="0" Text="Python"
                                    VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
-                        <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding TtsPythonPath, UpdateSourceTrigger=PropertyChanged}"
+                        <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding Tts.TtsPythonPath, UpdateSourceTrigger=PropertyChanged}"
                                  Watermark="/path/to/venv/bin/python"
                                  ToolTip.Tip="Python executable in the XTTS venv. Local AI Setup can create one after approval."
                                  FontSize="13" CornerRadius="6" Padding="10,6" />
@@ -194,7 +194,7 @@
                         </Button>
                         <TextBlock Grid.Row="5" Grid.Column="0" Text="Script"
                                    VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
-                        <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding TtsScriptPath, UpdateSourceTrigger=PropertyChanged}"
+                        <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding Tts.TtsScriptPath, UpdateSourceTrigger=PropertyChanged}"
                                  Watermark="/path/to/xtts_api_server.py" FontSize="13" CornerRadius="6" Padding="10,6" />
                         <Button Grid.Row="5" Grid.Column="2"
                                 Classes="icon-btn"
@@ -205,7 +205,7 @@
                         </Button>
                         <TextBlock Grid.Row="6" Grid.Column="0" Text="Model dir"
                                    VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
-                        <TextBox Grid.Row="6" Grid.Column="1" Text="{Binding TtsModelDirectory, UpdateSourceTrigger=PropertyChanged}"
+                        <TextBox Grid.Row="6" Grid.Column="1" Text="{Binding Tts.TtsModelDirectory, UpdateSourceTrigger=PropertyChanged}"
                                  Watermark="XTTS v2 model folder"
                                  ToolTip.Tip="Folder containing XTTS v2 config and model files."
                                  FontSize="13" CornerRadius="6" Padding="10,6" />
@@ -218,7 +218,7 @@
                         </Button>
                         <TextBlock Grid.Row="7" Grid.Column="0" Text="Output"
                                    VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
-                        <TextBox Grid.Row="7" Grid.Column="1" Text="{Binding TtsOutputDirectory, UpdateSourceTrigger=PropertyChanged}"
+                        <TextBox Grid.Row="7" Grid.Column="1" Text="{Binding Tts.TtsOutputDirectory, UpdateSourceTrigger=PropertyChanged}"
                                  Watermark="Default Aether XTTS folder" FontSize="13" CornerRadius="6" Padding="10,6" />
                         <Button Grid.Row="7" Grid.Column="2"
                                 Classes="icon-btn"
@@ -229,7 +229,7 @@
                         </Button>
                         <TextBlock Grid.Row="8" Grid.Column="0" Text="Voices"
                                    VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
-                        <TextBox Grid.Row="8" Grid.Column="1" Text="{Binding TtsVoiceDirectory, UpdateSourceTrigger=PropertyChanged}"
+                        <TextBox Grid.Row="8" Grid.Column="1" Text="{Binding Tts.TtsVoiceDirectory, UpdateSourceTrigger=PropertyChanged}"
                                  Watermark="Default Aether voice folder" FontSize="13" CornerRadius="6" Padding="10,6" />
                         <Button Grid.Row="8" Grid.Column="2"
                                 Classes="icon-btn"
@@ -240,17 +240,17 @@
                         </Button>
                         <TextBlock Grid.Row="9" Grid.Column="0" Text="Preview"
                                    VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
-                        <TextBox Grid.Row="9" Grid.Column="1" Text="{Binding TtsPreviewText}"
+                        <TextBox Grid.Row="9" Grid.Column="1" Text="{Binding Tts.TtsPreviewText}"
                                  Watermark="Preview sentence" FontSize="13" CornerRadius="6" Padding="10,6" />
                         <Button Grid.Row="9" Grid.Column="2"
-                                Command="{Binding PreviewTtsVoiceCommand}"
+                            Command="{Binding Tts.PreviewTtsVoiceCommand}"
                                 Content="Play" FontSize="12" Padding="10,5" CornerRadius="6" />
                         <TextBlock Grid.Row="10" Grid.Column="0" Text="Clone"
                                    VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
-                        <TextBox Grid.Row="10" Grid.Column="1" Text="{Binding TtsCloneDisplayName}"
+                        <TextBox Grid.Row="10" Grid.Column="1" Text="{Binding Tts.TtsCloneDisplayName}"
                                  Watermark="Imported voice name" FontSize="13" CornerRadius="6" Padding="10,6" />
                         <Button Grid.Row="10" Grid.Column="2"
-                                Command="{Binding ImportTtsVoiceSampleCommand}"
+                            Command="{Binding Tts.ImportTtsVoiceSampleCommand}"
                                 Content="Import" FontSize="12" Padding="10,5" CornerRadius="6" />
                     </Grid>
                     <TextBlock Text="Audio is held in memory and piped to the system player; Aether does not keep generated WAV files."
