@@ -195,6 +195,11 @@ Note: TTS settings were recently refactored into a dedicated `TtsSettingsViewMod
 The Settings view now binds to `Tts.*` for TTS configuration and commands,
 improving separation of concerns and making the TTS logic easier to test.
 
+RAG ingest improvements: the ingest pipeline now uses cancellable, batched
+embedding and storage steps to reduce DB lock contention and make long ingests
+abortable from the UI. Large ingests report progress per embedding and storage
+batch so the UI can surface better feedback and cancel if needed.
+
 ## Data, Backup, Security
 
 Default data root:

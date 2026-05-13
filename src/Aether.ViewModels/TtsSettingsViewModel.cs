@@ -49,7 +49,11 @@ public partial class TtsSettingsViewModel : ObservableObject
         get
         {
             var provider = VoiceProviders.FirstOrDefault(p => p.Name.Equals(SelectedVoiceProvider, StringComparison.OrdinalIgnoreCase));
-            return provider is not null && provider.Id == VoiceProvider.XttsV2;
+            // Legacy XTTS backend requires local capability and TTS support
+            return provider is not null
+                && provider.Id == VoiceProvider.XttsV2
+                && provider.Capabilities.HasFlag(VoiceCapability.Local)
+                && provider.Capabilities.HasFlag(VoiceCapability.TextToSpeech);
         }
     }
 
@@ -112,6 +116,13 @@ public partial class TtsSettingsViewModel : ObservableObject
     private async Task SetActiveVoiceProviderAsync(VoiceProviderInfo? provider)
     {
         if (provider is null) return;
+
+        // Enforce that providers exposed as selectable support TTS
+        if (!provider.Capabilities.HasFlag(VoiceCapability.TextToSpeech))
+        {
+            _toasts.Show("Provider not supported", $"{provider.Name} does not support text-to-speech.", ToastKind.Warning, 5000);
+            return;
+        }
 
         try
         {

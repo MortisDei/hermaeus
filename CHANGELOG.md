@@ -62,6 +62,14 @@ Pre-1.0 versions may still change internal APIs and storage details.
   `SettingsViewModel`, update Settings view bindings, and move XTTS status handling
   into the nested viewmodel to improve separation of concerns and testability.
 
+- Refactor Rag ingest: decompose embedding and storage into cancellable,
+  batched helpers (`EmbedChunksAsync`, `StoreChunksAsync`) to improve
+  responsiveness and make cancellation/reporting deterministic during large
+  ingests.
+
+- Tests: add cancellation tests that verify RAG ingest cancels cleanly during
+  embedding and storage phases to prevent long-running uninterruptible work.
+
 
 
 ## [0.8.7-alpha] - 2026-05-13

@@ -58,6 +58,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("RAG empty PDF warns and continues", RagEmptyPdfWarnsAndContinues),
     ("RAG ingest cancellation during embedding stops gracefully", RagIngestCancellationDuringEmbedding),
     ("RAG ingest cancellation during storage stops gracefully", RagIngestCancellationDuringStorage),
+    ("voice provider capability gating prevents unsupported providers", VoiceProviderCapabilityGating),
     ("agent task state serializes schema fields", AgentTaskStateSerializesSchemaFields),
     ("agent review queue reflects approval history", AgentReviewQueueReflectsApprovalHistory),
     ("agent workspace memory persists notes per workspace", AgentWorkspaceMemoryPersistsNotesPerWorkspace),
@@ -1071,6 +1072,23 @@ static async Task RagIngestCancellationDuringStorage()
     var chunks = await store.GetChunksAsync(dataset.Id, includeEmbeddings: false);
     // Cancellation during storage should prevent or reduce chunk persistence
     True(chunks.Count < 500, "cancellation during storage should prevent or reduce chunk persistence");
+}
+
+static async Task VoiceProviderCapabilityGating()
+{
+    using var temp = new TempDir();
+    var settings = NewSettings(temp);
+    var toasts = new FakeToasts();
+    var vm = new TtsSettingsViewModel(new FakeTts(), new FakeVoiceProviderRegistry(settings), toasts, new XttsProcessManager(), new FakeSecretStore(), settings);
+
+    var limited = new VoiceProviderInfo(VoiceProvider.Kokoro, "Kokoro-Limited", "No TTS", VoiceProviderCategory.Recommended, true, VoiceCapability.Local);
+    var asyncCmd = vm.SetActiveVoiceProviderCommand as CommunityToolkit.Mvvm.Input.IAsyncRelayCommand;
+    if (asyncCmd is not null)
+        await asyncCmd.ExecuteAsync(limited);
+    else
+        vm.SetActiveVoiceProviderCommand.Execute(limited);
+
+    Equal("Kokoro", vm.SelectedVoiceProvider, "provider without TTS should not become active");
 }
 
 static async Task AgentTaskStateSerializesSchemaFields()
