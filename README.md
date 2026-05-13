@@ -1,6 +1,6 @@
 # Aether
 
-Version: `0.8.7-alpha`
+Version: `0.9.0-alpha`
 
 A native, local-first Avalonia desktop AI workspace for `llama.cpp`, Ollama,
 OpenAI-compatible APIs, Oghma-grade RAG, agentic task work, and pluggable
@@ -42,8 +42,10 @@ local voice providers.
   rankings, reruns, and Markdown/JSON/CSV export.
 - System overview for app version, CPU, RAM, storage, databases, managed
   components, and best-effort GPU/VRAM visibility.
+- Aether Doctor checks for storage, runtimes, voice, RAG, GPU, and secrets.
 - Voice provider controls for Kokoro, F5-TTS, and XTTS v2, with preview and
   voice sample import.
+- Optional OpenAI voice provider for remote synthesis.
 - Local tasks, reminders, and app-running scheduled automations.
 - Tray integration, minimize-to-tray, local hotkeys, and Windows system-wide
   hotkeys.
@@ -148,6 +150,7 @@ In **Settings**, choose a voice provider:
 - **F5-TTS** - advanced voice cloning mode with heavier install requirements.
 - **XTTS v2** - legacy Coqui-compatible voice cloning backend, best kept for
   existing workflows that already depend on it.
+- **OpenAI** - optional remote voice synthesis for API users.
 
 XTTS v2 still supports the familiar local AI assets setup:
 
@@ -170,7 +173,8 @@ target path, command preview, risk, and expected result before Aether runs them.
 
 Voice provider setup is moving toward a pluggable layer, with Kokoro as the
 preferred built-in readback path and XTTS v2 retained as the legacy cloning
-backend.
+backend. Aether Doctor now validates the configured Python and voice backend
+health before installs or playback.
 
 ## Data, Backup, Security
 

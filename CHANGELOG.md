@@ -9,6 +9,13 @@ Pre-1.0 versions may still change internal APIs and storage details.
 
 ### Added
 
+- Voice provider abstraction with capabilities, health checks, and install
+  plans for Kokoro, F5-TTS, XTTS v2, and optional OpenAI voice.
+- Aether Doctor screen with environment checks for storage, runtimes, voice,
+  RAG, GPU visibility, and secrets, plus diagnostics copy and navigation.
+- Python health validator that rejects broken or non-relocatable Python
+  installs and surfaces actionable diagnostics.
+
 
 
 ## [0.8.7-alpha] - 2026-05-13
