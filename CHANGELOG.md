@@ -28,6 +28,27 @@ Pre-1.0 versions may still change internal APIs and storage details.
 
 ### Fixed
 
+- Refactor LLM provider routing in CompositeLlmService from hardcoded model
+  name prefix checks to metadata-driven ProviderTag routing; adds canonical
+  provider tagging to LlmModel discovery for OpenAI, Ollama, and llama.cpp.
+- Extract shared ExtraArgsParser utility for quote-aware command-line argument
+  tokenization; eliminates duplication between ServerProcessManager and
+  TrustService and centralizes parsing logic.
+- Guard SetupWizardViewModel runtime synchronisation loop to prevent infinite
+  re-entrancy via PropertyChanged events; replace event-driven sync with
+  guarded partial methods.
+- Fix MarkdownViewer timer lifecycle: move subscription to OnDetachedFromVisualTree,
+  add IDisposable implementation, and properly dispose timer on control detach
+  to prevent resource leaks.
+- Add logging for fire-and-forget background tasks in MainWindowViewModel;
+  capture exceptions in RunBackgroundTaskAsync helper and route them to
+  RuntimeLogService instead of silently discarding them.
+- Bound RagQueryService cache to 5 datasets maximum with LRU eviction policy;
+  prevent unbounded memory growth during long-running query sessions and
+  corpus re-rankings.
+- Harden OllamaService.ParseId to detect and reject model names containing
+  extra colons that would cause silent truncation; add ParseIdGuarded variant
+  for safer model name extraction.
 - Fix test harness and CI-only fakes to match new voice provider APIs and
   Python validator constructor; repaired several setup & log view bindings.
 
