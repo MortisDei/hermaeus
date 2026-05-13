@@ -22,6 +22,7 @@ public partial class MainWindowViewModel : ObservableObject
     public BenchmarkViewModel       Benchmarks { get; }
     public SystemOverviewViewModel  SystemOverview { get; }
     public DoctorViewModel          Doctor { get; }
+    public LogsViewModel            Logs { get; }
 
     public ObservableCollection<ConversationItemViewModel> Conversations { get; } = [];
     public ObservableCollection<ToastViewModel> Toasts { get; } = [];
@@ -45,6 +46,7 @@ public partial class MainWindowViewModel : ObservableObject
     public bool ShowBenchmarks => ActivePanel == "benchmarks";
     public bool ShowSystem => ActivePanel == "system";
     public bool ShowDoctor => ActivePanel == "doctor";
+    public bool ShowLogs => ActivePanel == "logs";
     public object ActiveViewModel => ActivePanel switch
     {
         "settings" => Settings,
@@ -56,6 +58,7 @@ public partial class MainWindowViewModel : ObservableObject
         "benchmarks" => Benchmarks,
         "system"   => SystemOverview,
         "doctor"   => Doctor,
+        "logs"     => Logs,
         _          => Chat
     };
 
@@ -71,13 +74,14 @@ public partial class MainWindowViewModel : ObservableObject
         BenchmarkViewModel benchmarks,
         SystemOverviewViewModel systemOverview,
         DoctorViewModel doctor,
+        LogsViewModel logs,
         IToastService toasts)
     {
         _sync = SynchronizationContext.Current;
         _toasts = toasts;
         _store = store; Chat = chat; Agent = agent; Settings = settings;
         Models = models; Rag = rag; Services = services; Tasks = tasks;
-        Benchmarks = benchmarks; SystemOverview = systemOverview; Doctor = doctor;
+        Benchmarks = benchmarks; SystemOverview = systemOverview; Doctor = doctor; Logs = logs;
         Doctor.RequestNavigate = panel => ActivePanel = panel;
         Chat.ConversationSaved += OnConversationSaved;
         Services.ServerAvailabilityChanged += (_, _) => _ = RefreshModelsAfterServerChangeAsync();
@@ -280,6 +284,7 @@ public partial class MainWindowViewModel : ObservableObject
         ActivePanel = "doctor";
         _ = Doctor.ScanCommand.ExecuteAsync(null);
     }
+    [RelayCommand] private void ShowLogsPanel()        => ActivePanel = "logs";
     [RelayCommand] private void ShowSettingsPanel()    { ActivePanel = "settings"; Settings.Reload(); }
 
     [RelayCommand]
@@ -327,6 +332,7 @@ public partial class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowBenchmarks));
         OnPropertyChanged(nameof(ShowSystem));
         OnPropertyChanged(nameof(ShowDoctor));
+        OnPropertyChanged(nameof(ShowLogs));
         OnPropertyChanged(nameof(ActiveViewModel));
     }
 

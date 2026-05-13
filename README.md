@@ -42,6 +42,7 @@ local voice providers.
   rankings, reruns, and Markdown/JSON/CSV export.
 - System overview for app version, CPU, RAM, storage, databases, managed
   components, and best-effort GPU/VRAM visibility.
+- Runtime logs with filters, copy, and redacted diagnostics export.
 - Aether Doctor checks for storage, runtimes, voice, RAG, GPU, and secrets.
 - Voice provider controls for Kokoro, F5-TTS, and XTTS v2, with preview and
   voice sample import.

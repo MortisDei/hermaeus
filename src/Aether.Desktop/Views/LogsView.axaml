@@ -1,0 +1,68 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Aether.ViewModels"
+             x:Class="Aether.Desktop.Views.LogsView"
+             x:DataType="vm:LogsViewModel">
+
+    <ScrollViewer Padding="24"
+                  VerticalScrollBarVisibility="Auto"
+                  HorizontalScrollBarVisibility="Disabled">
+        <StackPanel MaxWidth="780" Spacing="16">
+            <StackPanel Spacing="6">
+                <TextBlock Text="Runtime Logs" FontSize="22" FontWeight="SemiBold" />
+                <TextBlock Text="Filter and export runtime logs. Disk logs remain in the data root." FontSize="13" Opacity="0.5" />
+            </StackPanel>
+
+            <Border Classes="settings-card" Padding="14">
+                <StackPanel Spacing="10">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
+                            <TextBlock Text="Filter" FontSize="12" Opacity="0.6" VerticalAlignment="Center" />
+                            <ComboBox ItemsSource="{Binding Filters}"
+                                      SelectedItem="{Binding SelectedFilter}"
+                                      FontSize="12" Width="160" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                            <Button Command="{Binding CopyVisibleLogsCommand}"
+                                    Content="Copy visible logs"
+                                    FontSize="11" Padding="10,5" CornerRadius="6" />
+                            <Button Command="{Binding CopyRedactedDiagnosticsCommand}"
+                                    Content="Copy redacted diagnostics"
+                                    FontSize="11" Padding="10,5" CornerRadius="6" />
+                            <Button Command="{Binding OpenLogFolderCommand}"
+                                    Content="Open log folder"
+                                    FontSize="11" Padding="10,5" CornerRadius="6" />
+                            <Button Command="{Binding ClearViewCommand}"
+                                    Content="Clear view"
+                                    FontSize="11" Padding="10,5" CornerRadius="6" />
+                        </StackPanel>
+                    </Grid>
+                    <TextBlock Text="{Binding StatusText}" FontSize="11" Opacity="0.5" />
+                </StackPanel>
+            </Border>
+
+            <Border CornerRadius="8" BorderThickness="1"
+                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                    Background="{DynamicResource SubtleFillColorSecondaryBrush}">
+                <ScrollViewer MaxHeight="520" VerticalScrollBarVisibility="Auto">
+                    <ItemsControl ItemsSource="{Binding VisibleEntries}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock FontSize="12" TextWrapping="Wrap">
+                                    <TextBlock.Text>
+                                        <MultiBinding StringFormat="{0} [{1}] [{2}] {3}">
+                                            <Binding Path="Timestamp" StringFormat="{}{0:HH:mm:ss}" />
+                                            <Binding Path="Level" />
+                                            <Binding Path="Category" />
+                                            <Binding Path="Message" />
+                                        </MultiBinding>
+                                    </TextBlock.Text>
+                                </TextBlock>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

@@ -15,6 +15,7 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
     private readonly ISettingsService      _settings;
     private readonly ITrustService         _trust;
     private readonly IToastService         _toasts;
+    private readonly IRuntimeLogService    _runtimeLogs;
     private readonly ServerConfig          _config;
 
     [ObservableProperty] private string       _name;
@@ -75,13 +76,15 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
         ISettingsService settings,
         IRedactionService redactor,
         ITrustService trust,
-        IToastService toasts)
+        IToastService toasts,
+        IRuntimeLogService runtimeLogs)
     {
         _mgr = new ServerProcessManager(redactor);
         _config   = config;
         _settings = settings;
         _trust = trust;
         _toasts = toasts;
+        _runtimeLogs = runtimeLogs;
 
         _name           = config.Name;
         _executablePath = config.ExecutablePath;
@@ -100,11 +103,20 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
             ErrorMessage = _mgr.ErrorMessage;
             if (s is ServerStatus.Starting or ServerStatus.Error)
                 LogExpanded = true;
+            _runtimeLogs.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                s == ServerStatus.Error ? RuntimeLogLevel.Error : RuntimeLogLevel.Info,
+                RuntimeLogCategory.Service,
+                $"{Name} status: {StatusLabel}"));
             NotifyStatusProps();
         };
 
-        _mgr.LogLine += _ =>
+        _mgr.LogLine += line =>
+        {
             LogOutput = _mgr.GetLog();
+            if (!string.IsNullOrWhiteSpace(line))
+                _runtimeLogs.Add(MapLog(line));
+        };
     }
 
     [RelayCommand]
@@ -280,6 +292,26 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
             : $"{current.Trim()} {arg}";
     }
 
+    private RuntimeLogEntry MapLog(string line)
+    {
+        var lowered = line.ToLowerInvariant();
+        var level = lowered.Contains("error") || lowered.Contains("failed")
+            ? RuntimeLogLevel.Error
+            : lowered.Contains("warn") ? RuntimeLogLevel.Warning : RuntimeLogLevel.Info;
+
+        var category = lowered.Contains("starting") || lowered.Contains("launched") || lowered.Contains("ready")
+            ? RuntimeLogCategory.Startup
+            : lowered.Contains("model") || lowered.Contains("gguf")
+                ? RuntimeLogCategory.ModelLoad
+                : lowered.Contains("http") || lowered.Contains("port") || lowered.Contains("listen")
+                    ? RuntimeLogCategory.Network
+                    : lowered.Contains("voice") || lowered.Contains("tts")
+                        ? RuntimeLogCategory.Voice
+                        : RuntimeLogCategory.Service;
+
+        return new RuntimeLogEntry(DateTime.UtcNow, level, category, line);
+    }
+
     public void Dispose() => _mgr.Dispose();
 }
 
@@ -292,6 +324,7 @@ public partial class ServicesViewModel : ObservableObject
     private readonly IToastService _toasts;
     private readonly IRedactionService _redactor;
     private readonly ITrustService _trust;
+    private readonly IRuntimeLogService _runtimeLogs;
 
     public ObservableCollection<ServerProcessViewModel> Servers { get; } = [];
     public ObservableCollection<RuntimeProfileViewModel> RuntimeProfiles { get; } = [];
@@ -309,13 +342,15 @@ public partial class ServicesViewModel : ObservableObject
         IRuntimeProfileService runtimeProfiles,
         IToastService toasts,
         IRedactionService redactor,
-        ITrustService trust)
+        ITrustService trust,
+        IRuntimeLogService runtimeLogs)
     {
         _settings = settings;
         _runtimeProfiles = runtimeProfiles;
         _toasts = toasts;
         _redactor = redactor;
         _trust = trust;
+        _runtimeLogs = runtimeLogs;
         Rebuild();
         _settings.SettingsChanged += (_, _) => Rebuild();
     }
@@ -342,7 +377,7 @@ public partial class ServicesViewModel : ObservableObject
         {
             var vm = existing.TryGetValue(cfg.Id, out var current)
                 ? current
-                : new ServerProcessViewModel(cfg, _settings, _redactor, _trust, _toasts);
+                : new ServerProcessViewModel(cfg, _settings, _redactor, _trust, _toasts, _runtimeLogs);
 
             vm.PropertyChanged += OnServerPropertyChanged;
             Servers.Add(vm);
@@ -398,6 +433,11 @@ public partial class ServicesViewModel : ObservableObject
             var health = await _runtimeProfiles.CheckHealthAsync(item.ToProfile());
             item.HealthMessage = health.Message;
             item.IsHealthy = health.IsHealthy;
+            _runtimeLogs.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                health.IsHealthy ? RuntimeLogLevel.Info : RuntimeLogLevel.Warning,
+                RuntimeLogCategory.Network,
+                $"Runtime {item.Name} health: {health.Message}"));
             _toasts.Show(health.IsHealthy ? "Runtime healthy" : "Runtime unavailable",
                 $"{item.Name}: {health.Message}",
                 health.IsHealthy ? ToastKind.Success : ToastKind.Warning);

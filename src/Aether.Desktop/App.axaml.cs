@@ -76,6 +76,7 @@ public partial class App : Application
         s.AddSingleton<ISettingsService,   SettingsService>();
         s.AddSingleton<ISecretStore,       SecretStore>();
         s.AddSingleton<IRedactionService,  RedactionService>();
+        s.AddSingleton<IRuntimeLogService, RuntimeLogService>();
         s.AddSingleton<PythonHealthValidator>();
         s.AddSingleton<IBackupService,     BackupService>();
         s.AddSingleton<ILocalAiSetupService, LocalAiSetupService>();
@@ -120,6 +121,7 @@ public partial class App : Application
         s.AddSingleton<BenchmarkViewModel>();
         s.AddSingleton<SystemOverviewViewModel>();
         s.AddSingleton<DoctorViewModel>();
+        s.AddSingleton<LogsViewModel>();
         s.AddSingleton<MainWindowViewModel>();
     }
 }
