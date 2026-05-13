@@ -431,6 +431,12 @@ public sealed class RagPipeline
         IProgress<IngestProgress>? progress,
         CancellationToken ct)
     {
+        await EmbedChunksAsync(dataset, allChunks, progress, ct);
+        await StoreChunksAsync(dataset, allChunks, parentChunks, changedSourcePaths, progress, ct);
+    }
+
+    private async Task EmbedChunksAsync(RagDataset dataset, List<RagChunk> allChunks, IProgress<IngestProgress>? progress, CancellationToken ct)
+    {
         int total = allChunks.Count;
         progress?.Report(new IngestProgress("Embedding", 0, total, $"Embedding {total} chunks..."));
 
@@ -447,21 +453,49 @@ public sealed class RagPipeline
             progress?.Report(new IngestProgress("Embedding", Math.Min(i + EmbedBatchSize, total), total,
                 $"Batch {i / EmbedBatchSize + 1}"));
         }
+    }
 
+    private async Task StoreChunksAsync(
+        RagDataset dataset,
+        List<RagChunk> allChunks,
+        List<RagChunk> parentChunks,
+        HashSet<string> changedSourcePaths,
+        IProgress<IngestProgress>? progress,
+        CancellationToken ct)
+    {
+        int total = allChunks.Count;
         progress?.Report(new IngestProgress("Storing", 0, total, "Writing to SQLite..."));
+
         ct.ThrowIfCancellationRequested();
         await _store.SaveDatasetAsync(dataset, ct);
+
         ct.ThrowIfCancellationRequested();
         await _store.DeleteChunksForSourcesAsync(dataset.Id, changedSourcePaths, ct);
 
         if (parentChunks.Count > 0)
         {
             ct.ThrowIfCancellationRequested();
-            await _store.SaveChunksBatchAsync(parentChunks, ct);
+            // save parent chunks in smaller batches to allow cancellation responsiveness
+            const int saveBatch = 1000;
+            for (int i = 0; i < parentChunks.Count; i += saveBatch)
+            {
+                ct.ThrowIfCancellationRequested();
+                var batch = parentChunks.Skip(i).Take(saveBatch).ToList();
+                await _store.SaveChunksBatchAsync(batch, ct);
+                progress?.Report(new IngestProgress("Storing", Math.Min(i + saveBatch, total), total, "Writing parent chunks"));
+            }
         }
 
         ct.ThrowIfCancellationRequested();
-        await _store.SaveChunksBatchAsync(allChunks, ct);
+        // save main chunks in batches for responsiveness
+        const int mainSaveBatch = 1000;
+        for (int i = 0; i < allChunks.Count; i += mainSaveBatch)
+        {
+            ct.ThrowIfCancellationRequested();
+            var batch = allChunks.Skip(i).Take(mainSaveBatch).ToList();
+            await _store.SaveChunksBatchAsync(batch, ct);
+            progress?.Report(new IngestProgress("Storing", Math.Min(i + mainSaveBatch, total), total, $"Writing chunks {i}-{Math.Min(i + mainSaveBatch, total)}"));
+        }
 
         progress?.Report(new IngestProgress("Indexing", 0, 1, "Building BM25 stats..."));
         ct.ThrowIfCancellationRequested();
