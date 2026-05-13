@@ -1,4 +1,6 @@
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Linq;
 using Aether.Core.Models;
 using Aether.Core.Services;
 using Aether.Services;
@@ -67,6 +69,12 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private bool _localAiSetupBusy;
     [ObservableProperty] private string _localAiSetupLog = string.Empty;
     [ObservableProperty] private string _localAiSetupSummary = "Scan a local AI folder to see readiness.";
+    [ObservableProperty] private bool _localAiInstallPlanVisible;
+    [ObservableProperty] private string _localAiInstallPlanTitle = "Install plan";
+    [ObservableProperty] private string _localAiInstallPlanSummary = string.Empty;
+    [ObservableProperty] private string _localAiInstallPlanRisk = string.Empty;
+    [ObservableProperty] private string _localAiInstallPlanRiskNotes = string.Empty;
+    [ObservableProperty] private string _localAiInstallPlanActionId = string.Empty;
     [ObservableProperty] private bool _trustScanBusy;
     [ObservableProperty] private string _trustSummary = "Run a trust scan to review configured local tools.";
     [ObservableProperty] private string _trustLastScanned = string.Empty;
@@ -77,6 +85,8 @@ public partial class SettingsViewModel : ObservableObject
     public ObservableCollection<VoiceProviderInfo> VoiceProviders { get; } = [];
     public ObservableCollection<LocalAiReadinessItem> LocalAiReadinessItems { get; } = [];
     public ObservableCollection<LocalAiSetupAction> LocalAiSetupActions { get; } = [];
+    public ObservableCollection<string> LocalAiInstallPlanCreates { get; } = [];
+    public ObservableCollection<string> LocalAiInstallPlanInstalls { get; } = [];
     public ObservableCollection<TrustItem> TrustItems { get; } = [];
     public Action? RequestDataRootPicker { get; set; }
     public Action? RequestLocalAiAssetsRootPicker { get; set; }
@@ -395,6 +405,13 @@ public partial class SettingsViewModel : ObservableObject
             return;
         }
 
+        if (action.RequiresApproval && !string.Equals(LocalAiInstallPlanActionId, action.Id, StringComparison.Ordinal))
+        {
+            PreviewLocalAiInstallPlan(action);
+            _toasts.Show("Review install plan", "Review the install plan before approving this action.", ToastKind.Info, 6000);
+            return;
+        }
+
         await SaveLocalAiPathsForSetupAsync();
         LocalAiSetupBusy = true;
         LocalAiSetupLog = $"Approved: {action.Title}{Environment.NewLine}{action.CommandPreviewText}{Environment.NewLine}";
@@ -426,6 +443,71 @@ public partial class SettingsViewModel : ObservableObject
         {
             LocalAiSetupBusy = false;
         }
+    }
+
+    [RelayCommand]
+    private void PreviewLocalAiInstallPlan(LocalAiSetupAction? action)
+    {
+        if (action is null) return;
+
+        LocalAiInstallPlanCreates.Clear();
+        LocalAiInstallPlanInstalls.Clear();
+        LocalAiInstallPlanActionId = action.Id;
+        LocalAiInstallPlanTitle = action.Title;
+        LocalAiInstallPlanSummary = action.ExpectedResult;
+        LocalAiInstallPlanRisk = action.RiskLabel;
+        LocalAiInstallPlanRiskNotes = action.RequiresNetwork
+            ? "Downloads packages from the internet and runs local setup steps."
+            : "Runs local setup steps only.";
+
+        switch (action.Kind)
+        {
+            case LocalAiSetupActionKind.CreateVenv:
+            case LocalAiSetupActionKind.CreateXttsApiScript:
+            case LocalAiSetupActionKind.CreateDirectory:
+                if (!string.IsNullOrWhiteSpace(action.TargetPath))
+                    LocalAiInstallPlanCreates.Add(action.TargetPath);
+                break;
+            case LocalAiSetupActionKind.InstallXttsDependencies:
+                var packages = ExtractPackages(action.CommandPreview);
+                if (packages.Count == 0)
+                    LocalAiInstallPlanInstalls.Add("Python packages (see command preview)");
+                else
+                    foreach (var pkg in packages)
+                        LocalAiInstallPlanInstalls.Add(pkg);
+                break;
+        }
+
+        if (LocalAiInstallPlanCreates.Count == 0)
+            LocalAiInstallPlanCreates.Add("No new files are expected.");
+        if (LocalAiInstallPlanInstalls.Count == 0)
+            LocalAiInstallPlanInstalls.Add("No package installs expected.");
+
+        LocalAiInstallPlanVisible = true;
+    }
+
+    private static List<string> ExtractPackages(IReadOnlyList<string> commandPreview)
+    {
+        var packages = new List<string>();
+        if (commandPreview is null || commandPreview.Count == 0) return packages;
+
+        var installIndex = commandPreview
+            .Select((value, index) => new { value, index })
+            .FirstOrDefault(item => string.Equals(item.value, "install", StringComparison.OrdinalIgnoreCase))
+            ?.index ?? -1;
+
+        if (installIndex < 0 || installIndex + 1 >= commandPreview.Count)
+            return packages;
+
+        for (var i = installIndex + 1; i < commandPreview.Count; i++)
+        {
+            var value = commandPreview[i];
+            if (string.IsNullOrWhiteSpace(value)) continue;
+            if (value.StartsWith('-', StringComparison.Ordinal)) continue;
+            packages.Add(value);
+        }
+
+        return packages;
     }
 
     [RelayCommand]

@@ -169,7 +169,8 @@ WAV responses. Imported clone samples are copied only when explicitly imported.
 Local AI Setup can scan a selected AI folder and show readiness for GGUF models,
 Python venv, XTTS v2 model files, XTTS API script, voices, output folders, and
 the optional RAG reranker. Missing setup actions are approval-gated and show the
-target path, command preview, risk, and expected result before Aether runs them.
+target path, command preview, install plan, risk, and expected result before
+Aether runs them.
 
 Voice provider setup is moving toward a pluggable layer, with Kokoro as the
 preferred built-in readback path and XTTS v2 retained as the legacy cloning

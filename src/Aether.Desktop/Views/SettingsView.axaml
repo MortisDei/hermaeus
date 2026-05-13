@@ -341,13 +341,19 @@
                                                         <TextBlock Text="{Binding TargetPath}" FontSize="11" Opacity="0.58"
                                                                    TextWrapping="Wrap" />
                                                     </StackPanel>
-                                                    <Button Grid.Column="1"
-                                                            Content="Approve"
-                                                            IsEnabled="{Binding CanRun}"
-                                                            Command="{Binding $parent[ItemsControl].DataContext.RunLocalAiSetupActionCommand}"
-                                                            CommandParameter="{Binding}"
-                                                            ToolTip.Tip="Run this setup action after reviewing target, risk and command."
-                                                            FontSize="12" Padding="10,5" CornerRadius="6" />
+                                                    <StackPanel Grid.Column="1" Spacing="6">
+                                                        <Button Content="Plan"
+                                                                Command="{Binding $parent[ItemsControl].DataContext.PreviewLocalAiInstallPlanCommand}"
+                                                                CommandParameter="{Binding}"
+                                                                ToolTip.Tip="Preview the install plan before approval."
+                                                                FontSize="11" Padding="10,5" CornerRadius="6" />
+                                                        <Button Content="Approve"
+                                                                IsEnabled="{Binding CanRun}"
+                                                                Command="{Binding $parent[ItemsControl].DataContext.RunLocalAiSetupActionCommand}"
+                                                                CommandParameter="{Binding}"
+                                                                ToolTip.Tip="Run this setup action after reviewing target, risk and command."
+                                                                FontSize="11" Padding="10,5" CornerRadius="6" />
+                                                    </StackPanel>
                                                 </Grid>
                                                 <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
                                                     <TextBlock Grid.Column="0" Text="{Binding RiskLabel}" FontSize="11" Opacity="0.75" />
@@ -362,6 +368,43 @@
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
+                            <Border CornerRadius="6" Padding="10" Margin="0,2,0,0"
+                                    Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                    BorderThickness="1"
+                                    IsVisible="{Binding LocalAiInstallPlanVisible}">
+                                <StackPanel Spacing="8">
+                                    <TextBlock Text="{Binding LocalAiInstallPlanTitle}"
+                                               FontSize="12" FontWeight="SemiBold" />
+                                    <TextBlock Text="{Binding LocalAiInstallPlanSummary}"
+                                               FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="Will create" FontSize="11" Opacity="0.7" />
+                                        <ItemsControl ItemsSource="{Binding LocalAiInstallPlanCreates}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <TextBlock Text="{Binding}" FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="Will install" FontSize="11" Opacity="0.7" />
+                                        <ItemsControl ItemsSource="{Binding LocalAiInstallPlanInstalls}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <TextBlock Text="{Binding}" FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="Risk" FontSize="11" Opacity="0.7" />
+                                        <TextBlock Text="{Binding LocalAiInstallPlanRisk}" FontSize="11" Opacity="0.65" />
+                                        <TextBlock Text="{Binding LocalAiInstallPlanRiskNotes}" FontSize="11" Opacity="0.55" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
                             <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
                                 <TextBox Grid.Column="0" Text="{Binding LocalAiSetupLog}"
                                          AcceptsReturn="True" TextWrapping="Wrap"
