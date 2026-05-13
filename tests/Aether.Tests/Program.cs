@@ -125,7 +125,7 @@ static async Task DataRootMigrationRefusesConflicts()
     Equal(false, plan.WillMove, "migration preview should refuse conflicts");
     Equal(1, plan.Conflicts.Count, "conflicting db should be reported");
 
-    service.Settings.DataRootDirectory = next;
+    service.Settings.DataManagement.DataRootDirectory = next;
     await ThrowsAsync<IOException>(() => service.SaveAsync(previous));
 }
 
@@ -139,7 +139,7 @@ static async Task DataRootMigrationMovesFiles()
     File.WriteAllText(Path.Combine(previous, "conversations.db-shm"), "shm");
 
     var service = NewSettings(temp);
-    service.Settings.DataRootDirectory = next;
+    service.Settings.DataManagement.DataRootDirectory = next;
     var result = await service.SaveAsync(previous);
 
     Equal(true, result.DataMigrated, "migration should report moved data");
@@ -161,7 +161,7 @@ static async Task BackupExcludesSecretsAndRefusesOverwrite()
     File.WriteAllText(Path.Combine(root, "secrets.local.json"), "secret");
 
     var service = NewSettings(temp);
-    service.Settings.DataRootDirectory = root;
+    service.Settings.DataManagement.DataRootDirectory = root;
     var backups = new BackupService(service);
     var backup = await backups.BackupAsync(backupTarget);
 
@@ -174,7 +174,7 @@ static async Task BackupExcludesSecretsAndRefusesOverwrite()
     var restoreRoot = temp.PathFor("restore");
     Directory.CreateDirectory(restoreRoot);
     File.WriteAllText(Path.Combine(restoreRoot, "conversations.db"), "existing");
-    service.Settings.DataRootDirectory = restoreRoot;
+    service.Settings.DataManagement.DataRootDirectory = restoreRoot;
     await ThrowsAsync<IOException>(() => backups.RestoreAsync(backup.Path));
 }
 
@@ -198,7 +198,7 @@ static async Task BenchmarkDbCreatesAndRecordsRuns()
 {
     using var temp = new TempDir();
     var settings = NewSettings(temp);
-    settings.Settings.DataRootDirectory = temp.PathFor("data");
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
     var service = new BenchmarkService(settings, new FakeLlm(), new FakeSystemInfo());
 
     await service.InitializeAsync();
@@ -282,7 +282,7 @@ static async Task SystemInfoSafeFallback()
 {
     using var temp = new TempDir();
     var settings = NewSettings(temp);
-    settings.Settings.DataRootDirectory = temp.PathFor("data");
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
     var snapshot = await new SystemInfoService(settings).CaptureAsync();
     True(snapshot.ProcessorCount > 0, "processor count should be populated");
     True(!string.IsNullOrWhiteSpace(snapshot.OSDescription), "OS should be populated");
@@ -311,13 +311,13 @@ static Task LocalAiAssetsDetectAndApplyPaths()
     var layout = LocalAiAssetLocator.Detect(root);
     Equal(5, layout.FoundCount, "known asset paths should be detected");
 
-    var settings = new AppSettings { LocalAiAssetsRoot = root };
+    var settings = new AppSettings { DataManagement = { LocalAiAssetsRoot = root } };
     LocalAiAssetLocator.ApplyDetected(settings);
-    True(settings.TtsScriptPath.EndsWith("xtts_api_server.py", StringComparison.Ordinal), "XTTS script should be applied");
-    True(settings.TtsPythonPath.EndsWith(OperatingSystem.IsWindows() ? "python.exe" : "python", StringComparison.Ordinal), "XTTS venv python should be applied");
-    Equal(voices, settings.TtsVoiceDirectory, "voice directory should be applied");
-    Equal(output, settings.TtsOutputDirectory, "output directory should be applied");
-    Equal(encoder, settings.RagRerankerModelPath, "reranker directory should be applied");
+    True(settings.Tts.ScriptPath.EndsWith("xtts_api_server.py", StringComparison.Ordinal), "XTTS script should be applied");
+    True(settings.Tts.PythonPath.EndsWith(OperatingSystem.IsWindows() ? "python.exe" : "python", StringComparison.Ordinal), "XTTS venv python should be applied");
+    Equal(voices, settings.Tts.VoiceDirectory, "voice directory should be applied");
+    Equal(output, settings.Tts.OutputDirectory, "output directory should be applied");
+    Equal(encoder, settings.Rag.RerankerModelPath, "reranker directory should be applied");
     return Task.CompletedTask;
 }
 
@@ -336,16 +336,16 @@ static async Task SettingsApplyLocalAiAssetsPersistsPaths()
     File.WriteAllText(Path.Combine(venv, OperatingSystem.IsWindows() ? "python.exe" : "python"), string.Empty);
 
     var settings = NewSettings(temp);
-    settings.Settings.DataRootDirectory = temp.PathFor("data");
+    settings.Settings.DataManagement.LocalAiAssetsRoot = temp.PathFor("ai");
     var vm = NewSettingsViewModel(settings, new FakeSecretStore());
     vm.LocalAiAssetsRoot = root;
     await vm.ApplyLocalAiAssetsCommand.ExecuteAsync(null);
 
-    Equal(root, settings.Settings.LocalAiAssetsRoot, "local AI assets root should save immediately when paths are applied");
-    True(settings.Settings.TtsScriptPath.EndsWith("xtts_api_server.py", StringComparison.Ordinal),
+    Equal(root, settings.Settings.DataManagement.LocalAiAssetsRoot, "local AI assets root should save immediately when paths are applied");
+    True(settings.Settings.Tts.ScriptPath.EndsWith("xtts_api_server.py", StringComparison.Ordinal),
         "applied XTTS script should persist to settings");
-    Equal(voices, settings.Settings.TtsVoiceDirectory, "applied voice directory should persist to settings");
-    Equal(output, settings.Settings.TtsOutputDirectory, "applied output directory should persist to settings");
+    Equal(voices, settings.Settings.Tts.VoiceDirectory, "applied voice directory should persist to settings");
+    Equal(output, settings.Settings.Tts.OutputDirectory, "applied output directory should persist to settings");
 }
 
 static async Task LocalAiSetupDetectsFolderLayout()
@@ -363,7 +363,7 @@ static async Task LocalAiSetupDetectsFolderLayout()
     File.WriteAllText(Path.Combine(xtts, "config.json"), "{}");
     File.WriteAllText(Path.Combine(xtts, "model.pth"), string.Empty);
 
-    var settings = new AppSettings { LocalAiAssetsRoot = root };
+    var settings = new AppSettings { DataManagement = { LocalAiAssetsRoot = root } };
     var report = await new LocalAiSetupService(new PythonHealthValidator()).ScanAsync(settings);
 
     True(report.Items.Any(i => i.Key == "models" && i.Status == LocalAiReadinessStatus.Found), "GGUF model folder should be found");
@@ -408,7 +408,7 @@ static async Task LocalAiSetupCommandPreviewsStayShellFree()
     using var temp = new TempDir();
     var root = temp.PathFor("AI folder");
     Directory.CreateDirectory(root);
-    var report = await new LocalAiSetupService(new PythonHealthValidator()).ScanAsync(new AppSettings { LocalAiAssetsRoot = root });
+    var report = await new LocalAiSetupService(new PythonHealthValidator()).ScanAsync(new AppSettings { DataManagement = { LocalAiAssetsRoot = root } });
 
     var install = report.Actions.Single(a => a.Kind == LocalAiSetupActionKind.InstallXttsDependencies);
     ContainsInOrder(install.CommandPreview, "-m", "pip", "install preview should use ArgumentList-style tokens");
@@ -434,7 +434,7 @@ static async Task ChatContextAttachmentsBuildPromptAndPersistSummary()
 {
     using var temp = new TempDir();
     var settings = NewSettings(temp);
-    settings.Settings.DataRootDirectory = temp.PathFor("data");
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
     var store = new ConversationStore(settings);
     await store.InitializeAsync();
     var llm = new CapturingLlm();
@@ -484,7 +484,7 @@ static async Task ChatContextAttachmentsRemoveAndClear()
 {
     using var temp = new TempDir();
     var settings = NewSettings(temp);
-    settings.Settings.DataRootDirectory = temp.PathFor("data");
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
     var store = new ConversationStore(settings);
     await store.InitializeAsync();
     var vm = new ChatViewModel(new CapturingLlm(), store, settings, new FakeTts(), new ModelProfileService(settings));
@@ -555,7 +555,7 @@ static async Task ChatContextUsageUpdatesFromProvider()
 {
     using var temp = new TempDir();
     var settings = NewSettings(temp);
-    settings.Settings.DataRootDirectory = temp.PathFor("data");
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
     settings.Settings.ManagedServers[0].ContextSize = 100;
     var store = new ConversationStore(settings);
     await store.InitializeAsync();
@@ -574,7 +574,7 @@ static async Task ChatContextUsageEstimatesPendingContext()
 {
     using var temp = new TempDir();
     var settings = NewSettings(temp);
-    settings.Settings.DataRootDirectory = temp.PathFor("data");
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
     settings.Settings.ManagedServers[0].ContextSize = 100;
     var store = new ConversationStore(settings);
     await store.InitializeAsync();
@@ -605,7 +605,7 @@ static async Task TrustScanInsideAiRootIsLowRisk()
     await File.WriteAllTextAsync(bin, "trusted");
     await File.WriteAllTextAsync(model, "model");
 
-    var settings = new AppSettings { LocalAiAssetsRoot = root };
+    var settings = new AppSettings { DataManagement = { LocalAiAssetsRoot = root } };
     settings.ManagedServers.Clear();
     settings.ManagedServers.Add(new ServerConfig { Name = "Chat", ExecutablePath = bin, ModelPath = model });
 
@@ -626,7 +626,7 @@ static async Task TrustScanOutsideAiRootWarns()
     Directory.CreateDirectory(Path.GetDirectoryName(external)!);
     await File.WriteAllTextAsync(external, "external");
 
-    var settings = new AppSettings { LocalAiAssetsRoot = root };
+    var settings = new AppSettings { DataManagement = { LocalAiAssetsRoot = root } };
     settings.ManagedServers.Clear();
     settings.ManagedServers.Add(new ServerConfig { Name = "Chat", ExecutablePath = external, ModelPath = string.Empty });
 
@@ -643,7 +643,7 @@ static async Task TrustScanReportsMissingExecutable()
     var root = temp.PathFor("AI");
     Directory.CreateDirectory(root);
 
-    var settings = new AppSettings { LocalAiAssetsRoot = root };
+    var settings = new AppSettings { DataManagement = { LocalAiAssetsRoot = root } };
     settings.ManagedServers.Clear();
     settings.ManagedServers.Add(new ServerConfig { Name = "Chat", ExecutablePath = temp.PathFor("missing/llama-server"), ModelPath = string.Empty });
 
@@ -752,14 +752,14 @@ static async Task SecretStoreFallbackWithoutPlaintext()
     try
     {
         var settings = NewSettings(temp);
-        settings.Settings.DataRootDirectory = temp.PathFor("data");
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
         var store = new SecretStore(settings);
         var reference = await store.StoreAsync("openai-api-key", "sk-test-secret");
         Equal(true, store.IsReference(reference), "stored secret should return a reference");
         Equal("sk-test-secret", await store.ResolveAsync(reference), "secret reference should resolve");
         Equal("Local fallback file", await store.BackendLabelAsync(), "disabled keychain should use fallback label");
 
-        var localVault = Path.Combine(settings.Settings.DataRootDirectory, "secrets.local.json");
+        var localVault = Path.Combine(settings.Settings.DataManagement.DataRootDirectory, "secrets.local.json");
         True(File.Exists(localVault), "fallback vault should exist");
         var json = await File.ReadAllTextAsync(localVault);
         False(json.Contains("sk-test-secret", StringComparison.Ordinal), "fallback vault should not contain plaintext");
@@ -854,7 +854,7 @@ static async Task RagWebIngestStripsHtmlAndStoresChunks()
 {
     using var temp = new TempDir();
     var settings = NewSettings(temp);
-    settings.Settings.DataRootDirectory = temp.PathFor("data");
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
     var store = new SqliteRagStore(settings);
     await store.InitializeAsync();
 
@@ -907,7 +907,7 @@ static async Task RagDirectoryIngestIncludesPdfs()
 {
     using var temp = new TempDir();
     var settings = NewSettings(temp);
-    settings.Settings.DataRootDirectory = temp.PathFor("data");
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
     var store = new SqliteRagStore(settings);
     await store.InitializeAsync();
     var docs = temp.PathFor("docs");
@@ -929,7 +929,7 @@ static async Task RagDirectoryDryRunReportsWithoutPersisting()
 {
     using var temp = new TempDir();
     var settings = NewSettings(temp);
-    settings.Settings.DataRootDirectory = temp.PathFor("data");
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
     var store = new SqliteRagStore(settings);
     await store.InitializeAsync();
     var docs = temp.PathFor("docs");
@@ -950,7 +950,7 @@ static async Task RagDirectorySkipUnchangedAvoidsDuplicateChunks()
 {
     using var temp = new TempDir();
     var settings = NewSettings(temp);
-    settings.Settings.DataRootDirectory = temp.PathFor("data");
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
     var store = new SqliteRagStore(settings);
     await store.InitializeAsync();
     var docs = temp.PathFor("docs");
@@ -973,7 +973,7 @@ static async Task RagEmptyPdfWarnsAndContinues()
 {
     using var temp = new TempDir();
     var settings = NewSettings(temp);
-    settings.Settings.DataRootDirectory = temp.PathFor("data");
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
     var store = new SqliteRagStore(settings);
     await store.InitializeAsync();
     var docs = temp.PathFor("docs");
@@ -997,7 +997,7 @@ static async Task AgentTaskStateSerializesSchemaFields()
 {
     using var temp = new TempDir();
     var settings = NewSettings(temp);
-    settings.Settings.DataRootDirectory = temp.PathFor("data");
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
     var store = new FileAgentTaskStateStore(settings);
     var state = new AgentTaskState
     {
@@ -1025,7 +1025,7 @@ static async Task AgentReviewQueueReflectsApprovalHistory()
 {
     using var temp = new TempDir();
     var settings = NewSettings(temp);
-    settings.Settings.DataRootDirectory = temp.PathFor("data");
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
     var store = new FileAgentTaskStateStore(settings);
     await store.InitializeAsync();
 
@@ -1056,7 +1056,7 @@ static async Task AgentWorkspaceMemoryPersistsNotesPerWorkspace()
 {
     using var temp = new TempDir();
     var settings = NewSettings(temp);
-    settings.Settings.DataRootDirectory = temp.PathFor("data");
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
     var store = new FileAgentWorkspaceMemoryStore(settings);
     await store.InitializeAsync();
 
@@ -1124,7 +1124,7 @@ static async Task AgentContextPackStaysBounded()
     File.WriteAllText(Path.Combine(root, "alpha.txt"), "agent alpha context");
     File.WriteAllText(Path.Combine(root, "beta.txt"), "agent beta context");
     var settings = NewSettings(temp);
-    settings.Settings.DataRootDirectory = temp.PathFor("data");
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
     var ragStore = new SqliteRagStore(settings);
     var rag = new RagQueryService(ragStore, new FakeEmbeddingService(), new FakeLlm(), settings, new NoOpReranker());
     var builder = new AgentContextBuilder(new AgentWorkspaceTools(), rag, ragStore, new FileAgentWorkspaceMemoryStore(settings));
@@ -1179,7 +1179,7 @@ static async Task AgentLoopWritesStateLogAndTrace()
     Directory.CreateDirectory(root);
     File.WriteAllText(Path.Combine(root, "README.md"), "agent docs");
     var settings = NewSettings(temp);
-    settings.Settings.DataRootDirectory = temp.PathFor("data");
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
     var store = new FileAgentTaskStateStore(settings);
     var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new FakeAgentLlm());
     var options = new AgentWorkspaceOptions(root, ModelId: "fake-agent");
@@ -1262,17 +1262,17 @@ static async Task SettingsSaveMigratesOpenAiKey()
     try
     {
         var settings = NewSettings(temp);
-        settings.Settings.DataRootDirectory = temp.PathFor("data");
-        settings.Settings.OpenAiApiKey = "sk-plain-key-123456";
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        settings.Settings.Llm.OpenAiApiKey = "sk-plain-key-123456";
         var secrets = new SecretStore(settings);
         var vm = NewSettingsViewModel(settings, secrets);
 
         Equal("sk-plain-key-123456", vm.OpenAiApiKey, "plaintext setting should load into editable field");
         await vm.SaveCommand.ExecuteAsync(null);
 
-        True(secrets.IsReference(settings.Settings.OpenAiApiKey), "save should migrate plaintext key to a secret reference");
-        Equal("sk-plain-key-123456", await secrets.ResolveAsync(settings.Settings.OpenAiApiKey), "migrated reference should resolve");
-        var localVault = Path.Combine(settings.Settings.DataRootDirectory, "secrets.local.json");
+        True(secrets.IsReference(settings.Settings.Llm.OpenAiApiKey), "save should migrate plaintext key to a secret reference");
+        Equal("sk-plain-key-123456", await secrets.ResolveAsync(settings.Settings.Llm.OpenAiApiKey), "migrated reference should resolve");
+        var localVault = Path.Combine(settings.Settings.DataManagement.DataRootDirectory, "secrets.local.json");
         False((await File.ReadAllTextAsync(localVault)).Contains("sk-plain-key-123456", StringComparison.Ordinal),
             "migrated local vault should not contain plaintext");
     }
@@ -1290,16 +1290,16 @@ static async Task SettingsSavePreservesExistingSecretReference()
     try
     {
         var settings = NewSettings(temp);
-        settings.Settings.DataRootDirectory = temp.PathFor("data");
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
         var secrets = new SecretStore(settings);
         var reference = await secrets.StoreAsync("openai-api-key", "sk-existing-secret");
-        settings.Settings.OpenAiApiKey = reference;
+        settings.Settings.Llm.OpenAiApiKey = reference;
 
         var vm = NewSettingsViewModel(settings, secrets);
         Equal(string.Empty, vm.OpenAiApiKey, "existing secret reference should not be displayed");
         await vm.SaveCommand.ExecuteAsync(null);
 
-        Equal(reference, settings.Settings.OpenAiApiKey, "blank API key field should preserve existing reference");
+        Equal(reference, settings.Settings.Llm.OpenAiApiKey, "blank API key field should preserve existing reference");
         Equal("sk-existing-secret", await secrets.ResolveAsync(reference), "preserved reference should still resolve");
     }
     finally
@@ -1312,16 +1312,16 @@ static async Task SettingsSavePersistsGlobalHotkeyPreference()
 {
     using var temp = new TempDir();
     var settings = NewSettings(temp);
-    settings.Settings.DataRootDirectory = temp.PathFor("data");
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
     var vm = NewSettingsViewModel(settings, new FakeSecretStore());
 
     vm.EnableGlobalHotkeys = true;
     await vm.SaveCommand.ExecuteAsync(null);
-    True(settings.Settings.EnableGlobalHotkeys, "global hotkey setting should save when enabled");
+    True(settings.Settings.Ui.EnableGlobalHotkeys, "global hotkey setting should save when enabled");
 
     vm.EnableGlobalHotkeys = false;
     await vm.SaveCommand.ExecuteAsync(null);
-    False(settings.Settings.EnableGlobalHotkeys, "global hotkey setting should save when disabled");
+    False(settings.Settings.Ui.EnableGlobalHotkeys, "global hotkey setting should save when disabled");
 }
 
 static Task ServerProcessArgumentsAreSafe()
@@ -1551,7 +1551,7 @@ sealed class FakeVoiceProviderRegistry : IVoiceProviderRegistry
             new VoiceProviderInfo(VoiceProvider.XttsV2, "XTTS v2", "Legacy cloning.", VoiceProviderCategory.Legacy, true, VoiceCapability.TextToSpeech | VoiceCapability.VoiceCloning | VoiceCapability.Local)
         };
 
-    public VoiceProvider GetActiveProvider() => Enum.TryParse<VoiceProvider>(_settings.Settings.VoiceProvider, out var provider)
+    public VoiceProvider GetActiveProvider() => Enum.TryParse<VoiceProvider>(_settings.Settings.Tts.VoiceProvider, out var provider)
         ? provider
         : VoiceProvider.Kokoro;
 
@@ -1561,7 +1561,7 @@ sealed class FakeVoiceProviderRegistry : IVoiceProviderRegistry
 
     public Task SetActiveProviderAsync(VoiceProvider provider)
     {
-        _settings.Settings.VoiceProvider = provider.ToString();
+        _settings.Settings.Tts.VoiceProvider = provider.ToString();
         return Task.CompletedTask;
     }
 

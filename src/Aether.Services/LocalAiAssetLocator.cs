@@ -58,22 +58,22 @@ public static class LocalAiAssetLocator
 
     public static void ApplyDetected(AppSettings settings, bool overwrite = false)
     {
-        var layout = Detect(settings.LocalAiAssetsRoot);
+        var layout = Detect(settings.DataManagement.LocalAiAssetsRoot);
         if (string.IsNullOrWhiteSpace(layout.Root))
             return;
 
-        if (overwrite || string.IsNullOrWhiteSpace(settings.TtsScriptPath))
-            settings.TtsScriptPath = layout.TtsScriptPath;
-        if (overwrite || string.IsNullOrWhiteSpace(settings.TtsPythonPath))
-            settings.TtsPythonPath = layout.TtsPythonPath;
-        if (overwrite || string.IsNullOrWhiteSpace(settings.TtsModelDirectory))
-            settings.TtsModelDirectory = layout.TtsModelDirectory;
-        if (overwrite || string.IsNullOrWhiteSpace(settings.TtsVoiceDirectory))
-            settings.TtsVoiceDirectory = layout.TtsVoiceDirectory;
-        if (overwrite || string.IsNullOrWhiteSpace(settings.TtsOutputDirectory))
-            settings.TtsOutputDirectory = layout.TtsOutputDirectory;
-        if (overwrite || string.IsNullOrWhiteSpace(settings.RagRerankerModelPath))
-            settings.RagRerankerModelPath = layout.RerankerDirectory;
+        if (overwrite || string.IsNullOrWhiteSpace(settings.Tts.ScriptPath))
+            settings.Tts.ScriptPath = layout.TtsScriptPath;
+        if (overwrite || string.IsNullOrWhiteSpace(settings.Tts.PythonPath))
+            settings.Tts.PythonPath = layout.TtsPythonPath;
+        if (overwrite || string.IsNullOrWhiteSpace(settings.Tts.ModelDirectory))
+            settings.Tts.ModelDirectory = layout.TtsModelDirectory;
+        if (overwrite || string.IsNullOrWhiteSpace(settings.Tts.VoiceDirectory))
+            settings.Tts.VoiceDirectory = layout.TtsVoiceDirectory;
+        if (overwrite || string.IsNullOrWhiteSpace(settings.Tts.OutputDirectory))
+            settings.Tts.OutputDirectory = layout.TtsOutputDirectory;
+        if (overwrite || string.IsNullOrWhiteSpace(settings.Rag.RerankerModelPath))
+            settings.Rag.RerankerModelPath = layout.RerankerDirectory;
     }
 
     private static string FirstExistingDirectory(params string[] candidates) =>

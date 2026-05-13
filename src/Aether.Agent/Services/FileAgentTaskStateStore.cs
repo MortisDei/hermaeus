@@ -17,7 +17,7 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
     {
         get
         {
-            var configured = _settings.Settings.DataRootDirectory?.Trim();
+            var configured = _settings.Settings.DataManagement.DataRootDirectory?.Trim();
             var root = string.IsNullOrWhiteSpace(configured)
                 ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Aether")
                 : Path.GetFullPath(configured);

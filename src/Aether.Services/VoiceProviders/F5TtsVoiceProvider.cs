@@ -29,7 +29,7 @@ public sealed class F5TtsVoiceProvider : ITtsService, IVoiceProvider
         if (!VoiceProviderProcessRunner.IsExecutableAvailable(python))
             return new VoiceProviderDetection(false, "Python not found", "Install Python 3.11 or point Aether at a venv python.");
 
-        var voiceDir = _settings.Settings.TtsVoiceDirectory.Trim();
+        var voiceDir = _settings.Settings.Tts.VoiceDirectory.Trim();
         var hasVoice = Directory.Exists(voiceDir) && Directory.EnumerateFiles(voiceDir).Any();
         var summary = hasVoice ? "Voice samples detected" : "Voice samples missing";
         var detail = hasVoice
@@ -112,7 +112,7 @@ public sealed class F5TtsVoiceProvider : ITtsService, IVoiceProvider
 
     public Task<IReadOnlyList<string>> GetVoicesAsync(CancellationToken ct = default)
     {
-        var voiceDir = _settings.Settings.TtsVoiceDirectory.Trim();
+        var voiceDir = _settings.Settings.Tts.VoiceDirectory.Trim();
         if (!Directory.Exists(voiceDir))
             return Task.FromResult<IReadOnlyList<string>>([]);
 
@@ -133,7 +133,7 @@ public sealed class F5TtsVoiceProvider : ITtsService, IVoiceProvider
         if (!File.Exists(sourcePath))
             throw new FileNotFoundException($"Voice sample not found at {sourcePath}");
 
-        var targetDir = _settings.Settings.TtsVoiceDirectory.Trim();
+        var targetDir = _settings.Settings.Tts.VoiceDirectory.Trim();
         if (string.IsNullOrWhiteSpace(targetDir))
             throw new InvalidOperationException("TTS voice directory is not set.");
 
@@ -150,7 +150,7 @@ public sealed class F5TtsVoiceProvider : ITtsService, IVoiceProvider
 
     private async Task RenderAndPlayAsync(string text, string? speaker, CancellationToken ct)
     {
-        if (!_settings.Settings.TtsEnabled)
+        if (!_settings.Settings.Tts.Enabled)
             throw new InvalidOperationException("TTS is disabled in settings.");
 
         if (string.IsNullOrWhiteSpace(text))
@@ -174,7 +174,7 @@ public sealed class F5TtsVoiceProvider : ITtsService, IVoiceProvider
 
     private async Task<string> RenderToFileAsync(string text, string? speaker, string? outputPath, CancellationToken ct)
     {
-        if (!_settings.Settings.TtsEnabled)
+        if (!_settings.Settings.Tts.Enabled)
             throw new InvalidOperationException("TTS is disabled in settings.");
 
         if (string.IsNullOrWhiteSpace(text))
@@ -226,7 +226,7 @@ if not Path(args.output).exists():
         var run = await VoiceProviderProcessRunner.RunPythonScriptAsync(
             python,
             script,
-            ["--text", text, "--ref-audio", referenceFile, "--output", output, "--device", _settings.Settings.TtsDevice.Trim() ?? "cpu", "--model", "F5TTS_v1_Base"],
+            ["--text", text, "--ref-audio", referenceFile, "--output", output, "--device", _settings.Settings.Tts.Device.Trim() ?? "cpu", "--model", "F5TTS_v1_Base"],
             ct);
 
         if (!run.Success)
@@ -245,7 +245,7 @@ if not Path(args.output).exists():
         if (resolved is not null)
             return resolved;
 
-        var voiceDir = _settings.Settings.TtsVoiceDirectory.Trim();
+        var voiceDir = _settings.Settings.Tts.VoiceDirectory.Trim();
         if (!Directory.Exists(voiceDir))
             return null;
 

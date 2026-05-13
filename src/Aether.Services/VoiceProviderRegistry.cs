@@ -25,7 +25,7 @@ public sealed class VoiceProviderRegistry : IVoiceProviderRegistry
             { VoiceProvider.OpenAi, openAi }
         };
 
-        _activeProvider = ParseProviderFromSettings(settingsService.Settings.VoiceProvider);
+        _activeProvider = ParseProviderFromSettings(settingsService.Settings.Tts.VoiceProvider);
     }
 
     public IReadOnlyList<VoiceProviderInfo> GetAvailableProviders()
@@ -83,7 +83,7 @@ public sealed class VoiceProviderRegistry : IVoiceProviderRegistry
             throw new ArgumentException($"Unknown voice provider: {provider}");
 
         _activeProvider = provider;
-        _settingsService.Settings.VoiceProvider = provider.ToString();
+        _settingsService.Settings.Tts.VoiceProvider = provider.ToString();
         await _settingsService.SaveAsync();
     }
 

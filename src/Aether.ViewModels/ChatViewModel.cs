@@ -57,8 +57,8 @@ public partial class ChatViewModel : ObservableObject
         IModelProfileService profiles)
     {
         _llm = llm; _store = store; _settings = settings; _tts = tts; _profiles = profiles;
-        _temperature  = settings.Settings.Temperature;
-        _systemPrompt = settings.Settings.DefaultSystemPrompt;
+        _temperature  = settings.Settings.Llm.Temperature;
+        _systemPrompt = settings.Settings.Llm.DefaultSystemPrompt;
         Messages.CollectionChanged += (_, _) => HasMessages = Messages.Count > 0;
         ContextAttachments.CollectionChanged += (_, _) =>
         {
@@ -82,7 +82,7 @@ public partial class ChatViewModel : ObservableObject
         foreach (var m in models.Where(m => m.IsVisible)) AvailableModels.Add(m);
         if (AvailableModels.Count > 0)
         {
-            var def = _settings.Settings.DefaultModel;
+            var def = _settings.Settings.Llm.DefaultModel;
             var next = AvailableModels.FirstOrDefault(m => m.Id == current)
                 ?? AvailableModels.FirstOrDefault(m => m.Id == def)
                 ?? AvailableModels[0];
@@ -121,7 +121,7 @@ public partial class ChatViewModel : ObservableObject
     {
         CurrentConversationId = string.Empty;
         ConversationTitle     = "New Conversation";
-        SystemPrompt          = _settings.Settings.DefaultSystemPrompt;
+        SystemPrompt          = _settings.Settings.Llm.DefaultSystemPrompt;
         Messages.Clear();
     }
 
@@ -368,7 +368,7 @@ public partial class ChatViewModel : ObservableObject
         if (chatServer?.ContextSize is > 0)
             return chatServer.ContextSize;
 
-        return Math.Max(1, _settings.Settings.MaxTokens);
+        return Math.Max(1, _settings.Settings.Llm.MaxTokens);
     }
 
     private async Task PersistAsync()
@@ -423,7 +423,7 @@ public partial class ChatViewModel : ObservableObject
         if (value?.DefaultTemperature is { } temp)
             Temperature = temp;
         if (value?.DefaultMaxTokens is { } max && max > 0)
-            _settings.Settings.MaxTokens = max;
+            _settings.Settings.Llm.MaxTokens = max;
         SendCommand.NotifyCanExecuteChanged();
         RefreshEstimatedContextUsage();
     }

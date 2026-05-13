@@ -52,12 +52,12 @@ public sealed class SystemInfoService : ISystemInfoService
         snapshot.Components.Add(new ComponentStatus
         {
             Name = "Local AI assets",
-            Status = string.IsNullOrWhiteSpace(_settings.Settings.LocalAiAssetsRoot)
+            Status = string.IsNullOrWhiteSpace(_settings.Settings.DataManagement.LocalAiAssetsRoot)
                 ? "Not set"
-                : Directory.Exists(_settings.Settings.LocalAiAssetsRoot) ? "Ready" : "Missing",
-            Detail = string.IsNullOrWhiteSpace(_settings.Settings.LocalAiAssetsRoot)
+                : Directory.Exists(_settings.Settings.DataManagement.LocalAiAssetsRoot) ? "Ready" : "Missing",
+            Detail = string.IsNullOrWhiteSpace(_settings.Settings.DataManagement.LocalAiAssetsRoot)
                 ? "Choose an assets folder in Settings"
-                : Path.GetFullPath(_settings.Settings.LocalAiAssetsRoot)
+                : Path.GetFullPath(_settings.Settings.DataManagement.LocalAiAssetsRoot)
         });
         if (_secrets is not null)
         {

@@ -32,15 +32,15 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
         int topK,
         CancellationToken ct = default)
     {
-        if (!_settings.Settings.RagRerankerEnabled || _unavailable || candidates.Count == 0)
+        if (!_settings.Settings.Rag.RerankerEnabled || _unavailable || candidates.Count == 0)
             return candidates.Take(topK).ToList();
 
         var loaded = await EnsureLoadedAsync(ct);
         if (!loaded || _session is null || _tokenizer is null)
             return candidates.Take(topK).ToList();
 
-        var maxCandidates = Math.Clamp(_settings.Settings.RagRerankerMaxCandidates, topK, 100);
-        var maxLength = Math.Clamp(_settings.Settings.RagRerankerMaxLength, 64, 512);
+        var maxCandidates = Math.Clamp(_settings.Settings.Rag.RerankerMaxCandidates, topK, 100);
+        var maxLength = Math.Clamp(_settings.Settings.Rag.RerankerMaxLength, 64, 512);
         var reranked = new List<ScoredChunk>();
 
         foreach (var candidate in candidates.Take(maxCandidates))
@@ -76,7 +76,7 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
             var modelPath = Path.Combine(modelDir, ModelFileName);
             var vocabPath = Path.Combine(modelDir, VocabFileName);
 
-            if ((!File.Exists(modelPath) || !File.Exists(vocabPath)) && !_settings.Settings.RagRerankerAutoDownload)
+            if ((!File.Exists(modelPath) || !File.Exists(vocabPath)) && !_settings.Settings.Rag.RerankerAutoDownload)
             {
                 _unavailable = true;
                 return false;
@@ -170,10 +170,10 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
 
     private static string ResolveModelDirectory(AppSettings settings)
     {
-        if (!string.IsNullOrWhiteSpace(settings.RagRerankerModelPath))
-            return Path.GetFullPath(settings.RagRerankerModelPath);
+        if (!string.IsNullOrWhiteSpace(settings.Rag.RerankerModelPath))
+            return Path.GetFullPath(settings.Rag.RerankerModelPath);
 
-        var configured = settings.DataRootDirectory?.Trim();
+        var configured = settings.DataManagement.DataRootDirectory?.Trim();
         var root = string.IsNullOrWhiteSpace(configured)
             ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Aether")
             : Path.GetFullPath(configured);

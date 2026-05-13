@@ -22,7 +22,7 @@ public sealed class OpenAiService : IDisposable
     };
 
     public string ProviderName => "OpenAI";
-    public bool   IsConfigured => !string.IsNullOrWhiteSpace(_settings.Settings.OpenAiApiKey);
+    public bool   IsConfigured => !string.IsNullOrWhiteSpace(_settings.Settings.Llm.OpenAiApiKey);
 
     public OpenAiService(ISettingsService settings, ISecretStore secrets)
     {
@@ -31,10 +31,10 @@ public sealed class OpenAiService : IDisposable
         _http = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
     }
 
-    private string Base => _settings.Settings.OpenAiBaseUrl.TrimEnd('/');
+    private string Base => _settings.Settings.Llm.OpenAiBaseUrl.TrimEnd('/');
     private async Task AuthAsync(CancellationToken ct) =>
         _http.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", await _secrets.ResolveAsync(_settings.Settings.OpenAiApiKey, ct));
+            new AuthenticationHeaderValue("Bearer", await _secrets.ResolveAsync(_settings.Settings.Llm.OpenAiApiKey, ct));
 
     public async Task<List<LlmModel>> GetModelsAsync(CancellationToken ct = default)
     {
@@ -134,7 +134,7 @@ public sealed class OpenAiService : IDisposable
         try
         {
             await AuthAsync(ct);
-            var payload = BuildChatPayload(modelId, messages, systemPrompt, temperature, _settings.Settings.MaxTokens);
+            var payload = BuildChatPayload(modelId, messages, systemPrompt, temperature, _settings.Settings.Llm.MaxTokens);
             var req = new HttpRequestMessage(HttpMethod.Post, $"{Base}/v1/chat/completions")
                 { Content = JsonContent.Create(payload, options: JsonOpts) };
             var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);

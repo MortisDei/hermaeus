@@ -22,7 +22,7 @@ public sealed class OghmaRagService : IRagService, IDisposable
         _http = new HttpClient { Timeout = TimeSpan.FromSeconds(120) };
     }
 
-    private string Base => _settings.Settings.RagServiceUrl.TrimEnd('/');
+    private string Base => _settings.Settings.Rag.ServiceUrl.TrimEnd('/');
 
     public async Task<bool> CheckHealthAsync(CancellationToken ct = default)
     {

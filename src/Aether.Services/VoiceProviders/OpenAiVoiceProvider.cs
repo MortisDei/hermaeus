@@ -20,11 +20,11 @@ public sealed class OpenAiVoiceProvider : ITtsService, IVoiceProvider, IDisposab
         _settings = settings;
     }
 
-    public bool IsInstalled => !string.IsNullOrWhiteSpace(_settings.Settings.OpenAiApiKey);
+    public bool IsInstalled => !string.IsNullOrWhiteSpace(_settings.Settings.Llm.OpenAiApiKey);
 
     public VoiceProviderDetection Detect()
     {
-        if (string.IsNullOrWhiteSpace(_settings.Settings.OpenAiApiKey))
+        if (string.IsNullOrWhiteSpace(_settings.Settings.Llm.OpenAiApiKey))
             return new VoiceProviderDetection(false, "API key missing", "Set your OpenAI API key in Settings.");
 
         return new VoiceProviderDetection(true, "API key configured", "Remote voice generation available.");
@@ -44,7 +44,7 @@ public sealed class OpenAiVoiceProvider : ITtsService, IVoiceProvider, IDisposab
 
     public Task<VoiceHealth> HealthCheckAsync(CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(_settings.Settings.OpenAiApiKey))
+        if (string.IsNullOrWhiteSpace(_settings.Settings.Llm.OpenAiApiKey))
             return Task.FromResult(new VoiceHealth(VoiceHealthStatus.Unhealthy, "API key missing", "Add an OpenAI API key in Settings."));
 
         return Task.FromResult(new VoiceHealth(VoiceHealthStatus.Healthy, "OpenAI voice configured", "API key present."));
@@ -81,13 +81,13 @@ public sealed class OpenAiVoiceProvider : ITtsService, IVoiceProvider, IDisposab
 
     public async Task SpeakAsync(string text, CancellationToken ct = default)
     {
-        if (!_settings.Settings.TtsEnabled)
+        if (!_settings.Settings.Tts.Enabled)
             throw new InvalidOperationException("TTS is disabled in settings.");
 
         if (string.IsNullOrWhiteSpace(text))
             return;
 
-        var outputPath = await RenderToFileAsync(text, _settings.Settings.TtsSpeaker, null, ct);
+        var outputPath = await RenderToFileAsync(text, _settings.Settings.Tts.Speaker, null, ct);
         await VoiceProviderProcessRunner.PlayWavFileAsync(outputPath, ct);
         try { File.Delete(outputPath); }
         catch { }
@@ -95,7 +95,7 @@ public sealed class OpenAiVoiceProvider : ITtsService, IVoiceProvider, IDisposab
 
     public async Task PreviewVoiceAsync(string speaker, string text, CancellationToken ct = default)
     {
-        if (!_settings.Settings.TtsEnabled)
+        if (!_settings.Settings.Tts.Enabled)
             throw new InvalidOperationException("TTS is disabled in settings.");
 
         if (string.IsNullOrWhiteSpace(text))
@@ -120,11 +120,11 @@ public sealed class OpenAiVoiceProvider : ITtsService, IVoiceProvider, IDisposab
 
     private async Task<string> RenderToFileAsync(string text, string? voice, string? outputPath, CancellationToken ct)
     {
-        var key = _settings.Settings.OpenAiApiKey.Trim();
+        var key = _settings.Settings.Llm.OpenAiApiKey.Trim();
         if (string.IsNullOrWhiteSpace(key))
             throw new InvalidOperationException("OpenAI API key is missing.");
 
-        var baseUrl = _settings.Settings.OpenAiBaseUrl.TrimEnd('/');
+        var baseUrl = _settings.Settings.Llm.OpenAiBaseUrl.TrimEnd('/');
         var url = $"{baseUrl}/v1/audio/speech";
         var payload = new
         {

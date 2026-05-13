@@ -28,7 +28,7 @@ public sealed class LlamaCppService : IDisposable
         _http = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
     }
 
-    private string Base => _settings.Settings.LlamaCppBaseUrl.TrimEnd('/');
+    private string Base => _settings.Settings.Llm.LlamaCppBaseUrl.TrimEnd('/');
 
     public async Task<List<LlmModel>> GetModelsAsync(CancellationToken ct = default)
     {
@@ -121,7 +121,7 @@ public sealed class LlamaCppService : IDisposable
     {
         try
         {
-            var payload = BuildChatPayload(modelId, messages, systemPrompt, temperature, _settings.Settings.MaxTokens);
+            var payload = BuildChatPayload(modelId, messages, systemPrompt, temperature, _settings.Settings.Llm.MaxTokens);
             var req = new HttpRequestMessage(HttpMethod.Post, $"{Base}/v1/chat/completions")
                 { Content = JsonContent.Create(payload, options: JsonOpts) };
             var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);

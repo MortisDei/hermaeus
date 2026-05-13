@@ -17,15 +17,15 @@ public sealed class XttsService : ITtsService, IDisposable
 
     public async Task SpeakAsync(string text, CancellationToken ct = default)
     {
-        if (!_settings.Settings.TtsEnabled)
+        if (!_settings.Settings.Tts.Enabled)
             throw new InvalidOperationException("TTS is disabled in settings.");
 
         if (string.IsNullOrWhiteSpace(text))
             return;
 
-        var baseUrl = _settings.Settings.TtsServiceUrl.TrimEnd('/');
+        var baseUrl = _settings.Settings.Tts.ServiceUrl.TrimEnd('/');
 
-        var speaker = _settings.Settings.TtsSpeaker.Trim();
+        var speaker = _settings.Settings.Tts.Speaker.Trim();
         if (speaker.Equals("default", StringComparison.OrdinalIgnoreCase))
             speaker = string.Empty;
 
@@ -52,17 +52,17 @@ public sealed class XttsService : ITtsService, IDisposable
 
     public async Task PreviewVoiceAsync(string speaker, string text, CancellationToken ct = default)
     {
-        var previous = _settings.Settings.TtsSpeaker;
+        var previous = _settings.Settings.Tts.Speaker;
         try
         {
-            _settings.Settings.TtsSpeaker = speaker;
+            _settings.Settings.Tts.Speaker = speaker;
             await SpeakAsync(string.IsNullOrWhiteSpace(text)
                 ? "Aether voice preview is ready."
                 : text, ct);
         }
         finally
         {
-            _settings.Settings.TtsSpeaker = previous;
+            _settings.Settings.Tts.Speaker = previous;
         }
     }
 
@@ -91,7 +91,7 @@ public sealed class XttsService : ITtsService, IDisposable
 
     public async Task<IReadOnlyList<string>> GetVoicesAsync(CancellationToken ct = default)
     {
-        var baseUrl = _settings.Settings.TtsServiceUrl.TrimEnd('/');
+        var baseUrl = _settings.Settings.Tts.ServiceUrl.TrimEnd('/');
         var all = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "default" };
 
         foreach (var endpoint in new[] { "studio_speakers", "speakers_list", "speakers", "speaker_ids", "api/speakers", "api/speaker_ids", "api/speakers_list", "voices" })
@@ -167,8 +167,8 @@ public sealed class XttsService : ITtsService, IDisposable
 
     private string ResolveVoiceDirectory()
     {
-        if (!string.IsNullOrWhiteSpace(_settings.Settings.TtsVoiceDirectory))
-            return Path.GetFullPath(_settings.Settings.TtsVoiceDirectory.Trim());
+        if (!string.IsNullOrWhiteSpace(_settings.Settings.Tts.VoiceDirectory))
+            return Path.GetFullPath(_settings.Settings.Tts.VoiceDirectory.Trim());
 
         var dataRoot = SettingsService.ResolveDataRoot(_settings.Settings);
         return Path.Combine(dataRoot, "xtts-voices");

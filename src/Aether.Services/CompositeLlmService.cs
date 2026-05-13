@@ -37,9 +37,9 @@ public sealed class CompositeLlmService : ILlmService
             return _cachedModels.Select(Clone).ToList();
 
         var all = new List<LlmModel>();
-        if (_settings.Settings.LlamaCppEnabled)
+        if (_settings.Settings.Llm.LlamaCppEnabled)
             all.AddRange(await GetWithTimeoutAsync(_llamaCpp.GetModelsAsync, ct));
-        if (_settings.Settings.OpenAiEnabled && _openAi.IsConfigured)
+        if (_settings.Settings.Llm.OpenAiEnabled && _openAi.IsConfigured)
             all.AddRange(await GetWithTimeoutAsync(_openAi.GetModelsAsync, ct));
         all.AddRange(await GetWithTimeoutAsync(_ollama.GetModelsAsync, ct));
         _cachedModels.Clear();

@@ -83,7 +83,7 @@ public sealed class DoctorService : IDoctorService
 
     private async Task<DoctorCheck> CheckAiAssetsRootAsync(CancellationToken ct)
     {
-        var root = _settings.Settings.LocalAiAssetsRoot.Trim();
+        var root = _settings.Settings.DataManagement.LocalAiAssetsRoot.Trim();
         if (string.IsNullOrWhiteSpace(root))
         {
             return BuildCheck(
@@ -148,8 +148,8 @@ public sealed class DoctorService : IDoctorService
 
     private DoctorCheck CheckGgufModels()
     {
-        var layout = LocalAiAssetLocator.Detect(_settings.Settings.LocalAiAssetsRoot);
-        var dir = string.IsNullOrWhiteSpace(layout.ModelsDirectory) ? _settings.Settings.LocalAiAssetsRoot.Trim() : layout.ModelsDirectory;
+        var layout = LocalAiAssetLocator.Detect(_settings.Settings.DataManagement.LocalAiAssetsRoot);
+        var dir = string.IsNullOrWhiteSpace(layout.ModelsDirectory) ? _settings.Settings.DataManagement.LocalAiAssetsRoot.Trim() : layout.ModelsDirectory;
         if (string.IsNullOrWhiteSpace(dir) || !Directory.Exists(dir))
         {
             return BuildCheck(
@@ -250,7 +250,7 @@ public sealed class DoctorService : IDoctorService
 
     private async Task<DoctorCheck> CheckPythonAsync(CancellationToken ct)
     {
-        var python = _settings.Settings.TtsPythonPath.Trim();
+        var python = _settings.Settings.Tts.PythonPath.Trim();
         var report = await _pythonValidator.ValidateAsync(python, ct);
         var status = report.IsHealthy ? DoctorCheckStatus.Ready : DoctorCheckStatus.Error;
         if (!report.IsHealthy && report.Issues.Any(i => i.Code == "version"))
@@ -334,7 +334,7 @@ public sealed class DoctorService : IDoctorService
 
     private DoctorCheck CheckRerankerAssets()
     {
-        if (!_settings.Settings.RagRerankerEnabled)
+        if (!_settings.Settings.Rag.RerankerEnabled)
         {
             return BuildCheck(
                 "reranker",
@@ -505,8 +505,8 @@ public sealed class DoctorService : IDoctorService
 
     private string ResolveRerankerDirectory()
     {
-        if (!string.IsNullOrWhiteSpace(_settings.Settings.RagRerankerModelPath))
-            return Path.GetFullPath(_settings.Settings.RagRerankerModelPath);
+        if (!string.IsNullOrWhiteSpace(_settings.Settings.Rag.RerankerModelPath))
+            return Path.GetFullPath(_settings.Settings.Rag.RerankerModelPath);
 
         var root = SettingsService.ResolveDataRoot(_settings.Settings);
         return Path.Combine(root, "models", "rerank", "ms-marco-MiniLM-L6-v2");

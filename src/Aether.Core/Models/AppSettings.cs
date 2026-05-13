@@ -2,54 +2,64 @@ namespace Aether.Core.Models;
 
 public class AppSettings
 {
-    public string LlamaCppBaseUrl      { get; set; } = "http://localhost:8080";
-    public bool   LlamaCppEnabled      { get; set; } = true;
-    public string OpenAiBaseUrl        { get; set; } = "https://api.openai.com";
-    public string OpenAiApiKey         { get; set; } = string.Empty;
-    public bool   OpenAiEnabled        { get; set; } = false;
-    public string EmbeddingModel       { get; set; } = "nomic-embed-text";
-    public string DefaultModel         { get; set; } = string.Empty;
-    public string DefaultSystemPrompt  { get; set; } = string.Empty;
-    public double Temperature          { get; set; } = 0.7;
-    public int    MaxTokens            { get; set; } = 4096;
-    public bool   StreamResponses      { get; set; } = true;
-    public string Theme                { get; set; } = "System";
-    public bool   CtrlEnterToSend      { get; set; } = false;
-    public double FontSize             { get; set; } = 14;
-    public string DataRootDirectory    { get; set; } = string.Empty;
-    public string LocalAiAssetsRoot    { get; set; } = string.Empty;
-    public bool   RagEnabled           { get; set; } = false;
-    public string RagServiceUrl        { get; set; } = "http://localhost:8765";
-    public bool   RagRerankerEnabled   { get; set; } = true;
-    public bool   RagRerankerAutoDownload { get; set; } = true;
-    public string RagRerankerModelPath { get; set; } = string.Empty;
-    public int    RagRerankerMaxLength { get; set; } = 256;
-    public int    RagRerankerMaxCandidates { get; set; } = 20;
-    public bool   TtsEnabled           { get; set; } = true;
-    public string TtsServiceUrl        { get; set; } = "http://127.0.0.1:8020";
-    public string TtsSpeaker           { get; set; } = string.Empty;
-    public string TtsPythonPath        { get; set; } = "";
-    public string TtsScriptPath        { get; set; } = string.Empty;
-    public string TtsModelDirectory    { get; set; } = string.Empty;
-    public string TtsOutputDirectory   { get; set; } = "";
-    public string TtsDevice            { get; set; } = "cpu";
-    public string TtsModelVersion      { get; set; } = "2.0.3";
-    public bool   TtsPreload           { get; set; } = false;
-    public string TtsVoiceDirectory    { get; set; } = "";
-    public bool   StartMinimized       { get; set; } = false;
-    public bool   ShowQuickChat        { get; set; } = false;
-    public string VoiceProvider        { get; set; } = "Kokoro";
-    public bool   EnableTrayIcon       { get; set; } = true;
-    public bool   MinimizeToTray       { get; set; } = true;
-    public bool   EnableLocalHotkeys   { get; set; } = true;
-    public bool   EnableGlobalHotkeys  { get; set; } = false;
-    public bool   SetupWizardCompleted { get; set; } = false;
+    /// <summary>
+    /// LLM provider configuration (llama.cpp, OpenAI, model selection, generation parameters).
+    /// </summary>
+    public LlmSettings Llm { get; set; } = new();
+
+    /// <summary>
+    /// Text-to-Speech provider configuration (voice, device, model paths).
+    /// </summary>
+    public TtsSettings Tts { get; set; } = new();
+
+    /// <summary>
+    /// Retrieval-Augmented Generation configuration (service URL, reranking, embeddings).
+    /// </summary>
+    public RagSettings Rag { get; set; } = new();
+
+    /// <summary>
+    /// User interface configuration (theme, hotkeys, tray, fonts).
+    /// </summary>
+    public UiSettings Ui { get; set; } = new();
+
+    /// <summary>
+    /// Data management configuration (storage directories for data and AI assets).
+    /// </summary>
+    public DataManagementSettings DataManagement { get; set; } = new();
+
+    /// <summary>
+    /// Whether the first-run setup wizard has been completed.
+    /// </summary>
+    public bool SetupWizardCompleted { get; set; } = false;
+
+    /// <summary>
+    /// Voice provider-specific configurations (per-provider settings).
+    /// </summary>
     public Dictionary<string, VoiceProviderConfig> VoiceProviderConfigs { get; set; } = [];
+
+    /// <summary>
+    /// Saved chat model profiles with display names, tags, and defaults.
+    /// </summary>
     public List<ModelProfile> ModelProfiles { get; set; } = [];
+
+    /// <summary>
+    /// Alternative LLM runtime profiles (llama.cpp, Ollama, remote endpoints).
+    /// </summary>
     public List<RuntimeProfile> RuntimeProfiles { get; set; } = [];
+
+    /// <summary>
+    /// Local task items for task automation and scheduling.
+    /// </summary>
     public List<LocalTaskItem> Tasks { get; set; } = [];
+
+    /// <summary>
+    /// Scheduled automations for periodic task execution.
+    /// </summary>
     public List<ScheduledAutomation> Automations { get; set; } = [];
 
+    /// <summary>
+    /// Managed llama-server instances (Chat, Embeddings) with port, thread, and GPU configuration.
+    /// </summary>
     public List<ServerConfig> ManagedServers { get; set; } =
     [
         new ServerConfig

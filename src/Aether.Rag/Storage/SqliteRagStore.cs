@@ -32,7 +32,7 @@ public sealed class SqliteRagStore
 
     private string ResolveDataRoot()
     {
-        var configured = _settings.Settings.DataRootDirectory?.Trim();
+        var configured = _settings.Settings.DataManagement.DataRootDirectory?.Trim();
         if (!string.IsNullOrWhiteSpace(configured))
             return Path.GetFullPath(configured);
 

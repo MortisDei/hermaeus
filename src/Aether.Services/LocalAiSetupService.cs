@@ -22,7 +22,7 @@ public sealed class LocalAiSetupService : ILocalAiSetupService
     public async Task<LocalAiReadinessReport> ScanAsync(AppSettings settings, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        var root = settings.LocalAiAssetsRoot.Trim();
+        var root = settings.DataManagement.LocalAiAssetsRoot.Trim();
         var layout = LocalAiAssetLocator.Detect(root);
         var items = new List<LocalAiReadinessItem>();
         var actions = new List<LocalAiSetupAction>();
@@ -625,7 +625,7 @@ for check_name, passed in checks:
             return new LocalAiSetupResult(false, $"Refused to overwrite existing script at {target}.");
 
         Directory.CreateDirectory(Path.GetDirectoryName(target) ?? Environment.CurrentDirectory);
-        File.WriteAllText(target, BuildXttsApiScript(settings.TtsModelDirectory, settings.TtsOutputDirectory));
+        File.WriteAllText(target, BuildXttsApiScript(settings.Tts.ModelDirectory, settings.Tts.OutputDirectory));
         progress?.Report($"Wrote {target}");
         return new LocalAiSetupResult(true, $"Created XTTS API script at {target}", target);
     }

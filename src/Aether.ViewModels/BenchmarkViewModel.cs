@@ -62,7 +62,7 @@ public partial class BenchmarkViewModel : ObservableObject
         _profiles.ApplyProfiles(models);
         foreach (var model in models.Where(m => m.IsVisible))
             Models.Add(model);
-        SelectedModel ??= Models.FirstOrDefault(m => m.Id == _settings.Settings.DefaultModel) ?? Models.FirstOrDefault();
+        SelectedModel ??= Models.FirstOrDefault(m => m.Id == _settings.Settings.Llm.DefaultModel) ?? Models.FirstOrDefault();
 
         await ReloadRunsAsync();
         Status = $"Loaded {Suites.Count} suite(s), {Runs.Count} run(s).";

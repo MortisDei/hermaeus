@@ -19,9 +19,9 @@ public sealed class XttsProcessManager : IDisposable
         StatusLabel = "Starting";
         StatusChanged?.Invoke();
 
-        var baseUrl = new Uri(settings.TtsServiceUrl.TrimEnd('/'));
+        var baseUrl = new Uri(settings.Tts.ServiceUrl.TrimEnd('/'));
         var python = ResolvePython(settings);
-        var script = ResolveScript(settings.TtsScriptPath);
+        var script = ResolveScript(settings.Tts.ScriptPath);
         var outputDir = ResolveOutputDir(settings);
         Directory.CreateDirectory(outputDir);
 
@@ -40,17 +40,17 @@ public sealed class XttsProcessManager : IDisposable
         psi.ArgumentList.Add("--port");
         psi.ArgumentList.Add(baseUrl.Port.ToString());
         psi.ArgumentList.Add("--model-version");
-        psi.ArgumentList.Add(settings.TtsModelVersion);
+        psi.ArgumentList.Add(settings.Tts.ModelVersion);
         psi.ArgumentList.Add("--device");
-        psi.ArgumentList.Add(settings.TtsDevice);
+        psi.ArgumentList.Add(settings.Tts.Device);
         psi.ArgumentList.Add("--output-dir");
         psi.ArgumentList.Add(outputDir);
-        if (!string.IsNullOrWhiteSpace(settings.TtsModelDirectory))
+        if (!string.IsNullOrWhiteSpace(settings.Tts.ModelDirectory))
         {
             psi.ArgumentList.Add("--model-dir");
-            psi.ArgumentList.Add(Path.GetFullPath(settings.TtsModelDirectory.Trim()));
+            psi.ArgumentList.Add(Path.GetFullPath(settings.Tts.ModelDirectory.Trim()));
         }
-        if (settings.TtsPreload)
+        if (settings.Tts.Preload)
             psi.ArgumentList.Add("--preload");
 
         _process = new Process { StartInfo = psi, EnableRaisingEvents = true };
@@ -66,7 +66,7 @@ public sealed class XttsProcessManager : IDisposable
                 throw new InvalidOperationException("Failed to start XTTS v2 server.");
 
             _healthCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            await WaitForHealthAsync(settings.TtsServiceUrl, _healthCts.Token);
+            await WaitForHealthAsync(settings.Tts.ServiceUrl, _healthCts.Token);
             StatusLabel = "Running";
             StatusChanged?.Invoke();
         }
@@ -115,10 +115,10 @@ public sealed class XttsProcessManager : IDisposable
 
     private static string ResolvePython(AppSettings settings)
     {
-        if (!string.IsNullOrWhiteSpace(settings.TtsPythonPath))
-            return settings.TtsPythonPath.Trim();
+        if (!string.IsNullOrWhiteSpace(settings.Tts.PythonPath))
+            return settings.Tts.PythonPath.Trim();
 
-        var script = ResolveScript(settings.TtsScriptPath);
+        var script = ResolveScript(settings.Tts.ScriptPath);
         var repo = Path.GetDirectoryName(script) ?? string.Empty;
         var venv = Path.Combine(repo, "models", "tts", "xtts", "venv", OperatingSystem.IsWindows() ? "Scripts" : "bin", OperatingSystem.IsWindows() ? "python.exe" : "python");
         return File.Exists(venv) ? venv : "python3";
@@ -134,8 +134,8 @@ public sealed class XttsProcessManager : IDisposable
 
     private static string ResolveOutputDir(AppSettings settings)
     {
-        if (!string.IsNullOrWhiteSpace(settings.TtsOutputDirectory))
-            return Path.GetFullPath(settings.TtsOutputDirectory.Trim());
+        if (!string.IsNullOrWhiteSpace(settings.Tts.OutputDirectory))
+            return Path.GetFullPath(settings.Tts.OutputDirectory.Trim());
 
         return Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),

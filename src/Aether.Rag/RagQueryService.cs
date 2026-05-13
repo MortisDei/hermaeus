@@ -175,7 +175,7 @@ public sealed class RagQueryService
         var context = BuildContext(fused);
         var prompt  = BuildPrompt(question, context);
         var modelId = string.IsNullOrEmpty(opts.ModelId)
-            ? _settings.Settings.DefaultModel
+            ? _settings.Settings.Llm.DefaultModel
             : opts.ModelId;
 
         // Yield a structured header so the UI can parse sources

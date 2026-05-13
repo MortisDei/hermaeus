@@ -85,8 +85,8 @@ public sealed class RuntimeProfileService : IRuntimeProfileService, IDisposable
         {
             Name = "llama.cpp local",
             Kind = RuntimeKind.LlamaCpp,
-            BaseUrl = _settings.Settings.LlamaCppBaseUrl,
-            Enabled = _settings.Settings.LlamaCppEnabled,
+            BaseUrl = _settings.Settings.Llm.LlamaCppBaseUrl,
+            Enabled = _settings.Settings.Llm.LlamaCppEnabled,
             StartManagedLlamaServer = true,
             LinkedServerId = _settings.Settings.ManagedServers.FirstOrDefault(s => !s.EmbeddingsMode)?.Id ?? string.Empty
         });
@@ -101,9 +101,9 @@ public sealed class RuntimeProfileService : IRuntimeProfileService, IDisposable
         {
             Name = "OpenAI-compatible",
             Kind = RuntimeKind.OpenAiCompatible,
-            BaseUrl = _settings.Settings.OpenAiBaseUrl,
-            ApiKey = _settings.Settings.OpenAiApiKey,
-            Enabled = _settings.Settings.OpenAiEnabled
+            BaseUrl = _settings.Settings.Llm.OpenAiBaseUrl,
+            ApiKey = _settings.Settings.Llm.OpenAiApiKey,
+            Enabled = _settings.Settings.Llm.OpenAiEnabled
         });
     }
 

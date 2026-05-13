@@ -28,7 +28,7 @@ public sealed class SettingsService : ISettingsService
 
     public static string ResolveDataRoot(AppSettings settings)
     {
-        var configured = settings.DataRootDirectory?.Trim();
+        var configured = settings.DataManagement.DataRootDirectory?.Trim();
         return string.IsNullOrWhiteSpace(configured) ? DefaultDir : Path.GetFullPath(configured);
     }
 
@@ -46,7 +46,7 @@ public sealed class SettingsService : ISettingsService
 
     public async Task<SettingsSaveResult> SaveAsync(string? previousDataRootDirectory = null)
     {
-        var migration = MigrateDataRoot(previousDataRootDirectory, Settings.DataRootDirectory);
+        var migration = MigrateDataRoot(previousDataRootDirectory, Settings.DataManagement.DataRootDirectory);
         Directory.CreateDirectory(ResolveDataRoot(Settings));
         await File.WriteAllTextAsync(_path, JsonSerializer.Serialize(Settings, Opts));
         SettingsChanged?.Invoke(this, EventArgs.Empty);
@@ -55,8 +55,8 @@ public sealed class SettingsService : ISettingsService
 
     public DataMigrationPlan PreviewDataRootMigration(string? previousDataRootDirectory, string? nextDataRootDirectory)
     {
-        var previous = ResolveDataRoot(new AppSettings { DataRootDirectory = previousDataRootDirectory ?? string.Empty });
-        var next = ResolveDataRoot(new AppSettings { DataRootDirectory = nextDataRootDirectory ?? string.Empty });
+        var previous = ResolveDataRoot(new AppSettings { DataManagement = { DataRootDirectory = previousDataRootDirectory ?? string.Empty } });
+        var next = ResolveDataRoot(new AppSettings { DataManagement = { DataRootDirectory = nextDataRootDirectory ?? string.Empty } });
         if (string.Equals(previous, next, StringComparison.OrdinalIgnoreCase))
             return new DataMigrationPlan(false, previous, next, 0, []);
 
@@ -74,8 +74,8 @@ public sealed class SettingsService : ISettingsService
 
     private static SettingsSaveResult MigrateDataRoot(string? previousDataRootDirectory, string? nextDataRootDirectory)
     {
-        var previous = ResolveDataRoot(new AppSettings { DataRootDirectory = previousDataRootDirectory ?? string.Empty });
-        var next = ResolveDataRoot(new AppSettings { DataRootDirectory = nextDataRootDirectory ?? string.Empty });
+        var previous = ResolveDataRoot(new AppSettings { DataManagement = { DataRootDirectory = previousDataRootDirectory ?? string.Empty } });
+        var next = ResolveDataRoot(new AppSettings { DataManagement = { DataRootDirectory = nextDataRootDirectory ?? string.Empty } });
         ValidateDataRoot(next);
         if (string.Equals(previous, next, StringComparison.OrdinalIgnoreCase))
             return new SettingsSaveResult(false, previous, next, null, 0);

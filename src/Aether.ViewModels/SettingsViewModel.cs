@@ -154,44 +154,44 @@ public partial class SettingsViewModel : ObservableObject
     public void Reload()
     {
         var s = _svc.Settings;
-        LlamaCppBaseUrl     = s.LlamaCppBaseUrl;
-        LlamaCppEnabled     = s.LlamaCppEnabled;
-        OpenAiBaseUrl       = s.OpenAiBaseUrl;
-        OpenAiApiKey        = _secrets.IsReference(s.OpenAiApiKey) ? string.Empty : s.OpenAiApiKey;
-        OpenAiEnabled       = s.OpenAiEnabled;
-        EmbeddingModel      = s.EmbeddingModel;
-        DefaultSystemPrompt = s.DefaultSystemPrompt;
-        Temperature         = s.Temperature;
-        MaxTokens           = s.MaxTokens;
-        FontSize            = s.FontSize;
-        SelectedTheme       = s.Theme;
-        CtrlEnterToSend     = s.CtrlEnterToSend;
-        DataRootDirectory   = s.DataRootDirectory;
-        LocalAiAssetsRoot   = s.LocalAiAssetsRoot;
-        RagRerankerModelPath = s.RagRerankerModelPath;
-        TtsEnabled          = s.TtsEnabled;
-        TtsServiceUrl       = s.TtsServiceUrl;
-        TtsSpeaker          = s.TtsSpeaker;
-        TtsPythonPath       = s.TtsPythonPath;
-        TtsScriptPath       = s.TtsScriptPath;
-        TtsModelDirectory   = s.TtsModelDirectory;
-        TtsOutputDirectory  = s.TtsOutputDirectory;
-        TtsVoiceDirectory   = s.TtsVoiceDirectory;
-        TtsDevice           = s.TtsDevice;
-        TtsModelVersion     = s.TtsModelVersion;
-        TtsPreload          = s.TtsPreload;
-        StartMinimized      = s.StartMinimized;
-        ShowQuickChat       = s.ShowQuickChat;
-        EnableTrayIcon      = s.EnableTrayIcon;
-        MinimizeToTray      = s.MinimizeToTray;
-        EnableLocalHotkeys  = s.EnableLocalHotkeys;
-        EnableGlobalHotkeys = s.EnableGlobalHotkeys;
+        LlamaCppBaseUrl     = s.Llm.LlamaCppBaseUrl;
+        LlamaCppEnabled     = s.Llm.LlamaCppEnabled;
+        OpenAiBaseUrl       = s.Llm.OpenAiBaseUrl;
+        OpenAiApiKey        = _secrets.IsReference(s.Llm.OpenAiApiKey) ? string.Empty : s.Llm.OpenAiApiKey;
+        OpenAiEnabled       = s.Llm.OpenAiEnabled;
+        EmbeddingModel      = s.Rag.EmbeddingModel;
+        DefaultSystemPrompt = s.Llm.DefaultSystemPrompt;
+        Temperature         = s.Llm.Temperature;
+        MaxTokens           = s.Llm.MaxTokens;
+        FontSize            = s.Ui.FontSize;
+        SelectedTheme       = s.Ui.Theme;
+        CtrlEnterToSend     = s.Ui.CtrlEnterToSend;
+        DataRootDirectory   = s.DataManagement.DataRootDirectory;
+        LocalAiAssetsRoot   = s.DataManagement.LocalAiAssetsRoot;
+        RagRerankerModelPath = s.Rag.RerankerModelPath;
+        TtsEnabled          = s.Tts.Enabled;
+        TtsServiceUrl       = s.Tts.ServiceUrl;
+        TtsSpeaker          = s.Tts.Speaker;
+        TtsPythonPath       = s.Tts.PythonPath;
+        TtsScriptPath       = s.Tts.ScriptPath;
+        TtsModelDirectory   = s.Tts.ModelDirectory;
+        TtsOutputDirectory  = s.Tts.OutputDirectory;
+        TtsVoiceDirectory   = s.Tts.VoiceDirectory;
+        TtsDevice           = s.Tts.Device;
+        TtsModelVersion     = s.Tts.ModelVersion;
+        TtsPreload          = s.Tts.Preload;
+        StartMinimized      = s.Ui.StartMinimized;
+        ShowQuickChat       = s.Ui.ShowQuickChat;
+        EnableTrayIcon      = s.Ui.EnableTrayIcon;
+        MinimizeToTray      = s.Ui.MinimizeToTray;
+        EnableLocalHotkeys  = s.Ui.EnableLocalHotkeys;
+        EnableGlobalHotkeys = s.Ui.EnableGlobalHotkeys;
         TtsStatus           = IsLegacyVoiceBackend ? _xttsProcess.StatusLabel : "Ready";
         OnPropertyChanged(nameof(IsTtsRunning));
         VoiceProviders.Clear();
         foreach (var provider in _voiceProviderRegistry.GetAvailableProviders())
             VoiceProviders.Add(provider);
-        SelectedVoiceProvider = s.VoiceProvider;
+        SelectedVoiceProvider = s.Tts.VoiceProvider;
         OnPropertyChanged(nameof(IsLegacyVoiceBackend));
         UpdateMigrationPreview();
         UpdateLocalAiAssetsStatus();
@@ -201,42 +201,42 @@ public partial class SettingsViewModel : ObservableObject
     private async Task SaveAsync()
     {
         var s = _svc.Settings;
-        var previousDataRoot = s.DataRootDirectory;
+        var previousDataRoot = s.DataManagement.DataRootDirectory;
         SettingsError = string.Empty;
-        s.LlamaCppBaseUrl     = LlamaCppBaseUrl;
-        s.LlamaCppEnabled     = LlamaCppEnabled;
-        s.OpenAiBaseUrl       = OpenAiBaseUrl;
+        s.Llm.LlamaCppBaseUrl     = LlamaCppBaseUrl;
+        s.Llm.LlamaCppEnabled     = LlamaCppEnabled;
+        s.Llm.OpenAiBaseUrl       = OpenAiBaseUrl;
         if (!string.IsNullOrWhiteSpace(OpenAiApiKey))
-            s.OpenAiApiKey = await _secrets.StoreAsync("openai-api-key", OpenAiApiKey.Trim());
-        s.OpenAiEnabled       = OpenAiEnabled;
-        s.EmbeddingModel      = EmbeddingModel;
-        s.DefaultSystemPrompt = DefaultSystemPrompt;
-        s.Temperature         = Temperature;
-        s.MaxTokens           = MaxTokens;
-        s.FontSize            = FontSize;
-        s.Theme               = SelectedTheme;
-        s.CtrlEnterToSend     = CtrlEnterToSend;
-        s.DataRootDirectory   = DataRootDirectory.Trim();
-        s.LocalAiAssetsRoot   = LocalAiAssetsRoot.Trim();
-        s.RagRerankerModelPath = RagRerankerModelPath.Trim();
-        s.TtsEnabled          = TtsEnabled;
-        s.TtsServiceUrl       = TtsServiceUrl;
-        s.TtsSpeaker          = TtsSpeaker;
-        s.TtsPythonPath       = TtsPythonPath.Trim();
-        s.TtsScriptPath       = TtsScriptPath.Trim();
-        s.TtsModelDirectory   = TtsModelDirectory.Trim();
-        s.TtsOutputDirectory  = TtsOutputDirectory.Trim();
-        s.TtsVoiceDirectory   = TtsVoiceDirectory.Trim();
-        s.TtsDevice           = TtsDevice;
-        s.TtsModelVersion     = TtsModelVersion.Trim();
-        s.TtsPreload          = TtsPreload;
-        s.StartMinimized      = StartMinimized;
-        s.VoiceProvider       = SelectedVoiceProvider;
-        s.ShowQuickChat       = ShowQuickChat;
-        s.EnableTrayIcon      = EnableTrayIcon;
-        s.MinimizeToTray      = MinimizeToTray;
-        s.EnableLocalHotkeys  = EnableLocalHotkeys;
-        s.EnableGlobalHotkeys = EnableGlobalHotkeys;
+            s.Llm.OpenAiApiKey = await _secrets.StoreAsync("openai-api-key", OpenAiApiKey.Trim());
+        s.Llm.OpenAiEnabled       = OpenAiEnabled;
+        s.Rag.EmbeddingModel      = EmbeddingModel;
+        s.Llm.DefaultSystemPrompt = DefaultSystemPrompt;
+        s.Llm.Temperature         = Temperature;
+        s.Llm.MaxTokens           = MaxTokens;
+        s.Ui.FontSize            = FontSize;
+        s.Ui.Theme               = SelectedTheme;
+        s.Ui.CtrlEnterToSend     = CtrlEnterToSend;
+        s.DataManagement.DataRootDirectory   = DataRootDirectory.Trim();
+        s.DataManagement.LocalAiAssetsRoot   = LocalAiAssetsRoot.Trim();
+        s.Rag.RerankerModelPath = RagRerankerModelPath.Trim();
+        s.Tts.Enabled          = TtsEnabled;
+        s.Tts.ServiceUrl       = TtsServiceUrl;
+        s.Tts.Speaker          = TtsSpeaker;
+        s.Tts.PythonPath       = TtsPythonPath.Trim();
+        s.Tts.ScriptPath       = TtsScriptPath.Trim();
+        s.Tts.ModelDirectory   = TtsModelDirectory.Trim();
+        s.Tts.OutputDirectory  = TtsOutputDirectory.Trim();
+        s.Tts.VoiceDirectory   = TtsVoiceDirectory.Trim();
+        s.Tts.Device           = TtsDevice;
+        s.Tts.ModelVersion     = TtsModelVersion.Trim();
+        s.Tts.Preload          = TtsPreload;
+        s.Ui.StartMinimized      = StartMinimized;
+        s.Tts.VoiceProvider       = SelectedVoiceProvider;
+        s.Ui.ShowQuickChat       = ShowQuickChat;
+        s.Ui.EnableTrayIcon      = EnableTrayIcon;
+        s.Ui.MinimizeToTray      = MinimizeToTray;
+        s.Ui.EnableLocalHotkeys  = EnableLocalHotkeys;
+        s.Ui.EnableGlobalHotkeys = EnableGlobalHotkeys;
         try
         {
             var result = await _svc.SaveAsync(previousDataRoot);
@@ -248,7 +248,7 @@ public partial class SettingsViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            s.DataRootDirectory = previousDataRoot;
+            s.DataManagement.DataRootDirectory = previousDataRoot;
             DataRootDirectory = previousDataRoot;
             SettingsError = ex.Message;
             _toasts.Show("Settings not saved", ex.Message, ToastKind.Error);
@@ -681,7 +681,7 @@ public partial class SettingsViewModel : ObservableObject
 
     private void UpdateMigrationPreview()
     {
-        var plan = _svc.PreviewDataRootMigration(_svc.Settings.DataRootDirectory, DataRootDirectory);
+        var plan = _svc.PreviewDataRootMigration(_svc.Settings.DataManagement.DataRootDirectory, DataRootDirectory);
         DataMigrationPreview = plan.Conflicts.Count > 0
             ? $"Move blocked: {plan.Conflicts.Count} existing database file(s) in target."
             : plan.WillMove
@@ -691,7 +691,7 @@ public partial class SettingsViewModel : ObservableObject
 
     private string ResolveDataRoot()
     {
-        var configured = _svc.Settings.DataRootDirectory?.Trim();
+        var configured = _svc.Settings.DataManagement.DataRootDirectory?.Trim();
         return string.IsNullOrWhiteSpace(configured)
             ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Aether")
             : Path.GetFullPath(configured);
@@ -705,25 +705,25 @@ public partial class SettingsViewModel : ObservableObject
     private async Task SaveLocalAiPathsForSetupAsync()
     {
         var s = _svc.Settings;
-        s.LocalAiAssetsRoot = LocalAiAssetsRoot.Trim();
-        s.TtsPythonPath = TtsPythonPath.Trim();
-        s.TtsScriptPath = TtsScriptPath.Trim();
-        s.TtsModelDirectory = TtsModelDirectory.Trim();
-        s.TtsOutputDirectory = TtsOutputDirectory.Trim();
-        s.TtsVoiceDirectory = TtsVoiceDirectory.Trim();
-        s.RagRerankerModelPath = RagRerankerModelPath.Trim();
-        await _svc.SaveAsync(s.DataRootDirectory);
+        s.DataManagement.LocalAiAssetsRoot = LocalAiAssetsRoot.Trim();
+        s.Tts.PythonPath = TtsPythonPath.Trim();
+        s.Tts.ScriptPath = TtsScriptPath.Trim();
+        s.Tts.ModelDirectory = TtsModelDirectory.Trim();
+        s.Tts.OutputDirectory = TtsOutputDirectory.Trim();
+        s.Tts.VoiceDirectory = TtsVoiceDirectory.Trim();
+        s.Rag.RerankerModelPath = RagRerankerModelPath.Trim();
+        await _svc.SaveAsync(s.DataManagement.DataRootDirectory);
     }
 
     private void SyncSettingsForTrustScan()
     {
         var s = _svc.Settings;
-        s.LocalAiAssetsRoot = LocalAiAssetsRoot.Trim();
-        s.TtsPythonPath = TtsPythonPath.Trim();
-        s.TtsScriptPath = TtsScriptPath.Trim();
-        s.TtsModelDirectory = TtsModelDirectory.Trim();
-        s.TtsOutputDirectory = TtsOutputDirectory.Trim();
-        s.TtsVoiceDirectory = TtsVoiceDirectory.Trim();
+        s.DataManagement.LocalAiAssetsRoot = LocalAiAssetsRoot.Trim();
+        s.Tts.PythonPath = TtsPythonPath.Trim();
+        s.Tts.ScriptPath = TtsScriptPath.Trim();
+        s.Tts.ModelDirectory = TtsModelDirectory.Trim();
+        s.Tts.OutputDirectory = TtsOutputDirectory.Trim();
+        s.Tts.VoiceDirectory = TtsVoiceDirectory.Trim();
     }
 
     private void ApplySetupResult(LocalAiSetupAction action, LocalAiSetupResult result)

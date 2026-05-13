@@ -84,7 +84,7 @@ internal static class VoiceProviderProcessRunner
 
     internal static string ResolvePythonPath(ISettingsService settings)
     {
-        var configured = settings.Settings.TtsPythonPath.Trim();
+        var configured = settings.Settings.Tts.PythonPath.Trim();
         if (!string.IsNullOrWhiteSpace(configured) && File.Exists(configured))
             return configured;
 
@@ -104,14 +104,14 @@ internal static class VoiceProviderProcessRunner
 
     internal static string? ResolveSpeakerFile(ISettingsService settings)
     {
-        var speaker = settings.Settings.TtsSpeaker.Trim();
+        var speaker = settings.Settings.Tts.Speaker.Trim();
         if (string.IsNullOrWhiteSpace(speaker))
             return null;
 
         if (File.Exists(speaker))
             return Path.GetFullPath(speaker);
 
-        var voiceDir = settings.Settings.TtsVoiceDirectory.Trim();
+        var voiceDir = settings.Settings.Tts.VoiceDirectory.Trim();
         if (string.IsNullOrWhiteSpace(voiceDir) || !Directory.Exists(voiceDir))
             return null;
 

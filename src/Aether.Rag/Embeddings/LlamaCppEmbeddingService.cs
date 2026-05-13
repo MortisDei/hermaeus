@@ -23,7 +23,7 @@ public sealed class LlamaCppEmbeddingService : IEmbeddingService, IDisposable
         _http = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
     }
 
-    private string Base => _settings.Settings.LlamaCppBaseUrl.TrimEnd('/');
+    private string Base => _settings.Settings.Llm.LlamaCppBaseUrl.TrimEnd('/');
 
     public async Task<float[]> EmbedAsync(string text, CancellationToken ct = default)
     {
@@ -36,7 +36,7 @@ public sealed class LlamaCppEmbeddingService : IEmbeddingService, IDisposable
     {
         var payload = new
         {
-            model  = _settings.Settings.EmbeddingModel,
+            model  = _settings.Settings.Rag.EmbeddingModel,
             input  = texts,
             encoding_format = "float"
         };

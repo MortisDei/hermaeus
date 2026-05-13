@@ -63,8 +63,8 @@ public partial class SetupWizardViewModel : ObservableObject
     public void LoadFromSettings()
     {
         var s = _settings.Settings;
-        DataRootDirectory = s.DataRootDirectory;
-        LocalAiAssetsRoot = s.LocalAiAssetsRoot;
+        DataRootDirectory = s.DataManagement.DataRootDirectory;
+        LocalAiAssetsRoot = s.DataManagement.LocalAiAssetsRoot;
         ModelFolder = s.ManagedServers.FirstOrDefault()?.ModelPath ?? string.Empty;
 
         RuntimeOptions.Clear();
@@ -77,7 +77,7 @@ public partial class SetupWizardViewModel : ObservableObject
         VoiceOptions.Clear();
         foreach (var provider in _voiceProviders.GetAvailableProviders())
             VoiceOptions.Add(provider);
-        SelectedVoiceProvider = VoiceOptions.FirstOrDefault(p => p.Name == s.VoiceProvider)
+        SelectedVoiceProvider = VoiceOptions.FirstOrDefault(p => p.Name == s.Tts.VoiceProvider)
             ?? VoiceOptions.FirstOrDefault();
     }
 
@@ -183,8 +183,8 @@ public partial class SetupWizardViewModel : ObservableObject
         switch (step)
         {
             case 0:
-                _settings.Settings.DataRootDirectory = DataRootDirectory.Trim();
-                _settings.Settings.LocalAiAssetsRoot = LocalAiAssetsRoot.Trim();
+                _settings.Settings.DataManagement.DataRootDirectory = DataRootDirectory.Trim();
+                _settings.Settings.DataManagement.LocalAiAssetsRoot = LocalAiAssetsRoot.Trim();
                 await _settings.SaveAsync();
                 break;
             case 1:

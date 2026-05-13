@@ -20,7 +20,7 @@ public sealed class XttsV2VoiceProvider : ITtsService, IVoiceProvider, IDisposab
     public string DisplayName => "XTTS v2";
     public VoiceCapability Capabilities => VoiceCapability.TextToSpeech | VoiceCapability.VoiceCloning | VoiceCapability.Local | VoiceCapability.Legacy;
 
-    public bool IsInstalled => File.Exists(_settings.Settings.TtsScriptPath);
+    public bool IsInstalled => File.Exists(_settings.Settings.Tts.ScriptPath);
 
     public XttsV2VoiceProvider(ISettingsService settings, XttsProcessManager processManager)
     {
@@ -30,11 +30,11 @@ public sealed class XttsV2VoiceProvider : ITtsService, IVoiceProvider, IDisposab
 
     public VoiceProviderDetection Detect()
     {
-        var script = _settings.Settings.TtsScriptPath.Trim();
+        var script = _settings.Settings.Tts.ScriptPath.Trim();
         if (string.IsNullOrWhiteSpace(script) || !File.Exists(script))
             return new VoiceProviderDetection(false, "XTTS script missing", "Set the XTTS API script path in Settings.");
 
-        var python = _settings.Settings.TtsPythonPath.Trim();
+        var python = _settings.Settings.Tts.PythonPath.Trim();
         if (!string.IsNullOrWhiteSpace(python) && !File.Exists(python))
             return new VoiceProviderDetection(false, "XTTS Python missing", "Set a valid XTTS venv python path.");
 
@@ -43,9 +43,9 @@ public sealed class XttsV2VoiceProvider : ITtsService, IVoiceProvider, IDisposab
 
     public VoiceInstallPlan InstallPlan()
     {
-        var python = string.IsNullOrWhiteSpace(_settings.Settings.TtsPythonPath)
+        var python = string.IsNullOrWhiteSpace(_settings.Settings.Tts.PythonPath)
             ? VoiceProviderProcessRunner.ResolvePythonPath(_settings)
-            : _settings.Settings.TtsPythonPath.Trim();
+            : _settings.Settings.Tts.PythonPath.Trim();
         var steps = new List<VoiceInstallStep>
         {
             new(
@@ -76,7 +76,7 @@ public sealed class XttsV2VoiceProvider : ITtsService, IVoiceProvider, IDisposab
         if (!IsInstalled)
             return new VoiceHealth(VoiceHealthStatus.Unhealthy, "XTTS script missing", "Set the XTTS API script path.");
 
-        var baseUrl = _settings.Settings.TtsServiceUrl.TrimEnd('/');
+        var baseUrl = _settings.Settings.Tts.ServiceUrl.TrimEnd('/');
         try
         {
             using var resp = await _http.GetAsync($"{baseUrl}/health", ct);
@@ -114,15 +114,15 @@ public sealed class XttsV2VoiceProvider : ITtsService, IVoiceProvider, IDisposab
 
     public async Task SpeakAsync(string text, CancellationToken ct = default)
     {
-        if (!_settings.Settings.TtsEnabled)
+        if (!_settings.Settings.Tts.Enabled)
             throw new InvalidOperationException("TTS is disabled in settings.");
 
         if (string.IsNullOrWhiteSpace(text))
             return;
 
-        var baseUrl = _settings.Settings.TtsServiceUrl.TrimEnd('/');
+        var baseUrl = _settings.Settings.Tts.ServiceUrl.TrimEnd('/');
 
-        var speaker = _settings.Settings.TtsSpeaker.Trim();
+        var speaker = _settings.Settings.Tts.Speaker.Trim();
         if (speaker.Equals("default", StringComparison.OrdinalIgnoreCase))
             speaker = string.Empty;
 
@@ -138,13 +138,13 @@ public sealed class XttsV2VoiceProvider : ITtsService, IVoiceProvider, IDisposab
 
     public async Task PreviewVoiceAsync(string speaker, string text, CancellationToken ct = default)
     {
-        if (!_settings.Settings.TtsEnabled)
+        if (!_settings.Settings.Tts.Enabled)
             throw new InvalidOperationException("TTS is disabled in settings.");
 
         if (string.IsNullOrWhiteSpace(text))
             return;
 
-        var baseUrl = _settings.Settings.TtsServiceUrl.TrimEnd('/');
+        var baseUrl = _settings.Settings.Tts.ServiceUrl.TrimEnd('/');
 
         var outputPath = await RenderToFileAsync(text, speaker, null, ct);
         var wav = await File.ReadAllBytesAsync(outputPath, ct);
@@ -158,10 +158,10 @@ public sealed class XttsV2VoiceProvider : ITtsService, IVoiceProvider, IDisposab
 
     public async Task<IReadOnlyList<string>> GetVoicesAsync(CancellationToken ct = default)
     {
-        if (!_settings.Settings.TtsEnabled)
+        if (!_settings.Settings.Tts.Enabled)
             return [];
 
-        var baseUrl = _settings.Settings.TtsServiceUrl.TrimEnd('/');
+        var baseUrl = _settings.Settings.Tts.ServiceUrl.TrimEnd('/');
         try
         {
             var response = await _http.GetAsync($"{baseUrl}/voices", ct);
@@ -189,7 +189,7 @@ public sealed class XttsV2VoiceProvider : ITtsService, IVoiceProvider, IDisposab
         if (!File.Exists(sourcePath))
             throw new FileNotFoundException($"Voice sample not found at {sourcePath}");
 
-        var targetDir = _settings.Settings.TtsVoiceDirectory.Trim();
+        var targetDir = _settings.Settings.Tts.VoiceDirectory.Trim();
         if (string.IsNullOrWhiteSpace(targetDir))
             throw new InvalidOperationException("TTS voice directory is not set.");
 
@@ -209,7 +209,7 @@ public sealed class XttsV2VoiceProvider : ITtsService, IVoiceProvider, IDisposab
 
     private async Task<string> RenderToFileAsync(string text, string speaker, string? outputPath, CancellationToken ct)
     {
-        var baseUrl = _settings.Settings.TtsServiceUrl.TrimEnd('/');
+        var baseUrl = _settings.Settings.Tts.ServiceUrl.TrimEnd('/');
         using var response = await PostSpeechAsync(baseUrl, text, speaker, ct);
         if (!response.IsSuccessStatusCode)
         {

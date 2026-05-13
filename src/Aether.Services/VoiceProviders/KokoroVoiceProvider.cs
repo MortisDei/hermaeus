@@ -105,7 +105,7 @@ public sealed class KokoroVoiceProvider : ITtsService, IVoiceProvider
 
     public async Task SpeakAsync(string text, CancellationToken ct = default)
     {
-        await RenderAndPlayAsync(text, _settings.Settings.TtsSpeaker, ct);
+        await RenderAndPlayAsync(text, _settings.Settings.Tts.Speaker, ct);
     }
 
     public async Task PreviewVoiceAsync(string speaker, string text, CancellationToken ct = default)
@@ -126,7 +126,7 @@ public sealed class KokoroVoiceProvider : ITtsService, IVoiceProvider
 
     private async Task RenderAndPlayAsync(string text, string? speaker, CancellationToken ct)
     {
-        if (!_settings.Settings.TtsEnabled)
+        if (!_settings.Settings.Tts.Enabled)
             throw new InvalidOperationException("TTS is disabled in settings.");
 
         if (string.IsNullOrWhiteSpace(text))
@@ -150,7 +150,7 @@ public sealed class KokoroVoiceProvider : ITtsService, IVoiceProvider
 
     private async Task<string> RenderToFileAsync(string text, string? speaker, string? outputPath, CancellationToken ct)
     {
-        if (!_settings.Settings.TtsEnabled)
+        if (!_settings.Settings.Tts.Enabled)
             throw new InvalidOperationException("TTS is disabled in settings.");
 
         if (string.IsNullOrWhiteSpace(text))

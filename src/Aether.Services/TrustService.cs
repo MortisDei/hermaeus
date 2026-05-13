@@ -17,19 +17,19 @@ public sealed class TrustService : ITrustService
 
         foreach (var server in settings.ManagedServers)
         {
-            items.Add(await InspectPathAsync("Managed server", $"{server.Name} executable", server.ExecutablePath, settings.LocalAiAssetsRoot, PathTargetKind.File, scannedAt, ct));
-            items.Add(await InspectPathAsync("Managed server", $"{server.Name} model", server.ModelPath, settings.LocalAiAssetsRoot, PathTargetKind.File, scannedAt, ct));
+            items.Add(await InspectPathAsync("Managed server", $"{server.Name} executable", server.ExecutablePath, settings.DataManagement.LocalAiAssetsRoot, PathTargetKind.File, scannedAt, ct));
+            items.Add(await InspectPathAsync("Managed server", $"{server.Name} model", server.ModelPath, settings.DataManagement.LocalAiAssetsRoot, PathTargetKind.File, scannedAt, ct));
             items.AddRange(AnalyzeServerExtraArgs(server, scannedAt));
         }
 
         foreach (var profile in settings.RuntimeProfiles)
             items.Add(InspectEndpoint(profile, scannedAt));
 
-        items.Add(await InspectPathAsync("XTTS", "XTTS Python", settings.TtsPythonPath, settings.LocalAiAssetsRoot, PathTargetKind.File, scannedAt, ct));
-        items.Add(await InspectPathAsync("XTTS", "XTTS API script", settings.TtsScriptPath, settings.LocalAiAssetsRoot, PathTargetKind.File, scannedAt, ct));
-        items.Add(await InspectPathAsync("XTTS", "XTTS model directory", settings.TtsModelDirectory, settings.LocalAiAssetsRoot, PathTargetKind.Directory, scannedAt, ct));
-        items.Add(await InspectPathAsync("XTTS", "XTTS voices directory", settings.TtsVoiceDirectory, settings.LocalAiAssetsRoot, PathTargetKind.Directory, scannedAt, ct));
-        items.Add(await InspectPathAsync("XTTS", "XTTS output directory", settings.TtsOutputDirectory, settings.LocalAiAssetsRoot, PathTargetKind.Directory, scannedAt, ct));
+        items.Add(await InspectPathAsync("XTTS", "XTTS Python", settings.Tts.PythonPath, settings.DataManagement.LocalAiAssetsRoot, PathTargetKind.File, scannedAt, ct));
+        items.Add(await InspectPathAsync("XTTS", "XTTS API script", settings.Tts.ScriptPath, settings.DataManagement.LocalAiAssetsRoot, PathTargetKind.File, scannedAt, ct));
+        items.Add(await InspectPathAsync("XTTS", "XTTS model directory", settings.Tts.ModelDirectory, settings.DataManagement.LocalAiAssetsRoot, PathTargetKind.Directory, scannedAt, ct));
+        items.Add(await InspectPathAsync("XTTS", "XTTS voices directory", settings.Tts.VoiceDirectory, settings.DataManagement.LocalAiAssetsRoot, PathTargetKind.Directory, scannedAt, ct));
+        items.Add(await InspectPathAsync("XTTS", "XTTS output directory", settings.Tts.OutputDirectory, settings.DataManagement.LocalAiAssetsRoot, PathTargetKind.Directory, scannedAt, ct));
 
         var warningCount = items.Count(i => i.Status == TrustItemStatus.Warning);
         var missingCount = items.Count(i => i.Status == TrustItemStatus.Missing);
