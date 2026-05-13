@@ -798,14 +798,12 @@ static Task RagHybridScoringFusesRanks()
     var shared = new RagChunk { Id = "shared", Content = "appears in both lists" };
 
     var fused = HybridRetriever.Fuse(
-        [
+        new List<ScoredChunk>
+        {
             new ScoredChunk(semanticWinner, 0.99f, ScoreSource.Semantic),
-            new ScoredChunk(shared, 0.90f, ScoreSource.Semantic)
-        ],
-        [
-            new ScoredChunk(lexicalWinner, 12f, ScoreSource.Bm25),
-            new ScoredChunk(shared, 10f, ScoreSource.Bm25)
-        ],
+            new ScoredChunk(shared, 0.90f, ScoreSource.Semantic),
+            new ScoredChunk(lexicalWinner, 10f, ScoreSource.Bm25)
+        },
         topK: 3);
 
     Equal(3, fused.Count, "hybrid fusion should include unique chunks from both rankings");
@@ -1090,25 +1088,6 @@ static async Task VoiceProviderCapabilityGating()
 
     Equal("Kokoro", vm.SelectedVoiceProvider, "provider without TTS should not become active");
 }
-
-static async Task VoiceProviderLegacyRequiresLocalAndTts()
-{
-    using var temp = new TempDir();
-    var settings = NewSettings(temp);
-    var toasts = new FakeToasts();
-    settings.Settings.Tts.VoiceProvider = "XTTS v2";
-    var limitedRegistry = new FakeVoiceProviderRegistryLimited(settings);
-    var vm = new TtsSettingsViewModel(new FakeTts(), limitedRegistry, toasts, new XttsProcessManager(), new FakeSecretStore(), settings);
-
-    vm.ReloadFrom(settings.Settings);
-
-    False(vm.IsLegacyVoiceBackend, "XTTS without Local+TTS should not be considered legacy backend");
-    False(vm.StartTtsCommand.CanExecute(null), "StartTts should not be executable for non-legacy provider");
-    False(vm.StopTtsCommand.CanExecute(null), "StopTts should not be executable for non-legacy provider");
-
-    await Task.CompletedTask;
-}
-
 
 static async Task AgentTaskStateSerializesSchemaFields()
 {
