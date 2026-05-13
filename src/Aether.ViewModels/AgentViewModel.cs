@@ -25,6 +25,7 @@ public partial class AgentViewModel : ObservableObject
     private readonly IAgentTaskStateStore _store;
     private readonly ILlmService _llm;
     private readonly RagQueryService _rag;
+    private readonly IRuntimeLogService _logs;
     private CancellationTokenSource? _cts;
 
     public ObservableCollection<LlmModel> AvailableModels { get; } = [];
@@ -49,12 +50,14 @@ public partial class AgentViewModel : ObservableObject
         IAgentService agent,
         IAgentTaskStateStore store,
         ILlmService llm,
-        RagQueryService rag)
+        RagQueryService rag,
+        IRuntimeLogService logs)
     {
         _agent = agent;
         _store = store;
         _llm = llm;
         _rag = rag;
+        _logs = logs;
         WorkspaceRoot = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
     }
 
@@ -89,6 +92,8 @@ public partial class AgentViewModel : ObservableObject
         _cts = new CancellationTokenSource();
         try
         {
+            _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Agent,
+                $"Agent started: {GoalText}"));
             CurrentTask = await _agent.CreateTaskAsync(GoalText, BuildOptions(), _cts.Token);
             await RunCurrentStepAsync();
             await RefreshRecentAsync();
@@ -113,6 +118,8 @@ public partial class AgentViewModel : ObservableObject
         _cts = new CancellationTokenSource();
         try
         {
+            _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Agent,
+                $"Agent step started for task {CurrentTask?.TaskId}"));
             await RunCurrentStepAsync();
             await RefreshRecentAsync();
         }
@@ -163,6 +170,8 @@ public partial class AgentViewModel : ObservableObject
 
         RefreshTaskPreview();
         await RefreshLogAsync();
+        _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Agent,
+            $"Agent step complete: {result.State.ActiveStep}"));
     }
 
     private AgentWorkspaceOptions BuildOptions() => new(
@@ -209,6 +218,7 @@ public partial class AgentViewModel : ObservableObject
     {
         IsError = true;
         StatusMessage = message;
+        _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Error, RuntimeLogCategory.Agent, message));
     }
 
     partial void OnGoalTextChanged(string value) => StartCommand.NotifyCanExecuteChanged();

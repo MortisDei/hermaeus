@@ -18,6 +18,12 @@ Pre-1.0 versions may still change internal APIs and storage details.
 - Python health validator that rejects broken or non-relocatable Python
   installs and surfaces actionable diagnostics.
 
+### Fixed
+
+- Fix test harness and CI-only fakes to match new voice provider APIs and
+  Python validator constructor; repaired several setup & log view bindings.
+
+
 
 
 ## [0.8.7-alpha] - 2026-05-13

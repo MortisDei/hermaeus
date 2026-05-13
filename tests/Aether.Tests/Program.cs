@@ -360,7 +360,7 @@ static async Task LocalAiSetupDetectsFolderLayout()
     File.WriteAllText(Path.Combine(xtts, "model.pth"), string.Empty);
 
     var settings = new AppSettings { LocalAiAssetsRoot = root };
-    var report = await new LocalAiSetupService().ScanAsync(settings);
+    var report = await new LocalAiSetupService(new PythonHealthValidator()).ScanAsync(settings);
 
     True(report.Items.Any(i => i.Key == "models" && i.Status == LocalAiReadinessStatus.Found), "GGUF model folder should be found");
     True(report.Items.Any(i => i.Key == "venv" && i.Status == LocalAiReadinessStatus.Found), "root venv python should be found");
@@ -377,13 +377,13 @@ static async Task LocalAiSetupScriptHandlingIsApprovalGated()
     Directory.CreateDirectory(Path.GetDirectoryName(script)!);
     File.WriteAllText(script, "existing");
 
-    var service = new LocalAiSetupService();
+    var service = new LocalAiSetupService(new PythonHealthValidator());
     var action = new LocalAiSetupAction(
         "create-xtts-script",
         LocalAiSetupActionKind.CreateXttsApiScript,
         "Create XTTS API script",
         script,
-        ["write-file", script],
+        new List<string> { "write-file", script },
         LocalAiSetupRiskLevel.Medium,
         "Create script",
         false,
@@ -404,7 +404,7 @@ static async Task LocalAiSetupCommandPreviewsStayShellFree()
     using var temp = new TempDir();
     var root = temp.PathFor("AI folder");
     Directory.CreateDirectory(root);
-    var report = await new LocalAiSetupService().ScanAsync(new AppSettings { LocalAiAssetsRoot = root });
+    var report = await new LocalAiSetupService(new PythonHealthValidator()).ScanAsync(new AppSettings { LocalAiAssetsRoot = root });
 
     var install = report.Actions.Single(a => a.Kind == LocalAiSetupActionKind.InstallXttsDependencies);
     ContainsInOrder(install.CommandPreview, "-m", "pip", "install preview should use ArgumentList-style tokens");
@@ -417,7 +417,7 @@ static async Task LocalAiSetupCommandPreviewsStayShellFree()
 
 static Task XttsApiTemplateHasRequiredEndpoints()
 {
-    var script = new LocalAiSetupService().BuildXttsApiScript();
+    var script = new LocalAiSetupService(new PythonHealthValidator()).BuildXttsApiScript();
     True(script.Contains("@app.get(\"/health\")", StringComparison.Ordinal), "script should expose health endpoint");
     True(script.Contains("@app.post(\"/v1/audio/speech\")", StringComparison.Ordinal), "script should expose speech endpoint");
     True(script.Contains("@app.get(\"/voices\")", StringComparison.Ordinal), "script should expose voice listing endpoint");
@@ -1243,7 +1243,7 @@ static Task ServerProcessArgumentsAreSafe()
 static SettingsService NewSettings(TempDir temp) => new(temp.PathFor("settings/settings.json"));
 
 static SettingsViewModel NewSettingsViewModel(ISettingsService settings, ISecretStore secrets) =>
-    new(settings, new FakeTts(), new FakeVoiceProviderRegistry(settings), new FakeToasts(), new BackupService(settings), secrets, new XttsProcessManager(), new LocalAiSetupService(), new TrustService());
+    new(settings, new FakeTts(), new FakeVoiceProviderRegistry(settings), new FakeToasts(), new BackupService(settings), secrets, new XttsProcessManager(), new LocalAiSetupService(new PythonHealthValidator()), new TrustService());
 
 static async Task ThrowsAsync<T>(Func<Task> action) where T : Exception
 {
@@ -1404,7 +1404,30 @@ sealed class FakeTts : ITtsService
     public Task<string> ImportVoiceSampleAsync(string sourcePath, string displayName, CancellationToken ct = default) =>
         Task.FromResult(displayName);
     public Task<IReadOnlyList<string>> GetVoicesAsync(CancellationToken ct = default) =>
-        Task.FromResult<IReadOnlyList<string>>(["default"]);
+        Task.FromResult<IReadOnlyList<string>>(new List<string> { "default" });
+}
+
+sealed class FakeVoiceProvider : IVoiceProvider
+{
+    public VoiceProvider Id => VoiceProvider.Kokoro;
+    public string DisplayName => "Fake Voice";
+    public VoiceCapability Capabilities => VoiceCapability.TextToSpeech | VoiceCapability.Local;
+
+    public VoiceProviderDetection Detect() => new VoiceProviderDetection(true, "Available", "Fake provider available", null);
+
+    public VoiceInstallPlan InstallPlan() => new VoiceInstallPlan("No install needed", new List<VoiceInstallStep>(), "Low");
+
+    public Task StartAsync(CancellationToken ct = default) => Task.CompletedTask;
+    public Task StopAsync(CancellationToken ct = default) => Task.CompletedTask;
+
+    public Task<VoiceHealth> HealthCheckAsync(CancellationToken ct = default) =>
+        Task.FromResult(new VoiceHealth(VoiceHealthStatus.Healthy, "Healthy", "Fake provider is healthy"));
+
+    public Task<IReadOnlyList<VoiceDefinition>> ListVoicesAsync(CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<VoiceDefinition>>(new List<VoiceDefinition> { new VoiceDefinition("default", "Default", "English", false) });
+
+    public Task<VoiceSynthesisResult> GenerateSpeechAsync(VoiceSynthesisRequest request, CancellationToken ct = default) =>
+        Task.FromResult(new VoiceSynthesisResult(true, "Synthesis complete", "/tmp/audio.wav"));
 }
 
 sealed class FakeVoiceProviderRegistry : IVoiceProviderRegistry
@@ -1414,15 +1437,20 @@ sealed class FakeVoiceProviderRegistry : IVoiceProviderRegistry
     public FakeVoiceProviderRegistry(ISettingsService settings) => _settings = settings;
 
     public IReadOnlyList<VoiceProviderInfo> GetAvailableProviders() =>
-    [
-        new(VoiceProvider.Kokoro, "Kokoro", "Fast local readback.", VoiceProviderCategory.Recommended, true),
-        new(VoiceProvider.F5Tts, "F5-TTS", "Advanced cloning.", VoiceProviderCategory.Advanced, false),
-        new(VoiceProvider.XttsV2, "XTTS v2", "Legacy cloning.", VoiceProviderCategory.Legacy, true)
-    ];
+        new List<VoiceProviderInfo>
+        {
+            new VoiceProviderInfo(VoiceProvider.Kokoro, "Kokoro", "Fast local readback.", VoiceProviderCategory.Recommended, true, VoiceCapability.TextToSpeech | VoiceCapability.Local),
+            new VoiceProviderInfo(VoiceProvider.F5Tts, "F5-TTS", "Advanced cloning.", VoiceProviderCategory.Advanced, false, VoiceCapability.TextToSpeech | VoiceCapability.VoiceCloning | VoiceCapability.Remote),
+            new VoiceProviderInfo(VoiceProvider.XttsV2, "XTTS v2", "Legacy cloning.", VoiceProviderCategory.Legacy, true, VoiceCapability.TextToSpeech | VoiceCapability.VoiceCloning | VoiceCapability.Local)
+        };
 
     public VoiceProvider GetActiveProvider() => Enum.TryParse<VoiceProvider>(_settings.Settings.VoiceProvider, out var provider)
         ? provider
         : VoiceProvider.Kokoro;
+
+    public IVoiceProvider GetActiveVoiceProvider() => new FakeVoiceProvider();
+
+    public IVoiceProvider GetVoiceProvider(VoiceProvider provider) => new FakeVoiceProvider();
 
     public Task SetActiveProviderAsync(VoiceProvider provider)
     {

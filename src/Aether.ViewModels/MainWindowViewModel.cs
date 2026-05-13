@@ -10,6 +10,7 @@ public partial class MainWindowViewModel : ObservableObject
     private readonly IConversationStore _store;
     private readonly IToastService _toasts;
     private readonly SynchronizationContext? _sync;
+        private readonly ISettingsService _settingsService;
     private bool _refreshingFolderFilters;
 
     public ChatViewModel            Chat     { get; }
@@ -23,6 +24,7 @@ public partial class MainWindowViewModel : ObservableObject
     public SystemOverviewViewModel  SystemOverview { get; }
     public DoctorViewModel          Doctor { get; }
     public LogsViewModel            Logs { get; }
+    public SetupWizardViewModel     Wizard { get; }
 
     public ObservableCollection<ConversationItemViewModel> Conversations { get; } = [];
     public ObservableCollection<ToastViewModel> Toasts { get; } = [];
@@ -47,6 +49,7 @@ public partial class MainWindowViewModel : ObservableObject
     public bool ShowSystem => ActivePanel == "system";
     public bool ShowDoctor => ActivePanel == "doctor";
     public bool ShowLogs => ActivePanel == "logs";
+    public bool ShowWizard => ActivePanel == "wizard";
     public object ActiveViewModel => ActivePanel switch
     {
         "settings" => Settings,
@@ -59,6 +62,7 @@ public partial class MainWindowViewModel : ObservableObject
         "system"   => SystemOverview,
         "doctor"   => Doctor,
         "logs"     => Logs,
+        "wizard"   => Wizard,
         _          => Chat
     };
 
@@ -75,14 +79,18 @@ public partial class MainWindowViewModel : ObservableObject
         SystemOverviewViewModel systemOverview,
         DoctorViewModel doctor,
         LogsViewModel logs,
+        SetupWizardViewModel wizard,
+            ISettingsService settingsService,
         IToastService toasts)
     {
         _sync = SynchronizationContext.Current;
         _toasts = toasts;
+            _settingsService = settingsService;
         _store = store; Chat = chat; Agent = agent; Settings = settings;
         Models = models; Rag = rag; Services = services; Tasks = tasks;
-        Benchmarks = benchmarks; SystemOverview = systemOverview; Doctor = doctor; Logs = logs;
+        Benchmarks = benchmarks; SystemOverview = systemOverview; Doctor = doctor; Logs = logs; Wizard = wizard;
         Doctor.RequestNavigate = panel => ActivePanel = panel;
+        Wizard.WizardCompleted += () => ActivePanel = "chat";
         Chat.ConversationSaved += OnConversationSaved;
         Services.ServerAvailabilityChanged += (_, _) => _ = RefreshModelsAfterServerChangeAsync();
         _toasts.ToastRaised += OnToastRaised;
@@ -100,6 +108,8 @@ public partial class MainWindowViewModel : ObservableObject
             await Agent.LoadAsync();
             await Services.AutoStartAllAsync();
             await Chat.LoadModelsAsync();
+            if (!_settingsService.Settings.SetupWizardCompleted)
+                ActivePanel = "wizard";
         }
         finally { IsLoading = false; }
     }
@@ -285,6 +295,7 @@ public partial class MainWindowViewModel : ObservableObject
         _ = Doctor.ScanCommand.ExecuteAsync(null);
     }
     [RelayCommand] private void ShowLogsPanel()        => ActivePanel = "logs";
+    [RelayCommand] private void ShowWizardPanel()      => ActivePanel = "wizard";
     [RelayCommand] private void ShowSettingsPanel()    { ActivePanel = "settings"; Settings.Reload(); }
 
     [RelayCommand]
@@ -333,6 +344,7 @@ public partial class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowSystem));
         OnPropertyChanged(nameof(ShowDoctor));
         OnPropertyChanged(nameof(ShowLogs));
+        OnPropertyChanged(nameof(ShowWizard));
         OnPropertyChanged(nameof(ActiveViewModel));
     }
 

@@ -7,6 +7,7 @@ using Aether.Rag.Eval;
 using Aether.Rag.Models;
 using Aether.Rag.Pipeline;
 using Aether.Core.Services;
+using Aether.Core.Models;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -41,6 +42,7 @@ public partial class RagViewModel : ObservableObject
     private readonly RagPipeline     _pipeline;
     private readonly RagEvalService  _eval;
     private readonly IToastService   _toasts;
+    private readonly IRuntimeLogService _logs;
     private CancellationTokenSource? _cts;
 
     public ObservableCollection<RagDataset>       Datasets  { get; } = [];
@@ -85,12 +87,13 @@ public partial class RagViewModel : ObservableObject
     public Action<string>? RequestCopyToClipboard { get; set; }
     public bool IsLocalIngest => !EnableWebLoader;
 
-    public RagViewModel(RagQueryService query, RagPipeline pipeline, RagEvalService eval, IToastService toasts)
+    public RagViewModel(RagQueryService query, RagPipeline pipeline, RagEvalService eval, IToastService toasts, IRuntimeLogService logs)
     {
         _query    = query;
         _pipeline = pipeline;
         _eval     = eval;
         _toasts   = toasts;
+        _logs     = logs;
     }
 
     public async Task LoadDatasetsAsync()
@@ -120,6 +123,8 @@ public partial class RagViewModel : ObservableObject
 
         try
         {
+            _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Rag,
+                $"RAG query started for dataset {SelectedDataset.Name}"));
             var opts = new RagQueryOptions(
                 TopK: 5,
                 UseParentChild: UseParentChild,
@@ -151,6 +156,8 @@ public partial class RagViewModel : ObservableObject
             GroundingScore = RagQueryService.GroundingScore(
                 AnswerText,
                 string.Join(" ", Sources.Select(s => s.Content)));
+            _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Rag,
+                $"RAG query completed for dataset {SelectedDataset.Name}"));
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { SetError(ex.Message); }
@@ -173,6 +180,8 @@ public partial class RagViewModel : ObservableObject
 
         try
         {
+            _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Rag,
+                $"RAG ingest started for dataset {NewDatasetName}"));
             var ds = new RagDataset
             {
                 Name        = NewDatasetName.Trim(),
@@ -217,10 +226,14 @@ public partial class RagViewModel : ObservableObject
                 IngestPath = string.Empty;
             StatusMessage   = "Ingestion complete.";
             _toasts.Show("RAG ingest complete", $"Dataset \"{ds.Name}\" is ready.", ToastKind.Success);
+            _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Rag,
+                $"RAG ingest complete for dataset {ds.Name}"));
         }
         catch (Exception ex)
         {
             SetError(ex.Message);
+            _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Error, RuntimeLogCategory.Rag,
+                $"RAG ingest failed: {ex.Message}"));
             _toasts.Show("RAG ingest failed", ex.Message, ToastKind.Error, 7000);
         }
         finally { IsIngesting = false; IngestStage = string.Empty; }

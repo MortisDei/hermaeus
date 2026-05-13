@@ -1,5 +1,6 @@
 using Aether.Core.Models;
 using Aether.Core.Services;
+using Aether.Rag.Embeddings;
 using Aether.Rag.Storage;
 
 namespace Aether.Services;

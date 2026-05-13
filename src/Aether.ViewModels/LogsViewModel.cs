@@ -7,6 +7,18 @@ using CommunityToolkit.Mvvm.Input;
 
 namespace Aether.ViewModels;
 
+public class LogEntryDisplayViewModel
+{
+    public string Formatted { get; }
+    public RuntimeLogEntry Entry { get; }
+
+    public LogEntryDisplayViewModel(RuntimeLogEntry entry)
+    {
+        Entry = entry;
+        Formatted = $"{entry.Timestamp:HH:mm:ss} [{entry.Level}] [{entry.Category}] {entry.Message}";
+    }
+}
+
 public partial class LogsViewModel : ObservableObject
 {
     private readonly IRuntimeLogService _logs;
@@ -29,7 +41,7 @@ public partial class LogsViewModel : ObservableObject
         "Service"
     ];
 
-    public ObservableCollection<RuntimeLogEntry> VisibleEntries { get; } = [];
+    public ObservableCollection<LogEntryDisplayViewModel> VisibleEntries { get; } = [];
 
     public Action<string>? RequestCopyToClipboard { get; set; }
     public Action<string>? RequestOpenFolder { get; set; }
@@ -48,7 +60,7 @@ public partial class LogsViewModel : ObservableObject
         var filtered = ApplyFilter(_logs.GetEntries(), SelectedFilter).ToList();
         VisibleEntries.Clear();
         foreach (var entry in filtered)
-            VisibleEntries.Add(entry);
+            VisibleEntries.Add(new LogEntryDisplayViewModel(entry));
         StatusText = $"{filtered.Count} log line(s)";
     }
 
@@ -63,7 +75,7 @@ public partial class LogsViewModel : ObservableObject
     private void CopyVisibleLogs()
     {
         if (RequestCopyToClipboard is null) return;
-        var payload = string.Join("\n", VisibleEntries.Select(FormatEntry));
+        var payload = string.Join("\n", VisibleEntries.Select(e => e.Formatted));
         RequestCopyToClipboard(payload);
         StatusText = "Copied visible logs";
     }
@@ -72,7 +84,7 @@ public partial class LogsViewModel : ObservableObject
     private void CopyRedactedDiagnostics()
     {
         if (RequestCopyToClipboard is null) return;
-        var payload = string.Join("\n", VisibleEntries.Select(e => _redactor.Redact(FormatEntry(e))));
+        var payload = string.Join("\n", VisibleEntries.Select(e => _redactor.Redact(e.Formatted)));
         RequestCopyToClipboard(payload);
         StatusText = "Copied redacted diagnostics";
     }

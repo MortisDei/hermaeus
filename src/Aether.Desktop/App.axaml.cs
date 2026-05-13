@@ -122,6 +122,7 @@ public partial class App : Application
         s.AddSingleton<SystemOverviewViewModel>();
         s.AddSingleton<DoctorViewModel>();
         s.AddSingleton<LogsViewModel>();
+        s.AddSingleton<SetupWizardViewModel>();
         s.AddSingleton<MainWindowViewModel>();
     }
 }

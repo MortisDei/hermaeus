@@ -43,6 +43,7 @@ public class AppSettings
     public bool   MinimizeToTray       { get; set; } = true;
     public bool   EnableLocalHotkeys   { get; set; } = true;
     public bool   EnableGlobalHotkeys  { get; set; } = false;
+    public bool   SetupWizardCompleted { get; set; } = false;
     public Dictionary<string, VoiceProviderConfig> VoiceProviderConfigs { get; set; } = [];
     public List<ModelProfile> ModelProfiles { get; set; } = [];
     public List<RuntimeProfile> RuntimeProfiles { get; set; } = [];

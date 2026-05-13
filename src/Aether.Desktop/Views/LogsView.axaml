@@ -48,16 +48,7 @@
                     <ItemsControl ItemsSource="{Binding VisibleEntries}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <TextBlock FontSize="12" TextWrapping="Wrap">
-                                    <TextBlock.Text>
-                                        <MultiBinding StringFormat="{0} [{1}] [{2}] {3}">
-                                            <Binding Path="Timestamp" StringFormat="{}{0:HH:mm:ss}" />
-                                            <Binding Path="Level" />
-                                            <Binding Path="Category" />
-                                            <Binding Path="Message" />
-                                        </MultiBinding>
-                                    </TextBlock.Text>
-                                </TextBlock>
+                                <TextBlock FontSize="12" TextWrapping="Wrap" Text="{Binding Formatted}" />
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>

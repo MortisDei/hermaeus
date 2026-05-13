@@ -503,7 +503,7 @@ public partial class SettingsViewModel : ObservableObject
         {
             var value = commandPreview[i];
             if (string.IsNullOrWhiteSpace(value)) continue;
-            if (value.StartsWith('-', StringComparison.Ordinal)) continue;
+            if (value.StartsWith("-", StringComparison.Ordinal)) continue;
             packages.Add(value);
         }
 

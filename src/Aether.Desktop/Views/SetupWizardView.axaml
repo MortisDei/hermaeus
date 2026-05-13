@@ -1,0 +1,82 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Aether.ViewModels"
+             xmlns:views="using:Aether.Desktop.Views"
+             x:Class="Aether.Desktop.Views.SetupWizardView"
+             x:DataType="vm:SetupWizardViewModel">
+
+    <Border Padding="24"
+            Background="{DynamicResource SolidBackgroundFillColorBaseBrush}">
+        <StackPanel MaxWidth="760" Spacing="16">
+            <StackPanel Spacing="6">
+                <TextBlock Text="First-Run Setup" FontSize="22" FontWeight="SemiBold" />
+                <TextBlock Text="Set up storage, runtimes, models, and voice." FontSize="13" Opacity="0.5" />
+            </StackPanel>
+
+            <Border Classes="settings-card" Padding="14">
+                <StackPanel Spacing="12">
+                    <TextBlock Text="{Binding Steps[StepIndex]}" FontSize="14" FontWeight="SemiBold" />
+
+                    <StackPanel IsVisible="{Binding StepIndex, Converter={x:Static views:SetupWizardView.Step0}}" Spacing="10">
+                        <TextBlock Text="Choose your data root and AI assets folder." FontSize="12" Opacity="0.6" />
+                        <Grid ColumnDefinitions="120,*,Auto" ColumnSpacing="8">
+                            <TextBlock Grid.Column="0" Text="Data root" Opacity="0.6" FontSize="12" VerticalAlignment="Center" />
+                            <TextBox Grid.Column="1" Text="{Binding DataRootDirectory}" Watermark="Default app data folder" />
+                            <Button Grid.Column="2" Command="{Binding BrowseDataRootCommand}" Content="Browse" />
+                        </Grid>
+                        <Grid ColumnDefinitions="120,*,Auto" ColumnSpacing="8">
+                            <TextBlock Grid.Column="0" Text="AI assets" Opacity="0.6" FontSize="12" VerticalAlignment="Center" />
+                            <TextBox Grid.Column="1" Text="{Binding LocalAiAssetsRoot}" Watermark="Local AI assets folder" />
+                            <Button Grid.Column="2" Command="{Binding BrowseLocalAiAssetsRootCommand}" Content="Browse" />
+                        </Grid>
+                    </StackPanel>
+
+                    <StackPanel IsVisible="{Binding StepIndex, Converter={x:Static views:SetupWizardView.Step1}}" Spacing="10">
+                        <TextBlock Text="Pick the chat backend you want to use." FontSize="12" Opacity="0.6" />
+                        <ComboBox ItemsSource="{Binding RuntimeOptions}"
+                                  SelectedItem="{Binding SelectedRuntime}" />
+                    </StackPanel>
+
+                    <StackPanel IsVisible="{Binding StepIndex, Converter={x:Static views:SetupWizardView.Step2}}" Spacing="10">
+                        <TextBlock Text="Choose a model folder for llama.cpp." FontSize="12" Opacity="0.6" />
+                        <Grid ColumnDefinitions="120,*,Auto" ColumnSpacing="8">
+                            <TextBlock Grid.Column="0" Text="Model path" Opacity="0.6" FontSize="12" VerticalAlignment="Center" />
+                            <TextBox Grid.Column="1" Text="{Binding ModelFolder}" Watermark="Path to a GGUF model" />
+                            <Button Grid.Column="2" Command="{Binding BrowseModelFolderCommand}" Content="Browse" />
+                        </Grid>
+                    </StackPanel>
+
+                    <StackPanel IsVisible="{Binding StepIndex, Converter={x:Static views:SetupWizardView.Step3}}" Spacing="10">
+                        <TextBlock Text="Select a voice provider." FontSize="12" Opacity="0.6" />
+                        <ComboBox ItemsSource="{Binding VoiceOptions}"
+                                  SelectedItem="{Binding SelectedVoiceProvider}"
+                         />
+                    </StackPanel>
+
+                    <StackPanel IsVisible="{Binding StepIndex, Converter={x:Static views:SetupWizardView.Step4}}" Spacing="10">
+                        <TextBlock Text="Run Doctor to confirm everything is ready." FontSize="12" Opacity="0.6" />
+                        <Button Command="{Binding RunDoctorCommand}"
+                                IsEnabled="{Binding !IsDoctorRunning}"
+                                Content="Run Doctor" />
+                        <TextBlock Text="{Binding DoctorSummary}" FontSize="12" Opacity="0.6" TextWrapping="Wrap" />
+                    </StackPanel>
+
+                    <StackPanel IsVisible="{Binding StepIndex, Converter={x:Static views:SetupWizardView.Step5}}" Spacing="8">
+                        <TextBlock Text="Finish setup and start using Aether." FontSize="12" Opacity="0.6" />
+                    </StackPanel>
+
+                    <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                        <Button Command="{Binding BackCommand}" Content="Back" />
+                        <Button Command="{Binding SkipCommand}" Content="Skip" />
+                        <Button Command="{Binding NextCommand}"
+                            Content="Next"
+                            IsVisible="{Binding StepIndex, Converter={x:Static views:SetupWizardView.NotLast}}" />
+                        <Button Command="{Binding FinishCommand}"
+                            Content="Finish"
+                            IsVisible="{Binding StepIndex, Converter={x:Static views:SetupWizardView.Last}}" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </Border>
+</UserControl>
