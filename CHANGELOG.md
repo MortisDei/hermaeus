@@ -119,24 +119,26 @@ Pre-1.0 versions may still change internal APIs and storage details.
   limits, URL deduplication, and regression coverage for the default-disabled
   posture.
 - Experimental Aether Agent workbench with explicit task state, compact context
+  packs, local task logs/traces, read-only workspace tools, safety gating, and
+  optional RAG-backed retrieval.
 - Agent regression coverage for task-state serialization, workspace path
   safety, context packing, tool policy, and the fake-model agent loop.
 - Approval-gated Local AI Setup assistant for scanning an AI folder, detecting
   models, venvs, XTTS v2 assets, voices, output folders, and rerankers.
 - Structured setup actions for creating a venv, creating XTTS support folders,
   installing XTTS packages, and generating an XTTS v2 API script after explicit
+  user approval.
 
 ## [0.8.4-alpha] - 2026-05-12
+
 ### Added
 
 - Repeatable Linux and Windows archive packaging scripts.
+- Linux package layout with desktop launcher metadata, user-local desktop
   install/uninstall scripts, icon asset, license notices, archive, and SHA256.
+- Windows package layout with launch helper, license notices, ZIP archive, and
   SHA256.
 - App and tray icon assets derived from the Aether branding sheet.
-  - Tests: continue the harness split by extracting service and settings coverage
-    into `ServiceTests`, including redaction, local AI setup, trust, runtime
-    profile, secret store, and server argument checks.
-
 - Packaging documentation covering runtime requirements and self-contained
   builds.
 - Refreshed security review and threat model for secrets, local runtimes,
