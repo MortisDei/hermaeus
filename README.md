@@ -47,6 +47,11 @@ local voice providers.
 - Voice provider controls for Kokoro, F5-TTS, and XTTS v2, with preview and
   voice sample import.
 - Optional OpenAI voice provider for remote synthesis.
+- First-run Setup Wizard: on first launch Aether runs a guided 6-step
+  setup wizard to select the data root, local AI assets root, chat backend,
+  model folder, voice provider, and to run the Aether Doctor for a quick
+  health check before you start using the app. The wizard can be skipped
+  or re-run from the Settings panel.
 - Local tasks, reminders, and app-running scheduled automations.
 - Tray integration, minimize-to-tray, local hotkeys, and Windows system-wide
   hotkeys.
