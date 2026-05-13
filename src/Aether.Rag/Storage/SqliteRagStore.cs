@@ -288,6 +288,31 @@ public sealed class SqliteRagStore
         await tx.CommitAsync(ct);
     }
 
+    public async Task<Dictionary<string,string>> GetSourceHashesAsync(string datasetId, IEnumerable<string> sourcePaths, CancellationToken ct = default)
+    {
+        var paths = sourcePaths.Select(p => p.Trim()).Where(p => p.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var result = new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase);
+        if (paths.Count == 0) return result;
+
+        await EnsureInitializedAsync(ct);
+        await using var c = new SqliteConnection(Cs); await c.OpenAsync(ct);
+
+        foreach (var path in paths)
+        {
+            var file = Path.GetFileName(path);
+            var cmd = c.CreateCommand();
+            cmd.CommandText = "SELECT source_hash FROM rag_chunks WHERE dataset_id=$ds AND (source_path=$path OR (source_path='' AND source_file=$file)) LIMIT 1";
+            cmd.Parameters.AddWithValue("$ds", datasetId);
+            cmd.Parameters.AddWithValue("$path", path);
+            cmd.Parameters.AddWithValue("$file", file);
+            var val = await cmd.ExecuteScalarAsync(ct);
+            if (val is string s && !string.IsNullOrWhiteSpace(s))
+                result[path] = s;
+        }
+
+        return result;
+    }
+
     // ── BM25 stats ────────────────────────────────────────────────────────────
 
     public async Task SaveBm25StatsAsync(string datasetId, Bm25Stats stats, CancellationToken ct = default)

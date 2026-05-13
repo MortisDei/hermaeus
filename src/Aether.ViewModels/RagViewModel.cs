@@ -56,6 +56,8 @@ public partial class RagViewModel : ObservableObject
     [ObservableProperty] private bool        _isQuerying;
     [ObservableProperty] private bool        _isIngesting;
     [ObservableProperty] private string      _ingestPath      = string.Empty;
+    [ObservableProperty] private bool        _ingestDryRun;
+    [ObservableProperty] private IngestDuplicatePolicy _ingestPolicy = IngestDuplicatePolicy.Replace;
     [ObservableProperty] private string      _newDatasetName  = string.Empty;
     [ObservableProperty] private bool        _enableWebLoader;
     [ObservableProperty] private string      _webUrlList      = string.Empty;
@@ -95,6 +97,8 @@ public partial class RagViewModel : ObservableObject
         _toasts   = toasts;
         _logs     = logs;
     }
+
+    public IEnumerable<IngestDuplicatePolicy> IngestPolicyOptions => Enum.GetValues<IngestDuplicatePolicy>();
 
     public async Task LoadDatasetsAsync()
     {
@@ -208,13 +212,14 @@ public partial class RagViewModel : ObservableObject
                 StatusMessage = p.Detail;
             });
 
+            IngestReport report;
             if (EnableWebLoader)
             {
-                await _pipeline.IngestWebAsync(ds, progress, CancellationToken.None);
+                report = await _pipeline.IngestWebAsync(ds, progress, CancellationToken.None, new IngestOptions { DryRun = IngestDryRun, DuplicatePolicy = IngestPolicy });
             }
             else
             {
-                await _pipeline.IngestDirectoryAsync(ds, IngestPath, progress, CancellationToken.None);
+                report = await _pipeline.IngestDirectoryAsync(ds, IngestPath, progress, CancellationToken.None, new IngestOptions { DryRun = IngestDryRun, DuplicatePolicy = IngestPolicy });
             }
 
             await LoadDatasetsAsync();
@@ -225,9 +230,9 @@ public partial class RagViewModel : ObservableObject
             else
                 IngestPath = string.Empty;
             StatusMessage   = "Ingestion complete.";
-            _toasts.Show("RAG ingest complete", $"Dataset \"{ds.Name}\" is ready.", ToastKind.Success);
+            _toasts.Show("RAG ingest complete", $"{report.Summary()}", ToastKind.Success);
             _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Rag,
-                $"RAG ingest complete for dataset {ds.Name}"));
+                $"RAG ingest complete for dataset {ds.Name}. {report.Summary()}"));
         }
         catch (Exception ex)
         {

@@ -289,6 +289,14 @@
                                                TextWrapping="Wrap" />
                                 </StackPanel>
 
+                                <StackPanel Grid.Row="4" Grid.Column="1" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                                    <CheckBox IsChecked="{Binding IngestDryRun}" Content="Dry run" IsEnabled="{Binding !IsIngesting}" />
+                                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                        <TextBlock Text="Duplicate policy" VerticalAlignment="Center" Opacity="0.6" />
+                                        <ComboBox ItemsSource="{Binding IngestPolicyOptions}" SelectedItem="{Binding IngestPolicy}" Width="180" />
+                                    </StackPanel>
+                                </StackPanel>
+
                                 <TextBlock Grid.Row="2" Grid.Column="0"
                                            Text="Directory" VerticalAlignment="Center"
                                            Opacity="0.6" FontSize="13" />

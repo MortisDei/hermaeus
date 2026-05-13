@@ -56,6 +56,21 @@ public partial class SetupWizardViewModel : ObservableObject
         _doctor = doctor;
         _toasts = toasts;
         LoadFromSettings();
+        this.PropertyChanged += (s, e) =>
+        {
+            if (e.PropertyName == nameof(SelectedRuntime))
+            {
+                var newValue = SelectedRuntime;
+                if (newValue is not null && SelectedRuntimeId != newValue.Id)
+                    SelectedRuntimeId = newValue.Id;
+            }
+            else if (e.PropertyName == nameof(SelectedRuntimeId))
+            {
+                var id = SelectedRuntimeId;
+                if (!string.IsNullOrEmpty(id) && SelectedRuntime?.Id != id)
+                    SelectedRuntime = RuntimeOptions.FirstOrDefault(p => p.Id == id);
+            }
+        };
     }
 
     public void LoadFromSettings()
@@ -175,15 +190,5 @@ public partial class SetupWizardViewModel : ObservableObject
         }
     }
 
-    partial void OnSelectedRuntimeChanged(RuntimeProfileViewModel? oldValue, RuntimeProfileViewModel? newValue)
-    {
-        if (newValue is not null && SelectedRuntimeId != newValue.Id)
-            SelectedRuntimeId = newValue.Id;
-    }
-
-    partial void OnSelectedRuntimeIdChanged(string oldValue, string newValue)
-    {
-        if (!string.IsNullOrEmpty(newValue) && SelectedRuntime?.Id != newValue)
-            SelectedRuntime = RuntimeOptions.FirstOrDefault(p => p.Id == newValue);
-    }
+    
 }

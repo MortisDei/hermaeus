@@ -15,5 +15,7 @@
     <PackageLicenseExpression>PolyForm-Noncommercial-1.0.0</PackageLicenseExpression>
     <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
     <Description>A native, local-first AI workspace for chat, RAG, local runtimes, and voice workflows.</Description>
+    <!-- Treat any compiler warning as an error to enforce zero-warning builds -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
 </Project>

@@ -37,12 +37,14 @@ public sealed class RagPipeline
         _http = http;
     }
 
-    public async Task IngestDirectoryAsync(
+    public async Task<IngestReport> IngestDirectoryAsync(
         RagDataset dataset,
         string directory,
         IProgress<IngestProgress>? progress = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        IngestOptions? options = null)
     {
+        options ??= new IngestOptions();
         ValidateIngestConfig(dataset.Config);
         if (dataset.Config.ExtractionMode is not RagExtractionMode.TextMarkdown)
             throw new NotSupportedException($"{dataset.Config.ExtractionMode} is configured but not yet implemented. The provider slot is ready; install a concrete extractor before ingesting this profile.");
@@ -57,6 +59,11 @@ public sealed class RagPipeline
             throw new InvalidOperationException($"No .txt, .md, or .pdf files found in {directory}");
 
         progress?.Report(new IngestProgress("Chunking", 0, files.Count, $"Found {files.Count} files"));
+
+        var report = new IngestReport();
+
+        // lookup existing source hashes to decide skip/replace
+        var existingHashes = await _store.GetSourceHashesAsync(dataset.Id, files, ct);
 
         // ── 1. Chunk all files ────────────────────────────────────────────
         var allChunks = new List<RagChunk>();
@@ -73,6 +80,35 @@ public sealed class RagPipeline
             {
                 progress?.Report(new IngestProgress("Chunking", fi + 1, files.Count, $"Skipped {Path.GetFileName(file)}"));
                 continue;
+            }
+
+            // decide planned action for this source
+            var existingHash = existingHashes.TryGetValue(file, out var h) ? h : null;
+            if (!string.IsNullOrWhiteSpace(existingHash) && existingHash == document.SourceHash)
+            {
+                if (options.DuplicatePolicy == IngestDuplicatePolicy.SkipIfUnchanged)
+                {
+                    report.Documents.Add(new DocumentIngestReport { Path = document.SourcePath, Status = DocumentIngestStatus.SkippedUnchanged, Message = "Source unchanged, skipping" });
+                    progress?.Report(new IngestProgress("Chunking", fi + 1, files.Count, $"Skipped unchanged: {Path.GetFileName(file)}"));
+                    continue;
+                }
+                else if (options.DuplicatePolicy == IngestDuplicatePolicy.ReportOnly)
+                {
+                    report.Documents.Add(new DocumentIngestReport { Path = document.SourcePath, Status = DocumentIngestStatus.ReportOnly, Message = "Would replace (report-only)" });
+                }
+                else
+                {
+                    // Replace path - will be treated as replace later
+                    report.Documents.Add(new DocumentIngestReport { Path = document.SourcePath, Status = DocumentIngestStatus.Replaced, Message = "Will replace existing source" });
+                }
+            }
+            else
+            {
+                // new or changed
+                if (string.IsNullOrWhiteSpace(existingHash))
+                    report.Documents.Add(new DocumentIngestReport { Path = document.SourcePath, Status = DocumentIngestStatus.Added, Message = "New source" });
+                else
+                    report.Documents.Add(new DocumentIngestReport { Path = document.SourcePath, Status = DocumentIngestStatus.Replaced, Message = "Changed source - will replace" });
             }
 
             if (new FileInfo(file).Length > 50 * 1024 * 1024)
@@ -139,6 +175,19 @@ public sealed class RagPipeline
         if (health.EmptyChunkCount > 0)
             health.Warnings.Add($"{health.EmptyChunkCount} empty chunks detected.");
 
+        // ── 2. If dry-run, skip embedding and storage, return report and health
+        if (options.DryRun)
+        {
+            if (health.DuplicateChunkCount > 0)
+                health.Warnings.Add($"{health.DuplicateChunkCount} duplicate chunks detected.");
+            if (health.EmptyChunkCount > 0)
+                health.Warnings.Add($"{health.EmptyChunkCount} empty chunks detected.");
+
+            report.Documents.Add(new DocumentIngestReport { Path = "__health__", Status = DocumentIngestStatus.ReportOnly, Message = BuildHealthSummary(health) });
+            progress?.Report(new IngestProgress("Done", allChunks.Count, allChunks.Count, $"Dry-run complete. {report.Summary()}"));
+            return report;
+        }
+
         // ── 2. Embed in batches ───────────────────────────────────────────
         int total = allChunks.Count;
         progress?.Report(new IngestProgress("Embedding", 0, total, $"Embedding {total} chunks..."));
@@ -161,6 +210,7 @@ public sealed class RagPipeline
         progress?.Report(new IngestProgress("Storing", 0, total, "Writing to SQLite..."));
 
         await _store.SaveDatasetAsync(dataset, ct);
+        // if policy is SkipIfUnchanged already skipped unchanged files earlier; for replace and report-only default to delete of changed paths
         await _store.DeleteChunksForSourcesAsync(dataset.Id, changedSourcePaths, ct);
 
         if (parentChunks.Count > 0)
@@ -179,13 +229,18 @@ public sealed class RagPipeline
 
         progress?.Report(new IngestProgress("Done", total, total,
             $"{allChunks.Count} chunks indexed from {files.Count} files. Health: {BuildHealthSummary(health)}"));
+
+        report.Documents.Add(new DocumentIngestReport { Path = "__health__", Status = DocumentIngestStatus.ReportOnly, Message = BuildHealthSummary(health) });
+        return report;
     }
 
-    public async Task IngestWebAsync(
+    public async Task<IngestReport> IngestWebAsync(
         RagDataset dataset,
         IProgress<IngestProgress>? progress = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        IngestOptions? options = null)
     {
+        options ??= new IngestOptions();
         ValidateIngestConfig(dataset.Config);
         if (!dataset.Config.EnableWebLoader)
             throw new InvalidOperationException("Web loader is disabled for this dataset.");
@@ -261,9 +316,21 @@ public sealed class RagPipeline
             progress?.Report(new IngestProgress("Chunking", i + 1, documents.Count, $"{doc.Title} -> {textChunks.Count} chunks"));
         }
 
+        if (options.DryRun)
+        {
+            var report = new IngestReport();
+            report.Documents.Add(new DocumentIngestReport { Path = "__health__", Status = DocumentIngestStatus.ReportOnly, Message = $"Dry-run: {allChunks.Count} chunks from {documents.Count} pages" });
+            progress?.Report(new IngestProgress("Done", allChunks.Count, allChunks.Count, $"Dry-run complete. {report.Summary()}"));
+            return report;
+        }
+
         await EmbedAndStoreAsync(dataset, allChunks, parentChunks, sourcePaths, progress, ct);
         progress?.Report(new IngestProgress("Done", allChunks.Count, allChunks.Count,
             $"{allChunks.Count} chunks indexed from {documents.Count} web page(s)."));
+
+        var finalReport = new IngestReport();
+        finalReport.Documents.Add(new DocumentIngestReport { Path = "__health__", Status = DocumentIngestStatus.ReportOnly, Message = $"{allChunks.Count} chunks indexed from {documents.Count} web page(s)." });
+        return finalReport;
     }
 
     private static string BuildEmbeddingText(RagChunk chunk, RagDatasetConfig cfg)

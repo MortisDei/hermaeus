@@ -101,7 +101,7 @@ public sealed class XttsV2VoiceProvider : ITtsService, IVoiceProvider, IDisposab
     {
         try
         {
-            var outputPath = await RenderToFileAsync(request.Text, request.Voice, request.OutputPath, ct);
+            var outputPath = await RenderToFileAsync(request.Text, request.Voice ?? string.Empty, request.OutputPath, ct);
             if (request.PlayAudio)
                 await PlayAsync(await File.ReadAllBytesAsync(outputPath, ct), ct);
             return new VoiceSynthesisResult(true, "XTTS synthesis complete.", outputPath);
