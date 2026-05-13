@@ -4,8 +4,10 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Aether.Agent.Services;
 using Aether.Core.Models;
 using Aether.Core.Services;
+using Aether.Rag.Embeddings;
 using Aether.Services;
 using Aether.Services.ProcessManagement;
 using Aether.ViewModels;
@@ -283,4 +285,88 @@ sealed class FakeSecretStore : ISecretStore
     public Task<string> ResolveAsync(string valueOrReference, CancellationToken ct = default) =>
         Task.FromResult(valueOrReference);
     public Task<string> BackendLabelAsync(CancellationToken ct = default) => Task.FromResult("Fake");
+}
+
+sealed class FakeEmbeddingService : IEmbeddingService
+{
+    public int Dimensions => 4;
+
+    public Task<float[]> EmbedAsync(string text, CancellationToken ct = default) =>
+        Task.FromResult(new[] { 1f, text.Length % 7, text.Length % 11, 0.5f });
+
+    public Task<List<float[]>> EmbedBatchAsync(IReadOnlyList<string> texts, CancellationToken ct = default) =>
+        Task.FromResult(texts.Select(t => new[] { 1f, t.Length % 7, t.Length % 11, 0.5f }).ToList());
+}
+
+sealed class FakeHttpHandler : HttpMessageHandler
+{
+    private readonly string _body;
+
+    public FakeHttpHandler(string body) => _body = body;
+
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(_body, System.Text.Encoding.UTF8, "text/html")
+        };
+        return Task.FromResult(response);
+    }
+}
+
+sealed class FakeAgentContextBuilder : IAgentContextBuilder
+{
+    public Task<AgentContextPack> BuildAsync(AgentTaskState state, AgentWorkspaceOptions options, CancellationToken ct = default) =>
+        Task.FromResult(new AgentContextPack
+        {
+            CurrentGoal = state.Goal,
+            ActiveStep = state.ActiveStep,
+            Constraints = state.Constraints,
+            TaskStateSummary = state.Summary,
+            RetrievedFiles =
+            [
+                new AgentRetrievedItem("workspace", "README.md", "agent docs", 0, DateTime.UtcNow)
+            ]
+        });
+}
+
+sealed class FakeAgentLlm : ILlmService
+{
+    public string ProviderName => "FakeAgent";
+    public bool IsConfigured => true;
+    public Task<List<LlmModel>> GetModelsAsync(CancellationToken ct = default) =>
+        Task.FromResult(new List<LlmModel> { new() { Id = "fake-agent", Name = "Fake Agent", Provider = "Test" } });
+
+    public async IAsyncEnumerable<string> StreamChatAsync(
+        string modelId,
+        IReadOnlyList<ChatMessage> messages,
+        string? systemPrompt = null,
+        double temperature = 0.7,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        await Task.Delay(1, ct);
+        yield return """
+            {
+              "thought_summary": "Read the available context and found the docs.",
+              "current_step": "Wait for approval before any write.",
+              "next_action": {
+                "type": "tool",
+                "tool_name": "draft_patch",
+                "arguments": { "path": "README.md" },
+                "requires_approval": true,
+                "risk_level": "medium"
+              },
+              "state_update": {
+                "completed": ["inspected context"],
+                "pending": ["draft patch"],
+                "new_facts": ["workspace has README"],
+                "blockers": []
+              },
+              "user_message": "I found the relevant docs and can draft a patch for review."
+            }
+            """;
+    }
+
+    public Task PullModelAsync(string modelId, IProgress<string>? progress = null, CancellationToken ct = default) => Task.CompletedTask;
+    public Task DeleteModelAsync(string modelId, CancellationToken ct = default) => Task.CompletedTask;
 }

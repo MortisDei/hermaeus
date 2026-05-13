@@ -69,6 +69,12 @@ Pre-1.0 versions may still change internal APIs and storage details.
 - Tests: split the monolithic custom harness further by extracting backup and
   migration coverage into `BackupMigrationTests`, keeping `Program.cs` as a
   thinner runner and reducing the surface area for future test refactors.
+
+- Tests: continue the harness split by extracting agent coverage into
+  `AgentTests`, including task-state persistence, review queue behaviour,
+  workspace memory, path safety, context packing, safety gating, and trace
+  logging.
+
 - Refactor AppSettings into dedicated configuration types for LLM, TTS, RAG,
   UI, and data management settings, so each domain is owned by a focused model
   instead of one oversized settings object.
