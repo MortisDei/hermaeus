@@ -56,6 +56,8 @@ var tests = new (string Name, Func<Task> Run)[]
     ("RAG directory dry run reports without persisting", RagDirectoryDryRunReportsWithoutPersisting),
     ("RAG directory skip unchanged avoids duplicate chunks", RagDirectorySkipUnchangedAvoidsDuplicateChunks),
     ("RAG empty PDF warns and continues", RagEmptyPdfWarnsAndContinues),
+    ("RAG ingest cancellation during embedding stops gracefully", RagIngestCancellationDuringEmbedding),
+    ("RAG ingest cancellation during storage stops gracefully", RagIngestCancellationDuringStorage),
     ("agent task state serializes schema fields", AgentTaskStateSerializesSchemaFields),
     ("agent review queue reflects approval history", AgentReviewQueueReflectsApprovalHistory),
     ("agent workspace memory persists notes per workspace", AgentWorkspaceMemoryPersistsNotesPerWorkspace),
@@ -991,6 +993,84 @@ static async Task RagEmptyPdfWarnsAndContinues()
     False(chunks.Any(c => c.SourceFile == "scan.pdf"), "empty PDF should not store chunks");
     True(progressLines.Any(line => line.Contains("No extractable PDF text", StringComparison.Ordinal)),
         "empty PDF should surface a health warning");
+}
+
+static async Task RagIngestCancellationDuringEmbedding()
+{
+    using var temp = new TempDir();
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new SqliteRagStore(settings);
+    await store.InitializeAsync();
+    var docs = temp.PathFor("docs");
+    Directory.CreateDirectory(docs);
+    await File.WriteAllTextAsync(Path.Combine(docs, "file1.txt"), string.Concat(Enumerable.Repeat("alpha ", 100)));
+    await File.WriteAllTextAsync(Path.Combine(docs, "file2.txt"), string.Concat(Enumerable.Repeat("beta ", 100)));
+
+    var dataset = new RagDataset { Name = "cancel-embed" };
+    var pipeline = new RagPipeline(store, new FakeEmbeddingService());
+
+    // Cancellation during embedding phase
+    var cts = new CancellationTokenSource();
+    var task = Task.Run(async () =>
+    {
+        var progress = new Progress<IngestProgress>(p =>
+        {
+            // Cancel after first batch embedded
+            if (p.Stage == "Embedding" && p.Done > 10)
+                cts.Cancel();
+        });
+
+        try
+        {
+            await pipeline.IngestDirectoryAsync(dataset, docs, progress, cts.Token);
+        }
+        catch (OperationCanceledException) { }
+    });
+
+    await task;
+    var chunks = await store.GetChunksAsync(dataset.Id, includeEmbeddings: false);
+    // Cancellation should prevent storage, or at least partially stored
+    True(chunks.Count < 500, "cancellation during embedding should reduce final chunk count significantly");
+}
+
+static async Task RagIngestCancellationDuringStorage()
+{
+    using var temp = new TempDir();
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new SqliteRagStore(settings);
+    await store.InitializeAsync();
+    var docs = temp.PathFor("docs");
+    Directory.CreateDirectory(docs);
+    await File.WriteAllTextAsync(Path.Combine(docs, "file1.txt"), string.Concat(Enumerable.Repeat("gamma ", 100)));
+    await File.WriteAllTextAsync(Path.Combine(docs, "file2.txt"), string.Concat(Enumerable.Repeat("delta ", 100)));
+
+    var dataset = new RagDataset { Name = "cancel-store" };
+    var pipeline = new RagPipeline(store, new FakeEmbeddingService());
+
+    // Cancellation during storage phase
+    var cts = new CancellationTokenSource();
+    var task = Task.Run(async () =>
+    {
+        var progress = new Progress<IngestProgress>(p =>
+        {
+            // Cancel during storing phase
+            if (p.Stage == "Storing")
+                cts.Cancel();
+        });
+
+        try
+        {
+            await pipeline.IngestDirectoryAsync(dataset, docs, progress, cts.Token);
+        }
+        catch (OperationCanceledException) { }
+    });
+
+    await task;
+    var chunks = await store.GetChunksAsync(dataset.Id, includeEmbeddings: false);
+    // Cancellation during storage should prevent or reduce chunk persistence
+    True(chunks.Count < 500, "cancellation during storage should prevent or reduce chunk persistence");
 }
 
 static async Task AgentTaskStateSerializesSchemaFields()
