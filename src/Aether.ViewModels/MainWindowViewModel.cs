@@ -21,6 +21,7 @@ public partial class MainWindowViewModel : ObservableObject
     public TasksViewModel           Tasks    { get; }
     public BenchmarkViewModel       Benchmarks { get; }
     public SystemOverviewViewModel  SystemOverview { get; }
+    public DoctorViewModel          Doctor { get; }
 
     public ObservableCollection<ConversationItemViewModel> Conversations { get; } = [];
     public ObservableCollection<ToastViewModel> Toasts { get; } = [];
@@ -43,6 +44,7 @@ public partial class MainWindowViewModel : ObservableObject
     public bool ShowTasks    => ActivePanel == "tasks";
     public bool ShowBenchmarks => ActivePanel == "benchmarks";
     public bool ShowSystem => ActivePanel == "system";
+    public bool ShowDoctor => ActivePanel == "doctor";
     public object ActiveViewModel => ActivePanel switch
     {
         "settings" => Settings,
@@ -53,6 +55,7 @@ public partial class MainWindowViewModel : ObservableObject
         "tasks"    => Tasks,
         "benchmarks" => Benchmarks,
         "system"   => SystemOverview,
+        "doctor"   => Doctor,
         _          => Chat
     };
 
@@ -67,13 +70,15 @@ public partial class MainWindowViewModel : ObservableObject
         TasksViewModel tasks,
         BenchmarkViewModel benchmarks,
         SystemOverviewViewModel systemOverview,
+        DoctorViewModel doctor,
         IToastService toasts)
     {
         _sync = SynchronizationContext.Current;
         _toasts = toasts;
         _store = store; Chat = chat; Agent = agent; Settings = settings;
         Models = models; Rag = rag; Services = services; Tasks = tasks;
-        Benchmarks = benchmarks; SystemOverview = systemOverview;
+        Benchmarks = benchmarks; SystemOverview = systemOverview; Doctor = doctor;
+        Doctor.RequestNavigate = panel => ActivePanel = panel;
         Chat.ConversationSaved += OnConversationSaved;
         Services.ServerAvailabilityChanged += (_, _) => _ = RefreshModelsAfterServerChangeAsync();
         _toasts.ToastRaised += OnToastRaised;
@@ -270,6 +275,11 @@ public partial class MainWindowViewModel : ObservableObject
     [RelayCommand] private void ShowTasksPanel()       { Tasks.Reload(); ActivePanel = "tasks"; }
     [RelayCommand] private void ShowBenchmarksPanel()  { ActivePanel = "benchmarks"; _ = Benchmarks.LoadCommand.ExecuteAsync(null); }
     [RelayCommand] private void ShowSystemPanel()      { ActivePanel = "system"; _ = SystemOverview.RefreshCommand.ExecuteAsync(null); }
+    [RelayCommand] private void ShowDoctorPanel()
+    {
+        ActivePanel = "doctor";
+        _ = Doctor.ScanCommand.ExecuteAsync(null);
+    }
     [RelayCommand] private void ShowSettingsPanel()    { ActivePanel = "settings"; Settings.Reload(); }
 
     [RelayCommand]
@@ -316,6 +326,7 @@ public partial class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowTasks));
         OnPropertyChanged(nameof(ShowBenchmarks));
         OnPropertyChanged(nameof(ShowSystem));
+        OnPropertyChanged(nameof(ShowDoctor));
         OnPropertyChanged(nameof(ActiveViewModel));
     }
 

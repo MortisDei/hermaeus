@@ -76,9 +76,11 @@ public partial class App : Application
         s.AddSingleton<ISettingsService,   SettingsService>();
         s.AddSingleton<ISecretStore,       SecretStore>();
         s.AddSingleton<IRedactionService,  RedactionService>();
+        s.AddSingleton<PythonHealthValidator>();
         s.AddSingleton<IBackupService,     BackupService>();
         s.AddSingleton<ILocalAiSetupService, LocalAiSetupService>();
         s.AddSingleton<ITrustService,      TrustService>();
+        s.AddSingleton<IDoctorService,     DoctorService>();
         s.AddSingleton<ISystemInfoService, SystemInfoService>();
         s.AddSingleton<IBenchmarkService,  BenchmarkService>();
         s.AddSingleton<IConversationStore, ConversationStore>();
@@ -91,6 +93,7 @@ public partial class App : Application
         s.AddSingleton<XttsV2VoiceProvider>();
         s.AddSingleton<KokoroVoiceProvider>();
         s.AddSingleton<F5TtsVoiceProvider>();
+        s.AddSingleton<OpenAiVoiceProvider>();
         s.AddSingleton<IVoiceProviderRegistry, VoiceProviderRegistry>();
         s.AddSingleton<ITtsService, VoiceRoutingTtsService>();
         s.AddSingleton<XttsProcessManager>();
@@ -116,6 +119,7 @@ public partial class App : Application
         s.AddSingleton<TasksViewModel>();
         s.AddSingleton<BenchmarkViewModel>();
         s.AddSingleton<SystemOverviewViewModel>();
+        s.AddSingleton<DoctorViewModel>();
         s.AddSingleton<MainWindowViewModel>();
     }
 }

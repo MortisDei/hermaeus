@@ -12,7 +12,14 @@ public sealed class LocalAiSetupService : ILocalAiSetupService
     private static readonly Version MinSupportedXttsPython = new(3, 9);
     private static readonly Version MaxSupportedXttsPythonExclusive = new(3, 12);
 
-    public Task<LocalAiReadinessReport> ScanAsync(AppSettings settings, CancellationToken ct = default)
+    private readonly PythonHealthValidator _pythonValidator;
+
+    public LocalAiSetupService(PythonHealthValidator pythonValidator)
+    {
+        _pythonValidator = pythonValidator;
+    }
+
+    public async Task<LocalAiReadinessReport> ScanAsync(AppSettings settings, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
         var root = settings.LocalAiAssetsRoot.Trim();
@@ -24,8 +31,8 @@ public sealed class LocalAiSetupService : ILocalAiSetupService
         {
             items.Add(new("root", "AI folder", LocalAiReadinessStatus.Missing,
                 "Choose an existing folder before scanning.", "Aether only scans the folder you select.", true));
-            return Task.FromResult(new LocalAiReadinessReport(layout.Root, items, actions,
-                "Choose an existing local AI folder first.", string.Empty));
+            return new LocalAiReadinessReport(layout.Root, items, actions,
+                "Choose an existing local AI folder first.", string.Empty);
         }
 
         var defaultVenv = Path.Combine(layout.Root, "venv");
@@ -38,6 +45,18 @@ public sealed class LocalAiSetupService : ILocalAiSetupService
             "Found model folder.", "Missing Models folder with .gguf files.", true);
         AddItem(items, "venv", "Python venv", File.Exists(venvPython) ? venvPython : string.Empty,
             "Found Python in a local venv.", "No local venv Python was found.", true);
+        if (File.Exists(venvPython))
+        {
+            var health = await _pythonValidator.ValidateAsync(venvPython, ct);
+            var status = health.IsHealthy ? LocalAiReadinessStatus.Found : LocalAiReadinessStatus.NeedsAction;
+            items.Add(new LocalAiReadinessItem(
+                "python-health",
+                "Python health",
+                status,
+                health.IsHealthy ? "Python is healthy." : "Python failed health checks.",
+                health.Detail,
+                true));
+        }
         AddItem(items, "xtts-model", "XTTS v2 model", layout.TtsModelDirectory,
             "Found XTTS v2 model files.", "XTTS v2 model files were not found.", true);
         AddItem(items, "xtts-script", "XTTS API script", layout.TtsScriptPath,
@@ -72,7 +91,7 @@ public sealed class LocalAiSetupService : ILocalAiSetupService
             : $"{missingRequired} required item(s) need attention under {layout.Root}.";
         var commands = string.Join(Environment.NewLine, actions.Select(a => a.CommandPreviewText));
 
-        return Task.FromResult(new LocalAiReadinessReport(layout.Root, items, actions, summary, commands));
+        return new LocalAiReadinessReport(layout.Root, items, actions, summary, commands);
     }
 
     public async Task<LocalAiSetupResult> RunActionAsync(

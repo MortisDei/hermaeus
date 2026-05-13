@@ -1,23 +1,115 @@
 using System.Diagnostics;
-using System.Text.Json;
 using System.Net.Http.Json;
+using System.Text.Json;
+using Aether.Core.Models;
 using Aether.Core.Services;
+using Aether.Services.ProcessManagement;
 
 namespace Aether.Services;
 
 /// <summary>
 /// Legacy XTTS v2 voice cloning backend. Requires Python 3.11.
 /// </summary>
-public sealed class XttsV2VoiceProvider : ITtsService, IDisposable
+public sealed class XttsV2VoiceProvider : ITtsService, IVoiceProvider, IDisposable
 {
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(5) };
     private readonly ISettingsService _settings;
+    private readonly XttsProcessManager _processManager;
+
+    public VoiceProvider Id => VoiceProvider.XttsV2;
+    public string DisplayName => "XTTS v2";
+    public VoiceCapability Capabilities => VoiceCapability.TextToSpeech | VoiceCapability.VoiceCloning | VoiceCapability.Local | VoiceCapability.Legacy;
 
     public bool IsInstalled => File.Exists(_settings.Settings.TtsScriptPath);
 
-    public XttsV2VoiceProvider(ISettingsService settings)
+    public XttsV2VoiceProvider(ISettingsService settings, XttsProcessManager processManager)
     {
         _settings = settings;
+        _processManager = processManager;
+    }
+
+    public VoiceProviderDetection Detect()
+    {
+        var script = _settings.Settings.TtsScriptPath.Trim();
+        if (string.IsNullOrWhiteSpace(script) || !File.Exists(script))
+            return new VoiceProviderDetection(false, "XTTS script missing", "Set the XTTS API script path in Settings.");
+
+        var python = _settings.Settings.TtsPythonPath.Trim();
+        if (!string.IsNullOrWhiteSpace(python) && !File.Exists(python))
+            return new VoiceProviderDetection(false, "XTTS Python missing", "Set a valid XTTS venv python path.");
+
+        return new VoiceProviderDetection(true, "XTTS assets detected", script, script);
+    }
+
+    public VoiceInstallPlan InstallPlan()
+    {
+        var python = string.IsNullOrWhiteSpace(_settings.Settings.TtsPythonPath)
+            ? VoiceProviderProcessRunner.ResolvePythonPath(_settings)
+            : _settings.Settings.TtsPythonPath.Trim();
+        var steps = new List<VoiceInstallStep>
+        {
+            new(
+                "Install XTTS packages",
+                python,
+                "Installs TTS, fastapi, uvicorn, and soundfile for the XTTS server.",
+                VoiceInstallRiskLevel.High,
+                true,
+                [python, "-m", "pip", "install", "TTS", "fastapi", "uvicorn", "soundfile"]) 
+        };
+
+        return new VoiceInstallPlan(
+            "XTTS requires Python 3.11, packages, and an API script.",
+            steps,
+            "Packages download from PyPI and run a local API server.");
+    }
+
+    public Task StartAsync(CancellationToken ct = default) => _processManager.StartAsync(_settings.Settings, ct);
+
+    public Task StopAsync(CancellationToken ct = default)
+    {
+        _processManager.Stop();
+        return Task.CompletedTask;
+    }
+
+    public async Task<VoiceHealth> HealthCheckAsync(CancellationToken ct = default)
+    {
+        if (!IsInstalled)
+            return new VoiceHealth(VoiceHealthStatus.Unhealthy, "XTTS script missing", "Set the XTTS API script path.");
+
+        var baseUrl = _settings.Settings.TtsServiceUrl.TrimEnd('/');
+        try
+        {
+            using var resp = await _http.GetAsync($"{baseUrl}/health", ct);
+            if (resp.IsSuccessStatusCode)
+                return new VoiceHealth(VoiceHealthStatus.Healthy, "XTTS server healthy", $"{baseUrl}/health responded OK.");
+        }
+        catch (Exception ex)
+        {
+            return new VoiceHealth(VoiceHealthStatus.Warning, "XTTS server not reachable", ex.Message);
+        }
+
+        return new VoiceHealth(VoiceHealthStatus.Warning, "XTTS server not reachable", "Start the XTTS server and re-check.");
+    }
+
+    public async Task<IReadOnlyList<VoiceDefinition>> ListVoicesAsync(CancellationToken ct = default)
+    {
+        var voices = await GetVoicesAsync(ct);
+        return voices.Select(v => new VoiceDefinition(v, v, RequiresSample: true)).ToList();
+    }
+
+    public async Task<VoiceSynthesisResult> GenerateSpeechAsync(VoiceSynthesisRequest request, CancellationToken ct = default)
+    {
+        try
+        {
+            var outputPath = await RenderToFileAsync(request.Text, request.Voice, request.OutputPath, ct);
+            if (request.PlayAudio)
+                await PlayAsync(await File.ReadAllBytesAsync(outputPath, ct), ct);
+            return new VoiceSynthesisResult(true, "XTTS synthesis complete.", outputPath);
+        }
+        catch (Exception ex)
+        {
+            return new VoiceSynthesisResult(false, ex.Message);
+        }
     }
 
     public async Task SpeakAsync(string text, CancellationToken ct = default)
@@ -34,25 +126,14 @@ public sealed class XttsV2VoiceProvider : ITtsService, IDisposable
         if (speaker.Equals("default", StringComparison.OrdinalIgnoreCase))
             speaker = string.Empty;
 
-        using var response = await PostSpeechAsync(baseUrl, text, speaker, ct);
-        if (!response.IsSuccessStatusCode)
-        {
-            var body = await response.Content.ReadAsStringAsync(ct);
-            var detail = TryReadJsonError(body);
-            throw new InvalidOperationException(string.IsNullOrWhiteSpace(detail)
-                ? $"XTTS v2 returned {(int)response.StatusCode} {response.ReasonPhrase}."
-                : $"XTTS v2 returned {(int)response.StatusCode}: {detail}");
-        }
-
-        await using var source = await response.Content.ReadAsStreamAsync(ct);
-        using var audio = new MemoryStream();
-        await source.CopyToAsync(audio, ct);
-        var wav = audio.ToArray();
-
+        var outputPath = await RenderToFileAsync(text, speaker, null, ct);
+        var wav = await File.ReadAllBytesAsync(outputPath, ct);
         if (wav.Length == 0)
             throw new InvalidOperationException("XTTS v2 returned an empty audio response.");
 
         await PlayAsync(wav, ct);
+        try { File.Delete(outputPath); }
+        catch { }
     }
 
     public async Task PreviewVoiceAsync(string speaker, string text, CancellationToken ct = default)
@@ -65,25 +146,14 @@ public sealed class XttsV2VoiceProvider : ITtsService, IDisposable
 
         var baseUrl = _settings.Settings.TtsServiceUrl.TrimEnd('/');
 
-        using var response = await PostSpeechAsync(baseUrl, text, speaker, ct);
-        if (!response.IsSuccessStatusCode)
-        {
-            var body = await response.Content.ReadAsStringAsync(ct);
-            var detail = TryReadJsonError(body);
-            throw new InvalidOperationException(string.IsNullOrWhiteSpace(detail)
-                ? $"XTTS v2 returned {(int)response.StatusCode} {response.ReasonPhrase}."
-                : $"XTTS v2 returned {(int)response.StatusCode}: {detail}");
-        }
-
-        await using var source = await response.Content.ReadAsStreamAsync(ct);
-        using var audio = new MemoryStream();
-        await source.CopyToAsync(audio, ct);
-        var wav = audio.ToArray();
-
+        var outputPath = await RenderToFileAsync(text, speaker, null, ct);
+        var wav = await File.ReadAllBytesAsync(outputPath, ct);
         if (wav.Length == 0)
             throw new InvalidOperationException("XTTS v2 returned an empty audio response.");
 
         await PlayAsync(wav, ct);
+        try { File.Delete(outputPath); }
+        catch { }
     }
 
     public async Task<IReadOnlyList<string>> GetVoicesAsync(CancellationToken ct = default)
@@ -135,6 +205,29 @@ public sealed class XttsV2VoiceProvider : ITtsService, IDisposable
     {
         var payload = new { input = text, speaker_wav = speaker };
         return await _http.PostAsJsonAsync($"{baseUrl}/v1/audio/speech", payload, cancellationToken: ct);
+    }
+
+    private async Task<string> RenderToFileAsync(string text, string speaker, string? outputPath, CancellationToken ct)
+    {
+        var baseUrl = _settings.Settings.TtsServiceUrl.TrimEnd('/');
+        using var response = await PostSpeechAsync(baseUrl, text, speaker, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            var detail = TryReadJsonError(body);
+            throw new InvalidOperationException(string.IsNullOrWhiteSpace(detail)
+                ? $"XTTS v2 returned {(int)response.StatusCode} {response.ReasonPhrase}."
+                : $"XTTS v2 returned {(int)response.StatusCode}: {detail}");
+        }
+
+        var path = string.IsNullOrWhiteSpace(outputPath)
+            ? Path.Combine(Path.GetTempPath(), $"aether-xtts-{Guid.NewGuid():N}.wav")
+            : outputPath;
+
+        await using var source = await response.Content.ReadAsStreamAsync(ct);
+        await using var file = File.Create(path);
+        await source.CopyToAsync(file, ct);
+        return path;
     }
 
     private static void AppendLine(string? line, List<string> log)

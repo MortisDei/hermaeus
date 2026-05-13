@@ -10,6 +10,12 @@ public interface IVoiceProviderRegistry
     /// Get the currently active voice provider
     VoiceProvider GetActiveProvider();
 
+    /// Get the active provider instance
+    IVoiceProvider GetActiveVoiceProvider();
+
+    /// Get a provider instance by id
+    IVoiceProvider GetVoiceProvider(VoiceProvider provider);
+
     /// Set the active voice provider
     Task SetActiveProviderAsync(VoiceProvider provider);
 

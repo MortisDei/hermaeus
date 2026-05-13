@@ -91,6 +91,17 @@ internal static class VoiceProviderProcessRunner
         return OperatingSystem.IsWindows() ? "python" : "python3";
     }
 
+    internal static bool IsExecutableAvailable(string command)
+    {
+        if (string.IsNullOrWhiteSpace(command))
+            return false;
+
+        if (Path.IsPathFullyQualified(command))
+            return File.Exists(command);
+
+        return FindOnPath(command) is not null;
+    }
+
     internal static string? ResolveSpeakerFile(ISettingsService settings)
     {
         var speaker = settings.Settings.TtsSpeaker.Trim();
@@ -120,4 +131,19 @@ internal static class VoiceProviderProcessRunner
 
     private static string QuoteIfNeeded(string value) =>
         value.Contains(' ', StringComparison.Ordinal) ? $"\"{value}\"" : value;
+
+    private static string? FindOnPath(string executableName)
+    {
+        var path = Environment.GetEnvironmentVariable("PATH");
+        if (string.IsNullOrWhiteSpace(path)) return null;
+
+        foreach (var dir in path.Split(Path.PathSeparator))
+        {
+            if (string.IsNullOrWhiteSpace(dir)) continue;
+            var candidate = Path.Combine(dir, executableName);
+            if (File.Exists(candidate)) return candidate;
+        }
+
+        return null;
+    }
 }
