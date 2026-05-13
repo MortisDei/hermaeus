@@ -57,6 +57,8 @@ var tests = new (string Name, Func<Task> Run)[]
     ("RAG directory skip unchanged avoids duplicate chunks", RagDirectorySkipUnchangedAvoidsDuplicateChunks),
     ("RAG empty PDF warns and continues", RagEmptyPdfWarnsAndContinues),
     ("agent task state serializes schema fields", AgentTaskStateSerializesSchemaFields),
+    ("agent review queue reflects approval history", AgentReviewQueueReflectsApprovalHistory),
+    ("agent workspace memory persists notes per workspace", AgentWorkspaceMemoryPersistsNotesPerWorkspace),
     ("agent workspace tools enforce path safety", AgentWorkspaceToolsEnforcePathSafety),
     ("agent context pack stays bounded", AgentContextPackStaysBounded),
     ("agent tool policy gates risky actions", AgentToolPolicyGatesRiskyActions),
@@ -1019,6 +1021,65 @@ static async Task AgentTaskStateSerializesSchemaFields()
     Equal("Check project", loaded?.Goal, "stored task state should reload");
 }
 
+static async Task AgentReviewQueueReflectsApprovalHistory()
+{
+    using var temp = new TempDir();
+    var settings = NewSettings(temp);
+    settings.Settings.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    await store.InitializeAsync();
+
+    var state = new AgentTaskState
+    {
+        Goal = "Review patch",
+        Status = AgentTaskStatus.WaitingForUser,
+        ActiveStep = "Wait for approval",
+        Summary = "Needs review",
+        ApprovalHistory =
+        [
+            new AgentApprovalRecord("draft_patch", true, DateTime.UtcNow.AddMinutes(-5)),
+            new AgentApprovalRecord("publish", false, DateTime.UtcNow)
+        ]
+    };
+
+    await store.SaveAsync(state);
+    var queue = await store.ListReviewQueueAsync();
+
+    True(queue.Any(item => item.TaskId == state.TaskId), "waiting task should appear in the review queue");
+    var item = queue.Single(entry => entry.TaskId == state.TaskId);
+    Equal(2, item.ApprovalCount, "review queue should include approval count");
+    Equal("publish", item.LastApprovalAction, "review queue should surface the latest approval action");
+    False(item.LastApprovalApproved ?? true, "review queue should surface the latest approval decision");
+}
+
+static async Task AgentWorkspaceMemoryPersistsNotesPerWorkspace()
+{
+    using var temp = new TempDir();
+    var settings = NewSettings(temp);
+    settings.Settings.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentWorkspaceMemoryStore(settings);
+    await store.InitializeAsync();
+
+    var workspace = temp.PathFor("workspace");
+    Directory.CreateDirectory(workspace);
+
+    var entry = new AgentWorkspaceMemoryEntry
+    {
+        WorkspaceRoot = workspace,
+        Title = "Project note",
+        Body = "Remember to keep the ingest report visible.",
+        Tags = ["agent", "memory"]
+    };
+
+    await store.UpsertAsync(entry);
+    var items = await store.ListAsync(workspace);
+    True(items.Any(item => item.Title == "Project note"), "workspace memory should persist the note");
+
+    await store.DeleteAsync(workspace, entry.Id);
+    items = await store.ListAsync(workspace);
+    Equal(0, items.Count, "workspace memory should delete the note");
+}
+
 static Task AgentWorkspaceToolsEnforcePathSafety()
 {
     using var temp = new TempDir();
@@ -1066,7 +1127,7 @@ static async Task AgentContextPackStaysBounded()
     settings.Settings.DataRootDirectory = temp.PathFor("data");
     var ragStore = new SqliteRagStore(settings);
     var rag = new RagQueryService(ragStore, new FakeEmbeddingService(), new FakeLlm(), settings, new NoOpReranker());
-    var builder = new AgentContextBuilder(new AgentWorkspaceTools(), rag, ragStore);
+    var builder = new AgentContextBuilder(new AgentWorkspaceTools(), rag, ragStore, new FileAgentWorkspaceMemoryStore(settings));
     var state = new AgentTaskState
     {
         Goal = "Find alpha",

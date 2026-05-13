@@ -23,6 +23,8 @@ Pre-1.0 versions may still change internal APIs and storage details.
   subsequent launches after finish or skip.
 - RAG ingest dry-run, duplicate-source reporting, and per-document ingest
   summaries surfaced in the RAG panel before writing changes.
+- Agent review queue with approve/reject actions for waiting tasks, plus a
+  file-backed workspace memory panel for reusable workspace notes.
 
 ### Fixed
 

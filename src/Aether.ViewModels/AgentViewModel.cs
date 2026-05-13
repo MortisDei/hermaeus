@@ -19,10 +19,69 @@ public sealed class AgentContextItemViewModel
     public string ScoreDisplay { get; init; } = string.Empty;
 }
 
+public sealed class AgentReviewQueueItemViewModel
+{
+    public AgentReviewQueueItemViewModel(AgentReviewQueueItem item)
+    {
+        TaskId = item.TaskId;
+        Goal = item.Goal;
+        Status = item.Status;
+        UpdatedAt = item.UpdatedAt;
+        ActiveStep = item.ActiveStep;
+        Summary = item.Summary;
+        ApprovalCount = item.ApprovalCount;
+        LastApprovalAction = item.LastApprovalAction ?? string.Empty;
+        LastApprovalApproved = item.LastApprovalApproved;
+        LastApprovalAt = item.LastApprovalAt;
+    }
+
+    public string TaskId { get; }
+    public string Goal { get; }
+    public AgentTaskStatus Status { get; }
+    public DateTime UpdatedAt { get; }
+    public string ActiveStep { get; }
+    public string Summary { get; }
+    public int ApprovalCount { get; }
+    public string LastApprovalAction { get; }
+    public bool? LastApprovalApproved { get; }
+    public DateTime? LastApprovalAt { get; }
+    public string StatusLabel => Status.ToString();
+    public string ApprovalLabel => ApprovalCount == 0
+        ? "No approvals"
+        : $"{ApprovalCount} approval(s), last {LastApprovalAction}={(LastApprovalApproved == true ? "yes" : "no")}";
+
+    public string LatestApprovalLabel => LastApprovalAt is null
+        ? string.Empty
+        : $"Last review {LastApprovalAt:yyyy-MM-dd HH:mm} UTC";
+}
+
+public sealed class AgentWorkspaceMemoryEntryViewModel
+{
+    public AgentWorkspaceMemoryEntryViewModel(AgentWorkspaceMemoryEntry entry)
+    {
+        Id = entry.Id;
+        WorkspaceRoot = entry.WorkspaceRoot;
+        Title = entry.Title;
+        Body = entry.Body;
+        Tags = string.Join(", ", entry.Tags);
+        CreatedAt = entry.CreatedAt;
+        UpdatedAt = entry.UpdatedAt;
+    }
+
+    public string Id { get; }
+    public string WorkspaceRoot { get; }
+    public string Title { get; }
+    public string Body { get; }
+    public string Tags { get; }
+    public DateTime CreatedAt { get; }
+    public DateTime UpdatedAt { get; }
+}
+
 public partial class AgentViewModel : ObservableObject
 {
     private readonly IAgentService _agent;
     private readonly IAgentTaskStateStore _store;
+    private readonly IAgentWorkspaceMemoryStore _workspaceMemory;
     private readonly ILlmService _llm;
     private readonly RagQueryService _rag;
     private readonly IRuntimeLogService _logs;
@@ -31,6 +90,8 @@ public partial class AgentViewModel : ObservableObject
     public ObservableCollection<LlmModel> AvailableModels { get; } = [];
     public ObservableCollection<RagDataset> Datasets { get; } = [];
     public ObservableCollection<AgentTaskListItem> RecentTasks { get; } = [];
+    public ObservableCollection<AgentReviewQueueItemViewModel> ReviewQueue { get; } = [];
+    public ObservableCollection<AgentWorkspaceMemoryEntryViewModel> WorkspaceMemory { get; } = [];
     public ObservableCollection<AgentContextItemViewModel> RetrievedContext { get; } = [];
 
     [ObservableProperty] private string _goalText = string.Empty;
@@ -49,12 +110,14 @@ public partial class AgentViewModel : ObservableObject
     public AgentViewModel(
         IAgentService agent,
         IAgentTaskStateStore store,
+        IAgentWorkspaceMemoryStore workspaceMemory,
         ILlmService llm,
         RagQueryService rag,
         IRuntimeLogService logs)
     {
         _agent = agent;
         _store = store;
+        _workspaceMemory = workspaceMemory;
         _llm = llm;
         _rag = rag;
         _logs = logs;
@@ -76,6 +139,8 @@ public partial class AgentViewModel : ObservableObject
             foreach (var dataset in datasets) Datasets.Add(dataset);
 
             await RefreshRecentAsync();
+            await RefreshReviewQueueAsync();
+            await RefreshWorkspaceMemoryAsync();
         }
         catch (Exception ex)
         {
@@ -145,6 +210,79 @@ public partial class AgentViewModel : ObservableObject
         CurrentTask = await _store.LoadAsync(item.TaskId);
         RefreshTaskPreview();
         RunStepCommand.NotifyCanExecuteChanged();
+    }
+
+    [RelayCommand]
+    private async Task RefreshReviewQueueAsync()
+    {
+        ReviewQueue.Clear();
+        foreach (var item in await _store.ListReviewQueueAsync())
+            ReviewQueue.Add(new AgentReviewQueueItemViewModel(item));
+    }
+
+    [RelayCommand]
+    private async Task ApproveReviewAsync(AgentReviewQueueItemViewModel? item)
+    {
+        if (item is null) return;
+        await _agent.AppendApprovalAsync(item.TaskId, "review_queue", approved: true);
+        await RefreshReviewQueueAsync();
+        await LoadTaskIfOpenAsync(item.TaskId);
+    }
+
+    [RelayCommand]
+    private async Task RejectReviewAsync(AgentReviewQueueItemViewModel? item)
+    {
+        if (item is null) return;
+        await _agent.AppendApprovalAsync(item.TaskId, "review_queue", approved: false);
+        await RefreshReviewQueueAsync();
+        await LoadTaskIfOpenAsync(item.TaskId);
+    }
+
+    [RelayCommand]
+    private async Task RefreshWorkspaceMemoryAsync()
+    {
+        WorkspaceMemory.Clear();
+        if (string.IsNullOrWhiteSpace(WorkspaceRoot))
+            return;
+
+        foreach (var item in await _workspaceMemory.ListAsync(WorkspaceRoot))
+            WorkspaceMemory.Add(new AgentWorkspaceMemoryEntryViewModel(item));
+    }
+
+    [RelayCommand]
+    private async Task SaveWorkspaceMemoryAsync()
+    {
+        if (string.IsNullOrWhiteSpace(WorkspaceRoot) || string.IsNullOrWhiteSpace(GoalText))
+            return;
+
+        var entry = new AgentWorkspaceMemoryEntry
+        {
+            WorkspaceRoot = WorkspaceRoot,
+            Title = GoalText.Trim(),
+            Body = CurrentTask?.Summary ?? GoalText.Trim(),
+            Tags = ["agent", "workspace"]
+        };
+
+        await _workspaceMemory.UpsertAsync(entry);
+        await RefreshWorkspaceMemoryAsync();
+    }
+
+    [RelayCommand]
+    private async Task DeleteWorkspaceMemoryAsync(AgentWorkspaceMemoryEntryViewModel? entry)
+    {
+        if (entry is null) return;
+        await _workspaceMemory.DeleteAsync(WorkspaceRoot, entry.Id);
+        await RefreshWorkspaceMemoryAsync();
+    }
+
+    private async Task LoadTaskIfOpenAsync(string taskId)
+    {
+        if (CurrentTask?.TaskId != taskId)
+            return;
+
+        CurrentTask = await _store.LoadAsync(taskId);
+        RefreshTaskPreview();
+        await RefreshRecentAsync();
     }
 
     private async Task RunCurrentStepAsync()

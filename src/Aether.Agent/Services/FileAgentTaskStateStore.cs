@@ -80,6 +80,49 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
             .ToList();
     }
 
+    public async Task<IReadOnlyList<AgentReviewQueueItem>> ListReviewQueueAsync(int limit = 25, CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+        var queue = new List<AgentReviewQueueItem>();
+        foreach (var file in Directory.EnumerateFiles(Path.Combine(AgentRoot, "tasks"), "task_state.json", SearchOption.AllDirectories))
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                var json = await File.ReadAllTextAsync(file, ct);
+                var state = JsonSerializer.Deserialize<AgentTaskState>(json, AgentJson.Options);
+                if (state is null)
+                    continue;
+
+                var approvals = state.ApprovalHistory.OrderByDescending(a => a.Timestamp).ToList();
+                if (state.Status is not AgentTaskStatus.WaitingForUser and not AgentTaskStatus.Blocked && approvals.Count == 0)
+                    continue;
+
+                var last = approvals.FirstOrDefault();
+                queue.Add(new AgentReviewQueueItem(
+                    state.TaskId,
+                    state.Goal,
+                    state.Status,
+                    state.UpdatedAt,
+                    state.ActiveStep,
+                    state.Summary,
+                    approvals.Count,
+                    last?.Action,
+                    last is null ? null : last.Approved,
+                    last?.Timestamp));
+            }
+            catch
+            {
+                // Ignore corrupt task state entries so one bad task cannot hide the rest.
+            }
+        }
+
+        return queue
+            .OrderByDescending(t => t.UpdatedAt)
+            .Take(Math.Max(1, limit))
+            .ToList();
+    }
+
     public async Task AppendLogAsync(string taskId, string line, CancellationToken ct = default)
     {
         var dir = GetTaskDirectory(taskId);

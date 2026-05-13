@@ -52,6 +52,29 @@ public sealed class AgentTaskState
     public string Summary { get; set; } = string.Empty;
 }
 
+public sealed record AgentReviewQueueItem(
+    string TaskId,
+    string Goal,
+    AgentTaskStatus Status,
+    DateTime UpdatedAt,
+    string ActiveStep,
+    string Summary,
+    int ApprovalCount,
+    string? LastApprovalAction,
+    bool? LastApprovalApproved,
+    DateTime? LastApprovalAt);
+
+public sealed class AgentWorkspaceMemoryEntry
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string WorkspaceRoot { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string Body { get; set; } = string.Empty;
+    public List<string> Tags { get; set; } = [];
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
 public sealed record AgentDecision(
     string Decision,
     string Reason,

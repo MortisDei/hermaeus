@@ -147,6 +147,10 @@ The current Agent slice is read-first:
 - records `task_state.json`, `agent.log`, and `agent.trace.jsonl` under the
   Aether data root
 - classifies risky actions before execution
+- shows a review queue for waiting or blocked tasks with approve/reject
+  actions for recorded approvals
+- includes a workspace memory panel for saving and reusing notes tied to a
+  specific workspace root
 
 Writes, command execution, installs, network actions, commit, and push are not
 executed by this alpha agent. They are surfaced as approval-required or blocked

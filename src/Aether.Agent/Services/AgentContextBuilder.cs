@@ -9,15 +9,18 @@ public sealed class AgentContextBuilder : IAgentContextBuilder
     private readonly IAgentWorkspaceTools _workspaceTools;
     private readonly RagQueryService _rag;
     private readonly SqliteRagStore _ragStore;
+    private readonly IAgentWorkspaceMemoryStore _workspaceMemory;
 
     public AgentContextBuilder(
         IAgentWorkspaceTools workspaceTools,
         RagQueryService rag,
-        SqliteRagStore ragStore)
+        SqliteRagStore ragStore,
+        IAgentWorkspaceMemoryStore workspaceMemory)
     {
         _workspaceTools = workspaceTools;
         _rag = rag;
         _ragStore = ragStore;
+        _workspaceMemory = workspaceMemory;
     }
 
     public async Task<AgentContextPack> BuildAsync(
@@ -40,8 +43,33 @@ public sealed class AgentContextBuilder : IAgentContextBuilder
         };
 
         AddWorkspaceContext(pack, options);
+        await AddWorkspaceMemoryAsync(pack, options, ct);
         await AddRagContextAsync(pack, state, options, ct);
         return pack;
+    }
+
+    private async Task AddWorkspaceMemoryAsync(AgentContextPack pack, AgentWorkspaceOptions options, CancellationToken ct)
+    {
+        try
+        {
+            var entries = await _workspaceMemory.ListAsync(options.WorkspaceRoot, ct);
+            foreach (var entry in entries.OrderByDescending(e => e.UpdatedAt).Take(options.MaxContextItems))
+            {
+                pack.RetrievedMemory.Add(new AgentRetrievedItem(
+                    "workspace-memory",
+                    entry.Title,
+                    entry.Body,
+                    1.0,
+                    entry.UpdatedAt));
+            }
+
+            if (entries.Count > 0)
+                pack.KnownRisks.Add($"Workspace memory loaded: {entries.Count} note(s).");
+        }
+        catch (Exception ex)
+        {
+            pack.KnownRisks.Add($"Workspace memory unavailable: {ex.Message}");
+        }
     }
 
     private void AddWorkspaceContext(AgentContextPack pack, AgentWorkspaceOptions options)

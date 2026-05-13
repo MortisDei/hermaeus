@@ -8,9 +8,19 @@ public interface IAgentTaskStateStore
     Task SaveAsync(AgentTaskState state, CancellationToken ct = default);
     Task<AgentTaskState?> LoadAsync(string taskId, CancellationToken ct = default);
     Task<IReadOnlyList<AgentTaskListItem>> ListRecentAsync(int limit = 25, CancellationToken ct = default);
+    Task<IReadOnlyList<AgentReviewQueueItem>> ListReviewQueueAsync(int limit = 25, CancellationToken ct = default);
     Task AppendLogAsync(string taskId, string line, CancellationToken ct = default);
     Task AppendTraceAsync(string taskId, object trace, CancellationToken ct = default);
     string GetTaskDirectory(string taskId);
+}
+
+public interface IAgentWorkspaceMemoryStore
+{
+    Task InitializeAsync(CancellationToken ct = default);
+    Task<IReadOnlyList<AgentWorkspaceMemoryEntry>> ListAsync(string workspaceRoot, CancellationToken ct = default);
+    Task<AgentWorkspaceMemoryEntry> UpsertAsync(AgentWorkspaceMemoryEntry entry, CancellationToken ct = default);
+    Task DeleteAsync(string workspaceRoot, string id, CancellationToken ct = default);
+    string GetWorkspaceDirectory(string workspaceRoot);
 }
 
 public interface IAgentWorkspaceTools

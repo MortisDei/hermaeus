@@ -99,6 +99,18 @@
                             Content="Start Agent"
                             Padding="14,8"
                             CornerRadius="6" />
+                    <Button Command="{Binding RefreshReviewQueueCommand}"
+                        Content="Refresh Queue"
+                        Padding="14,8"
+                        CornerRadius="6" />
+                    <Button Command="{Binding RefreshWorkspaceMemoryCommand}"
+                        Content="Refresh Memory"
+                        Padding="14,8"
+                        CornerRadius="6" />
+                    <Button Command="{Binding SaveWorkspaceMemoryCommand}"
+                        Content="Save Memory"
+                        Padding="14,8"
+                        CornerRadius="6" />
                     <TextBlock Text="{Binding StatusMessage}"
                                VerticalAlignment="Center"
                                FontSize="12"
@@ -156,6 +168,95 @@
                                              Margin="0,8,0,0" />
                     </Expander>
                 </Grid>
+
+                <Expander Header="Review Queue" HorizontalAlignment="Stretch" IsExpanded="True">
+                    <ItemsControl ItemsSource="{Binding ReviewQueue}" Margin="0,8,0,0">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="6"
+                                        Padding="10"
+                                        Margin="0,0,0,6">
+                                    <StackPanel Spacing="3">
+                                        <Grid ColumnDefinitions="*,Auto">
+                                            <TextBlock Grid.Column="0"
+                                                       Text="{Binding Goal}"
+                                                       FontWeight="SemiBold"
+                                                       FontSize="13"
+                                                       TextWrapping="Wrap" />
+                                            <TextBlock Grid.Column="1"
+                                                       Text="{Binding StatusLabel}"
+                                                       FontSize="11"
+                                                       Opacity="0.5" />
+                                        </Grid>
+                                        <TextBlock Text="{Binding ActiveStep}"
+                                                   FontSize="11"
+                                                   Opacity="0.6"
+                                                   TextWrapping="Wrap" />
+                                        <TextBlock Text="{Binding Summary}"
+                                                   FontSize="11"
+                                                   Opacity="0.5"
+                                                   TextWrapping="Wrap" />
+                                        <TextBlock Text="{Binding ApprovalLabel}"
+                                                   FontSize="11"
+                                                   Opacity="0.55" />
+                                        <TextBlock Text="{Binding LatestApprovalLabel}"
+                                                   FontSize="11"
+                                                   Opacity="0.45" />
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <Button Content="Approve"
+                                                    Command="{Binding DataContext.ApproveReviewCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                    CommandParameter="{Binding}" />
+                                            <Button Content="Reject"
+                                                    Command="{Binding DataContext.RejectReviewCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                    CommandParameter="{Binding}" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </Expander>
+
+                <Expander Header="Workspace Memory" HorizontalAlignment="Stretch" IsExpanded="True">
+                    <ItemsControl ItemsSource="{Binding WorkspaceMemory}" Margin="0,8,0,0">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="6"
+                                        Padding="10"
+                                        Margin="0,0,0,6">
+                                    <StackPanel Spacing="3">
+                                        <Grid ColumnDefinitions="*,Auto">
+                                            <TextBlock Grid.Column="0"
+                                                       Text="{Binding Title}"
+                                                       FontWeight="SemiBold"
+                                                       FontSize="13"
+                                                       TextWrapping="Wrap" />
+                                            <TextBlock Grid.Column="1"
+                                                       Text="{Binding UpdatedAt, StringFormat={}{0:yyyy-MM-dd HH:mm}}"
+                                                       FontSize="11"
+                                                       Opacity="0.5" />
+                                        </Grid>
+                                        <TextBlock Text="{Binding Body}"
+                                                   FontSize="11"
+                                                   Opacity="0.55"
+                                                   TextWrapping="Wrap" />
+                                        <TextBlock Text="{Binding Tags}"
+                                                   FontSize="11"
+                                                   Opacity="0.4" />
+                                        <Button Content="Delete"
+                                                HorizontalAlignment="Left"
+                                                Command="{Binding DataContext.DeleteWorkspaceMemoryCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                CommandParameter="{Binding}" />
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </Expander>
 
                 <Expander Header="Agent Log" HorizontalAlignment="Stretch">
                     <SelectableTextBlock Text="{Binding LogPreview}"
