@@ -357,6 +357,7 @@ public partial class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowLogs));
         OnPropertyChanged(nameof(ShowWizard));
         OnPropertyChanged(nameof(ActiveViewModel));
+        OnPropertyChanged(nameof(WindowTitle));
     }
 
     partial void OnSearchQueryChanged(string value)
