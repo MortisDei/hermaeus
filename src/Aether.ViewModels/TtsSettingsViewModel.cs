@@ -66,6 +66,24 @@ public partial class TtsSettingsViewModel : ObservableObject
         }
     }
 
+    public bool IsF5TtsProvider
+    {
+        get
+        {
+            var provider = VoiceProviders.FirstOrDefault(p => p.Name.Equals(SelectedVoiceProvider, StringComparison.OrdinalIgnoreCase));
+            return provider is not null && provider.Id == VoiceProvider.F5Tts;
+        }
+    }
+
+    public bool IsOpenAiProvider
+    {
+        get
+        {
+            var provider = VoiceProviders.FirstOrDefault(p => p.Name.Equals(SelectedVoiceProvider, StringComparison.OrdinalIgnoreCase));
+            return provider is not null && provider.Id == VoiceProvider.OpenAi;
+        }
+    }
+
     public TtsSettingsViewModel(
         ITtsService tts,
         IVoiceProviderRegistry voiceProviderRegistry,
@@ -140,6 +158,8 @@ public partial class TtsSettingsViewModel : ObservableObject
             await RefreshTtsVoicesAsync();
             OnPropertyChanged(nameof(IsLegacyVoiceBackend));
             OnPropertyChanged(nameof(IsKokoroProvider));
+            OnPropertyChanged(nameof(IsF5TtsProvider));
+            OnPropertyChanged(nameof(IsOpenAiProvider));
             _toasts.Show("Voice provider changed", $"Now using {provider.Name}.", ToastKind.Success, 4000);
         }
         catch (Exception ex)
