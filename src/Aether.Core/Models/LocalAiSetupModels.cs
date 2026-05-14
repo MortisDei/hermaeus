@@ -13,7 +13,10 @@ public enum LocalAiSetupActionKind
     CreateVenv,
     InstallXttsDependencies,
     CreateXttsApiScript,
-    CreateDirectory
+    CreateDirectory,
+    DownloadGgufModel,
+    DownloadTtsModel,
+    DownloadLlamaServer
 }
 
 public enum LocalAiSetupRiskLevel

@@ -13,10 +13,17 @@ public sealed class LocalAiSetupService : ILocalAiSetupService
     private static readonly Version MaxSupportedXttsPythonExclusive = new(3, 12);
 
     private readonly PythonHealthValidator _pythonValidator;
+    private readonly ModelDownloadService _modelDownloader;
+    private readonly LlamaServerSetupService _llamaServerSetup;
 
-    public LocalAiSetupService(PythonHealthValidator pythonValidator)
+    public LocalAiSetupService(
+        PythonHealthValidator pythonValidator,
+        ModelDownloadService? modelDownloader = null,
+        LlamaServerSetupService? llamaServerSetup = null)
     {
         _pythonValidator = pythonValidator;
+        _modelDownloader = modelDownloader ?? new ModelDownloadService();
+        _llamaServerSetup = llamaServerSetup ?? new LlamaServerSetupService();
     }
 
     public async Task<LocalAiReadinessReport> ScanAsync(AppSettings settings, CancellationToken ct = default)
@@ -85,6 +92,31 @@ public sealed class LocalAiSetupService : ILocalAiSetupService
         if (string.IsNullOrWhiteSpace(layout.TtsOutputDirectory))
             actions.Add(CreateDirectoryAction("output", "Create XTTS output folder", defaultOutput));
 
+        // Offer to download default models if no GGUF files found
+        if (string.IsNullOrWhiteSpace(layout.ModelsDirectory))
+        {
+            var modelsDir = Path.Combine(layout.Root, "models");
+            var phi4ModelPath = Path.Combine(modelsDir, "phi-4-mini-reasoning-Q5_K_M.gguf");
+            const string phi4Url = "https://huggingface.co/bartowski/microsoft_Phi-4-mini-reasoning-GGUF/resolve/main/microsoft_Phi-4-mini-reasoning-Q5_K_M.gguf?download=true";
+            actions.Add(DownloadGgufModelAction(phi4ModelPath, phi4Url));
+
+            items.Add(new("default-model", "Default reasoning model", LocalAiReadinessStatus.NeedsAction,
+                "Phi-4 mini reasoning model can be downloaded automatically.",
+                "Aether can download the Phi-4 mini reasoning GGUF model for local reasoning tasks.",
+                true));
+        }
+
+        // Offer to download llama-server if not found
+        var llamaServerPath = _llamaServerSetup.GetDefaultInstallPath(layout.Root);
+        if (!_llamaServerSetup.IsInstalled(llamaServerPath))
+        {
+            actions.Add(DownloadLlamaServerAction(llamaServerPath));
+            items.Add(new("llama-server", "llama-server binary", LocalAiReadinessStatus.NeedsAction,
+                "llama-server binary can be downloaded automatically.",
+                "Aether can download the llama-server binary for running local language models.",
+                true));
+        }
+
         var missingRequired = items.Count(i => i.Required && i.Status != LocalAiReadinessStatus.Found);
         var summary = missingRequired == 0
             ? $"Local AI setup is ready under {layout.Root}."
@@ -111,6 +143,9 @@ public sealed class LocalAiSetupService : ILocalAiSetupService
             LocalAiSetupActionKind.InstallXttsDependencies => await InstallXttsAsync(action.TargetPath, progress, ct),
             LocalAiSetupActionKind.CreateXttsApiScript => CreateXttsApiScript(action.TargetPath, settings, allowOverwrite, progress),
             LocalAiSetupActionKind.CreateDirectory => CreateSupportDirectory(action.TargetPath, progress),
+            LocalAiSetupActionKind.DownloadGgufModel => await DownloadGgufModelAsync(action, progress, ct),
+            LocalAiSetupActionKind.DownloadTtsModel => await DownloadTtsModelAsync(action, progress, ct),
+            LocalAiSetupActionKind.DownloadLlamaServer => await DownloadLlamaServerAsync(action, progress, ct),
             _ => new LocalAiSetupResult(false, $"Unsupported setup action: {action.Kind}")
         };
     }
@@ -247,6 +282,84 @@ if __name__ == "__main__":
 """;
     }
 
+    private async Task<LocalAiSetupResult> DownloadGgufModelAsync(
+        LocalAiSetupAction action,
+        IProgress<string>? progress,
+        CancellationToken ct)
+    {
+        progress?.Report("Downloading GGUF model...");
+        try
+        {
+            var url = action.CommandPreview.FirstOrDefault() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(url))
+                return new LocalAiSetupResult(false, "No download URL specified in action.");
+
+            Directory.CreateDirectory(Path.GetDirectoryName(action.TargetPath) ?? action.TargetPath);
+            var result = await _modelDownloader.DownloadAsync(url, action.TargetPath, progress: null, ct: ct);
+            return result.Success
+                ? new LocalAiSetupResult(true, result.Message, action.TargetPath)
+                : new LocalAiSetupResult(false, result.Message);
+        }
+        catch (OperationCanceledException)
+        {
+            return new LocalAiSetupResult(false, "Download cancelled.");
+        }
+        catch (Exception ex)
+        {
+            return new LocalAiSetupResult(false, $"Failed to download GGUF model: {ex.Message}");
+        }
+    }
+
+    private async Task<LocalAiSetupResult> DownloadTtsModelAsync(
+        LocalAiSetupAction action,
+        IProgress<string>? progress,
+        CancellationToken ct)
+    {
+        progress?.Report("Downloading TTS model...");
+        try
+        {
+            var url = action.CommandPreview.FirstOrDefault() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(url))
+                return new LocalAiSetupResult(false, "No download URL specified in action.");
+
+            Directory.CreateDirectory(Path.GetDirectoryName(action.TargetPath) ?? action.TargetPath);
+            var result = await _modelDownloader.DownloadAsync(url, action.TargetPath, progress: null, ct: ct);
+            return result.Success
+                ? new LocalAiSetupResult(true, result.Message, action.TargetPath)
+                : new LocalAiSetupResult(false, result.Message);
+        }
+        catch (OperationCanceledException)
+        {
+            return new LocalAiSetupResult(false, "Download cancelled.");
+        }
+        catch (Exception ex)
+        {
+            return new LocalAiSetupResult(false, $"Failed to download TTS model: {ex.Message}");
+        }
+    }
+
+    private async Task<LocalAiSetupResult> DownloadLlamaServerAsync(
+        LocalAiSetupAction action,
+        IProgress<string>? progress,
+        CancellationToken ct)
+    {
+        progress?.Report("Installing llama-server binary...");
+        try
+        {
+            var installPath = Path.GetDirectoryName(action.TargetPath) ?? action.TargetPath;
+            var result = await _llamaServerSetup.InstallAsync(installPath, progress, ct);
+            return result;
+        }
+        catch (OperationCanceledException)
+        {
+            return new LocalAiSetupResult(false, "Installation cancelled.");
+        }
+        catch (Exception ex)
+        {
+            return new LocalAiSetupResult(false, $"Failed to install llama-server: {ex.Message}");
+        }
+    }
+
     private static void AddItem(
         List<LocalAiReadinessItem> items,
         string key,
@@ -287,6 +400,33 @@ if __name__ == "__main__":
         new($"create-{id}", LocalAiSetupActionKind.CreateDirectory, title, target,
             ["mkdir", target], LocalAiSetupRiskLevel.Low,
             "Creates the folder if it does not already exist.", false, true, true);
+
+    private static LocalAiSetupAction DownloadGgufModelAction(string modelPath, string url) =>
+        new("download-phi4-model", LocalAiSetupActionKind.DownloadGgufModel,
+            "Download Phi-4 Mini Reasoning Model",
+            modelPath,
+            [url],
+            LocalAiSetupRiskLevel.Medium,
+            "Downloads the Phi-4 mini reasoning GGUF model (Q5_K_M, ~9GB) for local reasoning.",
+            true, true, true);
+
+    private static LocalAiSetupAction DownloadTtsModelAction(string modelPath, string url) =>
+        new("download-kokoro-model", LocalAiSetupActionKind.DownloadTtsModel,
+            "Download Kokoro TTS Model",
+            modelPath,
+            [url],
+            LocalAiSetupRiskLevel.Medium,
+            "Downloads the Kokoro-82M TTS model for fast local speech synthesis.",
+            true, true, true);
+
+    private static LocalAiSetupAction DownloadLlamaServerAction(string installPath) =>
+        new("download-llama-server", LocalAiSetupActionKind.DownloadLlamaServer,
+            "Download llama-server Binary",
+            Path.Combine(installPath, OperatingSystem.IsWindows() ? "llama-server.exe" : "llama-server"),
+            ["https://github.com/ggerganov/llama.cpp/releases"],
+            LocalAiSetupRiskLevel.Medium,
+            "Downloads the llama-server binary for running local LLMs.",
+            true, true, true);
 
     private static async Task<LocalAiSetupResult> CreateVenvAsync(string target, IProgress<string>? progress, CancellationToken ct)
     {
