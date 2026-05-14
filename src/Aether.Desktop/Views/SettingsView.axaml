@@ -74,16 +74,35 @@
             <!-- RAG Embeddings -->
             <Border Grid.Row="1" Grid.Column="0" Classes="settings-card">
                 <StackPanel Spacing="12">
-                    <TextBlock Text="RAG Embeddings" FontSize="14" FontWeight="SemiBold" />
-                    <Grid ColumnDefinitions="110,*"
-                          ColumnSpacing="12">
-                        <TextBlock Grid.Column="0" Text="Embed model"
-                                   VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
-                        <TextBox Grid.Column="1" Text="{Binding EmbeddingModel}"
+                    <StackPanel Spacing="2">
+                        <TextBlock Text="RAG Embeddings" FontSize="14" FontWeight="SemiBold" />
+                        <TextBlock Text="Configure semantic search and retrieval augmented generation settings."
+                                   FontSize="11" Opacity="0.55" />
+                    </StackPanel>
+                    <Grid ColumnDefinitions="110,*,Auto" ColumnSpacing="12" RowDefinitions="Auto,Auto"
+                          RowSpacing="8">
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Embed model"
+                                   VerticalAlignment="Center" Opacity="0.6" FontSize="13"
+                                   ToolTip.Tip="Model used to generate embeddings for semantic search" />
+                        <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding EmbeddingModel}"
                                  Watermark="nomic-embed-text"
+                                 ToolTip.Tip="Defaults to nomic-embed-text. Managed via Services panel."
                                  FontSize="13" CornerRadius="6" Padding="10,6" />
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Reranker"
+                                   VerticalAlignment="Center" Opacity="0.6" FontSize="13"
+                                   ToolTip.Tip="Optional cross-encoder model for re-ranking search results" />
+                        <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding RagRerankerModelPath, UpdateSourceTrigger=PropertyChanged}"
+                                 Watermark="Path to reranker model"
+                                 ToolTip.Tip="Leave empty to disable reranking. Reranker uses LocalAiAssetsRoot."
+                                 FontSize="13" CornerRadius="6" Padding="10,6" />
+                        <Button Grid.Row="1" Grid.Column="2"
+                                Classes="icon-btn"
+                                ToolTip.Tip="Browse for reranker model">
+                            <PathIcon Data="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z"
+                                      Width="15" Height="15" />
+                        </Button>
                     </Grid>
-                    <TextBlock Text="Embedding model used for RAG. Managed separately via Services panel."
+                    <TextBlock Text="Embedding model is managed separately via the Services panel. Reranker is optional and improves search relevance."
                                FontSize="11" Opacity="0.45" TextWrapping="Wrap" />
                 </StackPanel>
             </Border>
