@@ -164,41 +164,54 @@ public sealed class KokoroVoiceProvider : ITtsService, IVoiceProvider
             : outputPath;
 
         var script = """
-import argparse
-from pathlib import Path
+                import argparse
+                from pathlib import Path
 
-import numpy as np
-import soundfile as sf
-from kokoro import KPipeline
+                import numpy as np
+                import soundfile as sf
+                from kokoro import KPipeline
 
-parser = argparse.ArgumentParser(description=\"Aether Kokoro voice renderer\")
-parser.add_argument(\"--text\", required=True)
-parser.add_argument(\"--voice\", default=\"af_heart\")
-parser.add_argument(\"--output\", required=True)
-parser.add_argument(\"--speed\", type=float, default=1.0)
-args = parser.parse_args()
+                parser = argparse.ArgumentParser(description="Aether Kokoro voice renderer")
+                parser.add_argument("--text", required=True)
+                parser.add_argument("--voice", default="af_heart")
+                parser.add_argument("--output", required=True)
+                parser.add_argument("--speed", type=float, default=1.0)
+                args = parser.parse_args()
 
-voice = args.voice.strip() or \"af_heart\"
-lang = voice[0].lower() if voice and voice[0].isalpha() else \"a\"
-pipeline = KPipeline(lang_code=lang)
+                voice = args.voice.strip() or "af_heart"
+                lang = voice[0].lower() if voice and voice[0].isalpha() else "a"
+                pipeline = KPipeline(lang_code=lang)
 
-with sf.SoundFile(args.output, \"w\", samplerate=24000, channels=1, subtype=\"PCM_16\") as wav_file:
-    for result in pipeline(args.text, voice=voice, speed=args.speed, split_pattern=r\"\\n+\"):
-        audio = result.audio
-        if audio is None:
-            continue
-        if hasattr(audio, \"detach\"):
-            audio = audio.detach().cpu().numpy()
-        else:
-            audio = np.asarray(audio)
-        wav_file.write(audio)
-""";
+                with sf.SoundFile(args.output, "w", samplerate=24000, channels=1, subtype="PCM_16") as wav_file:
+                    for result in pipeline(args.text, voice=voice, speed=args.speed, split_pattern=r"\n+"):
+                        audio = result.audio
+                        if audio is None:
+                            continue
+                        if hasattr(audio, "detach"):
+                            audio = audio.detach().cpu().numpy()
+                        else:
+                            audio = np.asarray(audio)
+                        wav_file.write(audio)
+                """;
+
+        var environment = new Dictionary<string, string?>();
+
+        if (_settings.Settings.Tts.Device.Equals("cpu", StringComparison.OrdinalIgnoreCase))
+        {
+            environment["CUDA_VISIBLE_DEVICES"] = "";
+        }
+        else
+        {
+            environment["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True";
+        }
+
 
         var run = await VoiceProviderProcessRunner.RunPythonScriptAsync(
             python,
             script,
             ["--text", text, "--voice", voice, "--output", output],
-            ct);
+            ct,
+            environment);
 
         if (!run.Success)
             throw new InvalidOperationException($"Kokoro synthesis failed.\n{run.Log}");

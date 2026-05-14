@@ -10,14 +10,15 @@ internal static class VoiceProviderProcessRunner
         string pythonPath,
         string scriptContents,
         IReadOnlyList<string> args,
-        CancellationToken ct)
+        CancellationToken ct,
+        IReadOnlyDictionary<string, string?>? environment = null)
     {
         var tempScript = Path.Combine(Path.GetTempPath(), $"aether-voice-{Guid.NewGuid():N}.py");
         var log = new StringBuilder();
         try
         {
             await File.WriteAllTextAsync(tempScript, scriptContents, Encoding.UTF8, ct);
-            return await RunProcessAsync(pythonPath, [tempScript, ..args], Path.GetTempPath(), log, ct);
+            return await RunProcessAsync(pythonPath, [tempScript, ..args], Path.GetTempPath(), log, ct, environment);
         }
         finally
         {
@@ -31,7 +32,8 @@ internal static class VoiceProviderProcessRunner
         IReadOnlyList<string> args,
         string workingDirectory,
         StringBuilder? log,
-        CancellationToken ct)
+        CancellationToken ct,
+        IReadOnlyDictionary<string, string?>? environment = null)
     {
         log ??= new StringBuilder();
         log.AppendLine($"Command: {fileName} {string.Join(" ", args.Select(QuoteIfNeeded))}");
@@ -45,6 +47,18 @@ internal static class VoiceProviderProcessRunner
             RedirectStandardError = true,
             CreateNoWindow = true
         };
+
+        if (environment is not null)
+        {
+            foreach (var pair in environment)
+            {
+                if (pair.Value is null)
+                    psi.Environment.Remove(pair.Key);
+                else
+                    psi.Environment[pair.Key] = pair.Value;
+            }
+        }
+
         foreach (var arg in args)
             psi.ArgumentList.Add(arg);
 
