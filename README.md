@@ -206,6 +206,18 @@ reranker model and vocabulary; Doctor shows progress messages during the
 download and loading steps. This prevents heavy network activity during queries
 and makes reranker installation an explicit, observable action.
 
+Model sources and Hugging Face guidance: Aether recommends using the Hugging
+Face Model Hub to obtain ONNX and tokenizer files for optional components
+like the reranker and small local LLMs. Hugging Face provides a model hub to
+browse and download model artifacts; many files are downloadable directly from
+their site, and they also offer the Hugging Face Inference API (requires an
+API key). The Inference API has a free tier with rate limits; for local
+deployments prefer downloading model files and installing them via the Doctor
+panel. Example small instruction-tuned model to consider for a local LLM is
+`microsoft/Phi-4-multimodal-instruct-onnx` (phi4) or similarly sized models
+that provide ONNX artifacts. Always check the model license and hosting
+requirements before downloading.
+
 ## Data, Backup, Security
 
 Default data root:

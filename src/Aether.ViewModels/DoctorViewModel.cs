@@ -11,11 +11,13 @@ public partial class DoctorViewModel : ObservableObject
 {
     private readonly IDoctorService _doctor;
     private readonly IToastService _toasts;
+    private CancellationTokenSource? _installCts;
 
     [ObservableProperty] private bool _isScanning;
     [ObservableProperty] private string _summary = "Run Doctor to scan your environment.";
     [ObservableProperty] private string _lastScanned = string.Empty;
     [ObservableProperty] private bool _isInstallingReranker;
+    [ObservableProperty] private string _rerankerProgress = string.Empty;
 
     public ObservableCollection<DoctorCheck> Checks { get; } = [];
 
@@ -73,6 +75,17 @@ public partial class DoctorViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private void CancelInstall()
+    {
+        if (_installCts is null) return;
+        try
+        {
+            _installCts.Cancel();
+        }
+        catch { }
+    }
+
+    [RelayCommand]
     private async Task RunFix(DoctorCheck? check)
     {
         if (check is null || !check.CanFix)
@@ -104,22 +117,33 @@ public partial class DoctorViewModel : ObservableObject
             {
                 if (IsInstallingReranker) return;
                 IsInstallingReranker = true;
-                var originalSummary = Summary;
-                var progress = new Progress<string>(s => Summary = "Reranker: " + s);
-                var ok = await _doctor.InstallRerankerAssetsAsync(progress);
+                _installCts = new CancellationTokenSource();
+                var progress = new Progress<string>(s => RerankerProgress = s);
+                var ok = await _doctor.InstallRerankerAssetsAsync(progress, _installCts.Token);
                 _toasts.Show(ok ? "Reranker installed" : "Reranker install failed",
                     ok ? "Reranker assets installed." : "See diagnostics for details.",
                     ok ? ToastKind.Success : ToastKind.Error,
                     7000);
                 // refresh doctor checks after attempt
                 await ScanAsync();
-                Summary = originalSummary;
+                RerankerProgress = string.Empty;
                 IsInstallingReranker = false;
+                _installCts = null;
                 return;
             }
             catch (Exception ex)
             {
-                _toasts.Show("Reranker install failed", ex.Message, ToastKind.Error, 7000);
+                if (ex is OperationCanceledException)
+                {
+                    _toasts.Show("Reranker install cancelled", "Installation was cancelled.", ToastKind.Info, 4000);
+                }
+                else
+                {
+                    _toasts.Show("Reranker install failed", ex.Message, ToastKind.Error, 7000);
+                }
+                IsInstallingReranker = false;
+                RerankerProgress = string.Empty;
+                _installCts = null;
                 return;
             }
         }

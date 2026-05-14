@@ -11,10 +11,11 @@
         <views:DoctorFixLabelConverter x:Key="DoctorFixLabel" />
     </UserControl.Resources>
 
-    <ScrollViewer Padding="24"
-                  VerticalScrollBarVisibility="Auto"
-                  HorizontalScrollBarVisibility="Disabled">
-        <StackPanel MaxWidth="780" Spacing="16">
+    <Grid>
+        <ScrollViewer Padding="24"
+                      VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled">
+            <StackPanel MaxWidth="780" Spacing="16">
             <StackPanel Spacing="6">
                 <TextBlock Text="Aether Doctor" FontSize="22" FontWeight="SemiBold" />
                 <TextBlock Text="Scan the local environment and services for issues." FontSize="13" Opacity="0.5" />
@@ -78,5 +79,21 @@
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
         </StackPanel>
-    </ScrollViewer>
+        </ScrollViewer>
+
+        <!-- Reranker install modal overlay -->
+        <Grid IsVisible="{Binding IsInstallingReranker}" Background="#80000000">
+        <Border HorizontalAlignment="Center" VerticalAlignment="Center" Background="{DynamicResource BackgroundBrush}" Padding="20" CornerRadius="8">
+            <StackPanel Spacing="12" Width="520">
+                <TextBlock Text="Installing Reranker" FontSize="16" FontWeight="SemiBold" />
+                <TextBlock Text="This will download and load the ONNX reranker model. You can cancel at any time." Opacity="0.7" TextWrapping="Wrap" />
+                <ProgressBar IsIndeterminate="True" Height="12" />
+                <TextBlock Text="{Binding RerankerProgress}" Opacity="0.9" />
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+                    <Button Content="Cancel" Command="{Binding CancelInstallCommand}" Padding="10,6" />
+                </StackPanel>
+            </StackPanel>
+        </Border>
+        </Grid>
+    </Grid>
 </UserControl>
