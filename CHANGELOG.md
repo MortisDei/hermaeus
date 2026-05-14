@@ -7,6 +7,41 @@ Pre-1.0 versions may still change internal APIs and storage details.
 
 ## [0.9.1-alpha] - Unreleased
 
+### Changed
+
+- Voice provider configuration now uses a dropdown selector to clearly indicate
+  the active provider, with conditional display of provider-specific settings
+  below the selector (Kokoro voice/device/speed controls, F5-TTS options, etc.).
+- RAG Embeddings section expanded with clarification that embeddings convert
+  document text to vectors for semantic search and are cached after first
+  compute, plus notes that reranker is optional and improves search relevance.
+- Tooltips for Local AI Setup Plan and Approve buttons now include more
+  detailed guidance on what each action accomplishes (preview vs. execute).
+- Toast notifications repositioned from top-right to top-left below the menu
+  bar for improved visibility and less overlap with active content areas.
+
+### Fixed
+
+- Window title now updates correctly when switching between non-Chat panels
+  (Settings, Agent, Models, RAG, Services, Tasks, etc.).
+- Agent view Grid layout: fixed TextBox/Browse button field overlap by adding
+  a third column definition for proper button sizing.
+- Services view: eliminated duplicate items appearing on scroll or after
+  collection changes by preventing multiple CollectionChanged subscriptions on
+  the same handler.
+- Python version validation now uses per-provider requirements; Kokoro requires
+  Python 3.12 while F5-TTS and XTTS v2 require Python 3.11, with appropriate
+  health check messages for each provider.
+- Reranker model path now resolves correctly against LocalAiAssetsRoot instead
+  of the incorrect DataRootDirectory reference.
+
+### Changed
+
+- Runtime log entry buffer capacity reduced from 2000 to 1000 entries to reduce
+  in-memory overhead during long-running sessions while maintaining adequate
+  debugging history.
+- Setup Wizard toolbar icon removed to reduce visual clutter; the wizard
+  remains accessible via the Settings panel.
 
 ## [0.9.0-alpha] - 2026-05-14
 
