@@ -14,6 +14,7 @@ namespace Aether.Desktop.Views;
 public partial class ServicesView : UserControl
 {
     public static readonly IValueConverter StatusColor = new StatusColorConverter();
+    private System.Collections.Specialized.NotifyCollectionChangedEventHandler? _collectionChangedHandler;
 
     public ServicesView()
     {
@@ -37,14 +38,21 @@ public partial class ServicesView : UserControl
     private void OnDataContextChanged(object? sender, EventArgs e)
     {
         if (DataContext is not ServicesViewModel vm) return;
+        
         foreach (var srv in vm.Servers)
             WireFilePickers(srv);
 
-        vm.Servers.CollectionChanged += (_, _) =>
+        // Create and store handler to allow unsubscribing later
+        _collectionChangedHandler = (_, e) =>
         {
-            foreach (var srv in vm.Servers)
-                WireFilePickers(srv);
+            if (e.NewItems is not null)
+            {
+                foreach (ServerProcessViewModel srv in e.NewItems)
+                    WireFilePickers(srv);
+            }
         };
+        
+        vm.Servers.CollectionChanged += _collectionChangedHandler;
     }
 
     private void WireFilePickers(ServerProcessViewModel srv)
