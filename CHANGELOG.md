@@ -20,6 +20,7 @@ Pre-1.0 versions may still change internal APIs and storage details.
   underlying coverage set.
  - Settings: add Kokoro managed service controls and health probe at startup; TTS speed persisted in settings.
  - Kokoro: Start/Stop managed service, venv-aware startup, and GPU-friendly install notes (supports CUDA, AMD, Intel via environment guidance).
+ - Kokoro: Start/Stop managed service, venv-aware startup, and GPU-friendly venv setup. The Local AI setup now detects NVIDIA (CUDA) or ROCm and suggests the appropriate device; Settings persist TTS device and speed. Manual override available in Settings.
  - Chat: avoid inserting internal runtime/TTS error messages into chat history; surface as runtime logs and toasts instead.
 - RAG Embeddings section expanded with clarification that embeddings convert
   document text to vectors for semantic search and are cached after first

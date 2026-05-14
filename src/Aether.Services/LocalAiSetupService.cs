@@ -147,7 +147,7 @@ public sealed class LocalAiSetupService : ILocalAiSetupService
 
         return action.Kind switch
         {
-            LocalAiSetupActionKind.CreateVenv => await CreateVenvAsync(action.TargetPath, progress, ct),
+            LocalAiSetupActionKind.CreateVenv => await CreateVenvAsync(action.TargetPath, settings, progress, ct),
             LocalAiSetupActionKind.InstallXttsDependencies => await InstallXttsAsync(action.TargetPath, progress, ct),
             LocalAiSetupActionKind.CreateXttsApiScript => CreateXttsApiScript(action.TargetPath, settings, allowOverwrite, progress),
             LocalAiSetupActionKind.CreateDirectory => CreateSupportDirectory(action.TargetPath, progress),
@@ -460,7 +460,7 @@ if __name__ == "__main__":
             "Downloads the llama-server binary for running local LLMs.",
             true, true, true);
 
-    private static async Task<LocalAiSetupResult> CreateVenvAsync(string target, IProgress<string>? progress, CancellationToken ct)
+    private static async Task<LocalAiSetupResult> CreateVenvAsync(string target, AppSettings settings, IProgress<string>? progress, CancellationToken ct)
     {
         if (Directory.Exists(target) && File.Exists(PythonPathForVenv(target)))
             return new LocalAiSetupResult(true, $"Venv already exists at {target}", PythonPathForVenv(target));
@@ -477,7 +477,42 @@ if __name__ == "__main__":
             Path.GetDirectoryName(target) ?? Environment.CurrentDirectory,
             progress,
             ct);
+        // Detect GPU backend on the host and update in-memory settings so UI can persist it.
+        try
+        {
+            var backend = await DetectGpuBackendAsync();
+            settings.Tts.Device = backend;
+            progress?.Report($"Detected GPU backend: {backend}");
+        }
+        catch { }
+
         return result with { UpdatedPath = PythonPathForVenv(target) };
+    }
+
+    private static async Task<string> DetectGpuBackendAsync()
+    {
+        // Prefer NVIDIA CUDA if nvidia-smi exists, then ROCm if rocminfo exists, otherwise default to cpu.
+        if (FindOnPath("nvidia-smi") is not null)
+            return "cuda";
+        if (FindOnPath("rocminfo") is not null)
+            return "rocm";
+        // Intel GPU detection is platform-specific; fall back to cpu and allow manual override.
+        return "cpu";
+    }
+
+    private static string? FindOnPath(string executableName)
+    {
+        var path = Environment.GetEnvironmentVariable("PATH");
+        if (string.IsNullOrWhiteSpace(path)) return null;
+
+        foreach (var dir in path.Split(Path.PathSeparator))
+        {
+            if (string.IsNullOrWhiteSpace(dir)) continue;
+            var candidate = Path.Combine(dir, executableName);
+            if (File.Exists(candidate)) return candidate;
+        }
+
+        return null;
     }
 
     private static Task<LocalAiSetupResult> InstallXttsAsync(string pythonPath, IProgress<string>? progress, CancellationToken ct)
