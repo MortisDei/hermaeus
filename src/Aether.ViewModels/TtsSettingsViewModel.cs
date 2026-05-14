@@ -57,6 +57,15 @@ public partial class TtsSettingsViewModel : ObservableObject
         }
     }
 
+    public bool IsKokoroProvider
+    {
+        get
+        {
+            var provider = VoiceProviders.FirstOrDefault(p => p.Name.Equals(SelectedVoiceProvider, StringComparison.OrdinalIgnoreCase));
+            return provider is not null && provider.Id == VoiceProvider.Kokoro;
+        }
+    }
+
     public TtsSettingsViewModel(
         ITtsService tts,
         IVoiceProviderRegistry voiceProviderRegistry,
@@ -130,6 +139,7 @@ public partial class TtsSettingsViewModel : ObservableObject
             SelectedVoiceProvider = provider.Name;
             await RefreshTtsVoicesAsync();
             OnPropertyChanged(nameof(IsLegacyVoiceBackend));
+            OnPropertyChanged(nameof(IsKokoroProvider));
             _toasts.Show("Voice provider changed", $"Now using {provider.Name}.", ToastKind.Success, 4000);
         }
         catch (Exception ex)
