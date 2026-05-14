@@ -26,6 +26,7 @@ public sealed class KokoroVoiceProvider : ITtsService, IVoiceProvider
     public VoiceProvider Id => VoiceProvider.Kokoro;
     public string DisplayName => "Kokoro";
     public VoiceCapability Capabilities => VoiceCapability.TextToSpeech | VoiceCapability.Local;
+    public (int Major, int Minor) RequiredPythonVersion => (3, 12);
 
     public KokoroVoiceProvider(ISettingsService settings)
     {
@@ -39,7 +40,7 @@ public sealed class KokoroVoiceProvider : ITtsService, IVoiceProvider
         var python = VoiceProviderProcessRunner.ResolvePythonPath(_settings);
         if (!VoiceProviderProcessRunner.IsExecutableAvailable(python))
         {
-            return new VoiceProviderDetection(false, "Python not found", "Install Python 3.11 or point Aether at a venv python.");
+            return new VoiceProviderDetection(false, "Python not found", "Install Python 3.12 or point Aether at a Python 3.12 venv.");
         }
 
         return new VoiceProviderDetection(true, "Python detected", $"Python path: {python}");
@@ -60,7 +61,7 @@ public sealed class KokoroVoiceProvider : ITtsService, IVoiceProvider
         };
 
         return new VoiceInstallPlan(
-            "Kokoro requires Python 3.11 and a small set of packages.",
+            "Kokoro requires Python 3.12 and a small set of packages.",
             steps,
             "Packages download from PyPI and run local inference.");
     }
@@ -73,7 +74,7 @@ public sealed class KokoroVoiceProvider : ITtsService, IVoiceProvider
     {
         var python = VoiceProviderProcessRunner.ResolvePythonPath(_settings);
         if (!VoiceProviderProcessRunner.IsExecutableAvailable(python))
-            return new VoiceHealth(VoiceHealthStatus.Unhealthy, "Python missing", "Configure a Python 3.11 interpreter or venv.");
+            return new VoiceHealth(VoiceHealthStatus.Unhealthy, "Python missing", "Configure a Python 3.12 interpreter or venv.");
 
         var script = "import importlib\nimportlib.import_module('kokoro')\nimportlib.import_module('soundfile')\n";
         var result = await VoiceProviderProcessRunner.RunPythonScriptAsync(python, script, [], ct);

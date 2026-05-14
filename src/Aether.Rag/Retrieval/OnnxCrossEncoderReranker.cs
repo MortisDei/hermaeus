@@ -211,7 +211,7 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
         if (!string.IsNullOrWhiteSpace(settings.Rag.RerankerModelPath))
             return Path.GetFullPath(settings.Rag.RerankerModelPath);
 
-        var configured = settings.DataManagement.DataRootDirectory?.Trim();
+        var configured = settings.DataManagement.LocalAiAssetsRoot?.Trim();
         var root = string.IsNullOrWhiteSpace(configured)
             ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Aether")
             : Path.GetFullPath(configured);

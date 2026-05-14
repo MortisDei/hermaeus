@@ -192,6 +192,7 @@ namespace Aether.Tests
         public VoiceProvider Id => VoiceProvider.Kokoro;
         public string DisplayName => "Fake Voice";
         public VoiceCapability Capabilities => VoiceCapability.TextToSpeech | VoiceCapability.Local;
+        public (int Major, int Minor) RequiredPythonVersion => (3, 12);
 
         public VoiceProviderDetection Detect() => new VoiceProviderDetection(true, "Available", "Fake provider available", null);
 

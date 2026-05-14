@@ -1,13 +1,29 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Aether.Core.Models;
+using Aether.Core.Services;
 
 namespace Aether.Services;
 
 public sealed class PythonHealthValidator
 {
-    private const int RequiredMajor = 3;
-    private const int RequiredMinor = 11;
+    private const int DefaultRequiredMajor = 3;
+    private const int DefaultRequiredMinor = 11;
+
+    private readonly int _requiredMajor;
+    private readonly int _requiredMinor;
+
+    public PythonHealthValidator(int requiredMajor = DefaultRequiredMajor, int requiredMinor = DefaultRequiredMinor)
+    {
+        _requiredMajor = requiredMajor;
+        _requiredMinor = requiredMinor;
+    }
+
+    public static PythonHealthValidator ForProvider(IVoiceProvider provider)
+    {
+        var (major, minor) = provider.RequiredPythonVersion;
+        return major > 0 ? new PythonHealthValidator(major, minor) : new PythonHealthValidator();
+    }
 
     public async Task<PythonHealthReport> ValidateAsync(string pythonPath, CancellationToken ct = default)
     {
@@ -100,7 +116,7 @@ print(json.dumps({"version": version, "issues": issues, "base_prefix": base_pref
 
             if (!IsRequiredVersion(version))
             {
-                issues.Add(new PythonHealthIssue("version", $"Expected Python {RequiredMajor}.{RequiredMinor}, got {version}.") );
+                issues.Add(new PythonHealthIssue("version", $"Expected Python {_requiredMajor}.{_requiredMinor}, got {version}.") );
             }
 
             var healthy = issues.Count == 0;
@@ -120,10 +136,10 @@ print(json.dumps({"version": version, "issues": issues, "base_prefix": base_pref
         }
     }
 
-    private static bool IsRequiredVersion(string version)
+    private bool IsRequiredVersion(string version)
     {
         if (string.IsNullOrWhiteSpace(version)) return false;
-        return version.StartsWith($"{RequiredMajor}.{RequiredMinor}", StringComparison.Ordinal);
+        return version.StartsWith($"{_requiredMajor}.{_requiredMinor}", StringComparison.Ordinal);
     }
 
     private static async Task<(bool Success, string Output)> RunPythonAsync(string pythonPath, string script, CancellationToken ct)
