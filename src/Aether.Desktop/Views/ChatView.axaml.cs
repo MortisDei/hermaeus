@@ -13,28 +13,34 @@ public partial class ChatView : UserControl
     public ChatView()
     {
         InitializeComponent();
+
         DataContextChanged += (_, _) =>
         {
-            _vm = DataContext as ChatViewModel;
-            if (_vm is null) return;
+            if (DataContext is not ChatViewModel vm)
+            {
+                _vm = null;
+                return;
+            }
 
-            _vm.ScrollToBottom += (_, _) =>
+            _vm = vm;
+
+            vm.ScrollToBottom += (_, _) =>
                 Dispatcher.UIThread.Post(() =>
                 {
                     if (this.FindControl<ListBox>("MessagesList") is { } list
-                        && _vm.Messages.LastOrDefault() is { } last)
+                        && vm.Messages.LastOrDefault() is { } last)
                     {
                         list.ScrollIntoView(last);
                     }
                 }, DispatcherPriority.Background);
 
-            _vm.RequestCopyToClipboard = async text =>
+            vm.RequestCopyToClipboard = async text =>
             {
                 if (TopLevel.GetTopLevel(this)?.Clipboard is { } cb)
                     await cb.SetTextAsync(text);
             };
 
-            _vm.RequestContextFilePicker = async () =>
+            vm.RequestContextFilePicker = async () =>
             {
                 var top = TopLevel.GetTopLevel(this);
                 if (top is null) return;
@@ -60,7 +66,7 @@ public partial class ChatView : UserControl
                 });
 
                 if (files.Count > 0)
-                    await _vm.AddContextFilesAsync(files.Select(f => f.Path.LocalPath));
+                    await vm.AddContextFilesAsync(files.Select(f => f.Path.LocalPath));
             };
         };
     }
