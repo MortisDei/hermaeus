@@ -8,7 +8,7 @@ Pre-1.0 versions may still change internal APIs and storage details.
 ## [0.9.1-alpha] - Unreleased
 
 
-## [0.9.0-alpha]
+## [0.9.0-alpha] - 2026-05-14
 
 ### Added
 
@@ -23,7 +23,6 @@ Pre-1.0 versions may still change internal APIs and storage details.
   voice step, including the provider install plan and risk notes.
 - Added regression coverage for resumable downloads and llama-server release
   data validation.
-
 - Voice provider abstraction with capabilities, health checks, and install
   plans for Kokoro, F5-TTS, XTTS v2, and optional OpenAI voice.
 - Local AI setup install plan previews that must be reviewed before approval.
@@ -84,17 +83,13 @@ Pre-1.0 versions may still change internal APIs and storage details.
 - Tests: split the monolithic custom harness further by extracting backup and
   migration coverage into `BackupMigrationTests`, keeping `Program.cs` as a
   thinner runner and reducing the surface area for future test refactors.
-
 - Tests: continue the harness split by extracting agent coverage into
   `AgentTests`, including task-state persistence, review queue behaviour,
   workspace memory, path safety, context packing, safety gating, and trace
   logging.
-
 - Refactor AppSettings into dedicated configuration types for LLM, TTS, RAG,
   UI, and data management settings, so each domain is owned by a focused model
   instead of one oversized settings object.
-
-
 
 ## [0.8.7-alpha] - 2026-05-13
 
