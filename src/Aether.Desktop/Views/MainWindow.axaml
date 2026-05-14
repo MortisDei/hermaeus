@@ -235,9 +235,9 @@
 
         <ItemsControl Grid.ColumnSpan="2"
                       ItemsSource="{Binding Toasts}"
-                      HorizontalAlignment="Right"
+                      HorizontalAlignment="Left"
                       VerticalAlignment="Top"
-                      Margin="0,58,18,0"
+                      Margin="18,58,0,0"
                       IsHitTestVisible="False">
             <ItemsControl.ItemsPanel>
                 <ItemsPanelTemplate>
