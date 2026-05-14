@@ -34,7 +34,37 @@ Pre-1.0 versions may still change internal APIs and storage details.
   health check messages for each provider.
 - Reranker model path now resolves correctly against LocalAiAssetsRoot instead
   of the incorrect DataRootDirectory reference.
+- Resource leak in MarkdownViewer: timer now properly stopped and unsubscribed
+  from events when control is detached from visual tree; prevents timer tick
+  events continuing after control disposal.
+- Resource leak in ServerProcessManager.AutoTuneAsync: TaskCompletionSource
+  now guaranteed to complete even on abnormal process exit; added defensive
+  catch block and finally-block check to ensure completion never hangs.
+- MainWindowViewModel panel commands now consistently use sync commands with
+  background async loading; ShowChatPanelAsync and ShowAgentPanelAsync
+  converted to ShowChatPanel and ShowAgentPanel using RunBackgroundTaskAsync
+  pattern for consistency with other panel switching commands.
+- CompositeLlmService timeouts tuned: per-provider timeout increased from 2s
+  to 5s to accommodate slower model providers; model cache duration increased
+  from 30s to 300s (5 minutes) for more stable model discovery; added explicit
+  error classification for timeout vs other exceptions.
+- RagQueryService LRU cache simplified: replaced complex Queue-based TouchCache
+  with LinkedList for O(n) instead of O(n^2) eviction; cleaner implementation
+  with direct node removal and addition to end.
+- ChatViewModel regenerate now uses proper attachment storage: AttachedFilePaths
+  collection added to MessageViewModel to store file paths; regeneration
+  retrieves paths from message model instead of fragile marker-based parsing.
+- AgentService JSON extraction improved: added brace-matching logic to properly
+  handle nested structures and escaped quotes; validates extracted JSON with
+  JsonDocument.Parse before returning; fallback behavior now attempts multiple
+  extraction strategies instead of failing on first mismatch.
+- SqliteRagStore connection pooling: added Pooling=true and Max Pool Size=5
+  to SQLite connection string for automatic connection reuse across operations.
+- SettingsView.axaml binding consistency: added missing Tts. prefix to
+  IsLegacyVoiceBackend bindings for UI visibility conditions.
 
+- Window title now updates correctly when switching between non-Chat panels
+  (Settings, Agent, Models, RAG, Services, Tasks, etc.).
 ### Changed
 
 - Runtime log entry buffer capacity reduced from 2000 to 1000 entries to reduce

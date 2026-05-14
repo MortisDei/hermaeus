@@ -23,7 +23,7 @@ public sealed class SqliteRagStore
             return Path.Combine(dir, "conversations.db");
         }
     }
-    private string Cs => $"Data Source={DbPath}";
+    private string Cs => $"Data Source={DbPath};Pooling=true;Max Pool Size=5";
 
     public SqliteRagStore(ISettingsService settings)
     {

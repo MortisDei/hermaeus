@@ -50,7 +50,7 @@ public sealed class CompositeLlmService : ILlmService
             if (!string.IsNullOrWhiteSpace(model.ProviderTag))
                 _providerTagsByModelId[model.Id] = model.ProviderTag;
         }
-        _cacheUntilUtc = DateTime.UtcNow.AddSeconds(30);
+        _cacheUntilUtc = DateTime.UtcNow.AddSeconds(300);
         return all;
     }
 
@@ -59,13 +59,19 @@ public sealed class CompositeLlmService : ILlmService
         CancellationToken ct)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(TimeSpan.FromSeconds(2));
+        timeout.CancelAfter(TimeSpan.FromSeconds(5));
         try
         {
             return await load(timeout.Token);
         }
+        catch (OperationCanceledException)
+        {
+            // Provider took too long to respond; return empty list gracefully
+            return [];
+        }
         catch
         {
+            // Other errors (connection issues, etc.) also return empty list
             return [];
         }
     }

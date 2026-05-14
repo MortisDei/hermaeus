@@ -201,6 +201,8 @@ public sealed class AgentService : IAgentService
     private static string ExtractJson(string raw)
     {
         var trimmed = raw.Trim();
+        
+        // First, try to extract JSON by removing markdown fence markers
         if (trimmed.StartsWith("```", StringComparison.Ordinal))
         {
             var firstNewline = trimmed.IndexOf('\n');
@@ -209,12 +211,80 @@ public sealed class AgentService : IAgentService
                 trimmed = trimmed[(firstNewline + 1)..lastFence].Trim();
         }
 
+        // Try parsing using brace matching to handle nested structures
+        var candidate = ExtractJsonObject(trimmed);
+        if (!string.IsNullOrEmpty(candidate))
+        {
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(candidate);
+                return candidate;
+            }
+            catch { }
+        }
+
+        // Fallback: find first { and last } for malformed responses
         var start = trimmed.IndexOf('{');
         var end = trimmed.LastIndexOf('}');
         if (start >= 0 && end > start)
-            return trimmed[start..(end + 1)];
+        {
+            var extracted = trimmed[start..(end + 1)];
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(extracted);
+                return extracted;
+            }
+            catch { }
+        }
 
-        throw new JsonException("Agent response did not contain a JSON object.");
+        throw new JsonException("Agent response did not contain valid JSON object.");
+    }
+
+    private static string ExtractJsonObject(string trimmed)
+    {
+        var start = trimmed.IndexOf('{');
+        if (start < 0)
+            return string.Empty;
+
+        int depth = 0;
+        bool inString = false;
+        bool escaped = false;
+
+        for (int i = start; i < trimmed.Length; i++)
+        {
+            var ch = trimmed[i];
+
+            if (escaped)
+            {
+                escaped = false;
+                continue;
+            }
+
+            if (ch == '\\')
+            {
+                escaped = true;
+                continue;
+            }
+
+            if (ch == '"')
+            {
+                inString = !inString;
+                continue;
+            }
+
+            if (!inString)
+            {
+                if (ch == '{') depth++;
+                else if (ch == '}')
+                {
+                    depth--;
+                    if (depth == 0)
+                        return trimmed[start..(i + 1)];
+                }
+            }
+        }
+
+        return string.Empty;
     }
 
     private static void ApplyResponse(AgentTaskState state, AgentPlannerResponse response)

@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace Aether.ViewModels;
@@ -15,6 +16,12 @@ public partial class MessageViewModel : ObservableObject
     public bool IsAssistant => Role == "assistant";
     public string Id { get; init; } = Guid.NewGuid().ToString();
     public DateTime CreatedAt { get; init; } = DateTime.Now;
+    
+    /// <summary>
+    /// Stores attachment file paths when this is a user message with context attachments.
+    /// Populated when attachments are added; used during regeneration to recover attachments.
+    /// </summary>
+    public ObservableCollection<string> AttachedFilePaths { get; } = [];
 
     public string MetaDisplay
     {

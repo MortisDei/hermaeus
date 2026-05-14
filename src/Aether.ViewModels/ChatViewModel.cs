@@ -135,7 +135,13 @@ public partial class ChatViewModel : ObservableObject
         var promptText = ChatContextAttachment.BuildPrompt(text, attachments);
         var displayText = ChatContextAttachment.BuildDisplayMessage(text, attachments);
         UpdateContextUsage(new ChatTokenUsage(EstimateTokensForSend(promptText), 0, EstimateTokensForSend(promptText)), "Estimated");
-        Messages.Add(new MessageViewModel { Role = "user", Content = displayText });
+        
+        var userMessage = new MessageViewModel { Role = "user", Content = displayText };
+        // Store attachment paths for regeneration; only include ready attachments
+        foreach (var attachment in attachments.Where(a => a.IsReady))
+            userMessage.AttachedFilePaths.Add(attachment.FullPath);
+        Messages.Add(userMessage);
+        
         InputText = string.Empty;
         ClearContextAttachments();
 
@@ -297,42 +303,29 @@ public partial class ChatViewModel : ObservableObject
         if (lastAsst is not null) Messages.Remove(lastAsst);
         var lastUser = Messages.LastOrDefault(m => m.IsUser);
         if (lastUser is null) return;
-        // Try to preserve attachments that were included in the saved display message.
-        var raw = lastUser.Content ?? string.Empty;
-        Messages.Remove(lastUser);
 
-        // Detect the attached context marker produced by ChatContextAttachment.BuildDisplayMessage
+        // Extract user text and recover attachment paths from the message
+        var raw = lastUser.Content ?? string.Empty;
+        var paths = lastUser.AttachedFilePaths.ToList();
+        
+        // Parse out the user's original text by removing the attachment marker section
         const string marker = "Attached context injected at send time:";
         var userText = raw;
-        var paths = new List<string>();
         if (raw.Contains(marker))
         {
             var lines = raw.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).ToList();
             var idx = lines.FindIndex(l => l.Trim().Equals(marker, StringComparison.OrdinalIgnoreCase));
             if (idx >= 0)
             {
-                // Lines before marker may contain the user's original text
+                // Lines before marker contain the user's original text
                 var before = lines.Take(idx).ToList();
                 userText = before.Count == 0 ? string.Empty : string.Join("\n", before).Trim();
-
-                // Lines after marker list attachments in format: "- FileName (SizeLabel) - FullPath"
-                for (var i = idx + 1; i < lines.Count; i++)
-                {
-                    var line = lines[i].Trim();
-                    if (!line.StartsWith("- ")) continue;
-                    // attempt to extract last ' - ' segment as path
-                    var parts = line.Split(" - ");
-                    if (parts.Length >= 2)
-                    {
-                        var candidate = parts[^1].Trim();
-                        if (!string.IsNullOrWhiteSpace(candidate) && File.Exists(candidate))
-                            paths.Add(candidate);
-                    }
-                }
             }
         }
 
+        Messages.Remove(lastUser);
         InputText = userText;
+        
         if (paths.Count > 0)
         {
             try

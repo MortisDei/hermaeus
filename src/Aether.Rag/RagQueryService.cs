@@ -32,7 +32,7 @@ public sealed class RagQueryService
     // In-memory chunk cache per dataset  (dataset_id → chunks)
     private const int MaxCachedDatasets = 8;
     private readonly Dictionary<string, List<RagChunk>> _cache = [];
-    private readonly Queue<string> _cacheOrder = [];
+    private readonly LinkedList<string> _cacheOrder = new();
 
     public RagQueryService(
         SqliteRagStore store,
@@ -54,63 +54,33 @@ public sealed class RagQueryService
     public void ClearCache(string datasetId)
     {
         _cache.Remove(datasetId);
-        if (_cacheOrder.Count == 0)
-            return;
-
-        var remaining = new Queue<string>();
-        while (_cacheOrder.Count > 0)
-        {
-            var current = _cacheOrder.Dequeue();
-            if (!string.Equals(current, datasetId, StringComparison.OrdinalIgnoreCase))
-                remaining.Enqueue(current);
-        }
-
-        while (remaining.Count > 0)
-            _cacheOrder.Enqueue(remaining.Dequeue());
+        var node = _cacheOrder.Find(datasetId);
+        if (node is not null)
+            _cacheOrder.Remove(node);
     }
 
     private void StoreCache(string datasetId, List<RagChunk> chunks)
     {
         _cache[datasetId] = chunks;
         TouchCache(datasetId);
-
-        while (_cacheOrder.Count > MaxCachedDatasets)
-        {
-            var oldest = _cacheOrder.Dequeue();
-            _cache.Remove(oldest);
-        }
     }
 
     private void TouchCache(string datasetId)
     {
-        if (_cacheOrder.Count == 0)
-        {
-            _cacheOrder.Enqueue(datasetId);
-            return;
-        }
+        var existing = _cacheOrder.Find(datasetId);
+        if (existing is not null)
+            _cacheOrder.Remove(existing);
+        _cacheOrder.AddLast(datasetId);
 
-        var entries = new Queue<string>();
-        var touched = false;
-        while (_cacheOrder.Count > 0)
+        // Evict oldest entries if we exceed the max
+        while (_cacheOrder.Count > MaxCachedDatasets)
         {
-            var current = _cacheOrder.Dequeue();
-            if (string.Equals(current, datasetId, StringComparison.OrdinalIgnoreCase))
+            var oldest = _cacheOrder.First;
+            if (oldest is not null)
             {
-                touched = true;
-                continue;
+                _cache.Remove(oldest.Value);
+                _cacheOrder.RemoveFirst();
             }
-            entries.Enqueue(current);
-        }
-
-        while (entries.Count > 0)
-            _cacheOrder.Enqueue(entries.Dequeue());
-
-        _cacheOrder.Enqueue(datasetId);
-        if (!touched && _cacheOrder.Count > MaxCachedDatasets)
-        {
-            var oldest = _cacheOrder.Dequeue();
-            if (!string.Equals(oldest, datasetId, StringComparison.OrdinalIgnoreCase))
-                _cache.Remove(oldest);
         }
     }
 

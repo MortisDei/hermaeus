@@ -284,15 +284,15 @@ public partial class MainWindowViewModel : ObservableObject
     public void ToggleQuickChatSurface() => ShowQuickChat = !ShowQuickChat;
     public void OpenNewConversation() => NewConversation();
     public void OpenServicesPanel() => ShowServicesPanel();
-    [RelayCommand] private async Task ShowChatPanelAsync()
+    [RelayCommand] private void ShowChatPanel()
     {
         ActivePanel = "chat";
-        await Chat.LoadModelsAsync();
+        RunBackgroundTaskAsync("load chat models", () => Chat.LoadModelsAsync());
     }
-    [RelayCommand] private async Task ShowAgentPanelAsync()
+    [RelayCommand] private void ShowAgentPanel()
     {
         ActivePanel = "agent";
-        await Agent.LoadAsync();
+        RunBackgroundTaskAsync("load agent", () => Agent.LoadAsync());
     }
     [RelayCommand] private void ShowRagPanel()         => ActivePanel = "rag";
     [RelayCommand] private void ShowModelsPanel()      { ActivePanel = "models"; RunBackgroundTaskAsync("refresh models panel", () => Models.RefreshCommand.ExecuteAsync(null)); }

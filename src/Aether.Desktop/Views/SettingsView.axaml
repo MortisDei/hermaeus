@@ -206,11 +206,11 @@
                         </StackPanel>
                     </Border>
 
-                    <TextBlock Text="Legacy XTTS v2 settings" FontSize="12" FontWeight="SemiBold" 
-                               IsVisible="{Binding IsLegacyVoiceBackend}" />
-                    <Grid ColumnDefinitions="110,*,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
+                      <TextBlock Text="Legacy XTTS v2 settings" FontSize="12" FontWeight="SemiBold" 
+                             IsVisible="{Binding Tts.IsLegacyVoiceBackend}" />
+                      <Grid ColumnDefinitions="110,*,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
                           RowSpacing="8" ColumnSpacing="12"
-                          IsVisible="{Binding IsLegacyVoiceBackend}">
+                          IsVisible="{Binding Tts.IsLegacyVoiceBackend}">
                         <TextBlock Grid.Row="0" Grid.Column="0" Text="Base URL"
                                    VerticalAlignment="Center" Opacity="0.6" FontSize="13" 
                                    ToolTip.Tip="Local XTTS API endpoint" />

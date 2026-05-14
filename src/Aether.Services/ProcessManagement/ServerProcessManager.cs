@@ -189,6 +189,12 @@ public sealed class ServerProcessManager : IDisposable
 
             return await completion.Task;
         }
+        catch (Exception ex) when (!completion.Task.IsCompleted)
+        {
+            // If an exception occurred and the task hasn't been completed, set it to propagate the error
+            completion.TrySetException(ex);
+            throw;
+        }
         finally
         {
             try
@@ -197,6 +203,13 @@ public sealed class ServerProcessManager : IDisposable
                     process.Kill(entireProcessTree: true);
             }
             catch { }
+
+            // Ensure the task is always completed, even if we exit abnormally
+            if (!completion.Task.IsCompleted)
+            {
+                completion.TrySetException(new InvalidOperationException(
+                    "Auto-tune task was not completed due to unexpected exit."));
+            }
         }
     }
 
