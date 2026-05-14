@@ -22,6 +22,8 @@ public partial class SetupWizardViewModel : ObservableObject
     [ObservableProperty] private VoiceProviderInfo? _selectedVoiceProvider;
     [ObservableProperty] private RuntimeProfileViewModel? _selectedRuntime;
     [ObservableProperty] private string _doctorSummary = "Run Doctor to verify the setup.";
+    [ObservableProperty] private string _voiceOnboardingSummary = string.Empty;
+    [ObservableProperty] private string _voiceOnboardingRiskNotes = string.Empty;
     [ObservableProperty] private bool _doctorRan;
     [ObservableProperty] private bool _isDoctorRunning;
 
@@ -39,6 +41,7 @@ public partial class SetupWizardViewModel : ObservableObject
 
     public ObservableCollection<RuntimeProfileViewModel> RuntimeOptions { get; } = [];
     public ObservableCollection<VoiceProviderInfo> VoiceOptions { get; } = [];
+    public ObservableCollection<string> VoiceOnboardingSteps { get; } = [];
 
     public Action? RequestDataRootPicker { get; set; }
     public Action? RequestLocalAiAssetsRootPicker { get; set; }
@@ -79,6 +82,7 @@ public partial class SetupWizardViewModel : ObservableObject
             VoiceOptions.Add(provider);
         SelectedVoiceProvider = VoiceOptions.FirstOrDefault(p => p.Name == s.Tts.VoiceProvider)
             ?? VoiceOptions.FirstOrDefault();
+        UpdateVoiceOnboarding(SelectedVoiceProvider);
     }
 
     [RelayCommand]
@@ -176,6 +180,26 @@ public partial class SetupWizardViewModel : ObservableObject
         {
             _syncingRuntimeSelection = false;
         }
+    }
+
+    partial void OnSelectedVoiceProviderChanged(VoiceProviderInfo? value) => UpdateVoiceOnboarding(value);
+
+    private void UpdateVoiceOnboarding(VoiceProviderInfo? provider)
+    {
+        VoiceOnboardingSteps.Clear();
+
+        if (provider is null)
+        {
+            VoiceOnboardingSummary = string.Empty;
+            VoiceOnboardingRiskNotes = string.Empty;
+            return;
+        }
+
+        var plan = _voiceProviders.GetVoiceProvider(provider.Id).InstallPlan();
+        VoiceOnboardingSummary = plan.Summary;
+        VoiceOnboardingRiskNotes = plan.RiskNotes;
+        foreach (var step in plan.Steps)
+            VoiceOnboardingSteps.Add($"{step.Title}: {step.Detail}");
     }
 
     private async Task ApplyStepAsync(int step)

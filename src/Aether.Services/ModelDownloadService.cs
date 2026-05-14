@@ -12,9 +12,9 @@ public sealed class ModelDownloadService
     private static readonly TimeSpan DefaultTimeout = TimeSpan.FromMinutes(30);
     private readonly HttpClient _http;
 
-    public ModelDownloadService()
+    public ModelDownloadService(HttpClient? http = null)
     {
-        _http = new HttpClient { Timeout = DefaultTimeout };
+        _http = http ?? new HttpClient { Timeout = DefaultTimeout };
     }
 
     /// <summary>

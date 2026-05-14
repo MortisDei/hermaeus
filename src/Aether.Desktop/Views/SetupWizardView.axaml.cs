@@ -16,6 +16,7 @@ public partial class SetupWizardView : UserControl
     public static readonly IValueConverter Step5 = new StepIndexConverter(5);
     public static readonly IValueConverter Last = new StepIndexConverter(5, isLast: true);
     public static readonly IValueConverter NotLast = new StepIndexConverter(5, invert: true);
+    public static readonly IValueConverter HasText = new HasTextConverter();
 
     public SetupWizardView()
     {
@@ -97,4 +98,13 @@ public sealed class StepIndexConverter : IValueConverter
     }
 
     public object ConvertBack(object? v, Type t, object? p, CultureInfo c) => throw new NotImplementedException();
+}
+
+public sealed class HasTextConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        !string.IsNullOrWhiteSpace(value?.ToString());
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        throw new NotImplementedException();
 }

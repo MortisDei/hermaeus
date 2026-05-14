@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Net.Http;
 using System.Threading.Tasks;
 using Aether.Core.Models;
 using Aether.Core.Services;
@@ -146,6 +147,51 @@ namespace Aether.Tests
             var report = await service.ScanAsync(settings.Settings);
 
             False(report.SetupCommands.Contains(';', StringComparison.Ordinal), "command previews should not synthesize shell separators");
+        }
+
+        public static async Task LocalAiSetupSurfcesKokoroOnboarding()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.Tts.VoiceProvider = "Kokoro";
+            var wizard = new SetupWizardViewModel(
+                settings,
+                new RuntimeProfileService(settings),
+                new FakeVoiceProviderRegistryKokoroInstall(settings),
+                new FakeDoctorService(),
+                new FakeToasts());
+
+            True(wizard.VoiceOnboardingSummary.Contains("Kokoro", StringComparison.Ordinal), "wizard should surface Kokoro onboarding summary");
+            True(wizard.VoiceOnboardingSteps.Any(step => step.Contains("Install Kokoro packages", StringComparison.Ordinal)), "wizard should include Kokoro install step");
+        }
+
+        public static async Task ModelDownloadResumesWithRangeRequest()
+        {
+            using var temp = new TempDir();
+            var destination = temp.PathFor("models/test.bin");
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            await File.WriteAllTextAsync(destination + ".tmp", "hello");
+
+            var handler = new CapturingRangeHttpHandler("world");
+            var client = new HttpClient(handler);
+            var service = new ModelDownloadService(client);
+
+            var result = await service.DownloadAsync("https://example.test/model.bin", destination);
+
+            True(result.Success, "download should succeed");
+            Equal("bytes=5-", handler.LastRequest?.Headers.Range?.ToString(), "resume request should send byte range");
+            Equal("helloworld", await File.ReadAllTextAsync(destination), "download should append to existing temp file");
+        }
+
+        public static Task LlamaServerReleaseDataCoversSupportedPlatforms()
+        {
+            var service = new LlamaServerSetupService();
+            var releases = service.GetSupportedReleaseInfo();
+
+            Equal(6, releases.Count, "release data should cover all supported platforms");
+            True(releases.All(entry => entry.Url.Contains("b4341", StringComparison.Ordinal)), "release urls should use the expected tag");
+            True(releases.Select(entry => entry.DisplayName).Distinct(StringComparer.Ordinal).Count() == releases.Count, "release labels should be unique");
+            return Task.CompletedTask;
         }
 
         public static Task XttsApiTemplateHasRequiredEndpoints()

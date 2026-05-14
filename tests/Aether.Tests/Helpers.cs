@@ -213,8 +213,13 @@ namespace Aether.Tests
     sealed class FakeVoiceProviderRegistry : IVoiceProviderRegistry
     {
         private readonly ISettingsService _settings;
+        private readonly KokoroVoiceProvider _kokoroProvider;
 
-        public FakeVoiceProviderRegistry(ISettingsService settings) => _settings = settings;
+        public FakeVoiceProviderRegistry(ISettingsService settings)
+        {
+            _settings = settings;
+            _kokoroProvider = new KokoroVoiceProvider(settings);
+        }
 
         public IReadOnlyList<VoiceProviderInfo> GetAvailableProviders() =>
             new List<VoiceProviderInfo>
@@ -230,7 +235,7 @@ namespace Aether.Tests
 
         public IVoiceProvider GetActiveVoiceProvider() => new FakeVoiceProvider();
 
-        public IVoiceProvider GetVoiceProvider(VoiceProvider provider) => new FakeVoiceProvider();
+        public IVoiceProvider GetVoiceProvider(VoiceProvider provider) => provider == VoiceProvider.Kokoro ? _kokoroProvider : new FakeVoiceProvider();
 
         public Task SetActiveProviderAsync(VoiceProvider provider)
         {
@@ -277,6 +282,68 @@ namespace Aether.Tests
         public Task SetProviderConfigAsync(VoiceProvider provider, VoiceProviderConfig config) => Task.CompletedTask;
 
         public ITtsService GetActiveTtsService() => new FakeTts();
+    }
+
+    sealed class FakeVoiceProviderRegistryKokoroInstall : IVoiceProviderRegistry
+    {
+        private readonly ISettingsService _settings;
+        private readonly KokoroVoiceProvider _kokoro;
+
+        public FakeVoiceProviderRegistryKokoroInstall(ISettingsService settings)
+        {
+            _settings = settings;
+            _kokoro = new KokoroVoiceProvider(settings);
+        }
+
+        public IReadOnlyList<VoiceProviderInfo> GetAvailableProviders() =>
+            new List<VoiceProviderInfo>
+            {
+                new VoiceProviderInfo(VoiceProvider.Kokoro, "Kokoro", "Fast local readback.", VoiceProviderCategory.Recommended, false, VoiceCapability.TextToSpeech | VoiceCapability.Local)
+            };
+
+        public VoiceProvider GetActiveProvider() => VoiceProvider.Kokoro;
+
+        public IVoiceProvider GetActiveVoiceProvider() => _kokoro;
+
+        public IVoiceProvider GetVoiceProvider(VoiceProvider provider) => _kokoro;
+
+        public Task SetActiveProviderAsync(VoiceProvider provider)
+        {
+            _settings.Settings.Tts.VoiceProvider = provider.ToString();
+            return Task.CompletedTask;
+        }
+
+        public VoiceProviderConfig? GetProviderConfig(VoiceProvider provider) => new(provider.ToString());
+
+        public Task SetProviderConfigAsync(VoiceProvider provider, VoiceProviderConfig config) => Task.CompletedTask;
+
+        public ITtsService GetActiveTtsService() => _kokoro;
+    }
+
+    sealed class CapturingRangeHttpHandler : HttpMessageHandler
+    {
+        private readonly byte[] _content;
+        public HttpRequestMessage? LastRequest { get; private set; }
+
+        public CapturingRangeHttpHandler(string content)
+        {
+            _content = System.Text.Encoding.UTF8.GetBytes(content);
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            LastRequest = request;
+            var body = _content;
+            var response = new HttpResponseMessage(request.Headers.Range is null
+                ? HttpStatusCode.OK
+                : HttpStatusCode.PartialContent)
+            {
+                Content = new ByteArrayContent(body)
+            };
+            response.Content.Headers.ContentLength = body.Length;
+            response.Headers.AcceptRanges.Add("bytes");
+            return Task.FromResult(response);
+        }
     }
 
     sealed class FakeToasts : IToastService
@@ -390,6 +457,16 @@ namespace Aether.Tests
                 new ComponentStatus { Name = "Fake component", Status = "Ready", Detail = "test" }
             ]
         });
+    }
+
+    sealed class FakeDoctorService : IDoctorService
+    {
+        public Task<DoctorReport> ScanAsync(CancellationToken ct = default) =>
+            Task.FromResult(new DoctorReport([], DateTime.UtcNow, "ok"));
+
+        public Task<bool> InstallRerankerAssetsAsync(CancellationToken ct = default) => Task.FromResult(true);
+
+        public Task<bool> InstallRerankerAssetsAsync(IProgress<string> progress, CancellationToken ct = default) => Task.FromResult(true);
     }
 
     internal static class PdfHelpers

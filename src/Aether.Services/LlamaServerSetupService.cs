@@ -9,6 +9,28 @@ namespace Aether.Services;
 /// </summary>
 public sealed class LlamaServerSetupService
 {
+    private static readonly DownloadDefinition[] DownloadDefinitions =
+    [
+        new(() => OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64,
+            "Windows x64 AVX2",
+            "llama-server-b4341-win-avx2.exe"),
+        new(() => OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.Arm64,
+            "Windows ARM64",
+            "llama-server-b4341-win-arm64.exe"),
+        new(() => OperatingSystem.IsLinux() && RuntimeInformation.ProcessArchitecture == Architecture.X64,
+            "Linux x64",
+            "llama-server-b4341-linux-x64"),
+        new(() => OperatingSystem.IsLinux() && RuntimeInformation.ProcessArchitecture == Architecture.Arm64,
+            "Linux ARM64",
+            "llama-server-b4341-linux-arm64"),
+        new(() => OperatingSystem.IsMacOS() && RuntimeInformation.ProcessArchitecture == Architecture.X64,
+            "macOS x64",
+            "llama-server-b4341-macos-x64"),
+        new(() => OperatingSystem.IsMacOS() && RuntimeInformation.ProcessArchitecture == Architecture.Arm64,
+            "macOS ARM64",
+            "llama-server-b4341-macos-arm64")
+    ];
+
     private readonly ModelDownloadService _downloader;
 
     public LlamaServerSetupService(ModelDownloadService? downloader = null)
@@ -85,6 +107,14 @@ public sealed class LlamaServerSetupService
             CanRun: true));
 
         return actions;
+    }
+
+    public IReadOnlyList<LlamaServerReleaseInfo> GetSupportedReleaseInfo()
+    {
+        var baseUrl = "https://github.com/ggerganov/llama.cpp/releases/download/b4341";
+        return DownloadDefinitions
+            .Select(def => new LlamaServerReleaseInfo(def.DisplayName, $"{baseUrl}/{def.AssetName}"))
+            .ToList();
     }
 
     /// <summary>
@@ -164,31 +194,11 @@ public sealed class LlamaServerSetupService
 
     private static (string url, string displayName) GetDownloadInfo()
     {
-        var version = "b4341"; // Latest stable release tag
-        var baseUrl = "https://github.com/ggerganov/llama.cpp/releases/download";
+        var match = DownloadDefinitions.FirstOrDefault(def => def.MatchesCurrentPlatform());
+        if (match is null)
+            throw new NotSupportedException($"Unsupported platform: {(OperatingSystem.IsWindows() ? "Windows" : OperatingSystem.IsLinux() ? "Linux" : OperatingSystem.IsMacOS() ? "macOS" : "Unknown")} {RuntimeInformation.ProcessArchitecture}");
 
-        return (OperatingSystem.IsWindows(), RuntimeInformation.ProcessArchitecture) switch
-        {
-            (true, Architecture.X64) => (
-                $"{baseUrl}/{version}/llama-server-{version}-win-avx2.exe",
-                "Windows x64 AVX2"),
-            (true, Architecture.Arm64) => (
-                $"{baseUrl}/{version}/llama-server-{version}-win-arm64.exe",
-                "Windows ARM64"),
-            (_, _) when OperatingSystem.IsLinux() && RuntimeInformation.ProcessArchitecture == Architecture.X64 => (
-                $"{baseUrl}/{version}/llama-server-{version}-linux-x64",
-                "Linux x64"),
-            (_, _) when OperatingSystem.IsLinux() && RuntimeInformation.ProcessArchitecture == Architecture.Arm64 => (
-                $"{baseUrl}/{version}/llama-server-{version}-linux-arm64",
-                "Linux ARM64"),
-            (_, _) when OperatingSystem.IsMacOS() && RuntimeInformation.ProcessArchitecture == Architecture.X64 => (
-                $"{baseUrl}/{version}/llama-server-{version}-macos-x64",
-                "macOS x64"),
-            (_, _) when OperatingSystem.IsMacOS() && RuntimeInformation.ProcessArchitecture == Architecture.Arm64 => (
-                $"{baseUrl}/{version}/llama-server-{version}-macos-arm64",
-                "macOS ARM64"),
-            _ => throw new NotSupportedException($"Unsupported platform: {(OperatingSystem.IsWindows() ? "Windows" : OperatingSystem.IsLinux() ? "Linux" : OperatingSystem.IsMacOS() ? "macOS" : "Unknown")} {RuntimeInformation.ProcessArchitecture}")
-        };
+        return ($"https://github.com/ggerganov/llama.cpp/releases/download/b4341/{match.AssetName}", match.DisplayName);
     }
 
     private static string? FindInPath(string exeName)
@@ -211,4 +221,8 @@ public sealed class LlamaServerSetupService
 
         return null;
     }
+
+    private sealed record DownloadDefinition(Func<bool> MatchesCurrentPlatform, string DisplayName, string AssetName);
 }
+
+public sealed record LlamaServerReleaseInfo(string DisplayName, string Url);
