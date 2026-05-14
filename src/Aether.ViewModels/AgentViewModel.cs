@@ -94,6 +94,8 @@ public partial class AgentViewModel : ObservableObject
     public ObservableCollection<AgentWorkspaceMemoryEntryViewModel> WorkspaceMemory { get; } = [];
     public ObservableCollection<AgentContextItemViewModel> RetrievedContext { get; } = [];
 
+    public Action? RequestWorkspaceRootPicker { get; set; }
+
     [ObservableProperty] private string _goalText = string.Empty;
     [ObservableProperty] private string _workspaceRoot = string.Empty;
     [ObservableProperty] private LlmModel? _selectedModel;
@@ -274,6 +276,9 @@ public partial class AgentViewModel : ObservableObject
         await _workspaceMemory.DeleteAsync(WorkspaceRoot, entry.Id);
         await RefreshWorkspaceMemoryAsync();
     }
+
+    [RelayCommand]
+    private void BrowseWorkspaceRoot() => RequestWorkspaceRootPicker?.Invoke();
 
     private async Task LoadTaskIfOpenAsync(string taskId)
     {

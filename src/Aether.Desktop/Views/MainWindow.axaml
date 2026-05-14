@@ -4,7 +4,7 @@
         xmlns:views="using:Aether.Desktop.Views"
         x:Class="Aether.Desktop.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
-        Title="Aether"
+        Title="{Binding WindowTitle}"
         MinWidth="720" MinHeight="500"
         Width="1280"   Height="820"
         WindowStartupLocation="CenterScreen"

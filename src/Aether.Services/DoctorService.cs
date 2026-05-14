@@ -2,6 +2,7 @@ using Aether.Core.Models;
 using Aether.Core.Services;
 using Aether.Rag.Embeddings;
 using Aether.Rag.Storage;
+using Aether.Rag.Retrieval;
 
 namespace Aether.Services;
 
@@ -15,6 +16,7 @@ public sealed class DoctorService : IDoctorService
     private readonly IEmbeddingService _embeddings;
     private readonly ISystemInfoService _systemInfo;
     private readonly PythonHealthValidator _pythonValidator;
+    private readonly IReranker _reranker;
 
     public DoctorService(
         ISettingsService settings,
@@ -24,7 +26,8 @@ public sealed class DoctorService : IDoctorService
         SqliteRagStore ragStore,
         IEmbeddingService embeddings,
         ISystemInfoService systemInfo,
-        PythonHealthValidator pythonValidator)
+        PythonHealthValidator pythonValidator,
+        IReranker reranker)
     {
         _settings = settings;
         _runtimes = runtimes;
@@ -34,6 +37,7 @@ public sealed class DoctorService : IDoctorService
         _embeddings = embeddings;
         _systemInfo = systemInfo;
         _pythonValidator = pythonValidator;
+        _reranker = reranker;
     }
 
     public async Task<DoctorReport> ScanAsync(CancellationToken ct = default)
@@ -358,10 +362,30 @@ public sealed class DoctorService : IDoctorService
             ok ? DoctorCheckStatus.Ready : DoctorCheckStatus.Warning,
             ok ? "Reranker assets present" : "Reranker assets missing",
             ok ? modelDir : "Download or point Aether at the reranker model folder.",
-            "Open Settings",
+            ok ? "Open Settings" : "Install Reranker",
             true,
             modelDir,
             "RAG");
+    }
+
+    public async Task<bool> InstallRerankerAssetsAsync(CancellationToken ct = default)
+    {
+        if (_reranker is Aether.Rag.Retrieval.OnnxCrossEncoderReranker onnx)
+        {
+            return await onnx.InstallAssetsAsync(null, ct);
+        }
+
+        return false;
+    }
+
+    public async Task<bool> InstallRerankerAssetsAsync(IProgress<string> progress, CancellationToken ct = default)
+    {
+        if (_reranker is Aether.Rag.Retrieval.OnnxCrossEncoderReranker onnx)
+        {
+            return await onnx.InstallAssetsAsync(progress, ct);
+        }
+
+        return false;
     }
 
     private async Task<DoctorCheck> CheckGpuAsync(CancellationToken ct)

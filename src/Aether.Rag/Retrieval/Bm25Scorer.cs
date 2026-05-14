@@ -53,13 +53,11 @@ public sealed class Bm25Scorer
     /// </summary>
     public static Bm25Stats BuildStats(IReadOnlyList<RagChunk> allChunks)
     {
-        var df    = new Dictionary<string, int>();
-        long totalLen = 0;
+        var df = new Dictionary<string, int>();
 
         foreach (var chunk in allChunks)
         {
             var terms = Tokenize(chunk.Content).ToHashSet();
-            totalLen += terms.Sum(t => t.Length);  // rough length proxy
             foreach (var t in terms)
                 df[t] = df.GetValueOrDefault(t) + 1;
         }

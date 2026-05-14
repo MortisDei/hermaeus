@@ -77,12 +77,14 @@ public sealed class ConversationStore : IConversationStore
         await alter.ExecuteNonQueryAsync(ct);
     }
 
-    public async Task<List<Conversation>> GetAllAsync(CancellationToken ct = default)
+    public async Task<List<Conversation>> GetAllAsync(bool includeArchived = true, CancellationToken ct = default)
     {
         await EnsureInitializedAsync(ct);
         await using var c = new SqliteConnection(Cs); await c.OpenAsync(ct);
         var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT * FROM conversations ORDER BY is_archived ASC, is_pinned DESC, updated_at DESC";
+        cmd.CommandText = includeArchived
+            ? "SELECT * FROM conversations ORDER BY is_archived ASC, is_pinned DESC, updated_at DESC"
+            : "SELECT * FROM conversations WHERE is_archived = 0 ORDER BY is_archived ASC, is_pinned DESC, updated_at DESC";
         var r = new List<Conversation>();
         await using var rd = await cmd.ExecuteReaderAsync(ct);
         while (await rd.ReadAsync(ct)) r.Add(Map(rd));

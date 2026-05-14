@@ -12,6 +12,7 @@ public partial class MainWindowViewModel : ObservableObject
     private readonly IToastService _toasts;
     private readonly IRuntimeLogService _logs;
     private readonly SynchronizationContext? _sync;
+    private CancellationTokenSource? _searchCts;
     private readonly ISettingsService _settingsService;
     private bool _refreshingFolderFilters;
 
@@ -68,6 +69,9 @@ public partial class MainWindowViewModel : ObservableObject
         _          => Chat
     };
 
+    public string WindowTitle
+        => ShowChat ? $"Aether - {Chat.ConversationTitle}" : $"Aether - {ActivePanel?.ToUpperInvariant() ?? string.Empty}";
+
     public MainWindowViewModel(
         IConversationStore store,
         ChatViewModel chat,
@@ -95,6 +99,9 @@ public partial class MainWindowViewModel : ObservableObject
         Benchmarks = benchmarks; SystemOverview = systemOverview; Doctor = doctor; Logs = logs; Wizard = wizard;
         Doctor.RequestNavigate = panel => ActivePanel = panel;
         Wizard.WizardCompleted += () => ActivePanel = "chat";
+        // allow settings view to request re-running the setup wizard
+        Settings.RequestShowSetupWizard = () => ActivePanel = "wizard";
+        Chat.PropertyChanged += (s, e) => { if (e.PropertyName == "ConversationTitle") OnPropertyChanged(nameof(WindowTitle)); };
         Chat.ConversationSaved += OnConversationSaved;
         Services.ServerAvailabilityChanged += (_, _) => RunBackgroundTaskAsync("refresh models after server availability change", RefreshModelsAfterServerChangeAsync);
         _toasts.ToastRaised += OnToastRaised;
@@ -127,7 +134,7 @@ public partial class MainWindowViewModel : ObservableObject
     private async Task LoadConversationsAsync()
     {
         var convs = string.IsNullOrWhiteSpace(SearchQuery)
-            ? await _store.GetAllAsync()
+            ? await _store.GetAllAsync(ShowArchivedConversations)
             : await _store.SearchAsync(SearchQuery);
 
         RefreshFolderFilters(convs);
@@ -326,7 +333,7 @@ public partial class MainWindowViewModel : ObservableObject
                 Id = convId, Title = Chat.ConversationTitle,
                 ModelId = Chat.SelectedModel?.Id ?? string.Empty,
                 UpdatedAt = DateTime.Now, IsSelected = true,
-                Folder = SelectedFolderFilter == "All" ? string.Empty : SelectedFolderFilter
+                Folder = string.Empty
             };
             Conversations.Insert(0, item);
             foreach (var c in Conversations.Skip(1)) c.IsSelected = false;
@@ -354,7 +361,27 @@ public partial class MainWindowViewModel : ObservableObject
 
     partial void OnSearchQueryChanged(string value)
     {
-        _ = LoadConversationsAsync();
+        // Debounce search to reduce DB hits when typing
+        try
+        {
+            _searchCts?.Cancel();
+            _searchCts = new CancellationTokenSource();
+            var token = _searchCts.Token;
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await Task.Delay(300, token);
+                    if (token.IsCancellationRequested) return;
+                    await RunOnUiAsync(() => LoadConversationsAsync());
+                }
+                catch (TaskCanceledException) { }
+            }, token);
+        }
+        catch
+        {
+            _ = LoadConversationsAsync();
+        }
     }
 
     partial void OnSelectedFolderFilterChanged(string value)
@@ -377,7 +404,16 @@ public partial class MainWindowViewModel : ObservableObject
             Kind = toast.Kind,
             DurationMs = toast.DurationMs
         };
-        RunOnUi(() => Toasts.Add(vm));
+        const int MaxVisibleToasts = 5;
+        RunOnUi(() =>
+        {
+            if (Toasts.Count >= MaxVisibleToasts)
+            {
+                // drop the oldest visible toast to keep the UI capped
+                Toasts.RemoveAt(0);
+            }
+            Toasts.Add(vm);
+        });
         _ = RemoveToastLaterAsync(vm);
     }
 

@@ -10,9 +10,10 @@ namespace Aether.Rag.Retrieval;
 /// </summary>
 public sealed class HybridRetriever
 {
-    private const float RrfK           = 60f;
-    private const float SemanticWeight = 0.7f;
-    private const float Bm25Weight     = 0.3f;
+    // Default fusion parameters. These can be overridden via RagDatasetConfig.
+    private const float DefaultRrfK           = 60f;
+    private const float DefaultSemanticWeight = 0.7f;
+    private const float DefaultBm25Weight     = 0.3f;
 
     /// <summary>
     /// Full cosine search over all chunks with embeddings.
@@ -40,7 +41,10 @@ public sealed class HybridRetriever
     public static List<ScoredChunk> Fuse(
         IReadOnlyList<ScoredChunk> semantic,
         IReadOnlyList<ScoredChunk> bm25,
-        int topK)
+        int topK,
+        float semanticWeight = DefaultSemanticWeight,
+        float bm25Weight = DefaultBm25Weight,
+        float rrfK = DefaultRrfK)
     {
         var scores   = new Dictionary<string, float>();
         var chunkMap = new Dictionary<string, RagChunk>();
@@ -48,14 +52,14 @@ public sealed class HybridRetriever
         for (int i = 0; i < semantic.Count; i++)
         {
             var id = semantic[i].Chunk.Id;
-            scores[id] = scores.GetValueOrDefault(id) + SemanticWeight / (i + RrfK);
+            scores[id] = scores.GetValueOrDefault(id) + semanticWeight / (i + rrfK);
             chunkMap[id] = semantic[i].Chunk;
         }
 
         for (int i = 0; i < bm25.Count; i++)
         {
             var id = bm25[i].Chunk.Id;
-            scores[id] = scores.GetValueOrDefault(id) + Bm25Weight / (i + RrfK);
+            scores[id] = scores.GetValueOrDefault(id) + bm25Weight / (i + rrfK);
             chunkMap.TryAdd(id, bm25[i].Chunk);
         }
 

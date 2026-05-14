@@ -25,6 +25,11 @@ public class RagDatasetConfig
     public string FirecrawlApiUrl { get; set; } = string.Empty;
     public string FirecrawlApiKey { get; set; } = string.Empty;
     public string PromptTemplate { get; set; } = "{context}\n\nQuestion: {question}";
+
+        // Hybrid retriever tuning: semantic vs BM25 fusion weights and RRF k
+        public float HybridSemanticWeight { get; set; } = 0.7f;
+        public float HybridBm25Weight { get; set; } = 0.3f;
+        public float HybridRrfK { get; set; } = 60f;
 }
 
 public enum RagExtractionMode

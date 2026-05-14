@@ -188,6 +188,8 @@ public partial class SetupWizardViewModel : ObservableObject
                 await _settings.SaveAsync();
                 break;
             case 1:
+                // Guard against no runtime options being present
+                if (RuntimeOptions.Count == 0) return;
                 foreach (var profile in RuntimeOptions)
                     profile.Enabled = profile.Id == SelectedRuntimeId;
                 foreach (var profile in RuntimeOptions)

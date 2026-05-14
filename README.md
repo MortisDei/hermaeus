@@ -198,7 +198,13 @@ improving separation of concerns and making the TTS logic easier to test.
 RAG ingest improvements: the ingest pipeline now uses cancellable, batched
 embedding and storage steps to reduce DB lock contention and make long ingests
 abortable from the UI. Large ingests report progress per embedding and storage
-batch so the UI can surface better feedback and cancel if needed.
+  batch so the UI can surface better feedback and cancel if needed.
+
+Reranker install: The ONNX cross-encoder reranker assets are not downloaded
+automatically during query time. Use the **Doctor** panel to install the
+reranker model and vocabulary; Doctor shows progress messages during the
+download and loading steps. This prevents heavy network activity during queries
+and makes reranker installation an explicit, observable action.
 
 ## Data, Backup, Security
 

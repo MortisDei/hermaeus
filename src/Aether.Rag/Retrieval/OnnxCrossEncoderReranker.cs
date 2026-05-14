@@ -76,18 +76,54 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
             var modelPath = Path.Combine(modelDir, ModelFileName);
             var vocabPath = Path.Combine(modelDir, VocabFileName);
 
-            if ((!File.Exists(modelPath) || !File.Exists(vocabPath)) && !_settings.Settings.Rag.RerankerAutoDownload)
+            // Do not perform heavy downloads during query path. Only initialize if assets already exist.
+            if (!File.Exists(modelPath) || !File.Exists(vocabPath))
             {
                 _unavailable = true;
                 return false;
             }
 
-            Directory.CreateDirectory(modelDir);
-            await DownloadIfMissingAsync(modelPath, ModelUrl, ct);
-            await DownloadIfMissingAsync(vocabPath, VocabUrl, ct);
-
+            // assets present - load tokenizer and session
             _tokenizer = BertTokenizer.Create(vocabPath);
             _session = new InferenceSession(modelPath);
+            return true;
+        }
+        catch
+        {
+            _unavailable = true;
+            _session?.Dispose();
+            _session = null;
+            _tokenizer = null;
+            return false;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    // Install model assets explicitly. This method performs heavy downloads and should be
+    // invoked from a setup or doctor action rather than the query path.
+    public async Task<bool> InstallAssetsAsync(IProgress<string>? progress = null, CancellationToken ct = default)
+    {
+        await _gate.WaitAsync(ct);
+        try
+        {
+            var modelDir = ResolveModelDirectory(_settings.Settings);
+            var modelPath = Path.Combine(modelDir, ModelFileName);
+            var vocabPath = Path.Combine(modelDir, VocabFileName);
+            Directory.CreateDirectory(modelDir);
+            progress?.Report("Downloading reranker model...");
+            await DownloadIfMissingAsync(modelPath, ModelUrl, progress, ct);
+            progress?.Report("Downloading reranker vocabulary...");
+            await DownloadIfMissingAsync(vocabPath, VocabUrl, progress, ct);
+            progress?.Report("Loading reranker model...");
+            // load after download
+            _tokenizer = BertTokenizer.Create(vocabPath);
+            _session?.Dispose();
+            _session = new InferenceSession(modelPath);
+            _unavailable = false;
+            progress?.Report("Reranker installed");
             return true;
         }
         catch
@@ -153,17 +189,19 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
         }
     }
 
-    private async Task DownloadIfMissingAsync(string path, string url, CancellationToken ct)
+    private async Task DownloadIfMissingAsync(string path, string url, IProgress<string>? progress, CancellationToken ct)
     {
         if (File.Exists(path))
             return;
 
         var temp = $"{path}.download";
+        progress?.Report($"Starting download: {Path.GetFileName(path)}");
         using var response = await _http.GetAsync(url, ct);
         response.EnsureSuccessStatusCode();
         await using (var source = await response.Content.ReadAsStreamAsync(ct))
         await using (var target = File.Create(temp))
             await source.CopyToAsync(target, ct);
+        progress?.Report($"Downloaded: {Path.GetFileName(path)}");
 
         File.Move(temp, path, overwrite: true);
     }

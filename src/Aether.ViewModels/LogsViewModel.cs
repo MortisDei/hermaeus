@@ -67,8 +67,9 @@ public partial class LogsViewModel : ObservableObject
     [RelayCommand]
     private void ClearView()
     {
-        VisibleEntries.Clear();
-        StatusText = "View cleared";
+        _logs.ClearInMemory();
+        Refresh();
+        StatusText = "Logs cleared";
     }
 
     [RelayCommand]

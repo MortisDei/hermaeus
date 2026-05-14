@@ -247,13 +247,18 @@ public partial class RagViewModel : ObservableObject
             }
 
             IngestReportItems.Clear();
-            foreach (var item in report.Documents.Where(d => d.Path != "__health__"))
-                IngestReportItems.Add(new RagIngestReportItemViewModel(item));
-            if (report.Documents.Any(d => d.Path == "__health__"))
-            {
-                var health = report.Documents.First(d => d.Path == "__health__");
-                IngestReportItems.Insert(0, new RagIngestReportItemViewModel(health));
-            }
+                // prefer explicit health property on the report
+                if (report.Health is not null)
+                {
+                    var health = report.Health;
+                    var parts = new List<string> { $"Files: {health.FileCount}" };
+                    if (health.DuplicateChunkCount > 0) parts.Add($"Duplicate chunks: {health.DuplicateChunkCount}");
+                    if (health.EmptyChunkCount > 0) parts.Add($"Empty chunks: {health.EmptyChunkCount}");
+                    if (health.OversizedFileCount > 0) parts.Add($"Oversized files: {health.OversizedFileCount}");
+                    if (health.Warnings?.Count > 0) parts.Add(string.Join("; ", health.Warnings));
+                    var summary = string.Join("; ", parts);
+                    IngestReportItems.Insert(0, new RagIngestReportItemViewModel(new DocumentIngestReport { Path = "__health__", Status = DocumentIngestStatus.ReportOnly, Message = summary }));
+                }
 
             await LoadDatasetsAsync();
             SelectedDataset = Datasets.FirstOrDefault(d => d.Name == ds.Name);

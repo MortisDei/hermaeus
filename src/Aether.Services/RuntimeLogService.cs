@@ -8,8 +8,10 @@ namespace Aether.Services;
 public sealed class RuntimeLogService : IRuntimeLogService
 {
     private const int MaxEntries = 2000;
+    private const long MaxLogFileBytes = 10 * 1024 * 1024; // 10 MB
     private readonly ConcurrentQueue<RuntimeLogEntry> _entries = new();
     private readonly ISettingsService _settings;
+    private readonly object _fileLock = new();
 
     public event Action<RuntimeLogEntry>? LogAdded;
 
@@ -49,11 +51,51 @@ public sealed class RuntimeLogService : IRuntimeLogService
         try
         {
             var path = GetLogFilePath();
-            var line = $"{entry.Timestamp:O} [{entry.Level}] [{entry.Category}] {entry.Message}";
-            File.AppendAllText(path, line + Environment.NewLine);
+            var line = $"{entry.Timestamp:O} [{entry.Level}] [{entry.Category}] {entry.Message}" + Environment.NewLine;
+
+            lock (_fileLock)
+            {
+                try
+                {
+                    RotateIfNeeded(path);
+                }
+                catch
+                {
+                    // ignore rotation failures and still attempt to append
+                }
+
+                // Use FileStream for atomic append
+                using var fs = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.Read);
+                var bytes = System.Text.Encoding.UTF8.GetBytes(line);
+                fs.Write(bytes, 0, bytes.Length);
+            }
         }
         catch
         {
+        }
+    }
+
+    private void RotateIfNeeded(string path)
+    {
+        try
+        {
+            if (!File.Exists(path)) return;
+            var fi = new FileInfo(path);
+            if (fi.Length < MaxLogFileBytes) return;
+
+            // move existing file to timestamped archive
+            var dir = Path.GetDirectoryName(path) ?? GetLogDirectory();
+            var name = Path.GetFileNameWithoutExtension(path);
+            var ext = Path.GetExtension(path);
+            var stamp = DateTime.UtcNow.ToString("yyyyMMddTHHmmssZ", CultureInfo.InvariantCulture);
+            var dest = Path.Combine(dir, $"{name}.{stamp}{ext}");
+            // ensure destination does not exist
+            if (File.Exists(dest)) File.Delete(dest);
+            File.Move(path, dest);
+        }
+        catch
+        {
+            // best-effort rotation; swallow errors
         }
     }
 }

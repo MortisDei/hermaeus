@@ -33,6 +33,9 @@ public class IngestReport
 {
     public List<DocumentIngestReport> Documents { get; } = new();
 
+    // Aggregate health information about the ingest run (formerly emitted as a __health__ sentinel document)
+    public RagIngestHealth? Health { get; set; }
+
     public int Added => Documents.Count(d => d.Status == DocumentIngestStatus.Added);
     public int Replaced => Documents.Count(d => d.Status == DocumentIngestStatus.Replaced);
     public int Skipped => Documents.Count(d => d.Status == DocumentIngestStatus.SkippedUnchanged);

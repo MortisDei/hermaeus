@@ -8,6 +8,7 @@ public sealed class AutomationScheduler : IAutomationScheduler
     private readonly ISettingsService _settings;
     private readonly IToastService _toasts;
     private Timer? _timer;
+    private readonly object _sync = new();
 
     public AutomationScheduler(ISettingsService settings, IToastService toasts)
     {
@@ -29,24 +30,27 @@ public sealed class AutomationScheduler : IAutomationScheduler
     private void Tick()
     {
         var now = DateTime.Now;
-        foreach (var task in _settings.Settings.Tasks.Where(t => t.Status != LocalTaskStatus.Done && t.DueAt is not null && !t.ReminderShown))
+        lock (_sync)
         {
-            if (task.DueAt!.Value > now) continue;
-            task.ReminderShown = true;
-            _toasts.Show("Task due", task.Title, ToastKind.Warning, 7000);
-        }
-
-        foreach (var automation in _settings.Settings.Automations.Where(a => a.Enabled && a.NextRunAt is not null && a.NextRunAt <= now))
-        {
-            automation.Enabled = false;
-            automation.RunHistory.Insert(0, new AutomationRunHistory
+            foreach (var task in _settings.Settings.Tasks.Where(t => t.Status != LocalTaskStatus.Done && t.DueAt is not null && !t.ReminderShown))
             {
-                StartedAt = DateTime.UtcNow,
-                FinishedAt = DateTime.UtcNow,
-                Succeeded = true,
-                Result = "Queued reminder. Background generation is app-running only and will be expanded with a confirmation flow."
-            });
-            _toasts.Show("Automation due", automation.Title, ToastKind.Info, 7000);
+                if (task.DueAt!.Value > now) continue;
+                task.ReminderShown = true;
+                _toasts.Show("Task due", task.Title, ToastKind.Warning, 7000);
+            }
+
+            foreach (var automation in _settings.Settings.Automations.Where(a => a.Enabled && a.NextRunAt is not null && a.NextRunAt <= now))
+            {
+                automation.Enabled = false;
+                automation.RunHistory.Insert(0, new AutomationRunHistory
+                {
+                    StartedAt = DateTime.UtcNow,
+                    FinishedAt = DateTime.UtcNow,
+                    Succeeded = true,
+                    Result = "Queued reminder. Background generation is app-running only and will be expanded with a confirmation flow."
+                });
+                _toasts.Show("Automation due", automation.Title, ToastKind.Info, 7000);
+            }
         }
 
         _ = _settings.SaveAsync();

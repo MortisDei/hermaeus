@@ -112,6 +112,18 @@ public partial class SettingsViewModel : ObservableObject
         Reload();
     }
 
+    // When the app wants the settings view to re-run the setup wizard, this action will be invoked
+    public Action? RequestShowSetupWizard { get; set; }
+
+    [RelayCommand]
+    private async Task ReRunSetupWizardAsync()
+    {
+        // Mark wizard as not completed and persist
+        _svc.Settings.SetupWizardCompleted = false;
+        await _svc.SaveAsync();
+        RequestShowSetupWizard?.Invoke();
+    }
+
     public void Reload()
     {
         var s = _svc.Settings;
@@ -251,6 +263,7 @@ public partial class SettingsViewModel : ObservableObject
     [RelayCommand]
     private async Task BackupDataAsync()
     {
+        SettingsError = string.Empty;
         try
         {
             var target = string.IsNullOrWhiteSpace(BackupDirectory)
@@ -269,6 +282,7 @@ public partial class SettingsViewModel : ObservableObject
     [RelayCommand]
     private async Task RestoreDataAsync()
     {
+        SettingsError = string.Empty;
         try
         {
             await _backups.RestoreAsync(RestoreBackupPath.Trim());
@@ -298,6 +312,7 @@ public partial class SettingsViewModel : ObservableObject
     [RelayCommand]
     private async Task ScanLocalAiSetupAsync()
     {
+        SettingsError = string.Empty;
         await SaveLocalAiPathsForSetupAsync();
         LocalAiSetupBusy = true;
         LocalAiSetupLog = string.Empty;
@@ -330,6 +345,7 @@ public partial class SettingsViewModel : ObservableObject
     [RelayCommand]
     private async Task RunLocalAiSetupActionAsync(LocalAiSetupAction? action)
     {
+        SettingsError = string.Empty;
         if (action is null) return;
         if (!action.CanRun)
         {
@@ -458,6 +474,7 @@ public partial class SettingsViewModel : ObservableObject
     [RelayCommand]
     private async Task RescanTrustAsync()
     {
+        SettingsError = string.Empty;
         SyncSettingsForTrustScan();
         TrustScanBusy = true;
         try

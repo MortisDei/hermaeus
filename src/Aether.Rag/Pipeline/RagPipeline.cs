@@ -183,7 +183,7 @@ public sealed class RagPipeline
             if (health.EmptyChunkCount > 0)
                 health.Warnings.Add($"{health.EmptyChunkCount} empty chunks detected.");
 
-            report.Documents.Add(new DocumentIngestReport { Path = "__health__", Status = DocumentIngestStatus.ReportOnly, Message = BuildHealthSummary(health) });
+            report.Health = health;
             progress?.Report(new IngestProgress("Done", allChunks.Count, allChunks.Count, $"Dry-run complete. {report.Summary()}"));
             return report;
         }
@@ -230,7 +230,7 @@ public sealed class RagPipeline
         progress?.Report(new IngestProgress("Done", total, total,
             $"{allChunks.Count} chunks indexed from {files.Count} files. Health: {BuildHealthSummary(health)}"));
 
-        report.Documents.Add(new DocumentIngestReport { Path = "__health__", Status = DocumentIngestStatus.ReportOnly, Message = BuildHealthSummary(health) });
+        report.Health = health;
         return report;
     }
 

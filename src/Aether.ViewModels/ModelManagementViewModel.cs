@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using Aether.Core.Models;
+using System.Threading;
 using Aether.Core.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -11,7 +12,7 @@ public partial class ModelManagementViewModel : ObservableObject
     private readonly ILlmService _llm;
     private readonly IModelProfileService _profiles;
     private readonly IToastService _toasts;
-    private DateTime _lastRefreshUtc = DateTime.MinValue;
+    private long _lastRefreshUtcTicks = DateTime.MinValue.Ticks;
     private readonly List<LlmModel> _modelCache = [];
 
     public ObservableCollection<ModelProfileItemViewModel> Models { get; } = [];
@@ -34,15 +35,17 @@ public partial class ModelManagementViewModel : ObservableObject
         IsLoading = true; StatusMessage = string.Empty; IsError = false;
         try
         {
+            var lastTicks = Interlocked.Read(ref _lastRefreshUtcTicks);
+            var lastRefresh = new DateTime(lastTicks, DateTimeKind.Utc);
             var useCache = !ForceRefresh
                            && _modelCache.Count > 0
-                           && DateTime.UtcNow - _lastRefreshUtc < TimeSpan.FromMinutes(2);
+                           && DateTime.UtcNow - lastRefresh < TimeSpan.FromMinutes(2);
             var models = useCache ? _modelCache.ToList() : await _llm.GetModelsAsync();
             if (!useCache)
             {
                 _modelCache.Clear();
                 _modelCache.AddRange(models);
-                _lastRefreshUtc = DateTime.UtcNow;
+                Interlocked.Exchange(ref _lastRefreshUtcTicks, DateTime.UtcNow.Ticks);
             }
 
             _profiles.ApplyProfiles(models);

@@ -146,7 +146,16 @@ public sealed class RagQueryService
                 .ToList();
         }
 
-        var fused = HybridRetriever.Fuse(semantic, bm25, Math.Max(opts.TopK * 2, opts.TopK));
+        // read dataset config to obtain hybrid retriever weights
+        var ds = (await _store.GetDatasetsAsync(ct)).FirstOrDefault(d => d.Id == datasetId);
+        var topFuse = Math.Max(opts.TopK * 2, opts.TopK);
+        var fused = HybridRetriever.Fuse(
+            semantic,
+            bm25,
+            topFuse,
+            ds?.Config.HybridSemanticWeight ?? 0.7f,
+            ds?.Config.HybridBm25Weight ?? 0.3f,
+            ds?.Config.HybridRrfK ?? 60f);
         fused = await _reranker.RerankAsync(expandedQuery, fused, opts.TopK, ct);
         if (opts.UseParentChild)
             fused = await UpgradeToParentsAsync(fused, ct);

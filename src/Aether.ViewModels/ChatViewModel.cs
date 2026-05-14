@@ -297,8 +297,51 @@ public partial class ChatViewModel : ObservableObject
         if (lastAsst is not null) Messages.Remove(lastAsst);
         var lastUser = Messages.LastOrDefault(m => m.IsUser);
         if (lastUser is null) return;
+        // Try to preserve attachments that were included in the saved display message.
+        var raw = lastUser.Content ?? string.Empty;
         Messages.Remove(lastUser);
-        InputText = lastUser.Content;
+
+        // Detect the attached context marker produced by ChatContextAttachment.BuildDisplayMessage
+        const string marker = "Attached context injected at send time:";
+        var userText = raw;
+        var paths = new List<string>();
+        if (raw.Contains(marker))
+        {
+            var lines = raw.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).ToList();
+            var idx = lines.FindIndex(l => l.Trim().Equals(marker, StringComparison.OrdinalIgnoreCase));
+            if (idx >= 0)
+            {
+                // Lines before marker may contain the user's original text
+                var before = lines.Take(idx).ToList();
+                userText = before.Count == 0 ? string.Empty : string.Join("\n", before).Trim();
+
+                // Lines after marker list attachments in format: "- FileName (SizeLabel) - FullPath"
+                for (var i = idx + 1; i < lines.Count; i++)
+                {
+                    var line = lines[i].Trim();
+                    if (!line.StartsWith("- ")) continue;
+                    // attempt to extract last ' - ' segment as path
+                    var parts = line.Split(" - ");
+                    if (parts.Length >= 2)
+                    {
+                        var candidate = parts[^1].Trim();
+                        if (!string.IsNullOrWhiteSpace(candidate) && File.Exists(candidate))
+                            paths.Add(candidate);
+                    }
+                }
+            }
+        }
+
+        InputText = userText;
+        if (paths.Count > 0)
+        {
+            try
+            {
+                await AddContextFilesAsync(paths);
+            }
+            catch { }
+        }
+
         await SendAsync();
     }
 

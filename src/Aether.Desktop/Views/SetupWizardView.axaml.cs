@@ -26,6 +26,10 @@ public partial class SetupWizardView : UserControl
     private void OnDataContextChanged(object? sender, EventArgs e)
     {
         if (DataContext is not SetupWizardViewModel vm) return;
+        // Adjust Last/NotLast converters to the dynamic steps count
+        var lastIndex = Math.Max(0, vm.Steps.Count - 1);
+        typeof(SetupWizardView).GetField("Last")!.SetValue(null, new StepIndexConverter(lastIndex, isLast: true));
+        typeof(SetupWizardView).GetField("NotLast")!.SetValue(null, new StepIndexConverter(lastIndex, invert: true));
         vm.RequestDataRootPicker = async () =>
         {
             var top = TopLevel.GetTopLevel(this);

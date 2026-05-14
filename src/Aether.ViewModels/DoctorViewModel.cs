@@ -15,6 +15,7 @@ public partial class DoctorViewModel : ObservableObject
     [ObservableProperty] private bool _isScanning;
     [ObservableProperty] private string _summary = "Run Doctor to scan your environment.";
     [ObservableProperty] private string _lastScanned = string.Empty;
+    [ObservableProperty] private bool _isInstallingReranker;
 
     public ObservableCollection<DoctorCheck> Checks { get; } = [];
 
@@ -72,7 +73,7 @@ public partial class DoctorViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void RunFix(DoctorCheck? check)
+    private async Task RunFix(DoctorCheck? check)
     {
         if (check is null || !check.CanFix)
         {
@@ -96,6 +97,32 @@ public partial class DoctorViewModel : ObservableObject
             "Storage" => "settings",
             _ => "settings"
         };
+        // Special-case reranker installation: perform install action via doctor service
+        if (check.Key == "reranker")
+        {
+            try
+            {
+                if (IsInstallingReranker) return;
+                IsInstallingReranker = true;
+                var originalSummary = Summary;
+                var progress = new Progress<string>(s => Summary = "Reranker: " + s);
+                var ok = await _doctor.InstallRerankerAssetsAsync(progress);
+                _toasts.Show(ok ? "Reranker installed" : "Reranker install failed",
+                    ok ? "Reranker assets installed." : "See diagnostics for details.",
+                    ok ? ToastKind.Success : ToastKind.Error,
+                    7000);
+                // refresh doctor checks after attempt
+                await ScanAsync();
+                Summary = originalSummary;
+                IsInstallingReranker = false;
+                return;
+            }
+            catch (Exception ex)
+            {
+                _toasts.Show("Reranker install failed", ex.Message, ToastKind.Error, 7000);
+                return;
+            }
+        }
 
         RequestNavigate(target);
     }

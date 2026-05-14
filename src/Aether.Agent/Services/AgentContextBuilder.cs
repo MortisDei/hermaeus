@@ -143,7 +143,7 @@ public sealed class AgentContextBuilder : IAgentContextBuilder
             .OrderByDescending(g => g.Count())
             .ThenByDescending(g => g.Key.Length)
             .Select(g => g.Key)
-            .Take(2)
+            .Take(1)
             .ToList();
 
         return words.Count == 0 ? string.Empty : words[0];

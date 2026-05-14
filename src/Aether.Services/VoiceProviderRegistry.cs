@@ -8,15 +8,18 @@ public sealed class VoiceProviderRegistry : IVoiceProviderRegistry
     private readonly ISettingsService _settingsService;
     private readonly Dictionary<VoiceProvider, IVoiceProvider> _providers;
     private VoiceProvider _activeProvider;
+    private readonly IRuntimeLogService _runtimeLogs;
 
     public VoiceProviderRegistry(
         ISettingsService settingsService,
         XttsV2VoiceProvider xttsV2,
         KokoroVoiceProvider kokoro,
         F5TtsVoiceProvider f5Tts,
-        OpenAiVoiceProvider openAi)
+        OpenAiVoiceProvider openAi,
+        IRuntimeLogService runtimeLogs)
     {
         _settingsService = settingsService;
+        _runtimeLogs = runtimeLogs;
         _providers = new()
         {
             { VoiceProvider.XttsV2, xttsV2 },
@@ -25,8 +28,27 @@ public sealed class VoiceProviderRegistry : IVoiceProviderRegistry
             { VoiceProvider.OpenAi, openAi }
         };
 
-        _activeProvider = ParseProviderFromSettings(settingsService.Settings.Tts.VoiceProvider);
+        var configured = settingsService.Settings.Tts.VoiceProvider;
+        _activeProvider = ParseProviderFromSettings(configured);
+        if (!IsRecognizedProviderName(configured))
+        {
+            _runtimeLogs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Service,
+                $"Unrecognised voice provider '{configured}' in settings; defaulting to {_activeProvider}."));
+        }
     }
+
+    private static bool IsRecognizedProviderName(string providerName) => providerName switch
+    {
+        "Kokoro" => true,
+        "F5Tts" => true,
+        "F5-TTS" => true,
+        "XttsV2" => true,
+        "XTTS" => true,
+        "XTTS v2" => true,
+        "OpenAi" => true,
+        "OpenAI" => true,
+        _ => false
+    };
 
     public IReadOnlyList<VoiceProviderInfo> GetAvailableProviders()
     {

@@ -19,7 +19,7 @@ public sealed class BackupService : IBackupService
             throw new DirectoryNotFoundException(root);
 
         Directory.CreateDirectory(targetDirectory);
-        var path = Path.Combine(targetDirectory, $"aether-backup-{DateTime.Now:yyyyMMdd-HHmmss}.zip");
+        var path = Path.Combine(targetDirectory, $"aether-backup-{DateTime.UtcNow:yyyyMMdd-HHmmss}.zip");
         var files = Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
             .Where(f => !Path.GetFileName(f).Equals("secrets.local.json", StringComparison.OrdinalIgnoreCase))
             .ToList();
