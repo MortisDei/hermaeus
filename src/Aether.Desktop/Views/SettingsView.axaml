@@ -260,8 +260,8 @@
                 </StackPanel>
             </Border>
 
-            <!-- Defaults -->
-            <Border Grid.Row="1" Grid.Column="1" Classes="settings-card">
+            <!-- Data Storage -->
+            <Border Grid.Row="2" Grid.Column="0" Classes="settings-card">
                 <StackPanel Spacing="12">
                     <TextBlock Text="Data Storage" FontSize="14" FontWeight="SemiBold" />
                     <Grid ColumnDefinitions="110,*,Auto" ColumnSpacing="8">
