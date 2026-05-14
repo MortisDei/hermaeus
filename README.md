@@ -47,6 +47,8 @@ local voice providers.
 - Voice provider controls for Kokoro, F5-TTS, and XTTS v2, with preview and
   voice sample import.
 - Optional OpenAI voice provider for remote synthesis.
+- The first-run Setup Wizard now shows Kokoro onboarding details in the voice
+  step, including the install plan and risk notes before you continue.
 - Local AI setup scans can offer approval-gated downloads for a default Phi-4
   mini reasoning GGUF file and a platform-specific `llama-server` binary when
   they are missing from the selected AI assets folder.

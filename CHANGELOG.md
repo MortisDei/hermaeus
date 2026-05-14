@@ -16,6 +16,10 @@ Pre-1.0 versions may still change internal APIs and storage details.
   large local assets.
 - The existing Settings scan flow now surfaces the new download actions without
   requiring a separate setup screen.
+- The first-run Setup Wizard now surfaces Kokoro onboarding directly in the
+  voice step, including the provider install plan and risk notes.
+- Added regression coverage for resumable downloads and llama-server release
+  data validation.
 
 - Voice provider abstraction with capabilities, health checks, and install
   plans for Kokoro, F5-TTS, XTTS v2, and optional OpenAI voice.
