@@ -110,10 +110,22 @@ public sealed class LlamaServerSetupService
             }
 
             progress?.Report($"Downloading llama-server ({displayName})...");
+            var lastPercent = -1;
+            var downloadProgress = progress is null
+                ? null
+                : new Progress<DownloadProgress>(state =>
+                {
+                    var percent = (int)Math.Floor(state.PercentComplete);
+                    if (percent <= lastPercent)
+                        return;
+
+                    lastPercent = percent;
+                    progress.Report($"Downloading llama-server ({displayName})... {percent}%");
+                });
             var downloadResult = await _downloader.DownloadAsync(
                 downloadUrl,
                 exePath,
-                progress: null,
+                progress: downloadProgress,
                 ct: ct);
 
             if (!downloadResult.Success)

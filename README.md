@@ -1,6 +1,6 @@
 # Aether
 
-Version: `0.9.0-alpha`
+Version: `0.9.1-alpha`
 
 A native, local-first Avalonia desktop AI workspace for `llama.cpp`, Ollama,
 OpenAI-compatible APIs, Oghma-grade RAG, agentic task work, and pluggable
@@ -47,6 +47,9 @@ local voice providers.
 - Voice provider controls for Kokoro, F5-TTS, and XTTS v2, with preview and
   voice sample import.
 - Optional OpenAI voice provider for remote synthesis.
+- Local AI setup scans can offer approval-gated downloads for a default Phi-4
+  mini reasoning GGUF file and a platform-specific `llama-server` binary when
+  they are missing from the selected AI assets folder.
 - First-run Setup Wizard: on first launch Aether runs a guided 6-step
   setup wizard to select the data root, local AI assets root, chat backend,
   model folder, voice provider, and to run the Aether Doctor for a quick
@@ -180,11 +183,14 @@ XTTS v2 still supports the familiar local AI assets setup:
 Voice preview uses in-memory generated audio. Aether does not persist generated
 WAV responses. Imported clone samples are copied only when explicitly imported.
 
-Local AI Setup can scan a selected AI folder and show readiness for GGUF models,
-Python venv, XTTS v2 model files, XTTS API script, voices, output folders, and
-the optional RAG reranker. Missing setup actions are approval-gated and show the
-target path, command preview, install plan, risk, and expected result before
-Aether runs them.
+Local AI Setup can scan a selected AI folder and show readiness for GGUF
+models, Python venv, XTTS v2 model files, XTTS API script, voices, output
+folders, and the optional RAG reranker. Missing setup actions are approval-
+gated and show the target path, command preview, install plan, risk, and
+expected result before Aether runs them. If no GGUF models are found, Aether
+can offer the default Phi-4 mini reasoning download. If `llama-server` is not
+available, Aether can offer a matching binary download for the current
+platform.
 
 Voice provider setup is moving toward a pluggable layer, with Kokoro as the
 preferred built-in readback path and XTTS v2 retained as the legacy cloning

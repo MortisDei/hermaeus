@@ -5,9 +5,17 @@ All notable changes to Aether will be documented in this file.
 The project follows semantic versioning once public release candidates begin.
 Pre-1.0 versions may still change internal APIs and storage details.
 
-## [0.9.0-alpha] - Unreleased
+## [0.9.1-alpha] - Unreleased
 
 ### Added
+
+- Local AI setup now offers approval-gated downloads for a default Phi-4 mini
+  reasoning GGUF file when no GGUF models are present, plus a platform-specific
+  `llama-server` binary download when the runtime is missing.
+- Added resumable model download support and binary installation helpers for
+  large local assets.
+- The existing Settings scan flow now surfaces the new download actions without
+  requiring a separate setup screen.
 
 - Voice provider abstraction with capabilities, health checks, and install
   plans for Kokoro, F5-TTS, XTTS v2, and optional OpenAI voice.

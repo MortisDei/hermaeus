@@ -1,10 +1,10 @@
 <Project>
   <PropertyGroup>
-    <VersionPrefix>0.9.0</VersionPrefix>
+    <VersionPrefix>0.9.1</VersionPrefix>
     <VersionSuffix>alpha</VersionSuffix>
     <Version>$(VersionPrefix)-$(VersionSuffix)</Version>
-    <AssemblyVersion>0.9.0.0</AssemblyVersion>
-    <FileVersion>0.9.0.0</FileVersion>
+    <AssemblyVersion>0.9.1.0</AssemblyVersion>
+    <FileVersion>0.9.1.0</FileVersion>
     <InformationalVersion>$(Version)</InformationalVersion>
     <Product>Aether</Product>
     <Authors>MortisDei</Authors>

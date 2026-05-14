@@ -48,8 +48,16 @@ public sealed class LocalAiSetupService : ILocalAiSetupService
         var defaultOutput = Path.Combine(layout.Root, "TTS", "output");
         var venvPython = string.IsNullOrWhiteSpace(layout.TtsPythonPath) ? PythonPathForVenv(defaultVenv) : layout.TtsPythonPath;
 
-        AddItem(items, "models", "GGUF models", layout.ModelsDirectory,
-            "Found model folder.", "Missing Models folder with .gguf files.", true);
+        var hasGgufModels = !string.IsNullOrWhiteSpace(layout.ModelsDirectory)
+            && Directory.Exists(layout.ModelsDirectory)
+            && Directory.EnumerateFiles(layout.ModelsDirectory, "*.gguf", SearchOption.AllDirectories).Any();
+        items.Add(new LocalAiReadinessItem(
+            "models",
+            "GGUF models",
+            hasGgufModels ? LocalAiReadinessStatus.Found : LocalAiReadinessStatus.NeedsAction,
+            hasGgufModels ? "Found GGUF model files." : "No GGUF model files were found.",
+            hasGgufModels ? "Found model files." : "Download Phi-4 mini reasoning or add your own GGUF model.",
+            true));
         AddItem(items, "venv", "Python venv", File.Exists(venvPython) ? venvPython : string.Empty,
             "Found Python in a local venv.", "No local venv Python was found.", true);
         if (File.Exists(venvPython))
@@ -93,7 +101,7 @@ public sealed class LocalAiSetupService : ILocalAiSetupService
             actions.Add(CreateDirectoryAction("output", "Create XTTS output folder", defaultOutput));
 
         // Offer to download default models if no GGUF files found
-        if (string.IsNullOrWhiteSpace(layout.ModelsDirectory))
+        if (!hasGgufModels)
         {
             var modelsDir = Path.Combine(layout.Root, "models");
             var phi4ModelPath = Path.Combine(modelsDir, "phi-4-mini-reasoning-Q5_K_M.gguf");
@@ -295,7 +303,19 @@ if __name__ == "__main__":
                 return new LocalAiSetupResult(false, "No download URL specified in action.");
 
             Directory.CreateDirectory(Path.GetDirectoryName(action.TargetPath) ?? action.TargetPath);
-            var result = await _modelDownloader.DownloadAsync(url, action.TargetPath, progress: null, ct: ct);
+            var lastPercent = -1;
+            var downloadProgress = progress is null
+                ? null
+                : new Progress<DownloadProgress>(state =>
+                {
+                    var percent = (int)Math.Floor(state.PercentComplete);
+                    if (percent <= lastPercent)
+                        return;
+
+                    lastPercent = percent;
+                    progress.Report($"Downloading GGUF model... {percent}%");
+                });
+            var result = await _modelDownloader.DownloadAsync(url, action.TargetPath, progress: downloadProgress, ct: ct);
             return result.Success
                 ? new LocalAiSetupResult(true, result.Message, action.TargetPath)
                 : new LocalAiSetupResult(false, result.Message);
@@ -323,7 +343,19 @@ if __name__ == "__main__":
                 return new LocalAiSetupResult(false, "No download URL specified in action.");
 
             Directory.CreateDirectory(Path.GetDirectoryName(action.TargetPath) ?? action.TargetPath);
-            var result = await _modelDownloader.DownloadAsync(url, action.TargetPath, progress: null, ct: ct);
+            var lastPercent = -1;
+            var downloadProgress = progress is null
+                ? null
+                : new Progress<DownloadProgress>(state =>
+                {
+                    var percent = (int)Math.Floor(state.PercentComplete);
+                    if (percent <= lastPercent)
+                        return;
+
+                    lastPercent = percent;
+                    progress.Report($"Downloading TTS model... {percent}%");
+                });
+            var result = await _modelDownloader.DownloadAsync(url, action.TargetPath, progress: downloadProgress, ct: ct);
             return result.Success
                 ? new LocalAiSetupResult(true, result.Message, action.TargetPath)
                 : new LocalAiSetupResult(false, result.Message);

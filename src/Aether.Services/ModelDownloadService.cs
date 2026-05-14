@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Net.Http.Headers;
 
 namespace Aether.Services;
 
@@ -37,7 +38,11 @@ public sealed class ModelDownloadService
                 Directory.CreateDirectory(destDir);
 
             var existingSize = File.Exists(tempPath) ? new FileInfo(tempPath).Length : 0L;
-            using var response = await _http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            if (existingSize > 0)
+                request.Headers.Range = new RangeHeaderValue(existingSize, null);
+
+            using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
 
             if (!response.IsSuccessStatusCode)
             {
@@ -47,12 +52,13 @@ public sealed class ModelDownloadService
                     null);
             }
 
-            var totalBytes = response.Content.Headers.ContentLength ?? 0L;
-            var canResume = response.StatusCode == System.Net.HttpStatusCode.PartialContent || 
-                           (existingSize > 0 && response.Headers.AcceptRanges?.Contains("bytes") == true);
+            var canResume = existingSize > 0 && response.StatusCode == System.Net.HttpStatusCode.PartialContent;
+            var totalBytes = canResume
+                ? existingSize + (response.Content.Headers.ContentLength ?? 0L)
+                : response.Content.Headers.ContentLength ?? 0L;
 
-            var fileMode = (existingSize > 0 && canResume) ? FileMode.Append : FileMode.Create;
-            var startByte = (existingSize > 0 && canResume) ? existingSize : 0L;
+            var fileMode = canResume ? FileMode.Append : FileMode.Create;
+            var startByte = canResume ? existingSize : 0L;
 
             using (var contentStream = await response.Content.ReadAsStreamAsync(ct))
             using (var fileStream = new FileStream(tempPath, fileMode, FileAccess.Write, FileShare.None, 81920, FileOptions.SequentialScan))

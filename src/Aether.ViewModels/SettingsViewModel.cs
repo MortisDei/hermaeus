@@ -413,6 +413,9 @@ public partial class SettingsViewModel : ObservableObject
             case LocalAiSetupActionKind.CreateVenv:
             case LocalAiSetupActionKind.CreateXttsApiScript:
             case LocalAiSetupActionKind.CreateDirectory:
+            case LocalAiSetupActionKind.DownloadGgufModel:
+            case LocalAiSetupActionKind.DownloadTtsModel:
+            case LocalAiSetupActionKind.DownloadLlamaServer:
                 if (!string.IsNullOrWhiteSpace(action.TargetPath))
                     LocalAiInstallPlanCreates.Add(action.TargetPath);
                 break;
