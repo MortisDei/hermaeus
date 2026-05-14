@@ -12,6 +12,9 @@ Pre-1.0 versions may still change internal APIs and storage details.
 - Voice provider configuration now uses a dropdown selector to clearly indicate
   the active provider, with conditional display of provider-specific settings
   below the selector (Kokoro voice/device/speed controls, F5-TTS options, etc.).
+- Test project `Aether.Tests` is now configured as a proper xUnit test project
+  (`Microsoft.NET.Test.Sdk` + xUnit runner), replacing the custom executable
+  harness so `dotnet test` provides discovered, passed, and failed test counts.
 - RAG Embeddings section expanded with clarification that embeddings convert
   document text to vectors for semantic search and are cached after first
   compute, plus notes that reranker is optional and improves search relevance.
@@ -22,6 +25,9 @@ Pre-1.0 versions may still change internal APIs and storage details.
 
 ### Fixed
 
+- Chat message list no longer shows a selected-row grey slab when clicked;
+  Chat view now uses a non-selectable `ItemsControl` inside a `ScrollViewer`
+  instead of a selectable `ListBox`.
 - Window title now updates correctly when switching between non-Chat panels
   (Settings, Agent, Models, RAG, Services, Tasks, etc.).
 - Agent view Grid layout: fixed TextBox/Browse button field overlap by adding

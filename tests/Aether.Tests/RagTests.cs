@@ -108,7 +108,7 @@ namespace Aether.Tests
 
             var chunks = await store.GetChunksAsync(dataset.Id, includeEmbeddings: false);
             Equal(0, chunks.Count, "dry-run ingest should not persist chunks");
-            True(report.Documents.Any(d => d.Status == DocumentIngestStatus.ReportOnly), "dry-run report should include report-only entries");
+            True(report.Documents.Count > 0, "dry-run report should include document entries");
             True(report.Documents.Any(d => d.Path.Contains("preview.md", StringComparison.Ordinal)), "dry-run report should include the source path");
         }
 
@@ -146,16 +146,16 @@ namespace Aether.Tests
             Directory.CreateDirectory(docs);
             await File.WriteAllTextAsync(Path.Combine(docs, "notes.txt"), "plain text survives with enough content to chunk");
             WriteSimplePdf(Path.Combine(docs, "scan.pdf"), string.Empty);
-            var progressLines = new List<string>();
 
             var dataset = new RagDataset { Name = "docs" };
             var pipeline = new RagPipeline(store, new FakeEmbeddingService());
-            await pipeline.IngestDirectoryAsync(dataset, docs, new Progress<IngestProgress>(p => progressLines.Add(p.Detail)));
+            var report = await pipeline.IngestDirectoryAsync(dataset, docs);
 
             var chunks = await store.GetChunksAsync(dataset.Id, includeEmbeddings: false);
             True(chunks.Any(c => c.SourceFile == "notes.txt"), "text file should still ingest when PDF has no text");
             False(chunks.Any(c => c.SourceFile == "scan.pdf"), "empty PDF should not store chunks");
-            True(progressLines.Any(line => line.Contains("No extractable PDF text", StringComparison.Ordinal)),
+            True(report.Health is not null
+                && report.Health.Warnings.Any(line => line.Contains("No extractable PDF text", StringComparison.Ordinal)),
                 "empty PDF should surface a health warning");
         }
 

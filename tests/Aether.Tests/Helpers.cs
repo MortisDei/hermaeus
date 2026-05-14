@@ -83,6 +83,8 @@ namespace Aether.Tests
     {
         private readonly string _root = Path.Combine(Path.GetTempPath(), $"aether-tests-{Guid.NewGuid():N}");
 
+        public TempDir() => Directory.CreateDirectory(_root);
+
         public string PathFor(string relative) => Path.Combine(_root, relative);
 
         public void Dispose()

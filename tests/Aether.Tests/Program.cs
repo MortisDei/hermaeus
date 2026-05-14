@@ -2,7 +2,6 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
-using System.Collections.Generic;
 using Aether.Agent.Models;
 using Aether.Agent.Services;
 using Aether.Core.Services;
@@ -14,59 +13,12 @@ using Aether.Services;
 using Aether.Tests;
 using static Aether.Tests.Helpers;
 
-var tests = new (string Name, Func<Task> Run)[]
-{
-    ("data root migration previews moveable files", BackupMigrationTests.DataRootMigrationPreview),
-    ("data root migration refuses conflicts", BackupMigrationTests.DataRootMigrationRefusesConflicts),
-    ("data root migration moves db files and leaves no junk", BackupMigrationTests.DataRootMigrationMovesFiles),
-    ("backup excludes secrets and refuses overwrite restore", BackupMigrationTests.BackupExcludesSecretsAndRefusesOverwrite),
-    ("redaction hides common secrets and home path", ServiceTests.RedactionHidesSecrets),
-    ("benchmark db creates starter suites and records runs", ServiceTests.BenchmarkDbCreatesAndRecordsRuns),
-    ("benchmark scoring and ranking are deterministic", ServiceTests.BenchmarkScoringAndRanking),
-    ("system info returns safe fallback values", ServiceTests.SystemInfoSafeFallback),
-    ("local ai assets detect and apply paths", ServiceTests.LocalAiAssetsDetectAndApplyPaths),
-    ("local AI setup detects Aether folder layout", ServiceTests.LocalAiSetupDetectsFolderLayout),
-    ("local AI setup script handling is approval gated", ServiceTests.LocalAiSetupScriptHandlingIsApprovalGated),
-    ("local AI setup command previews stay shell-free", ServiceTests.LocalAiSetupCommandPreviewsStayShellFree),
-    ("local AI setup surfaces Kokoro onboarding", ServiceTests.LocalAiSetupSurfcesKokoroOnboarding),
-    ("model download resumes with range request", ServiceTests.ModelDownloadResumesWithRangeRequest),
-    ("llama-server release data covers supported platforms", ServiceTests.LlamaServerReleaseDataCoversSupportedPlatforms),
-    ("XTTS API template has required endpoints", ServiceTests.XttsApiTemplateHasRequiredEndpoints),
-    ("trust scan classifies inside AI root as low risk", ServiceTests.TrustScanInsideAiRootIsLowRisk),
-    ("trust scan warns outside AI root but allows", ServiceTests.TrustScanOutsideAiRootWarns),
-    ("trust scan reports missing executable", ServiceTests.TrustScanReportsMissingExecutable),
-    ("trust scan keeps unset AI root neutral", ServiceTests.TrustScanUnsetAiRootIsNeutral),
-    ("trust scan detects network-facing extra args", ServiceTests.TrustScanDetectsNetworkExtraArgs),
-    ("source strings avoid long dashes", ServiceTests.SourceStringsAvoidLongDashes),
-    ("secret store falls back without plaintext", ServiceTests.SecretStoreFallbackWithoutPlaintext),
-    ("RAG web ingest strips HTML and stores chunks", RagTests.RagWebIngestStripsHtmlAndStoresChunks),
-    ("RAG digital PDF text extracts", RagTests.RagDigitalPdfTextExtracts),
-    ("RAG directory ingest includes PDFs", RagTests.RagDirectoryIngestIncludesPdfs),
-    ("RAG directory dry run reports without persisting", RagTests.RagDirectoryDryRunReportsWithoutPersisting),
-    ("RAG directory skip unchanged avoids duplicate chunks", RagTests.RagDirectorySkipUnchangedAvoidsDuplicateChunks),
-    ("RAG empty PDF warns and continues", RagTests.RagEmptyPdfWarnsAndContinues),
-    ("RAG ingest cancellation during embedding stops gracefully", RagTests.RagIngestCancellationDuringEmbedding),
-    ("RAG ingest cancellation during storage stops gracefully", RagTests.RagIngestCancellationDuringStorage),
-    ("voice provider capability gating prevents unsupported providers", TtsTests.VoiceProviderCapabilityGating),
-    ("voice provider legacy requires local and TTS", TtsTests.VoiceProviderLegacyRequiresLocalAndTts),
-    ("agent task state serializes schema fields", AgentTaskStateSerializesSchemaFields),
-    ("agent review queue reflects approval history", AgentReviewQueueReflectsApprovalHistory),
-    ("agent workspace memory persists notes per workspace", AgentWorkspaceMemoryPersistsNotesPerWorkspace),
-    ("agent workspace tools enforce path safety", AgentWorkspaceToolsEnforcePathSafety),
-    ("agent context pack stays bounded", AgentContextPackStaysBounded),
-    ("agent tool policy gates risky actions", AgentToolPolicyGatesRiskyActions),
-    ("agent loop writes state log and trace", AgentLoopWritesStateLogAndTrace),
-    ("runtime profile normalization and unsafe host validation", ServiceTests.RuntimeProfileValidation),
-    ("runtime profile defaults are deduplicated", ServiceTests.RuntimeProfilesAreDeduplicated),
-    ("settings save migrates OpenAI key to secret reference", ServiceTests.SettingsSaveMigratesOpenAiKey),
-    ("settings save preserves existing secret reference", ServiceTests.SettingsSavePreservesExistingSecretReference),
-    ("settings save persists global hotkey preference", ServiceTests.SettingsSavePersistsGlobalHotkeyPreference),
-    ("server process arguments stay shell-free and ordered", ServiceTests.ServerProcessArgumentsAreSafe)
-};
+namespace Aether.Tests;
 
-// --- Agent tests moved here as local top-level functions ---
-async Task AgentTaskStateSerializesSchemaFields()
+internal static class AgentTests
 {
+    public static async Task AgentTaskStateSerializesSchemaFields()
+    {
     using var temp = new TempDir();
     var settings = NewSettings(temp);
     settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
@@ -91,10 +43,10 @@ async Task AgentTaskStateSerializesSchemaFields()
     True(json.Contains("\"approval_history\"", StringComparison.Ordinal), "task state should include approval history");
     var loaded = await store.LoadAsync("task-1");
     Equal("Check project", loaded?.Goal, "stored task state should reload");
-}
+    }
 
-async Task AgentReviewQueueReflectsApprovalHistory()
-{
+    public static async Task AgentReviewQueueReflectsApprovalHistory()
+    {
     using var temp = new TempDir();
     var settings = NewSettings(temp);
     settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
@@ -122,10 +74,10 @@ async Task AgentReviewQueueReflectsApprovalHistory()
     Equal(2, item.ApprovalCount, "review queue should include approval count");
     Equal("publish", item.LastApprovalAction, "review queue should surface the latest approval action");
     False(item.LastApprovalApproved ?? true, "review queue should surface the latest approval decision");
-}
+    }
 
-async Task AgentWorkspaceMemoryPersistsNotesPerWorkspace()
-{
+    public static async Task AgentWorkspaceMemoryPersistsNotesPerWorkspace()
+    {
     using var temp = new TempDir();
     var settings = NewSettings(temp);
     settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
@@ -150,10 +102,10 @@ async Task AgentWorkspaceMemoryPersistsNotesPerWorkspace()
     await store.DeleteAsync(workspace, entry.Id);
     items = await store.ListAsync(workspace);
     Equal(0, items.Count, "workspace memory should delete the note");
-}
+    }
 
-Task AgentWorkspaceToolsEnforcePathSafety()
-{
+    public static Task AgentWorkspaceToolsEnforcePathSafety()
+    {
     using var temp = new TempDir();
     var root = temp.PathFor("workspace");
     var src = Path.Combine(root, "src");
@@ -186,10 +138,10 @@ Task AgentWorkspaceToolsEnforcePathSafety()
     Throws<InvalidOperationException>(() => tools.ReadFile(options, Path.Combine(root, "src", "note.txt")));
     Throws<InvalidOperationException>(() => tools.ReadFile(options, ".git/config"));
     return Task.CompletedTask;
-}
+    }
 
-async Task AgentContextPackStaysBounded()
-{
+    public static async Task AgentContextPackStaysBounded()
+    {
     using var temp = new TempDir();
     var root = temp.PathFor("workspace");
     Directory.CreateDirectory(root);
@@ -222,10 +174,10 @@ async Task AgentContextPackStaysBounded()
     True(pack.RetrievedFiles.Count <= 1, "context pack should honor context item bound");
     Equal(5, pack.ToolResults.Count, "context pack should keep latest five tool results");
     Equal("two", pack.ToolResults[0].Tool, "context pack should drop oldest tool results");
-}
+    }
 
-Task AgentToolPolicyGatesRiskyActions()
-{
+    public static Task AgentToolPolicyGatesRiskyActions()
+    {
     var gate = new AgentSafetyGate();
     var read = gate.Evaluate("read_file");
     Equal(AgentToolDisposition.Allowed, read.Disposition, "read-only tools should be allowed");
@@ -242,10 +194,10 @@ Task AgentToolPolicyGatesRiskyActions()
     var unknown = gate.Evaluate("desktop_control");
     Equal(AgentToolDisposition.Blocked, unknown.Disposition, "unknown tools should be blocked");
     return Task.CompletedTask;
-}
+    }
 
-async Task AgentLoopWritesStateLogAndTrace()
-{
+    public static async Task AgentLoopWritesStateLogAndTrace()
+    {
     using var temp = new TempDir();
     var root = temp.PathFor("workspace");
     Directory.CreateDirectory(root);
@@ -268,27 +220,5 @@ async Task AgentLoopWritesStateLogAndTrace()
     await service.AppendApprovalAsync(state.TaskId, "draft_patch", approved: false);
     var reloaded = await store.LoadAsync(state.TaskId);
     True(reloaded?.ApprovalHistory.Count == 1, "approval history should persist");
-}
-
-// Helpers are provided by Aether.Tests.Helpers; do not redefine here.
-
-var failed = 0;
-foreach (var test in tests)
-{
-    try
-    {
-        await test.Run();
-        Console.WriteLine($"PASS {test.Name}");
-    }
-    catch (Exception ex)
-    {
-        failed++;
-        Console.Error.WriteLine($"FAIL {test.Name}: {ex.Message}");
     }
 }
-
-if (failed > 0)
-    return failed;
-
-Console.WriteLine($"All {tests.Length} Aether tests passed.");
-return 0;
