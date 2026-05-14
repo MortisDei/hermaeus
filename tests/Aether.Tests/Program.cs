@@ -1,82 +1,71 @@
-using Aether.Core.Models;
+using System;
+using System.Threading.Tasks;
+using Aether.Tests;
 
-    await vm.AddContextFilesAsync([file]);
-
-    Equal("Estimated", vm.ContextUsageKind, "pending context should be locally estimated");
-    True(vm.IsContextUsageWarning, "80 percent estimate should warn");
-    False(vm.IsContextUsageCritical, "80 percent estimate should not be critical");
-
-        ActiveStep = "Inspect",
-        Constraints = ["local-first"],
-        CompletedSteps = ["created"],
-        PendingSteps = ["inspect"],
-        Summary = "Ready"
-    };
-
-    await store.SaveAsync(state);
-    var json = await File.ReadAllTextAsync(Path.Combine(store.GetTaskDirectory("task-1"), "task_state.json"));
-    True(json.Contains("\"task_id\"", StringComparison.Ordinal), "task state should use schema task_id field");
-    True(json.Contains("\"status\": \"running\"", StringComparison.Ordinal), "task state should serialize schema enum values");
-    True(json.Contains("\"completed_steps\"", StringComparison.Ordinal), "task state should use schema completed_steps field");
-    True(json.Contains("\"approval_history\"", StringComparison.Ordinal), "task state should include approval history");
-    var loaded = await store.LoadAsync("task-1");
-    Equal("Check project", loaded?.Goal, "stored task state should reload");
-}
-
-
-
-static async Task RuntimeProfileValidation()
+var tests = new (string Name, Func<Task> Run)[]
 {
-    using var temp = new TempDir();
-    var settings = NewSettings(temp);
-    var service = new RuntimeProfileService(settings);
-    var profile = new RuntimeProfile
-    {
-        Id = "runtime-1",
-        Name = "  Custom Runtime  ",
-        Kind = RuntimeKind.OpenAiCompatible,
-        BaseUrl = "  https://example.test/v1/  ",
-        ApiKey = " secret:runtime ",
-        Enabled = true,
-        LinkedServerId = " server-1 "
-    };
+    ("data root migration previews moveable files", BackupMigrationTests.DataRootMigrationPreview),
+    ("data root migration refuses conflicts", BackupMigrationTests.DataRootMigrationRefusesConflicts),
+    ("data root migration moves db files and leaves no junk", BackupMigrationTests.DataRootMigrationMovesFiles),
+    ("backup excludes secrets and refuses overwrite restore", BackupMigrationTests.BackupExcludesSecretsAndRefusesOverwrite),
+    ("redaction hides common secrets and home path", ServiceTests.RedactionHidesSecrets),
+    ("benchmark db creates starter suites and records runs", ServiceTests.BenchmarkDbCreatesAndRecordsRuns),
+    ("benchmark scoring and ranking are deterministic", ServiceTests.BenchmarkScoringAndRanking),
+    ("system info returns safe fallback values", ServiceTests.SystemInfoSafeFallback),
+    ("local ai assets detect and apply paths", ServiceTests.LocalAiAssetsDetectAndApplyPaths),
+    ("local AI setup detects Aether folder layout", ServiceTests.LocalAiSetupDetectsFolderLayout),
+    ("local AI setup script handling is approval gated", ServiceTests.LocalAiSetupScriptHandlingIsApprovalGated),
+    ("local AI setup command previews stay shell-free", ServiceTests.LocalAiSetupCommandPreviewsStayShellFree),
+    ("XTTS API template has required endpoints", ServiceTests.XttsApiTemplateHasRequiredEndpoints),
+    ("trust scan classifies inside AI root as low risk", ServiceTests.TrustScanInsideAiRootIsLowRisk),
+    ("trust scan warns outside AI root but allows", ServiceTests.TrustScanOutsideAiRootWarns),
+    ("trust scan reports missing executable", ServiceTests.TrustScanReportsMissingExecutable),
+    ("trust scan keeps unset AI root neutral", ServiceTests.TrustScanUnsetAiRootIsNeutral),
+    ("trust scan detects network-facing extra args", ServiceTests.TrustScanDetectsNetworkExtraArgs),
+    ("source strings avoid long dashes", ServiceTests.SourceStringsAvoidLongDashes),
+    ("secret store falls back without plaintext", ServiceTests.SecretStoreFallbackWithoutPlaintext),
+    ("RAG web ingest strips HTML and stores chunks", RagTests.RagWebIngestStripsHtmlAndStoresChunks),
+    ("RAG digital PDF text extracts", RagTests.RagDigitalPdfTextExtracts),
+    ("RAG directory ingest includes PDFs", RagTests.RagDirectoryIngestIncludesPdfs),
+    ("RAG directory dry run reports without persisting", RagTests.RagDirectoryDryRunReportsWithoutPersisting),
+    ("RAG directory skip unchanged avoids duplicate chunks", RagTests.RagDirectorySkipUnchangedAvoidsDuplicateChunks),
+    ("RAG empty PDF warns and continues", RagTests.RagEmptyPdfWarnsAndContinues),
+    ("RAG ingest cancellation during embedding stops gracefully", RagTests.RagIngestCancellationDuringEmbedding),
+    ("RAG ingest cancellation during storage stops gracefully", RagTests.RagIngestCancellationDuringStorage),
+    ("voice provider capability gating prevents unsupported providers", TtsTests.VoiceProviderCapabilityGating),
+    ("voice provider legacy requires local and TTS", TtsTests.VoiceProviderLegacyRequiresLocalAndTts),
+    ("agent task state serializes schema fields", AgentTests.AgentTaskStateSerializesSchemaFields),
+    ("agent review queue reflects approval history", AgentTests.AgentReviewQueueReflectsApprovalHistory),
+    ("agent workspace memory persists notes per workspace", AgentTests.AgentWorkspaceMemoryPersistsNotesPerWorkspace),
+    ("agent workspace tools enforce path safety", AgentTests.AgentWorkspaceToolsEnforcePathSafety),
+    ("agent context pack stays bounded", AgentTests.AgentContextPackStaysBounded),
+    ("agent tool policy gates risky actions", AgentTests.AgentToolPolicyGatesRiskyActions),
+    ("agent loop writes state log and trace", AgentTests.AgentLoopWritesStateLogAndTrace),
+    ("runtime profile normalization and unsafe host validation", ServiceTests.RuntimeProfileValidation),
+    ("runtime profile defaults are deduplicated", ServiceTests.RuntimeProfilesAreDeduplicated),
+    ("settings save migrates OpenAI key to secret reference", ServiceTests.SettingsSaveMigratesOpenAiKey),
+    ("settings save preserves existing secret reference", ServiceTests.SettingsSavePreservesExistingSecretReference),
+    ("settings save persists global hotkey preference", ServiceTests.SettingsSavePersistsGlobalHotkeyPreference),
+    ("server process arguments stay shell-free and ordered", ServiceTests.ServerProcessArgumentsAreSafe)
+};
 
-    await service.SaveAsync(profile);
-    var saved = settings.Settings.RuntimeProfiles.Single(p => p.Id == "runtime-1");
-    Equal("Custom Runtime", saved.Name, "runtime profile name should be trimmed");
-    Equal("https://example.test/v1", saved.BaseUrl, "runtime profile URL should be trimmed");
-    Equal("secret:runtime", saved.ApiKey, "runtime profile API key should be trimmed");
-    Equal("server-1", saved.LinkedServerId, "linked server id should be trimmed");
-
-    var defaulted = RuntimeProfileService.NormalizeProfile(new RuntimeProfile
-    {
-        Id = string.Empty,
-        Name = " ",
-        Kind = RuntimeKind.LlamaCpp,
-        BaseUrl = " "
-    });
-    True(Guid.TryParse(defaulted.Id, out _), "blank runtime id should be replaced");
-    Equal("LlamaCpp", defaulted.Name, "blank runtime name should default to kind");
-    Equal("http://127.0.0.1:8080", defaulted.BaseUrl, "blank runtime URL should default to loopback");
-
-    var unsafeProfile = new RuntimeProfileViewModel(new RuntimeProfile { BaseUrl = "http://0.0.0.0:8080" });
-    True(unsafeProfile.HasUnsafeHost, "runtime profile view model should flag 0.0.0.0");
-}
-
-static Task RuntimeProfilesAreDeduplicated()
+var failed = 0;
+foreach (var test in tests)
 {
-    using var temp = new TempDir();
-    var settings = NewSettings(temp);
-    settings.Settings.RuntimeProfiles =
-    [
-        new RuntimeProfile { Id = "llama-a", Name = "llama.cpp local", Kind = RuntimeKind.LlamaCpp, BaseUrl = "http://localhost:8080" },
-        new RuntimeProfile { Id = "llama-b", Name = "llama.cpp local", Kind = RuntimeKind.LlamaCpp, BaseUrl = "http://localhost:8080/" },
-        new RuntimeProfile { Id = "ollama", Name = "Ollama local", Kind = RuntimeKind.Ollama, BaseUrl = "http://127.0.0.1:11434" },
-        new RuntimeProfile { Id = "ollama", Name = "Ollama local", Kind = RuntimeKind.Ollama, BaseUrl = "http://127.0.0.1:11434" }
-    ];
-
-    var service = new RuntimeProfileService(settings);
-    Equal(2, service.Profiles.Count, "duplicate runtime defaults should be collapsed");
-    Equal(2, settings.Settings.RuntimeProfiles.Count, "dedupe should update backing settings list");
-    return Task.CompletedTask;
+    try
+    {
+        await test.Run();
+        Console.WriteLine($"PASS {test.Name}");
+    }
+    catch (Exception ex)
+    {
+        failed++;
+        Console.Error.WriteLine($"FAIL {test.Name}: {ex.Message}");
+    }
 }
+
+if (failed > 0)
+    return failed;
+
+Console.WriteLine($"All {tests.Length} Aether tests passed.");
+return 0;

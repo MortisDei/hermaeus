@@ -10,95 +10,98 @@ using Aether.Rag.Embeddings;
 using Aether.Rag.Storage;
 using Aether.Rag.Retrieval;
 using Aether.Services;
+using static Aether.Tests.Helpers;
 
-internal static class AgentTests
+namespace Aether.Tests
 {
-    public static async Task AgentTaskStateSerializesSchemaFields()
+    internal static class AgentTests
     {
-        using var temp = new TempDir();
-        var settings = NewSettings(temp);
-        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
-        var store = new FileAgentTaskStateStore(settings);
-        var state = new AgentTaskState
+        public static async Task AgentTaskStateSerializesSchemaFields()
         {
-            TaskId = "task-1",
-            Goal = "Check project",
-            Status = AgentTaskStatus.Running,
-            ActiveStep = "Inspect",
-            Constraints = ["local-first"],
-            CompletedSteps = ["created"],
-            PendingSteps = ["inspect"],
-            Summary = "Ready"
-        };
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var store = new FileAgentTaskStateStore(settings);
+            var state = new AgentTaskState
+            {
+                TaskId = "task-1",
+                Goal = "Check project",
+                Status = AgentTaskStatus.Running,
+                ActiveStep = "Inspect",
+                Constraints = ["local-first"],
+                CompletedSteps = ["created"],
+                PendingSteps = ["inspect"],
+                Summary = "Ready"
+            };
 
-        await store.SaveAsync(state);
-        var json = await File.ReadAllTextAsync(Path.Combine(store.GetTaskDirectory("task-1"), "task_state.json"));
-        True(json.Contains("\"task_id\"", StringComparison.Ordinal), "task state should use schema task_id field");
-        True(json.Contains("\"status\": \"running\"", StringComparison.Ordinal), "task state should serialize schema enum values");
-        True(json.Contains("\"completed_steps\"", StringComparison.Ordinal), "task state should use schema completed_steps field");
-        True(json.Contains("\"approval_history\"", StringComparison.Ordinal), "task state should include approval history");
-        var loaded = await store.LoadAsync("task-1");
-        Equal("Check project", loaded?.Goal, "stored task state should reload");
-    }
+            await store.SaveAsync(state);
+            var json = await File.ReadAllTextAsync(Path.Combine(store.GetTaskDirectory("task-1"), "task_state.json"));
+            True(json.Contains("\"task_id\"", StringComparison.Ordinal), "task state should use schema task_id field");
+            True(json.Contains("\"status\": \"running\"", StringComparison.Ordinal), "task state should serialize schema enum values");
+            True(json.Contains("\"completed_steps\"", StringComparison.Ordinal), "task state should use schema completed_steps field");
+            True(json.Contains("\"approval_history\"", StringComparison.Ordinal), "task state should include approval history");
+            var loaded = await store.LoadAsync("task-1");
+            Equal("Check project", loaded?.Goal, "stored task state should reload");
+        }
 
-    public static async Task AgentReviewQueueReflectsApprovalHistory()
-    {
-        using var temp = new TempDir();
-        var settings = NewSettings(temp);
-        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
-        var store = new FileAgentTaskStateStore(settings);
-        await store.InitializeAsync();
-
-        var state = new AgentTaskState
+        public static async Task AgentReviewQueueReflectsApprovalHistory()
         {
-            Goal = "Review patch",
-            Status = AgentTaskStatus.WaitingForUser,
-            ActiveStep = "Wait for approval",
-            Summary = "Needs review",
-            ApprovalHistory =
-            [
-                new AgentApprovalRecord("draft_patch", true, DateTime.UtcNow.AddMinutes(-5)),
-                new AgentApprovalRecord("publish", false, DateTime.UtcNow)
-            ]
-        };
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var store = new FileAgentTaskStateStore(settings);
+            await store.InitializeAsync();
 
-        await store.SaveAsync(state);
-        var queue = await store.ListReviewQueueAsync();
+            var state = new AgentTaskState
+            {
+                Goal = "Review patch",
+                Status = AgentTaskStatus.WaitingForUser,
+                ActiveStep = "Wait for approval",
+                Summary = "Needs review",
+                ApprovalHistory =
+                [
+                    new AgentApprovalRecord("draft_patch", true, DateTime.UtcNow.AddMinutes(-5)),
+                    new AgentApprovalRecord("publish", false, DateTime.UtcNow)
+                ]
+            };
 
-        True(queue.Any(item => item.TaskId == state.TaskId), "waiting task should appear in the review queue");
-        var item = queue.Single(entry => entry.TaskId == state.TaskId);
-        Equal(2, item.ApprovalCount, "review queue should include approval count");
-        Equal("publish", item.LastApprovalAction, "review queue should surface the latest approval action");
-        False(item.LastApprovalApproved ?? true, "review queue should surface the latest approval decision");
-    }
+            await store.SaveAsync(state);
+            var queue = await store.ListReviewQueueAsync();
 
-    public static async Task AgentWorkspaceMemoryPersistsNotesPerWorkspace()
-    {
-        using var temp = new TempDir();
-        var settings = NewSettings(temp);
-        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
-        var store = new FileAgentWorkspaceMemoryStore(settings);
-        await store.InitializeAsync();
+            True(queue.Any(item => item.TaskId == state.TaskId), "waiting task should appear in the review queue");
+            var item = queue.Single(entry => entry.TaskId == state.TaskId);
+            Equal(2, item.ApprovalCount, "review queue should include approval count");
+            Equal("publish", item.LastApprovalAction, "review queue should surface the latest approval action");
+            False(item.LastApprovalApproved ?? true, "review queue should surface the latest approval decision");
+        }
 
-        var workspace = temp.PathFor("workspace");
-        Directory.CreateDirectory(workspace);
-
-        var entry = new AgentWorkspaceMemoryEntry
+        public static async Task AgentWorkspaceMemoryPersistsNotesPerWorkspace()
         {
-            WorkspaceRoot = workspace,
-            Title = "Project note",
-            Body = "Remember to keep the ingest report visible.",
-            Tags = ["agent", "memory"]
-        };
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var store = new FileAgentWorkspaceMemoryStore(settings);
+            await store.InitializeAsync();
 
-        await store.UpsertAsync(entry);
-        var items = await store.ListAsync(workspace);
-        True(items.Any(item => item.Title == "Project note"), "workspace memory should persist the note");
+            var workspace = temp.PathFor("workspace");
+            Directory.CreateDirectory(workspace);
 
-        await store.DeleteAsync(workspace, entry.Id);
-        items = await store.ListAsync(workspace);
-        Equal(0, items.Count, "workspace memory should delete the note");
-    }
+            var entry = new AgentWorkspaceMemoryEntry
+            {
+                WorkspaceRoot = workspace,
+                Title = "Project note",
+                Body = "Remember to keep the ingest report visible.",
+                Tags = ["agent", "memory"]
+            };
+
+            await store.UpsertAsync(entry);
+            var items = await store.ListAsync(workspace);
+            True(items.Any(item => item.Title == "Project note"), "workspace memory should persist the note");
+
+            await store.DeleteAsync(workspace, entry.Id);
+            items = await store.ListAsync(workspace);
+            Equal(0, items.Count, "workspace memory should delete the note");
+        }
 
     public static Task AgentWorkspaceToolsEnforcePathSafety()
     {
@@ -247,4 +250,5 @@ internal static class AgentTests
 
         throw new InvalidOperationException($"Expected {typeof(T).Name}.");
     }
+}
 }
