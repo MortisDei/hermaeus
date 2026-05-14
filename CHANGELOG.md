@@ -18,6 +18,9 @@ Pre-1.0 versions may still change internal APIs and storage details.
 - xUnit harness cases are now grouped into per-domain fixtures (Backup,
   Services, RAG, TTS, Agent) for clearer CI output while preserving the same
   underlying coverage set.
+ - Settings: add Kokoro managed service controls and health probe at startup; TTS speed persisted in settings.
+ - Kokoro: Start/Stop managed service, venv-aware startup, and GPU-friendly install notes (supports CUDA, AMD, Intel via environment guidance).
+ - Chat: avoid inserting internal runtime/TTS error messages into chat history; surface as runtime logs and toasts instead.
 - RAG Embeddings section expanded with clarification that embeddings convert
   document text to vectors for semantic search and are cached after first
   compute, plus notes that reranker is optional and improves search relevance.

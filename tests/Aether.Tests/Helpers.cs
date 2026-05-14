@@ -23,7 +23,7 @@ namespace Aether.Tests
         public static SettingsService NewSettings(TempDir temp) => new(temp.PathFor("settings/settings.json"));
 
         public static SettingsViewModel NewSettingsViewModel(ISettingsService settings, ISecretStore secrets) =>
-            new(settings, new FakeTts(), new FakeVoiceProviderRegistry(settings), new FakeToasts(), new BackupService(settings), secrets, new XttsProcessManager(), new LocalAiSetupService(new PythonHealthValidator()), new TrustService());
+            new(settings, new FakeTts(), new FakeVoiceProviderRegistry(settings), new FakeToasts(), new BackupService(settings), secrets, new XttsProcessManager(), new KokoroProcessManager(), new LocalAiSetupService(new PythonHealthValidator()), new TrustService());
 
         public static async Task ThrowsAsync<T>(Func<Task> action) where T : Exception
         {
