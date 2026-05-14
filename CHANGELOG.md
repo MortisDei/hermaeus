@@ -7,6 +7,9 @@ Pre-1.0 versions may still change internal APIs and storage details.
 
 ## [0.9.1-alpha] - Unreleased
 
+
+## [0.9.0-alpha]
+
 ### Added
 
 - Local AI setup now offers approval-gated downloads for a default Phi-4 mini
