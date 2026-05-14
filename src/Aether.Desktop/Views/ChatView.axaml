@@ -103,31 +103,24 @@
 
         <!-- ── Messages ───────────────────────────────────────────────────── -->
         <Grid Grid.Row="3">
-            <ListBox x:Name="MessagesList"
-                     ItemsSource="{Binding Messages}"
-                     Background="Transparent"
-                     BorderThickness="0"
-                     Padding="16,8"
-                     ScrollViewer.VerticalScrollBarVisibility="Auto"
-                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-                <ListBox.ItemsPanel>
-                    <ItemsPanelTemplate>
-                        <VirtualizingStackPanel />
-                    </ItemsPanelTemplate>
-                </ListBox.ItemsPanel>
-                <ListBox.ItemContainerTheme>
-                    <ControlTheme TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
-                        <Setter Property="Padding" Value="0" />
-                        <Setter Property="Margin" Value="0,4" />
-                        <Setter Property="Background" Value="Transparent" />
-                    </ControlTheme>
-                </ListBox.ItemContainerTheme>
-                <ListBox.ItemTemplate>
-                    <DataTemplate DataType="vm:MessageViewModel">
-                        <controls:MessageControl />
-                    </DataTemplate>
-                </ListBox.ItemTemplate>
-            </ListBox>
+            <ScrollViewer x:Name="MessagesScroll"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled"
+                          Padding="16,8">
+                <ItemsControl x:Name="MessagesList"
+                              ItemsSource="{Binding Messages}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <StackPanel />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="vm:MessageViewModel">
+                            <controls:MessageControl />
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
 
             <StackPanel IsVisible="{Binding !HasMessages}"
                         HorizontalAlignment="Center"

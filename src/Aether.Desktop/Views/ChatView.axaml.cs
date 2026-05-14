@@ -1,3 +1,4 @@
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Platform.Storage;
@@ -27,10 +28,9 @@ public partial class ChatView : UserControl
             vm.ScrollToBottom += (_, _) =>
                 Dispatcher.UIThread.Post(() =>
                 {
-                    if (this.FindControl<ListBox>("MessagesList") is { } list
-                        && vm.Messages.LastOrDefault() is { } last)
+                    if (this.FindControl<ScrollViewer>("MessagesScroll") is { } scroll)
                     {
-                        list.ScrollIntoView(last);
+                        scroll.Offset = new Vector(scroll.Offset.X, scroll.Extent.Height);
                     }
                 }, DispatcherPriority.Background);
 
