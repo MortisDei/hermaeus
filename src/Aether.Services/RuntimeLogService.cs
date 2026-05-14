@@ -7,7 +7,7 @@ namespace Aether.Services;
 
 public sealed class RuntimeLogService : IRuntimeLogService
 {
-    private const int MaxEntries = 2000;
+    private const int MaxEntries = 1000;
     private const long MaxLogFileBytes = 10 * 1024 * 1024; // 10 MB
     private readonly ConcurrentQueue<RuntimeLogEntry> _entries = new();
     private readonly ISettingsService _settings;
