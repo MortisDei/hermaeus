@@ -15,6 +15,9 @@ Pre-1.0 versions may still change internal APIs and storage details.
 - Test project `Aether.Tests` is now configured as a proper xUnit test project
   (`Microsoft.NET.Test.Sdk` + xUnit runner), replacing the custom executable
   harness so `dotnet test` provides discovered, passed, and failed test counts.
+- xUnit harness cases are now grouped into per-domain fixtures (Backup,
+  Services, RAG, TTS, Agent) for clearer CI output while preserving the same
+  underlying coverage set.
 - RAG Embeddings section expanded with clarification that embeddings convert
   document text to vectors for semantic search and are cached after first
   compute, plus notes that reranker is optional and improves search relevance.
