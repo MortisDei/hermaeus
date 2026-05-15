@@ -4,7 +4,7 @@ using System.Threading;
 
 namespace Aether.Services;
 
-public sealed class CompositeLlmService : ILlmService
+public sealed class CompositeLlmService : ILlmService, IDisposable
 {
     private const string OpenAiProviderTagValue = "openai";
     private const string LlamaCppProviderTagValue = "llama.cpp";
@@ -172,5 +172,10 @@ public sealed class CompositeLlmService : ILlmService
         {
             _cacheLock.ExitReadLock();
         }
+    }
+
+    public void Dispose()
+    {
+        _cacheLock?.Dispose();
     }
 }
