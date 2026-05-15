@@ -85,4 +85,9 @@ public class AppSettings
             AutoStart      = false
         }
     ];
+
+    /// <summary>
+    /// Chat memory feature configuration (storage, injection, retention, encryption).
+    /// </summary>
+    public MemorySettings Memory { get; set; } = new();
 }

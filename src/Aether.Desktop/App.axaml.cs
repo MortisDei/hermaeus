@@ -59,6 +59,7 @@ public partial class App : Application
         {
             await sp.GetRequiredService<ISettingsService>().LoadAsync();
             await sp.GetRequiredService<IConversationStore>().InitializeAsync();
+            await sp.GetRequiredService<IMemoryStore>().InitializeAsync();
             await sp.GetRequiredService<SqliteRagStore>().InitializeAsync();
             await sp.GetRequiredService<IAgentTaskStateStore>().InitializeAsync();
             await sp.GetRequiredService<IBenchmarkService>().InitializeAsync();
@@ -91,6 +92,9 @@ public partial class App : Application
         s.AddSingleton<ISystemInfoService, SystemInfoService>();
         s.AddSingleton<IBenchmarkService,  BenchmarkService>();
         s.AddSingleton<IConversationStore, ConversationStore>();
+        s.AddSingleton<IMemoryStore, MemoryStore>();
+        s.AddSingleton<IMemoryExtractionService, MemoryExtractionService>();
+        s.AddSingleton<IMemoryInjectionService, MemoryInjectionService>();
         s.AddSingleton<LlamaCppService>();
         s.AddSingleton<OpenAiService>();
         s.AddSingleton<IRuntimeProfileService, RuntimeProfileService>();
@@ -129,6 +133,7 @@ public partial class App : Application
         s.AddSingleton<BenchmarkViewModel>();
         s.AddSingleton<SystemOverviewViewModel>();
         s.AddSingleton<DoctorViewModel>();
+        s.AddSingleton<MemoriesViewModel>();
         s.AddSingleton<LogsViewModel>();
         s.AddSingleton<SetupWizardViewModel>();
         s.AddSingleton<MainWindowViewModel>();

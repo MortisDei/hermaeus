@@ -26,6 +26,7 @@ public partial class MainWindowViewModel : ObservableObject
     public BenchmarkViewModel       Benchmarks { get; }
     public SystemOverviewViewModel  SystemOverview { get; }
     public DoctorViewModel          Doctor { get; }
+    public MemoriesViewModel        Memories { get; }
     public LogsViewModel            Logs { get; }
     public SetupWizardViewModel     Wizard { get; }
 
@@ -51,6 +52,7 @@ public partial class MainWindowViewModel : ObservableObject
     public bool ShowBenchmarks => ActivePanel == "benchmarks";
     public bool ShowSystem => ActivePanel == "system";
     public bool ShowDoctor => ActivePanel == "doctor";
+    public bool ShowMemories => ActivePanel == "memories";
     public bool ShowLogs => ActivePanel == "logs";
     public bool ShowWizard => ActivePanel == "wizard";
     public object ActiveViewModel => ActivePanel switch
@@ -64,6 +66,7 @@ public partial class MainWindowViewModel : ObservableObject
         "benchmarks" => Benchmarks,
         "system"   => SystemOverview,
         "doctor"   => Doctor,
+        "memories" => Memories,
         "logs"     => Logs,
         "wizard"   => Wizard,
         _          => Chat
@@ -84,6 +87,7 @@ public partial class MainWindowViewModel : ObservableObject
         BenchmarkViewModel benchmarks,
         SystemOverviewViewModel systemOverview,
         DoctorViewModel doctor,
+        MemoriesViewModel memories,
         LogsViewModel logs,
         SetupWizardViewModel wizard,
         ISettingsService settingsService,
@@ -96,7 +100,7 @@ public partial class MainWindowViewModel : ObservableObject
         _settingsService = settingsService;
         _store = store; Chat = chat; Agent = agent; Settings = settings;
         Models = models; Rag = rag; Services = services; Tasks = tasks;
-        Benchmarks = benchmarks; SystemOverview = systemOverview; Doctor = doctor; Logs = logs; Wizard = wizard;
+        Benchmarks = benchmarks; SystemOverview = systemOverview; Doctor = doctor; Memories = memories; Logs = logs; Wizard = wizard;
         Doctor.RequestNavigate = panel => ActivePanel = panel;
         Wizard.WizardCompleted += () => ActivePanel = "chat";
         // allow settings view to request re-running the setup wizard
@@ -308,6 +312,7 @@ public partial class MainWindowViewModel : ObservableObject
         ActivePanel = "doctor";
         RunBackgroundTaskAsync("run doctor scan", () => Doctor.ScanCommand.ExecuteAsync(null));
     }
+    [RelayCommand] private void ShowMemoriesPanel()    => ActivePanel = "memories";
     [RelayCommand] private void ShowLogsPanel()        => ActivePanel = "logs";
     [RelayCommand] private void ShowWizardPanel()      => ActivePanel = "wizard";
     [RelayCommand] private void ShowSettingsPanel()    { ActivePanel = "settings"; Settings.Reload(); }
@@ -357,6 +362,7 @@ public partial class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowBenchmarks));
         OnPropertyChanged(nameof(ShowSystem));
         OnPropertyChanged(nameof(ShowDoctor));
+        OnPropertyChanged(nameof(ShowMemories));
         OnPropertyChanged(nameof(ShowLogs));
         OnPropertyChanged(nameof(ShowWizard));
         OnPropertyChanged(nameof(ActiveViewModel));
