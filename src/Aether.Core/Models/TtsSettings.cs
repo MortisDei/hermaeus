@@ -47,7 +47,7 @@ public class TtsSettings
     public string OutputDirectory { get; set; } = "";
 
     /// <summary>
-    /// Device to use for TTS inference ("cpu" or "cuda").
+    /// Device to use for TTS inference ("cpu", "cuda", or "rocm").
     /// </summary>
     public string Device { get; set; } = "cpu";
 

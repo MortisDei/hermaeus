@@ -480,24 +480,71 @@ if __name__ == "__main__":
         // Detect GPU backend on the host and update in-memory settings so UI can persist it.
         try
         {
-            var backend = await DetectGpuBackendAsync();
-            settings.Tts.Device = backend;
-            progress?.Report($"Detected GPU backend: {backend}");
+            var detection = await DetectGpuBackendAsync();
+            settings.Tts.Device = detection.Device;
+            if (!string.IsNullOrWhiteSpace(detection.Warning))
+                progress?.Report(detection.Warning);
+            progress?.Report($"Detected GPU backend: {detection.Device}");
         }
         catch { }
 
         return result with { UpdatedPath = PythonPathForVenv(target) };
     }
 
-    private static async Task<string> DetectGpuBackendAsync()
+    private sealed record GpuBackendDetection(string Device, string? Warning);
+
+    private static async Task<GpuBackendDetection> DetectGpuBackendAsync()
     {
-        // Prefer NVIDIA CUDA if nvidia-smi exists, then ROCm if rocminfo exists, otherwise default to cpu.
+        // Prefer NVIDIA CUDA if nvidia-smi exists, then ROCm if rocminfo exists.
         if (FindOnPath("nvidia-smi") is not null)
-            return "cuda";
+            return new GpuBackendDetection("cuda", null);
         if (FindOnPath("rocminfo") is not null)
-            return "rocm";
-        // Intel GPU detection is platform-specific; fall back to cpu and allow manual override.
-        return "cpu";
+            return new GpuBackendDetection("rocm", null);
+
+        if (OperatingSystem.IsLinux())
+        {
+            var intelDetected = Directory.EnumerateFiles("/sys/class/drm", "vendor", SearchOption.AllDirectories)
+                .Any(path =>
+                {
+                    try
+                    {
+                        return File.ReadAllText(path).Trim().Equals("0x8086", StringComparison.OrdinalIgnoreCase);
+                    }
+                    catch
+                    {
+                        return false;
+                    }
+                });
+
+            if (intelDetected)
+            {
+                return new GpuBackendDetection(
+                    "cpu",
+                    "Intel GPU detected, but Aether cannot auto-install a matching XTTS wheel. Falling back to CPU for XTTS setup. You can still override the device manually if your backend supports it.");
+            }
+
+            var amdDetected = Directory.EnumerateFiles("/sys/class/drm", "vendor", SearchOption.AllDirectories)
+                .Any(path =>
+                {
+                    try
+                    {
+                        return File.ReadAllText(path).Trim().Equals("0x1002", StringComparison.OrdinalIgnoreCase);
+                    }
+                    catch
+                    {
+                        return false;
+                    }
+                });
+
+            if (amdDetected)
+            {
+                return new GpuBackendDetection(
+                    "cpu",
+                    "AMD GPU detected, but ROCm was not found. Falling back to CPU for XTTS setup. Install ROCm and rerun setup to use GPU acceleration.");
+            }
+        }
+
+        return new GpuBackendDetection("cpu", null);
     }
 
     private static string? FindOnPath(string executableName)
@@ -569,9 +616,13 @@ if __name__ == "__main__":
         // Install a matching PyTorch wheel for the detected backend before installing XTTS packages.
         try
         {
-            var backend = DetectGpuBackendFromSettings(settings);
-            progress?.Report($"Installing PyTorch for backend: {backend}...");
-            var torchResult = await InstallTorchForBackendAsync(pythonPath, backend, workingDirectory, progress, ct);
+            var detection = await DetectGpuBackendForSettingsAsync(settings, ct);
+            settings.Tts.Device = detection.Device;
+            if (!string.IsNullOrWhiteSpace(detection.Warning))
+                progress?.Report(detection.Warning);
+
+            progress?.Report($"Installing PyTorch for backend: {detection.Device}...");
+            var torchResult = await InstallTorchForBackendAsync(pythonPath, detection.Device, workingDirectory, progress, ct);
             if (!torchResult.Success)
                 return new LocalAiSetupResult(false, $"Failed to install PyTorch: {torchResult.Log}");
         }
@@ -613,13 +664,14 @@ if __name__ == "__main__":
         return await RunProcessAsync(pythonPath, args, workingDirectory, progress, ct);
     }
 
-    private static string DetectGpuBackendFromSettings(AppSettings settings)
+    private static async Task<GpuBackendDetection> DetectGpuBackendForSettingsAsync(AppSettings settings, CancellationToken ct)
     {
         var device = settings.Tts.Device.Trim().ToLowerInvariant();
         if (device is "cuda" or "rocm" or "cpu")
-            return device;
+            return new GpuBackendDetection(device, null);
 
-        return DetectGpuBackendAsync().GetAwaiter().GetResult();
+        ct.ThrowIfCancellationRequested();
+        return await DetectGpuBackendAsync();
     }
 
     private static async Task<LocalAiSetupResult> RebuildVenvAsync(string pythonPath, IProgress<string>? progress, CancellationToken ct)

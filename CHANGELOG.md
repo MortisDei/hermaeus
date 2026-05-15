@@ -22,6 +22,7 @@ Pre-1.0 versions may still change internal APIs and storage details.
 - Kokoro: Start/Stop managed service, venv-aware startup, and GPU-friendly install notes (supports CUDA, AMD, Intel via environment guidance).
 - Kokoro: Start/Stop managed service, venv-aware startup, and GPU-friendly venv setup. The Local AI setup now detects NVIDIA (CUDA) or ROCm and suggests the appropriate device; settings persist TTS device and speed. Manual override available in Settings.
 - Local AI setup now attempts to install a matching PyTorch wheel for the selected backend (CUDA/ROCm/CPU) before installing XTTS packages.
+- Local AI setup now explicitly warns when Intel or AMD GPUs are detected without a supported wheel path and falls back to CPU for XTTS setup instead of silently masking the hardware.
 - Chat: avoid inserting internal runtime/TTS error messages into chat history; surface as runtime logs and toasts instead.
 - RAG Embeddings section expanded with clarification that embeddings convert
   document text to vectors for semantic search and are cached after first

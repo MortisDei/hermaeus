@@ -42,7 +42,7 @@ public partial class TtsSettingsViewModel : ObservableObject
     [ObservableProperty] private string _ttsStatus = "Stopped";
     [ObservableProperty] private string _selectedVoiceProvider = "Kokoro";
 
-    public string[] TtsDevices { get; } = ["cpu", "auto", "cuda"];
+    public string[] TtsDevices { get; } = ["cpu", "auto", "cuda", "rocm"];
     public ObservableCollection<string> TtsVoices { get; } = ["default"];
     public ObservableCollection<VoiceProviderInfo> VoiceProviders { get; } = [];
 
