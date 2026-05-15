@@ -529,10 +529,6 @@ public sealed class DoctorService : IDoctorService
 
     private string ResolveRerankerDirectory()
     {
-        if (!string.IsNullOrWhiteSpace(_settings.Settings.Rag.RerankerModelPath))
-            return Path.GetFullPath(_settings.Settings.Rag.RerankerModelPath);
-
-        var root = SettingsService.ResolveDataRoot(_settings.Settings);
-        return Path.Combine(root, "models", "rerank", "ms-marco-MiniLM-L6-v2");
+        return OnnxCrossEncoderReranker.ResolveModelDirectory(_settings.Settings);
     }
 }

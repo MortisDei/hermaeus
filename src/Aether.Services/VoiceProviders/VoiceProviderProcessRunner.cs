@@ -77,23 +77,41 @@ internal static class VoiceProviderProcessRunner
 
     internal static async Task PlayWavFileAsync(string wavFilePath, CancellationToken ct)
     {
+        if (await TryPlayWavFileAsync("paplay", [wavFilePath], ct)) return;
+        if (await TryPlayWavFileAsync("pw-play", [wavFilePath], ct)) return;
+        if (await TryPlayWavFileAsync("aplay", ["-q", wavFilePath], ct)) return;
+        if (await TryPlayWavFileAsync("ffplay", ["-nodisp", "-autoexit", wavFilePath], ct)) return;
+
+        throw new InvalidOperationException("Could not find paplay, pw-play, aplay, or ffplay to play generated audio.");
+    }
+
+    private static async Task<bool> TryPlayWavFileAsync(string command, IReadOnlyList<string> args, CancellationToken ct)
+    {
         var psi = new ProcessStartInfo
         {
-            FileName = "ffplay",
+            FileName = command,
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             CreateNoWindow = true
         };
-        psi.ArgumentList.Add("-nodisp");
-        psi.ArgumentList.Add("-autoexit");
-        psi.ArgumentList.Add(wavFilePath);
 
-        using var process = new Process { StartInfo = psi, EnableRaisingEvents = true };
-        if (!process.Start())
-            throw new InvalidOperationException("ffplay not available; cannot play audio.");
+        foreach (var arg in args)
+            psi.ArgumentList.Add(arg);
 
-        await process.WaitForExitAsync(ct);
+        try
+        {
+            using var process = new Process { StartInfo = psi, EnableRaisingEvents = true };
+            if (!process.Start())
+                return false;
+
+            await process.WaitForExitAsync(ct);
+            return process.ExitCode == 0;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     internal static string ResolvePythonPath(ISettingsService settings)

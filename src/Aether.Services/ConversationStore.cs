@@ -45,13 +45,35 @@ public sealed class ConversationStore : IConversationStore
                 updated_at    TEXT NOT NULL,
                 messages_json TEXT NOT NULL
             );
+            CREATE VIRTUAL TABLE IF NOT EXISTS conversations_fts USING fts5(
+                id UNINDEXED,
+                title,
+                messages,
+                folder,
+                tags
+            );
             CREATE INDEX IF NOT EXISTS idx_updated ON conversations(updated_at DESC);";
         await cmd.ExecuteNonQueryAsync(ct);
         await EnsureColumnAsync(c, "folder", "TEXT NOT NULL DEFAULT ''", ct);
         await EnsureColumnAsync(c, "tags_json", "TEXT NOT NULL DEFAULT '[]'", ct);
         await EnsureColumnAsync(c, "is_pinned", "INTEGER NOT NULL DEFAULT 0", ct);
         await EnsureColumnAsync(c, "is_archived", "INTEGER NOT NULL DEFAULT 0", ct);
+        await RebuildFtsAsync(c, ct);
         _initializedPath = dbPath;
+    }
+
+    private static async Task RebuildFtsAsync(SqliteConnection c, CancellationToken ct)
+    {
+        await using var clear = c.CreateCommand();
+        clear.CommandText = "DELETE FROM conversations_fts";
+        await clear.ExecuteNonQueryAsync(ct);
+
+        await using var fill = c.CreateCommand();
+        fill.CommandText = @"
+            INSERT INTO conversations_fts (id, title, messages, folder, tags)
+            SELECT id, title, messages_json, folder, tags_json
+            FROM conversations";
+        await fill.ExecuteNonQueryAsync(ct);
     }
 
     private static async Task EnsureColumnAsync(SqliteConnection c, string column, string definition, CancellationToken ct)
@@ -132,6 +154,8 @@ public sealed class ConversationStore : IConversationStore
         cmd.Parameters.AddWithValue("$pin", conv.IsPinned ? 1 : 0);
         cmd.Parameters.AddWithValue("$archived", conv.IsArchived ? 1 : 0);
         await cmd.ExecuteNonQueryAsync(ct);
+
+        await UpsertFtsAsync(c, conv, json, tagsJson, ct);
     }
 
     public async Task DeleteAsync(string id, CancellationToken ct = default)
@@ -142,12 +166,72 @@ public sealed class ConversationStore : IConversationStore
         cmd.CommandText = "DELETE FROM conversations WHERE id = $id";
         cmd.Parameters.AddWithValue("$id", id);
         await cmd.ExecuteNonQueryAsync(ct);
+
+        await using var fts = c.CreateCommand();
+        fts.CommandText = "DELETE FROM conversations_fts WHERE id = $id";
+        fts.Parameters.AddWithValue("$id", id);
+        await fts.ExecuteNonQueryAsync(ct);
     }
 
     public async Task<List<Conversation>> SearchAsync(string q, CancellationToken ct = default)
     {
         await EnsureInitializedAsync(ct);
         await using var c = new SqliteConnection(Cs); await c.OpenAsync(ct);
+
+        var ftsQuery = BuildFtsQuery(q);
+        if (string.IsNullOrWhiteSpace(ftsQuery))
+            return await SearchLikeAsync(c, q, ct);
+
+        var cmd = c.CreateCommand();
+        cmd.CommandText = @"
+            SELECT c.*
+            FROM conversations c
+            JOIN conversations_fts f ON f.id = c.id
+            WHERE conversations_fts MATCH $q
+            ORDER BY c.is_archived ASC, c.is_pinned DESC, c.updated_at DESC
+            LIMIT 50";
+        cmd.Parameters.AddWithValue("$q", ftsQuery);
+
+        try
+        {
+            var r = new List<Conversation>();
+            await using var rd = await cmd.ExecuteReaderAsync(ct);
+            while (await rd.ReadAsync(ct)) r.Add(Map(rd));
+            return r;
+        }
+        catch (SqliteException)
+        {
+            // Fall back to LIKE for malformed user input or unsupported MATCH syntax.
+            return await SearchLikeAsync(c, q, ct);
+        }
+    }
+
+    private static async Task UpsertFtsAsync(
+        SqliteConnection c,
+        Conversation conv,
+        string messagesJson,
+        string tagsJson,
+        CancellationToken ct)
+    {
+        await using var delete = c.CreateCommand();
+        delete.CommandText = "DELETE FROM conversations_fts WHERE id = $id";
+        delete.Parameters.AddWithValue("$id", conv.Id);
+        await delete.ExecuteNonQueryAsync(ct);
+
+        await using var insert = c.CreateCommand();
+        insert.CommandText = @"
+            INSERT INTO conversations_fts (id, title, messages, folder, tags)
+            VALUES ($id, $title, $messages, $folder, $tags)";
+        insert.Parameters.AddWithValue("$id", conv.Id);
+        insert.Parameters.AddWithValue("$title", conv.Title);
+        insert.Parameters.AddWithValue("$messages", messagesJson);
+        insert.Parameters.AddWithValue("$folder", conv.Folder.Trim());
+        insert.Parameters.AddWithValue("$tags", tagsJson);
+        await insert.ExecuteNonQueryAsync(ct);
+    }
+
+    private static async Task<List<Conversation>> SearchLikeAsync(SqliteConnection c, string q, CancellationToken ct)
+    {
         var cmd = c.CreateCommand();
         cmd.CommandText = "SELECT * FROM conversations WHERE title LIKE $q OR messages_json LIKE $q OR folder LIKE $q OR tags_json LIKE $q ORDER BY is_archived ASC, is_pinned DESC, updated_at DESC LIMIT 50";
         cmd.Parameters.AddWithValue("$q", $"%{q}%");
@@ -155,6 +239,23 @@ public sealed class ConversationStore : IConversationStore
         await using var rd = await cmd.ExecuteReaderAsync(ct);
         while (await rd.ReadAsync(ct)) r.Add(Map(rd));
         return r;
+    }
+
+    private static string BuildFtsQuery(string query)
+    {
+        var terms = query
+            .Split([' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(t => t.Trim())
+            .Where(t => t.Length >= 2)
+            .Select(t => t.Replace("\"", "\"\"", StringComparison.Ordinal))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(8)
+            .ToList();
+
+        if (terms.Count == 0)
+            return string.Empty;
+
+        return string.Join(" AND ", terms.Select(t => $"\"{t}\"*"));
     }
 
     private static Conversation Map(SqliteDataReader r) => new()

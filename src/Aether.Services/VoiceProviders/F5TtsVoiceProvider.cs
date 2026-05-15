@@ -11,6 +11,7 @@ namespace Aether.Services;
 public sealed class F5TtsVoiceProvider : ITtsService, IVoiceProvider
 {
     private readonly ISettingsService _settings;
+    private readonly SemaphoreSlim _synthesisGate = new(1, 1);
 
     public VoiceProvider Id => VoiceProvider.F5Tts;
     public string DisplayName => "F5-TTS";
@@ -175,6 +176,9 @@ public sealed class F5TtsVoiceProvider : ITtsService, IVoiceProvider
 
     private async Task<string> RenderToFileAsync(string text, string? speaker, string? outputPath, CancellationToken ct)
     {
+        await _synthesisGate.WaitAsync(ct);
+        try
+        {
         if (!_settings.Settings.Tts.Enabled)
             throw new InvalidOperationException("TTS is disabled in settings.");
 
@@ -234,6 +238,11 @@ if not Path(args.output).exists():
             throw new InvalidOperationException($"F5-TTS synthesis failed.\n{run.Log}");
 
         return output;
+        }
+        finally
+        {
+            _synthesisGate.Release();
+        }
     }
 
     private string? ResolveReferenceAudioFile(string? speaker)

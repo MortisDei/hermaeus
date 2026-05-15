@@ -10,4 +10,5 @@ public class Message
     public bool IsError { get; set; }
     public string ModelId { get; set; } = string.Empty;
     public long DurationMs { get; set; }
+    public List<string> AttachedFilePaths { get; set; } = [];
 }

@@ -33,6 +33,7 @@ public sealed class RagQueryService
     private const int MaxCachedDatasets = 8;
     private readonly Dictionary<string, List<RagChunk>> _cache = [];
     private readonly LinkedList<string> _cacheOrder = new();
+    private readonly object _cacheSync = new();
 
     public RagQueryService(
         SqliteRagStore store,
@@ -53,19 +54,31 @@ public sealed class RagQueryService
 
     public void ClearCache(string datasetId)
     {
-        _cache.Remove(datasetId);
-        var node = _cacheOrder.Find(datasetId);
-        if (node is not null)
-            _cacheOrder.Remove(node);
+        lock (_cacheSync)
+        {
+            _cache.Remove(datasetId);
+            var node = _cacheOrder.Find(datasetId);
+            if (node is not null)
+                _cacheOrder.Remove(node);
+        }
     }
 
     private void StoreCache(string datasetId, List<RagChunk> chunks)
     {
-        _cache[datasetId] = chunks;
-        TouchCache(datasetId);
+        lock (_cacheSync)
+        {
+            _cache[datasetId] = chunks;
+            TouchCacheUnsafe(datasetId);
+        }
     }
 
     private void TouchCache(string datasetId)
+    {
+        lock (_cacheSync)
+            TouchCacheUnsafe(datasetId);
+    }
+
+    private void TouchCacheUnsafe(string datasetId)
     {
         var existing = _cacheOrder.Find(datasetId);
         if (existing is not null)
@@ -96,10 +109,20 @@ public sealed class RagQueryService
         opts ??= new RagQueryOptions();
         var sw = Stopwatch.StartNew();
 
-        if (!_cache.TryGetValue(datasetId, out var chunks) || chunks.Count == 0)
+        List<RagChunk> chunks;
+        lock (_cacheSync)
+        {
+            _cache.TryGetValue(datasetId, out chunks!);
+        }
+
+        if (chunks is null || chunks.Count == 0)
             await WarmCacheAsync(datasetId, ct);
-        chunks = _cache.GetValueOrDefault(datasetId, []);
-        TouchCache(datasetId);
+
+        lock (_cacheSync)
+        {
+            chunks = _cache.GetValueOrDefault(datasetId, []);
+            TouchCacheUnsafe(datasetId);
+        }
 
         var expandedQuery = await ExpandQueryAsync(datasetId, question, ct);
         var qEmbed = await _embed.EmbedAsync(expandedQuery, ct);
@@ -131,7 +154,7 @@ public sealed class RagQueryService
             fused = await UpgradeToParentsAsync(fused, ct);
 
         sw.Stop();
-        return new RagRetrievalResult(question, expandedQuery, semantic, bm25, fused, sw.ElapsedMilliseconds);
+        return new RagRetrievalResult(question, expandedQuery, semantic, bm25, fused, sw.ElapsedMilliseconds, ds?.Config);
     }
 
     public async IAsyncEnumerable<string> StreamQueryAsync(
@@ -152,7 +175,7 @@ public sealed class RagQueryService
 
         // ── 8. Build context + prompt ────────────────────────────────────
         var context = BuildContext(fused);
-        var prompt  = BuildPrompt(question, context);
+        var prompt  = BuildPrompt(question, context, retrieval.DatasetConfig);
         var modelId = string.IsNullOrEmpty(opts.ModelId)
             ? _settings.Settings.Llm.DefaultModel
             : opts.ModelId;
@@ -259,7 +282,23 @@ public sealed class RagQueryService
         return sb.ToString();
     }
 
-    private static string BuildPrompt(string question, string context) =>
+    private static string BuildPrompt(string question, string context, RagDatasetConfig? config)
+    {
+        var template = config?.PromptTemplate?.Trim();
+        if (string.IsNullOrWhiteSpace(template))
+            return BuildDefaultPrompt(question, context);
+
+        var hasContext = template.Contains("{context}", StringComparison.OrdinalIgnoreCase);
+        var hasQuestion = template.Contains("{question}", StringComparison.OrdinalIgnoreCase);
+        if (!hasContext || !hasQuestion)
+            return BuildDefaultPrompt(question, context);
+
+        return template
+            .Replace("{context}", context, StringComparison.OrdinalIgnoreCase)
+            .Replace("{question}", question, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string BuildDefaultPrompt(string question, string context) =>
         $"You are a helpful assistant. Answer the question using ONLY the information " +
         $"in the provided context. If the context does not contain enough information " +
         $"to answer clearly, say so. Do not invent information not present in the context.\n\n" +
@@ -301,4 +340,5 @@ public sealed record RagRetrievalResult(
     List<ScoredChunk> SemanticCandidates,
     List<ScoredChunk> Bm25Candidates,
     List<ScoredChunk> Selected,
-    long LatencyMs);
+    long LatencyMs,
+    RagDatasetConfig? DatasetConfig);

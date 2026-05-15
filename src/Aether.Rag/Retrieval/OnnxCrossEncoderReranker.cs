@@ -206,7 +206,7 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
         File.Move(temp, path, overwrite: true);
     }
 
-    private static string ResolveModelDirectory(AppSettings settings)
+    public static string ResolveModelDirectory(AppSettings settings)
     {
         if (!string.IsNullOrWhiteSpace(settings.Rag.RerankerModelPath))
             return Path.GetFullPath(settings.Rag.RerankerModelPath);

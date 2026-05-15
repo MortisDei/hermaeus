@@ -181,7 +181,7 @@ public partial class SettingsView : UserControl
                 vm.Tts.TtsVoiceDirectory = folders[0].Path.LocalPath;
         };
 
-        vm.RequestTtsVoiceSamplePicker = async () =>
+        vm.Tts.RequestTtsVoiceSamplePicker = async () =>
         {
             var top = TopLevel.GetTopLevel(this);
             if (top is null) return;

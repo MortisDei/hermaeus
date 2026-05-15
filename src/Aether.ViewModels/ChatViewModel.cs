@@ -108,14 +108,21 @@ public partial class ChatViewModel : ObservableObject
             SelectedModel = AvailableModels.FirstOrDefault(m => m.Id == conv.ModelId) ?? SelectedModel;
         Messages.Clear();
         foreach (var msg in conv.Messages)
-            Messages.Add(new MessageViewModel
+        {
+            var viewModel = new MessageViewModel
             {
                 Role = msg.Role,
                 Content = msg.Content,
                 IsError = msg.IsError,
                 ModelId = msg.ModelId,
                 DurationMs = msg.DurationMs
-            });
+            };
+
+            foreach (var path in msg.AttachedFilePaths.Where(p => !string.IsNullOrWhiteSpace(p)))
+                viewModel.AttachedFilePaths.Add(path);
+
+            Messages.Add(viewModel);
+        }
         ScrollToBottom?.Invoke(this, EventArgs.Empty);
     }
 
@@ -441,7 +448,11 @@ public partial class ChatViewModel : ObservableObject
                 Content = m.Content,
                 IsError = m.IsError,
                 ModelId = m.ModelId,
-                DurationMs = m.DurationMs
+                DurationMs = m.DurationMs,
+                AttachedFilePaths = m.AttachedFilePaths
+                    .Where(p => !string.IsNullOrWhiteSpace(p))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList()
             }).ToList()
         });
         ConversationSaved?.Invoke(this, CurrentConversationId);

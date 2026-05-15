@@ -1,5 +1,6 @@
 using Aether.Core.Models;
 using Aether.Core.Services;
+using System.Threading;
 
 namespace Aether.Services;
 
@@ -15,6 +16,7 @@ public sealed class CompositeLlmService : ILlmService
     private readonly IRuntimeProfileService _runtimeProfiles;
     private readonly List<LlmModel> _cachedModels = [];
     private readonly Dictionary<string, string> _providerTagsByModelId = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ReaderWriterLockSlim _cacheLock = new();
     private DateTime _cacheUntilUtc = DateTime.MinValue;
 
     public string ProviderName => "Composite";
@@ -33,24 +35,47 @@ public sealed class CompositeLlmService : ILlmService
 
     public async Task<List<LlmModel>> GetModelsAsync(CancellationToken ct = default)
     {
-        if (_cachedModels.Count > 0 && DateTime.UtcNow < _cacheUntilUtc)
-            return _cachedModels.Select(Clone).ToList();
+        _cacheLock.EnterReadLock();
+        try
+        {
+            if (_cachedModels.Count > 0 && DateTime.UtcNow < _cacheUntilUtc)
+                return _cachedModels.Select(Clone).ToList();
+        }
+        finally
+        {
+            _cacheLock.ExitReadLock();
+        }
 
         var all = new List<LlmModel>();
+        var loads = new List<Task<List<LlmModel>>>();
         if (_settings.Settings.Llm.LlamaCppEnabled)
-            all.AddRange(await GetWithTimeoutAsync(_llamaCpp.GetModelsAsync, ct));
+            loads.Add(GetWithTimeoutAsync(_llamaCpp.GetModelsAsync, ct));
         if (_settings.Settings.Llm.OpenAiEnabled && _openAi.IsConfigured)
-            all.AddRange(await GetWithTimeoutAsync(_openAi.GetModelsAsync, ct));
-        all.AddRange(await GetWithTimeoutAsync(_ollama.GetModelsAsync, ct));
-        _cachedModels.Clear();
-        _cachedModels.AddRange(all.Select(Clone));
-        _providerTagsByModelId.Clear();
-        foreach (var model in _cachedModels)
+            loads.Add(GetWithTimeoutAsync(_openAi.GetModelsAsync, ct));
+        loads.Add(GetWithTimeoutAsync(_ollama.GetModelsAsync, ct));
+
+        var results = await Task.WhenAll(loads);
+        foreach (var models in results)
+            all.AddRange(models);
+
+        _cacheLock.EnterWriteLock();
+        try
         {
-            if (!string.IsNullOrWhiteSpace(model.ProviderTag))
-                _providerTagsByModelId[model.Id] = model.ProviderTag;
+            _cachedModels.Clear();
+            _cachedModels.AddRange(all.Select(Clone));
+            _providerTagsByModelId.Clear();
+            foreach (var model in _cachedModels)
+            {
+                if (!string.IsNullOrWhiteSpace(model.ProviderTag))
+                    _providerTagsByModelId[model.Id] = model.ProviderTag;
+            }
+            _cacheUntilUtc = DateTime.UtcNow.AddSeconds(300);
         }
-        _cacheUntilUtc = DateTime.UtcNow.AddSeconds(300);
+        finally
+        {
+            _cacheLock.ExitWriteLock();
+        }
+
         return all;
     }
 
@@ -131,13 +156,21 @@ public sealed class CompositeLlmService : ILlmService
 
     private string? ResolveProviderTag(string modelId)
     {
-        if (_providerTagsByModelId.TryGetValue(modelId, out var tag) && !string.IsNullOrWhiteSpace(tag))
-            return tag;
+        _cacheLock.EnterReadLock();
+        try
+        {
+            if (_providerTagsByModelId.TryGetValue(modelId, out var tag) && !string.IsNullOrWhiteSpace(tag))
+                return tag;
 
-        var model = _cachedModels.FirstOrDefault(m => string.Equals(m.Id, modelId, StringComparison.OrdinalIgnoreCase));
-        if (!string.IsNullOrWhiteSpace(model?.ProviderTag))
-            return model.ProviderTag;
+            var model = _cachedModels.FirstOrDefault(m => string.Equals(m.Id, modelId, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(model?.ProviderTag))
+                return model.ProviderTag;
 
-        return null;
+            return null;
+        }
+        finally
+        {
+            _cacheLock.ExitReadLock();
+        }
     }
 }

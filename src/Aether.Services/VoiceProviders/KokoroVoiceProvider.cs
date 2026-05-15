@@ -26,6 +26,7 @@ public sealed class KokoroVoiceProvider : ITtsService, IVoiceProvider
     private readonly ISettingsService _settings;
     private readonly KokoroProcessManager _processManager;
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(3) };
+    private readonly SemaphoreSlim _synthesisGate = new(1, 1);
 
     public VoiceProvider Id => VoiceProvider.Kokoro;
     public string DisplayName => "Kokoro";
@@ -168,6 +169,9 @@ public sealed class KokoroVoiceProvider : ITtsService, IVoiceProvider
 
     private async Task<string> RenderToFileAsync(string text, string? speaker, string? outputPath, CancellationToken ct)
     {
+        await _synthesisGate.WaitAsync(ct);
+        try
+        {
         if (!_settings.Settings.Tts.Enabled)
             throw new InvalidOperationException("TTS is disabled in settings.");
 
@@ -202,6 +206,11 @@ public sealed class KokoroVoiceProvider : ITtsService, IVoiceProvider
         await source.CopyToAsync(file, ct);
 
         return output;
+        }
+        finally
+        {
+            _synthesisGate.Release();
+        }
     }
 
     private async Task EnsureServiceRunningAsync(CancellationToken ct)

@@ -121,9 +121,6 @@
                                         <Button Content="Reset"
                                                 Command="{Binding $parent[ItemsControl].DataContext.ResetProfileCommand}"
                                                 CommandParameter="{Binding}" />
-                                        <Button Content="Cleanup"
-                                                Command="{Binding $parent[ItemsControl].DataContext.CleanupLocalMetadataCommand}"
-                                                CommandParameter="{Binding}" />
                                     </StackPanel>
                                 </Grid>
                             </Grid>

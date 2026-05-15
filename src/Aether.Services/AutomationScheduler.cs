@@ -7,13 +7,15 @@ public sealed class AutomationScheduler : IAutomationScheduler
 {
     private readonly ISettingsService _settings;
     private readonly IToastService _toasts;
+    private readonly IRuntimeLogService _logs;
     private Timer? _timer;
     private readonly object _sync = new();
 
-    public AutomationScheduler(ISettingsService settings, IToastService toasts)
+    public AutomationScheduler(ISettingsService settings, IToastService toasts, IRuntimeLogService logs)
     {
         _settings = settings;
         _toasts = toasts;
+        _logs = logs;
     }
 
     public void Start()
@@ -53,7 +55,20 @@ public sealed class AutomationScheduler : IAutomationScheduler
             }
         }
 
-        _ = _settings.SaveAsync();
+        _ = SaveSettingsAsync();
+    }
+
+    private async Task SaveSettingsAsync()
+    {
+        try
+        {
+            await _settings.SaveAsync();
+        }
+        catch (Exception ex)
+        {
+            _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Error, RuntimeLogCategory.Service,
+                $"AutomationScheduler save failed: {ex.Message}"));
+        }
     }
 
     public void Dispose() => Stop();

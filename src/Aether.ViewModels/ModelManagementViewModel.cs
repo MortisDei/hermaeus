@@ -87,13 +87,6 @@ public partial class ModelManagementViewModel : ObservableObject
         _toasts.Show("Model profile reset", $"Aether metadata for {item.RawName} was cleared.", ToastKind.Info);
     }
 
-    [RelayCommand]
-    private void CleanupLocalMetadata(ModelProfileItemViewModel? item)
-    {
-        if (item is null) return;
-        StatusMessage = "Aether only owns metadata here. Physical model-file deletion is intentionally not performed.";
-        _toasts.Show("GGUF untouched", "Cleanup reset/removes Aether metadata only; model files stay on disk.", ToastKind.Warning, 5500);
-    }
 }
 
 public partial class ModelProfileItemViewModel : ObservableObject

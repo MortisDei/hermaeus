@@ -1,6 +1,6 @@
 # Aether
 
-Version: `0.9.1-alpha`
+Version: `0.9.2-alpha`
 
 A native, local-first Avalonia desktop AI workspace for `llama.cpp`, Ollama,
 OpenAI-compatible APIs, Oghma-grade RAG, agentic task work, and pluggable
@@ -24,7 +24,8 @@ local voice providers.
 
 ## Features
 
-- Chat history with rename, delete, search, folders, tags, pins, archive, and
+- Chat history with rename, delete, fast FTS-backed search, folders, tags,
+  pins, archive, and
   direct file context injection for selected text/code files.
 - Chat context usage indicator with provider-reported usage where available and
   local estimates before send.
@@ -32,7 +33,7 @@ local voice providers.
 - Runtime profiles for `llama.cpp`, Ollama, and OpenAI-compatible endpoints.
 - Managed `llama-server` start/stop, auto-start, logs, and GPU auto-tune.
 - RAG ingest for text/markdown and digital PDFs, optional explicit web URLs,
-  reindex diffing, corpus health warnings.
+  reindex diffing, corpus health warnings, and in-progress cancel.
 - RAG citations with `[1] [2] [3] +N`, source inspector, copy source/path.
 - RAG query traces, ONNX cross-encoder reranking, and native eval harness for
   `gold.json` / `stress.json`.
@@ -91,6 +92,9 @@ Use the attach button or drop files on the input. Aether reads each file once at
 send time, prepends a bounded context block to the model prompt, and stores only
 an attachment summary in conversation history.
 
+Attachment file paths are also persisted with each user message so regenerate
+can reattach context files after an app restart when those files still exist.
+
 This is not RAG: attachments are not indexed, embedded, watched, or mutated.
 Large, unsupported, or binary-looking files are skipped with visible status.
 
@@ -124,7 +128,7 @@ quality loss.
 2. Open **RAG** and ingest a folder of `.txt` / `.md` / digital `.pdf` files.
   Use **Dry run** to preview the ingest report before writing to SQLite, or
   choose a duplicate policy to skip unchanged sources, replace them, or just
-  report what would happen.
+  report what would happen. Use **Stop** during ingest to cancel long runs.
 3. Ask questions against the dataset.
 4. Inspect citations, source text, grounding score, query traces, and the last
   ingest report.

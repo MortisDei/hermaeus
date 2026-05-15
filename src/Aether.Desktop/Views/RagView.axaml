@@ -378,6 +378,10 @@
                                         IsEnabled="{Binding !IsIngesting}"
                                         Content="Build Index"
                                         FontSize="13" Padding="14,7" CornerRadius="6" />
+                                <Button Command="{Binding StopIngestCommand}"
+                                    IsVisible="{Binding IsIngesting}"
+                                    Content="Stop"
+                                    FontSize="13" Padding="14,7" CornerRadius="6" />
                                 <TextBlock Text="Accepts .txt, .md, and digital .pdf folders or explicit URL lists. OCR can wait."
                                            FontSize="11" Opacity="0.4"
                                            VerticalAlignment="Center" />

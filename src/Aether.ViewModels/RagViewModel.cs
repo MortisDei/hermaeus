@@ -67,6 +67,7 @@ public partial class RagViewModel : ObservableObject
     private readonly IToastService   _toasts;
     private readonly IRuntimeLogService _logs;
     private CancellationTokenSource? _cts;
+    private CancellationTokenSource? _ingestCts;
 
     public ObservableCollection<RagDataset>       Datasets  { get; } = [];
     public ObservableCollection<RagSourceViewModel> Sources  { get; } = [];
@@ -205,6 +206,7 @@ public partial class RagViewModel : ObservableObject
         IsIngesting = true;
         IsError = false;
         StatusMessage = string.Empty;
+        _ingestCts = new CancellationTokenSource();
 
         try
         {
@@ -239,26 +241,31 @@ public partial class RagViewModel : ObservableObject
             IngestReport report;
             if (EnableWebLoader)
             {
-                report = await _pipeline.IngestWebAsync(ds, progress, CancellationToken.None, new IngestOptions { DryRun = IngestDryRun, DuplicatePolicy = IngestPolicy });
+                report = await _pipeline.IngestWebAsync(ds, progress, _ingestCts.Token, new IngestOptions { DryRun = IngestDryRun, DuplicatePolicy = IngestPolicy });
             }
             else
             {
-                report = await _pipeline.IngestDirectoryAsync(ds, IngestPath, progress, CancellationToken.None, new IngestOptions { DryRun = IngestDryRun, DuplicatePolicy = IngestPolicy });
+                report = await _pipeline.IngestDirectoryAsync(ds, IngestPath, progress, _ingestCts.Token, new IngestOptions { DryRun = IngestDryRun, DuplicatePolicy = IngestPolicy });
             }
 
             IngestReportItems.Clear();
-                // prefer explicit health property on the report
-                if (report.Health is not null)
-                {
-                    var health = report.Health;
-                    var parts = new List<string> { $"Files: {health.FileCount}" };
-                    if (health.DuplicateChunkCount > 0) parts.Add($"Duplicate chunks: {health.DuplicateChunkCount}");
-                    if (health.EmptyChunkCount > 0) parts.Add($"Empty chunks: {health.EmptyChunkCount}");
-                    if (health.OversizedFileCount > 0) parts.Add($"Oversized files: {health.OversizedFileCount}");
-                    if (health.Warnings?.Count > 0) parts.Add(string.Join("; ", health.Warnings));
-                    var summary = string.Join("; ", parts);
-                    IngestReportItems.Insert(0, new RagIngestReportItemViewModel(new DocumentIngestReport { Path = "__health__", Status = DocumentIngestStatus.ReportOnly, Message = summary }));
-                }
+            foreach (var document in report.Documents)
+                IngestReportItems.Add(new RagIngestReportItemViewModel(document));
+
+            // Prefer explicit health property on the report instead of sentinel documents.
+            if (report.Health is not null)
+            {
+                var health = report.Health;
+                var parts = new List<string> { $"Files: {health.FileCount}" };
+                if (health.DuplicateChunkCount > 0) parts.Add($"Duplicate chunks: {health.DuplicateChunkCount}");
+                if (health.EmptyChunkCount > 0) parts.Add($"Empty chunks: {health.EmptyChunkCount}");
+                if (health.OversizedFileCount > 0) parts.Add($"Oversized files: {health.OversizedFileCount}");
+                if (health.UnsupportedFileCount > 0) parts.Add($"Unsupported files: {health.UnsupportedFileCount}");
+                if (health.StaleSourceCount > 0) parts.Add($"Stale sources: {health.StaleSourceCount}");
+                if (health.Warnings?.Count > 0) parts.Add(string.Join("; ", health.Warnings));
+                var summary = string.Join("; ", parts);
+                IngestReportItems.Insert(0, new RagIngestReportItemViewModel(new DocumentIngestReport { Path = "Health summary", Status = DocumentIngestStatus.ReportOnly, Message = summary }));
+            }
 
             await LoadDatasetsAsync();
             SelectedDataset = Datasets.FirstOrDefault(d => d.Name == ds.Name);
@@ -272,6 +279,13 @@ public partial class RagViewModel : ObservableObject
             _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Rag,
                 $"RAG ingest complete for dataset {ds.Name}. {report.Summary()}"));
         }
+        catch (OperationCanceledException)
+        {
+            StatusMessage = "Ingest cancelled.";
+            _toasts.Show("RAG ingest cancelled", "Ingest was cancelled before completion.", ToastKind.Info, 5000);
+            _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Rag,
+                "RAG ingest cancelled."));
+        }
         catch (Exception ex)
         {
             SetError(ex.Message);
@@ -279,7 +293,19 @@ public partial class RagViewModel : ObservableObject
                 $"RAG ingest failed: {ex.Message}"));
             _toasts.Show("RAG ingest failed", ex.Message, ToastKind.Error, 7000);
         }
-        finally { IsIngesting = false; IngestStage = string.Empty; }
+        finally
+        {
+            IsIngesting = false;
+            IngestStage = string.Empty;
+            _ingestCts?.Dispose();
+            _ingestCts = null;
+        }
+    }
+
+    [RelayCommand]
+    private void StopIngest()
+    {
+        _ingestCts?.Cancel();
     }
 
     [RelayCommand]

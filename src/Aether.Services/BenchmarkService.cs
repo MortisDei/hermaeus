@@ -356,20 +356,29 @@ public sealed class BenchmarkService : IBenchmarkService
         await cmd.ExecuteNonQueryAsync(ct);
         _initializedPath = dbPath;
 
-        var suites = await CountSuitesAsync(ct);
-        if (suites == 0)
-        {
-            foreach (var suite in StarterSuites())
-                await SaveSuiteAsync(suite, ct);
-        }
+        await EnsureStarterSuitesAsync(ct);
     }
 
-    private async Task<int> CountSuitesAsync(CancellationToken ct)
+    private async Task EnsureStarterSuitesAsync(CancellationToken ct)
     {
         await using var c = new SqliteConnection(Cs); await c.OpenAsync(ct);
-        var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT COUNT(*) FROM benchmark_suites";
-        return Convert.ToInt32(await cmd.ExecuteScalarAsync(ct));
+        var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        await using (var cmd = c.CreateCommand())
+        {
+            cmd.CommandText = "SELECT id FROM benchmark_suites";
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                if (!reader.IsDBNull(0))
+                    existing.Add(reader.GetString(0));
+            }
+        }
+
+        foreach (var suite in StarterSuites())
+        {
+            if (!existing.Contains(suite.Id))
+                await SaveSuiteAsync(suite, ct);
+        }
     }
 
     public static IReadOnlyList<BenchmarkSuite> StarterSuites() =>

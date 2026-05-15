@@ -42,6 +42,8 @@ public partial class TtsSettingsViewModel : ObservableObject
     [ObservableProperty] private string _ttsStatus = "Stopped";
     [ObservableProperty] private string _selectedVoiceProvider = "Kokoro";
 
+    public Func<Task>? RequestTtsVoiceSamplePicker { get; set; }
+
     public string[] TtsDevices { get; } = ["cpu", "auto", "cuda", "rocm"];
     public ObservableCollection<string> TtsVoices { get; } = ["default"];
     public ObservableCollection<VoiceProviderInfo> VoiceProviders { get; } = [];
@@ -265,6 +267,18 @@ public partial class TtsSettingsViewModel : ObservableObject
         {
             _toasts.Show("Voice preview failed", ex.Message, ToastKind.Error, 7000);
         }
+    }
+
+    [RelayCommand]
+    private async Task ImportTtsVoiceSampleAsync()
+    {
+        if (RequestTtsVoiceSamplePicker is null)
+        {
+            _toasts.Show("Voice import unavailable", "Voice sample picker is not available in this view.", ToastKind.Warning, 5000);
+            return;
+        }
+
+        await RequestTtsVoiceSamplePicker();
     }
 
     public async Task ProbeActiveProviderHealthAsync(CancellationToken ct = default)

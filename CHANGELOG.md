@@ -7,6 +7,52 @@ Pre-1.0 versions may still change internal APIs and storage details.
 
 ## [0.9.2-alpha] - Unreleased
 
+### Added
+
+- RAG ingest cancellation controls in the UI, with token propagation through
+  the pipeline so long-running ingests can be stopped cleanly.
+- Conversation search now uses SQLite FTS5 for faster full-text lookup across
+  title, messages, folder, and tags, with LIKE fallback for malformed or very
+  short queries.
+
+### Changed
+
+- Project version metadata bumped to `0.9.2-alpha`.
+- RAG query prompt generation now applies per-dataset `PromptTemplate`
+  configuration, honoring `{context}` and `{question}` placeholders.
+- Benchmark starter suite seeding is now ID-aware, so missing default suites
+  are inserted even when the database already contains other suites.
+- SQL connection string construction in `SqliteRagStore` is now cached and only
+  rebuilt when the resolved database path changes.
+
+### Fixed
+
+- Settings voice sample import compile break: `SettingsView` now correctly wires
+  `ImportTtsVoiceSampleCommand` through `TtsSettingsViewModel`.
+- Reranker directory resolution parity between Doctor and runtime reranker:
+  both now use the same path resolution strategy.
+- `MainWindowViewModel` search debounce now disposes prior
+  `CancellationTokenSource` instances to avoid CTS leaks while typing.
+- `KokoroVoiceProvider` and `F5TtsVoiceProvider` now serialise synthesis calls
+  with a semaphore to avoid concurrent Python process stampedes.
+- WAV playback fallback chain restored in `VoiceProviderProcessRunner`:
+  `paplay` → `pw-play` → `aplay` → `ffplay`.
+- `ServicesView` now unsubscribes old collection-changed handlers when
+  DataContext changes, preventing duplicate subscriptions.
+- `AutomationScheduler` settings saves are now guarded and failures are logged
+  to runtime logs instead of being silently swallowed.
+- Chat attachment paths are now persisted in `Message` and round-tripped
+  through `ConversationStore`, so regenerate can reattach after app restart.
+- RAG ingest health reporting now uses `IngestReport.Health` directly;
+  `__health__` sentinel rows are no longer emitted by web ingest.
+- Legacy unused services removed: `XttsService` and `OghmaRagService`.
+- `CompositeLlmService` shared model cache state is now lock-protected, and
+  provider model refresh now runs concurrently instead of sequential timeouts.
+- `RagQueryService` dataset chunk cache and LRU metadata are now synchronised
+  for concurrent query/warm/clear access.
+- Model Management UI no longer shows the misleading non-destructive
+  "Cleanup" action.
+
 
 
 ## [0.9.1-alpha] - Unreleased

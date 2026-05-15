@@ -127,6 +127,9 @@ public partial class MainWindowViewModel : ObservableObject
 
     public void Shutdown()
     {
+        _searchCts?.Cancel();
+        _searchCts?.Dispose();
+        _searchCts = null;
         Services.StopAll();
         Settings.Shutdown();
     }
@@ -366,6 +369,7 @@ public partial class MainWindowViewModel : ObservableObject
         try
         {
             _searchCts?.Cancel();
+            _searchCts?.Dispose();
             _searchCts = new CancellationTokenSource();
             var token = _searchCts.Token;
             _ = Task.Run(async () =>

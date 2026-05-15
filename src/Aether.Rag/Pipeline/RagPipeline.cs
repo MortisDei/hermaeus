@@ -264,6 +264,7 @@ public sealed class RagPipeline
         var allChunks = new List<RagChunk>();
         var parentChunks = new List<RagChunk>();
         var sourcePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var health = new RagIngestHealth { FileCount = documents.Count };
         progress?.Report(new IngestProgress("Chunking", 0, documents.Count, $"Chunking {documents.Count} web page(s)"));
 
         for (var i = 0; i < documents.Count; i++)
@@ -276,6 +277,9 @@ public sealed class RagPipeline
 
             foreach (var tc in textChunks)
             {
+                if (string.IsNullOrWhiteSpace(tc.Content))
+                    health.EmptyChunkCount++;
+
                 var chunk = new RagChunk
                 {
                     DatasetId = dataset.Id,
@@ -316,10 +320,18 @@ public sealed class RagPipeline
             progress?.Report(new IngestProgress("Chunking", i + 1, documents.Count, $"{doc.Title} -> {textChunks.Count} chunks"));
         }
 
+        health.DuplicateChunkCount = allChunks
+            .GroupBy(c => $"{c.SourcePath}\n{c.Content}", StringComparer.Ordinal)
+            .Sum(g => Math.Max(0, g.Count() - 1));
+        if (health.DuplicateChunkCount > 0)
+            health.Warnings.Add($"{health.DuplicateChunkCount} duplicate chunks detected.");
+        if (health.EmptyChunkCount > 0)
+            health.Warnings.Add($"{health.EmptyChunkCount} empty chunks detected.");
+
         if (options.DryRun)
         {
             var report = new IngestReport();
-            report.Documents.Add(new DocumentIngestReport { Path = "__health__", Status = DocumentIngestStatus.ReportOnly, Message = $"Dry-run: {allChunks.Count} chunks from {documents.Count} pages" });
+            report.Health = health;
             progress?.Report(new IngestProgress("Done", allChunks.Count, allChunks.Count, $"Dry-run complete. {report.Summary()}"));
             return report;
         }
@@ -328,8 +340,7 @@ public sealed class RagPipeline
         progress?.Report(new IngestProgress("Done", allChunks.Count, allChunks.Count,
             $"{allChunks.Count} chunks indexed from {documents.Count} web page(s)."));
 
-        var finalReport = new IngestReport();
-        finalReport.Documents.Add(new DocumentIngestReport { Path = "__health__", Status = DocumentIngestStatus.ReportOnly, Message = $"{allChunks.Count} chunks indexed from {documents.Count} web page(s)." });
+        var finalReport = new IngestReport { Health = health };
         return finalReport;
     }
 

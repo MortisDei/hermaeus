@@ -15,6 +15,7 @@ public partial class ServicesView : UserControl
 {
     public static readonly IValueConverter StatusColor = new StatusColorConverter();
     private System.Collections.Specialized.NotifyCollectionChangedEventHandler? _collectionChangedHandler;
+    private ServicesViewModel? _wiredViewModel;
 
     public ServicesView()
     {
@@ -37,7 +38,11 @@ public partial class ServicesView : UserControl
 
     private void OnDataContextChanged(object? sender, EventArgs e)
     {
+        if (_wiredViewModel is not null && _collectionChangedHandler is not null)
+            _wiredViewModel.Servers.CollectionChanged -= _collectionChangedHandler;
+
         if (DataContext is not ServicesViewModel vm) return;
+        _wiredViewModel = vm;
         
         foreach (var srv in vm.Servers)
             WireFilePickers(srv);

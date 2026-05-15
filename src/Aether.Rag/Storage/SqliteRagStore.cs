@@ -14,6 +14,8 @@ public sealed class SqliteRagStore
 {
     private readonly ISettingsService _settings;
     private string _initializedPath = string.Empty;
+    private string _cachedConnectionString = string.Empty;
+    private string _cachedConnectionPath = string.Empty;
     private string DbPath
     {
         get
@@ -23,19 +25,26 @@ public sealed class SqliteRagStore
             return Path.Combine(dir, "conversations.db");
         }
     }
-private string Cs
-{
-    get
+    private string Cs
     {
-        var builder = new SqliteConnectionStringBuilder
+        get
         {
-            DataSource = DbPath,
-            Pooling = true
-        };
+            var path = DbPath;
+            if (!string.Equals(_cachedConnectionPath, path, StringComparison.Ordinal))
+            {
+                var builder = new SqliteConnectionStringBuilder
+                {
+                    DataSource = path,
+                    Pooling = true
+                };
 
-        return builder.ToString();
+                _cachedConnectionString = builder.ToString();
+                _cachedConnectionPath = path;
+            }
+
+            return _cachedConnectionString;
+        }
     }
-}
 
     public SqliteRagStore(ISettingsService settings)
     {
