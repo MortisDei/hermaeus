@@ -488,5 +488,51 @@ namespace Aether.Tests
             True(args.Contains("--embeddings"), "embeddings mode should add embeddings flag");
             return Task.CompletedTask;
         }
+
+        public static async Task ConversationAutoSummaryStoresMemoriesWhenImportant()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            settings.Settings.Memory.Enabled = true;
+            settings.Settings.Memory.AutoSummarizeImportanceThreshold = 0.2;
+            settings.Settings.Memory.MaxMemoriesPerConversation = 10;
+            settings.Settings.Llm.DefaultModel = "memory-test";
+
+            var conversationStore = new ConversationStore(settings);
+            var memoryStore = new MemoryStore(settings);
+            await conversationStore.InitializeAsync();
+            await memoryStore.InitializeAsync();
+
+            var conversation = new Conversation
+            {
+                Id = "conv-1",
+                Title = "Memory worthy chat",
+                ModelId = "memory-test",
+                Messages =
+                [
+                    new Message { Role = "user", Content = "I prefer Australian spelling and optimisation focused solutions." },
+                    new Message { Role = "assistant", Content = "Noted, I will use Australian English and performance-first approaches." },
+                    new Message { Role = "user", Content = "Please remember this preference for future sessions too." },
+                    new Message { Role = "assistant", Content = "I can store that as durable memory." }
+                ]
+            };
+            await conversationStore.SaveAsync(conversation);
+
+            var service = new ConversationMemoryService(
+                settings,
+                conversationStore,
+                memoryStore,
+                new MemoryExtractionService(),
+                new MemoryMarkerLlm("[MEMORY: User prefers Australian English spelling.] [MEMORY: User prioritises performance optimisation.]"),
+                new RuntimeLogService(settings));
+
+            await service.RunAutoSummaryAsync("conv-1");
+
+            var memories = await memoryStore.GetAllAsync(includeArchived: true);
+            True(memories.Count >= 2, "auto-summary should persist extracted memories");
+            True(memories.Any(m => m.Tags.Contains("auto_summary")), "auto-summary memories should be tagged");
+            True(memories.All(m => m.SourceConversationId == "conv-1"), "memories should keep source conversation id");
+        }
     }
 }

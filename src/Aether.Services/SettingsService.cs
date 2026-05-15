@@ -63,7 +63,7 @@ public sealed class SettingsService : ISettingsService
         if (!Directory.Exists(previous))
             return new DataMigrationPlan(false, previous, next, 0, []);
 
-        var files = Directory.EnumerateFiles(previous, "conversations.db*").ToList();
+        var files = EnumerateMigrationFiles(previous).ToList();
         var conflicts = files
             .Select(f => Path.Combine(next, Path.GetFileName(f)))
             .Where(File.Exists)
@@ -84,7 +84,7 @@ public sealed class SettingsService : ISettingsService
         if (!Directory.Exists(previous))
             return new SettingsSaveResult(false, previous, next, null, 0);
 
-        var files = Directory.EnumerateFiles(previous, "conversations.db*").ToList();
+        var files = EnumerateMigrationFiles(previous).ToList();
         if (files.Count == 0)
             return new SettingsSaveResult(false, previous, next, null, 0);
 
@@ -114,6 +114,25 @@ public sealed class SettingsService : ISettingsService
         }
 
         return new SettingsSaveResult(true, previous, next, backupDir, files.Count);
+    }
+
+    private static IEnumerable<string> EnumerateMigrationFiles(string root)
+    {
+        foreach (var file in EnumerateFamily(root, "conversations.db*"))
+            yield return file;
+        foreach (var file in EnumerateFamily(root, "memories.db*"))
+            yield return file;
+        foreach (var file in EnumerateFamily(root, "benchmarks.db*"))
+            yield return file;
+    }
+
+    private static IEnumerable<string> EnumerateFamily(string root, string pattern)
+    {
+        if (!Directory.Exists(root))
+            return [];
+
+        return Directory.EnumerateFiles(root, pattern)
+            .Distinct(StringComparer.OrdinalIgnoreCase);
     }
 
     private static void ValidateDataRoot(string path)

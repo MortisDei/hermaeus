@@ -179,6 +179,36 @@ namespace Aether.Tests
         public Task DeleteModelAsync(string modelId, CancellationToken ct = default) => Task.CompletedTask;
     }
 
+    sealed class MemoryMarkerLlm : ILlmService
+    {
+        private readonly string _response;
+
+        public MemoryMarkerLlm(string response)
+        {
+            _response = response;
+        }
+
+        public string ProviderName => "MemoryMarker";
+        public bool IsConfigured => true;
+
+        public Task<List<LlmModel>> GetModelsAsync(CancellationToken ct = default) =>
+            Task.FromResult(new List<LlmModel> { new() { Id = "memory-test", Name = "Memory Test", Provider = "Test" } });
+
+        public async IAsyncEnumerable<string> StreamChatAsync(
+            string modelId,
+            IReadOnlyList<ChatMessage> messages,
+            string? systemPrompt = null,
+            double temperature = 0.7,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+        {
+            await Task.Delay(1, ct);
+            yield return _response;
+        }
+
+        public Task PullModelAsync(string modelId, IProgress<string>? progress = null, CancellationToken ct = default) => Task.CompletedTask;
+        public Task DeleteModelAsync(string modelId, CancellationToken ct = default) => Task.CompletedTask;
+    }
+
     sealed class FakeTts : ITtsService
     {
         public Task SpeakAsync(string text, CancellationToken ct = default) => Task.CompletedTask;

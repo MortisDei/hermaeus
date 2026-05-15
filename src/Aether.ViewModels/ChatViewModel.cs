@@ -16,6 +16,7 @@ public partial class ChatViewModel : ObservableObject
     private readonly ITtsService _tts;
     private readonly IToastService _toasts;
     private readonly IModelProfileService _profiles;
+    private readonly IConversationMemoryService _conversationMemory;
     private CancellationTokenSource? _cts;
     private CancellationTokenSource? _ttsCts;
     private CancellationTokenSource? _contextUsageCts;
@@ -57,9 +58,11 @@ public partial class ChatViewModel : ObservableObject
         ISettingsService settings,
         ITtsService tts,
         IModelProfileService profiles,
-        IToastService toasts)
+        IToastService toasts,
+        IConversationMemoryService conversationMemory)
     {
         _llm = llm; _store = store; _settings = settings; _tts = tts; _profiles = profiles; _toasts = toasts;
+        _conversationMemory = conversationMemory;
         _temperature  = settings.Settings.Llm.Temperature;
         _systemPrompt = settings.Settings.Llm.DefaultSystemPrompt;
         Messages.CollectionChanged += (_, _) =>
@@ -209,6 +212,7 @@ public partial class ChatViewModel : ObservableObject
             if (reportedUsage is null)
                 RefreshEstimatedContextUsage();
             await PersistAsync();
+            _ = Task.Run(() => RunConversationMemoryAsync(CurrentConversationId));
         }
         catch (OperationCanceledException)
         {
@@ -461,6 +465,18 @@ public partial class ChatViewModel : ObservableObject
             }).ToList()
         });
         ConversationSaved?.Invoke(this, CurrentConversationId);
+    }
+
+    private async Task RunConversationMemoryAsync(string conversationId)
+    {
+        try
+        {
+            await _conversationMemory.RunAutoSummaryAsync(conversationId);
+        }
+        catch
+        {
+            // Auto-summary failures should never break chat flow.
+        }
     }
 
     partial void OnInputTextChanged(string value)

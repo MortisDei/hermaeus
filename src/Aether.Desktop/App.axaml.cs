@@ -95,6 +95,7 @@ public partial class App : Application
         s.AddSingleton<IMemoryStore, MemoryStore>();
         s.AddSingleton<IMemoryExtractionService, MemoryExtractionService>();
         s.AddSingleton<IMemoryInjectionService, MemoryInjectionService>();
+        s.AddSingleton<IConversationMemoryService, ConversationMemoryService>();
         s.AddSingleton<LlamaCppService>();
         s.AddSingleton<OpenAiService>();
         s.AddSingleton<IRuntimeProfileService, RuntimeProfileService>();

@@ -22,6 +22,9 @@ Pre-1.0 versions may still change internal APIs and storage details.
 - Settings now include chat memory controls for enable/disable, prompt
   injection toggle, auto-summary threshold, injection token budget, encryption
   toggle, and auto-archive days.
+- Phase 5 memory automation: conversations are now auto-analysed in the
+  background after assistant replies, and durable memories are extracted and
+  persisted only when conversation importance exceeds the configured threshold.
 
 ### Changed
 
@@ -91,6 +94,8 @@ Pre-1.0 versions may still change internal APIs and storage details.
   for concurrent query/warm/clear access.
 - Model Management UI no longer shows the misleading non-destructive
   "Cleanup" action.
+- Data root migration now carries all local SQLite families used by chat and
+  memory features (`conversations.db*`, `memories.db*`, `benchmarks.db*`).
 
 
 
