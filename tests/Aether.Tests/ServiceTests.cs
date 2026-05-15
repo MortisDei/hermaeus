@@ -574,6 +574,33 @@ namespace Aether.Tests
             Equal<Memory?>(null, deleted, "deleted memory should not exist");
         }
 
+        public static async Task MemoryStoreCountsByConversationWork()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var store = new MemoryStore(settings);
+            await store.InitializeAsync();
+
+            var memA = new Memory { Id = "c1-m1", Category = "facts", Content = "A1", SourceConversationId = "conv-A" };
+            var memB = new Memory { Id = "c1-m2", Category = "facts", Content = "A2", SourceConversationId = "conv-A" };
+            var memC = new Memory { Id = "c2-m1", Category = "preferences", Content = "B1", SourceConversationId = "conv-B" };
+
+            await store.SaveAsync(memA);
+            await store.SaveAsync(memB);
+            await store.SaveAsync(memC);
+
+            var countA = await store.GetCountByConversationAsync("conv-A");
+            var countB = await store.GetCountByConversationAsync("conv-B");
+            Equal(2, countA, "conv-A should have two stored memories");
+            Equal(1, countB, "conv-B should have one stored memory");
+
+            var batch = await store.GetCountsByConversationAsync(new[] { "conv-A", "conv-B", "conv-missing" });
+            Equal(2, batch["conv-A"]);
+            Equal(1, batch["conv-B"]);
+            Equal(0, batch["conv-missing"]);
+        }
+
         public static async Task MemoryExtractionParsesAndCleansMarkers()
         {
             var service = new MemoryExtractionService();

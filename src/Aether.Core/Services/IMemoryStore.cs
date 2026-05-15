@@ -51,4 +51,14 @@ public interface IMemoryStore
     /// Get recent memories (last N by UpdatedAt).
     /// </summary>
     Task<List<Memory>> GetRecentAsync(int limit = 10, CancellationToken ct = default);
+
+    /// <summary>
+    /// Get the exact count of stored (non-archived by default) memories for a single conversation.
+    /// </summary>
+    Task<int> GetCountByConversationAsync(string conversationId, bool includeArchived = false, CancellationToken ct = default);
+
+    /// <summary>
+    /// Get exact counts for multiple conversations in a single efficient query. Returns a mapping of conversationId -> count.
+    /// </summary>
+    Task<Dictionary<string,int>> GetCountsByConversationAsync(IEnumerable<string> conversationIds, bool includeArchived = false, CancellationToken ct = default);
 }

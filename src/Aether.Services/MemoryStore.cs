@@ -69,7 +69,8 @@ public sealed class MemoryStore : IMemoryStore
             );
             CREATE INDEX IF NOT EXISTS idx_category ON memories(category);
             CREATE INDEX IF NOT EXISTS idx_importance ON memories(importance_score DESC);
-            CREATE INDEX IF NOT EXISTS idx_updated ON memories(updated_at DESC);";
+            CREATE INDEX IF NOT EXISTS idx_updated ON memories(updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_source_conversation ON memories(source_conversation_id);";
         await cmd.ExecuteNonQueryAsync(ct);
         await RebuildFtsAsync(c, ct);
         _initializedPath = dbPath;
@@ -253,6 +254,56 @@ public sealed class MemoryStore : IMemoryStore
         await using var rd = await cmd.ExecuteReaderAsync(ct);
         while (await rd.ReadAsync(ct)) r.Add(Map(rd));
         return r;
+    }
+
+    public async Task<int> GetCountByConversationAsync(string conversationId, bool includeArchived = false, CancellationToken ct = default)
+    {
+        await EnsureInitializedAsync(ct);
+        await using var c = new SqliteConnection(Cs);
+        await c.OpenAsync(ct);
+        var cmd = c.CreateCommand();
+        cmd.CommandText = includeArchived
+            ? "SELECT COUNT(1) FROM memories WHERE source_conversation_id = $src"
+            : "SELECT COUNT(1) FROM memories WHERE source_conversation_id = $src AND is_archived = 0";
+        cmd.Parameters.AddWithValue("$src", conversationId ?? (object)DBNull.Value);
+        var scalar = await cmd.ExecuteScalarAsync(ct);
+        return Convert.ToInt32(scalar ?? 0);
+    }
+
+    public async Task<Dictionary<string,int>> GetCountsByConversationAsync(IEnumerable<string> conversationIds, bool includeArchived = false, CancellationToken ct = default)
+    {
+        var ids = conversationIds?.Where(i => !string.IsNullOrWhiteSpace(i)).Distinct().ToList() ?? new List<string>();
+        var result = new Dictionary<string,int>(StringComparer.Ordinal);
+        if (ids.Count == 0) return result;
+
+        await EnsureInitializedAsync(ct);
+        await using var c = new SqliteConnection(Cs);
+        await c.OpenAsync(ct);
+        var cmd = c.CreateCommand();
+
+        // build parameter list: $p0, $p1, ...
+        var paramNames = ids.Select((id, idx) => "$p" + idx).ToList();
+        var inClause = string.Join(',', paramNames);
+        cmd.CommandText = includeArchived
+            ? $"SELECT source_conversation_id, COUNT(1) as cnt FROM memories WHERE source_conversation_id IN ({inClause}) GROUP BY source_conversation_id"
+            : $"SELECT source_conversation_id, COUNT(1) as cnt FROM memories WHERE source_conversation_id IN ({inClause}) AND is_archived = 0 GROUP BY source_conversation_id";
+
+        for (var i = 0; i < ids.Count; i++)
+            cmd.Parameters.AddWithValue(paramNames[i], ids[i]);
+
+        await using var rd = await cmd.ExecuteReaderAsync(ct);
+        while (await rd.ReadAsync(ct))
+        {
+            var id = GetString(rd, "source_conversation_id", "");
+            var cnt = GetInt(rd, "cnt", 0);
+            if (!string.IsNullOrEmpty(id)) result[id] = cnt;
+        }
+
+        // ensure all requested ids have an entry (0 if missing)
+        foreach (var id in ids)
+            if (!result.ContainsKey(id)) result[id] = 0;
+
+        return result;
     }
 
     private static async Task UpsertFtsAsync(
