@@ -5,6 +5,10 @@ All notable changes to Aether will be documented in this file.
 The project follows semantic versioning once public release candidates begin.
 Pre-1.0 versions may still change internal APIs and storage details.
 
+## [0.9.2-alpha] - Unreleased
+
+
+
 ## [0.9.1-alpha] - Unreleased
 
 ### Changed
