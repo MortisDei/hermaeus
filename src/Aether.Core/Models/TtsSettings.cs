@@ -57,6 +57,11 @@ public class TtsSettings
     public string ModelVersion { get; set; } = "2.0.3";
 
     /// <summary>
+    /// Playback speed multiplier for voice synthesis.
+    /// </summary>
+    public double Speed { get; set; } = 1.0;
+
+    /// <summary>
     /// Preload TTS models on startup.
     /// </summary>
     public bool Preload { get; set; } = false;

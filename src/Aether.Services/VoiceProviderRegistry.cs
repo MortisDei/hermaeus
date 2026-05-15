@@ -71,8 +71,8 @@ public sealed class VoiceProviderRegistry : IVoiceProviderRegistry
             new VoiceProviderInfo(
                 VoiceProvider.XttsV2,
                 "XTTS v2",
-                "Legacy Coqui-compatible voice cloning backend. Best compatibility with existing workflows, requires Python 3.11.",
-                VoiceProviderCategory.Legacy,
+                "Coqui-compatible voice cloning backend for XTTS v2 workflows. Requires Python 3.11.",
+                VoiceProviderCategory.Advanced,
                 ((XttsV2VoiceProvider)_providers[VoiceProvider.XttsV2]).IsInstalled,
                 _providers[VoiceProvider.XttsV2].Capabilities),
             new VoiceProviderInfo(

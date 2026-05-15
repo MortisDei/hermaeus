@@ -15,7 +15,7 @@ namespace Aether.Tests
             using var temp = new TempDir();
             var settings = NewSettings(temp);
             var toasts = new FakeToasts();
-            var vm = new TtsSettingsViewModel(new FakeTts(), new FakeVoiceProviderRegistry(settings), toasts, new XttsProcessManager(), new FakeSecretStore(), settings);
+            var vm = new TtsSettingsViewModel(new FakeTts(), new FakeVoiceProviderRegistry(settings), toasts, new XttsProcessManager(), new KokoroProcessManager(), new FakeSecretStore(), settings);
 
             var limited = new VoiceProviderInfo(VoiceProvider.Kokoro, "Kokoro-Limited", "No TTS", VoiceProviderCategory.Recommended, true, VoiceCapability.Local);
             var asyncCmd = vm.SetActiveVoiceProviderCommand as IAsyncRelayCommand;
@@ -27,20 +27,20 @@ namespace Aether.Tests
             Equal("Kokoro", vm.SelectedVoiceProvider, "provider without TTS should not become active");
         }
 
-        public static async Task VoiceProviderLegacyRequiresLocalAndTts()
+        public static async Task VoiceProviderXttsV2RequiresLocalAndTts()
         {
             using var temp = new TempDir();
             var settings = NewSettings(temp);
             var toasts = new FakeToasts();
             settings.Settings.Tts.VoiceProvider = "XTTS v2";
             var limitedRegistry = new FakeVoiceProviderRegistryLimited(settings);
-            var vm = new TtsSettingsViewModel(new FakeTts(), limitedRegistry, toasts, new XttsProcessManager(), new FakeSecretStore(), settings);
+            var vm = new TtsSettingsViewModel(new FakeTts(), limitedRegistry, toasts, new XttsProcessManager(), new KokoroProcessManager(), new FakeSecretStore(), settings);
 
             vm.ReloadFrom(settings.Settings);
 
-            False(vm.IsLegacyVoiceBackend, "XTTS without Local+TTS should not be considered legacy backend");
-            False(vm.StartTtsCommand.CanExecute(null), "StartTts should not be executable for non-legacy provider");
-            False(vm.StopTtsCommand.CanExecute(null), "StopTts should not be executable for non-legacy provider");
+            False(vm.IsXttsV2Provider, "XTTS without Local+TTS should not be considered an XTTS v2 provider candidate");
+            False(vm.StartTtsCommand.CanExecute(null), "StartTts should not be executable for unsupported XTTS v2 capability flags");
+            False(vm.StopTtsCommand.CanExecute(null), "StopTts should not be executable for unsupported XTTS v2 capability flags");
 
             await Task.CompletedTask;
         }

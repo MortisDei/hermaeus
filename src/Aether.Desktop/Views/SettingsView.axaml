@@ -145,9 +145,9 @@
                     </Grid>
 
                     <!-- Kokoro-Specific Settings -->
-                    <StackPanel IsVisible="{Binding IsKokoroProvider}" Spacing="12">
+                    <StackPanel IsVisible="{Binding Tts.IsKokoroProvider}" Spacing="12">
                         <TextBlock Text="Kokoro settings" FontSize="12" FontWeight="SemiBold" />
-                        <Grid ColumnDefinitions="110,*,Auto" RowDefinitions="Auto,Auto,Auto"
+                        <Grid ColumnDefinitions="110,*,Auto" RowDefinitions="Auto,Auto,Auto,Auto"
                               RowSpacing="8" ColumnSpacing="12">
                             <TextBlock Grid.Row="0" Grid.Column="0" Text="Voice"
                                        VerticalAlignment="Center" Opacity="0.6" FontSize="13"
@@ -169,7 +169,30 @@
                             <Slider Grid.Row="2" Grid.Column="1"
                                     Minimum="0.5" Maximum="2.0" TickFrequency="0.1"
                                     IsSnapToTickEnabled="True"
+                                    Value="{Binding Tts.TtsSpeed}"
                                     VerticalAlignment="Center" />
+                                <TextBlock Grid.Row="2" Grid.Column="2"
+                                       Text="{Binding Tts.TtsSpeed, StringFormat={}{0:F1}x}"
+                                       VerticalAlignment="Center"
+                                       Opacity="0.6"
+                                       FontSize="12" />
+                                <TextBlock Grid.Row="3" Grid.Column="0" Text="Service"
+                                       VerticalAlignment="Center" Opacity="0.6" FontSize="13"
+                                       ToolTip.Tip="Start or stop the managed Kokoro voice process to avoid repeated cold starts." />
+                                <StackPanel Grid.Row="3" Grid.Column="1"
+                                    Orientation="Horizontal" Spacing="8">
+                                <Button Command="{Binding Tts.StartTtsCommand}"
+                                    IsEnabled="{Binding !Tts.IsTtsRunning}"
+                                    Content="Start"
+                                    FontSize="12" Padding="12,5" CornerRadius="6" />
+                                <Button Command="{Binding Tts.StopTtsCommand}"
+                                    IsEnabled="{Binding Tts.IsTtsRunning}"
+                                    Content="Stop"
+                                    FontSize="12" Padding="12,5" CornerRadius="6" />
+                                <TextBlock Text="{Binding Tts.TtsStatus}"
+                                       VerticalAlignment="Center"
+                                       FontSize="12" Opacity="0.6" />
+                                </StackPanel>
                         </Grid>
                     </StackPanel>
 
@@ -206,11 +229,11 @@
                         </StackPanel>
                     </Border>
 
-                      <TextBlock Text="Legacy XTTS v2 settings" FontSize="12" FontWeight="SemiBold" 
-                             IsVisible="{Binding Tts.IsLegacyVoiceBackend}" />
+                     <TextBlock Text="XTTS v2 settings" FontSize="12" FontWeight="SemiBold" 
+                         IsVisible="{Binding Tts.IsXttsV2Provider}" />
                       <Grid ColumnDefinitions="110,*,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
                           RowSpacing="8" ColumnSpacing="12"
-                          IsVisible="{Binding Tts.IsLegacyVoiceBackend}">
+                         IsVisible="{Binding Tts.IsXttsV2Provider}">
                         <TextBlock Grid.Row="0" Grid.Column="0" Text="Base URL"
                                    VerticalAlignment="Center" Opacity="0.6" FontSize="13" 
                                    ToolTip.Tip="Local XTTS API endpoint" />
@@ -219,10 +242,10 @@
                                  FontSize="13" CornerRadius="6" Padding="10,6" />
                         <StackPanel Grid.Row="0" Grid.Column="2" Orientation="Horizontal" Spacing="8">
                             <Button Command="{Binding Tts.StartTtsCommand}"
-                                    IsEnabled="{Binding !IsTtsRunning}"
+                                IsEnabled="{Binding !Tts.IsTtsRunning}"
                                     Content="Start" FontSize="12" Padding="12,5" CornerRadius="6" />
                             <Button Command="{Binding Tts.StopTtsCommand}"
-                                    IsEnabled="{Binding IsTtsRunning}"
+                                IsEnabled="{Binding Tts.IsTtsRunning}"
                                     Content="Stop" FontSize="12" Padding="12,5" CornerRadius="6" />
                         </StackPanel>
                         <TextBlock Grid.Row="1" Grid.Column="0" Text="Speaker"

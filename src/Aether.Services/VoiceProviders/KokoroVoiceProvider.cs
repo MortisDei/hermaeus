@@ -1,5 +1,7 @@
 using Aether.Core.Models;
 using Aether.Core.Services;
+using Aether.Services.ProcessManagement;
+using System.Net.Http.Json;
 
 namespace Aether.Services;
 
@@ -22,15 +24,18 @@ public sealed class KokoroVoiceProvider : ITtsService, IVoiceProvider
     ];
 
     private readonly ISettingsService _settings;
+    private readonly KokoroProcessManager _processManager;
+    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(3) };
 
     public VoiceProvider Id => VoiceProvider.Kokoro;
     public string DisplayName => "Kokoro";
     public VoiceCapability Capabilities => VoiceCapability.TextToSpeech | VoiceCapability.Local;
     public (int Major, int Minor) RequiredPythonVersion => (3, 12);
 
-    public KokoroVoiceProvider(ISettingsService settings)
+    public KokoroVoiceProvider(ISettingsService settings, KokoroProcessManager? processManager = null)
     {
         _settings = settings;
+        _processManager = processManager ?? new KokoroProcessManager();
     }
 
     public bool IsInstalled => VoiceProviderProcessRunner.IsExecutableAvailable(VoiceProviderProcessRunner.ResolvePythonPath(_settings));
@@ -66,9 +71,13 @@ public sealed class KokoroVoiceProvider : ITtsService, IVoiceProvider
             "Packages download from PyPI and run local inference.");
     }
 
-    public Task StartAsync(CancellationToken ct = default) => Task.CompletedTask;
+    public Task StartAsync(CancellationToken ct = default) => _processManager.StartAsync(_settings.Settings, ct);
 
-    public Task StopAsync(CancellationToken ct = default) => Task.CompletedTask;
+    public Task StopAsync(CancellationToken ct = default)
+    {
+        _processManager.Stop();
+        return Task.CompletedTask;
+    }
 
     public async Task<VoiceHealth> HealthCheckAsync(CancellationToken ct = default)
     {
@@ -76,11 +85,19 @@ public sealed class KokoroVoiceProvider : ITtsService, IVoiceProvider
         if (!VoiceProviderProcessRunner.IsExecutableAvailable(python))
             return new VoiceHealth(VoiceHealthStatus.Unhealthy, "Python missing", "Configure a Python 3.12 interpreter or venv.");
 
-        var script = "import importlib\nimportlib.import_module('kokoro')\nimportlib.import_module('soundfile')\n";
-        var result = await VoiceProviderProcessRunner.RunPythonScriptAsync(python, script, [], ct);
-        return result.Success
-            ? new VoiceHealth(VoiceHealthStatus.Healthy, "Kokoro is ready", "Python packages import successfully.")
-            : new VoiceHealth(VoiceHealthStatus.Unhealthy, "Kokoro import failed", result.Log);
+        var baseUrl = _settings.Settings.Tts.ServiceUrl.TrimEnd('/');
+        try
+        {
+            using var response = await _http.GetAsync($"{baseUrl}/health", ct);
+            if (response.IsSuccessStatusCode)
+                return new VoiceHealth(VoiceHealthStatus.Healthy, "Kokoro service is running", $"{baseUrl}/health responded OK.");
+        }
+        catch (Exception ex)
+        {
+            return new VoiceHealth(VoiceHealthStatus.Warning, "Kokoro service is not running", ex.Message);
+        }
+
+        return new VoiceHealth(VoiceHealthStatus.Warning, "Kokoro service is not running", "Start the Kokoro service or synthesize once to launch it.");
     }
 
     public async Task<IReadOnlyList<VoiceDefinition>> ListVoicesAsync(CancellationToken ct = default)
@@ -158,65 +175,41 @@ public sealed class KokoroVoiceProvider : ITtsService, IVoiceProvider
             throw new InvalidOperationException("No text supplied for synthesis.");
 
         var voice = NormalizeVoice(speaker);
-        var python = VoiceProviderProcessRunner.ResolvePythonPath(_settings);
         var output = string.IsNullOrWhiteSpace(outputPath)
             ? Path.Combine(Path.GetTempPath(), $"aether-kokoro-{Guid.NewGuid():N}.wav")
             : outputPath;
 
-        var script = """
-                import argparse
-                from pathlib import Path
-
-                import numpy as np
-                import soundfile as sf
-                from kokoro import KPipeline
-
-                parser = argparse.ArgumentParser(description="Aether Kokoro voice renderer")
-                parser.add_argument("--text", required=True)
-                parser.add_argument("--voice", default="af_heart")
-                parser.add_argument("--output", required=True)
-                parser.add_argument("--speed", type=float, default=1.0)
-                args = parser.parse_args()
-
-                voice = args.voice.strip() or "af_heart"
-                lang = voice[0].lower() if voice and voice[0].isalpha() else "a"
-                pipeline = KPipeline(lang_code=lang)
-
-                with sf.SoundFile(args.output, "w", samplerate=24000, channels=1, subtype="PCM_16") as wav_file:
-                    for result in pipeline(args.text, voice=voice, speed=args.speed, split_pattern=r"\n+"):
-                        audio = result.audio
-                        if audio is None:
-                            continue
-                        if hasattr(audio, "detach"):
-                            audio = audio.detach().cpu().numpy()
-                        else:
-                            audio = np.asarray(audio)
-                        wav_file.write(audio)
-                """;
-
-        var environment = new Dictionary<string, string?>();
-
-        if (_settings.Settings.Tts.Device.Equals("cpu", StringComparison.OrdinalIgnoreCase))
+        await EnsureServiceRunningAsync(ct);
+        var baseUrl = _settings.Settings.Tts.ServiceUrl.TrimEnd('/');
+        var payload = new
         {
-            environment["CUDA_VISIBLE_DEVICES"] = "";
-        }
-        else
+            input = text,
+            speaker_wav = voice,
+            speed = Math.Clamp(_settings.Settings.Tts.Speed, 0.5, 2.0)
+        };
+
+        using var response = await _http.PostAsJsonAsync($"{baseUrl}/v1/audio/speech", payload, ct);
+        if (!response.IsSuccessStatusCode)
         {
-            environment["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True";
+            var body = await response.Content.ReadAsStringAsync(ct);
+            throw new InvalidOperationException(string.IsNullOrWhiteSpace(body)
+                ? $"Kokoro synthesis failed with {(int)response.StatusCode}."
+                : $"Kokoro synthesis failed: {body}");
         }
 
-
-        var run = await VoiceProviderProcessRunner.RunPythonScriptAsync(
-            python,
-            script,
-            ["--text", text, "--voice", voice, "--output", output],
-            ct,
-            environment);
-
-        if (!run.Success)
-            throw new InvalidOperationException($"Kokoro synthesis failed.\n{run.Log}");
+        await using var source = await response.Content.ReadAsStreamAsync(ct);
+        await using var file = File.Create(output);
+        await source.CopyToAsync(file, ct);
 
         return output;
+    }
+
+    private async Task EnsureServiceRunningAsync(CancellationToken ct)
+    {
+        if (_processManager.IsRunning)
+            return;
+
+        await _processManager.StartAsync(_settings.Settings, ct);
     }
 
     private static string NormalizeVoice(string? speaker)

@@ -148,7 +148,7 @@ public sealed class LocalAiSetupService : ILocalAiSetupService
         return action.Kind switch
         {
             LocalAiSetupActionKind.CreateVenv => await CreateVenvAsync(action.TargetPath, settings, progress, ct),
-            LocalAiSetupActionKind.InstallXttsDependencies => await InstallXttsAsync(action.TargetPath, progress, ct),
+            LocalAiSetupActionKind.InstallXttsDependencies => await InstallXttsAsync(action.TargetPath, settings, progress, ct),
             LocalAiSetupActionKind.CreateXttsApiScript => CreateXttsApiScript(action.TargetPath, settings, allowOverwrite, progress),
             LocalAiSetupActionKind.CreateDirectory => CreateSupportDirectory(action.TargetPath, progress),
             LocalAiSetupActionKind.DownloadGgufModel => await DownloadGgufModelAsync(action, progress, ct),
@@ -515,15 +515,15 @@ if __name__ == "__main__":
         return null;
     }
 
-    private static Task<LocalAiSetupResult> InstallXttsAsync(string pythonPath, IProgress<string>? progress, CancellationToken ct)
+    private static Task<LocalAiSetupResult> InstallXttsAsync(string pythonPath, AppSettings settings, IProgress<string>? progress, CancellationToken ct)
     {
         if (!File.Exists(pythonPath))
             return Task.FromResult(new LocalAiSetupResult(false, $"Python was not found at {pythonPath}. Create or choose a venv first."));
 
-        return InstallXttsWithRepairAsync(pythonPath, progress, ct);
+        return InstallXttsWithRepairAsync(pythonPath, settings, progress, ct);
     }
 
-    private static async Task<LocalAiSetupResult> InstallXttsWithRepairAsync(string pythonPath, IProgress<string>? progress, CancellationToken ct)
+    private static async Task<LocalAiSetupResult> InstallXttsWithRepairAsync(string pythonPath, AppSettings settings, IProgress<string>? progress, CancellationToken ct)
     {
         var workingDirectory = Path.GetDirectoryName(pythonPath) ?? Environment.CurrentDirectory;
         var preflight = await RunProcessAsync(
@@ -566,12 +566,60 @@ if __name__ == "__main__":
             }
         }
 
+        // Install a matching PyTorch wheel for the detected backend before installing XTTS packages.
+        try
+        {
+            var backend = DetectGpuBackendFromSettings(settings);
+            progress?.Report($"Installing PyTorch for backend: {backend}...");
+            var torchResult = await InstallTorchForBackendAsync(pythonPath, backend, workingDirectory, progress, ct);
+            if (!torchResult.Success)
+                return new LocalAiSetupResult(false, $"Failed to install PyTorch: {torchResult.Log}");
+        }
+        catch (Exception ex)
+        {
+            progress?.Report($"PyTorch auto-install skipped: {ex.Message}");
+        }
+
         return await RunProcessAsync(
             pythonPath,
             ["-m", "pip", "install", ..XttsPackages],
             workingDirectory,
             progress,
             ct);
+
+    }
+
+    private static async Task<LocalAiSetupResult> InstallTorchForBackendAsync(string pythonPath, string backend, string workingDirectory, IProgress<string>? progress, CancellationToken ct)
+    {
+        // Upgrade pip/setuptools first.
+        var upgrade = await RunProcessAsync(pythonPath, ["-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"], workingDirectory, progress, ct);
+        if (!upgrade.Success)
+            return upgrade;
+
+        var args = new List<string> { "-m", "pip", "install" };
+        if (backend == "cuda")
+        {
+            args.AddRange(["torch", "torchaudio", "torchvision", "--index-url", "https://download.pytorch.org/whl/cu118"]);
+        }
+        else if (backend == "rocm")
+        {
+            args.AddRange(["torch", "torchaudio", "torchvision", "--index-url", "https://download.pytorch.org/whl/rocm5.8"]);
+        }
+        else
+        {
+            args.AddRange(["torch", "torchaudio", "torchvision", "--index-url", "https://download.pytorch.org/whl/cpu"]);
+        }
+
+        return await RunProcessAsync(pythonPath, args, workingDirectory, progress, ct);
+    }
+
+    private static string DetectGpuBackendFromSettings(AppSettings settings)
+    {
+        var device = settings.Tts.Device.Trim().ToLowerInvariant();
+        if (device is "cuda" or "rocm" or "cpu")
+            return device;
+
+        return DetectGpuBackendAsync().GetAwaiter().GetResult();
     }
 
     private static async Task<LocalAiSetupResult> RebuildVenvAsync(string pythonPath, IProgress<string>? progress, CancellationToken ct)

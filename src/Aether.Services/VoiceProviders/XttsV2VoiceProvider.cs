@@ -8,7 +8,7 @@ using Aether.Services.ProcessManagement;
 namespace Aether.Services;
 
 /// <summary>
-/// Legacy XTTS v2 voice cloning backend. Requires Python 3.11.
+/// XTTS v2 voice cloning backend. Requires Python 3.11.
 /// </summary>
 public sealed class XttsV2VoiceProvider : ITtsService, IVoiceProvider, IDisposable
 {
@@ -18,7 +18,7 @@ public sealed class XttsV2VoiceProvider : ITtsService, IVoiceProvider, IDisposab
 
     public VoiceProvider Id => VoiceProvider.XttsV2;
     public string DisplayName => "XTTS v2";
-    public VoiceCapability Capabilities => VoiceCapability.TextToSpeech | VoiceCapability.VoiceCloning | VoiceCapability.Local | VoiceCapability.Legacy;
+    public VoiceCapability Capabilities => VoiceCapability.TextToSpeech | VoiceCapability.VoiceCloning | VoiceCapability.Local;
     public (int Major, int Minor) RequiredPythonVersion => (3, 11);
 
     public bool IsInstalled => File.Exists(_settings.Settings.Tts.ScriptPath);

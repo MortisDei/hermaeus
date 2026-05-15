@@ -61,7 +61,7 @@ public static class HarnessCases
     public static IEnumerable<object[]> Tts =>
     [
         [new HarnessCase("voice provider capability gating prevents unsupported providers", TtsTests.VoiceProviderCapabilityGating)],
-        [new HarnessCase("voice provider legacy requires local and TTS", TtsTests.VoiceProviderLegacyRequiresLocalAndTts)]
+        [new HarnessCase("voice provider XTTS v2 requires local and TTS", TtsTests.VoiceProviderXttsV2RequiresLocalAndTts)]
     ];
 
     public static IEnumerable<object[]> Agent =>

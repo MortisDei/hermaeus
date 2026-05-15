@@ -63,6 +63,12 @@ public partial class App : Application
             await sp.GetRequiredService<IAgentTaskStateStore>().InitializeAsync();
             await sp.GetRequiredService<IBenchmarkService>().InitializeAsync();
             sp.GetRequiredService<IAutomationScheduler>().Start();
+            // Probe active voice provider health at startup to detect externally-running services
+            try
+            {
+                await vm.Settings.Tts.ProbeActiveProviderHealthAsync();
+            }
+            catch { }
             await vm.InitializeAsync();
         }
         catch (Exception ex)
@@ -98,6 +104,7 @@ public partial class App : Application
         s.AddSingleton<IVoiceProviderRegistry, VoiceProviderRegistry>();
         s.AddSingleton<ITtsService, VoiceRoutingTtsService>();
         s.AddSingleton<XttsProcessManager>();
+        s.AddSingleton<KokoroProcessManager>();
         s.AddSingleton<IToastService,      ToastService>();
         s.AddSingleton<IAutomationScheduler, AutomationScheduler>();
         s.AddSingleton<SqliteRagStore>();

@@ -19,9 +19,11 @@ public partial class TtsSettingsViewModel : ObservableObject
     private readonly IVoiceProviderRegistry _voiceProviderRegistry;
     private readonly IToastService _toasts;
     private readonly XttsProcessManager _xttsProcess;
+    private readonly KokoroProcessManager _kokoroProcess;
     private readonly ISecretStore _secrets;
     private readonly ISettingsService _settings;
     private readonly SynchronizationContext? _sync;
+    private bool _externalServiceRunning;
 
     [ObservableProperty] private bool   _ttsEnabled = true;
     [ObservableProperty] private string _ttsServiceUrl = "http://127.0.0.1:8020";
@@ -33,6 +35,7 @@ public partial class TtsSettingsViewModel : ObservableObject
     [ObservableProperty] private string _ttsVoiceDirectory = string.Empty;
     [ObservableProperty] private string _ttsDevice = "cpu";
     [ObservableProperty] private string _ttsModelVersion = "2.0.3";
+    [ObservableProperty] private double _ttsSpeed = 1.0;
     [ObservableProperty] private bool   _ttsPreload;
     [ObservableProperty] private string _ttsPreviewText = "Aether voice preview is ready.";
     [ObservableProperty] private string _ttsCloneDisplayName = string.Empty;
@@ -43,13 +46,17 @@ public partial class TtsSettingsViewModel : ObservableObject
     public ObservableCollection<string> TtsVoices { get; } = ["default"];
     public ObservableCollection<VoiceProviderInfo> VoiceProviders { get; } = [];
 
-    public bool IsTtsRunning => IsLegacyVoiceBackend && _xttsProcess.IsRunning;
-    public bool IsLegacyVoiceBackend
+    public bool IsTtsRunning => IsXttsV2Provider
+        ? (_xttsProcess.IsRunning || _externalServiceRunning)
+        : (IsKokoroProvider && (_kokoroProcess.IsRunning || _externalServiceRunning));
+
+    public bool IsServerManagedProvider => IsXttsV2Provider || IsKokoroProvider;
+
+    public bool IsXttsV2Provider
     {
         get
         {
             var provider = VoiceProviders.FirstOrDefault(p => p.Name.Equals(SelectedVoiceProvider, StringComparison.OrdinalIgnoreCase));
-            // Legacy XTTS backend requires local capability and TTS support
             return provider is not null
                 && provider.Id == VoiceProvider.XttsV2
                 && provider.Capabilities.HasFlag(VoiceCapability.Local)
@@ -89,6 +96,7 @@ public partial class TtsSettingsViewModel : ObservableObject
         IVoiceProviderRegistry voiceProviderRegistry,
         IToastService toasts,
         XttsProcessManager xttsProcess,
+        KokoroProcessManager kokoroProcess,
         ISecretStore secrets,
         ISettingsService settings)
     {
@@ -96,10 +104,12 @@ public partial class TtsSettingsViewModel : ObservableObject
         _voiceProviderRegistry = voiceProviderRegistry;
         _toasts = toasts;
         _xttsProcess = xttsProcess;
+        _kokoroProcess = kokoroProcess;
         _secrets = secrets;
         _settings = settings;
         _sync = SynchronizationContext.Current;
         _xttsProcess.StatusChanged += OnXttsStatusChanged;
+        _kokoroProcess.StatusChanged += OnXttsStatusChanged;
     }
 
     private void OnXttsStatusChanged()
@@ -112,8 +122,13 @@ public partial class TtsSettingsViewModel : ObservableObject
 
     private void ApplyXttsStatus()
     {
-        TtsStatus = IsLegacyVoiceBackend ? _xttsProcess.StatusLabel : "Ready";
+        TtsStatus = IsXttsV2Provider
+            ? _xttsProcess.StatusLabel
+            : IsKokoroProvider
+                ? _kokoroProcess.StatusLabel
+                : "Ready";
         OnPropertyChanged(nameof(IsTtsRunning));
+        OnPropertyChanged(nameof(IsServerManagedProvider));
         StartTtsCommand.NotifyCanExecuteChanged();
         StopTtsCommand.NotifyCanExecuteChanged();
     }
@@ -130,13 +145,15 @@ public partial class TtsSettingsViewModel : ObservableObject
         TtsVoiceDirectory = settings.Tts.VoiceDirectory;
         TtsDevice = settings.Tts.Device;
         TtsModelVersion = settings.Tts.ModelVersion;
+        TtsSpeed = settings.Tts.Speed;
         TtsPreload = settings.Tts.Preload;
-        TtsStatus = IsLegacyVoiceBackend ? _xttsProcess.StatusLabel : "Ready";
         VoiceProviders.Clear();
         foreach (var provider in _voiceProviderRegistry.GetAvailableProviders())
             VoiceProviders.Add(provider);
         SelectedVoiceProvider = settings.Tts.VoiceProvider;
-        OnPropertyChanged(nameof(IsLegacyVoiceBackend));
+        OnPropertyChanged(nameof(IsXttsV2Provider));
+        OnPropertyChanged(nameof(IsServerManagedProvider));
+        ApplyXttsStatus();
     }
 
     [RelayCommand]
@@ -156,10 +173,12 @@ public partial class TtsSettingsViewModel : ObservableObject
             await _voiceProviderRegistry.SetActiveProviderAsync(provider.Id);
             SelectedVoiceProvider = provider.Name;
             await RefreshTtsVoicesAsync();
-            OnPropertyChanged(nameof(IsLegacyVoiceBackend));
+            OnPropertyChanged(nameof(IsXttsV2Provider));
             OnPropertyChanged(nameof(IsKokoroProvider));
             OnPropertyChanged(nameof(IsF5TtsProvider));
             OnPropertyChanged(nameof(IsOpenAiProvider));
+            OnPropertyChanged(nameof(IsServerManagedProvider));
+            ApplyXttsStatus();
             _toasts.Show("Voice provider changed", $"Now using {provider.Name}.", ToastKind.Success, 4000);
         }
         catch (Exception ex)
@@ -171,44 +190,48 @@ public partial class TtsSettingsViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanStartTts))]
     private async Task StartTtsAsync()
     {
-        if (!IsLegacyVoiceBackend)
+        if (!IsServerManagedProvider)
         {
-            _toasts.Show("No voice server needed", "Kokoro and F5-TTS generate directly without a background server.", ToastKind.Info, 5000);
+            _toasts.Show("No voice service", "The current provider does not use a managed background service.", ToastKind.Info, 5000);
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(TtsScriptPath))
+        if (IsXttsV2Provider && string.IsNullOrWhiteSpace(TtsScriptPath))
         {
-            if (string.IsNullOrWhiteSpace(TtsScriptPath))
-            {
-                _toasts.Show("XTTS path needed", "Choose the XTTS API server script before starting XTTS.", ToastKind.Warning);
-                return;
-            }
+            _toasts.Show("XTTS path needed", "Choose the XTTS API server script before starting XTTS v2.", ToastKind.Warning);
+            return;
         }
 
         try
         {
-            await _xttsProcess.StartAsync(_settings.Settings);
-            _toasts.Show("XTTS v2 started", $"Listening at {TtsServiceUrl}", ToastKind.Success);
+            var provider = _voiceProviderRegistry.GetVoiceProvider(IsXttsV2Provider ? VoiceProvider.XttsV2 : VoiceProvider.Kokoro);
+            await provider.StartAsync();
+            _toasts.Show(IsXttsV2Provider ? "XTTS v2 started" : "Kokoro service started", $"Listening at {TtsServiceUrl}", ToastKind.Success);
             await RefreshTtsVoicesAsync();
+            ApplyXttsStatus();
         }
         catch (Exception ex)
         {
-            _toasts.Show("XTTS v2 failed", ex.Message, ToastKind.Error, 7000);
+            _toasts.Show(IsXttsV2Provider ? "XTTS v2 failed" : "Kokoro service failed", ex.Message, ToastKind.Error, 7000);
         }
     }
 
     [RelayCommand(CanExecute = nameof(CanStopTts))]
     private void StopTts()
     {
-        if (!IsLegacyVoiceBackend)
+        if (!IsServerManagedProvider)
         {
-            _toasts.Show("No voice server running", "The current provider does not use a background XTTS server.", ToastKind.Info, 4000);
+            _toasts.Show("No voice service", "The current provider does not use a managed background service.", ToastKind.Info, 4000);
             return;
         }
 
-        _xttsProcess.Stop();
-        _toasts.Show("XTTS v2 stopped", "The local voice server was stopped.", ToastKind.Info);
+        if (IsXttsV2Provider)
+            _xttsProcess.Stop();
+        else if (IsKokoroProvider)
+            _kokoroProcess.Stop();
+
+        _toasts.Show(IsXttsV2Provider ? "XTTS v2 stopped" : "Kokoro service stopped", "The local voice service was stopped.", ToastKind.Info);
+        ApplyXttsStatus();
     }
 
     [RelayCommand]
@@ -244,6 +267,24 @@ public partial class TtsSettingsViewModel : ObservableObject
         }
     }
 
+    public async Task ProbeActiveProviderHealthAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            var active = _voiceProviderRegistry.GetActiveProvider();
+            var provider = _voiceProviderRegistry.GetVoiceProvider(active);
+            var health = await provider.HealthCheckAsync(ct);
+            _externalServiceRunning = health.Status == VoiceHealthStatus.Healthy;
+            TtsStatus = health.Summary;
+        }
+        catch (Exception ex)
+        {
+            _externalServiceRunning = false;
+            TtsStatus = ex.Message;
+        }
+        ApplyXttsStatus();
+    }
+
     public async Task ImportTtsVoiceSampleAsync(string sourcePath)
     {
         try
@@ -259,6 +300,6 @@ public partial class TtsSettingsViewModel : ObservableObject
         }
     }
 
-    private bool CanStartTts() => IsLegacyVoiceBackend && !IsTtsRunning;
-    private bool CanStopTts() => IsLegacyVoiceBackend && IsTtsRunning;
+    private bool CanStartTts() => IsServerManagedProvider && !IsTtsRunning;
+    private bool CanStopTts() => IsServerManagedProvider && IsTtsRunning;
 }

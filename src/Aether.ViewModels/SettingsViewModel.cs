@@ -22,6 +22,7 @@ public partial class SettingsViewModel : ObservableObject
     private readonly IBackupService _backups;
     private readonly ISecretStore _secrets;
     private readonly XttsProcessManager _xttsProcess;
+    private readonly KokoroProcessManager _kokoroProcess;
     private readonly ILocalAiSetupService _localAiSetup;
     private readonly ITrustService _trust;
 
@@ -95,6 +96,7 @@ public partial class SettingsViewModel : ObservableObject
         IBackupService backups,
         ISecretStore secrets,
         XttsProcessManager xttsProcess,
+        KokoroProcessManager kokoroProcess,
         ILocalAiSetupService localAiSetup,
         ITrustService trust)
     {
@@ -105,10 +107,11 @@ public partial class SettingsViewModel : ObservableObject
         _backups = backups;
         _secrets = secrets;
         _xttsProcess = xttsProcess;
+        _kokoroProcess = kokoroProcess;
         _localAiSetup = localAiSetup;
         _trust = trust;
 
-        Tts = new TtsSettingsViewModel(_tts, _voiceProviderRegistry, _toasts, _xttsProcess, _secrets, _svc);
+        Tts = new TtsSettingsViewModel(_tts, _voiceProviderRegistry, _toasts, _xttsProcess, _kokoroProcess, _secrets, _svc);
         Reload();
     }
 
@@ -190,6 +193,7 @@ public partial class SettingsViewModel : ObservableObject
         s.Tts.VoiceDirectory = Tts.TtsVoiceDirectory.Trim();
         s.Tts.Device = Tts.TtsDevice;
         s.Tts.ModelVersion = Tts.TtsModelVersion.Trim();
+        s.Tts.Speed = Tts.TtsSpeed;
         s.Tts.Preload = Tts.TtsPreload;
         s.Tts.VoiceProvider = Tts.SelectedVoiceProvider;
 

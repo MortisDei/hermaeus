@@ -14,6 +14,7 @@ public partial class ChatViewModel : ObservableObject
     private readonly IConversationStore _store;
     private readonly ISettingsService _settings;
     private readonly ITtsService _tts;
+    private readonly IToastService _toasts;
     private readonly IModelProfileService _profiles;
     private CancellationTokenSource? _cts;
     private CancellationTokenSource? _ttsCts;
@@ -54,9 +55,10 @@ public partial class ChatViewModel : ObservableObject
         IConversationStore store,
         ISettingsService settings,
         ITtsService tts,
-        IModelProfileService profiles)
+        IModelProfileService profiles,
+        IToastService toasts)
     {
-        _llm = llm; _store = store; _settings = settings; _tts = tts; _profiles = profiles;
+        _llm = llm; _store = store; _settings = settings; _tts = tts; _profiles = profiles; _toasts = toasts;
         _temperature  = settings.Settings.Llm.Temperature;
         _systemPrompt = settings.Settings.Llm.DefaultSystemPrompt;
         Messages.CollectionChanged += (_, _) => HasMessages = Messages.Count > 0;
@@ -286,12 +288,8 @@ public partial class ChatViewModel : ObservableObject
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            Messages.Add(new MessageViewModel
-            {
-                Role = "assistant",
-                Content = $"TTS error: {ex.Message}",
-                IsError = true
-            });
+            // Avoid inserting internal TTS errors into chat history; surface via toast and runtime logs instead
+            _toasts.Show("TTS error", ex.Message, ToastKind.Error, 7000);
         }
     }
 
