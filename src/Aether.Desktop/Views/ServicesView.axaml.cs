@@ -22,6 +22,7 @@ public partial class ServicesView : UserControl
         InitializeComponent();
         AddHandler(PointerWheelChangedEvent, OnPointerWheelChanged, RoutingStrategies.Tunnel);
         DataContextChanged += OnDataContextChanged;
+        Unloaded += OnUnloaded;
     }
 
     private void OnPointerWheelChanged(object? sender, PointerWheelEventArgs e)
@@ -58,6 +59,16 @@ public partial class ServicesView : UserControl
         };
         
         vm.Servers.CollectionChanged += _collectionChangedHandler;
+    }
+
+    private void OnUnloaded(object? sender, RoutedEventArgs e)
+    {
+        // Clean up event subscriptions when view is unloaded
+        if (_wiredViewModel is not null && _collectionChangedHandler is not null)
+            _wiredViewModel.Servers.CollectionChanged -= _collectionChangedHandler;
+
+        _wiredViewModel = null;
+        _collectionChangedHandler = null;
     }
 
     private void WireFilePickers(ServerProcessViewModel srv)
