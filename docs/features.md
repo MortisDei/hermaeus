@@ -1,0 +1,66 @@
+# Features
+
+## Chat
+
+- Chat history with rename, delete, fast FTS-backed search, folders, tags,
+  pins, archive, and direct file context injection for selected text/code files.
+- Chat context usage indicator with provider-reported usage where available and
+  local estimates before send.
+- Chat can attach selected local text/code files directly to the next message.
+  Use the attach button or drop files on the input. Aether reads each file once at
+  send time, prepends a bounded context block to the model prompt, and stores only
+  an attachment summary in conversation history.
+- Attachment file paths are also persisted with each user message so regenerate
+  can reattach context files after an app restart when those files still exist.
+- The chat bar shows current context usage against the selected context window.
+  It uses provider-reported token usage when available and falls back to a
+  local estimate for draft input, visible history, system prompt, and ready file
+  attachments. At high usage, Aether warns so a fresh conversation can avoid
+  quality loss.
+
+## Model Management
+
+- Model profiles with display names, descriptions, tags, visibility, and defaults.
+- Runtime profiles for `llama.cpp`, Ollama, and OpenAI-compatible endpoints.
+- Managed `llama-server` start/stop, auto-start, logs, and GPU auto-tune.
+- Model benchmarks with saved run history, deterministic quality checks,
+  rankings, reruns, and Markdown/JSON/CSV export.
+
+## Local AI Setup
+
+- The first-run Setup Wizard now shows Kokoro onboarding details in the voice
+  step, including the install plan and risk notes before you continue.
+- Local AI setup scans can offer approval-gated downloads for a default Phi-4
+  mini reasoning GGUF file and a platform-specific `llama-server` binary when
+  they are missing from the selected AI assets folder.
+- The Local AI setup can now detect available GPU backends when creating
+  a Python venv and will suggest a device (`cuda` for NVIDIA, `rocm` for
+  AMD/ROCm, or `cpu`) to use for TTS/model inference. You can still override
+  the selected device in **Settings → Voice providers** after setup.
+- First-run Setup Wizard: on first launch Aether runs a guided 6-step
+  setup wizard to select the data root, local AI assets root, chat backend,
+  model folder, voice provider, and to run the Aether Doctor for a quick
+  health check before you start using the app. The wizard can be skipped
+  or re-run from the Settings panel.
+
+## Aether Doctor
+
+- Aether Doctor checks for storage, runtimes, voice, RAG, GPU, and secrets.
+- Aether Doctor now validates the configured Python and voice backend
+  health before installs or playback.
+
+## System Integration
+
+- System overview for app version, CPU, RAM, storage, databases, managed
+  components, and best-effort GPU/VRAM visibility.
+- Runtime logs with filters, copy, and redacted diagnostics export.
+- Local tasks, reminders, and app-running scheduled automations.
+- Tray integration, minimize-to-tray, local hotkeys, and Windows system-wide
+  hotkeys.
+- Toast notifications throughout the app.
+- Configurable data root with migration, backup, restore, and conflict refusal.
+- Configurable local AI assets root for models, XTTS, venvs, and encoders.
+- Trust & Safety scan for configured local tools, hashes, AI-root scope, and
+  network exposure warnings.
+- OS-backed secret references and redacted process logs.
+- Data-safety test harness for migration, backup/restore, and redaction.
