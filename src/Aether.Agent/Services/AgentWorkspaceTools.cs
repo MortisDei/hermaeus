@@ -137,6 +137,11 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
         if (full.Split(Path.DirectorySeparatorChar).Any(part => IgnoredDirectories.Contains(part)))
             throw new InvalidOperationException("Agent path is inside an ignored directory.");
 
+        // Reject symbolic links for security
+        var info = new FileInfo(full);
+        if (info.LinkTarget is not null)
+            throw new InvalidOperationException("Agent paths cannot reference symbolic links.");
+
         return full;
     }
 
