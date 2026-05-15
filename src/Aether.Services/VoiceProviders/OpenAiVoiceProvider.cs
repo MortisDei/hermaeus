@@ -8,7 +8,7 @@ namespace Aether.Services;
 
 public sealed class OpenAiVoiceProvider : ITtsService, IVoiceProvider, IDisposable
 {
-    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(2) };
+    private static readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(2) };
     private readonly ISettingsService _settings;
 
     public VoiceProvider Id => VoiceProvider.OpenAi;
@@ -175,5 +175,8 @@ public sealed class OpenAiVoiceProvider : ITtsService, IVoiceProvider, IDisposab
         return null;
     }
 
-    public void Dispose() => _http.Dispose();
+    public void Dispose()
+    {
+        // HttpClient is static and shared; do not dispose
+    }
 }

@@ -10,11 +10,12 @@ namespace Aether.Services;
 public sealed class ModelDownloadService
 {
     private static readonly TimeSpan DefaultTimeout = TimeSpan.FromMinutes(30);
+    private static readonly HttpClient _defaultHttp = new() { Timeout = DefaultTimeout };
     private readonly HttpClient _http;
 
     public ModelDownloadService(HttpClient? http = null)
     {
-        _http = http ?? new HttpClient { Timeout = DefaultTimeout };
+        _http = http ?? _defaultHttp;
     }
 
     /// <summary>

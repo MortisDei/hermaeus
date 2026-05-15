@@ -5,8 +5,8 @@ namespace Aether.Services;
 
 public sealed class RuntimeProfileService : IRuntimeProfileService, IDisposable
 {
+    private static readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(3) };
     private readonly ISettingsService _settings;
-    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(3) };
 
     public RuntimeProfileService(ISettingsService settings)
     {
@@ -137,5 +137,8 @@ public sealed class RuntimeProfileService : IRuntimeProfileService, IDisposable
         ? "http://127.0.0.1:8080"
         : url.Trim().TrimEnd('/');
 
-    public void Dispose() => _http.Dispose();
+    public void Dispose()
+    {
+        // HttpClient is static and shared; do not dispose
+    }
 }

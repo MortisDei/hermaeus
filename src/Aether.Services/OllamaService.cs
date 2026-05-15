@@ -155,7 +155,10 @@ public sealed class OllamaService : IDisposable
         return (id[(firstSeparator + 1)..secondSeparator], id[(secondSeparator + 1)..]);
     }
 
-    public void Dispose() => _http.Dispose();
+    public void Dispose()
+    {
+        // HttpClient is static and shared; do not dispose
+    }
 
     private sealed record TagsResponse([property: JsonPropertyName("models")] List<OllamaModel>? Models);
     private sealed record OllamaModel(

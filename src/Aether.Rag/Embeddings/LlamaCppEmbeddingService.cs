@@ -11,7 +11,7 @@ namespace Aether.Rag.Embeddings;
 /// </summary>
 public sealed class LlamaCppEmbeddingService : IEmbeddingService, IDisposable
 {
-    private readonly HttpClient _http;
+    private static readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(60) };
     private readonly ISettingsService _settings;
 
     // nomic-embed-text outputs 768 dims; update if you switch models
@@ -20,7 +20,6 @@ public sealed class LlamaCppEmbeddingService : IEmbeddingService, IDisposable
     public LlamaCppEmbeddingService(ISettingsService settings)
     {
         _settings = settings;
-        _http = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
     }
 
     private string Base => _settings.Settings.Llm.LlamaCppBaseUrl.TrimEnd('/');
@@ -53,7 +52,10 @@ public sealed class LlamaCppEmbeddingService : IEmbeddingService, IDisposable
             .ToList();
     }
 
-    public void Dispose() => _http.Dispose();
+    public void Dispose()
+    {
+        // HttpClient is static and shared; do not dispose
+    }
 
     private record EmbedResponse(
         [property: JsonPropertyName("data")] List<EmbedData> Data);

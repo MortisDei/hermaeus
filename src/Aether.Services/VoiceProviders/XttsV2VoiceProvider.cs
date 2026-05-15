@@ -12,7 +12,7 @@ namespace Aether.Services;
 /// </summary>
 public sealed class XttsV2VoiceProvider : ITtsService, IVoiceProvider, IDisposable
 {
-    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(5) };
+    private static readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(5) };
     private readonly ISettingsService _settings;
     private readonly XttsProcessManager _processManager;
 
@@ -282,6 +282,6 @@ public sealed class XttsV2VoiceProvider : ITtsService, IVoiceProvider, IDisposab
 
     public void Dispose()
     {
-        _http?.Dispose();
+        // HttpClient is static and shared; do not dispose
     }
 }

@@ -17,6 +17,7 @@ public record IngestProgress(string Stage, int Done, int Total, string Detail = 
 /// </summary>
 public sealed class RagPipeline
 {
+    private static readonly HttpClient _defaultHttp = new() { Timeout = TimeSpan.FromSeconds(15) };
     private readonly SqliteRagStore   _store;
     private readonly IEmbeddingService _embed;
     private readonly ParagraphChunker  _chunker = new();
@@ -26,15 +27,15 @@ public sealed class RagPipeline
     private const int MaxWebPageBytes = 2 * 1024 * 1024;
 
     public RagPipeline(SqliteRagStore store, IEmbeddingService embed)
-        : this(store, embed, new HttpClient { Timeout = TimeSpan.FromSeconds(15) })
+        : this(store, embed, null)
     {
     }
 
-    public RagPipeline(SqliteRagStore store, IEmbeddingService embed, HttpClient http)
+    public RagPipeline(SqliteRagStore store, IEmbeddingService embed, HttpClient? http)
     {
         _store = store;
         _embed = embed;
-        _http = http;
+        _http = http ?? _defaultHttp;
     }
 
     public async Task<IngestReport> IngestDirectoryAsync(

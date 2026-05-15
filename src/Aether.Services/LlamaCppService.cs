@@ -10,7 +10,7 @@ namespace Aether.Services;
 public sealed class LlamaCppService : IDisposable
 {
     private const string ProviderTagValue = "llama.cpp";
-    private readonly HttpClient _http;
+    private static readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(10) };
     private readonly ISettingsService _settings;
 
     private static readonly JsonSerializerOptions JsonOpts = new()
@@ -25,7 +25,6 @@ public sealed class LlamaCppService : IDisposable
     public LlamaCppService(ISettingsService settings)
     {
         _settings = settings;
-        _http = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
     }
 
     private string Base => _settings.Settings.Llm.LlamaCppBaseUrl.TrimEnd('/');
@@ -171,7 +170,10 @@ public sealed class LlamaCppService : IDisposable
 
     public Task PullModelAsync(string m, IProgress<string>? p = null, CancellationToken ct = default) => Task.CompletedTask;
     public Task DeleteModelAsync(string m, CancellationToken ct = default) => Task.CompletedTask;
-    public void Dispose() => _http.Dispose();
+    public void Dispose()
+    {
+        // HttpClient is static and shared; do not dispose
+    }
 
     private record ModelsResponse([property: JsonPropertyName("data")] List<ModelData>? Data);
     private record ModelData([property: JsonPropertyName("id")] string Id);

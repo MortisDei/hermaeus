@@ -14,8 +14,8 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
     private const string ModelFileName = "model_O4.onnx";
     private const string VocabFileName = "vocab.txt";
 
+    private static readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(10) };
     private readonly ISettingsService _settings;
-    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(10) };
     private readonly SemaphoreSlim _gate = new(1, 1);
     private InferenceSession? _session;
     private BertTokenizer? _tokenizer;
@@ -233,8 +233,8 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
     public void Dispose()
     {
         _session?.Dispose();
-        _http.Dispose();
         _gate.Dispose();
+        // HttpClient is static and shared; do not dispose
     }
 
     private sealed record EncodedPair(long[] InputIds, long[] AttentionMask, long[] TokenTypeIds);

@@ -23,9 +23,9 @@ public sealed class KokoroVoiceProvider : ITtsService, IVoiceProvider
         "bm_george"
     ];
 
+    private static readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(3) };
     private readonly ISettingsService _settings;
     private readonly KokoroProcessManager _processManager;
-    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(3) };
     private readonly SemaphoreSlim _synthesisGate = new(1, 1);
 
     public VoiceProvider Id => VoiceProvider.Kokoro;
