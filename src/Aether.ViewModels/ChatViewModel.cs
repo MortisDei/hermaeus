@@ -18,6 +18,7 @@ public partial class ChatViewModel : ObservableObject
     private readonly IModelProfileService _profiles;
     private CancellationTokenSource? _cts;
     private CancellationTokenSource? _ttsCts;
+    private CancellationTokenSource? _contextUsageCts;
     private DateTime _modelsLoadedAtUtc = DateTime.MinValue;
 
     public ObservableCollection<MessageViewModel> Messages        { get; } = [];
@@ -61,14 +62,17 @@ public partial class ChatViewModel : ObservableObject
         _llm = llm; _store = store; _settings = settings; _tts = tts; _profiles = profiles; _toasts = toasts;
         _temperature  = settings.Settings.Llm.Temperature;
         _systemPrompt = settings.Settings.Llm.DefaultSystemPrompt;
-        Messages.CollectionChanged += (_, _) => HasMessages = Messages.Count > 0;
+        Messages.CollectionChanged += (_, _) =>
+        {
+            HasMessages = Messages.Count > 0;
+            ScheduleContextUsageRefresh();
+        };
         ContextAttachments.CollectionChanged += (_, _) =>
         {
             OnPropertyChanged(nameof(HasContextAttachments));
             SendCommand.NotifyCanExecuteChanged();
-            RefreshEstimatedContextUsage();
+            ScheduleContextUsageRefresh();
         };
-        Messages.CollectionChanged += (_, _) => RefreshEstimatedContextUsage();
         RefreshEstimatedContextUsage();
     }
 
@@ -373,6 +377,7 @@ public partial class ChatViewModel : ObservableObject
 
     private void RefreshEstimatedContextUsage()
     {
+        _contextUsageCts?.Cancel();
         var total = EstimateTokens(SystemPrompt) + EstimateTokens(InputText);
         foreach (var message in Messages.Where(m => !m.IsStreaming))
             total += EstimateTokens(message.Content);
@@ -461,7 +466,7 @@ public partial class ChatViewModel : ObservableObject
     partial void OnInputTextChanged(string value)
     {
         SendCommand.NotifyCanExecuteChanged();
-        RefreshEstimatedContextUsage();
+        ScheduleContextUsageRefresh();
     }
     partial void OnSelectedModelChanged(LlmModel? value)
     {
@@ -470,7 +475,26 @@ public partial class ChatViewModel : ObservableObject
         if (value?.DefaultMaxTokens is { } max && max > 0)
             _settings.Settings.Llm.MaxTokens = max;
         SendCommand.NotifyCanExecuteChanged();
-        RefreshEstimatedContextUsage();
+        ScheduleContextUsageRefresh();
     }
     partial void OnIsGeneratingChanged(bool value)       => SendCommand.NotifyCanExecuteChanged();
+
+    private void ScheduleContextUsageRefresh()
+    {
+        _contextUsageCts?.Cancel();
+        _contextUsageCts?.Dispose();
+        _contextUsageCts = new CancellationTokenSource();
+        var token = _contextUsageCts.Token;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(150, token);
+                if (!token.IsCancellationRequested)
+                    RefreshEstimatedContextUsage();
+            }
+            catch (OperationCanceledException) { }
+        }, token);
+    }
 }

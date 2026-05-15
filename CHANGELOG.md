@@ -24,6 +24,12 @@ Pre-1.0 versions may still change internal APIs and storage details.
   are inserted even when the database already contains other suites.
 - SQL connection string construction in `SqliteRagStore` is now cached and only
   rebuilt when the resolved database path changes.
+- Kokoro and F5-TTS Python scripts are now shipped as embedded resources rather
+  than multi-hundred-line C# string literals.
+- Local AI setup scripting and action definitions are now split into dedicated
+  helper classes so the service file is easier to navigate and maintain.
+- Chat context usage estimation is now debounced to reduce repeated full
+  recalculations while typing or when messages/attachments change rapidly.
 
 ### Fixed
 

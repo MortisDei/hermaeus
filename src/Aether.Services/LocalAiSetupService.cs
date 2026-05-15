@@ -411,54 +411,25 @@ if __name__ == "__main__":
     }
 
     private static LocalAiSetupAction CreateVenvAction(string target) =>
-        new("create-venv", LocalAiSetupActionKind.CreateVenv, "Create Python venv", target,
-            [DefaultPythonCommand(), "-m", "venv", target], LocalAiSetupRiskLevel.Medium,
-            "Creates an isolated Python environment under the selected AI folder.", false, true, true);
+        LocalAiSetupActionFactory.CreateVenvAction(target);
 
     private static LocalAiSetupAction InstallXttsAction(string pythonPath, bool canRun) =>
-        new("install-voice-backend", LocalAiSetupActionKind.InstallXttsDependencies, "Install Voice Backend Packages", pythonPath,
-            [pythonPath, "-m", "pip", "install", ..XttsPackages], LocalAiSetupRiskLevel.High,
-            canRun
-                ? "Installs voice backend packages into the selected venv. This may use the network."
-                : "Create or choose a venv before installing voice backend packages.",
-            true, true, canRun);
+        LocalAiSetupActionFactory.InstallXttsAction(pythonPath, canRun);
 
     private static LocalAiSetupAction CreateScriptAction(string target) =>
-        new("create-xtts-script", LocalAiSetupActionKind.CreateXttsApiScript, "Create XTTS API script", target,
-            ["write-file", target], LocalAiSetupRiskLevel.Medium,
-            "Creates a local FastAPI script for XTTS v2 without starting it.", false, true, true);
+        LocalAiSetupActionFactory.CreateScriptAction(target);
 
     private static LocalAiSetupAction CreateDirectoryAction(string id, string title, string target) =>
-        new($"create-{id}", LocalAiSetupActionKind.CreateDirectory, title, target,
-            ["mkdir", target], LocalAiSetupRiskLevel.Low,
-            "Creates the folder if it does not already exist.", false, true, true);
+        LocalAiSetupActionFactory.CreateDirectoryAction(id, title, target);
 
     private static LocalAiSetupAction DownloadGgufModelAction(string modelPath, string url) =>
-        new("download-phi4-model", LocalAiSetupActionKind.DownloadGgufModel,
-            "Download Phi-4 Mini Reasoning Model",
-            modelPath,
-            [url],
-            LocalAiSetupRiskLevel.Medium,
-            "Downloads the Phi-4 mini reasoning GGUF model (Q5_K_M, ~9GB) for local reasoning.",
-            true, true, true);
+        LocalAiSetupActionFactory.DownloadGgufModelAction(modelPath, url);
 
     private static LocalAiSetupAction DownloadTtsModelAction(string modelPath, string url) =>
-        new("download-kokoro-model", LocalAiSetupActionKind.DownloadTtsModel,
-            "Download Kokoro TTS Model",
-            modelPath,
-            [url],
-            LocalAiSetupRiskLevel.Medium,
-            "Downloads the Kokoro-82M TTS model for fast local speech synthesis.",
-            true, true, true);
+        LocalAiSetupActionFactory.DownloadTtsModelAction(modelPath, url);
 
     private static LocalAiSetupAction DownloadLlamaServerAction(string installPath) =>
-        new("download-llama-server", LocalAiSetupActionKind.DownloadLlamaServer,
-            "Download llama-server Binary",
-            Path.Combine(installPath, OperatingSystem.IsWindows() ? "llama-server.exe" : "llama-server"),
-            ["https://github.com/ggerganov/llama.cpp/releases"],
-            LocalAiSetupRiskLevel.Medium,
-            "Downloads the llama-server binary for running local LLMs.",
-            true, true, true);
+        LocalAiSetupActionFactory.DownloadLlamaServerAction(installPath);
 
     private static async Task<LocalAiSetupResult> CreateVenvAsync(string target, AppSettings settings, IProgress<string>? progress, CancellationToken ct)
     {
@@ -932,7 +903,7 @@ for check_name, passed in checks:
             return new LocalAiSetupResult(false, $"Refused to overwrite existing script at {target}.");
 
         Directory.CreateDirectory(Path.GetDirectoryName(target) ?? Environment.CurrentDirectory);
-        File.WriteAllText(target, BuildXttsApiScript(settings.Tts.ModelDirectory, settings.Tts.OutputDirectory));
+        File.WriteAllText(target, LocalAiSetupScriptGenerator.BuildXttsApiScript(settings.Tts.ModelDirectory, settings.Tts.OutputDirectory));
         progress?.Report($"Wrote {target}");
         return new LocalAiSetupResult(true, $"Created XTTS API script at {target}", target);
     }

@@ -12,4 +12,7 @@
     <ProjectReference Include="../Aether.Core/Aether.Core.csproj" />
     <ProjectReference Include="../Aether.Rag/Aether.Rag.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Resources/Python/*.py" />
+  </ItemGroup>
 </Project>
