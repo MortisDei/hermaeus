@@ -12,6 +12,17 @@ public sealed class LocalAiSetupService : ILocalAiSetupService
     private static readonly Version MinSupportedXttsPython = new(3, 9);
     private static readonly Version MaxSupportedXttsPythonExclusive = new(3, 12);
 
+    // Model SHA256 hashes for integrity verification
+    // These should be updated when models are released/updated
+    private static readonly Dictionary<string, string> ModelHashes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        // Phi-4 mini reasoning Q5_K_M GGUF model
+        // Note: Update this hash when the model is re-released or changed
+        // Current: microsoft_Phi-4-mini-reasoning-Q5_K_M.gguf
+        { "https://huggingface.co/bartowski/microsoft_Phi-4-mini-reasoning-GGUF/resolve/main/microsoft_Phi-4-mini-reasoning-Q5_K_M.gguf?download=true", 
+          "b0aca5b1aca5b1aca5b1aca5b1aca5b1aca5b1aca5b1aca5b1aca5b1aca5b1aca5b1" } // Placeholder: Replace with actual hash
+    };
+
     private readonly PythonHealthValidator _pythonValidator;
     private readonly ModelDownloadService _modelDownloader;
     private readonly LlamaServerSetupService _llamaServerSetup;
@@ -316,9 +327,20 @@ if __name__ == "__main__":
                     progress.Report($"Downloading GGUF model... {percent}%");
                 });
             var result = await _modelDownloader.DownloadAsync(url, action.TargetPath, progress: downloadProgress, ct: ct);
-            return result.Success
-                ? new LocalAiSetupResult(true, result.Message, action.TargetPath)
-                : new LocalAiSetupResult(false, result.Message);
+            if (!result.Success)
+                return new LocalAiSetupResult(false, result.Message);
+
+            // Verify hash for security if available
+            if (ModelHashes.TryGetValue(url, out var expectedHash))
+            {
+                progress?.Report("Verifying model integrity...");
+                var hashValid = await _modelDownloader.VerifyHashAsync(action.TargetPath, expectedHash, progress, ct);
+                if (!hashValid)
+                    return new LocalAiSetupResult(false, "Model hash verification failed. Downloaded file may be corrupted or tampered with.");
+                progress?.Report("Model integrity verified.");
+            }
+
+            return new LocalAiSetupResult(true, result.Message, action.TargetPath);
         }
         catch (OperationCanceledException)
         {
