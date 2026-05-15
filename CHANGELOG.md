@@ -14,6 +14,14 @@ Pre-1.0 versions may still change internal APIs and storage details.
 - Conversation search now uses SQLite FTS5 for faster full-text lookup across
   title, messages, folder, and tags, with LIKE fallback for malformed or very
   short queries.
+- Chat memory foundations: new memory domain model and settings, SQLite-backed
+  memory store with FTS5 search, extraction service for `[MEMORY: ...]`
+  markers, and context injection service with token-budget selection.
+- New Memories panel in the main toolbar for reviewing, searching, pinning,
+  archiving, and deleting saved memories.
+- Settings now include chat memory controls for enable/disable, prompt
+  injection toggle, auto-summary threshold, injection token budget, encryption
+  toggle, and auto-archive days.
 
 ### Changed
 

@@ -53,8 +53,12 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private bool   _enableLocalHotkeys = true;
     [ObservableProperty] private bool   _enableGlobalHotkeys;
     [ObservableProperty] private string _globalHotkeyStatus = "System-wide hotkeys are off.";
-    [ObservableProperty] private string _settingsError = string.Empty;
-    [ObservableProperty] private bool _localAiSetupBusy;
+    [ObservableProperty] private string _settingsError = string.Empty;    [ObservableProperty] private bool _memoryFeatureEnabled;
+    [ObservableProperty] private bool _memoryInjectIntoContext;
+    [ObservableProperty] private double _memoryImportanceThreshold = 0.6;
+    [ObservableProperty] private int _memoryInjectionTokenBudget = 500;
+    [ObservableProperty] private bool _memoryEncryptionEnabled;
+    [ObservableProperty] private int _memoryAutoArchiveDays = 90;    [ObservableProperty] private bool _localAiSetupBusy;
     [ObservableProperty] private string _localAiSetupLog = string.Empty;
     [ObservableProperty] private string _localAiSetupSummary = "Scan a local AI folder to see readiness.";
     [ObservableProperty] private bool _localAiInstallPlanVisible;
@@ -154,6 +158,12 @@ public partial class SettingsViewModel : ObservableObject
         MinimizeToTray      = s.Ui.MinimizeToTray;
         EnableLocalHotkeys  = s.Ui.EnableLocalHotkeys;
         EnableGlobalHotkeys = s.Ui.EnableGlobalHotkeys;
+        MemoryFeatureEnabled = s.Memory.Enabled;
+        MemoryInjectIntoContext = s.Memory.InjectMemoriesIntoContext;
+        MemoryImportanceThreshold = s.Memory.AutoSummarizeImportanceThreshold;
+        MemoryInjectionTokenBudget = s.Memory.InjectionTokenBudget;
+        MemoryEncryptionEnabled = s.Memory.EncryptMemoriesAtRest;
+        MemoryAutoArchiveDays = s.Memory.AutoArchiveAfterDays;
         UpdateMigrationPreview();
         UpdateLocalAiAssetsStatus();
     }
@@ -203,6 +213,13 @@ public partial class SettingsViewModel : ObservableObject
         s.Ui.MinimizeToTray      = MinimizeToTray;
         s.Ui.EnableLocalHotkeys  = EnableLocalHotkeys;
         s.Ui.EnableGlobalHotkeys = EnableGlobalHotkeys;
+
+        s.Memory.Enabled = MemoryFeatureEnabled;
+        s.Memory.InjectMemoriesIntoContext = MemoryInjectIntoContext;
+        s.Memory.AutoSummarizeImportanceThreshold = MemoryImportanceThreshold;
+        s.Memory.InjectionTokenBudget = MemoryInjectionTokenBudget;
+        s.Memory.EncryptMemoriesAtRest = MemoryEncryptionEnabled;
+        s.Memory.AutoArchiveAfterDays = MemoryAutoArchiveDays;
 
         try
         {
