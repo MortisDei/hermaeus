@@ -33,6 +33,31 @@ Pre-1.0 versions may still change internal APIs and storage details.
 
 ### Fixed
 
+- HttpClient pooling: Converted instance `HttpClient` creation to static class
+  fields across 11 service classes (OpenAiService, LlamaCppService,
+  OllamaService, RuntimeProfileService, ModelDownloadService,
+  LlamaCppEmbeddingService, KokoroVoiceProvider, XttsV2VoiceProvider,
+  OpenAiVoiceProvider, RagPipeline, OnnxCrossEncoderReranker) to prevent socket
+  exhaustion under concurrent connections.
+- `ReaderWriterLockSlim` disposal: `CompositeLlmService` now implements
+  `IDisposable` to properly dispose the shared model cache lock.
+- Async-over-sync anti-pattern: `ServiceTests.SystemInfoSafeFallback()` now
+  uses proper async/await instead of `GetAwaiter().GetResult()`.
+- Port validation: `ServerProcessManager.NormalizeConfig()` now validates port
+  range (1-65535) before process launch to catch invalid configurations early.
+- AutoTune debugging: `ServerProcessManager.AutoTuneAsync()` now tracks and
+  includes process exit code in timeout exception for better diagnostics.
+- Event lifecycle: `ServicesView` now properly unsubscribes from
+  `ObservableCollection.CollectionChanged` on view unload to prevent memory
+  leaks.
+- Symlink security hardening: `AgentWorkspaceTools.ResolveSafePath()` now
+  rejects symbolic links to prevent path traversal attacks.
+- Secret storage encryption: `SecretStore` now uses AES-256-CBC encryption
+  with PBKDF2 key derivation (using machine identifier and 10,000 iterations)
+  instead of Base64 encoding, with backward compatibility fallback.
+- Model download integrity: `LocalAiSetupService` now implements mandatory
+  SHA256 hash verification for critical model downloads (Phi-4 mini reasoning).
+  Hash mismatches now fail the setup action with a clear error message.
 - Settings voice sample import compile break: `SettingsView` now correctly wires
   `ImportTtsVoiceSampleCommand` through `TtsSettingsViewModel`.
 - Reranker directory resolution parity between Doctor and runtime reranker:

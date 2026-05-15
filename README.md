@@ -265,6 +265,11 @@ Security hardening currently includes:
   Linux Secret Service via `secret-tool`, macOS Keychain via `security`, and
   Windows Credential Manager. A user-only local fallback vault is used when no
   OS store is available.
+- AES-256-CBC encryption for stored secrets with PBKDF2 key derivation, with
+  backward compatibility for legacy Base64-encoded entries
+- mandatory SHA256 hash verification for critical model downloads (such as
+  Phi-4 mini reasoning) to detect tampering or corruption
+- symlink rejection in workspace file resolution to prevent path traversal
 - refreshed security review and threat model covering secrets, local runtime
   binding, backup/restore, RAG ingest, tray behavior, and packaging
 - data-safety tests for migration, backup/restore, and redaction
