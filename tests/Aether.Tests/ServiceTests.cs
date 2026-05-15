@@ -72,12 +72,11 @@ namespace Aether.Tests
             return Task.CompletedTask;
         }
 
-        public static Task SystemInfoSafeFallback()
+        public static async Task SystemInfoSafeFallback()
         {
-            var snapshot = new FakeSystemInfo().CaptureAsync().GetAwaiter().GetResult();
+            var snapshot = await new FakeSystemInfo().CaptureAsync();
             Equal("test", snapshot.AppVersion, "snapshot should come from fake service");
             Equal(1, snapshot.Components.Count, "snapshot should include a component");
-            return Task.CompletedTask;
         }
 
         public static Task LocalAiAssetsDetectAndApplyPaths()
