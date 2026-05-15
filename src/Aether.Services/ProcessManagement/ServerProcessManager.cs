@@ -130,6 +130,7 @@ public sealed class ServerProcessManager : IDisposable
         var lines = new ConcurrentQueue<string>();
         var completion = new TaskCompletionSource<ServerTuneResult>(
             TaskCreationOptions.RunContinuationsAsynchronously);
+        var exitCode = -1;  // Track exit code for error reporting
 
         void HandleLine(string? raw)
         {
@@ -166,10 +167,11 @@ public sealed class ServerProcessManager : IDisposable
         process.ErrorDataReceived += (_, e) => HandleLine(e.Data);
         process.Exited += (_, _) =>
         {
+            exitCode = process.ExitCode;
             if (!completion.Task.IsCompleted)
             {
                 completion.TrySetException(new InvalidOperationException(
-                    $"llama-server exited during auto-tune. Exit code: {process.ExitCode}.\n\nRecent log:\n{string.Join('\n', lines)}"));
+                    $"llama-server exited during auto-tune. Exit code: {exitCode}.\n\nRecent log:\n{string.Join('\n', lines)}"));
             }
         };
 
@@ -184,8 +186,11 @@ public sealed class ServerProcessManager : IDisposable
             using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(3));
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
             using var registration = linked.Token.Register(() =>
+            {
+                var exitCodeSuffix = exitCode >= 0 ? $" Process exit code: {exitCode}." : string.Empty;
                 completion.TrySetException(new TimeoutException(
-                    $"Auto-tune did not reach a GPU layer decision within 3 minutes.\n\nRecent log:\n{string.Join('\n', lines)}")));
+                    $"Auto-tune did not reach a GPU layer decision within 3 minutes.{exitCodeSuffix}\n\nRecent log:\n{string.Join('\n', lines)}"));
+            });
 
             return await completion.Task;
         }
