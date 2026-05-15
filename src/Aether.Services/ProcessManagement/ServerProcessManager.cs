@@ -277,6 +277,9 @@ public sealed class ServerProcessManager : IDisposable
 
     private static ServerConfig NormalizeConfig(ServerConfig cfg)
     {
+        if (cfg.Port < 1 || cfg.Port > 65535)
+            throw new ArgumentOutOfRangeException(nameof(cfg.Port), cfg.Port, "Port must be between 1 and 65535");
+
         cfg.ExecutablePath = ResolveExecutable(cfg.ExecutablePath);
         cfg.ModelPath      = ResolveModel(cfg.ModelPath);
         return cfg;
