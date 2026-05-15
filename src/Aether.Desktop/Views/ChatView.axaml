@@ -76,12 +76,16 @@
             </Grid>
         </Border>
 
-        <TextBlock Grid.Row="1"
-                   Text="{Binding PerformanceLog}"
-                   IsVisible="{Binding PerformanceLog, Converter={x:Static views:NotEmptyConverter.Instance}}"
-                   Margin="16,6,16,0"
-                   FontSize="11"
-                   Opacity="0.42" />
+        <StackPanel Grid.Row="1" Margin="16,6,16,0" Spacing="2">
+            <TextBlock Text="{Binding PerformanceLog}"
+                       IsVisible="{Binding PerformanceLog, Converter={x:Static views:NotEmptyConverter.Instance}}"
+                       FontSize="11"
+                       Opacity="0.42" />
+            <TextBlock Text="{Binding MemoryStatus}"
+                       IsVisible="{Binding MemoryStatus, Converter={x:Static views:NotEmptyConverter.Instance}}"
+                       FontSize="11"
+                       Opacity="0.48" />
+        </StackPanel>
 
         <!-- ── System prompt (collapsible) ───────────────────────────────── -->
         <Border Grid.Row="2"

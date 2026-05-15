@@ -534,5 +534,76 @@ namespace Aether.Tests
             True(memories.Any(m => m.Tags.Contains("auto_summary")), "auto-summary memories should be tagged");
             True(memories.All(m => m.SourceConversationId == "conv-1"), "memories should keep source conversation id");
         }
+
+        public static async Task MemoryStoreCrudAndSearchWorks()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var store = new MemoryStore(settings);
+            await store.InitializeAsync();
+
+            var memory = new Memory
+            {
+                Id = "mem-1",
+                Category = "preferences",
+                Content = "User prefers concise summaries.",
+                Tags = ["preference", "summary"],
+                ImportanceScore = 0.85,
+                SourceConversationId = "conv-42"
+            };
+
+            await store.SaveAsync(memory);
+            var byId = await store.GetByIdAsync("mem-1");
+            True(byId is not null, "saved memory should be retrievable by id");
+            Equal("preferences", byId!.Category, "saved category should round trip");
+
+            var byCategory = await store.GetByCategoryAsync("preferences");
+            True(byCategory.Any(m => m.Id == "mem-1"), "category query should include saved memory");
+
+            var found = await store.SearchAsync("concise");
+            True(found.Any(m => m.Id == "mem-1"), "search should match content");
+
+            byId.IsArchived = true;
+            await store.SaveAsync(byId);
+            var visible = await store.GetAllAsync(includeArchived: false);
+            False(visible.Any(m => m.Id == "mem-1"), "archived memory should be hidden when includeArchived is false");
+
+            await store.DeleteAsync("mem-1");
+            var deleted = await store.GetByIdAsync("mem-1");
+            Equal<Memory?>(null, deleted, "deleted memory should not exist");
+        }
+
+        public static async Task MemoryExtractionParsesAndCleansMarkers()
+        {
+            var service = new MemoryExtractionService();
+            var output = "Great, noted. [MEMORY: User prefers Australian English.] I can help. [MEMORY: User values performance over quick fixes.]";
+
+            var memories = await service.ExtractMemoriesAsync(output, "conv-extract");
+            Equal(2, memories.Count, "extractor should parse two markers");
+            True(memories.All(m => m.SourceConversationId == "conv-extract"), "extracted memories should preserve source conversation id");
+            True(memories.Any(m => m.Category == "preferences"), "preference-like text should be categorised as preferences");
+
+            var cleaned = service.CleanMemoryMarkers(output);
+            False(cleaned.Contains("[MEMORY:", StringComparison.Ordinal), "cleaned output should remove marker syntax");
+        }
+
+        public static async Task MemoryInjectionRespectsTokenBudgetAndPriority()
+        {
+            var service = new MemoryInjectionService();
+            var memories = new List<Memory>
+            {
+                new() { Id = "1", Category = "facts", Content = "Pinned memory with high value.", IsPinned = true, ImportanceScore = 0.9, UpdatedAt = DateTime.UtcNow },
+                new() { Id = "2", Category = "preferences", Content = new string('x', 1200), IsPinned = false, ImportanceScore = 0.8, UpdatedAt = DateTime.UtcNow.AddMinutes(-1) },
+                new() { Id = "3", Category = "interests", Content = "Secondary memory.", IsPinned = false, ImportanceScore = 0.2, UpdatedAt = DateTime.UtcNow.AddMinutes(-2) }
+            };
+
+            var selected = await service.SelectMemoriesForInjectionAsync(memories, tokenBudget: 80);
+            True(selected.Count >= 1, "selection should return at least one memory under budget");
+            Equal("1", selected[0].Id, "pinned high-importance memory should be selected first");
+
+            var context = service.BuildMemoryContext(selected);
+            True(context.Contains("Stored Memories", StringComparison.Ordinal), "memory context should include heading");
+        }
     }
 }

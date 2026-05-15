@@ -25,6 +25,10 @@ Pre-1.0 versions may still change internal APIs and storage details.
 - Phase 5 memory automation: conversations are now auto-analysed in the
   background after assistant replies, and durable memories are extracted and
   persisted only when conversation importance exceeds the configured threshold.
+- Memory test coverage now includes store CRUD/search behaviour, extraction
+  marker parsing/cleanup, and injection token-budget prioritisation.
+- Chat now shows a live memory status line (enabled state and recent counts)
+  in the header area for clearer memory visibility.
 
 ### Changed
 
@@ -96,6 +100,10 @@ Pre-1.0 versions may still change internal APIs and storage details.
   "Cleanup" action.
 - Data root migration now carries all local SQLite families used by chat and
   memory features (`conversations.db*`, `memories.db*`, `benchmarks.db*`).
+- Feature documentation now includes a dedicated Memory section describing the
+  UI, settings controls, and background auto-summary behaviour.
+- Chat auto-summary failures are now captured in runtime logs as warnings
+  instead of being silently swallowed.
 
 
 

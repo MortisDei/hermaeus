@@ -15,6 +15,8 @@ public partial class ChatViewModel : ObservableObject
     private readonly ISettingsService _settings;
     private readonly ITtsService _tts;
     private readonly IToastService _toasts;
+    private readonly IMemoryStore _memoryStore;
+    private readonly IRuntimeLogService _runtimeLogs;
     private readonly IModelProfileService _profiles;
     private readonly IConversationMemoryService _conversationMemory;
     private CancellationTokenSource? _cts;
@@ -45,6 +47,7 @@ public partial class ChatViewModel : ObservableObject
     [ObservableProperty] private string    _contextUsageWarningLevel = "None";
     [ObservableProperty] private bool      _isContextUsageWarning;
     [ObservableProperty] private bool      _isContextUsageCritical;
+    [ObservableProperty] private string    _memoryStatus = string.Empty;
 
     public event EventHandler?        ScrollToBottom;
     public event EventHandler<string>? ConversationSaved;
@@ -55,14 +58,18 @@ public partial class ChatViewModel : ObservableObject
     public ChatViewModel(
         ILlmService llm,
         IConversationStore store,
+        IMemoryStore memoryStore,
         ISettingsService settings,
         ITtsService tts,
         IModelProfileService profiles,
         IToastService toasts,
-        IConversationMemoryService conversationMemory)
+        IConversationMemoryService conversationMemory,
+        IRuntimeLogService runtimeLogs)
     {
         _llm = llm; _store = store; _settings = settings; _tts = tts; _profiles = profiles; _toasts = toasts;
+        _memoryStore = memoryStore;
         _conversationMemory = conversationMemory;
+        _runtimeLogs = runtimeLogs;
         _temperature  = settings.Settings.Llm.Temperature;
         _systemPrompt = settings.Settings.Llm.DefaultSystemPrompt;
         Messages.CollectionChanged += (_, _) =>
@@ -77,6 +84,7 @@ public partial class ChatViewModel : ObservableObject
             ScheduleContextUsageRefresh();
         };
         RefreshEstimatedContextUsage();
+        _ = Task.Run(RefreshMemoryStatusAsync);
     }
 
     public async Task LoadModelsAsync(bool force = false)
@@ -131,6 +139,7 @@ public partial class ChatViewModel : ObservableObject
             Messages.Add(viewModel);
         }
         ScrollToBottom?.Invoke(this, EventArgs.Empty);
+        await RefreshMemoryStatusAsync();
     }
 
     public void NewConversation()
@@ -139,6 +148,7 @@ public partial class ChatViewModel : ObservableObject
         ConversationTitle     = "New Conversation";
         SystemPrompt          = _settings.Settings.Llm.DefaultSystemPrompt;
         Messages.Clear();
+        _ = Task.Run(RefreshMemoryStatusAsync);
     }
 
     [RelayCommand(CanExecute = nameof(CanSend))]
@@ -465,6 +475,7 @@ public partial class ChatViewModel : ObservableObject
             }).ToList()
         });
         ConversationSaved?.Invoke(this, CurrentConversationId);
+        await RefreshMemoryStatusAsync();
     }
 
     private async Task RunConversationMemoryAsync(string conversationId)
@@ -472,10 +483,41 @@ public partial class ChatViewModel : ObservableObject
         try
         {
             await _conversationMemory.RunAutoSummaryAsync(conversationId);
+            await RefreshMemoryStatusAsync();
+        }
+        catch (Exception ex)
+        {
+            _runtimeLogs.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Warning,
+                RuntimeLogCategory.Service,
+                $"Chat auto-summary failed: {ex.Message}"));
+        }
+    }
+
+    private async Task RefreshMemoryStatusAsync()
+    {
+        if (!_settings.Settings.Memory.Enabled)
+        {
+            MemoryStatus = "Memory off";
+            return;
+        }
+
+        try
+        {
+            var recent = await _memoryStore.GetRecentAsync(200);
+            if (string.IsNullOrWhiteSpace(CurrentConversationId))
+            {
+                MemoryStatus = $"Memory on · {recent.Count} recent";
+                return;
+            }
+
+            var inConversation = recent.Count(m => string.Equals(m.SourceConversationId, CurrentConversationId, StringComparison.Ordinal));
+            MemoryStatus = $"Memory on · {inConversation} in this chat · {recent.Count} recent";
         }
         catch
         {
-            // Auto-summary failures should never break chat flow.
+            MemoryStatus = "Memory on";
         }
     }
 

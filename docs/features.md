@@ -18,6 +18,21 @@
   attachments. At high usage, Aether warns so a fresh conversation can avoid
   quality loss.
 
+## Memory
+
+- Persistent chat memories with categories (`facts`, `preferences`,
+  `learned_behaviors`, `interests`) stored in a local SQLite database.
+- Dedicated Memories panel to review, search, pin, archive, and delete
+  memories.
+- Configurable memory controls in Settings: global enable, context injection,
+  auto-summary threshold, token budget, encryption toggle, and auto-archive
+  days.
+- Post-response auto-summary pipeline: important conversations are analysed in
+  the background and durable memories are extracted and merged with
+  deduplication safeguards.
+- Chat header now shows a live memory status line so you can see whether memory
+  is enabled and how many recent memories are available.
+
 ## Model Management
 
 - Model profiles with display names, descriptions, tags, visibility, and defaults.
