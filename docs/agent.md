@@ -23,6 +23,11 @@ The current Agent implementation focuses on read-first operations:
 - Can include relevant context from an optional RAG dataset.
 - Classifies risky actions before execution.
 
+The agent panel now also surfaces a compact summary strip with current task
+state, goal, summary, recent task history, review queue counts, workspace
+memory counts, and retrieved context counts so the workbench is easier to scan
+at a glance.
+
 ### Tools
 
 - Read-only file tools for workspace inspection.

@@ -33,6 +33,16 @@
 - Chat header now shows a live memory status line so you can see whether memory
   is enabled and how many recent memories are available.
 
+## Agent Workbench
+
+- Read-first local task workbench with explicit task state, compact context
+  packs, local logs/traces, and review queue controls.
+- The agent panel surfaces a compact summary strip with task state, goal,
+  summary, recent task history, review queue counts, workspace memory counts,
+  and retrieved context counts for quick scanning.
+- Workspace memory notes can be saved, reviewed, and deleted per workspace
+  root.
+
 ## Model Management
 
 - Model profiles with display names, descriptions, tags, visibility, and defaults.

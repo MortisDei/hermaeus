@@ -5,6 +5,18 @@ All notable changes to Aether will be documented in this file.
 The project follows semantic versioning once public release candidates begin.
 Pre-1.0 versions may still change internal APIs and storage details.
 
+## [0.9.3-alpha] - Unreleased
+
+### Added
+
+- Agent workbench now surfaces task state, goal, summary, recent task history,
+  review queue counts, workspace memory counts, and retrieved context counts in
+  a compact summary strip at the top of the panel.
+
+### Changed
+
+- Project version metadata bumped to `0.9.3-alpha`.
+
 ## [0.9.2-alpha] - Unreleased
 
 ### Added

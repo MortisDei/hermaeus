@@ -596,9 +596,9 @@ namespace Aether.Tests
             Equal(1, countB, "conv-B should have one stored memory");
 
             var batch = await store.GetCountsByConversationAsync(new[] { "conv-A", "conv-B", "conv-missing" });
-            Equal(2, batch["conv-A"]);
-            Equal(1, batch["conv-B"]);
-            Equal(0, batch["conv-missing"]);
+            Equal(2, batch["conv-A"], "batch count for conv-A should match");
+            Equal(1, batch["conv-B"], "batch count for conv-B should match");
+            Equal(0, batch["conv-missing"], "missing conversations should count as zero");
         }
 
         public static async Task MemoryExtractionParsesAndCleansMarkers()

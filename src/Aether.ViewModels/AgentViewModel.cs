@@ -109,6 +109,14 @@ public partial class AgentViewModel : ObservableObject
     [ObservableProperty] private string _logPreview = string.Empty;
     [ObservableProperty] private bool _isError;
 
+    public string CurrentTaskStatusLabel => CurrentTask is null ? "No active task" : CurrentTask.Status.ToString();
+    public string CurrentTaskGoalLabel => CurrentTask is null || string.IsNullOrWhiteSpace(CurrentTask.Goal) ? "No goal loaded" : CurrentTask.Goal;
+    public string CurrentTaskSummaryLabel => CurrentTask is null || string.IsNullOrWhiteSpace(CurrentTask.Summary) ? "No summary yet" : CurrentTask.Summary;
+    public int RecentTaskCount => RecentTasks.Count;
+    public int ReviewQueueCount => ReviewQueue.Count;
+    public int WorkspaceMemoryCount => WorkspaceMemory.Count;
+    public int RetrievedContextCount => RetrievedContext.Count;
+
     public AgentViewModel(
         IAgentService agent,
         IAgentTaskStateStore store,
@@ -124,7 +132,36 @@ public partial class AgentViewModel : ObservableObject
         _rag = rag;
         _logs = logs;
         WorkspaceRoot = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+
+        RecentTasks.CollectionChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(RecentTaskCount));
+            OnPropertyChanged(nameof(HasTaskHistory));
+        };
+
+        ReviewQueue.CollectionChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(ReviewQueueCount));
+            OnPropertyChanged(nameof(HasReviewQueue));
+        };
+
+        WorkspaceMemory.CollectionChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(WorkspaceMemoryCount));
+            OnPropertyChanged(nameof(HasWorkspaceMemory));
+        };
+
+        RetrievedContext.CollectionChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(RetrievedContextCount));
+            OnPropertyChanged(nameof(HasRetrievedContext));
+        };
     }
+
+    public bool HasTaskHistory => RecentTaskCount > 0;
+    public bool HasReviewQueue => ReviewQueueCount > 0;
+    public bool HasWorkspaceMemory => WorkspaceMemoryCount > 0;
+    public bool HasRetrievedContext => RetrievedContextCount > 0;
 
     [RelayCommand]
     public async Task LoadAsync()
@@ -346,6 +383,10 @@ public partial class AgentViewModel : ObservableObject
 
     private void RefreshTaskPreview()
     {
+        OnPropertyChanged(nameof(CurrentTaskStatusLabel));
+        OnPropertyChanged(nameof(CurrentTaskGoalLabel));
+        OnPropertyChanged(nameof(CurrentTaskSummaryLabel));
+
         if (CurrentTask is null)
         {
             TaskStatePreview = string.Empty;

@@ -1,35 +1,69 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Aether.ViewModels"
+             x:Name="Root"
              x:Class="Aether.Desktop.Views.AgentView"
              x:DataType="vm:AgentViewModel">
     <Grid RowDefinitions="Auto,*">
         <Border Grid.Row="0" Padding="12,8"
                 BorderThickness="0,0,0,1"
                 BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
-            <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="8">
-                <TextBlock Grid.Column="0"
-                           Text="Agent"
-                           FontSize="14"
-                           FontWeight="SemiBold"
-                           VerticalAlignment="Center" />
-                <TextBlock Grid.Column="1"
-                           Text="{Binding CurrentStep}"
-                           FontSize="12"
-                           Opacity="0.5"
-                           VerticalAlignment="Center"
-                           TextTrimming="CharacterEllipsis" />
-                <Button Grid.Column="2"
-                        Command="{Binding RunStepCommand}"
-                        Content="Run Step"
-                        Padding="12,6"
-                        CornerRadius="6" />
-                <Button Grid.Column="3"
-                        Command="{Binding StopCommand}"
-                        Content="Stop"
-                        Padding="12,6"
-                        CornerRadius="6" />
-            </Grid>
+            <StackPanel Spacing="8">
+                <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="8">
+                    <TextBlock Grid.Column="0"
+                               Text="Agent"
+                               FontSize="14"
+                               FontWeight="SemiBold"
+                               VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="1"
+                               Text="{Binding CurrentStep}"
+                               FontSize="12"
+                               Opacity="0.5"
+                               VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                    <Button Grid.Column="2"
+                            Command="{Binding RunStepCommand}"
+                            Content="Run Step"
+                            Padding="12,6"
+                            CornerRadius="6" />
+                    <Button Grid.Column="3"
+                            Command="{Binding StopCommand}"
+                            Content="Stop"
+                            Padding="12,6"
+                            CornerRadius="6" />
+                </Grid>
+
+                <Grid ColumnDefinitions="*,*,*,*" ColumnSpacing="8">
+                    <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="10">
+                        <StackPanel Spacing="2">
+                            <TextBlock Text="Task state" FontSize="11" Opacity="0.55" />
+                            <TextBlock Text="{Binding CurrentTaskStatusLabel}" FontSize="13" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding CurrentTaskGoalLabel}" FontSize="11" Opacity="0.7" TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                    </Border>
+                    <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="10">
+                        <StackPanel Spacing="2">
+                            <TextBlock Text="Task history" FontSize="11" Opacity="0.55" />
+                            <TextBlock Text="{Binding RecentTaskCount, StringFormat={}{0} recent tasks}" FontSize="13" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding ReviewQueueCount, StringFormat={}{0} queued reviews}" FontSize="11" Opacity="0.7" />
+                        </StackPanel>
+                    </Border>
+                    <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="10">
+                        <StackPanel Spacing="2">
+                            <TextBlock Text="Workspace memory" FontSize="11" Opacity="0.55" />
+                            <TextBlock Text="{Binding WorkspaceMemoryCount, StringFormat={}{0} saved notes}" FontSize="13" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding RetrievedContextCount, StringFormat={}{0} context items}" FontSize="11" Opacity="0.7" />
+                        </StackPanel>
+                    </Border>
+                    <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="10">
+                        <StackPanel Spacing="2">
+                            <TextBlock Text="Summary" FontSize="11" Opacity="0.55" />
+                            <TextBlock Text="{Binding CurrentTaskSummaryLabel}" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Text="{Binding StatusMessage}" FontSize="11" Opacity="0.7" TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </StackPanel>
         </Border>
 
         <ScrollViewer Grid.Row="1" Padding="24,16">
@@ -209,12 +243,12 @@
                                         <TextBlock Text="{Binding LatestApprovalLabel}"
                                                    FontSize="11"
                                                    Opacity="0.45" />
-                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <StackPanel Orientation="Horizontal" Spacing="8" x:CompileBindings="False">
                                             <Button Content="Approve"
-                                                    Command="{Binding DataContext.ApproveReviewCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                    Command="{Binding DataContext.ApproveReviewCommand, ElementName=Root}"
                                                     CommandParameter="{Binding}" />
                                             <Button Content="Reject"
-                                                    Command="{Binding DataContext.RejectReviewCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                    Command="{Binding DataContext.RejectReviewCommand, ElementName=Root}"
                                                     CommandParameter="{Binding}" />
                                         </StackPanel>
                                     </StackPanel>
@@ -254,7 +288,8 @@
                                                    Opacity="0.4" />
                                         <Button Content="Delete"
                                                 HorizontalAlignment="Left"
-                                                Command="{Binding DataContext.DeleteWorkspaceMemoryCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                            x:CompileBindings="False"
+                                                Command="{Binding DataContext.DeleteWorkspaceMemoryCommand, ElementName=Root}"
                                                 CommandParameter="{Binding}" />
                                     </StackPanel>
                                 </Border>
