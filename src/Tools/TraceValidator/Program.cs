@@ -1,7 +1,9 @@
 using System;
 using System.IO;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Json.Schema;
 
 internal static class Program
 {
@@ -19,10 +21,21 @@ internal static class Program
         if (!File.Exists(schemaPath))
         {
             Console.Error.WriteLine($"Schema file not found: {schemaPath}");
-            // Not fatal - continue with minimal validation
+            return 2;
         }
 
         Console.WriteLine($"Validating trace: {tracePath}");
+        JsonSchema schema;
+        try
+        {
+            schema = JsonSchema.FromFile(schemaPath, new BuildOptions { SchemaRegistry = new SchemaRegistry() });
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Failed to load schema: {ex.Message}");
+            return 2;
+        }
+
         var lineNo = 0;
         var errors = 0;
 
@@ -38,27 +51,20 @@ internal static class Program
                 using var doc = JsonDocument.Parse(line);
                 var root = doc.RootElement;
 
-                if (!root.TryGetProperty("timestamp", out var ts) || string.IsNullOrWhiteSpace(ts.GetString()))
+                var result = schema.Evaluate(root, new EvaluationOptions { OutputFormat = OutputFormat.Hierarchical });
+                if (result.IsValid)
                 {
-                    Console.WriteLine($"Line {lineNo}: missing timestamp");
-                    errors++;
                     continue;
                 }
 
-                if (!DateTime.TryParse(ts.GetString(), null, System.Globalization.DateTimeStyles.RoundtripKind, out _))
+                errors++;
+                Console.WriteLine($"Line {lineNo}: schema validation failed");
+                var resultText = JsonSerializer.Serialize(result, new JsonSerializerOptions
                 {
-                    Console.WriteLine($"Line {lineNo}: invalid timestamp format: {ts.GetString()}");
-                    errors++;
-                }
-
-                foreach (var required in new[] { "taskId", "event", "status" })
-                {
-                    if (!root.TryGetProperty(required, out _))
-                    {
-                        Console.WriteLine($"Line {lineNo}: missing required property '{required}'");
-                        errors++;
-                    }
-                }
+                    WriteIndented = true,
+                    Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+                });
+                Console.WriteLine(resultText);
             }
             catch (JsonException ex)
             {

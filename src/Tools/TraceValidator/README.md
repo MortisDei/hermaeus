@@ -1,6 +1,6 @@
 # TraceValidator
 
-Small CLI tool to validate Aether `agent.trace.jsonl` event lines for basic required fields and timestamp format.
+Small CLI tool to validate Aether `agent.trace.jsonl` event lines against `docs/schemas/agent_trace.schema.json` using `Json.Schema`.
 
 Usage:
 
@@ -8,9 +8,15 @@ Usage:
 dotnet run --project src/Tools/TraceValidator -- path/to/agent.trace.jsonl [docs/schemas/agent_trace.schema.json]
 ```
 
+Or use the convenience wrapper:
+
+```bash
+bash scripts/validate_trace.sh [path/to/agent.trace.jsonl] [docs/schemas/agent_trace.schema.json]
+```
+
 Exit codes:
 - 0: success (no validation errors)
 - 1: validation errors found
-- 2: missing input file
+- 2: missing input file or schema load failure
 
-This intentionally performs lightweight validation (required keys and timestamp parsing). For full JSON Schema validation, add a JSON Schema library (e.g., `Json.Schema`) and wire it to the schema file.
+Validation errors are printed using the schema evaluation output so you can see the failing line and the validation details.

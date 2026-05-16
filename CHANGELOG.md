@@ -19,9 +19,9 @@ Pre-1.0 versions may still change internal APIs and storage details.
   unsupported answer rate, refusal accuracy, and reranker rank delta.
 
 - Tools: added a lightweight CLI `TraceValidator` tool for validating
-  `agent.trace.jsonl` event lines (basic required-field checks and timestamp
-  formatting). The tool lives at `src/Tools/TraceValidator` and accepts a
-  trace file path and optional schema path.
+  `agent.trace.jsonl` event lines. It now uses `JsonSchema.Net` to validate
+  each trace line against `docs/schemas/agent_trace.schema.json`, and ships
+  with a convenience runner script at `scripts/validate_trace.sh`.
 - Schemas: added example JSON Schema at `docs/schemas/agent_trace.schema.json`
   to document the fields emitted in agent traces and to guide future
   validation tooling.

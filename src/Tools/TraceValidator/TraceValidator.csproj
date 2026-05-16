@@ -9,4 +9,8 @@
     <RootNamespace>TraceValidator</RootNamespace>
   </PropertyGroup>
 
+  <ItemGroup>
+    <PackageReference Include="JsonSchema.Net" Version="9.2.1" />
+  </ItemGroup>
+
 </Project>
