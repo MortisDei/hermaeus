@@ -11,6 +11,7 @@ public partial class DoctorViewModel : ObservableObject
 {
     private readonly IDoctorService _doctor;
     private readonly IToastService _toasts;
+    private readonly ISettingsService _settingsService;
     private CancellationTokenSource? _installCts;
 
     [ObservableProperty] private bool _isScanning;
@@ -20,16 +21,21 @@ public partial class DoctorViewModel : ObservableObject
     [ObservableProperty] private string _rerankerProgress = string.Empty;
     [ObservableProperty] private bool _isInstallingEmbeddingModel;
     [ObservableProperty] private string _embeddingModelProgress = string.Empty;
+    [ObservableProperty] private double _embeddingModelProgressPercent;
+    [ObservableProperty] private bool _embeddingModelProgressIsIndeterminate = true;
+
+    private readonly System.Text.StringBuilder _embeddingLogBuffer = new();
 
     public ObservableCollection<DoctorCheck> Checks { get; } = [];
 
     public Action<string>? RequestCopyToClipboard { get; set; }
     public Action<string>? RequestNavigate { get; set; }
 
-    public DoctorViewModel(IDoctorService doctor, IToastService toasts)
+    public DoctorViewModel(IDoctorService doctor, IToastService toasts, ISettingsService settings)
     {
         _doctor = doctor;
         _toasts = toasts;
+        _settingsService = settings;
     }
 
     [RelayCommand]
@@ -85,6 +91,62 @@ public partial class DoctorViewModel : ObservableObject
             _installCts.Cancel();
         }
         catch { }
+    }
+
+    private void HandleEmbeddingProgress(string s)
+    {
+        EmbeddingModelProgress = s;
+        try
+        {
+            // parse percent like '... 42.3%'
+            var m = System.Text.RegularExpressions.Regex.Match(s ?? string.Empty, "(\\d+(?:\\.\\d+)?)%", System.Text.RegularExpressions.RegexOptions.Compiled);
+            if (m.Success && double.TryParse(m.Groups[1].Value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var pct))
+            {
+                EmbeddingModelProgressPercent = pct;
+                EmbeddingModelProgressIsIndeterminate = false;
+            }
+            else
+            {
+                EmbeddingModelProgressIsIndeterminate = true;
+            }
+        }
+        catch { EmbeddingModelProgressIsIndeterminate = true; }
+
+        // append to in-memory buffer
+        try
+        {
+            _embeddingLogBuffer.AppendLine($"{DateTime.UtcNow:O} {s}");
+        }
+        catch { }
+
+        // update the corresponding check diagnostics (if present)
+        try
+        {
+            var idx = Checks.ToList().FindIndex(c => c.Key == "embedding-model");
+            if (idx >= 0)
+            {
+                var existing = Checks[idx];
+                var updated = new DoctorCheck(existing.Key, existing.Title, existing.Status, existing.Summary, existing.Detail, existing.FixLabel, existing.CanFix, _embeddingLogBuffer.ToString(), existing.Category);
+                // replace item to notify UI
+                Checks[idx] = updated;
+            }
+        }
+        catch { }
+
+        // persist to a log file asynchronously
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var root = Aether.Services.SettingsService.ResolveDataRoot(_settingsService.Settings);
+                var dir = Path.Combine(root, "logs");
+                Directory.CreateDirectory(dir);
+                var path = Path.Combine(dir, "embedding_downloads.log");
+                var entry = $"{DateTime.UtcNow:O} {s}{Environment.NewLine}";
+                await File.AppendAllTextAsync(path, entry);
+            }
+            catch { }
+        });
     }
 
     [RelayCommand]
@@ -156,8 +218,9 @@ public partial class DoctorViewModel : ObservableObject
             {
                 if (IsInstallingEmbeddingModel) return;
                 IsInstallingEmbeddingModel = true;
-                var progress = new Progress<string>(s => EmbeddingModelProgress = s);
-                var ok = await _doctor.InstallEmbeddingModelAsync(progress);
+                _installCts = new CancellationTokenSource();
+                var progress = new Progress<string>(s => HandleEmbeddingProgress(s));
+                var ok = await _doctor.InstallEmbeddingModelAsync(progress, _installCts.Token);
                 _toasts.Show(ok ? "Embedding model installed" : "Embedding model install failed",
                     ok ? "Embedding model downloaded and configured." : "See diagnostics for details.",
                     ok ? ToastKind.Success : ToastKind.Error,
@@ -165,13 +228,22 @@ public partial class DoctorViewModel : ObservableObject
                 await ScanAsync();
                 EmbeddingModelProgress = string.Empty;
                 IsInstallingEmbeddingModel = false;
+                _installCts = null;
                 return;
             }
             catch (Exception ex)
             {
-                _toasts.Show("Embedding model install failed", ex.Message, ToastKind.Error, 7000);
+                if (ex is OperationCanceledException)
+                {
+                    _toasts.Show("Embedding install cancelled", "Installation was cancelled.", ToastKind.Info, 4000);
+                }
+                else
+                {
+                    _toasts.Show("Embedding model install failed", ex.Message, ToastKind.Error, 7000);
+                }
                 IsInstallingEmbeddingModel = false;
                 EmbeddingModelProgress = string.Empty;
+                _installCts = null;
                 return;
             }
         }

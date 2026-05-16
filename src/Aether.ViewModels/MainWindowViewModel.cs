@@ -35,6 +35,7 @@ public partial class MainWindowViewModel : ObservableObject
 
     public ObservableCollection<ConversationItemViewModel> Conversations { get; } = [];
     public ObservableCollection<ToastViewModel> Toasts { get; } = [];
+    public ObservableCollection<ToastViewModel> ToastHistory { get; } = [];
     public ObservableCollection<string> FolderFilters { get; } = ["All"];
 
     [ObservableProperty] private bool   _isSidebarOpen = true;
@@ -44,6 +45,10 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty] private string _selectedFolderFilter = "All";
     [ObservableProperty] private bool   _showArchivedConversations;
     [ObservableProperty] private bool   _showQuickChat;
+    [ObservableProperty] private bool   _showToastHistory;
+    [ObservableProperty] private bool   _doctorHasErrors;
+    [ObservableProperty] private bool   _doctorHasWarnings;
+    [ObservableProperty] private bool   _doctorIsOk;
 
     public bool ShowChat     => ActivePanel == "chat";
     public bool ShowAgent    => ActivePanel == "agent";
@@ -116,6 +121,9 @@ public partial class MainWindowViewModel : ObservableObject
         Agent.DraftPatchPreviewRequested += (patchId, path, oldText, newText, decision) =>
             ShowDraftPatchPreviewPanel(patchId, path, oldText, newText, decision);
         Doctor.RequestNavigate = panel => ActivePanel = panel;
+        // Keep toolbar doctor badge in sync with doctor checks
+        Doctor.Checks.CollectionChanged += (_, _) => UpdateDoctorStatus();
+        UpdateDoctorStatus();
         Wizard.WizardCompleted += () => ActivePanel = "chat";
         // allow settings view to request re-running the setup wizard
         Settings.RequestShowSetupWizard = () => ActivePanel = "wizard";
@@ -126,6 +134,15 @@ public partial class MainWindowViewModel : ObservableObject
         
     }
 
+    private void UpdateDoctorStatus()
+    {
+        var errs = Doctor.Checks.Count(c => c.Status == Aether.Core.Models.DoctorCheckStatus.Error);
+        var warns = Doctor.Checks.Count(c => c.Status == Aether.Core.Models.DoctorCheckStatus.Warning);
+        DoctorHasErrors = errs > 0;
+        DoctorHasWarnings = errs == 0 && warns > 0;
+        DoctorIsOk = errs == 0 && warns == 0 && Doctor.Checks.Count > 0;
+    }
+
     public async Task InitializeAsync()
     {
         IsLoading = true;
@@ -134,12 +151,17 @@ public partial class MainWindowViewModel : ObservableObject
             await LoadConversationsAsync();
             Settings.Reload();
             ShowQuickChat = Settings.ShowQuickChat;
+            await LoadToastHistoryAsync();
+            if (!_settingsService.Settings.SetupWizardCompleted)
+            {
+                ActivePanel = "wizard";
+                return;
+            }
+
             await Rag.LoadDatasetsAsync();
             await Agent.LoadAsync();
             await Services.AutoStartAllAsync();
             await Chat.LoadModelsAsync();
-            if (!_settingsService.Settings.SetupWizardCompleted)
-                ActivePanel = "wizard";
         }
         finally { IsLoading = false; }
     }
@@ -352,6 +374,12 @@ public partial class MainWindowViewModel : ObservableObject
     [RelayCommand] private void ShowSettingsPanel()    { ActivePanel = "settings"; Settings.Reload(); }
 
     [RelayCommand]
+    private void ToggleToastHistory()
+    {
+        ShowToastHistory = !ShowToastHistory;
+    }
+
+    [RelayCommand]
     private async Task SearchAsync()
     {
         await LoadConversationsAsync();
@@ -446,6 +474,7 @@ public partial class MainWindowViewModel : ObservableObject
         {
             Title = toast.Title,
             Message = toast.Message,
+            Timestamp = DateTime.UtcNow,
             Kind = toast.Kind,
             DurationMs = toast.DurationMs
         };
@@ -460,6 +489,79 @@ public partial class MainWindowViewModel : ObservableObject
             Toasts.Add(vm);
         });
         _ = RemoveToastLaterAsync(vm);
+        // add to persistent history and save
+        RunOnUi(() => ToastHistory.Insert(0, vm));
+        _ = SaveToastHistoryAsync();
+    }
+
+    private async Task LoadToastHistoryAsync()
+    {
+        try
+        {
+            var root = Aether.Services.SettingsService.ResolveDataRoot(_settingsService.Settings);
+            var path = Path.Combine(root, "toasts.json");
+            if (!File.Exists(path)) return;
+            var json = await File.ReadAllTextAsync(path);
+            var opts = new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            var list = System.Text.Json.JsonSerializer.Deserialize<List<ToastHistoryEntry>>(json, opts);
+            if (list is null) return;
+            RunOnUi(() =>
+            {
+                ToastHistory.Clear();
+                foreach (var e in list.OrderByDescending(t => t.Timestamp))
+                    ToastHistory.Add(new ToastViewModel { Title = e.Title, Message = e.Message, Kind = e.Kind, DurationMs = e.DurationMs, Timestamp = e.Timestamp });
+                // cap size
+                TrimToastHistory();
+            });
+        }
+        catch { }
+    }
+
+    private async Task SaveToastHistoryAsync()
+    {
+        try
+        {
+            var root = Aether.Services.SettingsService.ResolveDataRoot(_settingsService.Settings);
+            Directory.CreateDirectory(root);
+            var path = Path.Combine(root, "toasts.json");
+            var list = ToastHistory.Select(t => new ToastHistoryEntry { Title = t.Title, Message = t.Message, Kind = t.Kind, DurationMs = t.DurationMs, Timestamp = t.Timestamp }).ToList();
+            var opts = new System.Text.Json.JsonSerializerOptions { WriteIndented = true };
+            var json = System.Text.Json.JsonSerializer.Serialize(list, opts);
+            await File.WriteAllTextAsync(path, json);
+        }
+        catch { }
+    }
+
+    private void TrimToastHistory()
+    {
+        const int MaxHistory = 200;
+        while (ToastHistory.Count > MaxHistory)
+            ToastHistory.RemoveAt(ToastHistory.Count - 1);
+    }
+
+    [RelayCommand]
+    private async Task DismissToastAsync(ToastViewModel? item)
+    {
+        if (item is null) return;
+        RunOnUi(() => ToastHistory.Remove(item));
+        TrimToastHistory();
+        await SaveToastHistoryAsync();
+    }
+
+    [RelayCommand]
+    private async Task ClearToastHistoryAsync()
+    {
+        RunOnUi(() => ToastHistory.Clear());
+        await SaveToastHistoryAsync();
+    }
+
+    private sealed class ToastHistoryEntry
+    {
+        public string Title { get; set; } = string.Empty;
+        public string Message { get; set; } = string.Empty;
+        public ToastKind Kind { get; set; }
+        public int DurationMs { get; set; }
+        public DateTime Timestamp { get; set; }
     }
 
     private async Task RemoveToastLaterAsync(ToastViewModel toast)

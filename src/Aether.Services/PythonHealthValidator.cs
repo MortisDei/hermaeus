@@ -139,7 +139,14 @@ print(json.dumps({"version": version, "issues": issues, "base_prefix": base_pref
     private bool IsRequiredVersion(string version)
     {
         if (string.IsNullOrWhiteSpace(version)) return false;
-        return version.StartsWith($"{_requiredMajor}.{_requiredMinor}", StringComparison.Ordinal);
+        // Accept any patch version and any newer minor version within the same major.
+        // e.g., required 3.11 should accept 3.11.x and 3.12.x, 3.13.x, etc.
+        var parts = version.Split('.', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length < 2) return false;
+        if (!int.TryParse(parts[0], out var major)) return false;
+        if (!int.TryParse(parts[1], out var minor)) return false;
+        if (major != _requiredMajor) return false;
+        return minor >= _requiredMinor;
     }
 
     private static async Task<(bool Success, string Output)> RunPythonAsync(string pythonPath, string script, CancellationToken ct)

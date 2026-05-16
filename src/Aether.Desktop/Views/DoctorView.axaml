@@ -73,6 +73,7 @@
                                     </StackPanel>
                                 </Grid>
                                 <TextBlock Text="{Binding Detail}" FontSize="12" Opacity="0.5" TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding Diagnostics}" FontSize="11" Opacity="0.65" TextWrapping="Wrap" Margin="0,6,0,0" />
                             </StackPanel>
                         </Border>
                     </DataTemplate>
@@ -89,6 +90,20 @@
                 <TextBlock Text="This will download and load the ONNX reranker model. You can cancel at any time." Opacity="0.7" TextWrapping="Wrap" />
                 <ProgressBar IsIndeterminate="True" Height="12" />
                 <TextBlock Text="{Binding RerankerProgress}" Opacity="0.9" />
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+                    <Button Content="Cancel" Command="{Binding CancelInstallCommand}" Padding="10,6" />
+                </StackPanel>
+            </StackPanel>
+        </Border>
+        </Grid>
+        <!-- Embedding model install modal overlay -->
+        <Grid IsVisible="{Binding IsInstallingEmbeddingModel}" Background="#80000000">
+        <Border HorizontalAlignment="Center" VerticalAlignment="Center" Background="{DynamicResource BackgroundBrush}" Padding="20" CornerRadius="8">
+            <StackPanel Spacing="12" Width="520">
+                <TextBlock Text="Installing Embedding Model" FontSize="16" FontWeight="SemiBold" />
+                <TextBlock Text="This will download the default embedding model (nomic-embed-text-v1.5-Q4_K_M.gguf). You can cancel at any time." Opacity="0.7" TextWrapping="Wrap" />
+                <ProgressBar IsIndeterminate="{Binding EmbeddingModelProgressIsIndeterminate}" Value="{Binding EmbeddingModelProgressPercent}" Maximum="100" Height="12" />
+                <TextBlock Text="{Binding EmbeddingModelProgress}" Opacity="0.9" TextWrapping="Wrap" />
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
                     <Button Content="Cancel" Command="{Binding CancelInstallCommand}" Padding="10,6" />
                 </StackPanel>

@@ -84,10 +84,7 @@
                         <TextBlock Grid.Row="0" Grid.Column="0" Text="Embed model"
                                    VerticalAlignment="Center" Opacity="0.6" FontSize="13"
                                    ToolTip.Tip="Model used to generate embeddings for semantic search" />
-                        <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding EmbeddingModel}"
-                                 Watermark="nomic-embed-text"
-                                 ToolTip.Tip="Defaults to nomic-embed-text. Managed via Services panel."
-                                 FontSize="13" CornerRadius="6" Padding="10,6" />
+                        <ComboBox Grid.Row="0" Grid.Column="1" ItemsSource="{Binding EmbeddingModelOptions}" SelectedItem="{Binding EmbeddingModel}" FontSize="13" CornerRadius="6" />
                         <TextBlock Grid.Row="1" Grid.Column="0" Text="Reranker"
                                    VerticalAlignment="Center" Opacity="0.6" FontSize="13"
                                    ToolTip.Tip="Optional cross-encoder model for re-ranking search results" />

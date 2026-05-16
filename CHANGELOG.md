@@ -41,6 +41,10 @@ Pre-1.0 versions may still change internal APIs and storage details.
 - RAG ingest now pauses non-embedding LLM servers and TTS services during
   document indexing to reduce memory pressure, then restores them after
   ingest completion (or cancellation/failure).
+- First-run startup now skips heavyweight panel loading until the setup wizard
+  is completed, so the wizard appears sooner and initial launch feels snappier.
+- Toast notifications now use a toast-shaped toolbar icon, and the stored
+  notification history shows the newest items first.
 
 ### Changed
 

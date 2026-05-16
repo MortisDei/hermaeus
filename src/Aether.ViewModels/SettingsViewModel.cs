@@ -42,6 +42,7 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private string _dataRootDirectory = string.Empty;
     [ObservableProperty] private string _dataMigrationPreview = string.Empty;
     [ObservableProperty] private string _localAiAssetsRoot = string.Empty;
+    public ObservableCollection<string> EmbeddingModelOptions { get; } = [];
     [ObservableProperty] private string _localAiAssetsStatus = "Choose a local AI assets folder first.";
     [ObservableProperty] private string _ragRerankerModelPath = string.Empty;
     [ObservableProperty] private string _backupDirectory = string.Empty;
@@ -102,7 +103,8 @@ public partial class SettingsViewModel : ObservableObject
         XttsProcessManager xttsProcess,
         KokoroProcessManager kokoroProcess,
         ILocalAiSetupService localAiSetup,
-        ITrustService trust)
+        ITrustService trust,
+        ServicesViewModel? services = null)
     {
         _svc = svc;
         _tts = tts;
@@ -114,10 +116,13 @@ public partial class SettingsViewModel : ObservableObject
         _kokoroProcess = kokoroProcess;
         _localAiSetup = localAiSetup;
         _trust = trust;
+        _servicesView = services;
 
         Tts = new TtsSettingsViewModel(_tts, _voiceProviderRegistry, _toasts, _xttsProcess, _kokoroProcess, _secrets, _svc);
         Reload();
     }
+
+    private readonly ServicesViewModel? _servicesView;
 
     // When the app wants the settings view to re-run the setup wizard, this action will be invoked
     public Action? RequestShowSetupWizard { get; set; }
@@ -149,6 +154,7 @@ public partial class SettingsViewModel : ObservableObject
         DataRootDirectory   = s.DataManagement.DataRootDirectory;
         LocalAiAssetsRoot   = s.DataManagement.LocalAiAssetsRoot;
         RagRerankerModelPath = s.Rag.RerankerModelPath;
+        RefreshEmbeddingModelOptions();
 
         Tts.ReloadFrom(s);
 
@@ -174,6 +180,7 @@ public partial class SettingsViewModel : ObservableObject
         var s = _svc.Settings;
         var previousDataRoot = s.DataManagement.DataRootDirectory;
         SettingsError = string.Empty;
+        var previousEmbedding = s.Rag.EmbeddingModel;
 
         s.Llm.LlamaCppBaseUrl     = LlamaCppBaseUrl;
         s.Llm.LlamaCppEnabled     = LlamaCppEnabled;
@@ -241,6 +248,36 @@ public partial class SettingsViewModel : ObservableObject
 
         IsSaved = true;
         _toasts.Show("Settings saved", "Aether settings were updated.", ToastKind.Success);
+        // If embedding model changed, try to resolve a local model file and update embedding server
+        try
+        {
+            if (!string.Equals(previousEmbedding, EmbeddingModel, StringComparison.OrdinalIgnoreCase))
+            {
+                var modelPath = ResolveLocalEmbeddingModelPath(EmbeddingModel, LocalAiAssetsRoot);
+                if (!string.IsNullOrWhiteSpace(modelPath))
+                {
+                    var server = s.ManagedServers.FirstOrDefault(sv => sv.EmbeddingsMode);
+                    if (server is not null)
+                    {
+                        server.ModelPath = modelPath;
+                        await _svc.SaveAsync();
+                        if (_servicesView is not null)
+                        {
+                            var embedServer = _servicesView.Servers.FirstOrDefault(x => x.EmbeddingsMode);
+                            if (embedServer is not null)
+                            {
+                                await _servicesView.RestartServersAsync(new[] { embedServer.Id });
+                                _toasts.Show("Embedding server restarted", "Embedding server restarted with the new model.", ToastKind.Info);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _toasts.Show("Embedding model apply failed", ex.Message, ToastKind.Warning);
+        }
         await Task.Delay(2000);
         IsSaved = false;
     }
@@ -560,6 +597,38 @@ public partial class SettingsViewModel : ObservableObject
     private void UpdateLocalAiAssetsStatus()
     {
         LocalAiAssetsStatus = LocalAiAssetLocator.Detect(LocalAiAssetsRoot).Summary;
+        RefreshEmbeddingModelOptions();
+    }
+
+    private void RefreshEmbeddingModelOptions()
+    {
+        EmbeddingModelOptions.Clear();
+        try
+        {
+            var root = string.IsNullOrWhiteSpace(LocalAiAssetsRoot) ? ResolveDataRoot() : Path.GetFullPath(LocalAiAssetsRoot);
+            if (!Directory.Exists(root)) return;
+            var ggufs = Directory.EnumerateFiles(root, "*.gguf", SearchOption.AllDirectories)
+                .Select(Path.GetFileNameWithoutExtension)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(x => x);
+            foreach (var name in ggufs.Where(n => !string.IsNullOrWhiteSpace(n)))
+                EmbeddingModelOptions.Add(name!);
+        }
+        catch { }
+    }
+
+    private static string ResolveLocalEmbeddingModelPath(string modelId, string root)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(root) || string.IsNullOrWhiteSpace(modelId)) return string.Empty;
+            var candidates = Directory.EnumerateFiles(root, "*.gguf", SearchOption.AllDirectories)
+                .Where(p => Path.GetFileNameWithoutExtension(p).IndexOf(modelId, StringComparison.OrdinalIgnoreCase) >= 0)
+                .OrderBy(p => p.Length)
+                .ToList();
+            return candidates.FirstOrDefault() ?? string.Empty;
+        }
+        catch { return string.Empty; }
     }
 
     private async Task SaveLocalAiPathsForSetupAsync()

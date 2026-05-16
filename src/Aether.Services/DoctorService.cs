@@ -392,9 +392,9 @@ public sealed class DoctorService : IDoctorService
         }
 
         var modelDir = ResolveRerankerDirectory();
-        var modelPath = Path.Combine(modelDir, "model_O4.onnx");
         var vocabPath = Path.Combine(modelDir, "vocab.txt");
-        var ok = File.Exists(modelPath) && File.Exists(vocabPath);
+        // Accept any ONNX file in the reranker directory (some mirrors/name variants use different filenames)
+        var ok = File.Exists(vocabPath) && Directory.Exists(modelDir) && Directory.EnumerateFiles(modelDir, "*.onnx", SearchOption.TopDirectoryOnly).Any();
         return BuildCheck(
             "reranker",
             "Reranker assets",
@@ -617,12 +617,18 @@ public sealed class DoctorService : IDoctorService
 
             try
             {
-                var matches = Directory.EnumerateFiles(dir, "*.gguf", SearchOption.AllDirectories)
-                    .Where(path => markers.Any(marker => path.Contains(marker, StringComparison.OrdinalIgnoreCase)))
+                // Prefer marker-matched files (model name, embedding-related keywords).
+                var all = Directory.EnumerateFiles(dir, "*.gguf", SearchOption.AllDirectories).ToList();
+                var matches = all.Where(path => markers.Any(marker => path.Contains(marker, StringComparison.OrdinalIgnoreCase)))
                     .OrderBy(path => path.Length)
                     .ToList();
+
                 if (matches.Count > 0)
                     return (true, matches[0], string.Join(", ", directories));
+
+                // Fallback: if there are any GGUF files at all, pick the shortest path (likely the intended model)
+                if (all.Count > 0)
+                    return (true, all.OrderBy(p => p.Length).First(), string.Join(", ", directories));
             }
             catch
             {
@@ -654,6 +660,8 @@ public sealed class DoctorService : IDoctorService
         return new[]
         {
             layout.ModelsDirectory,
+            // Include the root folder itself in case users point directly at a model folder
+            string.IsNullOrWhiteSpace(aiRoot) ? string.Empty : Path.GetFullPath(aiRoot),
             string.IsNullOrWhiteSpace(aiRoot) ? string.Empty : Path.Combine(Path.GetFullPath(aiRoot), "models"),
             string.IsNullOrWhiteSpace(aiRoot) ? string.Empty : Path.Combine(Path.GetFullPath(aiRoot), "Models"),
             Path.Combine(dataRoot, "models")

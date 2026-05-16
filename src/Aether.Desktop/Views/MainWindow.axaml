@@ -97,8 +97,19 @@
 
                         <Button Classes="icon-btn" Command="{Binding ShowDoctorPanelCommand}"
                                 ToolTip.Tip="Aether Doctor">
-                            <PathIcon Data="M12 2a5 5 0 0 0-5 5v3H5a1 1 0 0 0-1 1v3h3v6h10v-6h3v-3a1 1 0 0 0-1-1h-2V7a5 5 0 0 0-5-5zm-3 8V7a3 3 0 1 1 6 0v3H9zm0 8v-4h6v4H9z"
-                                      Width="17" Height="17" />
+                            <Grid>
+                                <PathIcon Data="M12 2a5 5 0 0 0-5 5v3H5a1 1 0 0 0-1 1v3h3v6h10v-6h3v-3a1 1 0 0 0-1-1h-2V7a5 5 0 0 0-5-5zm-3 8V7a3 3 0 1 1 6 0v3H9zm0 8v-4h6v4H9z"
+                                          Width="17" Height="17" />
+                                <Ellipse Width="10" Height="10" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,0,-2,-2"
+                                         Fill="#f44336"
+                                         IsVisible="{Binding DoctorHasErrors}" />
+                                <Ellipse Width="8" Height="8" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,0,-1,-1"
+                                         Fill="#FF9800"
+                                         IsVisible="{Binding DoctorHasWarnings}" />
+                                <Ellipse Width="6" Height="6" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,0,0,0"
+                                         Fill="#4CAF50"
+                                         IsVisible="{Binding DoctorIsOk}" />
+                            </Grid>
                         </Button>
 
                         <Button Classes="icon-btn" Command="{Binding ShowMemoriesPanelCommand}"
@@ -116,6 +127,12 @@
                         <Button Classes="icon-btn" Command="{Binding ShowLogsPanelCommand}"
                                 ToolTip.Tip="Runtime logs">
                             <PathIcon Data="M4 6h16v2H4V6zm0 4h16v2H4v-2zm0 4h10v2H4v-2z"
+                                      Width="17" Height="17" />
+                        </Button>
+
+                        <Button Classes="icon-btn" Command="{Binding ToggleToastHistoryCommand}"
+                                ToolTip.Tip="Toast notifications">
+                            <PathIcon Data="M5 4h8c2.21 0 4 1.79 4 4v6c0 2.21-1.79 4-4 4H7c-2.21 0-4-1.79-4-4V6c0-1.1.9-2 2-2zm1 2a1 1 0 0 0-1 1v6c0 .55.45 1 1 1h5.5a1.5 1.5 0 0 0 1.5-1.5V8a2 2 0 0 0-2-2H6zM8 7h3c.55 0 1 .45 1 1v2c0 .55-.45 1-1 1H8c-.55 0-1-.45-1-1V8c0-.55.45-1 1-1z"
                                       Width="17" Height="17" />
                         </Button>
 
@@ -299,5 +316,47 @@
                 </DataTemplate>
             </ItemsControl.ItemTemplate>
         </ItemsControl>
+
+        <!-- Persistent toast history panel -->
+        <Border Grid.ColumnSpan="2"
+                IsVisible="{Binding ShowToastHistory}"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Top"
+                Margin="0,58,18,0"
+                Width="420"
+                MaxHeight="320"
+                Padding="12"
+                CornerRadius="8"
+                Background="{DynamicResource SolidBackgroundFillColorBaseBrush}"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                BorderThickness="1">
+            <StackPanel Spacing="8">
+                <TextBlock Text="Notifications" FontWeight="SemiBold" FontSize="14" />
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button Content="Clear" Command="{Binding ClearToastHistoryCommand}" Padding="8,4" CornerRadius="6" />
+                </StackPanel>
+                <ScrollViewer MaxHeight="260">
+                    <ItemsControl ItemsSource="{Binding ToastHistory}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:ToastViewModel">
+                                <Border Padding="8" Margin="0,0,0,6" CornerRadius="6" Background="{DynamicResource SubtleFillColorTertiaryBrush}">
+                                    <StackPanel>
+                                        <Grid ColumnDefinitions="*,Auto">
+                                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <TextBlock Text="{Binding KindLabel}" Opacity="0.7" />
+                                                <Button Content="Dismiss" Command="{Binding $parent[ItemsControl].DataContext.DismissToastCommand}" CommandParameter="{Binding}" Padding="6,4" CornerRadius="6" />
+                                            </StackPanel>
+                                        </Grid>
+                                        <TextBlock Text="{Binding Message}" TextWrapping="Wrap" />
+                                        <TextBlock Text="{Binding Timestamp}" FontSize="11" Opacity="0.6" />
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </StackPanel>
+        </Border>
     </Grid>
 </Window>
