@@ -48,7 +48,7 @@ public sealed class KokoroProcessManager : IDisposable
 
         if (settings.Tts.Device.Equals("cpu", StringComparison.OrdinalIgnoreCase))
             psi.Environment["CUDA_VISIBLE_DEVICES"] = string.Empty;
-        else
+        else if (settings.Tts.Device.Equals("cuda", StringComparison.OrdinalIgnoreCase))
             psi.Environment["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True";
 
         _process = new Process { StartInfo = psi, EnableRaisingEvents = true };

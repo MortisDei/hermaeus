@@ -44,7 +44,7 @@ public partial class TtsSettingsViewModel : ObservableObject
 
     public Func<Task>? RequestTtsVoiceSamplePicker { get; set; }
 
-    public string[] TtsDevices { get; } = ["cpu", "auto", "cuda", "rocm"];
+    public string[] TtsDevices { get; } = ["cpu", "auto", "cuda", "rocm", "mps"];
     public ObservableCollection<string> TtsVoices { get; } = ["default"];
     public ObservableCollection<VoiceProviderInfo> VoiceProviders { get; } = [];
 

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using Aether.Core.Models;
@@ -488,11 +489,13 @@ if __name__ == "__main__":
 
     private static async Task<GpuBackendDetection> DetectGpuBackendAsync()
     {
-        // Prefer NVIDIA CUDA if nvidia-smi exists, then ROCm if rocminfo exists.
+        // Prefer hardware-specific accelerators before falling back to CPU.
         if (FindOnPath("nvidia-smi") is not null)
             return new GpuBackendDetection("cuda", null);
         if (FindOnPath("rocminfo") is not null)
             return new GpuBackendDetection("rocm", null);
+        if (OperatingSystem.IsMacOS() && RuntimeInformation.ProcessArchitecture is Architecture.Arm64)
+            return new GpuBackendDetection("mps", null);
 
         if (OperatingSystem.IsLinux())
         {
@@ -649,6 +652,10 @@ if __name__ == "__main__":
         {
             args.AddRange(["torch", "torchaudio", "torchvision", "--index-url", "https://download.pytorch.org/whl/rocm5.8"]);
         }
+        else if (backend == "mps")
+        {
+            args.AddRange(["torch", "torchaudio", "torchvision"]);
+        }
         else
         {
             args.AddRange(["torch", "torchaudio", "torchvision", "--index-url", "https://download.pytorch.org/whl/cpu"]);
@@ -660,7 +667,7 @@ if __name__ == "__main__":
     private static async Task<GpuBackendDetection> DetectGpuBackendForSettingsAsync(AppSettings settings, CancellationToken ct)
     {
         var device = settings.Tts.Device.Trim().ToLowerInvariant();
-        if (device is "cuda" or "rocm" or "cpu")
+        if (device is "cuda" or "rocm" or "mps" or "cpu")
             return new GpuBackendDetection(device, null);
 
         ct.ThrowIfCancellationRequested();

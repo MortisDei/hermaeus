@@ -44,5 +44,16 @@ namespace Aether.Tests
 
             await Task.CompletedTask;
         }
+
+        public static Task VoiceDeviceOptionsIncludeMps()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            var vm = new TtsSettingsViewModel(new FakeTts(), new FakeVoiceProviderRegistry(settings), new FakeToasts(), new XttsProcessManager(), new KokoroProcessManager(), new FakeSecretStore(), settings);
+
+            True(vm.TtsDevices.Contains("mps"), "voice device options should include Apple Silicon MPS");
+
+            return Task.CompletedTask;
+        }
     }
 }

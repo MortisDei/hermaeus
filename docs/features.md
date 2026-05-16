@@ -77,8 +77,9 @@
   they are missing from the selected AI assets folder.
 - The Local AI setup can now detect available GPU backends when creating
   a Python venv and will suggest a device (`cuda` for NVIDIA, `rocm` for
-  AMD/ROCm, or `cpu`) to use for TTS/model inference. You can still override
-  the selected device in **Settings → Voice providers** after setup.
+  AMD/ROCm, `mps` for Apple Silicon, or `cpu`) to use for TTS/model inference.
+  You can still override the selected device in **Settings -> Voice providers**
+  after setup.
 - First-run Setup Wizard: on first launch Aether runs a guided 6-step
   setup wizard to select the data root, local AI assets root, chat backend,
   model folder, voice provider, and to run the Aether Doctor for a quick

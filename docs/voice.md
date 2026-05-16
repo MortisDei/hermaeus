@@ -1,24 +1,41 @@
 # Voice Providers
 
-## Choosing a Voice Provider
+## Voice Architecture and Providers
 
-In **Settings**, choose a voice provider:
+Aether uses a pluggable voice layer managed by `TtsSettingsViewModel`.
+Settings bind through `Tts.*` so provider state stays isolated and easier to
+test.
 
-- **Kokoro** - recommended default for fast local readback.
-- **F5-TTS** - advanced voice cloning mode with heavier install requirements.
-- **XTTS v2** - legacy Coqui-compatible voice cloning backend, best kept for
-  existing workflows that already depend on it.
-- **OpenAI** - optional remote voice synthesis for API users.
+Supported providers:
 
-## Provider Architecture
+- **Kokoro** - default ultra-fast local readback for standard use.
+- **F5-TTS** - advanced local voice cloning with high fidelity, heavy resource
+  demands, and a dedicated Python venv requirement.
+- **XTTS v2** - legacy Coqui-compatible cloning retained for existing user
+  workflows that already depend on it.
+- **OpenAI** - remote voice synthesis through a cloud API with no local model
+  footprint.
 
-Voice provider setup is moving toward a pluggable layer:
+## Local Environment and Hardware Setup
 
-- **Kokoro** is the preferred built-in readback path for fast, local synthesis.
-- **XTTS v2** is retained as the legacy cloning backend for existing workflows.
-- **F5-TTS** provides advanced cloning with better voice fidelity at the cost of
-  heavier resource requirements.
-- **OpenAI** enables remote synthesis for users with API access.
+The first-run Setup Wizard and Local AI setup can detect available hardware
+backends and suggest an inference device. You can override the selected device
+in **Settings -> Voice providers**.
+
+- **NVIDIA** - `cuda`
+- **AMD/ROCm** - `rocm`
+- **Apple Silicon** - `mps`
+- **Fallback** - `cpu`
+
+### Python Virtual Environments
+
+Use isolated Python virtual environments for heavy cloning providers.
+F5-TTS and XTTS v2 have different, sensitive PyTorch and CUDA dependency
+requirements. Installing them into the same venv can break one or both
+providers.
+
+Aether Doctor validates configured Python paths and voice backend health before
+installs or playback.
 
 ## Kokoro Setup
 
@@ -26,37 +43,32 @@ Kokoro is recommended as the default voice provider. The first-run Setup Wizard
 shows Kokoro onboarding details in the voice step, including the install plan
 and risk notes before you continue.
 
-Aether can detect available GPU backends when creating a Python venv and will
-suggest a device (`cuda` for NVIDIA, `rocm` for AMD/ROCm, or `cpu`) to use for
-TTS inference. You can still override the selected device in
-**Settings → Voice providers** after setup.
+Aether can detect available hardware backends when creating a Python venv and
+will suggest a device (`cuda`, `rocm`, `mps`, or `cpu`) to use for TTS
+inference. You can still override the selected device in
+**Settings -> Voice providers** after setup.
 
 TTS speed is configurable per-provider and persisted in settings.
 
-## XTTS v2 Configuration
+## Local Asset Configuration
 
-XTTS v2 still supports the familiar local AI assets setup:
-
-- Local AI assets folder, or explicit paths
-- Service URL
-- Python/script path
-- XTTS model directory
-- Device (`cpu`, `auto`, `cuda`)
-- Model version
-- Voice folder
-- Selected speaker
-
-### Local AI Setup
+XTTS v2 and F5-TTS use local asset paths for Python, model files, scripts,
+devices, and voice samples. XTTS v2 still supports explicit paths for service
+URL, Python/script path, model directory, output directory, voice folder,
+selected speaker, model version, and device (`cpu`, `auto`, `cuda`, `rocm`, or
+`mps`).
 
 Local AI Setup can scan a selected AI folder and show readiness for:
 
 - GGUF models
-- Python venv
+- Python venv integrity
 - XTTS v2 model files
 - XTTS API script
 - Voices folder
 - Output folder
+- F5-TTS voice samples
 - Optional RAG reranker
+- Platform-matched `llama-server` downloads if missing
 
 Missing setup actions are approval-gated and show:
 
@@ -70,21 +82,10 @@ If no GGUF models are found, Aether can offer the default Phi-4 mini reasoning
 download. If `llama-server` is not available, Aether can offer a matching
 binary download for the current platform.
 
-## Voice Preview & Import
+## Audio Data and Privacy Lifecycle
 
-- Voice preview uses in-memory generated audio.
-- Aether does not persist generated WAV responses.
+- Voice previews use transient generated audio and delete temporary WAV files
+  after playback when a local player needs a file path.
+- Aether does not cache generated WAV responses.
 - Imported clone samples are copied only when explicitly imported.
 - Voice sample import is available in Settings under TTS configuration.
-
-## Health & Validation
-
-Aether Doctor now validates the configured Python and voice backend health
-before installs or playback. This ensures voice provider readiness before
-use.
-
-## Architecture Notes
-
-TTS settings were recently refactored into a dedicated `TtsSettingsViewModel`.
-The Settings view now binds to `Tts.*` for TTS configuration and commands,
-improving separation of concerns and making the TTS logic easier to test.

@@ -20,6 +20,9 @@ Pre-1.0 versions may still change internal APIs and storage details.
 - Benchmarks now capture richer run metadata, record repeated cold and warm
   attempts where possible, and surface median, p95, and failure summaries for
   more useful comparisons.
+- Voice setup now documents the consolidated provider architecture, isolated
+  venv requirement for F5-TTS and XTTS v2, and Apple Silicon `mps` hardware
+  backend support.
 
 - Tools: added a lightweight CLI `TraceValidator` tool for validating
   `agent.trace.jsonl` event lines. It now uses `JsonSchema.Net` to validate
