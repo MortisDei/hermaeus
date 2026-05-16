@@ -17,6 +17,9 @@ Pre-1.0 versions may still change internal APIs and storage details.
   summaries plus refusal reasons in traces.
 - Eval harness results now report Recall@K, MRR, citation hit rate,
   unsupported answer rate, refusal accuracy, and reranker rank delta.
+- Benchmarks now capture richer run metadata, record repeated cold and warm
+  attempts where possible, and surface median, p95, and failure summaries for
+  more useful comparisons.
 
 - Tools: added a lightweight CLI `TraceValidator` tool for validating
   `agent.trace.jsonl` event lines. It now uses `JsonSchema.Net` to validate

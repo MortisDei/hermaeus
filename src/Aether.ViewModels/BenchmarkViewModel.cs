@@ -228,19 +228,19 @@ public sealed class BenchmarkRunViewModel
     public string Started => Run.StartedAt.ToLocalTime().ToString("g");
     public string Score => $"{Run.RankingScore:P0}";
     public string PassRate => $"{Run.PassRate:P0}";
-    public string Speed => $"{Run.AverageApproxTokensPerSecond:F1} tok/s";
-    public string FirstToken => $"{Run.AverageFirstTokenMs:F0} ms";
-    public string Summary => $"{Score} · pass {PassRate} · {Speed} · first {FirstToken}";
+    public string Speed => $"median {Run.MedianApproxTokensPerSecond:F1} tok/s";
+    public string FirstToken => $"median {Run.MedianFirstTokenMs:F0} ms";
+    public string Summary => $"{Score} · pass {PassRate} · {Speed} · first {FirstToken} · failures {Run.FailureCount}";
     public BenchmarkRunViewModel(BenchmarkRun run) => Run = run;
 }
 
 public sealed class BenchmarkResultViewModel
 {
     public BenchmarkResult Result { get; }
-    public string Title => $"{(Result.Passed ? "PASS" : "FAIL")} · {Result.CaseName}";
+    public string Title => $"{Result.Phase} {Result.IterationIndex + 1} · {(Result.Passed ? "PASS" : "FAIL")} · {Result.CaseName}";
     public string Timings => $"{Result.FirstTokenMs} ms first · {Result.TotalMs} ms total · {Result.ApproxTokensPerSecond:F1} tok/s";
     public string Quality => $"{Result.QualityScore:P0}";
-    public string Checks => $"keyword {Result.KeywordHit} · regex {Result.RegexHit} · refusal {Result.RefusalCorrect}";
+    public string Checks => $"keyword {Result.KeywordHit} · regex {Result.RegexHit} · refusal {Result.RefusalCorrect} · failure {Result.FailureCategory}";
     public string Error => Result.Error;
     public string Output => Result.Output;
     public BenchmarkResultViewModel(BenchmarkResult result) => Result = result;
