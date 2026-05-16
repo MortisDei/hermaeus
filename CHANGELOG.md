@@ -18,6 +18,17 @@ Pre-1.0 versions may still change internal APIs and storage details.
 - Eval harness results now report Recall@K, MRR, citation hit rate,
   unsupported answer rate, refusal accuracy, and reranker rank delta.
 
+- Tools: added a lightweight CLI `TraceValidator` tool for validating
+  `agent.trace.jsonl` event lines (basic required-field checks and timestamp
+  formatting). The tool lives at `src/Tools/TraceValidator` and accepts a
+  trace file path and optional schema path.
+- Schemas: added example JSON Schema at `docs/schemas/agent_trace.schema.json`
+  to document the fields emitted in agent traces and to guide future
+  validation tooling.
+- Tests: added an acceptance test that exercises trace schema validation and
+  a view-model style UI acceptance test asserting patch-queue metadata is
+  surfaced by the `AgentViewModel`.
+
 ### Changed
 
 - RAG retrieval now uses query-variant BM25 scoring, structural boosts, and

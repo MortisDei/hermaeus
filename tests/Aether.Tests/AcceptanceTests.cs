@@ -13,6 +13,7 @@ using Aether.Rag.Retrieval;
 using Aether.Services;
 using Aether.ViewModels;
 using static Aether.Tests.Helpers;
+using Aether.Core.Models;
 
 namespace Aether.Tests
 {
@@ -97,6 +98,25 @@ namespace Aether.Tests
             if (patch.RelativePath != "README.md") throw new InvalidOperationException("RelativePath incorrect");
             if (!patch.Rationale.Contains("Fix header")) throw new InvalidOperationException("Rationale missing");
             if (vm.PendingPatchCount != 1) throw new InvalidOperationException("PendingPatchCount incorrect");
+        }
+
+        // Small test-local runtime log implementation used only for acceptance tests.
+        private sealed class SimpleRuntimeLog : IRuntimeLogService
+        {
+            public event Action<RuntimeLogEntry>? LogAdded;
+
+            public void Add(RuntimeLogEntry entry)
+            {
+                LogAdded?.Invoke(entry);
+            }
+
+            public IReadOnlyList<RuntimeLogEntry> GetEntries() => Array.Empty<RuntimeLogEntry>();
+
+            public void ClearInMemory() { }
+
+            public string GetLogDirectory() => Path.Combine(Path.GetTempPath(), "aether-test-logs");
+
+            public string GetLogFilePath() => Path.Combine(GetLogDirectory(), "runtime.log");
         }
     }
 }
