@@ -269,6 +269,21 @@ namespace Aether.Tests
             return Task.CompletedTask;
         }
 
+        public static async Task AgentWorkspaceApplyDraftPatchWritesFile()
+        {
+            using var temp = new TempDir();
+            var root = temp.PathFor("workspace");
+            Directory.CreateDirectory(root);
+            File.WriteAllText(Path.Combine(root, "Program.cs"), "old content\n");
+
+            var tools = new Aether.Agent.Services.AgentWorkspaceTools();
+            var options = new Aether.Agent.Models.AgentWorkspaceOptions(root);
+            var result = tools.ApplyDraftPatch(options, "Program.cs", "new content\nsecond line\n");
+
+            Equal("Program.cs", result.RelativePath, "applied patch should report the relative path");
+            Equal("new content\nsecond line\n", await File.ReadAllTextAsync(Path.Combine(root, "Program.cs")), "applied patch should write the new file content");
+        }
+
         public static Task AgentDraftPatchQueueAndApproval()
         {
             var patch = new Aether.Agent.Models.AgentDraftPatch

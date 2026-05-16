@@ -16,7 +16,9 @@ Pre-1.0 versions may still change internal APIs and storage details.
   preview, and summarise behaviour for faster read-first inspection.
 - Agent workbench now supports draft patch proposals from workspace files,
   with rationale, generated patch preview, approval-gated queueing, and
-  approve/reject actions for queued patches.
+  approve/reject actions for queued patches. Approving a draft patch now writes
+  the proposed content back to the selected workspace file and refreshes the
+  preview immediately.
 
 ### Changed
 

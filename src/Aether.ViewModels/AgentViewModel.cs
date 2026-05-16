@@ -475,13 +475,19 @@ public partial class AgentViewModel : ObservableObject
             var found = CurrentTask.DraftPatches.FirstOrDefault(p => p.Id == patch.Id);
             if (found is not null)
             {
-                found.Status = AgentDraftPatchStatus.Approved;
+                var selectedPath = SelectedWorkspaceFile?.RelativePath;
+                _workspaceTools.ApplyDraftPatch(BuildOptions(), found.RelativePath, found.ProposedContent);
+                found.Status = AgentDraftPatchStatus.Applied;
                 found.ApprovedAt = DateTime.UtcNow;
                 found.ApprovedBy = "User";
                 await _store.SaveAsync(CurrentTask);
+                await _agent.AppendApprovalAsync(CurrentTask.TaskId, "draft_patch_apply", approved: true);
                 QueuedPatches.Remove(patch);
-                StatusMessage = $"Patch for {patch.RelativePath} approved.";
-                RefreshTaskPreview();
+                StatusMessage = $"Patch for {patch.RelativePath} applied.";
+                await RefreshWorkspaceFilesAsync();
+                if (!string.IsNullOrWhiteSpace(selectedPath))
+                    SelectedWorkspaceFile = WorkspaceFiles.FirstOrDefault(file => file.RelativePath == selectedPath);
+                await LoadTaskIfOpenAsync(CurrentTask.TaskId);
             }
         }
         catch (Exception ex)
@@ -501,9 +507,10 @@ public partial class AgentViewModel : ObservableObject
             {
                 found.Status = AgentDraftPatchStatus.Rejected;
                 await _store.SaveAsync(CurrentTask);
+                await _agent.AppendApprovalAsync(CurrentTask.TaskId, "draft_patch_reject", approved: false);
                 QueuedPatches.Remove(patch);
                 StatusMessage = $"Patch for {patch.RelativePath} rejected.";
-                RefreshTaskPreview();
+                await LoadTaskIfOpenAsync(CurrentTask.TaskId);
             }
         }
         catch (Exception ex)

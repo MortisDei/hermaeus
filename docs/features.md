@@ -44,7 +44,8 @@
   preview, and summary behaviour for faster read-first inspection.
 - Draft patch proposal UI: users can draft file edits with a rationale, propose
   content, generate a formatted patch preview, and queue the patch for approval
-  in the task review queue.
+  in the task review queue. Approving a patch writes the proposed content to
+  the selected workspace file and refreshes the file preview.
 - Queued patches expander shows all pending draft patches with rationale and
   proposed content, allowing approve/reject actions that track approval state
   and metadata (approver, approval timestamp).

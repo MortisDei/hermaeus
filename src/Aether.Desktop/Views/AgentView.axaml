@@ -343,10 +343,6 @@
                                                                  MinHeight="80"
                                                                  MaxHeight="140" />
                                         </Border>
-                                        <TextBlock Text="{Binding CreatedLabel}"
-                                                   FontSize="10"
-                                                   Opacity="0.55"
-                                                   Margin="0,4,0,0" />
                                         <TextBlock Text="{Binding ApprovedLabel}"
                                                FontSize="10"
                                                Opacity="0.5"

@@ -101,6 +101,19 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
         return new AgentFileSummaryResult(read.RelativePath, summary, read.Truncated);
     }
 
+    public AgentFileReadResult ApplyDraftPatch(AgentWorkspaceOptions options, string relativePath, string proposedContent)
+    {
+        var root = ResolveWorkspaceRoot(options.WorkspaceRoot);
+        var full = ResolveSafePath(root, relativePath);
+        var directory = Path.GetDirectoryName(full);
+        if (!string.IsNullOrWhiteSpace(directory))
+            Directory.CreateDirectory(directory);
+
+        var content = proposedContent.Replace("\r\n", "\n").Replace('\r', '\n');
+        File.WriteAllText(full, content, Encoding.UTF8);
+        return new AgentFileReadResult(ToRelative(root, full), content, false);
+    }
+
     public string DraftPatch(string relativePath, string rationale, string proposedContent)
     {
         var path = relativePath.Replace('\\', '/').Trim();

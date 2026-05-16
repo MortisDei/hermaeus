@@ -38,6 +38,7 @@ public enum AgentToolDisposition
 public enum AgentDraftPatchStatus
 {
     Pending,
+    Applied,
     Approved,
     Rejected
 }
