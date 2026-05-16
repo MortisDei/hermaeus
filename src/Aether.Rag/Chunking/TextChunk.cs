@@ -1,3 +1,5 @@
+using Aether.Rag.Models;
+
 namespace Aether.Rag.Chunking;
 
 public record TextChunk(
@@ -6,4 +8,10 @@ public record TextChunk(
     string SourceTitle,
     int    Index,
     int    Total,
-    string? ParentContent = null);   // non-null when parent-child mode
+    string? ParentContent = null,
+    RagChunkKind ChunkKind = RagChunkKind.PlainText,
+    string? HeadingPath = null,
+    string? CodeSymbolInfo = null,
+    int? PageNumber = null,
+    string? EventType = null,
+    string? SourceUrl = null);

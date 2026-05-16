@@ -5,9 +5,30 @@ All notable changes to Aether will be documented in this file.
 The project follows semantic versioning once public release candidates begin.
 Pre-1.0 versions may still change internal APIs and storage details.
 
-## [0.9.4-alpha] - Unreleased
+## [0.9.4-alpha] - 2026-05-16
 
+### Added
 
+- Structure-aware RAG chunking for markdown headings, code symbols, PDF pages,
+  log events, and web pages, with metadata carried through storage and traces.
+- Query planning now emits multiple rewritten variants and records them in RAG
+  traces for later inspection.
+- Context packing now respects a configurable token budget and records packing
+  summaries plus refusal reasons in traces.
+- Eval harness results now report Recall@K, MRR, citation hit rate,
+  unsupported answer rate, refusal accuracy, and reranker rank delta.
+
+### Changed
+
+- RAG retrieval now uses query-variant BM25 scoring, structural boosts, and
+  budget-aware context selection before answer generation.
+- RAG queries can now refuse early when the retrieved context is too weak to
+  answer reliably.
+
+### Fixed
+
+- RAG storage and trace handling now tolerate older databases while persisting
+  the new chunk, planner, and packing metadata.
 
 ## [0.9.3-alpha] - 2026-05-16
 

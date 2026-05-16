@@ -24,6 +24,7 @@ public sealed class Bm25Scorer
             return candidates.Select(c => new ScoredChunk(c, 0f, ScoreSource.Bm25)).ToList();
 
         var queryTerms = Tokenize(query);
+        var queryPhrase = NormalizePhrase(query);
         var avgDl      = stats.AverageDocumentLength;
 
         return candidates
@@ -41,6 +42,8 @@ public sealed class Bm25Scorer
                     var tfn = f * (K1 + 1f) / (f + K1 * (1f - B + B * docLen / avgDl));
                     score  += idf * tfn;
                 }
+
+                score += ComputeMetadataBoost(chunk, queryTerms, queryPhrase);
                 return new ScoredChunk(chunk, score, ScoreSource.Bm25);
             })
             .OrderByDescending(s => s.Score)
@@ -95,4 +98,47 @@ public sealed class Bm25Scorer
             tf[t] = tf.GetValueOrDefault(t) + 1;
         return tf;
     }
+
+    private static float ComputeMetadataBoost(RagChunk chunk, IReadOnlyCollection<string> queryTerms, string queryPhrase)
+    {
+        var boost = 0f;
+
+        if (!string.IsNullOrWhiteSpace(queryPhrase))
+        {
+            if (ContainsPhrase(chunk.Content, queryPhrase)) boost += 0.020f;
+            if (ContainsPhrase(chunk.SourceTitle, queryPhrase)) boost += 0.015f;
+            if (ContainsPhrase(chunk.HeadingPath, queryPhrase)) boost += 0.015f;
+            if (ContainsPhrase(chunk.CodeSymbolInfo, queryPhrase)) boost += 0.015f;
+        }
+
+        if (HasAnyTerm(chunk.SourceTitle, queryTerms)) boost += 0.010f;
+        if (HasAnyTerm(chunk.HeadingPath, queryTerms)) boost += 0.012f;
+        if (HasAnyTerm(chunk.CodeSymbolInfo, queryTerms)) boost += 0.015f;
+        if (HasAnyTerm(chunk.EventType, queryTerms)) boost += 0.010f;
+
+        if (chunk.PageNumber.HasValue && queryTerms.Any(t => int.TryParse(t, out var value) && value == chunk.PageNumber.Value))
+            boost += 0.012f;
+
+        return boost;
+    }
+
+    private static bool HasAnyTerm(string? text, IReadOnlyCollection<string> queryTerms)
+    {
+        if (string.IsNullOrWhiteSpace(text) || queryTerms.Count == 0)
+            return false;
+
+        var haystack = text.ToLowerInvariant();
+        return queryTerms.Any(term => haystack.Contains(term, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool ContainsPhrase(string? text, string phrase)
+    {
+        if (string.IsNullOrWhiteSpace(text) || string.IsNullOrWhiteSpace(phrase))
+            return false;
+
+        return text.Contains(phrase, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizePhrase(string text) =>
+        Regex.Replace(text ?? string.Empty, @"\s+", " ").Trim();
 }

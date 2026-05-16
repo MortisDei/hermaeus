@@ -16,8 +16,9 @@ providers.
 - Ollama and OpenAI-compatible runtime profiles.
 - Native markdown rendering with virtualized long chats and syntax-highlighted
   fenced code blocks.
-- Local RAG with hybrid retrieval, ONNX reranking, parent-child context,
-  citations, traces, and evals.
+- Local RAG with structure-aware chunking, multi-variant query planning,
+  hybrid retrieval, ONNX reranking, budget-aware context packing, citations,
+  traces, and evals.
 - Aether Agent: read-first task workbench with explicit state, compact context,
   retrieval, safety gates, and local logs.
 - Pluggable local voice providers for readback and cloning workflows.

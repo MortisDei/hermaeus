@@ -118,6 +118,12 @@ public sealed class SqliteRagStore
                 dataset_id TEXT NOT NULL,
                 question TEXT NOT NULL,
                 expanded_question TEXT NOT NULL,
+                query_variants_json TEXT NOT NULL DEFAULT '[]',
+                planner_notes TEXT NOT NULL DEFAULT '',
+                context_token_budget INTEGER NOT NULL DEFAULT 0,
+                context_packing_summary TEXT NOT NULL DEFAULT '',
+                refused INTEGER NOT NULL DEFAULT 0,
+                refusal_reason TEXT NOT NULL DEFAULT '',
                 model_id TEXT NOT NULL,
                 retrieval_latency_ms INTEGER NOT NULL DEFAULT 0,
                 total_latency_ms INTEGER NOT NULL DEFAULT 0,
@@ -137,6 +143,12 @@ public sealed class SqliteRagStore
         await EnsureColumnAsync(c, "rag_chunks", "page_number", "INTEGER", ct);
         await EnsureColumnAsync(c, "rag_chunks", "event_type", "TEXT", ct);
         await EnsureColumnAsync(c, "rag_chunks", "source_url", "TEXT", ct);
+        await EnsureColumnAsync(c, "rag_query_traces", "query_variants_json", "TEXT NOT NULL DEFAULT '[]'", ct);
+        await EnsureColumnAsync(c, "rag_query_traces", "planner_notes", "TEXT NOT NULL DEFAULT ''", ct);
+        await EnsureColumnAsync(c, "rag_query_traces", "context_token_budget", "INTEGER NOT NULL DEFAULT 0", ct);
+        await EnsureColumnAsync(c, "rag_query_traces", "context_packing_summary", "TEXT NOT NULL DEFAULT ''", ct);
+        await EnsureColumnAsync(c, "rag_query_traces", "refused", "INTEGER NOT NULL DEFAULT 0", ct);
+        await EnsureColumnAsync(c, "rag_query_traces", "refusal_reason", "TEXT NOT NULL DEFAULT ''", ct);
         _initializedPath = dbPath;
     }
 
@@ -387,14 +399,20 @@ public sealed class SqliteRagStore
         var cmd = c.CreateCommand();
         cmd.CommandText = @"
             INSERT INTO rag_query_traces
-                (id,dataset_id,question,expanded_question,model_id,retrieval_latency_ms,total_latency_ms,
+                (id,dataset_id,question,expanded_question,query_variants_json,planner_notes,context_token_budget,context_packing_summary,refused,refusal_reason,model_id,retrieval_latency_ms,total_latency_ms,
                  grounding_score,grounding_mode,retrieved_chunks_json,selected_context_json,created_at)
             VALUES
-                ($id,$ds,$q,$eq,$model,$retrieval,$total,$grounding,$mode,$retrieved,$selected,$created)";
+                ($id,$ds,$q,$eq,$variants,$notes,$budget,$packing,$refused,$refusal,$model,$retrieval,$total,$grounding,$mode,$retrieved,$selected,$created)";
         cmd.Parameters.AddWithValue("$id", trace.Id);
         cmd.Parameters.AddWithValue("$ds", trace.DatasetId);
         cmd.Parameters.AddWithValue("$q", trace.Question);
         cmd.Parameters.AddWithValue("$eq", trace.ExpandedQuestion);
+        cmd.Parameters.AddWithValue("$variants", JsonSerializer.Serialize(trace.QueryVariants));
+        cmd.Parameters.AddWithValue("$notes", trace.PlannerNotes);
+        cmd.Parameters.AddWithValue("$budget", trace.ContextTokenBudget);
+        cmd.Parameters.AddWithValue("$packing", trace.ContextPackingSummary);
+        cmd.Parameters.AddWithValue("$refused", trace.Refused ? 1 : 0);
+        cmd.Parameters.AddWithValue("$refusal", trace.RefusalReason);
         cmd.Parameters.AddWithValue("$model", trace.ModelId);
         cmd.Parameters.AddWithValue("$retrieval", trace.RetrievalLatencyMs);
         cmd.Parameters.AddWithValue("$total", trace.TotalLatencyMs);

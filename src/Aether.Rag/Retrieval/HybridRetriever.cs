@@ -39,6 +39,7 @@ public sealed class HybridRetriever
     /// Fuse semantic and BM25 ranked lists into a single hybrid ranking.
     /// </summary>
     public static List<ScoredChunk> Fuse(
+        string query,
         IReadOnlyList<ScoredChunk> semantic,
         IReadOnlyList<ScoredChunk> bm25,
         int topK,
@@ -48,6 +49,7 @@ public sealed class HybridRetriever
     {
         var scores   = new Dictionary<string, float>();
         var chunkMap = new Dictionary<string, RagChunk>();
+        var queryTerms = Bm25Scorer.Tokenize(query);
 
         for (int i = 0; i < semantic.Count; i++)
         {
@@ -63,10 +65,53 @@ public sealed class HybridRetriever
             chunkMap.TryAdd(id, bm25[i].Chunk);
         }
 
+        foreach (var (id, score) in scores.ToList())
+        {
+            if (!chunkMap.TryGetValue(id, out var chunk))
+                continue;
+
+            scores[id] = score + ComputeBoost(query, queryTerms, chunk);
+        }
+
         return scores
             .OrderByDescending(kv => kv.Value)
             .Take(topK)
             .Select((kv, rank) => new ScoredChunk(chunkMap[kv.Key], kv.Value, ScoreSource.Hybrid))
             .ToList();
+    }
+
+    private static float ComputeBoost(string query, IReadOnlyCollection<string> queryTerms, RagChunk chunk)
+    {
+        var boost = 0f;
+        var phrase = query.Trim();
+
+        if (!string.IsNullOrWhiteSpace(phrase))
+        {
+            if (chunk.Content.Contains(phrase, StringComparison.OrdinalIgnoreCase)) boost += 0.015f;
+            if (!string.IsNullOrWhiteSpace(chunk.SourceTitle) && chunk.SourceTitle.Contains(phrase, StringComparison.OrdinalIgnoreCase)) boost += 0.012f;
+            if (!string.IsNullOrWhiteSpace(chunk.HeadingPath) && chunk.HeadingPath.Contains(phrase, StringComparison.OrdinalIgnoreCase)) boost += 0.012f;
+            if (!string.IsNullOrWhiteSpace(chunk.CodeSymbolInfo) && chunk.CodeSymbolInfo.Contains(phrase, StringComparison.OrdinalIgnoreCase)) boost += 0.012f;
+        }
+
+        if (!string.IsNullOrWhiteSpace(chunk.HeadingPath) && queryTerms.Any(t => chunk.HeadingPath.Contains(t, StringComparison.OrdinalIgnoreCase)))
+            boost += 0.008f;
+
+        if (!string.IsNullOrWhiteSpace(chunk.CodeSymbolInfo) && queryTerms.Any(t => chunk.CodeSymbolInfo.Contains(t, StringComparison.OrdinalIgnoreCase)))
+            boost += 0.010f;
+
+        if (!string.IsNullOrWhiteSpace(chunk.EventType) && queryTerms.Any(t => chunk.EventType.Contains(t, StringComparison.OrdinalIgnoreCase)))
+            boost += 0.008f;
+
+        if (chunk.PageNumber.HasValue && queryTerms.Any(t => int.TryParse(t, out var page) && page == chunk.PageNumber.Value))
+            boost += 0.008f;
+
+        if (chunk.SourceModifiedUtc.HasValue)
+        {
+            var ageDays = (DateTime.UtcNow - chunk.SourceModifiedUtc.Value).TotalDays;
+            if (ageDays < 30) boost += 0.006f;
+            else if (ageDays < 180) boost += 0.003f;
+        }
+
+        return boost;
     }
 }

@@ -12,22 +12,24 @@ repeatable question sets, then make that native and visible in the app.
 - `aliases.json`: canonical term and alternate names used during query
   expansion.
 - `run.jsonl`: one row per query with model, dataset, retrieved chunks, latency,
-  grounding score, and pass/fail notes.
+  grounding score, planner variants, packing summary, and pass/fail notes.
 
 ## Metrics
 
-- Retrieval hit rate: expected source appears in top K.
-- Citation precision: cited chunks actually support the answer.
-- Grounding overlap: answer terms are present in retrieved context.
+- Recall@K: fraction of expected sources retrieved in the top K.
+- Mean reciprocal rank: inverse rank of the first expected source.
+- Citation hit rate: answer text cites or references the expected source.
+- Unsupported answer rate: answer was produced without enough grounded support.
 - Refusal accuracy: app says insufficient context when it should.
+- Reranker rank delta: how much the cross-encoder moved the expected source.
 - Latency: embed, retrieve, prompt-build, first-token, full-response.
 
 ## Native UI
 
 - Dataset eval tab with selectable gold/stress files.
 - Run history table.
-- Per-question inspector with query expansion, top chunks, scores, and generated
-  answer.
+- Per-question inspector with query variants, top chunks, scores, packing
+  summary, and generated answer.
 - Export to JSONL/Markdown for debugging and regression tracking.
 
 ## First Implementation Slice

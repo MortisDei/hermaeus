@@ -2,8 +2,9 @@
 
 ## Overview
 
-Aether includes a local RAG: hybrid retrieval, ONNX reranking,
-parent-child context, citations, traces, and native eval support.
+Aether includes a local RAG: structure-aware chunking, query planning,
+hybrid retrieval, ONNX reranking, budget-aware context packing, citations,
+traces, and native eval support.
 
 ## Getting Started
 
@@ -13,15 +14,23 @@ parent-child context, citations, traces, and native eval support.
    choose a duplicate policy to skip unchanged sources, replace them, or just
    report what would happen. Use **Stop** during ingest to cancel long runs.
 4. Ask questions against the dataset.
-5. Inspect citations, source text, grounding score, query traces, and the last
-   ingest report.
+5. Inspect citations, source text, grounding score, query traces, planner
+  variants, context packing summaries, and the last ingest report.
 6. Run eval sets from the Eval Harness panel.
 
 ## Features
 
-### Ingest
+-### Ingest
 
 - RAG ingest for text/markdown and digital PDFs.
+- Markdown ingest preserves heading paths so retrieval can boost structural
+  matches.
+- Code ingest groups symbols and carries namespace/class context through to
+  stored chunks.
+- PDF ingest records page markers from the extractor and keeps page metadata
+  with each chunk.
+- Log-like text is chunked by event boundaries and severity when the source
+  looks like a log.
 - Optional explicit web URLs (off by default).
 - Reindex diffing and corpus health warnings.
 - In-progress cancellation support.
@@ -46,9 +55,14 @@ parent-child context, citations, traces, and native eval support.
 ### Querying
 
 - RAG citations with `[1] [2] [3] +N`, source inspector, copy source/path.
-- RAG query traces, ONNX cross-encoder reranking, and native eval harness.
-- RAG query service provides hybrid retrieval with optional reranking for
-  improved relevance.
+- RAG query traces now include query variants, planner notes, packing summaries,
+  and refusal reasons.
+- The query planner emits multiple variants so lexical retrieval can score the
+  original query, alias-expanded form, and keyword-focused variants together.
+- RAG query service provides hybrid retrieval with structural boosts, optional
+  reranking, and budget-aware context packing for improved relevance.
+- Queries can refuse early when the retrieved context is too weak to answer
+  reliably, instead of forcing a speculative response.
 
 ### Reranker
 
@@ -68,6 +82,15 @@ Eval files can be either an array of cases or an object with `cases` /
 - `expected_sources` - list of expected source identifiers
 - `answer_keywords` - list of keywords the answer should contain
 - `should_refuse` - whether the query should be refused or answered
+
+The native eval harness now reports retrieval metrics in addition to pass/fail:
+
+- Recall@K
+- Mean reciprocal rank
+- Citation hit rate
+- Unsupported answer rate
+- Refusal accuracy
+- Latency and reranker rank delta
 
 ## Model Sources
 

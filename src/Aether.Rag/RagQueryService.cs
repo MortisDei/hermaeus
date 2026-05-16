@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Aether.Core.Services;
 using Aether.Rag.Embeddings;
 using Aether.Rag.Models;
@@ -14,7 +15,11 @@ public record RagQueryOptions(
     bool   UseParentChild  = false,
     bool   StreamAnswer    = true,
     string ModelId         = "",
-    RagGroundingMode GroundingMode = RagGroundingMode.TokenOverlap);
+    RagGroundingMode GroundingMode = RagGroundingMode.TokenOverlap,
+    int    ContextTokenBudget = 3200,
+    int    MaxContextChunks   = 8,
+    int    MaxChunksPerSource = 2,
+    float  RefusalThreshold   = 0.08f);
 
 /// <summary>
 /// Main entry point for RAG queries.
@@ -124,8 +129,8 @@ public sealed class RagQueryService
             TouchCacheUnsafe(datasetId);
         }
 
-        var expandedQuery = await ExpandQueryAsync(datasetId, question, ct);
-        var qEmbed = await _embed.EmbedAsync(expandedQuery, ct);
+        var plan = await BuildQueryPlanAsync(datasetId, question, ct);
+        var qEmbed = await _embed.EmbedAsync(plan.PrimaryQuery, ct);
         var semanticK = Math.Max(opts.TopK * 10, 50);
         var semantic = HybridRetriever.CosineScan(qEmbed, chunks, semanticK);
 
@@ -133,8 +138,7 @@ public sealed class RagQueryService
         List<ScoredChunk> bm25 = [];
         if (bm25Stats is not null)
         {
-            var scorer = new Bm25Scorer();
-            bm25 = scorer.Score(expandedQuery, chunks, bm25Stats)
+            bm25 = ScoreQueryVariants(plan.QueryVariants, chunks, bm25Stats)
                 .Take(semanticK)
                 .ToList();
         }
@@ -143,18 +147,19 @@ public sealed class RagQueryService
         var ds = (await _store.GetDatasetsAsync(ct)).FirstOrDefault(d => d.Id == datasetId);
         var topFuse = Math.Max(opts.TopK * 2, opts.TopK);
         var fused = HybridRetriever.Fuse(
+            plan.PrimaryQuery,
             semantic,
             bm25,
             topFuse,
             ds?.Config.HybridSemanticWeight ?? 0.7f,
             ds?.Config.HybridBm25Weight ?? 0.3f,
             ds?.Config.HybridRrfK ?? 60f);
-        fused = await _reranker.RerankAsync(expandedQuery, fused, opts.TopK, ct);
+        fused = await _reranker.RerankAsync(plan.PrimaryQuery, fused, opts.TopK, ct);
         if (opts.UseParentChild)
             fused = await UpgradeToParentsAsync(fused, ct);
 
         sw.Stop();
-        return new RagRetrievalResult(question, expandedQuery, semantic, bm25, fused, sw.ElapsedMilliseconds, ds?.Config);
+        return new RagRetrievalResult(question, plan.PrimaryQuery, plan.QueryVariants, plan.PlannerNotes, semantic, bm25, fused, sw.ElapsedMilliseconds, ds?.Config);
     }
 
     public async IAsyncEnumerable<string> StreamQueryAsync(
@@ -174,11 +179,43 @@ public sealed class RagQueryService
         retrievalSw.Stop();
 
         // ── 8. Build context + prompt ────────────────────────────────────
-        var context = BuildContext(fused);
+        var contextPack = BuildContext(fused, opts);
+        var context = contextPack.Text;
         var prompt  = BuildPrompt(question, context, retrieval.DatasetConfig);
         var modelId = string.IsNullOrEmpty(opts.ModelId)
             ? _settings.Settings.Llm.DefaultModel
             : opts.ModelId;
+
+        var preflightGrounding = ComputeGroundingScore(question, context, opts.GroundingMode);
+        if (preflightGrounding < opts.RefusalThreshold)
+        {
+            var refusal = "I do not have enough grounded context to answer that reliably.";
+            yield return refusal;
+
+            totalSw.Stop();
+            var refusalTrace = new RagQueryTrace
+            {
+                DatasetId = datasetId,
+                Question = question,
+                ExpandedQuestion = expandedQuery,
+                QueryVariants = retrieval.QueryVariants,
+                PlannerNotes = retrieval.PlannerNotes,
+                ModelId = modelId,
+                RetrievalLatencyMs = retrievalSw.ElapsedMilliseconds,
+                TotalLatencyMs = totalSw.ElapsedMilliseconds,
+                GroundingMode = opts.GroundingMode,
+                GroundingScore = preflightGrounding,
+                Refused = true,
+                RefusalReason = $"Preflight grounding {preflightGrounding:F3} below threshold {opts.RefusalThreshold:F3}",
+                ContextTokenBudget = opts.ContextTokenBudget,
+                ContextPackingSummary = contextPack.Summary,
+                RetrievedChunks = semantic.Select((r, i) => ToTraceChunk(r, i + 1)).ToList(),
+                SelectedContext = fused.Select((r, i) => ToTraceChunk(r, i + 1)).ToList()
+            };
+            await _store.SaveRagQueryTraceAsync(refusalTrace, ct);
+            yield return $"__RAG_TRACE__{JsonSerializer.Serialize(new { refusalTrace.Id, refusalTrace.RetrievalLatencyMs, refusalTrace.TotalLatencyMs, refusalTrace.GroundingScore, refusalTrace.Refused, refusalTrace.RefusalReason, mode = refusalTrace.GroundingMode.ToString() })}__END_TRACE__";
+            yield break;
+        }
 
         // Yield a structured header so the UI can parse sources
         var sourcesJson = JsonSerializer.Serialize(fused.Select((r, i) => new
@@ -210,11 +247,17 @@ public sealed class RagQueryService
             DatasetId = datasetId,
             Question = question,
             ExpandedQuestion = expandedQuery,
+            QueryVariants = retrieval.QueryVariants,
+            PlannerNotes = retrieval.PlannerNotes,
             ModelId = modelId,
             RetrievalLatencyMs = retrievalSw.ElapsedMilliseconds,
             TotalLatencyMs = totalSw.ElapsedMilliseconds,
             GroundingMode = opts.GroundingMode,
             GroundingScore = ComputeGroundingScore(answerText, context, opts.GroundingMode),
+            Refused = false,
+            RefusalReason = string.Empty,
+            ContextTokenBudget = opts.ContextTokenBudget,
+            ContextPackingSummary = contextPack.Summary,
             RetrievedChunks = semantic.Select((r, i) => ToTraceChunk(r, i + 1)).ToList(),
             SelectedContext = fused.Select((r, i) => ToTraceChunk(r, i + 1)).ToList()
         };
@@ -224,31 +267,115 @@ public sealed class RagQueryService
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
-    private async Task<string> ExpandQueryAsync(string datasetId, string question, CancellationToken ct)
+    private async Task<QueryPlan> BuildQueryPlanAsync(string datasetId, string question, CancellationToken ct)
     {
         try
         {
             var ds = (await _store.GetDatasetsAsync(ct)).FirstOrDefault(d => d.Id == datasetId);
-            if (ds?.Config.AliasFilePath is { Length: > 0 } path && File.Exists(path))
-            {
-                var json    = await File.ReadAllTextAsync(path, ct);
-                var aliases = JsonSerializer.Deserialize<Dictionary<string, List<string>>>(json);
-                if (aliases is null) return question;
+            var aliasPlan = await BuildAliasExpansionAsync(question, ds?.Config.AliasFilePath, ct);
+            var variants = BuildQueryVariants(question, aliasPlan.ExpandedQuery, aliasPlan.AliasTerms);
+            return new QueryPlan(aliasPlan.ExpandedQuery, variants, aliasPlan.Notes);
+        }
+        catch
+        {
+            var fallback = NormalizeQuery(question);
+            return new QueryPlan(fallback, BuildQueryVariants(fallback, fallback, []), string.Empty);
+        }
+    }
 
-                var expansion = new StringBuilder(question);
-                foreach (var (term, expansions) in aliases)
+    private async Task<AliasExpansionPlan> BuildAliasExpansionAsync(string question, string? aliasPath, CancellationToken ct)
+    {
+        var expanded = NormalizeQuery(question);
+        var aliasTerms = new List<string>();
+        var notes = new List<string>();
+
+        try
+        {
+            if (aliasPath is { Length: > 0 } path && File.Exists(path))
+            {
+                var json = await File.ReadAllTextAsync(path, ct);
+                var aliases = JsonSerializer.Deserialize<Dictionary<string, List<string>>>(json);
+                if (aliases is not null)
                 {
-                    if (question.Contains(term, StringComparison.OrdinalIgnoreCase))
+                    foreach (var (term, expansions) in aliases)
                     {
-                        expansion.Append(' ');
-                        expansion.AppendJoin(' ', expansions);
+                        if (!question.Contains(term, StringComparison.OrdinalIgnoreCase))
+                            continue;
+
+                        var clean = expansions.Where(e => !string.IsNullOrWhiteSpace(e)).Select(e => e.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                        if (clean.Count == 0)
+                            continue;
+
+                        aliasTerms.Add(term);
+                        expanded = string.Join(' ', new[] { expanded }.Concat(clean)).Trim();
+                        notes.Add($"Alias {term} -> {string.Join(", ", clean)}");
                     }
                 }
-                return expansion.ToString();
             }
         }
-        catch { /* alias expansion is best-effort */ }
-        return question;
+        catch
+        {
+            // best-effort only
+        }
+
+        return new AliasExpansionPlan(expanded, aliasTerms, notes.Count == 0 ? string.Empty : string.Join("; ", notes));
+    }
+
+    private static List<string> BuildQueryVariants(string original, string expanded, IReadOnlyCollection<string> aliasTerms)
+    {
+        var variants = new List<string>
+        {
+            NormalizeQuery(expanded),
+            NormalizeQuery(original)
+        };
+
+        var keywordVariant = BuildKeywordQuery(original, aliasTerms);
+        if (!string.IsNullOrWhiteSpace(keywordVariant))
+            variants.Add(keywordVariant);
+
+        return variants
+            .Where(v => !string.IsNullOrWhiteSpace(v))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(5)
+            .ToList();
+    }
+
+    private static string BuildKeywordQuery(string question, IReadOnlyCollection<string> aliasTerms)
+    {
+        var tokens = Bm25Scorer.Tokenize(question)
+            .Where(t => t.Length >= 4)
+            .Where(t => !aliasTerms.Contains(t, StringComparer.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(10)
+            .ToList();
+
+        return tokens.Count == 0 ? string.Empty : string.Join(' ', tokens);
+    }
+
+    private static string NormalizeQuery(string query) => Regex.Replace(query ?? string.Empty, "\\s+", " ").Trim();
+
+    private static List<ScoredChunk> ScoreQueryVariants(IEnumerable<string> variants, List<RagChunk> chunks, Bm25Stats stats)
+    {
+        var scorer = new Bm25Scorer();
+        var best = new Dictionary<string, ScoredChunk>(StringComparer.Ordinal);
+
+        foreach (var variant in variants.Where(v => !string.IsNullOrWhiteSpace(v)))
+        {
+            foreach (var scored in scorer.Score(variant, chunks, stats))
+            {
+                if (best.TryGetValue(scored.Chunk.Id, out var existing))
+                {
+                    if (scored.Score > existing.Score)
+                        best[scored.Chunk.Id] = scored;
+                }
+                else
+                {
+                    best[scored.Chunk.Id] = scored;
+                }
+            }
+        }
+
+        return best.Values.OrderByDescending(s => s.Score).ToList();
     }
 
     private async Task<List<ScoredChunk>> UpgradeToParentsAsync(
@@ -270,16 +397,103 @@ public sealed class RagQueryService
         return upgraded;
     }
 
-    private static string BuildContext(IReadOnlyList<ScoredChunk> chunks)
+    private static ContextPack BuildContext(IReadOnlyList<ScoredChunk> chunks, RagQueryOptions opts)
     {
+        var budget = Math.Max(opts.ContextTokenBudget, 128);
+        var maxChunks = Math.Max(opts.MaxContextChunks, 1);
+        var perSourceLimit = Math.Max(opts.MaxChunksPerSource, 1);
+
         var sb = new StringBuilder();
-        for (int i = 0; i < chunks.Count; i++)
+        var usedTokens = 0;
+        var usedChunks = 0;
+        var sourceCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var notes = new List<string>();
+
+        foreach (var scored in chunks)
         {
-            sb.Append($"[{i + 1}] Source: {chunks[i].Chunk.SourceTitle}\n");
-            sb.AppendLine(chunks[i].Chunk.Content);
-            if (i < chunks.Count - 1) sb.AppendLine("\n---");
+            if (usedChunks >= maxChunks)
+            {
+                notes.Add($"chunk limit {maxChunks} reached");
+                break;
+            }
+
+            var chunk = scored.Chunk;
+            var sourceKey = string.IsNullOrWhiteSpace(chunk.SourcePath) ? chunk.SourceFile : chunk.SourcePath;
+            sourceCounts.TryGetValue(sourceKey, out var sourceCount);
+            if (sourceCount >= perSourceLimit)
+                continue;
+
+            var tokenCount = Math.Max(chunk.TokenCount, 1);
+            var remaining = budget - usedTokens;
+            if (remaining <= 0)
+            {
+                notes.Add($"budget {budget} tokens exhausted");
+                break;
+            }
+
+            if (tokenCount > remaining)
+            {
+                var truncated = TruncateContent(chunk.Content, remaining * 4);
+                if (string.IsNullOrWhiteSpace(truncated))
+                    continue;
+
+                AppendContextChunk(sb, usedChunks + 1, chunk, truncated, truncated: true);
+                usedTokens = budget;
+                usedChunks++;
+                notes.Add($"truncated {chunk.SourceTitle} to fit budget");
+                break;
+            }
+
+            AppendContextChunk(sb, usedChunks + 1, chunk, chunk.Content, truncated: false);
+            usedTokens += tokenCount;
+            usedChunks++;
+            sourceCounts[sourceKey] = sourceCount + 1;
         }
-        return sb.ToString();
+
+        if (usedChunks == 0 && chunks.Count > 0)
+        {
+            var fallback = chunks[0].Chunk;
+            var snippet = TruncateContent(fallback.Content, Math.Max(budget * 4, 512));
+            AppendContextChunk(sb, 1, fallback, snippet, truncated: true);
+            usedChunks = 1;
+            usedTokens = Math.Min(budget, Math.Max(fallback.TokenCount, 1));
+            notes.Add("fallback chunk used because budget selection was empty");
+        }
+
+        return new ContextPack(
+            sb.ToString().Trim(),
+            usedTokens,
+            usedChunks,
+            string.Join("; ", notes));
+    }
+
+    private static void AppendContextChunk(StringBuilder sb, int rank, RagChunk chunk, string content, bool truncated)
+    {
+        if (sb.Length > 0)
+            sb.AppendLine("\n---");
+
+        sb.AppendLine($"[{rank}] Source: {chunk.SourceTitle}");
+        if (!string.IsNullOrWhiteSpace(chunk.HeadingPath))
+            sb.AppendLine($"Heading: {chunk.HeadingPath}");
+        if (!string.IsNullOrWhiteSpace(chunk.CodeSymbolInfo))
+            sb.AppendLine($"Symbol: {chunk.CodeSymbolInfo}");
+        if (chunk.PageNumber.HasValue)
+            sb.AppendLine($"Page: {chunk.PageNumber.Value}");
+        if (!string.IsNullOrWhiteSpace(chunk.EventType))
+            sb.AppendLine($"Event: {chunk.EventType}");
+        if (truncated)
+            sb.AppendLine("Note: truncated to respect context budget");
+        sb.AppendLine(content.Trim());
+    }
+
+    private static string TruncateContent(string content, int maxChars)
+    {
+        if (string.IsNullOrWhiteSpace(content) || maxChars <= 0)
+            return string.Empty;
+
+        return content.Length <= maxChars
+            ? content.Trim()
+            : content[..maxChars].TrimEnd() + "...";
     }
 
     private static string BuildPrompt(string question, string context, RagDatasetConfig? config)
@@ -337,8 +551,16 @@ public sealed class RagQueryService
 public sealed record RagRetrievalResult(
     string Question,
     string ExpandedQuery,
+    List<string> QueryVariants,
+    string PlannerNotes,
     List<ScoredChunk> SemanticCandidates,
     List<ScoredChunk> Bm25Candidates,
     List<ScoredChunk> Selected,
     long LatencyMs,
     RagDatasetConfig? DatasetConfig);
+
+internal sealed record QueryPlan(string PrimaryQuery, List<string> QueryVariants, string PlannerNotes);
+
+internal sealed record AliasExpansionPlan(string ExpandedQuery, List<string> AliasTerms, string Notes);
+
+internal sealed record ContextPack(string Text, int TokensUsed, int ChunksUsed, string Summary);

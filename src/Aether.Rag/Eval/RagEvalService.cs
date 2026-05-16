@@ -58,19 +58,31 @@ public sealed class RagEvalService
         var retrieval = await _query.RetrieveAsync(datasetId, test.Question, new RagQueryOptions(TopK: 5), ct);
         sw.Stop();
         var retrieved = retrieval.Selected.Select((r, i) => ToTraceChunk(r, i + 1)).ToList();
-        var hit = MatchesExpectedSource(retrieved, test.ExpectedSources);
+        var expectedCount = test.ExpectedSources.Count;
+        var hitCount = CountExpectedHits(retrieved, test.ExpectedSources);
+        var retrievalRank = FindFirstExpectedRank(retrieved, test.ExpectedSources);
+        var semanticRank = FindFirstExpectedRank(retrieval.SemanticCandidates.Select((r, i) => ToTraceChunk(r, i + 1)), test.ExpectedSources);
 
         return new RagEvalResult
         {
             CaseId = test.Id,
             Question = test.Question,
-            RetrievalHit = hit,
+            RetrievalHit = hitCount > 0,
             KeywordHit = !test.AnswerKeywords.Any(),
             RefusalCorrect = !test.ShouldRefuse,
-            Passed = hit && !test.ShouldRefuse,
+            Passed = hitCount > 0 && !test.ShouldRefuse,
             LatencyMs = sw.Elapsed.TotalMilliseconds,
             Retrieved = retrieved,
-            Notes = hit ? "Expected source found in top K." : "Expected source missing from top K."
+            RecallAtK = expectedCount == 0 ? 1d : (double)hitCount / expectedCount,
+            ReciprocalRank = retrievalRank <= 0 ? 0d : 1d / retrievalRank,
+            ExpectedSourceHits = hitCount,
+            ExpectedSourceCount = expectedCount,
+            CitationHit = hitCount > 0,
+            UnsupportedAnswer = false,
+            SemanticRank = semanticRank,
+            SelectedRank = retrievalRank,
+            RerankerDelta = semanticRank > 0 && retrievalRank > 0 ? semanticRank - retrievalRank : 0,
+            Notes = hitCount > 0 ? "Expected source found in top K." : "Expected source missing from top K."
         };
     }
 
@@ -95,24 +107,37 @@ public sealed class RagEvalService
         sw.Stop();
         var answerText = answer.ToString();
         var context = string.Join(" ", retrieved.Select(r => r.Content));
-        var retrievalHit = MatchesExpectedSource(retrieved, test.ExpectedSources);
+        var expectedCount = test.ExpectedSources.Count;
+        var hitCount = CountExpectedHits(retrieved, test.ExpectedSources);
+        var retrievalRank = FindFirstExpectedRank(retrieved, test.ExpectedSources);
         var keywordHit = !test.AnswerKeywords.Any()
                          || test.AnswerKeywords.All(k => answerText.Contains(k, StringComparison.OrdinalIgnoreCase));
         var refusalCorrect = !test.ShouldRefuse || LooksLikeRefusal(answerText);
+        var citationHit = HasCitation(answerText, retrieved, test.ExpectedSources);
+        var unsupportedAnswer = !test.ShouldRefuse && !refusalCorrect && hitCount == 0;
 
         return new RagEvalResult
         {
             CaseId = test.Id,
             Question = test.Question,
-            RetrievalHit = retrievalHit,
+            RetrievalHit = hitCount > 0,
             KeywordHit = keywordHit,
             RefusalCorrect = refusalCorrect,
-            Passed = retrievalHit && keywordHit && refusalCorrect,
+            Passed = hitCount > 0 && keywordHit && refusalCorrect,
             LatencyMs = sw.Elapsed.TotalMilliseconds,
             GroundingScore = RagQueryService.GroundingScore(answerText, context),
+            RecallAtK = expectedCount == 0 ? 1d : (double)hitCount / expectedCount,
+            ReciprocalRank = retrievalRank <= 0 ? 0d : 1d / retrievalRank,
+            ExpectedSourceHits = hitCount,
+            ExpectedSourceCount = expectedCount,
+            CitationHit = citationHit,
+            UnsupportedAnswer = unsupportedAnswer,
+            SemanticRank = retrievalRank,
+            SelectedRank = retrievalRank,
+            RerankerDelta = 0,
             Answer = answerText,
             Retrieved = retrieved,
-            Notes = BuildNotes(retrievalHit, keywordHit, refusalCorrect)
+            Notes = BuildNotes(hitCount > 0, keywordHit, refusalCorrect)
         };
     }
 
@@ -146,6 +171,12 @@ public sealed class RagEvalService
         md.AppendLine($"- Dataset: `{run.DatasetId}`");
         md.AppendLine($"- Mode: {(run.FullAnswer ? "full answer" : "retrieval only")}");
         md.AppendLine($"- Passed: {run.Passed}/{run.Total} ({run.PassRate:P0})");
+        md.AppendLine($"- Recall@K: {run.AverageRecallAtK:P0}");
+        md.AppendLine($"- MRR: {run.MeanReciprocalRank:F3}");
+        md.AppendLine($"- Citation hit rate: {run.CitationHitRate:P0}");
+        md.AppendLine($"- Unsupported answer rate: {run.UnsupportedAnswerRate:P0}");
+        md.AppendLine($"- Refusal accuracy: {run.RefusalAccuracy:P0}");
+        md.AppendLine($"- Avg latency: {run.AverageLatencyMs:F0} ms");
         md.AppendLine();
         foreach (var result in run.Results)
         {
@@ -154,23 +185,59 @@ public sealed class RagEvalService
             md.AppendLine($"- Retrieval hit: {result.RetrievalHit}");
             md.AppendLine($"- Keyword hit: {result.KeywordHit}");
             md.AppendLine($"- Refusal correct: {result.RefusalCorrect}");
+            md.AppendLine($"- Recall@K: {result.RecallAtK:P0}");
+            md.AppendLine($"- MRR: {result.ReciprocalRank:F3}");
+            md.AppendLine($"- Citation hit: {result.CitationHit}");
+            md.AppendLine($"- Unsupported answer: {result.UnsupportedAnswer}");
             md.AppendLine($"- Latency: {result.LatencyMs:F0} ms");
             md.AppendLine($"- Grounding: {result.GroundingScore:P0}");
+            md.AppendLine($"- Reranker delta: {result.RerankerDelta}");
             md.AppendLine($"- Notes: {result.Notes}");
             md.AppendLine();
         }
         await File.WriteAllTextAsync(Path.Combine(dir, "report.md"), md.ToString(), ct);
     }
 
-    private static bool MatchesExpectedSource(IEnumerable<RagTraceChunk> chunks, IEnumerable<string> expectedSources)
+    private static int CountExpectedHits(IEnumerable<RagTraceChunk> chunks, IEnumerable<string> expectedSources)
     {
         var expected = expectedSources.Where(s => !string.IsNullOrWhiteSpace(s)).ToList();
-        if (expected.Count == 0) return true;
+        if (expected.Count == 0) return 0;
 
-        return chunks.Any(chunk => expected.Any(expectedSource =>
+        return chunks.Count(chunk => expected.Any(expectedSource =>
             chunk.Title.Contains(expectedSource, StringComparison.OrdinalIgnoreCase)
             || chunk.File.Contains(expectedSource, StringComparison.OrdinalIgnoreCase)
             || chunk.Path.Contains(expectedSource, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private static int FindFirstExpectedRank(IEnumerable<RagTraceChunk> chunks, IEnumerable<string> expectedSources)
+    {
+        var expected = expectedSources.Where(s => !string.IsNullOrWhiteSpace(s)).ToList();
+        if (expected.Count == 0) return 0;
+
+        foreach (var chunk in chunks)
+        {
+            if (expected.Any(expectedSource =>
+                chunk.Title.Contains(expectedSource, StringComparison.OrdinalIgnoreCase)
+                || chunk.File.Contains(expectedSource, StringComparison.OrdinalIgnoreCase)
+                || chunk.Path.Contains(expectedSource, StringComparison.OrdinalIgnoreCase)))
+            {
+                return chunk.Rank;
+            }
+        }
+
+        return 0;
+    }
+
+    private static bool HasCitation(string answer, IEnumerable<RagTraceChunk> retrieved, IEnumerable<string> expectedSources)
+    {
+        if (string.IsNullOrWhiteSpace(answer))
+            return false;
+
+        if (retrieved.Any(chunk => answer.Contains($"[{chunk.Rank}]", StringComparison.OrdinalIgnoreCase)))
+            return true;
+
+        return expectedSources.Where(s => !string.IsNullOrWhiteSpace(s)).Any(expectedSource =>
+            answer.Contains(expectedSource, StringComparison.OrdinalIgnoreCase));
     }
 
     private static bool LooksLikeRefusal(string answer) =>

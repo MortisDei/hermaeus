@@ -12,6 +12,12 @@ public sealed class RagQueryTrace
     public string DatasetId { get; set; } = string.Empty;
     public string Question { get; set; } = string.Empty;
     public string ExpandedQuestion { get; set; } = string.Empty;
+    public List<string> QueryVariants { get; set; } = [];
+    public string PlannerNotes { get; set; } = string.Empty;
+    public int ContextTokenBudget { get; set; }
+    public string ContextPackingSummary { get; set; } = string.Empty;
+    public bool Refused { get; set; }
+    public string RefusalReason { get; set; } = string.Empty;
     public string ModelId { get; set; } = string.Empty;
     public long RetrievalLatencyMs { get; set; }
     public long TotalLatencyMs { get; set; }

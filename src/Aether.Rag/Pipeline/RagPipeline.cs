@@ -5,6 +5,7 @@ using Aether.Rag.Retrieval;
 using Aether.Rag.Storage;
 using System.Security.Cryptography;
 using System.Net;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace Aether.Rag.Pipeline;
@@ -126,38 +127,13 @@ public sealed class RagPipeline
                 if (string.IsNullOrWhiteSpace(tc.Content))
                     health.EmptyChunkCount++;
 
-                var chunk = new RagChunk
-                {
-                    DatasetId   = dataset.Id,
-                    SourceFile  = document.SourceFile,
-                    SourcePath  = document.SourcePath,
-                    SourceHash  = document.SourceHash,
-                    SourceModifiedUtc = document.ModifiedUtc,
-                    SourceTitle = document.Title,
-                    Content     = tc.Content,
-                    ChunkIndex  = tc.Index,
-                    ChunkTotal  = tc.Total,
-                    TokenCount  = ParagraphChunker.EstimateTokens(tc.Content)
-                };
+                var chunk = CreateChunk(dataset.Id, document.SourceFile, document.SourcePath, document.SourceHash, document.ModifiedUtc, document.Title, tc);
 
                 if (tc.ParentContent is not null)
                 {
                     // Parent chunk (stored but not embedded for indexing)
                     var parentId = Guid.NewGuid().ToString();
-                    var parent = new RagChunk
-                    {
-                        Id          = parentId,
-                        DatasetId   = dataset.Id,
-                        SourceFile  = chunk.SourceFile,
-                        SourcePath  = chunk.SourcePath,
-                        SourceHash  = chunk.SourceHash,
-                        SourceModifiedUtc = chunk.SourceModifiedUtc,
-                        SourceTitle = chunk.SourceTitle,
-                        Content     = tc.ParentContent,
-                        ChunkIndex  = tc.Index,
-                        ChunkTotal  = tc.Total,
-                        TokenCount  = ParagraphChunker.EstimateTokens(tc.ParentContent)
-                    };
+                    var parent = CreateChunk(dataset.Id, document.SourceFile, document.SourcePath, document.SourceHash, document.ModifiedUtc, document.Title, tc, tc.ParentContent, parentId, null);
                     parentChunks.Add(parent);
                     chunk.ParentId = parentId;
                 }
@@ -281,37 +257,12 @@ public sealed class RagPipeline
                 if (string.IsNullOrWhiteSpace(tc.Content))
                     health.EmptyChunkCount++;
 
-                var chunk = new RagChunk
-                {
-                    DatasetId = dataset.Id,
-                    SourceFile = doc.Url.Host,
-                    SourcePath = doc.Url.ToString(),
-                    SourceHash = sourceHash,
-                    SourceModifiedUtc = DateTime.UtcNow,
-                    SourceTitle = doc.Title,
-                    Content = tc.Content,
-                    ChunkIndex = tc.Index,
-                    ChunkTotal = tc.Total,
-                    TokenCount = ParagraphChunker.EstimateTokens(tc.Content)
-                };
+                var chunk = CreateChunk(dataset.Id, doc.Url.Host, doc.Url.ToString(), sourceHash, DateTime.UtcNow, doc.Title, tc);
 
                 if (tc.ParentContent is not null)
                 {
                     var parentId = Guid.NewGuid().ToString();
-                    parentChunks.Add(new RagChunk
-                    {
-                        Id = parentId,
-                        DatasetId = dataset.Id,
-                        SourceFile = chunk.SourceFile,
-                        SourcePath = chunk.SourcePath,
-                        SourceHash = chunk.SourceHash,
-                        SourceModifiedUtc = chunk.SourceModifiedUtc,
-                        SourceTitle = chunk.SourceTitle,
-                        Content = tc.ParentContent,
-                        ChunkIndex = tc.Index,
-                        ChunkTotal = tc.Total,
-                        TokenCount = ParagraphChunker.EstimateTokens(tc.ParentContent)
-                    });
+                    parentChunks.Add(CreateChunk(dataset.Id, doc.Url.Host, doc.Url.ToString(), sourceHash, DateTime.UtcNow, doc.Title, tc, tc.ParentContent, parentId, null));
                     chunk.ParentId = parentId;
                 }
 
@@ -347,10 +298,72 @@ public sealed class RagPipeline
 
     private static string BuildEmbeddingText(RagChunk chunk, RagDatasetConfig cfg)
     {
-        if (!cfg.PrependTitleToEmbedding || string.IsNullOrWhiteSpace(chunk.SourceTitle))
-            return chunk.Content;
+        var builder = new StringBuilder();
 
-        return $"Title: {chunk.SourceTitle}\nSource: {chunk.SourceFile}\n\n{chunk.Content}";
+        if (cfg.PrependTitleToEmbedding && !string.IsNullOrWhiteSpace(chunk.SourceTitle))
+            builder.AppendLine($"Title: {chunk.SourceTitle}");
+
+        if (!string.IsNullOrWhiteSpace(chunk.SourcePath))
+            builder.AppendLine($"Source: {chunk.SourcePath}");
+
+        if (chunk.ChunkKind != RagChunkKind.PlainText)
+            builder.AppendLine($"Chunk kind: {chunk.ChunkKind}");
+
+        if (!string.IsNullOrWhiteSpace(chunk.HeadingPath))
+            builder.AppendLine($"Heading: {chunk.HeadingPath}");
+
+        if (!string.IsNullOrWhiteSpace(chunk.CodeSymbolInfo))
+            builder.AppendLine($"Symbol: {chunk.CodeSymbolInfo}");
+
+        if (chunk.PageNumber.HasValue)
+            builder.AppendLine($"Page: {chunk.PageNumber}");
+
+        if (!string.IsNullOrWhiteSpace(chunk.EventType))
+            builder.AppendLine($"Event: {chunk.EventType}");
+
+        if (!string.IsNullOrWhiteSpace(chunk.SourceUrl))
+            builder.AppendLine($"Url: {chunk.SourceUrl}");
+
+        if (builder.Length > 0)
+            builder.AppendLine();
+
+        builder.Append(chunk.Content);
+        return builder.ToString();
+    }
+
+    private static RagChunk CreateChunk(
+        string datasetId,
+        string sourceFile,
+        string sourcePath,
+        string sourceHash,
+        DateTime modifiedUtc,
+        string sourceTitle,
+        TextChunk textChunk,
+        string? contentOverride = null,
+        string? chunkId = null,
+        string? parentId = null)
+    {
+        return new RagChunk
+        {
+            Id = chunkId ?? Guid.NewGuid().ToString(),
+            DatasetId = datasetId,
+            SourceFile = sourceFile,
+            SourcePath = sourcePath,
+            SourceHash = sourceHash,
+            SourceModifiedUtc = modifiedUtc,
+            SourceTitle = sourceTitle,
+            Content = contentOverride ?? textChunk.Content,
+            ChunkIndex = textChunk.Index,
+            ChunkTotal = textChunk.Total,
+            ParentId = parentId,
+            TokenCount = ParagraphChunker.EstimateTokens(contentOverride ?? textChunk.Content),
+            ChunkKind = textChunk.ChunkKind,
+            HeadingPath = textChunk.HeadingPath,
+            CodeSymbolInfo = textChunk.CodeSymbolInfo,
+            PageNumber = textChunk.PageNumber,
+            EventType = textChunk.EventType,
+            SourceUrl = textChunk.SourceUrl
+        };
     }
 
     private static void ValidateIngestConfig(RagDatasetConfig config)

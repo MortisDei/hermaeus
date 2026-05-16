@@ -209,6 +209,53 @@
                     </StackPanel>
                 </Border>
 
+                <!-- Diagnostics -->
+                <Expander IsExpanded="True"
+                          IsVisible="{Binding LastTraceId, Converter={x:Static views:RagView.NotEmpty}}"
+                          Header="Diagnostics">
+                    <StackPanel Spacing="10" Margin="0,6,0,0">
+                        <StackPanel Spacing="3">
+                            <TextBlock Text="Rewritten query" FontSize="11" Opacity="0.45" />
+                            <SelectableTextBlock Text="{Binding ExpandedQuery}"
+                                                 TextWrapping="Wrap"
+                                                 FontSize="13"
+                                                 Opacity="0.9" />
+                        </StackPanel>
+                        <StackPanel Spacing="3">
+                            <TextBlock Text="Query variants" FontSize="11" Opacity="0.45" />
+                            <SelectableTextBlock Text="{Binding QueryVariants}"
+                                                 TextWrapping="Wrap"
+                                                 FontSize="12"
+                                                 Opacity="0.82" />
+                        </StackPanel>
+                        <StackPanel Spacing="3">
+                            <TextBlock Text="Planner notes" FontSize="11" Opacity="0.45" />
+                            <SelectableTextBlock Text="{Binding PlannerNotes}"
+                                                 TextWrapping="Wrap"
+                                                 FontSize="12"
+                                                 Opacity="0.82" />
+                        </StackPanel>
+                        <StackPanel Spacing="3">
+                            <TextBlock Text="Context packing" FontSize="11" Opacity="0.45" />
+                            <SelectableTextBlock Text="{Binding ContextPackingSummary}"
+                                                 TextWrapping="Wrap"
+                                                 FontSize="12"
+                                                 Opacity="0.82" />
+                        </StackPanel>
+                        <StackPanel Spacing="3">
+                            <TextBlock Text="Refusal" FontSize="11" Opacity="0.45" />
+                            <TextBlock Text="{Binding RefusalReason}"
+                                       IsVisible="{Binding TraceRefused}"
+                                       FontSize="12"
+                                       Opacity="0.82" />
+                            <TextBlock Text="Supported answer path"
+                                       IsVisible="{Binding TraceRefused}"
+                                       FontSize="12"
+                                       Opacity="0.55" />
+                        </StackPanel>
+                    </StackPanel>
+                </Expander>
+
                 <!-- Sources -->
                 <Expander IsExpanded="True"
                           IsVisible="{Binding Sources.Count, Converter={x:Static views:RagView.IsNonZero}}"

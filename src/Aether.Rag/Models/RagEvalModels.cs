@@ -39,6 +39,12 @@ public sealed class RagEvalRun
     public int Total => Results.Count;
     public int Passed => Results.Count(r => r.Passed);
     public double PassRate => Total == 0 ? 0 : (double)Passed / Total;
+    public double AverageRecallAtK => Total == 0 ? 0 : Results.Average(r => r.RecallAtK);
+    public double MeanReciprocalRank => Total == 0 ? 0 : Results.Average(r => r.ReciprocalRank);
+    public double CitationHitRate => Total == 0 ? 0 : Results.Count(r => r.CitationHit) / (double)Total;
+    public double UnsupportedAnswerRate => Total == 0 ? 0 : Results.Count(r => r.UnsupportedAnswer) / (double)Total;
+    public double RefusalAccuracy => Total == 0 ? 0 : Results.Count(r => r.RefusalCorrect) / (double)Total;
+    public double AverageLatencyMs => Total == 0 ? 0 : Results.Average(r => r.LatencyMs);
 }
 
 public sealed class RagEvalResult
@@ -51,6 +57,15 @@ public sealed class RagEvalResult
     public bool Passed { get; set; }
     public double LatencyMs { get; set; }
     public float GroundingScore { get; set; }
+    public double RecallAtK { get; set; }
+    public double ReciprocalRank { get; set; }
+    public int ExpectedSourceHits { get; set; }
+    public int ExpectedSourceCount { get; set; }
+    public bool CitationHit { get; set; }
+    public bool UnsupportedAnswer { get; set; }
+    public int SemanticRank { get; set; }
+    public int SelectedRank { get; set; }
+    public int RerankerDelta { get; set; }
     public string Answer { get; set; } = string.Empty;
     public List<RagTraceChunk> Retrieved { get; set; } = [];
     public string Notes { get; set; } = string.Empty;

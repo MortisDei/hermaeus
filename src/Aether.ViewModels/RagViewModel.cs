@@ -97,6 +97,12 @@ public partial class RagViewModel : ObservableObject
     [ObservableProperty] private bool        _hasAnswer;
     [ObservableProperty] private RagSourceViewModel? _selectedSource;
     [ObservableProperty] private bool        _showSourceInspector;
+    [ObservableProperty] private string      _expandedQuery = string.Empty;
+    [ObservableProperty] private string      _queryVariants = string.Empty;
+    [ObservableProperty] private string      _plannerNotes = string.Empty;
+    [ObservableProperty] private string      _contextPackingSummary = string.Empty;
+    [ObservableProperty] private bool        _traceRefused;
+    [ObservableProperty] private string      _refusalReason = string.Empty;
     [ObservableProperty] private string      _sourceOverflowLabel = string.Empty;
     [ObservableProperty] private bool        _hasSourceOverflow;
     [ObservableProperty] private string      _lastTraceId = string.Empty;
@@ -442,6 +448,18 @@ public partial class RagViewModel : ObservableObject
             LastRetrievalLatencyMs = root.GetProperty("RetrievalLatencyMs").GetInt64();
             LastTotalLatencyMs = root.GetProperty("TotalLatencyMs").GetInt64();
             GroundingScore = root.GetProperty("GroundingScore").GetSingle();
+            if (root.TryGetProperty("ExpandedQuery", out var expandedQuery))
+                ExpandedQuery = expandedQuery.GetString() ?? string.Empty;
+            if (root.TryGetProperty("QueryVariants", out var variants))
+                QueryVariants = string.Join("\n", variants.EnumerateArray().Select(v => v.GetString()).Where(v => !string.IsNullOrWhiteSpace(v)));
+            if (root.TryGetProperty("PlannerNotes", out var plannerNotes))
+                PlannerNotes = plannerNotes.GetString() ?? string.Empty;
+            if (root.TryGetProperty("ContextPackingSummary", out var packingSummary))
+                ContextPackingSummary = packingSummary.GetString() ?? string.Empty;
+            if (root.TryGetProperty("Refused", out var refused))
+                TraceRefused = refused.GetBoolean();
+            if (root.TryGetProperty("RefusalReason", out var refusalReason))
+                RefusalReason = refusalReason.GetString() ?? string.Empty;
         }
         catch { }
     }
