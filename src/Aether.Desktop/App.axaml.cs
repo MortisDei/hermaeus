@@ -135,6 +135,7 @@ public partial class App : Application
         s.AddSingleton<SystemOverviewViewModel>();
         s.AddSingleton<DoctorViewModel>();
         s.AddSingleton<MemoriesViewModel>();
+        s.AddSingleton<SessionUsageViewModel>();
         s.AddSingleton<LogsViewModel>();
         s.AddSingleton<SetupWizardViewModel>();
         s.AddSingleton<MainWindowViewModel>();

@@ -1,0 +1,42 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Aether.ViewModels"
+             x:Class="Aether.Desktop.Views.SessionUsageView"
+             x:DataType="vm:SessionUsageViewModel">
+
+    <ScrollViewer Padding="24" VerticalScrollBarVisibility="Auto">
+        <StackPanel MaxWidth="900" Spacing="12">
+            <StackPanel Spacing="6">
+                <TextBlock Text="Session Usage" FontSize="22" FontWeight="SemiBold" />
+                <TextBlock Text="Shows per-conversation memory counts and recent activity." FontSize="13" Opacity="0.6" />
+            </StackPanel>
+
+            <Border Classes="settings-card" Padding="12">
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Stretch" Spacing="8">
+                    <Button Content="Refresh" Command="{Binding RefreshCommand}" Padding="10,6" />
+                    <TextBlock Text="" />
+                </StackPanel>
+            </Border>
+
+            <Border CornerRadius="8" BorderThickness="1" BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" Background="{DynamicResource SubtleFillColorSecondaryBrush}">
+                <ScrollViewer MaxHeight="600" VerticalScrollBarVisibility="Auto">
+                    <ItemsControl ItemsSource="{Binding Items}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:SessionUsageItemViewModel">
+                                <Border Padding="12" BorderThickness="0,0,0,1" BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
+                                    <Grid ColumnDefinitions="*,100" ColumnSpacing="12">
+                                        <StackPanel Orientation="Vertical">
+                                            <TextBlock Text="{Binding Title}" FontSize="13" FontWeight="SemiBold" />
+                                            <TextBlock Text="{Binding ConversationId}" FontSize="11" Opacity="0.6" />
+                                        </StackPanel>
+                                        <TextBlock Grid.Column="1" Text="{Binding MemoryCount}" HorizontalAlignment="Right" VerticalAlignment="Center" FontSize="14" FontWeight="SemiBold" />
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

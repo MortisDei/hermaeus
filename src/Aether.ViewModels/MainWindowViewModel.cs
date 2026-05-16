@@ -28,6 +28,7 @@ public partial class MainWindowViewModel : ObservableObject
     public DoctorViewModel          Doctor { get; }
     public MemoriesViewModel        Memories { get; }
     public LogsViewModel            Logs { get; }
+    public SessionUsageViewModel    SessionUsage { get; }
     public SetupWizardViewModel     Wizard { get; }
 
     public ObservableCollection<ConversationItemViewModel> Conversations { get; } = [];
@@ -53,6 +54,7 @@ public partial class MainWindowViewModel : ObservableObject
     public bool ShowSystem => ActivePanel == "system";
     public bool ShowDoctor => ActivePanel == "doctor";
     public bool ShowMemories => ActivePanel == "memories";
+    public bool ShowSessionUsage => ActivePanel == "session-usage";
     public bool ShowLogs => ActivePanel == "logs";
     public bool ShowWizard => ActivePanel == "wizard";
     public object ActiveViewModel => ActivePanel switch
@@ -67,6 +69,7 @@ public partial class MainWindowViewModel : ObservableObject
         "system"   => SystemOverview,
         "doctor"   => Doctor,
         "memories" => Memories,
+        "session-usage" => SessionUsage,
         "logs"     => Logs,
         "wizard"   => Wizard,
         _          => Chat
@@ -89,6 +92,7 @@ public partial class MainWindowViewModel : ObservableObject
         DoctorViewModel doctor,
         MemoriesViewModel memories,
         LogsViewModel logs,
+        SessionUsageViewModel sessionUsage,
         SetupWizardViewModel wizard,
         ISettingsService settingsService,
         IToastService toasts,
@@ -100,7 +104,7 @@ public partial class MainWindowViewModel : ObservableObject
         _settingsService = settingsService;
         _store = store; Chat = chat; Agent = agent; Settings = settings;
         Models = models; Rag = rag; Services = services; Tasks = tasks;
-        Benchmarks = benchmarks; SystemOverview = systemOverview; Doctor = doctor; Memories = memories; Logs = logs; Wizard = wizard;
+        Benchmarks = benchmarks; SystemOverview = systemOverview; Doctor = doctor; Memories = memories; Logs = logs; SessionUsage = sessionUsage; Wizard = wizard;
         Doctor.RequestNavigate = panel => ActivePanel = panel;
         Wizard.WizardCompleted += () => ActivePanel = "chat";
         // allow settings view to request re-running the setup wizard
