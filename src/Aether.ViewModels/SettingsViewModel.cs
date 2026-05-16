@@ -533,7 +533,11 @@ public partial class SettingsViewModel : ObservableObject
 
     [RelayCommand] private void Reset() => Reload();
 
-    public void Shutdown() => _xttsProcess.Stop();
+    public void Shutdown()
+    {
+        Tts.Dispose();
+        _xttsProcess.Stop();
+    }
 
     private void UpdateMigrationPreview()
     {

@@ -422,8 +422,8 @@ public sealed class BenchmarkService : IBenchmarkService
             ScoringProfile = "fast-chat-v1",
             Cases =
             [
-                new BenchmarkCase { Name = "Tiny greeting", Prompt = "Reply with one friendly sentence.", ExpectedKeywords = ["friendly"] },
-                new BenchmarkCase { Name = "Three bullets", Prompt = "List three benefits of local-first AI in bullet points.", ExpectedKeywords = ["local"] }
+                new BenchmarkCase { Name = "Tiny greeting", Prompt = "Reply with one friendly sentence that includes the word ready.", ExpectedKeywords = ["ready"] },
+                new BenchmarkCase { Name = "Three bullets", Prompt = "List exactly three benefits of local-first AI in bullet points. Include privacy, latency, and offline access.", ExpectedKeywords = ["privacy", "latency", "offline"] }
             ]
         },
         new()
@@ -435,7 +435,7 @@ public sealed class BenchmarkService : IBenchmarkService
             Cases =
             [
                 new BenchmarkCase { Name = "Exact JSON", Prompt = "Return JSON only with keys name and status. Use name Aether and status ready.", ExpectedKeywords = ["Aether", "ready"], ExpectedRegexes = ["\\{.*name.*status.*\\}"] },
-                new BenchmarkCase { Name = "Limit words", Prompt = "Explain model quantization in exactly two short sentences.", ExpectedKeywords = ["quant"] }
+                new BenchmarkCase { Name = "Limit words", Prompt = "Explain model quantization in exactly two short sentences. Mention smaller weights and lower memory use.", ExpectedKeywords = ["weights", "memory"] }
             ]
         },
         new()

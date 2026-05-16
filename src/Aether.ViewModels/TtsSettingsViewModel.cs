@@ -13,7 +13,7 @@ using CommunityToolkit.Mvvm.Input;
 
 namespace Aether.ViewModels;
 
-public partial class TtsSettingsViewModel : ObservableObject
+public partial class TtsSettingsViewModel : ObservableObject, IDisposable
 {
     private readonly ITtsService _tts;
     private readonly IVoiceProviderRegistry _voiceProviderRegistry;
@@ -133,6 +133,12 @@ public partial class TtsSettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(IsServerManagedProvider));
         StartTtsCommand.NotifyCanExecuteChanged();
         StopTtsCommand.NotifyCanExecuteChanged();
+    }
+
+    public void Dispose()
+    {
+        _xttsProcess.StatusChanged -= OnXttsStatusChanged;
+        _kokoroProcess.StatusChanged -= OnXttsStatusChanged;
     }
 
     public void ReloadFrom(AppSettings settings)

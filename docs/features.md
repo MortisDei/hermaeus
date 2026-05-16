@@ -100,7 +100,8 @@
   step, including the install plan and risk notes before you continue.
 - Local AI setup scans can offer approval-gated downloads for a default Phi-4
   mini reasoning GGUF file and a platform-specific `llama-server` binary when
-  they are missing from the selected AI assets folder.
+  they are missing from the selected AI assets folder. Model downloads verify a
+  SHA256 hash when Aether has trusted hash metadata for that exact URL.
 - The Local AI setup can now detect available GPU backends when creating
   a Python venv and will suggest a device (`cuda` for NVIDIA, `rocm` for
   AMD/ROCm, `mps` for Apple Silicon, or `cpu`) to use for TTS/model inference.
@@ -136,6 +137,8 @@
 - Trust & Safety scan for configured local tools, hashes, AI-root scope, and
   network exposure warnings.
 - OS-backed secret references and redacted process logs.
+- Local fallback secrets use an app-created per-data-root key file restricted
+  to the current user. Backup excludes both the fallback vault and key file.
 - Data-safety test harness for migration, backup/restore, and redaction.
 
 ## Workbench Glue

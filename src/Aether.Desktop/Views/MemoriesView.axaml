@@ -107,7 +107,7 @@
 
             <!-- Empty State -->
             <StackPanel Spacing="8" HorizontalAlignment="Center" VerticalAlignment="Center"
-                        IsVisible="{Binding Memories.Count}">
+                        IsVisible="{Binding HasNoMemories}">
                 <TextBlock Text="No memories yet" FontSize="16" FontWeight="SemiBold" Opacity="0.5" HorizontalAlignment="Center" />
                 <TextBlock Text="Memories will appear here as the agent learns about you." FontSize="12" Opacity="0.4" HorizontalAlignment="Center" />
             </StackPanel>

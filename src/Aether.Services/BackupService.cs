@@ -21,7 +21,12 @@ public sealed class BackupService : IBackupService
         Directory.CreateDirectory(targetDirectory);
         var path = Path.Combine(targetDirectory, $"aether-backup-{DateTime.UtcNow:yyyyMMdd-HHmmss}.zip");
         var files = Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
-            .Where(f => !Path.GetFileName(f).Equals("secrets.local.json", StringComparison.OrdinalIgnoreCase))
+            .Where(f =>
+            {
+                var name = Path.GetFileName(f);
+                return !name.Equals("secrets.local.json", StringComparison.OrdinalIgnoreCase)
+                    && !name.Equals("secrets.local.key", StringComparison.OrdinalIgnoreCase);
+            })
             .ToList();
 
         using var zip = ZipFile.Open(path, ZipArchiveMode.Create);
@@ -35,7 +40,10 @@ public sealed class BackupService : IBackupService
         return Task.FromResult(new BackupResult(path, files.Count));
     }
 
-    public Task RestoreAsync(string backupPath, CancellationToken ct = default)
+    public Task RestoreAsync(string backupPath, CancellationToken ct = default) =>
+        RestoreAsync(backupPath, allowOverwrite: false, ct);
+
+    public Task RestoreAsync(string backupPath, bool allowOverwrite, CancellationToken ct = default)
     {
         if (!File.Exists(backupPath))
             throw new FileNotFoundException("Backup file was not found.", backupPath);
@@ -49,11 +57,11 @@ public sealed class BackupService : IBackupService
             var target = Path.GetFullPath(Path.Combine(root, entry.FullName));
             if (!target.StartsWith(root, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("Backup contains an unsafe path.");
-            if (File.Exists(target))
+            if (File.Exists(target) && !allowOverwrite)
                 throw new IOException($"Restore refused because '{target}' already exists.");
 
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-            entry.ExtractToFile(target);
+            entry.ExtractToFile(target, allowOverwrite);
         }
 
         return Task.CompletedTask;

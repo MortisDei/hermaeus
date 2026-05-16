@@ -76,6 +76,7 @@ namespace Aether.Tests
             Directory.CreateDirectory(root);
             File.WriteAllText(Path.Combine(root, "conversations.db"), "db");
             File.WriteAllText(Path.Combine(root, "secrets.local.json"), "secret");
+            File.WriteAllText(Path.Combine(root, "secrets.local.key"), "key");
 
             var service = NewSettings(temp);
             service.Settings.DataManagement.DataRootDirectory = root;
@@ -86,6 +87,7 @@ namespace Aether.Tests
             {
                 True(archive.GetEntry("conversations.db") is not null, "conversation db should be backed up");
                 True(archive.GetEntry("secrets.local.json") is null, "local secrets should not be backed up");
+                True(archive.GetEntry("secrets.local.key") is null, "local secret key should not be backed up");
             }
 
             var restoreRoot = temp.PathFor("restore");
@@ -93,6 +95,8 @@ namespace Aether.Tests
             File.WriteAllText(Path.Combine(restoreRoot, "conversations.db"), "existing");
             service.Settings.DataManagement.DataRootDirectory = restoreRoot;
             await ThrowsAsync<IOException>(() => backups.RestoreAsync(backup.Path));
+            await backups.RestoreAsync(backup.Path, allowOverwrite: true);
+            Equal("db", await File.ReadAllTextAsync(Path.Combine(restoreRoot, "conversations.db")), "overwrite restore should replace existing files");
         }
     }
 }

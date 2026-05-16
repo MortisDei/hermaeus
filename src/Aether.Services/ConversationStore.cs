@@ -34,6 +34,7 @@ public sealed class ConversationStore : IConversationStore
 
         await using var c = new SqliteConnection(Cs);
         await c.OpenAsync(ct);
+        var ftsExisted = await TableExistsAsync(c, "conversations_fts", ct);
         var cmd = c.CreateCommand();
         cmd.CommandText = @"
             CREATE TABLE IF NOT EXISTS conversations (
@@ -54,12 +55,23 @@ public sealed class ConversationStore : IConversationStore
             );
             CREATE INDEX IF NOT EXISTS idx_updated ON conversations(updated_at DESC);";
         await cmd.ExecuteNonQueryAsync(ct);
-        await EnsureColumnAsync(c, "folder", "TEXT NOT NULL DEFAULT ''", ct);
-        await EnsureColumnAsync(c, "tags_json", "TEXT NOT NULL DEFAULT '[]'", ct);
-        await EnsureColumnAsync(c, "is_pinned", "INTEGER NOT NULL DEFAULT 0", ct);
-        await EnsureColumnAsync(c, "is_archived", "INTEGER NOT NULL DEFAULT 0", ct);
-        await RebuildFtsAsync(c, ct);
+        var schemaChanged = false;
+        schemaChanged |= await EnsureColumnAsync(c, "folder", "TEXT NOT NULL DEFAULT ''", ct);
+        schemaChanged |= await EnsureColumnAsync(c, "tags_json", "TEXT NOT NULL DEFAULT '[]'", ct);
+        schemaChanged |= await EnsureColumnAsync(c, "is_pinned", "INTEGER NOT NULL DEFAULT 0", ct);
+        schemaChanged |= await EnsureColumnAsync(c, "is_archived", "INTEGER NOT NULL DEFAULT 0", ct);
+        if (!ftsExisted || schemaChanged)
+            await RebuildFtsAsync(c, ct);
         _initializedPath = dbPath;
+    }
+
+    private static async Task<bool> TableExistsAsync(SqliteConnection c, string table, CancellationToken ct)
+    {
+        await using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = $table";
+        cmd.Parameters.AddWithValue("$table", table);
+        var value = await cmd.ExecuteScalarAsync(ct);
+        return value is not null;
     }
 
     private static async Task RebuildFtsAsync(SqliteConnection c, CancellationToken ct)
@@ -76,7 +88,7 @@ public sealed class ConversationStore : IConversationStore
         await fill.ExecuteNonQueryAsync(ct);
     }
 
-    private static async Task EnsureColumnAsync(SqliteConnection c, string column, string definition, CancellationToken ct)
+    private static async Task<bool> EnsureColumnAsync(SqliteConnection c, string column, string definition, CancellationToken ct)
     {
         var exists = false;
         await using (var cmd = c.CreateCommand())
@@ -93,10 +105,11 @@ public sealed class ConversationStore : IConversationStore
             }
         }
 
-        if (exists) return;
+        if (exists) return false;
         await using var alter = c.CreateCommand();
         alter.CommandText = $"ALTER TABLE conversations ADD COLUMN {column} {definition}";
         await alter.ExecuteNonQueryAsync(ct);
+        return true;
     }
 
     public async Task<List<Conversation>> GetAllAsync(bool includeArchived = true, CancellationToken ct = default)

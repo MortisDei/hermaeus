@@ -13,16 +13,7 @@ public sealed class LocalAiSetupService : ILocalAiSetupService
     private static readonly Version MinSupportedXttsPython = new(3, 9);
     private static readonly Version MaxSupportedXttsPythonExclusive = new(3, 12);
 
-    // Model SHA256 hashes for integrity verification
-    // These should be updated when models are released/updated
-    private static readonly Dictionary<string, string> ModelHashes = new(StringComparer.OrdinalIgnoreCase)
-    {
-        // Phi-4 mini reasoning Q5_K_M GGUF model
-        // Note: Update this hash when the model is re-released or changed
-        // Current: microsoft_Phi-4-mini-reasoning-Q5_K_M.gguf
-        { "https://huggingface.co/bartowski/microsoft_Phi-4-mini-reasoning-GGUF/resolve/main/microsoft_Phi-4-mini-reasoning-Q5_K_M.gguf?download=true", 
-          "b0aca5b1aca5b1aca5b1aca5b1aca5b1aca5b1aca5b1aca5b1aca5b1aca5b1aca5b1" } // Placeholder: Replace with actual hash
-    };
+    private static readonly Dictionary<string, string> ModelHashes = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly PythonHealthValidator _pythonValidator;
     private readonly ModelDownloadService _modelDownloader;

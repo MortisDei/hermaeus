@@ -28,7 +28,10 @@ public partial class MemoriesViewModel : ObservableObject
         _store = store;
         _toasts = toasts;
         _selectedCategory = "All";
+        Memories.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasNoMemories));
     }
+
+    public bool HasNoMemories => Memories.Count == 0;
 
     [RelayCommand]
     public async Task InitializeAsync()

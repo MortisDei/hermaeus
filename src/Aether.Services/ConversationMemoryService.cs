@@ -18,6 +18,8 @@ public sealed class ConversationMemoryService : IConversationMemoryService
     private readonly IMemoryExtractionService _extractor;
     private readonly ILlmService _llm;
     private readonly IRuntimeLogService _logs;
+    private readonly object _summaryCacheLock = new();
+    private readonly Dictionary<string, DateTime> _lastAutoSummaryByConversation = new(StringComparer.Ordinal);
 
     public ConversationMemoryService(
         ISettingsService settings,
@@ -87,6 +89,7 @@ public sealed class ConversationMemoryService : IConversationMemoryService
 
         await MergeAndSaveAsync(picked, conversationId, ct);
         await EnforcePerConversationCapAsync(conversationId, memorySettings.MaxMemoriesPerConversation, ct);
+        MarkAutoSummary(conversationId, DateTime.UtcNow);
     }
 
     private static bool IsEligibleForSummary(Conversation conversation)
@@ -120,12 +123,32 @@ public sealed class ConversationMemoryService : IConversationMemoryService
 
     private async Task<bool> HasRecentAutoSummaryAsync(string conversationId, CancellationToken ct)
     {
-        var recent = await _memories.GetRecentAsync(100, ct);
         var cutoff = DateTime.UtcNow.AddHours(-6);
-        return recent.Any(m =>
+        lock (_summaryCacheLock)
+        {
+            if (_lastAutoSummaryByConversation.TryGetValue(conversationId, out var cached) && cached >= cutoff)
+                return true;
+        }
+
+        var recent = await _memories.GetRecentAsync(100, ct);
+        var latest = recent
+            .Where(m =>
             string.Equals(m.SourceConversationId, conversationId, StringComparison.Ordinal)
             && m.UpdatedAt >= cutoff
-            && m.Tags.Any(t => string.Equals(t, "auto_summary", StringComparison.OrdinalIgnoreCase)));
+            && m.Tags.Any(t => string.Equals(t, "auto_summary", StringComparison.OrdinalIgnoreCase)))
+            .OrderByDescending(m => m.UpdatedAt)
+            .FirstOrDefault();
+        if (latest is null)
+            return false;
+
+        MarkAutoSummary(conversationId, latest.UpdatedAt);
+        return true;
+    }
+
+    private void MarkAutoSummary(string conversationId, DateTime timestamp)
+    {
+        lock (_summaryCacheLock)
+            _lastAutoSummaryByConversation[conversationId] = timestamp;
     }
 
     private async Task<string> ResolveModelIdAsync(string conversationModelId, CancellationToken ct)

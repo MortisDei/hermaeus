@@ -5,6 +5,34 @@ All notable changes to Aether will be documented in this file. Appned new versio
 The project follows semantic versioning once public release candidates begin.
 Pre-1.0 versions may still change internal APIs and storage details.
 
+## [0.9.6-alpha] - 2026-05-16
+
+### Fixed
+
+- Memories now shows the empty state only when there are no memories.
+- Removed the placeholder Phi-4 SHA256 entry so setup no longer fails every
+  default model download against a known-wrong hash.
+- Local fallback secrets now use a stable per-data-root key file and
+  `Rfc2898DeriveBytes` instead of hostname-derived hand-rolled PBKDF2.
+- TTS settings now unsubscribes process status events during shutdown.
+- Chat regeneration now uses stored original message text and attachment paths
+  instead of parsing the display-only attachment summary.
+- Background panel load failures now surface a warning toast as well as a
+  runtime log entry.
+- Conversation FTS rebuilds now run only when the FTS table is missing or a
+  schema migration actually changes columns.
+- Conversation auto-summary throttling now caches the last summary timestamp
+  per conversation to avoid a DB read on every assistant response.
+
+### Changed
+
+- Draft patch preview decisions now use async callbacks rather than
+  fire-and-forget `Action` callbacks.
+- Backups now exclude the local fallback secret key file, and restore supports
+  an explicit overwrite path for future UI use.
+- Starter benchmark checks now use more specific expected keywords.
+- Project version metadata bumped to `0.9.6-alpha`.
+
 ## [0.9.5-alpha] - 2026-05-16
 
 ### Added
@@ -161,9 +189,9 @@ Pre-1.0 versions may still change internal APIs and storage details.
 - Secret storage encryption: `SecretStore` now uses AES-256-CBC encryption
   with PBKDF2 key derivation (using machine identifier and 10,000 iterations)
   instead of Base64 encoding, with backward compatibility fallback.
-- Model download integrity: `LocalAiSetupService` now implements mandatory
-  SHA256 hash verification for critical model downloads (Phi-4 mini reasoning).
-  Hash mismatches now fail the setup action with a clear error message.
+- Model download integrity: `LocalAiSetupService` now supports SHA256 hash
+  verification when trusted hash metadata is available. Hash mismatches fail the
+  setup action with a clear error message.
 - Settings voice sample import compile break: `SettingsView` now correctly wires
   `ImportTtsVoiceSampleCommand` through `TtsSettingsViewModel`.
 - Reranker directory resolution parity between Doctor and runtime reranker:

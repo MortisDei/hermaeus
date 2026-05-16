@@ -6,6 +6,7 @@ public class Message
     public string ConversationId { get; set; } = string.Empty;
     public string Role { get; set; } = "user";
     public string Content { get; set; } = string.Empty;
+    public string OriginalContent { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public bool IsError { get; set; }
     public string ModelId { get; set; } = string.Empty;

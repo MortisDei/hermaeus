@@ -6,6 +6,7 @@ namespace Aether.ViewModels;
 public partial class MessageViewModel : ObservableObject
 {
     [ObservableProperty] private string _content = string.Empty;
+    [ObservableProperty] private string _originalContent = string.Empty;
     [ObservableProperty] private bool   _isStreaming;
     [ObservableProperty] private bool   _isError;
     [ObservableProperty] private string _modelId = string.Empty;

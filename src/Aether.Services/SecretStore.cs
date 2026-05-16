@@ -1,6 +1,6 @@
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using Aether.Core.Services;
@@ -12,6 +12,8 @@ public sealed class SecretStore : ISecretStore
     private readonly ISettingsService _settings;
     private readonly ISecretBackend _osBackend;
     private const string Prefix = "secret:";
+    private const string EncryptedPrefix = "v2:";
+    private const int KeyIterations = 100_000;
 
     public SecretStore(ISettingsService settings)
     {
@@ -119,25 +121,40 @@ public sealed class SecretStore : ISecretStore
         catch { }
     }
 
-    private static string EncryptSecret(string secret)
+    private string KeyPath()
     {
-        try
-        {
-            var plainBytes = Encoding.UTF8.GetBytes(secret);
-            var encryptedBytes = EncryptWithAes(plainBytes);
-            return Convert.ToBase64String(encryptedBytes);
-        }
-        catch
-        {
-            // Fallback to unencrypted Base64 if encryption fails
-            return Convert.ToBase64String(Encoding.UTF8.GetBytes(secret));
-        }
+        var root = SettingsService.ResolveDataRoot(_settings.Settings);
+        return Path.Combine(root, "secrets.local.key");
     }
 
-    private static string DecryptSecret(string encrypted)
+    private byte[] GetOrCreateLocalKeyMaterial()
+    {
+        var path = KeyPath();
+        if (File.Exists(path))
+            return Convert.FromBase64String(File.ReadAllText(path).Trim());
+
+        var key = RandomNumberGenerator.GetBytes(32);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, Convert.ToBase64String(key));
+        TryRestrictPermissions(path);
+        return key;
+    }
+
+    private string EncryptSecret(string secret)
+    {
+        var plainBytes = Encoding.UTF8.GetBytes(secret);
+        var encryptedBytes = EncryptWithAes(plainBytes);
+        return EncryptedPrefix + Convert.ToBase64String(encryptedBytes);
+    }
+
+    private string DecryptSecret(string encrypted)
     {
         try
         {
+            if (!encrypted.StartsWith(EncryptedPrefix, StringComparison.OrdinalIgnoreCase))
+                throw new CryptographicException("Legacy secret format.");
+
+            encrypted = encrypted[EncryptedPrefix.Length..];
             var encryptedBytes = Convert.FromBase64String(encrypted);
             var plainBytes = DecryptWithAes(encryptedBytes);
             return Encoding.UTF8.GetString(plainBytes);
@@ -148,7 +165,9 @@ public sealed class SecretStore : ISecretStore
             try
             {
                 var bytes = Convert.FromBase64String(encrypted);
-                return Encoding.UTF8.GetString(bytes);
+                var decoder = Encoding.UTF8.Clone() as Encoding;
+                decoder!.DecoderFallback = DecoderFallback.ExceptionFallback;
+                return decoder.GetString(bytes);
             }
             catch
             {
@@ -157,14 +176,14 @@ public sealed class SecretStore : ISecretStore
         }
     }
 
-    private static byte[] EncryptWithAes(byte[] plaintext)
+    private byte[] EncryptWithAes(byte[] plaintext)
     {
         using var aes = Aes.Create();
         aes.KeySize = 256;
         aes.Mode = CipherMode.CBC;
         aes.Padding = PaddingMode.PKCS7;
 
-        var key = DeriveKey();
+        var key = DeriveKey(GetOrCreateLocalKeyMaterial());
         using var encryptor = aes.CreateEncryptor(key, aes.IV);
         using var ms = new MemoryStream();
         ms.Write(aes.IV, 0, aes.IV.Length);
@@ -178,14 +197,14 @@ public sealed class SecretStore : ISecretStore
         return ms.ToArray();
     }
 
-    private static byte[] DecryptWithAes(byte[] ciphertext)
+    private byte[] DecryptWithAes(byte[] ciphertext)
     {
         using var aes = Aes.Create();
         aes.KeySize = 256;
         aes.Mode = CipherMode.CBC;
         aes.Padding = PaddingMode.PKCS7;
 
-        var key = DeriveKey();
+        var key = DeriveKey(GetOrCreateLocalKeyMaterial());
         var iv = new byte[aes.IV.Length];
         Array.Copy(ciphertext, 0, iv, 0, iv.Length);
         aes.IV = iv;
@@ -198,56 +217,10 @@ public sealed class SecretStore : ISecretStore
         return resultMs.ToArray();
     }
 
-    private static byte[] DeriveKey()
+    private static byte[] DeriveKey(byte[] keyMaterial)
     {
-        // Derive a consistent key from machine and user identifiers
-        var machineId = GetMachineIdentifier();
-        var seed = Encoding.UTF8.GetBytes(machineId);
         var salt = Encoding.UTF8.GetBytes("aether-secret-store");
-        
-        // Use PBKDF2 with SHA256 to derive a 256-bit key
-        var hash = new byte[32];
-        using (var hmac = new System.Security.Cryptography.HMACSHA256(seed))
-        {
-            // Simple PBKDF2 implementation with 10000 iterations
-            var block = new byte[hmac.OutputBlockSize / 8 + salt.Length];
-            salt.CopyTo(block, 0);
-            block[salt.Length] = 0;
-            block[salt.Length + 1] = 0;
-            block[salt.Length + 2] = 0;
-            block[salt.Length + 3] = 1;
-            
-            var lastBlock = hmac.ComputeHash(block);
-            Array.Copy(lastBlock, hash, Math.Min(hash.Length, lastBlock.Length));
-            
-            var iterationBlock = lastBlock;
-            for (int i = 1; i < 10000; i++)
-            {
-                iterationBlock = hmac.ComputeHash(iterationBlock);
-                for (int j = 0; j < Math.Min(hash.Length, iterationBlock.Length); j++)
-                    hash[j] ^= iterationBlock[j];
-            }
-        }
-        
-        return hash;
-    }
-
-    private static string GetMachineIdentifier()
-    {
-        // Use a combination of machine identifiers to derive the key
-        // This ensures the key is consistent across app restarts but different across machines
-        if (OperatingSystem.IsWindows())
-        {
-            try
-            {
-                var id = System.Diagnostics.Process.GetCurrentProcess().MachineName;
-                return id ?? "aether";
-            }
-            catch { }
-        }
-
-        var hostname = System.Net.Dns.GetHostName();
-        return !string.IsNullOrWhiteSpace(hostname) ? hostname : "aether";
+        return Rfc2898DeriveBytes.Pbkdf2(keyMaterial, salt, KeyIterations, HashAlgorithmName.SHA256, 32);
     }
 
     private interface ISecretBackend

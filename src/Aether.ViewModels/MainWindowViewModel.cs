@@ -144,7 +144,7 @@ public partial class MainWindowViewModel : ObservableObject
         finally { IsLoading = false; }
     }
 
-    private void ShowDraftPatchPreviewPanel(string patchId, string relativePath, string oldText, string newText, Action<bool> decision)
+    private void ShowDraftPatchPreviewPanel(string patchId, string relativePath, string oldText, string newText, Func<bool, Task> decision)
     {
         // Load preview into viewmodel and switch panel
         _ = DraftPatchPreview.LoadAsync(relativePath, oldText ?? string.Empty, newText ?? string.Empty);
@@ -526,6 +526,7 @@ public partial class MainWindowViewModel : ObservableObject
         {
             _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Error, RuntimeLogCategory.Service,
                 $"{operation} failed: {ex.Message}"));
+            _toasts.Show("Background task failed", $"{operation}: {ex.Message}", ToastKind.Warning, 7000);
         }
     }
 }

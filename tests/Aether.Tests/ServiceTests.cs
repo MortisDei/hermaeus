@@ -174,6 +174,16 @@ namespace Aether.Tests
             False(report.SetupCommands.Contains(';', StringComparison.Ordinal), "command previews should not synthesize shell separators");
         }
 
+        public static Task LocalAiSetupDoesNotShipPlaceholderHashes()
+        {
+            var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../"));
+            var file = Path.Combine(root, "src", "Aether.Services", "LocalAiSetupService.cs");
+            var source = File.ReadAllText(file);
+            False(source.Contains("b0aca5b1", StringComparison.OrdinalIgnoreCase), "setup service should not ship placeholder hashes");
+            False(source.Contains("Placeholder: Replace", StringComparison.OrdinalIgnoreCase), "setup service should not ship placeholder hash comments");
+            return Task.CompletedTask;
+        }
+
         public static async Task LocalAiSetupSurfcesKokoroOnboarding()
         {
             using var temp = new TempDir();
@@ -401,8 +411,11 @@ namespace Aether.Tests
                 Equal("Local fallback file", await store.BackendLabelAsync(), "disabled keychain should use fallback label");
 
                 var localVault = Path.Combine(settings.Settings.DataManagement.DataRootDirectory, "secrets.local.json");
+                var localKey = Path.Combine(settings.Settings.DataManagement.DataRootDirectory, "secrets.local.key");
                 True(File.Exists(localVault), "fallback vault should exist");
+                True(File.Exists(localKey), "fallback key should exist");
                 var json = await File.ReadAllTextAsync(localVault);
+                True(json.Contains("v2:", StringComparison.Ordinal), "fallback vault should use versioned encrypted values");
                 False(json.Contains("sk-test-secret", StringComparison.Ordinal), "fallback vault should not contain plaintext");
             }
             finally

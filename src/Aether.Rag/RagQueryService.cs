@@ -85,6 +85,7 @@ public sealed class RagQueryService
 
     private void TouchCacheUnsafe(string datasetId)
     {
+        // Caller must hold _cacheSync because _cache and _cacheOrder are updated together.
         var existing = _cacheOrder.Find(datasetId);
         if (existing is not null)
             _cacheOrder.Remove(existing);

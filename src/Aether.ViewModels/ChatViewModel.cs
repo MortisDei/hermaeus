@@ -209,6 +209,7 @@ public partial class ChatViewModel : ObservableObject
             {
                 Role = msg.Role,
                 Content = msg.Content,
+                OriginalContent = msg.OriginalContent,
                 IsError = msg.IsError,
                 ModelId = msg.ModelId,
                 DurationMs = msg.DurationMs
@@ -244,7 +245,7 @@ public partial class ChatViewModel : ObservableObject
         var displayText = ChatContextAttachment.BuildDisplayMessage(text, attachments);
         UpdateContextUsage(new ChatTokenUsage(snapshot.EstimatedTokens, 0, snapshot.EstimatedTokens), "Estimated");
         
-        var userMessage = new MessageViewModel { Role = "user", Content = displayText };
+        var userMessage = new MessageViewModel { Role = "user", Content = displayText, OriginalContent = text };
         // Store attachment paths for regeneration; only include ready attachments
         foreach (var attachment in attachments.Where(a => a.IsReady))
             userMessage.AttachedFilePaths.Add(attachment.FullPath);
@@ -415,24 +416,9 @@ public partial class ChatViewModel : ObservableObject
         var lastUser = Messages.LastOrDefault(m => m.IsUser);
         if (lastUser is null) return;
 
-        // Extract user text and recover attachment paths from the message
-        var raw = lastUser.Content ?? string.Empty;
+        // Recover from structured fields rather than parsing the display-only attachment summary.
+        var userText = lastUser.OriginalContent ?? lastUser.Content ?? string.Empty;
         var paths = lastUser.AttachedFilePaths.ToList();
-        
-        // Parse out the user's original text by removing the attachment marker section
-        const string marker = "Attached context injected at send time:";
-        var userText = raw;
-        if (raw.Contains(marker))
-        {
-            var lines = raw.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).ToList();
-            var idx = lines.FindIndex(l => l.Trim().Equals(marker, StringComparison.OrdinalIgnoreCase));
-            if (idx >= 0)
-            {
-                // Lines before marker contain the user's original text
-                var before = lines.Take(idx).ToList();
-                userText = before.Count == 0 ? string.Empty : string.Join("\n", before).Trim();
-            }
-        }
 
         Messages.Remove(lastUser);
         InputText = userText;
@@ -760,6 +746,7 @@ public partial class ChatViewModel : ObservableObject
                 Id = m.Id, ConversationId = CurrentConversationId,
                 Role = m.Role,
                 Content = m.Content,
+                OriginalContent = m.OriginalContent,
                 IsError = m.IsError,
                 ModelId = m.ModelId,
                 DurationMs = m.DurationMs,
