@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Aether.ViewModels"
+             xmlns:controls="using:Aether.Desktop.Controls"
+             x:Class="Aether.Desktop.Views.DraftPatchPreviewView"
+             x:DataType="vm:DraftPatchDiffViewModel">
+
+  <Grid RowDefinitions="Auto,*,Auto" Margin="12">
+    <StackPanel Orientation="Horizontal" Spacing="8">
+      <TextBlock Text="Draft patch preview" FontWeight="SemiBold" FontSize="14" />
+      <TextBlock Text=" - " />
+      <TextBlock Text="{Binding RelativePath}" Opacity="0.8" />
+    </StackPanel>
+
+    <controls:DiffView Grid.Row="1" DataContext="{Binding}" />
+
+    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,8,0,0">
+      <Button Content="Cancel" Command="{Binding CancelCommand}" />
+      <Button Content="Apply patch" Command="{Binding ApplyCommand}" Classes="primary-btn" />
+    </StackPanel>
+  </Grid>
+
+</UserControl>

@@ -30,6 +30,7 @@ public partial class MainWindowViewModel : ObservableObject
     public LogsViewModel            Logs { get; }
     public SessionUsageViewModel    SessionUsage { get; }
     public SessionUsageDetailViewModel SessionUsageDetail { get; }
+    public DraftPatchDiffViewModel DraftPatchPreview { get; }
     public SetupWizardViewModel     Wizard { get; }
 
     public ObservableCollection<ConversationItemViewModel> Conversations { get; } = [];
@@ -71,6 +72,7 @@ public partial class MainWindowViewModel : ObservableObject
         "doctor"   => Doctor,
         "memories" => Memories,
         "session-usage" => SessionUsage,
+        "draft-patch-preview" => DraftPatchPreview,
         "logs"     => Logs,
         "wizard"   => Wizard,
         _          => Chat
@@ -95,6 +97,7 @@ public partial class MainWindowViewModel : ObservableObject
         LogsViewModel logs,
         SessionUsageViewModel sessionUsage,
         SessionUsageDetailViewModel sessionUsageDetail,
+        DraftPatchDiffViewModel draftPatchPreview,
         SetupWizardViewModel wizard,
         ISettingsService settingsService,
         IToastService toasts,
@@ -109,6 +112,9 @@ public partial class MainWindowViewModel : ObservableObject
         Benchmarks = benchmarks; SystemOverview = systemOverview; Doctor = doctor; Memories = memories; Logs = logs; SessionUsage = sessionUsage; Wizard = wizard;
         SessionUsageDetail = sessionUsageDetail;
         SessionUsage.RequestOpenDetail += (id, title) => ShowSessionUsageDetailPanel(id, title);
+        DraftPatchPreview = draftPatchPreview;
+        Agent.DraftPatchPreviewRequested += (patchId, path, oldText, newText, decision) =>
+            ShowDraftPatchPreviewPanel(patchId, path, oldText, newText, decision);
         Doctor.RequestNavigate = panel => ActivePanel = panel;
         Wizard.WizardCompleted += () => ActivePanel = "chat";
         // allow settings view to request re-running the setup wizard
@@ -117,6 +123,7 @@ public partial class MainWindowViewModel : ObservableObject
         Chat.ConversationSaved += OnConversationSaved;
         Services.ServerAvailabilityChanged += (_, _) => RunBackgroundTaskAsync("refresh models after server availability change", RefreshModelsAfterServerChangeAsync);
         _toasts.ToastRaised += OnToastRaised;
+        
     }
 
     public async Task InitializeAsync()
@@ -135,6 +142,14 @@ public partial class MainWindowViewModel : ObservableObject
                 ActivePanel = "wizard";
         }
         finally { IsLoading = false; }
+    }
+
+    private void ShowDraftPatchPreviewPanel(string patchId, string relativePath, string oldText, string newText, Action<bool> decision)
+    {
+        // Load preview into viewmodel and switch panel
+        _ = DraftPatchPreview.LoadAsync(relativePath, oldText ?? string.Empty, newText ?? string.Empty);
+        DraftPatchPreview.DecisionCallback = decision;
+        ActivePanel = "draft-patch-preview";
     }
 
     public void Shutdown()

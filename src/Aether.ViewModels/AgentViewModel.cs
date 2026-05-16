@@ -138,6 +138,8 @@ public sealed class AgentDraftPatchViewModel
 
 public partial class AgentViewModel : ObservableObject
 {
+    public delegate void DraftPatchPreviewRequestedHandler(string patchId, string relativePath, string oldContent, string newContent, Action<bool> decisionCallback);
+    public event DraftPatchPreviewRequestedHandler? DraftPatchPreviewRequested;
     private readonly IAgentService _agent;
     private readonly IAgentTaskStateStore _store;
     private readonly IAgentWorkspaceMemoryStore _workspaceMemory;
@@ -514,22 +516,43 @@ public partial class AgentViewModel : ObservableObject
             var found = CurrentTask.DraftPatches.FirstOrDefault(p => p.Id == patch.Id);
             if (found is not null)
             {
-                var selectedPath = SelectedWorkspaceFile?.RelativePath;
-                _workspaceTools.ApplyDraftPatch(BuildOptions(), found.RelativePath, found.ProposedContent);
-                found.Status = AgentDraftPatchStatus.Applied;
-                found.ApprovedAt = DateTime.UtcNow;
-                found.ApprovedBy = "User";
-                found.BlockedAt = null;
-                found.BlockedBy = null;
-                found.BlockReason = string.Empty;
-                await _store.SaveAsync(CurrentTask);
-                await _agent.AppendApprovalAsync(CurrentTask.TaskId, "draft_patch_apply", approved: true);
-                StatusMessage = $"Patch for {patch.RelativePath} applied.";
-                await RefreshWorkspaceFilesAsync();
-                if (!string.IsNullOrWhiteSpace(selectedPath))
-                    SelectedWorkspaceFile = WorkspaceFiles.FirstOrDefault(file => file.RelativePath == selectedPath);
-                await LoadTaskIfOpenAsync(CurrentTask.TaskId);
+                // Show preview first: get current file content
+                var filePreview = _workspaceTools.ReadFile(BuildOptions(), found.RelativePath)?.Content ?? string.Empty;
+                // Raise preview request with a decision callback that will apply if approved
+                DraftPatchPreviewRequested?.Invoke(found.Id, found.RelativePath, filePreview, found.ProposedContent, decision =>
+                {
+                    _ = HandlePreviewDecisionAsync(found.Id, decision);
+                });
             }
+        }
+        catch (Exception ex)
+        {
+            SetError(ex.Message);
+        }
+    }
+
+    private async Task HandlePreviewDecisionAsync(string patchId, bool apply)
+    {
+        if (!apply || CurrentTask is null) return;
+        var found = CurrentTask.DraftPatches.FirstOrDefault(p => p.Id == patchId);
+        if (found is null) return;
+        try
+        {
+            var selectedPath = SelectedWorkspaceFile?.RelativePath;
+            _workspaceTools.ApplyDraftPatch(BuildOptions(), found.RelativePath, found.ProposedContent);
+            found.Status = AgentDraftPatchStatus.Applied;
+            found.ApprovedAt = DateTime.UtcNow;
+            found.ApprovedBy = "User";
+            found.BlockedAt = null;
+            found.BlockedBy = null;
+            found.BlockReason = string.Empty;
+            await _store.SaveAsync(CurrentTask);
+            await _agent.AppendApprovalAsync(CurrentTask.TaskId, "draft_patch_apply", approved: true);
+            StatusMessage = $"Patch for {found.RelativePath} applied.";
+            await RefreshWorkspaceFilesAsync();
+            if (!string.IsNullOrWhiteSpace(selectedPath))
+                SelectedWorkspaceFile = WorkspaceFiles.FirstOrDefault(file => file.RelativePath == selectedPath);
+            await LoadTaskIfOpenAsync(CurrentTask.TaskId);
         }
         catch (Exception ex)
         {
