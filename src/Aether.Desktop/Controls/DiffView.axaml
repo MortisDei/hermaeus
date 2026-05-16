@@ -8,17 +8,31 @@
     <conv:DiffTypeToBrushConverter x:Key="DiffBrush" />
   </UserControl.Resources>
   <ScrollViewer>
-    <ItemsControl ItemsSource="{Binding Lines}">
-      <ItemsControl.ItemTemplate>
-        <DataTemplate>
-          <Grid ColumnDefinitions="40,*,40,*" Margin="2" Background="{Binding Type, Converter={StaticResource DiffBrush}}">
-            <TextBlock Text="{Binding OldLineNumber}" HorizontalAlignment="Right" Width="40" Margin="4,0"/>
-            <TextBlock Grid.Column="1" Text="{Binding OldText}" Margin="6,0" />
-            <TextBlock Grid.Column="2" Text="{Binding NewLineNumber}" HorizontalAlignment="Right" Width="40" Margin="4,0"/>
-            <TextBlock Grid.Column="3" Text="{Binding NewText}" Margin="6,0" />
-          </Grid>
-        </DataTemplate>
-      </ItemsControl.ItemTemplate>
-    </ItemsControl>
+    <StackPanel>
+      <!-- Header row -->
+      <Border Background="{DynamicResource SubtleFillColorTertiaryBrush}" Padding="8" BorderThickness="0,0,0,1" BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
+        <Grid ColumnDefinitions="50,*,50,*">
+          <TextBlock Text="Old Line" FontWeight="SemiBold" FontSize="12" HorizontalAlignment="Center" />
+          <TextBlock Grid.Column="1" Text="Old Content" FontWeight="SemiBold" FontSize="12" Margin="6,0" />
+          <TextBlock Grid.Column="2" Text="New Line" FontWeight="SemiBold" FontSize="12" HorizontalAlignment="Center" />
+          <TextBlock Grid.Column="3" Text="New Content" FontWeight="SemiBold" FontSize="12" Margin="6,0" />
+        </Grid>
+      </Border>
+      <ItemsControl ItemsSource="{Binding Lines}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate>
+            <Border BorderThickness="0,0,0,1" BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" 
+                    Background="{Binding Type, Converter={StaticResource DiffBrush}}" Opacity="0.15" Padding="8">
+              <Grid ColumnDefinitions="50,*,50,*">
+                <TextBlock Text="{Binding OldLineNumber}" HorizontalAlignment="Right" FontFamily="Courier New" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                <TextBlock Grid.Column="1" Text="{Binding OldText}" Margin="6,0" FontFamily="Courier New" FontSize="11" />
+                <TextBlock Grid.Column="2" Text="{Binding NewLineNumber}" HorizontalAlignment="Right" FontFamily="Courier New" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                <TextBlock Grid.Column="3" Text="{Binding NewText}" Margin="6,0" FontFamily="Courier New" FontSize="11" />
+              </Grid>
+            </Border>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </StackPanel>
   </ScrollViewer>
 </UserControl>

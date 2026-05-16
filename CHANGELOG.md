@@ -25,7 +25,11 @@ Pre-1.0 versions may still change internal APIs and storage details.
 - Agent workbench now shows a capability disclosure callout that states the
   current slice is read-first and approval-gated, with shell, network, and
   remote-control actions kept out of scope.
- - Session usage panel: per-conversation memory counts and recent activity (Session Usage panel).
+- Session usage panel: per-conversation memory counts and recent activity.
+- Draft patch diff preview: side-by-side visual comparison with line numbers,
+  colour-coded changes (green for additions, red for removals), and gutter lines.
+  Preview opens automatically after generating a patch and allows approve or
+  cancel before queueing.
 
 ### Changed
 

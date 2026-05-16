@@ -473,6 +473,12 @@ public partial class AgentViewModel : ObservableObject
 
             var result = await Task.Run(() => _workspaceTools.DraftPatch(relative, DraftRationale ?? string.Empty, DraftProposedContent ?? string.Empty));
             DraftPreview = result ?? string.Empty;
+            // Auto-open the preview to show the diff before queueing
+            DraftPatchPreviewRequested?.Invoke(Guid.NewGuid().ToString(), relative, WorkspaceFilePreview ?? string.Empty, DraftProposedContent ?? string.Empty, decision =>
+            {
+                if (decision)
+                    _ = QueueDraftPatchAsync();
+            });
         }
         catch (Exception ex)
         {

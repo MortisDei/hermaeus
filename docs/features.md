@@ -47,9 +47,10 @@
 - The agent panel also includes a workspace file browser with query, list,
   preview, and summary behaviour for faster read-first inspection.
 - Draft patch proposal UI: users can draft file edits with a rationale, propose
-  content, generate a formatted patch preview, and queue the patch for approval
-  in the task review queue. Approving a patch writes the proposed content to
-  the selected workspace file and refreshes the file preview.
+  content, and generate a side-by-side diff preview before queueing. The preview
+  shows line-by-line changes with colour highlights (green for additions, red
+  for removals) and line numbers for easy review. After approval, Aether writes
+  the proposed content to the workspace file and refreshes the preview.
 - Queued patches expander shows all draft patch decisions with rationale,
   proposed content, and outcome labels, allowing approve, reject, and block
   actions with explicit review metadata.
