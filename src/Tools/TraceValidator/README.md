@@ -14,6 +14,12 @@ Or use the convenience wrapper:
 bash scripts/validate_trace.sh [path/to/agent.trace.jsonl] [docs/schemas/agent_trace.schema.json]
 ```
 
+PowerShell users can run:
+
+```powershell
+.\scripts\validate_trace.ps1 [path/to/agent.trace.jsonl] [docs/schemas/agent_trace.schema.json]
+```
+
 Exit codes:
 - 0: success (no validation errors)
 - 1: validation errors found

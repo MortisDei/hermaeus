@@ -21,7 +21,8 @@ Pre-1.0 versions may still change internal APIs and storage details.
 - Tools: added a lightweight CLI `TraceValidator` tool for validating
   `agent.trace.jsonl` event lines. It now uses `JsonSchema.Net` to validate
   each trace line against `docs/schemas/agent_trace.schema.json`, and ships
-  with a convenience runner script at `scripts/validate_trace.sh`.
+  with convenience runner scripts at `scripts/validate_trace.sh` and
+  `scripts/validate_trace.ps1`.
 - Schemas: added example JSON Schema at `docs/schemas/agent_trace.schema.json`
   to document the fields emitted in agent traces and to guide future
   validation tooling.
