@@ -40,7 +40,8 @@ public enum AgentDraftPatchStatus
     Pending,
     Applied,
     Approved,
-    Rejected
+    Rejected,
+    Blocked
 }
 
 public sealed class AgentTaskState
@@ -104,6 +105,9 @@ public sealed class AgentDraftPatch
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? ApprovedAt { get; set; }
     public string? ApprovedBy { get; set; }
+    public DateTime? BlockedAt { get; set; }
+    public string? BlockedBy { get; set; }
+    public string BlockReason { get; set; } = string.Empty;
 }
 
 public sealed class AgentContextPack

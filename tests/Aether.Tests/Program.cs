@@ -11,6 +11,7 @@ using Aether.Rag.Storage;
 using Aether.Rag.Retrieval;
 using Aether.Services;
 using Aether.Tests;
+using Aether.ViewModels;
 using static Aether.Tests.Helpers;
 
 namespace Aether.Tests;
@@ -172,6 +173,61 @@ internal static class AgentTests
     Equal(1, loaded!.DraftPatches.Count, "draft patches should persist with the task state");
     Equal("src/Feature.cs", loaded.DraftPatches[0].RelativePath, "draft patch path should round-trip");
     Equal(AgentDraftPatchStatus.Pending, loaded.DraftPatches[0].Status, "new draft patches should remain pending");
+    }
+
+    public static async Task AgentTaskStatePersistsBlockedDraftPatches()
+    {
+    using var temp = new TempDir();
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    await store.InitializeAsync();
+
+    var state = new AgentTaskState
+    {
+        Goal = "Review blocked patch",
+        Status = AgentTaskStatus.WaitingForUser,
+        ActiveStep = "Review draft",
+        Summary = "Patch blocked",
+        DraftPatches =
+        [
+            new AgentDraftPatch
+            {
+                RelativePath = "src/Unsafe.cs",
+                Rationale = "Needs manual review",
+                ProposedContent = "public sealed class Unsafe {}",
+                Status = AgentDraftPatchStatus.Blocked,
+                BlockReason = "Too risky for this slice",
+                BlockedAt = DateTime.UtcNow,
+                BlockedBy = "User"
+            }
+        ]
+    };
+
+    await store.SaveAsync(state);
+    var loaded = await store.LoadAsync(state.TaskId);
+
+    True(loaded is not null, "task state should reload");
+    Equal(AgentDraftPatchStatus.Blocked, loaded!.DraftPatches[0].Status, "blocked draft patch should persist its status");
+    Equal("Too risky for this slice", loaded.DraftPatches[0].BlockReason, "blocked draft patch should persist its reason");
+    }
+
+    public static Task AgentDraftPatchViewModelShowsOutcomeLabels()
+    {
+    var vm = new AgentDraftPatchViewModel(new AgentDraftPatch
+    {
+        RelativePath = "src/Unsafe.cs",
+        Rationale = "Needs manual review",
+        ProposedContent = "public sealed class Unsafe {}",
+        Status = AgentDraftPatchStatus.Blocked,
+        BlockReason = "Too risky for this slice",
+        BlockedAt = new DateTime(2026, 05, 16, 12, 0, 0, DateTimeKind.Utc),
+        BlockedBy = "User"
+    });
+
+    Equal("Blocked 2026-05-16 12:00 by User: Too risky for this slice", vm.OutcomeLabel, "blocked outcome should render a clear status line");
+    True(vm.CanReview, "blocked patches should remain visible for later review");
+    return Task.CompletedTask;
     }
 
     public static async Task AgentContextPackStaysBounded()

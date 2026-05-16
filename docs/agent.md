@@ -41,6 +41,8 @@ can enter a rationale, review the generated patch preview, queue the patch for
 review, and then approve or reject queued patches from the dedicated panel.
 Approving a queued patch applies the proposed content to the selected workspace
 file immediately and refreshes the preview.
+Queued patches now expose explicit pending, applied, rejected, and blocked
+states so review decisions are visible at a glance.
 
 ### Tools
 

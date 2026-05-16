@@ -49,11 +49,12 @@
   content, generate a formatted patch preview, and queue the patch for approval
   in the task review queue. Approving a patch writes the proposed content to
   the selected workspace file and refreshes the file preview.
-- Queued patches expander shows all pending draft patches with rationale and
-  proposed content, allowing approve/reject actions that track approval state
-  and metadata (approver, approval timestamp).
+- Queued patches expander shows all draft patch decisions with rationale,
+  proposed content, and outcome labels, allowing approve, reject, and block
+  actions with explicit review metadata.
 - The agent summary strip surfaces queued patch counts so approval work is
-  visible at a glance without opening the lower panel.
+  visible at a glance without opening the lower panel, including pending and
+  blocked counts.
 - Workspace memory notes can be saved, reviewed, and deleted per workspace
   root.
 

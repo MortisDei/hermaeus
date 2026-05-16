@@ -104,6 +104,9 @@ public sealed class AgentDraftPatchViewModel
         CreatedAt = patch.CreatedAt;
         ApprovedAt = patch.ApprovedAt;
         ApprovedBy = patch.ApprovedBy;
+        BlockedAt = patch.BlockedAt;
+        BlockedBy = patch.BlockedBy;
+        BlockReason = patch.BlockReason;
     }
 
     public string Id { get; }
@@ -114,9 +117,23 @@ public sealed class AgentDraftPatchViewModel
     public DateTime CreatedAt { get; }
     public DateTime? ApprovedAt { get; }
     public string? ApprovedBy { get; }
+    public DateTime? BlockedAt { get; }
+    public string? BlockedBy { get; }
+    public string BlockReason { get; }
     public string StatusLabel => Status.ToString();
     public string CreatedLabel => $"Created {CreatedAt:yyyy-MM-dd HH:mm} UTC";
-    public string ApprovedLabel => ApprovedAt is null ? "Pending approval" : $"Approved {ApprovedAt:yyyy-MM-dd HH:mm} by {ApprovedBy}";
+    public bool CanReview => Status != AgentDraftPatchStatus.Applied;
+    public string OutcomeLabel => Status switch
+    {
+        AgentDraftPatchStatus.Pending => "Pending review",
+        AgentDraftPatchStatus.Applied => $"Applied {ApprovedAt:yyyy-MM-dd HH:mm} by {ApprovedBy}",
+        AgentDraftPatchStatus.Approved => $"Approved {ApprovedAt:yyyy-MM-dd HH:mm} by {ApprovedBy}",
+        AgentDraftPatchStatus.Rejected => $"Rejected {BlockedAt:yyyy-MM-dd HH:mm} by {BlockedBy}",
+        AgentDraftPatchStatus.Blocked => string.IsNullOrWhiteSpace(BlockReason)
+            ? $"Blocked {BlockedAt:yyyy-MM-dd HH:mm} by {BlockedBy}"
+            : $"Blocked {BlockedAt:yyyy-MM-dd HH:mm} by {BlockedBy}: {BlockReason}",
+        _ => Status.ToString()
+    };
 }
 
 public partial class AgentViewModel : ObservableObject
@@ -179,6 +196,10 @@ public partial class AgentViewModel : ObservableObject
     public int WorkspaceMemoryCount => WorkspaceMemory.Count;
     public int RetrievedContextCount => RetrievedContext.Count;
     public int QueuedPatchCount => QueuedPatches.Count;
+    public int PendingPatchCount => QueuedPatches.Count(patch => patch.Status == AgentDraftPatchStatus.Pending);
+    public int AppliedPatchCount => QueuedPatches.Count(patch => patch.Status == AgentDraftPatchStatus.Applied);
+    public int RejectedPatchCount => QueuedPatches.Count(patch => patch.Status == AgentDraftPatchStatus.Rejected);
+    public int BlockedPatchCount => QueuedPatches.Count(patch => patch.Status == AgentDraftPatchStatus.Blocked);
     public bool HasQueuedPatches => QueuedPatchCount > 0;
 
     public AgentViewModel(
@@ -232,6 +253,10 @@ public partial class AgentViewModel : ObservableObject
         QueuedPatches.CollectionChanged += (_, _) =>
         {
             OnPropertyChanged(nameof(QueuedPatchCount));
+            OnPropertyChanged(nameof(PendingPatchCount));
+            OnPropertyChanged(nameof(AppliedPatchCount));
+            OnPropertyChanged(nameof(RejectedPatchCount));
+            OnPropertyChanged(nameof(BlockedPatchCount));
             OnPropertyChanged(nameof(HasQueuedPatches));
         };
     }
@@ -371,14 +396,18 @@ public partial class AgentViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private async Task RefreshQueuedPatchesAsync()
+    private Task RefreshQueuedPatchesAsync()
     {
         QueuedPatches.Clear();
         if (CurrentTask is null)
-            return;
+            return Task.CompletedTask;
 
-        foreach (var patch in CurrentTask.DraftPatches.Where(p => p.Status == AgentDraftPatchStatus.Pending))
+        foreach (var patch in CurrentTask.DraftPatches
+                     .OrderBy(patch => patch.Status == AgentDraftPatchStatus.Pending ? 0 : 1)
+                     .ThenByDescending(patch => patch.CreatedAt))
             QueuedPatches.Add(new AgentDraftPatchViewModel(patch));
+
+        return Task.CompletedTask;
     }
 
     [RelayCommand]
@@ -490,9 +519,11 @@ public partial class AgentViewModel : ObservableObject
                 found.Status = AgentDraftPatchStatus.Applied;
                 found.ApprovedAt = DateTime.UtcNow;
                 found.ApprovedBy = "User";
+                found.BlockedAt = null;
+                found.BlockedBy = null;
+                found.BlockReason = string.Empty;
                 await _store.SaveAsync(CurrentTask);
                 await _agent.AppendApprovalAsync(CurrentTask.TaskId, "draft_patch_apply", approved: true);
-                QueuedPatches.Remove(patch);
                 StatusMessage = $"Patch for {patch.RelativePath} applied.";
                 await RefreshWorkspaceFilesAsync();
                 if (!string.IsNullOrWhiteSpace(selectedPath))
@@ -516,10 +547,39 @@ public partial class AgentViewModel : ObservableObject
             if (found is not null)
             {
                 found.Status = AgentDraftPatchStatus.Rejected;
+                found.BlockedAt = DateTime.UtcNow;
+                found.BlockedBy = "User";
+                found.BlockReason = "Rejected during review.";
                 await _store.SaveAsync(CurrentTask);
                 await _agent.AppendApprovalAsync(CurrentTask.TaskId, "draft_patch_reject", approved: false);
-                QueuedPatches.Remove(patch);
                 StatusMessage = $"Patch for {patch.RelativePath} rejected.";
+                await LoadTaskIfOpenAsync(CurrentTask.TaskId);
+            }
+        }
+        catch (Exception ex)
+        {
+            SetError(ex.Message);
+        }
+    }
+
+    [RelayCommand]
+    private async Task BlockPatchAsync(AgentDraftPatchViewModel? patch)
+    {
+        if (CurrentTask is null || patch is null) return;
+        try
+        {
+            var found = CurrentTask.DraftPatches.FirstOrDefault(p => p.Id == patch.Id);
+            if (found is not null)
+            {
+                found.Status = AgentDraftPatchStatus.Blocked;
+                found.BlockedAt = DateTime.UtcNow;
+                found.BlockedBy = "User";
+                found.BlockReason = string.IsNullOrWhiteSpace(found.BlockReason)
+                    ? "Blocked during review."
+                    : found.BlockReason;
+                await _store.SaveAsync(CurrentTask);
+                await _agent.AppendApprovalAsync(CurrentTask.TaskId, "draft_patch_block", approved: false);
+                StatusMessage = $"Patch for {patch.RelativePath} blocked.";
                 await LoadTaskIfOpenAsync(CurrentTask.TaskId);
             }
         }
@@ -628,6 +688,10 @@ public partial class AgentViewModel : ObservableObject
         OnPropertyChanged(nameof(CurrentTaskGoalLabel));
         OnPropertyChanged(nameof(CurrentTaskSummaryLabel));
         OnPropertyChanged(nameof(QueuedPatchCount));
+        OnPropertyChanged(nameof(PendingPatchCount));
+        OnPropertyChanged(nameof(AppliedPatchCount));
+        OnPropertyChanged(nameof(RejectedPatchCount));
+        OnPropertyChanged(nameof(BlockedPatchCount));
         OnPropertyChanged(nameof(HasQueuedPatches));
 
         if (CurrentTask is null)
