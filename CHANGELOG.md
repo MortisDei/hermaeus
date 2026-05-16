@@ -19,6 +19,9 @@ Pre-1.0 versions may still change internal APIs and storage details.
   approve/reject actions for queued patches. Approving a draft patch now writes
   the proposed content back to the selected workspace file and refreshes the
   preview immediately.
+- Agent workbench now shows a capability disclosure callout that states the
+  current slice is read-first and approval-gated, with shell, network, and
+  remote-control actions kept out of scope.
 
 ### Changed
 

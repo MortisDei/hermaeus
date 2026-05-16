@@ -40,6 +40,9 @@
 - The agent panel surfaces a compact summary strip with task state, goal,
   summary, recent task history, review queue counts, workspace memory counts,
   and retrieved context counts for quick scanning.
+- The agent panel also shows a capability disclosure callout so users can see
+  the current slice: read-first workspace inspection, approval-gated patch
+  drafting, and no shell or network execution.
 - The agent panel also includes a workspace file browser with query, list,
   preview, and summary behaviour for faster read-first inspection.
 - Draft patch proposal UI: users can draft file edits with a rationale, propose

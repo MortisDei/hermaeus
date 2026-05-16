@@ -139,6 +139,16 @@ public partial class AgentViewModel : ObservableObject
     public ObservableCollection<AgentContextItemViewModel> RetrievedContext { get; } = [];
     public ObservableCollection<AgentDraftPatchViewModel> QueuedPatches { get; } = [];
 
+    public IReadOnlyList<string> CapabilityNotes { get; } =
+    [
+        "Read-first workspace inspection: list, search, read, and summarise local files.",
+        "Approval-gated patch drafting: propose content, queue it for review, and apply only after approval.",
+        "No general shell, network, or remote-control actions in this slice.",
+        "Workspace memory and review queues remain local and explicit."
+    ];
+
+    public string CapabilityLabel => "Current agent scope";
+
     public Action? RequestWorkspaceRootPicker { get; set; }
 
     [ObservableProperty] private string _goalText = string.Empty;

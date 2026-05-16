@@ -28,6 +28,10 @@ state, goal, summary, recent task history, review queue counts, workspace
 memory counts, and retrieved context counts so the workbench is easier to scan
 at a glance.
 
+A compact capability disclosure now sits under the summary strip so the current
+slice is explicit: the workbench is read-first, patch drafting is approval-
+gated, and shell, network, and remote-control actions remain out of scope.
+
 The same panel now includes a workspace file browser with query, list,
 preview, and summary support so you can inspect local workspace files without
 leaving the workbench.
