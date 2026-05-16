@@ -197,9 +197,6 @@
                     <DataTemplate DataType="vm:SessionUsageDetailViewModel">
                         <views:SessionUsageDetailView />
                     </DataTemplate>
-                    <DataTemplate DataType="vm:DraftPatchDiffViewModel">
-                        <views:DraftPatchPreviewView />
-                    </DataTemplate>
                     <DataTemplate DataType="vm:LogsViewModel">
                         <views:LogsView />
                     </DataTemplate>

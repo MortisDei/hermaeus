@@ -15,6 +15,10 @@ Pre-1.0 versions may still change internal APIs and storage details.
   notification history shows the newest items first.
 - Settings now populate the embedding model dropdown from discovered local
   GGUF files and restart the embedding server after a model change is saved.
+- Settings internals are now split into domain section view models and section
+  views while preserving the single settings screen and save flow.
+- Agent draft patch review now opens as an awaited modal dialog instead of
+  routing through a full app panel.
 - Top toolbar icons are now grouped more coherently so the main workspace,
   operations, logs, notifications, and settings read left to right more
   naturally.

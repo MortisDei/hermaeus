@@ -532,6 +532,52 @@ namespace Aether.Tests
             }
         }
 
+        public static async Task SettingsChildViewModelsApplyToSettings()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            var vm = NewSettingsViewModel(settings, new FakeSecretStore());
+
+            vm.Llm.LlamaCppBaseUrl = "http://127.0.0.1:9000";
+            vm.Llm.OpenAiEnabled = true;
+            vm.Rag.EmbeddingModel = "local-embed";
+            vm.Rag.RagRerankerModelPath = temp.PathFor("reranker");
+            vm.Data.DataRootDirectory = temp.PathFor("data");
+            vm.Data.LocalAiAssetsRoot = temp.PathFor("ai");
+            vm.Ui.SelectedTheme = "Dark";
+            vm.Ui.EnableGlobalHotkeys = true;
+            vm.Memory.MemoryFeatureEnabled = true;
+            vm.Memory.MemoryInjectionTokenBudget = 700;
+
+            await vm.SaveCommand.ExecuteAsync(null);
+
+            Equal("http://127.0.0.1:9000", settings.Settings.Llm.LlamaCppBaseUrl, "llm section should apply base URL");
+            Equal(true, settings.Settings.Llm.OpenAiEnabled, "llm section should apply remote toggle");
+            Equal("local-embed", settings.Settings.Rag.EmbeddingModel, "rag section should apply embedding model");
+            Equal(temp.PathFor("reranker"), settings.Settings.Rag.RerankerModelPath, "rag section should apply reranker path");
+            Equal(temp.PathFor("data"), settings.Settings.DataManagement.DataRootDirectory, "data section should apply data root");
+            Equal(temp.PathFor("ai"), settings.Settings.DataManagement.LocalAiAssetsRoot, "data section should apply AI assets root");
+            Equal("Dark", settings.Settings.Ui.Theme, "ui section should apply theme");
+            Equal(true, settings.Settings.Ui.EnableGlobalHotkeys, "ui section should apply global hotkey toggle");
+            Equal(true, settings.Settings.Memory.Enabled, "memory section should apply enable flag");
+            Equal(700, settings.Settings.Memory.InjectionTokenBudget, "memory section should apply token budget");
+        }
+
+        public static async Task DraftPatchPreviewDecisionCompletes()
+        {
+            var vm = new DraftPatchDiffViewModel(new PatchDiffService());
+            await vm.LoadAsync("src/File.cs", "old", "new");
+            bool? decision = null;
+            vm.DecisionCompleted += value => decision = value;
+
+            await vm.ApplyCommand.ExecuteAsync(null);
+            Equal(true, decision, "apply should complete with true");
+
+            decision = null;
+            await vm.CancelCommand.ExecuteAsync(null);
+            Equal(false, decision, "cancel should complete with false");
+        }
+
         public static async Task SettingsSavePreservesExistingSecretReference()
         {
             using var temp = new TempDir();

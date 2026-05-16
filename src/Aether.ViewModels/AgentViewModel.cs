@@ -168,10 +168,11 @@ public sealed class AgentDraftPatchViewModel
     };
 }
 
+public sealed record DraftPatchPreviewRequest(string PatchId, string RelativePath, string OldContent, string NewContent);
+
 public partial class AgentViewModel : ObservableObject
 {
-    public delegate void DraftPatchPreviewRequestedHandler(string patchId, string relativePath, string oldContent, string newContent, Func<bool, Task> decisionCallback);
-    public event DraftPatchPreviewRequestedHandler? DraftPatchPreviewRequested;
+    public Func<DraftPatchPreviewRequest, Task<bool>>? RequestDraftPatchPreview { get; set; }
     private readonly IAgentService _agent;
     private readonly IAgentTaskStateStore _store;
     private readonly IAgentWorkspaceMemoryStore _workspaceMemory;
@@ -528,12 +529,14 @@ public partial class AgentViewModel : ObservableObject
 
             var result = await Task.Run(() => _workspaceTools.DraftPatch(relative, DraftRationale ?? string.Empty, DraftProposedContent ?? string.Empty));
             DraftPreview = result ?? string.Empty;
-            // Auto-open the preview to show the diff before queueing
-            DraftPatchPreviewRequested?.Invoke(Guid.NewGuid().ToString(), relative, WorkspaceFilePreview ?? string.Empty, DraftProposedContent ?? string.Empty, async decision =>
-            {
-                if (decision)
-                    await QueueDraftPatchAsync();
-            });
+            var approved = RequestDraftPatchPreview is not null
+                && await RequestDraftPatchPreview(new DraftPatchPreviewRequest(
+                    Guid.NewGuid().ToString(),
+                    relative,
+                    WorkspaceFilePreview ?? string.Empty,
+                    DraftProposedContent ?? string.Empty));
+            if (approved)
+                await QueueDraftPatchAsync();
         }
         catch (Exception ex)
         {
@@ -577,11 +580,15 @@ public partial class AgentViewModel : ObservableObject
             var found = CurrentTask.DraftPatches.FirstOrDefault(p => p.Id == patch.Id);
             if (found is not null)
             {
-                // Show preview first: get current file content
                 var filePreview = _workspaceTools.ReadFile(BuildOptions(), found.RelativePath)?.Content ?? string.Empty;
-                // Raise preview request with a decision callback that will apply if approved
-                DraftPatchPreviewRequested?.Invoke(found.Id, found.RelativePath, filePreview, found.ProposedContent,
-                    decision => HandlePreviewDecisionAsync(found.Id, decision));
+                var approved = RequestDraftPatchPreview is not null
+                    && await RequestDraftPatchPreview(new DraftPatchPreviewRequest(
+                        found.Id,
+                        found.RelativePath,
+                        filePreview,
+                        found.ProposedContent));
+                if (approved)
+                    await HandlePreviewDecisionAsync(found.Id, apply: true);
             }
         }
         catch (Exception ex)

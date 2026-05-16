@@ -43,6 +43,11 @@ public partial class TtsSettingsViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string _selectedVoiceProvider = "Kokoro";
 
     public Func<Task>? RequestTtsVoiceSamplePicker { get; set; }
+    public Action? RequestTtsPythonPicker { get; set; }
+    public Action? RequestTtsScriptPicker { get; set; }
+    public Action? RequestTtsModelDirectoryPicker { get; set; }
+    public Action? RequestTtsOutputPicker { get; set; }
+    public Action? RequestTtsVoiceDirectoryPicker { get; set; }
 
     public string[] TtsDevices { get; } = ["cpu", "auto", "cuda", "rocm", "mps"];
     public ObservableCollection<string> TtsVoices { get; } = ["default"];
@@ -163,6 +168,21 @@ public partial class TtsSettingsViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(IsServerManagedProvider));
         ApplyXttsStatus();
     }
+
+    [RelayCommand]
+    private void BrowseTtsScript() => RequestTtsScriptPicker?.Invoke();
+
+    [RelayCommand]
+    private void BrowseTtsPython() => RequestTtsPythonPicker?.Invoke();
+
+    [RelayCommand]
+    private void BrowseTtsModelDirectory() => RequestTtsModelDirectoryPicker?.Invoke();
+
+    [RelayCommand]
+    private void BrowseTtsOutput() => RequestTtsOutputPicker?.Invoke();
+
+    [RelayCommand]
+    private void BrowseTtsVoiceDirectory() => RequestTtsVoiceDirectoryPicker?.Invoke();
 
     [RelayCommand]
     private async Task SetActiveVoiceProviderAsync(VoiceProviderInfo? provider)

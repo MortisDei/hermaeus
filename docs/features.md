@@ -58,8 +58,9 @@
 - Draft patch proposal UI: users can draft file edits with a rationale, propose
   content, and generate a side-by-side diff preview before queueing. The preview
   shows line-by-line changes with colour highlights (green for additions, red
-  for removals) and line numbers for easy review. After approval, Aether writes
-  the proposed content to the workspace file and refreshes the preview.
+  for removals) and line numbers for easy review in an approval modal. After
+  approval, Aether writes the proposed content to the workspace file and
+  refreshes the preview.
 - Queued patches expander shows all draft patch decisions with rationale,
   proposed content, and outcome labels, allowing approve, reject, and block
   actions with explicit review metadata.
@@ -136,6 +137,8 @@
 - Configurable local AI assets root for models, XTTS, venvs, and encoders.
 - Trust & Safety scan for configured local tools, hashes, AI-root scope, and
   network exposure warnings.
+- Settings are implemented as domain sections for LLM defaults, RAG, data,
+  local AI setup, voice, UI, memory, and trust while preserving one save flow.
 - OS-backed secret references and redacted process logs.
 - Local fallback secrets use an app-created per-data-root key file restricted
   to the current user. Backup excludes both the fallback vault and key file.

@@ -140,7 +140,6 @@ public partial class App : Application
         s.AddSingleton<MemoriesViewModel>();
         s.AddSingleton<SessionUsageViewModel>();
         s.AddSingleton<SessionUsageDetailViewModel>();
-        s.AddSingleton<DraftPatchDiffViewModel>();
         s.AddSingleton<LogsViewModel>();
         s.AddSingleton<SetupWizardViewModel>();
         s.AddSingleton<MainWindowViewModel>();

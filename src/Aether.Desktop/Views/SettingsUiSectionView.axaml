@@ -1,0 +1,25 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Aether.ViewModels"
+             x:Class="Aether.Desktop.Views.SettingsUiSectionView"
+             x:DataType="vm:UiSettingsViewModel">
+    <Border Classes="settings-card">
+        <StackPanel Spacing="12">
+            <TextBlock Text="Interface" FontSize="14" FontWeight="SemiBold" />
+            <Grid ColumnDefinitions="110,*" RowDefinitions="Auto,Auto" RowSpacing="10" ColumnSpacing="12">
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="Font size" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
+                <NumericUpDown Grid.Row="0" Grid.Column="1" Value="{Binding FontSize}" Minimum="10" Maximum="24" Increment="1" FontSize="13" />
+                <TextBlock Grid.Row="1" Grid.Column="0" Text="Theme" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
+                <ComboBox Grid.Row="1" Grid.Column="1" ItemsSource="{Binding Themes}" SelectedItem="{Binding SelectedTheme}" FontSize="13" />
+            </Grid>
+            <CheckBox IsChecked="{Binding CtrlEnterToSend}" Content="Ctrl+Enter to send (Enter inserts newline)" FontSize="13" />
+            <CheckBox IsChecked="{Binding ShowQuickChat}" Content="Show compact quick-chat surface" FontSize="13" />
+            <CheckBox IsChecked="{Binding EnableTrayIcon}" Content="Show tray icon" FontSize="13" />
+            <CheckBox IsChecked="{Binding MinimizeToTray}" Content="Minimize to tray" FontSize="13" />
+            <CheckBox IsChecked="{Binding EnableLocalHotkeys}" Content="Enable local hotkeys" FontSize="13" />
+            <CheckBox IsChecked="{Binding EnableGlobalHotkeys}" Content="Enable system-wide hotkeys" FontSize="13" />
+            <CheckBox IsChecked="{Binding StartMinimized}" Content="Start minimized" FontSize="13" />
+            <TextBlock Text="{Binding GlobalHotkeyStatus}" FontSize="11" Opacity="0.45" TextWrapping="Wrap" />
+        </StackPanel>
+    </Border>
+</UserControl>

@@ -30,7 +30,6 @@ public partial class MainWindowViewModel : ObservableObject
     public LogsViewModel            Logs { get; }
     public SessionUsageViewModel    SessionUsage { get; }
     public SessionUsageDetailViewModel SessionUsageDetail { get; }
-    public DraftPatchDiffViewModel DraftPatchPreview { get; }
     public SetupWizardViewModel     Wizard { get; }
 
     public ObservableCollection<ConversationItemViewModel> Conversations { get; } = [];
@@ -77,7 +76,6 @@ public partial class MainWindowViewModel : ObservableObject
         "doctor"   => Doctor,
         "memories" => Memories,
         "session-usage" => SessionUsage,
-        "draft-patch-preview" => DraftPatchPreview,
         "logs"     => Logs,
         "wizard"   => Wizard,
         _          => Chat
@@ -102,7 +100,6 @@ public partial class MainWindowViewModel : ObservableObject
         LogsViewModel logs,
         SessionUsageViewModel sessionUsage,
         SessionUsageDetailViewModel sessionUsageDetail,
-        DraftPatchDiffViewModel draftPatchPreview,
         SetupWizardViewModel wizard,
         ISettingsService settingsService,
         IToastService toasts,
@@ -117,9 +114,6 @@ public partial class MainWindowViewModel : ObservableObject
         Benchmarks = benchmarks; SystemOverview = systemOverview; Doctor = doctor; Memories = memories; Logs = logs; SessionUsage = sessionUsage; Wizard = wizard;
         SessionUsageDetail = sessionUsageDetail;
         SessionUsage.RequestOpenDetail += (id, title) => ShowSessionUsageDetailPanel(id, title);
-        DraftPatchPreview = draftPatchPreview;
-        Agent.DraftPatchPreviewRequested += (patchId, path, oldText, newText, decision) =>
-            ShowDraftPatchPreviewPanel(patchId, path, oldText, newText, decision);
         Doctor.RequestNavigate = panel => ActivePanel = panel;
         // Keep toolbar doctor badge in sync with doctor checks
         Doctor.Checks.CollectionChanged += (_, _) => UpdateDoctorStatus();
@@ -164,14 +158,6 @@ public partial class MainWindowViewModel : ObservableObject
             await Chat.LoadModelsAsync();
         }
         finally { IsLoading = false; }
-    }
-
-    private void ShowDraftPatchPreviewPanel(string patchId, string relativePath, string oldText, string newText, Func<bool, Task> decision)
-    {
-        // Load preview into viewmodel and switch panel
-        _ = DraftPatchPreview.LoadAsync(relativePath, oldText ?? string.Empty, newText ?? string.Empty);
-        DraftPatchPreview.DecisionCallback = decision;
-        ActivePanel = "draft-patch-preview";
     }
 
     public void Shutdown()

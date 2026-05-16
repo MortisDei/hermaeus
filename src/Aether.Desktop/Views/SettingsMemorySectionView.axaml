@@ -1,0 +1,27 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Aether.ViewModels"
+             x:Class="Aether.Desktop.Views.SettingsMemorySectionView"
+             x:DataType="vm:MemorySettingsViewModel">
+    <Border Classes="settings-card">
+        <StackPanel Spacing="12">
+            <TextBlock Text="Chat memory" FontSize="14" FontWeight="SemiBold" />
+            <TextBlock Text="Control whether Aether stores and injects long-term memories from conversations."
+                       FontSize="11" Opacity="0.55" TextWrapping="Wrap" />
+            <Grid ColumnDefinitions="190,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="10" ColumnSpacing="12">
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="Enable memory" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
+                <CheckBox Grid.Row="0" Grid.Column="1" IsChecked="{Binding MemoryFeatureEnabled}" Content="Remember important details across chats" FontSize="13" />
+                <TextBlock Grid.Row="1" Grid.Column="0" Text="Inject memories" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
+                <CheckBox Grid.Row="1" Grid.Column="1" IsChecked="{Binding MemoryInjectIntoContext}" Content="Attach selected memories to chat context" FontSize="13" />
+                <TextBlock Grid.Row="2" Grid.Column="0" Text="Auto-summary threshold" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
+                <NumericUpDown Grid.Row="2" Grid.Column="1" Value="{Binding MemoryImportanceThreshold}" Minimum="0" Maximum="1" Increment="0.05" FormatString="F2" FontSize="13" />
+                <TextBlock Grid.Row="3" Grid.Column="0" Text="Injection token budget" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
+                <NumericUpDown Grid.Row="3" Grid.Column="1" Value="{Binding MemoryInjectionTokenBudget}" Minimum="100" Maximum="4000" Increment="50" FontSize="13" />
+                <TextBlock Grid.Row="4" Grid.Column="0" Text="Encrypt at rest" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
+                <CheckBox Grid.Row="4" Grid.Column="1" IsChecked="{Binding MemoryEncryptionEnabled}" Content="Encrypt stored memory content" FontSize="13" />
+                <TextBlock Grid.Row="5" Grid.Column="0" Text="Auto-archive days" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
+                <NumericUpDown Grid.Row="5" Grid.Column="1" Value="{Binding MemoryAutoArchiveDays}" Minimum="1" Maximum="3650" Increment="1" FontSize="13" />
+            </Grid>
+        </StackPanel>
+    </Border>
+</UserControl>

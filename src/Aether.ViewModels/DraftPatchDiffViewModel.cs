@@ -17,7 +17,7 @@ public partial class DraftPatchDiffViewModel : ObservableObject
     public string OldContent { get; private set; } = string.Empty;
     public string NewContent { get; private set; } = string.Empty;
 
-    public Func<bool, Task>? DecisionCallback { get; set; }
+    public event Action<bool>? DecisionCompleted;
 
     public DraftPatchDiffViewModel(IPatchDiffService diffService)
     {
@@ -39,14 +39,14 @@ public partial class DraftPatchDiffViewModel : ObservableObject
     [RelayCommand]
     private async Task ApplyAsync()
     {
-        if (DecisionCallback is not null)
-            await DecisionCallback(true);
+        DecisionCompleted?.Invoke(true);
+        await Task.CompletedTask;
     }
 
     [RelayCommand]
     private async Task CancelAsync()
     {
-        if (DecisionCallback is not null)
-            await DecisionCallback(false);
+        DecisionCompleted?.Invoke(false);
+        await Task.CompletedTask;
     }
 }
