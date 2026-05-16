@@ -1,11 +1,32 @@
 # Changelog
 
-All notable changes to Aether will be documented in this file. Appned new versions above the previous version.
+All notable changes to Aether will be documented in this file. Append new versions above the previous version.
 
 The project follows semantic versioning once public release candidates begin.
 Pre-1.0 versions may still change internal APIs and storage details.
 
-## [0.9.6-alpha] - 2026-05-16
+## [0.9.7-alpha] - Unreleased
+
+### Changed
+
+- First-run startup now skips heavyweight panel loading until the setup wizard
+  is completed, so the wizard appears sooner and initial launch feels snappier.
+- Toast notifications now use a toast-shaped toolbar icon, and the stored
+  notification history shows the newest items first.
+- Settings now populate the embedding model dropdown from discovered local
+  GGUF files and restart the embedding server after a model change is saved.
+- Top toolbar icons are now grouped more coherently so the main workspace,
+  operations, logs, notifications, and settings read left to right more
+  naturally.
+
+### Fixed
+
+- Setup wizard startup now returns early when the wizard is required, instead
+  of loading the rest of the app before showing onboarding.
+- Toast history trimming now preserves newest-first ordering when the cap is
+  exceeded.
+
+## [0.9.6-alpha] - 2026-05-17
 
 ### Fixed
 
