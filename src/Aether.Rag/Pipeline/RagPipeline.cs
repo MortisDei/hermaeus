@@ -26,6 +26,7 @@ public sealed class RagPipeline
 
     private const int EmbedBatchSize = 10;
     private const int MaxWebPageBytes = 2 * 1024 * 1024;
+    private const int MaxEmbeddingInputTokens = 320;
 
     public RagPipeline(SqliteRagStore store, IEmbeddingService embed)
         : this(store, embed, null)
@@ -173,7 +174,7 @@ public sealed class RagPipeline
         {
             ct.ThrowIfCancellationRequested();
             var batch  = allChunks.Skip(i).Take(EmbedBatchSize).ToList();
-            var texts  = batch.Select(c => BuildEmbeddingText(c, dataset.Config)).ToList();
+            var texts  = batch.Select(c => BuildEmbeddingInput(c, dataset.Config)).ToList();
             var embeddings = await _embed.EmbedBatchAsync(texts, ct);
             if (embeddings.Count > 0)
                 dataset.Config.EmbeddingDimensions = embeddings[0].Length;
@@ -471,7 +472,7 @@ public sealed class RagPipeline
         {
             ct.ThrowIfCancellationRequested();
             var batch = allChunks.Skip(i).Take(EmbedBatchSize).ToList();
-            var texts = batch.Select(c => BuildEmbeddingText(c, dataset.Config)).ToList();
+            var texts = batch.Select(c => BuildEmbeddingInput(c, dataset.Config)).ToList();
             var embeddings = await _embed.EmbedBatchAsync(texts, ct);
             if (embeddings.Count > 0)
                 dataset.Config.EmbeddingDimensions = embeddings[0].Length;
@@ -575,6 +576,32 @@ public sealed class RagPipeline
             text,
             ComputeHash(text),
             File.GetLastWriteTimeUtc(file));
+    }
+
+    private static string BuildEmbeddingInput(RagChunk chunk, RagDatasetConfig cfg)
+    {
+        var text = BuildEmbeddingText(chunk, cfg);
+        return ClampEmbeddingInput(text, MaxEmbeddingInputTokens);
+    }
+
+    private static string ClampEmbeddingInput(string text, int maxTokens)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return string.Empty;
+
+        if (ParagraphChunker.EstimateTokens(text) <= maxTokens)
+            return text;
+
+        var maxChars = Math.Max(128, maxTokens * 4);
+        if (text.Length <= maxChars)
+            return text;
+
+        var trimmed = text[..maxChars];
+        var boundary = trimmed.LastIndexOfAny(['.', '!', '?', '\n', ' ']);
+        if (boundary > maxChars / 2)
+            trimmed = trimmed[..boundary];
+
+        return trimmed.Trim();
     }
 
     private sealed record WebDocument(Uri Url, string Title, string Content);

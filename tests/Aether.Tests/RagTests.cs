@@ -236,5 +236,56 @@ namespace Aether.Tests
             // Cancellation during storage should prevent or reduce chunk persistence
             True(chunks.Count < 500, "cancellation during storage should prevent or reduce chunk persistence");
         }
+
+        public static async Task RagIngestClampsOversizedEmbeddingInputs()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var store = new SqliteRagStore(settings);
+            await store.InitializeAsync();
+
+            var docs = temp.PathFor("docs");
+            Directory.CreateDirectory(docs);
+            await File.WriteAllTextAsync(Path.Combine(docs, "long.txt"), new string('a', 8000));
+
+            var dataset = new RagDataset { Name = "long-embedding" };
+            var strictEmbed = new MaxLengthEmbeddingService(maxChars: 1400);
+            var pipeline = new RagPipeline(store, strictEmbed);
+
+            await pipeline.IngestDirectoryAsync(dataset, docs);
+
+            var chunks = await store.GetChunksAsync(dataset.Id, includeEmbeddings: true);
+            True(chunks.Count > 0, "ingest should store chunks even when source text is very long");
+            True(chunks.All(c => c.Embedding.Length > 0), "all stored chunks should have embeddings");
+        }
+
+        private sealed class MaxLengthEmbeddingService : Aether.Rag.Embeddings.IEmbeddingService
+        {
+            private readonly int _maxChars;
+
+            public MaxLengthEmbeddingService(int maxChars)
+            {
+                _maxChars = maxChars;
+            }
+
+            public int Dimensions => 4;
+
+            public Task<float[]> EmbedAsync(string text, CancellationToken ct = default)
+            {
+                if (text.Length > _maxChars)
+                    throw new InvalidOperationException($"input too large for test embedding service: {text.Length} chars");
+
+                return Task.FromResult(new[] { 1f, text.Length % 17, text.Length % 31, 0.25f });
+            }
+
+            public async Task<List<float[]>> EmbedBatchAsync(IReadOnlyList<string> texts, CancellationToken ct = default)
+            {
+                var result = new List<float[]>(texts.Count);
+                foreach (var text in texts)
+                    result.Add(await EmbedAsync(text, ct));
+                return result;
+            }
+        }
     }
 }

@@ -32,6 +32,9 @@ Pre-1.0 versions may still change internal APIs and storage details.
 - Embeddings-mode managed server launches now default to `--pooling mean`
   (unless explicitly overridden) to keep llama.cpp OpenAI-compatible
   embeddings requests from failing with pooling type `none`.
+- RAG ingest now clamps per-chunk embedding input size before calling
+  `/v1/embeddings`, preventing single oversized chunks from failing a full
+  ingest run on servers with smaller embedding token limits.
 
 ### Changed
 
