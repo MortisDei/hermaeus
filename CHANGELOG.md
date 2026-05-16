@@ -12,6 +12,8 @@ Pre-1.0 versions may still change internal APIs and storage details.
 - Agent workbench now surfaces task state, goal, summary, recent task history,
   review queue counts, workspace memory counts, and retrieved context counts in
   a compact summary strip at the top of the panel.
+- Agent workbench now includes a workspace file browser with query, list,
+  preview, and summarise behaviour for faster read-first inspection.
 
 ### Changed
 

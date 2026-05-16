@@ -40,6 +40,8 @@
 - The agent panel surfaces a compact summary strip with task state, goal,
   summary, recent task history, review queue counts, workspace memory counts,
   and retrieved context counts for quick scanning.
+- The agent panel also includes a workspace file browser with query, list,
+  preview, and summary behaviour for faster read-first inspection.
 - Workspace memory notes can be saved, reviewed, and deleted per workspace
   root.
 

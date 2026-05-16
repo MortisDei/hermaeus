@@ -77,11 +77,27 @@ public sealed class AgentWorkspaceMemoryEntryViewModel
     public DateTime UpdatedAt { get; }
 }
 
+public sealed class AgentWorkspaceFileViewModel
+{
+    public AgentWorkspaceFileViewModel(string relativePath, string snippet, DateTime modifiedUtc)
+    {
+        RelativePath = relativePath;
+        Snippet = snippet;
+        ModifiedUtc = modifiedUtc;
+    }
+
+    public string RelativePath { get; }
+    public string Snippet { get; }
+    public DateTime ModifiedUtc { get; }
+    public string ModifiedLabel => $"{ModifiedUtc:yyyy-MM-dd HH:mm} UTC";
+}
+
 public partial class AgentViewModel : ObservableObject
 {
     private readonly IAgentService _agent;
     private readonly IAgentTaskStateStore _store;
     private readonly IAgentWorkspaceMemoryStore _workspaceMemory;
+    private readonly IAgentWorkspaceTools _workspaceTools;
     private readonly ILlmService _llm;
     private readonly RagQueryService _rag;
     private readonly IRuntimeLogService _logs;
@@ -92,6 +108,7 @@ public partial class AgentViewModel : ObservableObject
     public ObservableCollection<AgentTaskListItem> RecentTasks { get; } = [];
     public ObservableCollection<AgentReviewQueueItemViewModel> ReviewQueue { get; } = [];
     public ObservableCollection<AgentWorkspaceMemoryEntryViewModel> WorkspaceMemory { get; } = [];
+    public ObservableCollection<AgentWorkspaceFileViewModel> WorkspaceFiles { get; } = [];
     public ObservableCollection<AgentContextItemViewModel> RetrievedContext { get; } = [];
 
     public Action? RequestWorkspaceRootPicker { get; set; }
@@ -107,6 +124,10 @@ public partial class AgentViewModel : ObservableObject
     [ObservableProperty] private string _taskStatePreview = string.Empty;
     [ObservableProperty] private string _nextActionPreview = string.Empty;
     [ObservableProperty] private string _logPreview = string.Empty;
+    [ObservableProperty] private string _workspaceFileQuery = string.Empty;
+    [ObservableProperty] private AgentWorkspaceFileViewModel? _selectedWorkspaceFile;
+    [ObservableProperty] private string _workspaceFilePreview = string.Empty;
+    [ObservableProperty] private string _workspaceFileSummary = string.Empty;
     [ObservableProperty] private bool _isError;
 
     public string CurrentTaskStatusLabel => CurrentTask is null ? "No active task" : CurrentTask.Status.ToString();
@@ -121,6 +142,7 @@ public partial class AgentViewModel : ObservableObject
         IAgentService agent,
         IAgentTaskStateStore store,
         IAgentWorkspaceMemoryStore workspaceMemory,
+        IAgentWorkspaceTools workspaceTools,
         ILlmService llm,
         RagQueryService rag,
         IRuntimeLogService logs)
@@ -128,6 +150,7 @@ public partial class AgentViewModel : ObservableObject
         _agent = agent;
         _store = store;
         _workspaceMemory = workspaceMemory;
+        _workspaceTools = workspaceTools;
         _llm = llm;
         _rag = rag;
         _logs = logs;
@@ -151,6 +174,12 @@ public partial class AgentViewModel : ObservableObject
             OnPropertyChanged(nameof(HasWorkspaceMemory));
         };
 
+        WorkspaceFiles.CollectionChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(WorkspaceFileCount));
+            OnPropertyChanged(nameof(HasWorkspaceFiles));
+        };
+
         RetrievedContext.CollectionChanged += (_, _) =>
         {
             OnPropertyChanged(nameof(RetrievedContextCount));
@@ -161,7 +190,9 @@ public partial class AgentViewModel : ObservableObject
     public bool HasTaskHistory => RecentTaskCount > 0;
     public bool HasReviewQueue => ReviewQueueCount > 0;
     public bool HasWorkspaceMemory => WorkspaceMemoryCount > 0;
+    public bool HasWorkspaceFiles => WorkspaceFileCount > 0;
     public bool HasRetrievedContext => RetrievedContextCount > 0;
+    public int WorkspaceFileCount => WorkspaceFiles.Count;
 
     [RelayCommand]
     public async Task LoadAsync()
@@ -180,6 +211,7 @@ public partial class AgentViewModel : ObservableObject
             await RefreshRecentAsync();
             await RefreshReviewQueueAsync();
             await RefreshWorkspaceMemoryAsync();
+            await RefreshWorkspaceFilesAsync();
         }
         catch (Exception ex)
         {
@@ -286,6 +318,52 @@ public partial class AgentViewModel : ObservableObject
 
         foreach (var item in await _workspaceMemory.ListAsync(WorkspaceRoot))
             WorkspaceMemory.Add(new AgentWorkspaceMemoryEntryViewModel(item));
+    }
+
+    [RelayCommand]
+    private async Task RefreshWorkspaceFilesAsync()
+    {
+        WorkspaceFiles.Clear();
+        WorkspaceFilePreview = string.Empty;
+        WorkspaceFileSummary = string.Empty;
+        SelectedWorkspaceFile = null;
+
+        if (string.IsNullOrWhiteSpace(WorkspaceRoot))
+            return;
+
+        var files = await Task.Run(() =>
+        {
+            var options = BuildOptions();
+            return string.IsNullOrWhiteSpace(WorkspaceFileQuery)
+                ? _workspaceTools.ListFiles(options)
+                    .Select(path => new AgentWorkspaceFileViewModel(path, string.Empty, DateTime.MinValue))
+                    .ToList()
+                : _workspaceTools.SearchFiles(options, WorkspaceFileQuery)
+                    .Select(result => new AgentWorkspaceFileViewModel(result.RelativePath, result.Snippet, result.ModifiedUtc))
+                    .ToList();
+        });
+
+        foreach (var file in files)
+            WorkspaceFiles.Add(file);
+
+        OnPropertyChanged(nameof(WorkspaceFileCount));
+        OnPropertyChanged(nameof(HasWorkspaceFiles));
+    }
+
+    private async Task LoadSelectedWorkspaceFileAsync(AgentWorkspaceFileViewModel? file)
+    {
+        if (file is null || string.IsNullOrWhiteSpace(WorkspaceRoot))
+        {
+            WorkspaceFilePreview = string.Empty;
+            WorkspaceFileSummary = string.Empty;
+            return;
+        }
+
+        var options = BuildOptions();
+        var preview = await Task.Run(() => _workspaceTools.ReadFile(options, file.RelativePath));
+        var summary = await Task.Run(() => _workspaceTools.SummarizeFile(options, file.RelativePath));
+        WorkspaceFilePreview = preview.Content;
+        WorkspaceFileSummary = summary.Summary;
     }
 
     [RelayCommand]
@@ -407,6 +485,8 @@ public partial class AgentViewModel : ObservableObject
 
     partial void OnGoalTextChanged(string value) => StartCommand.NotifyCanExecuteChanged();
     partial void OnWorkspaceRootChanged(string value) => StartCommand.NotifyCanExecuteChanged();
+    partial void OnWorkspaceFileQueryChanged(string value) => _ = RefreshWorkspaceFilesAsync();
+    partial void OnSelectedWorkspaceFileChanged(AgentWorkspaceFileViewModel? value) => _ = LoadSelectedWorkspaceFileAsync(value);
     partial void OnSelectedModelChanged(LlmModel? value)
     {
         StartCommand.NotifyCanExecuteChanged();

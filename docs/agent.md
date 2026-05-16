@@ -28,6 +28,10 @@ state, goal, summary, recent task history, review queue counts, workspace
 memory counts, and retrieved context counts so the workbench is easier to scan
 at a glance.
 
+The same panel now includes a workspace file browser with query, list,
+preview, and summary support so you can inspect local workspace files without
+leaving the workbench.
+
 ### Tools
 
 - Read-only file tools for workspace inspection.

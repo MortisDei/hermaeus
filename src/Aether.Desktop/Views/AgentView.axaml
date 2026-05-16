@@ -157,6 +157,61 @@
                                TextTrimming="CharacterEllipsis" />
                 </StackPanel>
 
+                <Expander Header="Workspace Files" HorizontalAlignment="Stretch" IsExpanded="True">
+                    <StackPanel Margin="0,8,0,0" Spacing="10">
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                            <TextBox Grid.Column="0"
+                                     Text="{Binding WorkspaceFileQuery}"
+                                     Watermark="Search workspace files by path or content..."
+                                     IsEnabled="{Binding !IsRunning}" />
+                            <Button Grid.Column="1"
+                                    Command="{Binding RefreshWorkspaceFilesCommand}"
+                                    Content="Refresh"
+                                    Padding="12,6"
+                                    CornerRadius="6" />
+                        </Grid>
+
+                        <TextBlock Text="{Binding WorkspaceFileCount, StringFormat={}{0} files available}" FontSize="11" Opacity="0.55" />
+
+                        <Grid ColumnDefinitions="320,*" ColumnSpacing="12" MinHeight="220">
+                            <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="6">
+                                <ListBox ItemsSource="{Binding WorkspaceFiles}"
+                                         SelectedItem="{Binding SelectedWorkspaceFile}"
+                                         BorderThickness="0"
+                                         Background="Transparent">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <StackPanel Spacing="2" Margin="8,6">
+                                                <TextBlock Text="{Binding RelativePath}" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                <TextBlock Text="{Binding Snippet}" FontSize="10" Opacity="0.6" TextWrapping="Wrap" />
+                                                <TextBlock Text="{Binding ModifiedLabel}" FontSize="10" Opacity="0.45" />
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </Border>
+
+                            <StackPanel Grid.Column="1" Spacing="8">
+                                <TextBlock Text="{Binding SelectedWorkspaceFile.RelativePath, TargetNullValue=Select a file to preview}" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding WorkspaceFileSummary, StringFormat=Summary: {0}}" FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
+                                <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="6"
+                                        Padding="10"
+                                        Background="{DynamicResource SubtleFillColorSecondaryBrush}">
+                                    <SelectableTextBlock Text="{Binding WorkspaceFilePreview}"
+                                                         FontFamily="Consolas,monospace"
+                                                         FontSize="11"
+                                                         TextWrapping="Wrap"
+                                                         MinHeight="180" />
+                                </Border>
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </Expander>
+
                 <Expander Header="Retrieved Context" IsExpanded="True" HorizontalAlignment="Stretch">
                     <ItemsControl ItemsSource="{Binding RetrievedContext}" Margin="0,8,0,0">
                         <ItemsControl.ItemTemplate>
