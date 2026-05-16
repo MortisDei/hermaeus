@@ -34,7 +34,7 @@ namespace Aether.Tests
             var pipeline = new RagPipeline(store, new FakeEmbeddingService());
             var eval = new Aether.Rag.Eval.RagEvalService(query, settings);
             var toasts = new FakeToasts();
-            var logs = new SimpleRuntimeLog();
+            var logs = new SimpleRuntimeLog(temp.PathFor("runtime-logs"));
 
             var vm = new RagViewModel(query, pipeline, eval, toasts, logs, settings);
             vm.SelectedDataset = (await query.GetDatasetsAsync()).FirstOrDefault(d => d.Name == ds.Name);
@@ -91,11 +91,18 @@ namespace Aether.Tests
         // Minimal runtime log implementation for tests
         private sealed class SimpleRuntimeLog : IRuntimeLogService
         {
+            private readonly string _logDirectory;
+
+            public SimpleRuntimeLog(string logDirectory)
+            {
+                _logDirectory = logDirectory;
+            }
+
             public event Action<Aether.Core.Models.RuntimeLogEntry>? LogAdded;
             public void Add(Aether.Core.Models.RuntimeLogEntry entry) => LogAdded?.Invoke(entry);
             public IReadOnlyList<Aether.Core.Models.RuntimeLogEntry> GetEntries() => Array.Empty<Aether.Core.Models.RuntimeLogEntry>();
             public void ClearInMemory() { }
-            public string GetLogDirectory() => Path.GetTempPath();
+            public string GetLogDirectory() => _logDirectory;
             public string GetLogFilePath() => Path.Combine(GetLogDirectory(), "runtime.log");
         }
     }

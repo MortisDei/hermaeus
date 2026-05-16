@@ -74,7 +74,7 @@ namespace Aether.Tests
             await ragStore.InitializeAsync();
             var rag = new RagQueryService(ragStore, new FakeEmbeddingService(), new FakeLlm(), settings, new NoOpReranker());
             var agentService = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new FakeAgentLlm());
-            var logs = new SimpleRuntimeLog();
+            var logs = new SimpleRuntimeLog(temp.PathFor("aether-test-logs"));
             var profiles = new FileWorkspaceProfileStore(settings);
             var analysis = new WorkspaceAnalysisService(profiles, memoryStore);
 
@@ -105,6 +105,13 @@ namespace Aether.Tests
         // Small test-local runtime log implementation used only for acceptance tests.
         private sealed class SimpleRuntimeLog : IRuntimeLogService
         {
+            private readonly string _logDirectory;
+
+            public SimpleRuntimeLog(string logDirectory)
+            {
+                _logDirectory = logDirectory;
+            }
+
             public event Action<RuntimeLogEntry>? LogAdded;
 
             public void Add(RuntimeLogEntry entry)
@@ -116,7 +123,7 @@ namespace Aether.Tests
 
             public void ClearInMemory() { }
 
-            public string GetLogDirectory() => Path.Combine(Path.GetTempPath(), "aether-test-logs");
+            public string GetLogDirectory() => _logDirectory;
 
             public string GetLogFilePath() => Path.Combine(GetLogDirectory(), "runtime.log");
         }
