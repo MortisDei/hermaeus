@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aether.local/schemas/agent_trace.schema.json",
+  "title": "Aether Agent Trace Event",
+  "type": "object",
+  "required": ["timestamp", "taskId", "event", "status"],
+  "properties": {
+    "timestamp": { "type": "string", "format": "date-time" },
+    "taskId": { "type": "string" },
+    "event": { "type": "string" },
+    "risk": { "type": "string" },
+    "targetPath": { "type": ["string", "null"] },
+    "reason": { "type": ["string", "null"] },
+    "status": { "type": "string" },
+    "details": { "type": ["object", "null"] }
+  },
+  "additionalProperties": true
+}
