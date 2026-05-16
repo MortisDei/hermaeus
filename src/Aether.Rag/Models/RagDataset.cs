@@ -22,6 +22,8 @@ public class RagDatasetConfig
     public bool   EnableWebLoader   { get; set; } = false;
     public string WebUrlList        { get; set; } = string.Empty;
     public int    WebMaxPages       { get; set; } = 5;
+    public string EmbeddingModel    { get; set; } = string.Empty;
+    public int    EmbeddingDimensions { get; set; }
     public string FirecrawlApiUrl { get; set; } = string.Empty;
     public string FirecrawlApiKey { get; set; } = string.Empty;
     public string PromptTemplate { get; set; } = "{context}\n\nQuestion: {question}";

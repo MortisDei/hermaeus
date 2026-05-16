@@ -26,7 +26,7 @@
                 Padding="12,6"
                 BorderThickness="0,0,0,1"
                 BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
-            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="8">
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
 
                 <TextBlock Grid.Column="0" Text="Model"
                            VerticalAlignment="Center" Opacity="0.5" FontSize="12" />
@@ -73,6 +73,27 @@
                     <PathIcon Data="M12 2C6.47 2 2 6.47 2 12s4.47 10 10 10 10-4.47 10-10S17.53 2 12 2zm5 13.59L15.59 17 12 13.41 8.41 17 7 15.59 10.59 12 7 8.41 8.41 7 12 10.59 15.59 7 17 8.41 13.41 12 17 15.59z"
                               Width="16" Height="16" />
                 </Button>
+
+                <Button Grid.Column="5" Classes="icon-btn"
+                        Command="{Binding ToggleContextInspectorCommand}"
+                        ToolTip.Tip="Context inspector">
+                    <PathIcon Data="M3 4h18v2H3V4zm0 5h18v2H3V9zm0 5h12v2H3v-2zm0 5h8v2H3v-2z"
+                              Width="16" Height="16" />
+                </Button>
+
+                <Button Grid.Column="6" Classes="icon-btn"
+                        Command="{Binding ToggleChatTracesCommand}"
+                        ToolTip.Tip="Chat traces">
+                    <PathIcon Data="M12 2a10 10 0 1 0 10 10h-2a8 8 0 1 1-2.34-5.66L14 10h8V2l-2.93 2.93A9.96 9.96 0 0 0 12 2z"
+                              Width="16" Height="16" />
+                </Button>
+
+                <Button Grid.Column="7" Classes="icon-btn"
+                        Command="{Binding ToggleCompareModelsCommand}"
+                        ToolTip.Tip="Compare models">
+                    <PathIcon Data="M4 5h7v14H4V5zm9 0h7v14h-7V5zM6 7v10h3V7H6zm9 0v10h3V7h-3z"
+                              Width="16" Height="16" />
+                </Button>
             </Grid>
         </Border>
 
@@ -103,6 +124,130 @@
                          FontSize="13" CornerRadius="6"
                          Padding="10,6" MinHeight="40" MaxHeight="100" />
             </StackPanel>
+        </Border>
+
+        <Border Grid.Row="2"
+                IsVisible="{Binding ShowContextInspector}"
+                Padding="16,8"
+                BorderThickness="0,0,0,1"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
+            <Expander Header="Context Inspector" IsExpanded="True">
+                <StackPanel Spacing="8" Margin="0,8,0,0">
+                    <TextBlock Text="{Binding ContextPreviewSummary}" FontSize="12" Opacity="0.65" />
+                    <ItemsControl ItemsSource="{Binding ContextPreviewParts}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:ChatContextPartViewModel">
+                                <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="6"
+                                        Padding="8"
+                                        Margin="0,0,0,6">
+                                    <StackPanel Spacing="3">
+                                        <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+                                            <TextBlock Grid.Column="0" Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Grid.Column="1" Text="{Binding Kind}" FontSize="11" Opacity="0.55" />
+                                            <TextBlock Grid.Column="2" Text="{Binding TokenLabel}" FontSize="11" Opacity="0.55" />
+                                        </Grid>
+                                        <SelectableTextBlock Text="{Binding Content}" FontSize="11" TextWrapping="Wrap" MaxHeight="120" />
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <Expander Header="Raw model context">
+                        <SelectableTextBlock Text="{Binding ContextPreviewRaw}"
+                                             FontFamily="Consolas,monospace"
+                                             FontSize="11"
+                                             TextWrapping="Wrap"
+                                             MaxHeight="180" />
+                    </Expander>
+                </StackPanel>
+            </Expander>
+        </Border>
+
+        <Border Grid.Row="2"
+                IsVisible="{Binding ShowChatTraces}"
+                Padding="16,8"
+                BorderThickness="0,0,0,1"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
+            <Expander Header="Chat Trace Viewer" IsExpanded="True">
+                <Grid ColumnDefinitions="320,*" ColumnSpacing="12" Margin="0,8,0,0" MaxHeight="260">
+                    <ListBox Grid.Column="0"
+                             ItemsSource="{Binding ChatTraces}"
+                             SelectedItem="{Binding SelectedChatTrace}">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate DataType="vm:ChatTraceViewModel">
+                                <StackPanel Spacing="2" Margin="6">
+                                    <TextBlock Text="{Binding Summary}" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                    <TextBlock Text="{Binding UsageLabel}" FontSize="11" Opacity="0.55" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                    <StackPanel Grid.Column="1" Spacing="5">
+                        <TextBlock Text="{Binding SelectedChatTrace.ModelId}" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding SelectedChatTrace.Provider, StringFormat=Provider: {0}}" FontSize="11" Opacity="0.65" />
+                        <TextBlock Text="{Binding SelectedChatTrace.Runtime, StringFormat=Runtime: {0}}" FontSize="11" Opacity="0.65" />
+                        <TextBlock Text="{Binding SelectedChatTrace.FirstTokenMs, StringFormat=First token: {0} ms}" FontSize="11" Opacity="0.65" />
+                        <TextBlock Text="{Binding SelectedChatTrace.TotalLatencyMs, StringFormat=Total latency: {0} ms}" FontSize="11" Opacity="0.65" />
+                        <TextBlock Text="{Binding SelectedChatTrace.AttachmentCount, StringFormat=Attachments: {0}}" FontSize="11" Opacity="0.65" />
+                        <TextBlock Text="{Binding SelectedChatTrace.EstimatedTokens, StringFormat=Estimated tokens: {0}}" FontSize="11" Opacity="0.65" />
+                        <SelectableTextBlock Text="{Binding SelectedChatTrace.ErrorDetails}" FontSize="11" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Grid>
+            </Expander>
+        </Border>
+
+        <Border Grid.Row="2"
+                IsVisible="{Binding ShowCompareModels}"
+                Padding="16,8"
+                BorderThickness="0,0,0,1"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
+            <Expander Header="Compare Models" IsExpanded="True">
+                <StackPanel Spacing="8" Margin="0,8,0,0">
+                    <ItemsControl ItemsSource="{Binding CompareModels}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:CompareModelOptionViewModel">
+                                <CheckBox Content="{Binding DisplayName}"
+                                          IsChecked="{Binding IsSelected}"
+                                          Margin="0,0,12,6"
+                                          FontSize="12" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button Content="Compare"
+                                Command="{Binding CompareSelectedModelsCommand}"
+                                IsEnabled="{Binding !IsComparingModels}"
+                                Padding="12,6" />
+                        <TextBlock Text="{Binding CompareStatus}" FontSize="12" Opacity="0.65" VerticalAlignment="Center" />
+                    </StackPanel>
+                    <ItemsControl ItemsSource="{Binding CompareResults}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:ModelCompareResultViewModel">
+                                <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="6"
+                                        Padding="10"
+                                        Margin="0,0,0,8">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" />
+                                        <TextBlock Text="{Binding LatencyLabel}" FontSize="11" Opacity="0.65" />
+                                        <TextBlock Text="{Binding UsageLabel}" FontSize="11" Opacity="0.55" />
+                                        <TextBlock Text="{Binding QualityNotes}" FontSize="11" Opacity="0.55" />
+                                        <SelectableTextBlock Text="{Binding Answer}" TextWrapping="Wrap" FontSize="12" MaxHeight="150" />
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Expander>
         </Border>
 
         <!-- ── Messages ───────────────────────────────────────────────────── -->

@@ -44,6 +44,46 @@
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
 
+            <Expander Header="Privacy Audit" IsExpanded="True">
+                <StackPanel Spacing="10">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                        <TextBlock Grid.Column="0"
+                                   Text="Local-first posture, remote data paths, secret storage, and exposed services"
+                                   FontSize="12"
+                                   Opacity="0.62"
+                                   TextWrapping="Wrap" />
+                        <Button Grid.Column="1"
+                                Content="Refresh"
+                                Command="{Binding RefreshPrivacyAuditCommand}"
+                                IsEnabled="{Binding !IsRefreshing}" />
+                    </Grid>
+                    <ItemsControl ItemsSource="{Binding PrivacyAuditItems}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:PrivacyAuditItemViewModel">
+                                <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                        BorderThickness="0,0,0,1"
+                                        Padding="0,8">
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                        <StackPanel Grid.Column="0" Spacing="3">
+                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                            <TextBlock Text="{Binding Detail}"
+                                                       TextWrapping="Wrap"
+                                                       FontSize="12"
+                                                       Opacity="0.62" />
+                                        </StackPanel>
+                                        <TextBlock Grid.Column="1"
+                                                   Text="{Binding Status}"
+                                                   FontWeight="SemiBold"
+                                                   FontSize="12"
+                                                   VerticalAlignment="Top" />
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Expander>
+
             <Grid ColumnDefinitions="*,*" ColumnSpacing="16">
                 <Border Grid.Column="0"
                         Padding="14"

@@ -175,6 +175,8 @@ public sealed class RagPipeline
             var batch  = allChunks.Skip(i).Take(EmbedBatchSize).ToList();
             var texts  = batch.Select(c => BuildEmbeddingText(c, dataset.Config)).ToList();
             var embeddings = await _embed.EmbedBatchAsync(texts, ct);
+            if (embeddings.Count > 0)
+                dataset.Config.EmbeddingDimensions = embeddings[0].Length;
 
             for (int j = 0; j < batch.Count; j++)
                 batch[j].Embedding = embeddings[j];
@@ -471,6 +473,8 @@ public sealed class RagPipeline
             var batch = allChunks.Skip(i).Take(EmbedBatchSize).ToList();
             var texts = batch.Select(c => BuildEmbeddingText(c, dataset.Config)).ToList();
             var embeddings = await _embed.EmbedBatchAsync(texts, ct);
+            if (embeddings.Count > 0)
+                dataset.Config.EmbeddingDimensions = embeddings[0].Length;
 
             for (int j = 0; j < batch.Count; j++)
                 batch[j].Embedding = embeddings[j];

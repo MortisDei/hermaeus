@@ -105,6 +105,9 @@ public sealed class RagQueryService
     public async Task<List<RagDataset>> GetDatasetsAsync(CancellationToken ct = default)
         => await _store.GetDatasetsAsync(ct);
 
+    public async Task<List<RagChunk>> GetChunksForDatasetAsync(string datasetId, bool includeEmbeddings = false, CancellationToken ct = default)
+        => await _store.GetChunksAsync(datasetId, includeEmbeddings, ct);
+
     public async Task<RagRetrievalResult> RetrieveAsync(
         string datasetId,
         string question,

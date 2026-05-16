@@ -5,6 +5,21 @@ All notable changes to Aether will be documented in this file. Appned new versio
 The project follows semantic versioning once public release candidates begin.
 Pre-1.0 versions may still change internal APIs and storage details.
 
+## [0.9.5-alpha] - 2026-05-16
+
+### Added
+
+- Chat context inspector and trace viewer for transparent model calls.
+- Compare Models workflow for side-by-side prompt checks across selected models.
+- RAG dataset manager with lifecycle, embedding, stale/missing source, and
+  reindex status details.
+- Privacy audit dashboard for remote-provider, local-server, secret, log, and
+  backup visibility.
+
+### Changed
+
+- Project version metadata bumped to `0.9.5-alpha`.
+
 ## [0.9.4-alpha] - 2026-05-16
 
 ### Added

@@ -8,6 +8,70 @@ using CommunityToolkit.Mvvm.Input;
 
 namespace Aether.ViewModels;
 
+public sealed class ChatContextPartViewModel
+{
+    public string Kind { get; init; } = string.Empty;
+    public string Title { get; init; } = string.Empty;
+    public string Content { get; init; } = string.Empty;
+    public int EstimatedTokens { get; init; }
+    public string TokenLabel => $"{EstimatedTokens:N0} tokens";
+}
+
+public sealed class ChatTraceViewModel
+{
+    public string Id { get; init; } = Guid.NewGuid().ToString("N");
+    public DateTime Timestamp { get; init; } = DateTime.UtcNow;
+    public string ModelId { get; init; } = string.Empty;
+    public string Provider { get; init; } = string.Empty;
+    public string Runtime { get; init; } = string.Empty;
+    public string SystemPrompt { get; init; } = string.Empty;
+    public int MemoryItems { get; init; }
+    public int AttachmentCount { get; init; }
+    public int RagContextItems { get; init; }
+    public int EstimatedTokens { get; init; }
+    public ChatTokenUsage? ProviderUsage { get; init; }
+    public long FirstTokenMs { get; init; }
+    public long TotalLatencyMs { get; init; }
+    public string ErrorDetails { get; init; } = string.Empty;
+    public string Summary => $"{Timestamp:HH:mm:ss} {ModelId} · {TotalLatencyMs} ms · {EstimatedTokens:N0} est tokens";
+    public string UsageLabel => ProviderUsage is null
+        ? "provider usage unavailable"
+        : $"prompt {ProviderUsage.PromptTokens:N0}, completion {ProviderUsage.CompletionTokens:N0}, total {ProviderUsage.TotalTokens:N0}";
+}
+
+public partial class CompareModelOptionViewModel : ObservableObject
+{
+    public CompareModelOptionViewModel(LlmModel model)
+    {
+        Model = model;
+        IsSelected = false;
+    }
+
+    public LlmModel Model { get; }
+    public string DisplayName => Model.DisplayName;
+    [ObservableProperty] private bool _isSelected;
+}
+
+public sealed class ModelCompareResultViewModel
+{
+    public string ModelId { get; init; } = string.Empty;
+    public string DisplayName { get; init; } = string.Empty;
+    public string Answer { get; init; } = string.Empty;
+    public long FirstTokenMs { get; init; }
+    public long TotalLatencyMs { get; init; }
+    public ChatTokenUsage? Usage { get; init; }
+    public string Error { get; init; } = string.Empty;
+    public string LatencyLabel => string.IsNullOrWhiteSpace(Error)
+        ? $"first {FirstTokenMs} ms · total {TotalLatencyMs} ms"
+        : $"failed after {TotalLatencyMs} ms";
+    public string UsageLabel => Usage is null
+        ? "usage unavailable"
+        : $"prompt {Usage.PromptTokens:N0}, completion {Usage.CompletionTokens:N0}, total {Usage.TotalTokens:N0}";
+    public string QualityNotes => string.IsNullOrWhiteSpace(Error)
+        ? $"{Answer.Length:N0} chars · {ChatViewModel.EstimateTokens(Answer):N0} estimated answer tokens"
+        : Error;
+}
+
 public partial class ChatViewModel : ObservableObject
 {
     private readonly ILlmService _llm;
@@ -27,6 +91,10 @@ public partial class ChatViewModel : ObservableObject
     public ObservableCollection<MessageViewModel> Messages        { get; } = [];
     public ObservableCollection<LlmModel>         AvailableModels { get; } = [];
     public ObservableCollection<ChatContextAttachment> ContextAttachments { get; } = [];
+    public ObservableCollection<ChatContextPartViewModel> ContextPreviewParts { get; } = [];
+    public ObservableCollection<ChatTraceViewModel> ChatTraces { get; } = [];
+    public ObservableCollection<CompareModelOptionViewModel> CompareModels { get; } = [];
+    public ObservableCollection<ModelCompareResultViewModel> CompareResults { get; } = [];
 
     [ObservableProperty] private string    _inputText = string.Empty;
     [ObservableProperty] private bool      _isGenerating;
@@ -48,6 +116,14 @@ public partial class ChatViewModel : ObservableObject
     [ObservableProperty] private bool      _isContextUsageWarning;
     [ObservableProperty] private bool      _isContextUsageCritical;
     [ObservableProperty] private string    _memoryStatus = string.Empty;
+    [ObservableProperty] private bool      _showContextInspector;
+    [ObservableProperty] private bool      _showChatTraces;
+    [ObservableProperty] private bool      _showCompareModels;
+    [ObservableProperty] private string    _contextPreviewSummary = string.Empty;
+    [ObservableProperty] private string    _contextPreviewRaw = string.Empty;
+    [ObservableProperty] private ChatTraceViewModel? _selectedChatTrace;
+    [ObservableProperty] private bool      _isComparingModels;
+    [ObservableProperty] private string    _compareStatus = string.Empty;
 
     public event EventHandler?        ScrollToBottom;
     public event EventHandler<string>? ConversationSaved;
@@ -96,7 +172,12 @@ public partial class ChatViewModel : ObservableObject
         var models = await _llm.GetModelsAsync();
         _profiles.ApplyProfiles(models);
         AvailableModels.Clear();
-        foreach (var m in models.Where(m => m.IsVisible)) AvailableModels.Add(m);
+        CompareModels.Clear();
+        foreach (var m in models.Where(m => m.IsVisible))
+        {
+            AvailableModels.Add(m);
+            CompareModels.Add(new CompareModelOptionViewModel(m));
+        }
         if (AvailableModels.Count > 0)
         {
             var def = _settings.Settings.Llm.DefaultModel;
@@ -158,9 +239,10 @@ public partial class ChatViewModel : ObservableObject
         var attachments = ContextAttachments.ToList();
         if ((string.IsNullOrEmpty(text) && !attachments.Any(a => a.IsReady)) || SelectedModel is null) return;
 
-        var promptText = ChatContextAttachment.BuildPrompt(text, attachments);
+        var snapshot = BuildContextSnapshot(text, attachments);
+        var promptText = snapshot.PromptText;
         var displayText = ChatContextAttachment.BuildDisplayMessage(text, attachments);
-        UpdateContextUsage(new ChatTokenUsage(EstimateTokensForSend(promptText), 0, EstimateTokensForSend(promptText)), "Estimated");
+        UpdateContextUsage(new ChatTokenUsage(snapshot.EstimatedTokens, 0, snapshot.EstimatedTokens), "Estimated");
         
         var userMessage = new MessageViewModel { Role = "user", Content = displayText };
         // Store attachment paths for regeneration; only include ready attachments
@@ -189,6 +271,8 @@ public partial class ChatViewModel : ObservableObject
         var responseClock = Stopwatch.StartNew();
         long? firstTokenMs = null;
         var renderBatches = 0;
+        ChatTokenUsage? reportedUsage = null;
+        var traceError = string.Empty;
         try
         {
             var history = Messages.Where(m => !m.IsStreaming)
@@ -196,7 +280,6 @@ public partial class ChatViewModel : ObservableObject
             if (history.Count > 0 && history[^1].Role == "user")
                 history[^1] = history[^1] with { Content = promptText };
 
-            ChatTokenUsage? reportedUsage = null;
             await foreach (var evt in _llm.StreamChatEventsAsync(
                 selectedModelId, history,
                 string.IsNullOrWhiteSpace(SystemPrompt) ? null : SystemPrompt,
@@ -231,6 +314,7 @@ public partial class ChatViewModel : ObservableObject
         }
         catch (Exception ex)
         {
+            traceError = ex.Message;
             asst.Content = $"Error: {ex.Message}";
             responseClock.Stop();
             asst.DurationMs = responseClock.ElapsedMilliseconds;
@@ -238,7 +322,11 @@ public partial class ChatViewModel : ObservableObject
             asst.IsStreaming = false;
             asst.IsError = true;
         }
-        finally { IsGenerating = false; _cts?.Dispose(); _cts = null; }
+        finally
+        {
+            AddChatTrace(snapshot, selectedModelId, reportedUsage, firstTokenMs ?? 0, responseClock.ElapsedMilliseconds, traceError);
+            IsGenerating = false; _cts?.Dispose(); _cts = null;
+        }
 
         void AppendStreamToken(MessageViewModel message, string token, bool force)
         {
@@ -371,7 +459,131 @@ public partial class ChatViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void ToggleSystemPrompt() => ShowSystemPrompt = !ShowSystemPrompt;
+    private void ToggleSystemPrompt()
+    {
+        ShowSystemPrompt = !ShowSystemPrompt;
+        if (ShowSystemPrompt)
+        {
+            ShowContextInspector = false;
+            ShowChatTraces = false;
+            ShowCompareModels = false;
+        }
+    }
+
+    [RelayCommand]
+    private void ToggleContextInspector()
+    {
+        ShowContextInspector = !ShowContextInspector;
+        if (ShowContextInspector)
+        {
+            ShowChatTraces = false;
+            ShowCompareModels = false;
+            ShowSystemPrompt = false;
+        }
+        if (ShowContextInspector)
+            RefreshContextInspector();
+    }
+
+    [RelayCommand]
+    private void ToggleChatTraces()
+    {
+        ShowChatTraces = !ShowChatTraces;
+        if (ShowChatTraces)
+        {
+            ShowContextInspector = false;
+            ShowCompareModels = false;
+            ShowSystemPrompt = false;
+        }
+    }
+
+    [RelayCommand]
+    private void ToggleCompareModels()
+    {
+        ShowCompareModels = !ShowCompareModels;
+        if (ShowCompareModels)
+        {
+            ShowContextInspector = false;
+            ShowChatTraces = false;
+            ShowSystemPrompt = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task CompareSelectedModelsAsync()
+    {
+        var text = InputText.Trim();
+        var attachments = ContextAttachments.ToList();
+        if ((string.IsNullOrWhiteSpace(text) && !attachments.Any(a => a.IsReady)) || IsGenerating || IsComparingModels)
+            return;
+
+        var selected = CompareModels.Where(model => model.IsSelected).Take(4).ToList();
+        if (selected.Count == 0 && SelectedModel is not null)
+        {
+            selected.Add(new CompareModelOptionViewModel(SelectedModel) { IsSelected = true });
+        }
+
+        if (selected.Count == 0)
+            return;
+
+        var snapshot = BuildContextSnapshot(text, attachments);
+        CompareResults.Clear();
+        IsComparingModels = true;
+        CompareStatus = $"Comparing {selected.Count} model(s)...";
+        try
+        {
+            foreach (var option in selected)
+            {
+                var clock = Stopwatch.StartNew();
+                long? firstTokenMs = null;
+                ChatTokenUsage? usage = null;
+                var answer = new StringBuilder();
+                var history = BuildHistory(snapshot.PromptText);
+                var error = string.Empty;
+                try
+                {
+                    await foreach (var evt in _llm.StreamChatEventsAsync(
+                        option.Model.Id,
+                        history,
+                        string.IsNullOrWhiteSpace(SystemPrompt) ? null : SystemPrompt,
+                        Temperature))
+                    {
+                        if (evt.Usage is not null)
+                            usage = evt.Usage;
+                        if (!string.IsNullOrEmpty(evt.ContentDelta))
+                        {
+                            firstTokenMs ??= clock.ElapsedMilliseconds;
+                            answer.Append(evt.ContentDelta);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    error = ex.Message;
+                }
+                finally
+                {
+                    clock.Stop();
+                }
+
+                CompareResults.Add(new ModelCompareResultViewModel
+                {
+                    ModelId = option.Model.Id,
+                    DisplayName = option.Model.DisplayName,
+                    Answer = answer.ToString(),
+                    FirstTokenMs = firstTokenMs ?? 0,
+                    TotalLatencyMs = clock.ElapsedMilliseconds,
+                    Usage = usage,
+                    Error = error
+                });
+            }
+
+            CompareStatus = $"Compared {CompareResults.Count} model(s).";
+        }
+        finally
+        {
+            IsComparingModels = false;
+        }
+    }
 
     private bool CanSend() =>
         !IsGenerating
@@ -389,6 +601,87 @@ public partial class ChatViewModel : ObservableObject
         return total;
     }
 
+    private ChatContextSnapshot BuildContextSnapshot(string text, IReadOnlyList<ChatContextAttachment> attachments)
+    {
+        var promptText = ChatContextAttachment.BuildPrompt(text, attachments);
+        var historyTokens = Messages.Where(m => !m.IsStreaming).Sum(m => EstimateTokens(m.Content));
+        var parts = new List<ChatContextPartViewModel>();
+
+        if (!string.IsNullOrWhiteSpace(SystemPrompt))
+        {
+            parts.Add(new ChatContextPartViewModel
+            {
+                Kind = "System",
+                Title = "System prompt",
+                Content = SystemPrompt,
+                EstimatedTokens = EstimateTokens(SystemPrompt)
+            });
+        }
+
+        parts.Add(new ChatContextPartViewModel
+        {
+            Kind = "User",
+            Title = "Draft message",
+            Content = text,
+            EstimatedTokens = EstimateTokens(text)
+        });
+
+        foreach (var attachment in attachments.Where(a => a.IsReady))
+        {
+            parts.Add(new ChatContextPartViewModel
+            {
+                Kind = "Attachment",
+                Title = attachment.FullPath,
+                Content = attachment.Content,
+                EstimatedTokens = EstimateTokens(attachment.Content)
+            });
+        }
+
+        var total = EstimateTokens(SystemPrompt) + EstimateTokens(promptText) + historyTokens;
+        return new ChatContextSnapshot(promptText, total, parts, historyTokens);
+    }
+
+    private List<ChatMessage> BuildHistory(string promptText)
+    {
+        var history = Messages.Where(m => !m.IsStreaming)
+            .Select(m => new ChatMessage(m.Role, m.Content)).ToList();
+        history.Add(new ChatMessage("user", promptText));
+        return history;
+    }
+
+    private void RefreshContextInspector()
+    {
+        var snapshot = BuildContextSnapshot(InputText.Trim(), ContextAttachments.ToList());
+        ContextPreviewParts.Clear();
+        foreach (var part in snapshot.Parts)
+            ContextPreviewParts.Add(part);
+
+        ContextPreviewSummary = $"Estimated {snapshot.EstimatedTokens:N0} tokens including {snapshot.HistoryTokens:N0} history tokens.";
+        ContextPreviewRaw = string.Join("\n\n---\n\n", snapshot.Parts.Select(part => $"[{part.Kind}] {part.Title}\n{part.Content}"));
+    }
+
+    private void AddChatTrace(ChatContextSnapshot snapshot, string modelId, ChatTokenUsage? usage, long firstTokenMs, long totalMs, string error)
+    {
+        var model = AvailableModels.FirstOrDefault(m => m.Id == modelId);
+        var trace = new ChatTraceViewModel
+        {
+            ModelId = modelId,
+            Provider = model?.Provider ?? _llm.ProviderName,
+            Runtime = model?.ProviderTag ?? _llm.ProviderName,
+            SystemPrompt = SystemPrompt,
+            AttachmentCount = snapshot.Parts.Count(p => p.Kind == "Attachment"),
+            EstimatedTokens = snapshot.EstimatedTokens,
+            ProviderUsage = usage,
+            FirstTokenMs = firstTokenMs,
+            TotalLatencyMs = totalMs,
+            ErrorDetails = error
+        };
+        ChatTraces.Insert(0, trace);
+        SelectedChatTrace = trace;
+        while (ChatTraces.Count > 50)
+            ChatTraces.RemoveAt(ChatTraces.Count - 1);
+    }
+
     private void RefreshEstimatedContextUsage()
     {
         _contextUsageCts?.Cancel();
@@ -399,6 +692,8 @@ public partial class ChatViewModel : ObservableObject
             total += EstimateTokens(attachment.Content);
 
         UpdateContextUsage(new ChatTokenUsage(total, 0, total), "Estimated");
+        if (ShowContextInspector)
+            RefreshContextInspector();
     }
 
     private void UpdateContextUsage(ChatTokenUsage usage, string kind)
@@ -555,4 +850,10 @@ public partial class ChatViewModel : ObservableObject
             catch (OperationCanceledException) { }
         }, token);
     }
+
+    private sealed record ChatContextSnapshot(
+        string PromptText,
+        int EstimatedTokens,
+        IReadOnlyList<ChatContextPartViewModel> Parts,
+        int HistoryTokens);
 }

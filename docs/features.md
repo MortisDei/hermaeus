@@ -6,6 +6,15 @@
   pins, archive, and direct file context injection for selected text/code files.
 - Chat context usage indicator with provider-reported usage where available and
   local estimates before send.
+- Context Inspector panel shows the exact context pack before send when opened:
+  system prompt, draft message, ready attachments, chat history token estimate,
+  and the raw prompt sections that will be sent to the model.
+- Chat Trace Viewer records completed sends with selected model/runtime,
+  system prompt, attachment count, estimated tokens, provider usage when
+  reported, first-token latency, total latency, and error details.
+- Compare Models sends the current draft prompt to one to four selected models
+  and compares answers, latency, token usage, and simple quality notes without
+  adding the comparison run to chat history.
 - Chat can attach selected local text/code files directly to the next message.
   Use the attach button or drop files on the input. Aether reads each file once at
   send time, prepends a bounded context block to the model prompt, and stores only
@@ -69,8 +78,21 @@
 - Model profiles with display names, descriptions, tags, visibility, and defaults.
 - Runtime profiles for `llama.cpp`, Ollama, and OpenAI-compatible endpoints.
 - Managed `llama-server` start/stop, auto-start, logs, and GPU auto-tune.
+- Compare Models provides an in-chat practical comparison path for trying the
+  same prompt across multiple visible models before choosing one for normal
+  conversation.
 - Model benchmarks with saved run history, deterministic quality checks,
   rankings, reruns, and Markdown/JSON/CSV export.
+
+## RAG
+
+- Dataset Manager lists each dataset's chunk count, source count, embedding
+  model, embedding dimensions, last ingest time, missing source files, stale
+  local files, duplicate source/chunk entries, and reindex warnings when the
+  current embedding model differs from the dataset metadata.
+- Dataset metadata now records the embedding model and observed embedding
+  dimensions during ingest so future reindex decisions are visible instead of
+  implicit.
 
 ## Local AI Setup
 
@@ -100,6 +122,10 @@
 
 - System overview for app version, CPU, RAM, storage, databases, managed
   components, and best-effort GPU/VRAM visibility.
+- Privacy Audit dashboard connects local-first posture into one view covering
+  configured remote providers, local providers, network-facing managed server
+  flags, secret backend health, runtime log redaction, data-root backup status,
+  and features that may send data remotely.
 - Runtime logs with filters, copy, and redacted diagnostics export.
 - Local tasks, reminders, and app-running scheduled automations.
 - Tray integration, minimize-to-tray, local hotkeys, and Windows system-wide
@@ -157,30 +183,30 @@ include:
 The Agent panel already exposes retrieved context, task state, next action, and
 workspace analysis outputs.
 
-Context inspection should be available before model calls, not only inside the
-agent. A context pack inspector should show the system prompt, memory snippets,
-attached files, RAG snippets, workspace notes, and estimated tokens before send.
+Chat now includes an opt-in Context Inspector before send. It shows the system
+prompt, draft message, ready attached files, raw prompt sections, and estimated
+tokens for the current context pack.
 
-Chat traces should extend the current RAG and agent trace model with selected
-model/profile, runtime, system prompt, memory injection, attachments, RAG
-context, token estimate, provider usage, latency, and error details.
+Chat Trace Viewer now extends the current RAG and agent trace model with
+selected model/runtime, system prompt, attachment count, token estimate,
+provider usage, latency, and error details for completed sends.
 
 ### Model and Dataset Lifecycle
 
-Compare Models should send the same prompt to two to four selected models and
-show answer quality notes, latency, token usage, and remote cost when available.
+Compare Models sends the same prompt to one to four selected models and shows
+answer quality notes, latency, token usage, and errors.
 
-A RAG Dataset Manager should show dataset source count, chunk count, embedding
-model, dimensions, last ingest time, stale files, missing files, duplicate
-sources, import/export metadata, and reindex warnings when the current embedding
-provider differs from the one used to create the dataset.
+A RAG Dataset Manager shows dataset source count, chunk count, embedding model,
+dimensions, last ingest time, stale files, missing files, duplicate sources, and
+reindex warnings when the current embedding provider differs from the one used
+to create the dataset.
 
 ### Local-First Operations
 
-A Privacy Audit dashboard should connect existing trust, secrets, logs, and
-runtime checks into one view covering remote providers, local-only providers,
-features that may send data remotely, exposed local servers, secret health, log
-redaction status, and data-root backup status.
+The System Overview Privacy Audit dashboard connects existing trust, secrets,
+logs, and runtime checks into one view covering remote providers, local-only
+providers, features that may send data remotely, exposed local servers, secret
+health, log redaction status, and data-root backup status.
 
 A Doctor Fixes queue should turn Doctor findings into explicit approval-gated
 actions with target paths, command previews, risk notes, and recorded outcomes.

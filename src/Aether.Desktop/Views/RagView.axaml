@@ -81,6 +81,51 @@
                                HorizontalAlignment="Center" FontSize="13" Opacity="0.18" />
                 </StackPanel>
 
+                <Expander Header="Dataset Manager" IsExpanded="True"
+                          IsVisible="{Binding Datasets.Count, Converter={x:Static views:RagView.IsNonZero}}">
+                    <StackPanel Spacing="10" Margin="0,8,0,0">
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                            <TextBlock Grid.Column="0"
+                                       Text="{Binding DatasetManagerStatus}"
+                                       FontSize="12"
+                                       Opacity="0.65"
+                                       VerticalAlignment="Center" />
+                            <Button Grid.Column="1"
+                                    Content="Refresh datasets"
+                                    Command="{Binding RefreshDatasetManagerCommand}"
+                                    Padding="10,6" />
+                        </Grid>
+                        <ItemsControl ItemsSource="{Binding DatasetManagerItems}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="vm:RagDatasetManagerItemViewModel">
+                                    <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="8"
+                                            Padding="12"
+                                            Margin="0,0,0,8">
+                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                            <StackPanel Grid.Column="0" Spacing="4">
+                                                <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold" />
+                                                <TextBlock Text="{Binding Description}" FontSize="11" Opacity="0.55" TextWrapping="Wrap" />
+                                                <TextBlock Text="{Binding ReindexStatus}" FontSize="11" Opacity="0.7" TextWrapping="Wrap" />
+                                                <TextBlock Text="{Binding DimensionsLabel}" FontSize="11" Opacity="0.55" />
+                                            </StackPanel>
+                                            <UniformGrid Grid.Column="1" Columns="2" Rows="3" MinWidth="260">
+                                                <TextBlock Text="{Binding ChunkCount, StringFormat=Chunks: {0}}" FontSize="11" />
+                                                <TextBlock Text="{Binding SourceCount, StringFormat=Sources: {0}}" FontSize="11" />
+                                                <TextBlock Text="{Binding MissingFiles, StringFormat=Missing: {0}}" FontSize="11" />
+                                                <TextBlock Text="{Binding StaleFiles, StringFormat=Stale: {0}}" FontSize="11" />
+                                                <TextBlock Text="{Binding DuplicateSources, StringFormat=Duplicates: {0}}" FontSize="11" />
+                                                <TextBlock Text="{Binding LastIngestLabel}" FontSize="11" />
+                                            </UniformGrid>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Expander>
+
                 <!-- Answer area -->
                 <StackPanel IsVisible="{Binding HasAnswer}" Spacing="4">
                     <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,0,4">

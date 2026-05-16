@@ -59,6 +59,44 @@ public sealed class RagIngestReportItemViewModel
     };
 }
 
+public sealed class RagDatasetManagerItemViewModel
+{
+    public RagDatasetManagerItemViewModel(RagDataset dataset, string currentEmbeddingModel)
+    {
+        Dataset = dataset;
+        Id = dataset.Id;
+        Name = dataset.Name;
+        Description = dataset.Description;
+        ChunkCount = dataset.ChunkCount;
+        CreatedAt = dataset.CreatedAt;
+        EmbeddingModel = string.IsNullOrWhiteSpace(dataset.Config.EmbeddingModel) ? "unknown" : dataset.Config.EmbeddingModel;
+        EmbeddingDimensions = dataset.Config.EmbeddingDimensions;
+        CurrentEmbeddingModel = currentEmbeddingModel;
+    }
+
+    public RagDataset Dataset { get; }
+    public string Id { get; }
+    public string Name { get; }
+    public string Description { get; }
+    public int ChunkCount { get; }
+    public DateTime CreatedAt { get; }
+    public string EmbeddingModel { get; }
+    public int EmbeddingDimensions { get; }
+    public string CurrentEmbeddingModel { get; }
+    public int SourceCount { get; set; }
+    public int MissingFiles { get; set; }
+    public int StaleFiles { get; set; }
+    public int DuplicateSources { get; set; }
+    public string LastIngestLabel => CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+    public string DimensionsLabel => EmbeddingDimensions <= 0 ? "unknown dimensions" : $"{EmbeddingDimensions:N0} dimensions";
+    public bool ReindexRequired => !string.IsNullOrWhiteSpace(CurrentEmbeddingModel)
+        && !string.Equals(EmbeddingModel, "unknown", StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(EmbeddingModel, CurrentEmbeddingModel, StringComparison.OrdinalIgnoreCase);
+    public string ReindexStatus => ReindexRequired
+        ? $"Reindex required: dataset uses {EmbeddingModel}, current provider is {CurrentEmbeddingModel}."
+        : $"Embedding model: {EmbeddingModel}";
+}
+
 public partial class RagViewModel : ObservableObject
 {
     private readonly RagQueryService _query;
@@ -66,6 +104,7 @@ public partial class RagViewModel : ObservableObject
     private readonly RagEvalService  _eval;
     private readonly IToastService   _toasts;
     private readonly IRuntimeLogService _logs;
+    private readonly ISettingsService _settings;
     private CancellationTokenSource? _cts;
     private CancellationTokenSource? _ingestCts;
 
@@ -74,6 +113,7 @@ public partial class RagViewModel : ObservableObject
     public ObservableCollection<RagSourceViewModel> VisibleCitationSources { get; } = [];
     public ObservableCollection<RagEvalResultViewModel> EvalResults { get; } = [];
     public ObservableCollection<RagIngestReportItemViewModel> IngestReportItems { get; } = [];
+    public ObservableCollection<RagDatasetManagerItemViewModel> DatasetManagerItems { get; } = [];
 
     [ObservableProperty] private RagDataset? _selectedDataset;
     [ObservableProperty] private string      _questionText    = string.Empty;
@@ -115,18 +155,21 @@ public partial class RagViewModel : ObservableObject
     [ObservableProperty] private int         _evalTotal;
     [ObservableProperty] private double      _evalPassRate;
     [ObservableProperty] private RagEvalResultViewModel? _selectedEvalResult;
+    [ObservableProperty] private RagDatasetManagerItemViewModel? _selectedDatasetManagerItem;
+    [ObservableProperty] private string      _datasetManagerStatus = string.Empty;
 
     public event EventHandler? ScrollToBottom;
     public Action<string>? RequestCopyToClipboard { get; set; }
     public bool IsLocalIngest => !EnableWebLoader;
 
-    public RagViewModel(RagQueryService query, RagPipeline pipeline, RagEvalService eval, IToastService toasts, IRuntimeLogService logs)
+    public RagViewModel(RagQueryService query, RagPipeline pipeline, RagEvalService eval, IToastService toasts, IRuntimeLogService logs, ISettingsService settings)
     {
         _query    = query;
         _pipeline = pipeline;
         _eval     = eval;
         _toasts   = toasts;
         _logs     = logs;
+        _settings  = settings;
     }
 
     public IEnumerable<IngestDuplicatePolicy> IngestPolicyOptions => Enum.GetValues<IngestDuplicatePolicy>();
@@ -139,6 +182,7 @@ public partial class RagViewModel : ObservableObject
             Datasets.Clear();
             foreach (var d in all) Datasets.Add(d);
             SelectedDataset = Datasets.FirstOrDefault();
+            await RefreshDatasetManagerAsync();
         }
         catch (Exception ex) { SetError(ex.Message); }
     }
@@ -227,6 +271,7 @@ public partial class RagViewModel : ObservableObject
                 Config      = new RagDatasetConfig
                 {
                     UseParentChild = UseParentChild,
+                    EmbeddingModel = _settings.Settings.Rag.EmbeddingModel,
                     EnableWebLoader = EnableWebLoader,
                     WebUrlList = EnableWebLoader ? WebUrlList.Trim() : string.Empty,
                     WebMaxPages = Math.Clamp(WebMaxPages <= 0 ? 5 : WebMaxPages, 1, 20),
@@ -275,6 +320,7 @@ public partial class RagViewModel : ObservableObject
 
             await LoadDatasetsAsync();
             SelectedDataset = Datasets.FirstOrDefault(d => d.Name == ds.Name);
+            await RefreshDatasetManagerAsync();
             NewDatasetName  = string.Empty;
             if (EnableWebLoader)
                 WebUrlList = string.Empty;
@@ -406,6 +452,56 @@ public partial class RagViewModel : ObservableObject
                                     ? !string.IsNullOrWhiteSpace(WebUrlList)
                                     : !string.IsNullOrWhiteSpace(IngestPath));
     private bool CanRunEval() => !IsEvaluating && SelectedDataset is not null && File.Exists(EvalPath);
+
+    [RelayCommand]
+    private async Task RefreshDatasetManagerAsync()
+    {
+        DatasetManagerItems.Clear();
+        var datasets = await _query.GetDatasetsAsync();
+        foreach (var dataset in datasets)
+        {
+            var item = new RagDatasetManagerItemViewModel(dataset, _settings.Settings.Rag.EmbeddingModel);
+            try
+            {
+                var chunks = await _query.GetChunksForDatasetAsync(dataset.Id, includeEmbeddings: false);
+                var sources = chunks.GroupBy(c => c.SourcePath, StringComparer.OrdinalIgnoreCase).ToList();
+                item.SourceCount = sources.Count;
+                item.DuplicateSources = chunks
+                    .GroupBy(c => $"{c.SourcePath}::{c.ChunkIndex}", StringComparer.OrdinalIgnoreCase)
+                    .Count(g => g.Count() > 1);
+
+                foreach (var source in sources)
+                {
+                    var path = source.Key;
+                    if (string.IsNullOrWhiteSpace(path) || path.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                        continue;
+                    if (!File.Exists(path))
+                    {
+                        item.MissingFiles++;
+                        continue;
+                    }
+
+                    var sourceModified = source
+                        .Select(c => c.SourceModifiedUtc)
+                        .Where(x => x.HasValue)
+                        .OrderByDescending(x => x!.Value)
+                        .FirstOrDefault();
+                    if (sourceModified.HasValue && File.GetLastWriteTimeUtc(path) > sourceModified.Value.AddSeconds(1))
+                        item.StaleFiles++;
+                }
+            }
+            catch
+            {
+                item.SourceCount = 0;
+            }
+
+            DatasetManagerItems.Add(item);
+        }
+
+        DatasetManagerStatus = $"{DatasetManagerItems.Count} dataset(s), {DatasetManagerItems.Sum(i => i.SourceCount)} source(s).";
+        SelectedDatasetManagerItem = DatasetManagerItems.FirstOrDefault(i => SelectedDataset is not null && i.Id == SelectedDataset.Id)
+            ?? DatasetManagerItems.FirstOrDefault();
+    }
 
     private void ParseSources(string header)
     {

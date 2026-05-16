@@ -36,7 +36,7 @@ namespace Aether.Tests
             var toasts = new FakeToasts();
             var logs = new SimpleRuntimeLog();
 
-            var vm = new RagViewModel(query, pipeline, eval, toasts, logs);
+            var vm = new RagViewModel(query, pipeline, eval, toasts, logs, settings);
             vm.SelectedDataset = (await query.GetDatasetsAsync()).FirstOrDefault(d => d.Name == ds.Name);
             vm.QuestionText = "will cause refusal";
 

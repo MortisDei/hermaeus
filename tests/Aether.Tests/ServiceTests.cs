@@ -79,6 +79,33 @@ namespace Aether.Tests
             Equal(1, snapshot.Components.Count, "snapshot should include a component");
         }
 
+        public static async Task PrivacyAuditReportsRemoteAndNetworkExposure()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.Llm.OpenAiEnabled = true;
+            settings.Settings.Llm.OpenAiBaseUrl = "https://api.example.invalid/v1";
+            settings.Settings.ManagedServers.Clear();
+            settings.Settings.ManagedServers.Add(new ServerConfig
+            {
+                Name = "Chat",
+                Port = 8080,
+                ExtraArgs = "--host 0.0.0.0"
+            });
+
+            var vm = new SystemOverviewViewModel(
+                new FakeSystemInfo(),
+                new FakeToasts(),
+                settings,
+                new FakeSecretStore(),
+                new RuntimeLogService(settings));
+
+            await vm.RefreshPrivacyAuditCommand.ExecuteAsync(null);
+
+            True(vm.PrivacyAuditItems.Any(i => i.Name == "Remote providers" && i.Status == "Review"), "remote providers should require review");
+            True(vm.PrivacyAuditItems.Any(i => i.Name == "Exposed local servers" && i.Status == "Warning"), "network-facing server args should warn");
+        }
+
         public static Task LocalAiAssetsDetectAndApplyPaths()
         {
             using var temp = new TempDir();
