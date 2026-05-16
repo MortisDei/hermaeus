@@ -17,7 +17,7 @@ Pre-1.0 versions may still change internal APIs and storage details.
 
 - Project version metadata bumped to `0.9.3-alpha`.
 
-## [0.9.2-alpha] - Unreleased
+## [0.9.2-alpha] - 2026-05-16
 
 ### Added
 
@@ -119,7 +119,7 @@ Pre-1.0 versions may still change internal APIs and storage details.
 
 
 
-## [0.9.1-alpha] - Unreleased
+## [0.9.1-alpha] - 2026-05-15
 
 ### Changed
 
