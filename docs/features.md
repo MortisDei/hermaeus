@@ -59,6 +59,10 @@
   blocked counts.
 - Workspace memory notes can be saved, reviewed, and deleted per workspace
   root.
+- Workspace profile analysis can scan the selected root, detect project shape,
+  languages, frameworks, important files, project instructions, risk notes,
+  safe command recipes, a suggested `AGENTS.md`, and a RAG ingest plan. The
+  result is saved back into workspace memory.
 
 ## Model Management
 
@@ -107,3 +111,80 @@
   network exposure warnings.
 - OS-backed secret references and redacted process logs.
 - Data-safety test harness for migration, backup/restore, and redaction.
+
+## Workbench Glue
+
+Aether connects its local-first systems around a workspace root so chat, RAG,
+agent state, project instructions, and local safety checks can share context.
+
+### Workspace Profiles
+
+The Agent workspace now records a profile around a project root:
+
+- Root folder
+- Preferred chat model
+- Linked RAG dataset
+- Workspace memory count
+- Trust and safety status
+- Last workspace summary
+
+Planned profile fields include preferred embedding model, recent chats,
+benchmark history, and richer trust status.
+
+### Workspace Understanding
+
+An **Explain Workspace** action scans the selected root and saves a summary into
+workspace memory. The scan identifies repo type, languages, frameworks, safe
+build and test command recipes, important files, risks, a suggested
+`AGENTS.md`, and a RAG ingest plan.
+
+### Project Instructions
+
+The Project Instructions view detects local instruction sources, summarizes the
+active guidance, and flags conflicts or risky override language. Candidate files
+include:
+
+- `AGENTS.md`
+- `CLAUDE.md`
+- `GEMINI.md`
+- `.codex/instructions.md`
+- `.github/copilot-instructions.md`
+- `README.md`
+- `CONTRIBUTING.md`
+
+### Context Transparency
+
+The Agent panel already exposes retrieved context, task state, next action, and
+workspace analysis outputs.
+
+Context inspection should be available before model calls, not only inside the
+agent. A context pack inspector should show the system prompt, memory snippets,
+attached files, RAG snippets, workspace notes, and estimated tokens before send.
+
+Chat traces should extend the current RAG and agent trace model with selected
+model/profile, runtime, system prompt, memory injection, attachments, RAG
+context, token estimate, provider usage, latency, and error details.
+
+### Model and Dataset Lifecycle
+
+Compare Models should send the same prompt to two to four selected models and
+show answer quality notes, latency, token usage, and remote cost when available.
+
+A RAG Dataset Manager should show dataset source count, chunk count, embedding
+model, dimensions, last ingest time, stale files, missing files, duplicate
+sources, import/export metadata, and reindex warnings when the current embedding
+provider differs from the one used to create the dataset.
+
+### Local-First Operations
+
+A Privacy Audit dashboard should connect existing trust, secrets, logs, and
+runtime checks into one view covering remote providers, local-only providers,
+features that may send data remotely, exposed local servers, secret health, log
+redaction status, and data-root backup status.
+
+A Doctor Fixes queue should turn Doctor findings into explicit approval-gated
+actions with target paths, command previews, risk notes, and recorded outcomes.
+
+Safe command recipe cards should suggest manual commands, explain why they are
+useful, classify risk, and provide copy controls. This keeps early agent work
+safe while leaving a clear path toward approval-gated execution later.

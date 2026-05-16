@@ -105,6 +105,35 @@ internal static class AgentTests
     Equal(0, items.Count, "workspace memory should delete the note");
     }
 
+    public static async Task AgentWorkspaceAnalysisBuildsProfile()
+    {
+    using var temp = new TempDir();
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var workspace = temp.PathFor("workspace");
+    Directory.CreateDirectory(Path.Combine(workspace, "src"));
+    Directory.CreateDirectory(Path.Combine(workspace, "tests"));
+    await File.WriteAllTextAsync(Path.Combine(workspace, "Aether.Sample.sln"), "");
+    await File.WriteAllTextAsync(Path.Combine(workspace, "README.md"), "# Sample\nLocal project.");
+    await File.WriteAllTextAsync(Path.Combine(workspace, "AGENTS.md"), "# AGENTS.md\nRun local builds only.");
+    await File.WriteAllTextAsync(Path.Combine(workspace, "src", "App.cs"), "namespace Sample;");
+    await File.WriteAllTextAsync(Path.Combine(workspace, "tests", "AppTests.cs"), "namespace Sample.Tests;");
+
+    var memory = new FileAgentWorkspaceMemoryStore(settings);
+    var profiles = new FileWorkspaceProfileStore(settings);
+    var analysis = new WorkspaceAnalysisService(profiles, memory);
+    var report = await analysis.AnalyzeAsync(new AgentWorkspaceOptions(workspace, ModelId: "local-model"));
+
+    Equal(".NET solution", report.RepoType, "workspace without .git but with solution should report solution type");
+    True(report.Languages.Any(lang => lang.StartsWith("C#", StringComparison.Ordinal)), "analysis should detect C# files");
+    True(report.Instructions.Any(file => file.RelativePath == "AGENTS.md"), "analysis should detect AGENTS.md");
+    True(report.CommandRecipes.Any(recipe => recipe.Command == "dotnet build"), "analysis should suggest dotnet build");
+    True(report.RagIngestPlan.Contains("reindex", StringComparison.OrdinalIgnoreCase), "analysis should include RAG reindex guidance");
+
+    var saved = await profiles.LoadAsync(workspace);
+    Equal("local-model", saved?.PreferredModelId, "workspace profile should persist preferred model");
+    }
+
     public static Task AgentWorkspaceToolsEnforcePathSafety()
     {
     using var temp = new TempDir();

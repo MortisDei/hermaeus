@@ -92,6 +92,38 @@ public sealed class AgentWorkspaceFileViewModel
     public string ModifiedLabel => $"{ModifiedUtc:yyyy-MM-dd HH:mm} UTC";
 }
 
+public sealed class ProjectInstructionFileViewModel
+{
+    public ProjectInstructionFileViewModel(ProjectInstructionFile file)
+    {
+        RelativePath = file.RelativePath;
+        Summary = file.Summary;
+        Content = file.Content;
+        IsPrimary = file.IsPrimary;
+    }
+
+    public string RelativePath { get; }
+    public string Summary { get; }
+    public string Content { get; }
+    public bool IsPrimary { get; }
+    public string PriorityLabel => IsPrimary ? "Primary" : "Secondary";
+}
+
+public sealed class WorkspaceCommandRecipeViewModel
+{
+    public WorkspaceCommandRecipeViewModel(WorkspaceCommandRecipe recipe)
+    {
+        Command = recipe.Command;
+        Why = recipe.Why;
+        RiskLevel = recipe.RiskLevel;
+    }
+
+    public string Command { get; }
+    public string Why { get; }
+    public AgentRiskLevel RiskLevel { get; }
+    public string RiskLabel => RiskLevel.ToString();
+}
+
 public sealed class AgentDraftPatchViewModel
 {
     public AgentDraftPatchViewModel(AgentDraftPatch patch)
@@ -147,6 +179,7 @@ public partial class AgentViewModel : ObservableObject
     private readonly ILlmService _llm;
     private readonly RagQueryService _rag;
     private readonly IRuntimeLogService _logs;
+    private readonly IWorkspaceAnalysisService _workspaceAnalysis;
     private CancellationTokenSource? _cts;
 
     public ObservableCollection<LlmModel> AvailableModels { get; } = [];
@@ -157,6 +190,10 @@ public partial class AgentViewModel : ObservableObject
     public ObservableCollection<AgentWorkspaceFileViewModel> WorkspaceFiles { get; } = [];
     public ObservableCollection<AgentContextItemViewModel> RetrievedContext { get; } = [];
     public ObservableCollection<AgentDraftPatchViewModel> QueuedPatches { get; } = [];
+    public ObservableCollection<ProjectInstructionFileViewModel> ProjectInstructions { get; } = [];
+    public ObservableCollection<WorkspaceCommandRecipeViewModel> CommandRecipes { get; } = [];
+    public ObservableCollection<string> WorkspaceRisks { get; } = [];
+    public ObservableCollection<string> InstructionWarnings { get; } = [];
 
     public IReadOnlyList<string> CapabilityNotes { get; } =
     [
@@ -189,6 +226,14 @@ public partial class AgentViewModel : ObservableObject
     [ObservableProperty] private string _draftPreview = string.Empty;
     [ObservableProperty] private string _workspaceFileSummary = string.Empty;
     [ObservableProperty] private bool _isError;
+    [ObservableProperty] private bool _isAnalyzingWorkspace;
+    [ObservableProperty] private string _workspaceProfileSummary = string.Empty;
+    [ObservableProperty] private string _workspaceRepoType = string.Empty;
+    [ObservableProperty] private string _workspaceLanguages = string.Empty;
+    [ObservableProperty] private string _workspaceFrameworks = string.Empty;
+    [ObservableProperty] private string _workspaceImportantFiles = string.Empty;
+    [ObservableProperty] private string _workspaceRagIngestPlan = string.Empty;
+    [ObservableProperty] private string _suggestedAgentsMd = string.Empty;
 
     public string CurrentTaskStatusLabel => CurrentTask is null ? "No active task" : CurrentTask.Status.ToString();
     public string CurrentTaskGoalLabel => CurrentTask is null || string.IsNullOrWhiteSpace(CurrentTask.Goal) ? "No goal loaded" : CurrentTask.Goal;
@@ -211,7 +256,8 @@ public partial class AgentViewModel : ObservableObject
         IAgentWorkspaceTools workspaceTools,
         ILlmService llm,
         RagQueryService rag,
-        IRuntimeLogService logs)
+        IRuntimeLogService logs,
+        IWorkspaceAnalysisService workspaceAnalysis)
     {
         _agent = agent;
         _store = store;
@@ -220,6 +266,7 @@ public partial class AgentViewModel : ObservableObject
         _llm = llm;
         _rag = rag;
         _logs = logs;
+        _workspaceAnalysis = workspaceAnalysis;
         WorkspaceRoot = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
         RecentTasks.CollectionChanged += (_, _) =>
@@ -261,6 +308,10 @@ public partial class AgentViewModel : ObservableObject
             OnPropertyChanged(nameof(BlockedPatchCount));
             OnPropertyChanged(nameof(HasQueuedPatches));
         };
+
+        ProjectInstructions.CollectionChanged += (_, _) => OnPropertyChanged(nameof(ProjectInstructionCount));
+        CommandRecipes.CollectionChanged += (_, _) => OnPropertyChanged(nameof(CommandRecipeCount));
+        WorkspaceRisks.CollectionChanged += (_, _) => OnPropertyChanged(nameof(WorkspaceRiskCount));
     }
 
     public bool HasTaskHistory => RecentTaskCount > 0;
@@ -269,6 +320,9 @@ public partial class AgentViewModel : ObservableObject
     public bool HasWorkspaceFiles => WorkspaceFileCount > 0;
     public bool HasRetrievedContext => RetrievedContextCount > 0;
     public int WorkspaceFileCount => WorkspaceFiles.Count;
+    public int ProjectInstructionCount => ProjectInstructions.Count;
+    public int CommandRecipeCount => CommandRecipes.Count;
+    public int WorkspaceRiskCount => WorkspaceRisks.Count;
 
     [RelayCommand]
     public async Task LoadAsync()
@@ -288,6 +342,7 @@ public partial class AgentViewModel : ObservableObject
             await RefreshReviewQueueAsync();
             await RefreshWorkspaceMemoryAsync();
             await RefreshWorkspaceFilesAsync();
+            await ExplainWorkspaceAsync();
         }
         catch (Exception ex)
         {
@@ -647,6 +702,61 @@ public partial class AgentViewModel : ObservableObject
     [RelayCommand]
     private void BrowseWorkspaceRoot() => RequestWorkspaceRootPicker?.Invoke();
 
+    [RelayCommand]
+    private async Task ExplainWorkspaceAsync()
+    {
+        if (string.IsNullOrWhiteSpace(WorkspaceRoot) || !Directory.Exists(WorkspaceRoot))
+            return;
+
+        IsAnalyzingWorkspace = true;
+        IsError = false;
+        try
+        {
+            var report = await _workspaceAnalysis.AnalyzeAsync(BuildOptions());
+            WorkspaceProfileSummary = report.Summary;
+            WorkspaceRepoType = report.RepoType;
+            WorkspaceLanguages = string.Join(", ", report.Languages);
+            WorkspaceFrameworks = string.Join(", ", report.Frameworks);
+            WorkspaceImportantFiles = string.Join(", ", report.ImportantFiles);
+            WorkspaceRagIngestPlan = report.RagIngestPlan;
+            SuggestedAgentsMd = report.SuggestedAgentsMd;
+
+            ProjectInstructions.Clear();
+            foreach (var instruction in report.Instructions)
+                ProjectInstructions.Add(new ProjectInstructionFileViewModel(instruction));
+
+            InstructionWarnings.Clear();
+            foreach (var warning in report.InstructionWarnings)
+                InstructionWarnings.Add(warning);
+
+            WorkspaceRisks.Clear();
+            foreach (var risk in report.Risks)
+                WorkspaceRisks.Add(risk);
+
+            CommandRecipes.Clear();
+            foreach (var recipe in report.CommandRecipes)
+                CommandRecipes.Add(new WorkspaceCommandRecipeViewModel(recipe));
+
+            await _workspaceMemory.UpsertAsync(new AgentWorkspaceMemoryEntry
+            {
+                WorkspaceRoot = WorkspaceRoot,
+                Title = "Workspace profile",
+                Body = $"{report.Summary}\n\nRAG ingest plan: {report.RagIngestPlan}",
+                Tags = ["workspace", "profile", "auto"]
+            });
+            await RefreshWorkspaceMemoryAsync();
+            StatusMessage = "Workspace profile updated.";
+        }
+        catch (Exception ex)
+        {
+            SetError(ex.Message);
+        }
+        finally
+        {
+            IsAnalyzingWorkspace = false;
+        }
+    }
+
     private async Task LoadTaskIfOpenAsync(string taskId)
     {
         if (CurrentTask?.TaskId != taskId)
@@ -744,7 +854,11 @@ public partial class AgentViewModel : ObservableObject
     }
 
     partial void OnGoalTextChanged(string value) => StartCommand.NotifyCanExecuteChanged();
-    partial void OnWorkspaceRootChanged(string value) => StartCommand.NotifyCanExecuteChanged();
+    partial void OnWorkspaceRootChanged(string value)
+    {
+        StartCommand.NotifyCanExecuteChanged();
+        ExplainWorkspaceCommand.NotifyCanExecuteChanged();
+    }
     partial void OnWorkspaceFileQueryChanged(string value) => _ = RefreshWorkspaceFilesAsync();
     partial void OnSelectedWorkspaceFileChanged(AgentWorkspaceFileViewModel? value) => _ = LoadSelectedWorkspaceFileAsync(value);
     partial void OnSelectedModelChanged(LlmModel? value)

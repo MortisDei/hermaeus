@@ -75,8 +75,10 @@ namespace Aether.Tests
             var rag = new RagQueryService(ragStore, new FakeEmbeddingService(), new FakeLlm(), settings, new NoOpReranker());
             var agentService = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new FakeAgentLlm());
             var logs = new SimpleRuntimeLog();
+            var profiles = new FileWorkspaceProfileStore(settings);
+            var analysis = new WorkspaceAnalysisService(profiles, memoryStore);
 
-            var vm = new AgentViewModel(agentService, store, memoryStore, tools, new FakeLlm(), rag, logs);
+            var vm = new AgentViewModel(agentService, store, memoryStore, tools, new FakeLlm(), rag, logs, analysis);
             vm.WorkspaceRoot = workspace;
 
             // Create a task and set it as current

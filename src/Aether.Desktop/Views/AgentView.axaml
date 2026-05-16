@@ -168,12 +168,120 @@
                         Content="Save Memory"
                         Padding="14,8"
                         CornerRadius="6" />
+                    <Button Command="{Binding ExplainWorkspaceCommand}"
+                        Content="Explain Workspace"
+                        Padding="14,8"
+                        CornerRadius="6" />
                     <TextBlock Text="{Binding StatusMessage}"
                                VerticalAlignment="Center"
                                FontSize="12"
                                Opacity="0.75"
                                TextTrimming="CharacterEllipsis" />
                 </StackPanel>
+
+                <Expander Header="Workspace Profile" HorizontalAlignment="Stretch" IsExpanded="True">
+                    <StackPanel Margin="0,8,0,0" Spacing="10">
+                        <Grid ColumnDefinitions="*,*,*" ColumnSpacing="8">
+                            <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="10">
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="Repository" FontSize="11" Opacity="0.55" />
+                                    <TextBlock Text="{Binding WorkspaceRepoType}" FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                    <TextBlock Text="{Binding WorkspaceLanguages}" FontSize="11" Opacity="0.7" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+                            <Border Grid.Column="1" Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="10">
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="Frameworks" FontSize="11" Opacity="0.55" />
+                                    <TextBlock Text="{Binding WorkspaceFrameworks}" FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                    <TextBlock Text="{Binding WorkspaceImportantFiles}" FontSize="11" Opacity="0.7" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+                            <Border Grid.Column="2" Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="10">
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="Profile" FontSize="11" Opacity="0.55" />
+                                    <TextBlock Text="{Binding WorkspaceProfileSummary}" FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                    <TextBlock Text="{Binding WorkspaceRiskCount, StringFormat={}{0} risk notes}" FontSize="11" Opacity="0.7" />
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+
+                        <TextBlock Text="{Binding WorkspaceRagIngestPlan}" FontSize="12" Opacity="0.75" TextWrapping="Wrap" />
+
+                        <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+                            <Expander Grid.Column="0" Header="Project Instructions" IsExpanded="True">
+                                <StackPanel Spacing="8" Margin="0,8,0,0">
+                                    <ItemsControl ItemsSource="{Binding InstructionWarnings}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding}" FontSize="11" Opacity="0.75" TextWrapping="Wrap" />
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <ItemsControl ItemsSource="{Binding ProjectInstructions}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate DataType="vm:ProjectInstructionFileViewModel">
+                                                <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                                        BorderThickness="1"
+                                                        CornerRadius="6"
+                                                        Padding="10"
+                                                        Margin="0,0,0,6">
+                                                    <StackPanel Spacing="3">
+                                                        <Grid ColumnDefinitions="*,Auto">
+                                                            <TextBlock Grid.Column="0" Text="{Binding RelativePath}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                            <TextBlock Grid.Column="1" Text="{Binding PriorityLabel}" FontSize="11" Opacity="0.55" />
+                                                        </Grid>
+                                                        <TextBlock Text="{Binding Summary}" FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
+                                                    </StackPanel>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </Expander>
+
+                            <Expander Grid.Column="1" Header="Command Recipes" IsExpanded="True">
+                                <ItemsControl ItemsSource="{Binding CommandRecipes}" Margin="0,8,0,0">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate DataType="vm:WorkspaceCommandRecipeViewModel">
+                                            <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="6"
+                                                    Padding="10"
+                                                    Margin="0,0,0,6">
+                                                <StackPanel Spacing="3">
+                                                    <Grid ColumnDefinitions="*,Auto">
+                                                        <SelectableTextBlock Grid.Column="0" Text="{Binding Command}" FontFamily="Consolas,monospace" FontWeight="SemiBold" />
+                                                        <TextBlock Grid.Column="1" Text="{Binding RiskLabel}" FontSize="11" Opacity="0.55" />
+                                                    </Grid>
+                                                    <TextBlock Text="{Binding Why}" FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
+                                                </StackPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </Expander>
+                        </Grid>
+
+                        <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+                            <Expander Grid.Column="0" Header="Workspace Risks">
+                                <ItemsControl ItemsSource="{Binding WorkspaceRisks}" Margin="0,8,0,0">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding}" FontSize="11" Opacity="0.7" TextWrapping="Wrap" Margin="0,0,0,4" />
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </Expander>
+                            <Expander Grid.Column="1" Header="Suggested AGENTS.md">
+                                <SelectableTextBlock Text="{Binding SuggestedAgentsMd}"
+                                                     FontFamily="Consolas,monospace"
+                                                     FontSize="11"
+                                                     TextWrapping="Wrap"
+                                                     Margin="0,8,0,0" />
+                            </Expander>
+                        </Grid>
+                    </StackPanel>
+                </Expander>
 
                 <Expander Header="Workspace Files" HorizontalAlignment="Stretch" IsExpanded="True">
                     <StackPanel Margin="0,8,0,0" Spacing="10">

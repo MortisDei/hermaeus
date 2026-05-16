@@ -121,6 +121,8 @@ public partial class App : Application
         s.AddSingleton<IAgentTaskStateStore, FileAgentTaskStateStore>();
         s.AddSingleton<IAgentWorkspaceMemoryStore, FileAgentWorkspaceMemoryStore>();
         s.AddSingleton<IAgentWorkspaceTools, AgentWorkspaceTools>();
+        s.AddSingleton<IWorkspaceProfileStore, FileWorkspaceProfileStore>();
+        s.AddSingleton<IWorkspaceAnalysisService, WorkspaceAnalysisService>();
         s.AddSingleton<IAgentSafetyGate, AgentSafetyGate>();
         s.AddSingleton<IAgentContextBuilder, AgentContextBuilder>();
         s.AddSingleton<IAgentService, AgentService>();

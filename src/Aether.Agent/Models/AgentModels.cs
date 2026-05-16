@@ -209,3 +209,45 @@ public sealed record AgentFileSummaryResult(
 public sealed record AgentRagRetrievalResult(
     RagDataset Dataset,
     IReadOnlyList<AgentRetrievedItem> Items);
+
+public sealed class WorkspaceProfile
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string WorkspaceRoot { get; set; } = string.Empty;
+    public string PreferredModelId { get; set; } = string.Empty;
+    public string PreferredEmbeddingModelId { get; set; } = string.Empty;
+    public string? LinkedRagDatasetId { get; set; }
+    public int WorkspaceMemoryCount { get; set; }
+    public int RecentChatCount { get; set; }
+    public int BenchmarkRunCount { get; set; }
+    public string TrustStatus { get; set; } = "unknown";
+    public string LastSummary { get; set; } = string.Empty;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+public sealed record ProjectInstructionFile(
+    string RelativePath,
+    string Summary,
+    string Content,
+    bool IsPrimary);
+
+public sealed record WorkspaceCommandRecipe(
+    string Command,
+    string Why,
+    AgentRiskLevel RiskLevel);
+
+public sealed class WorkspaceAnalysisReport
+{
+    public WorkspaceProfile Profile { get; set; } = new();
+    public string RepoType { get; set; } = "unknown";
+    public List<string> Languages { get; set; } = [];
+    public List<string> Frameworks { get; set; } = [];
+    public List<string> ImportantFiles { get; set; } = [];
+    public List<string> Risks { get; set; } = [];
+    public List<ProjectInstructionFile> Instructions { get; set; } = [];
+    public List<string> InstructionWarnings { get; set; } = [];
+    public List<WorkspaceCommandRecipe> CommandRecipes { get; set; } = [];
+    public string SuggestedAgentsMd { get; set; } = string.Empty;
+    public string RagIngestPlan { get; set; } = string.Empty;
+    public string Summary { get; set; } = string.Empty;
+}

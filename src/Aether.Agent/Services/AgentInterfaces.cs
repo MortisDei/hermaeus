@@ -50,3 +50,14 @@ public interface IAgentService
     Task<IReadOnlyList<AgentTaskListItem>> LoadRecentTasksAsync(CancellationToken ct = default);
     Task AppendApprovalAsync(string taskId, string action, bool approved, CancellationToken ct = default);
 }
+
+public interface IWorkspaceProfileStore
+{
+    Task<WorkspaceProfile?> LoadAsync(string workspaceRoot, CancellationToken ct = default);
+    Task<WorkspaceProfile> SaveAsync(WorkspaceProfile profile, CancellationToken ct = default);
+}
+
+public interface IWorkspaceAnalysisService
+{
+    Task<WorkspaceAnalysisReport> AnalyzeAsync(AgentWorkspaceOptions options, CancellationToken ct = default);
+}
