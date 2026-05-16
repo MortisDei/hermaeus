@@ -29,6 +29,7 @@ public partial class MainWindowViewModel : ObservableObject
     public MemoriesViewModel        Memories { get; }
     public LogsViewModel            Logs { get; }
     public SessionUsageViewModel    SessionUsage { get; }
+    public SessionUsageDetailViewModel SessionUsageDetail { get; }
     public SetupWizardViewModel     Wizard { get; }
 
     public ObservableCollection<ConversationItemViewModel> Conversations { get; } = [];
@@ -93,6 +94,7 @@ public partial class MainWindowViewModel : ObservableObject
         MemoriesViewModel memories,
         LogsViewModel logs,
         SessionUsageViewModel sessionUsage,
+        SessionUsageDetailViewModel sessionUsageDetail,
         SetupWizardViewModel wizard,
         ISettingsService settingsService,
         IToastService toasts,
@@ -105,6 +107,8 @@ public partial class MainWindowViewModel : ObservableObject
         _store = store; Chat = chat; Agent = agent; Settings = settings;
         Models = models; Rag = rag; Services = services; Tasks = tasks;
         Benchmarks = benchmarks; SystemOverview = systemOverview; Doctor = doctor; Memories = memories; Logs = logs; SessionUsage = sessionUsage; Wizard = wizard;
+        SessionUsageDetail = sessionUsageDetail;
+        SessionUsage.RequestOpenDetail += (id, title) => ShowSessionUsageDetailPanel(id, title);
         Doctor.RequestNavigate = panel => ActivePanel = panel;
         Wizard.WizardCompleted += () => ActivePanel = "chat";
         // allow settings view to request re-running the setup wizard
@@ -321,6 +325,12 @@ public partial class MainWindowViewModel : ObservableObject
     {
         ActivePanel = "session-usage";
         RunBackgroundTaskAsync("load session usage", () => SessionUsage.RefreshCommand.ExecuteAsync(null));
+    }
+
+    private void ShowSessionUsageDetailPanel(string conversationId, string? title = null)
+    {
+        ActivePanel = "session-usage-detail";
+        RunBackgroundTaskAsync("load session usage detail", () => SessionUsageDetail.LoadForConversationAsync(conversationId, title ?? "(untitled)"));
     }
     [RelayCommand] private void ShowLogsPanel()        => ActivePanel = "logs";
     [RelayCommand] private void ShowWizardPanel()      => ActivePanel = "wizard";

@@ -29,6 +29,14 @@ public partial class SessionUsageViewModel : ObservableObject
         _toasts = toasts;
     }
 
+    public event Action<string,string?>? RequestOpenDetail;
+
+    [RelayCommand]
+    public void OpenDetail(string conversationId)
+    {
+        RequestOpenDetail?.Invoke(conversationId, null);
+    }
+
     [RelayCommand]
     public async Task RefreshAsync()
     {

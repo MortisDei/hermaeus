@@ -124,6 +124,7 @@ public partial class App : Application
         s.AddSingleton<IAgentSafetyGate, AgentSafetyGate>();
         s.AddSingleton<IAgentContextBuilder, AgentContextBuilder>();
         s.AddSingleton<IAgentService, AgentService>();
+        s.AddSingleton<IPatchDiffService, PatchDiffService>();
         s.AddSingleton<ChatViewModel>();
         s.AddSingleton<AgentViewModel>();
         s.AddSingleton<SettingsViewModel>();
@@ -136,6 +137,8 @@ public partial class App : Application
         s.AddSingleton<DoctorViewModel>();
         s.AddSingleton<MemoriesViewModel>();
         s.AddSingleton<SessionUsageViewModel>();
+        s.AddSingleton<SessionUsageDetailViewModel>();
+        s.AddSingleton<DraftPatchDiffViewModel>();
         s.AddSingleton<LogsViewModel>();
         s.AddSingleton<SetupWizardViewModel>();
         s.AddSingleton<MainWindowViewModel>();

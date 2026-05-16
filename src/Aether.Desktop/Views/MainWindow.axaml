@@ -177,6 +177,9 @@
                     <DataTemplate DataType="vm:SessionUsageViewModel">
                         <views:SessionUsageView />
                     </DataTemplate>
+                    <DataTemplate DataType="vm:SessionUsageDetailViewModel">
+                        <views:SessionUsageDetailView />
+                    </DataTemplate>
                     <DataTemplate DataType="vm:LogsViewModel">
                         <views:LogsView />
                     </DataTemplate>
