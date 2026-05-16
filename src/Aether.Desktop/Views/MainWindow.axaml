@@ -107,6 +107,12 @@
                                       Width="17" Height="17" />
                         </Button>
 
+                        <Button Classes="icon-btn" Command="{Binding ShowSessionUsagePanelCommand}"
+                                ToolTip.Tip="Session Usage - per-conversation memory counts">
+                            <PathIcon Data="M3 17h2v-7H3v7zm4 0h2V7H7v10zm4 0h2v-4h-2v4zm4 0h2V4h-2v13zm4 0h2v-9h-2v9z"
+                                      Width="17" Height="17" />
+                        </Button>
+
                         <Button Classes="icon-btn" Command="{Binding ShowLogsPanelCommand}"
                                 ToolTip.Tip="Runtime logs">
                             <PathIcon Data="M4 6h16v2H4V6zm0 4h16v2H4v-2zm0 4h10v2H4v-2z"
@@ -167,6 +173,9 @@
                     </DataTemplate>
                     <DataTemplate DataType="vm:MemoriesViewModel">
                         <views:MemoriesView />
+                    </DataTemplate>
+                    <DataTemplate DataType="vm:SessionUsageViewModel">
+                        <views:SessionUsageView />
                     </DataTemplate>
                     <DataTemplate DataType="vm:LogsViewModel">
                         <views:LogsView />

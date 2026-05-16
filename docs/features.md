@@ -24,6 +24,7 @@
   `learned_behaviors`, `interests`) stored in a local SQLite database.
 - Dedicated Memories panel to review, search, pin, archive, and delete
   memories.
+ - Session Usage panel: view per-conversation memory counts and recent activity to help triage which conversations have stored memories.
 - Configurable memory controls in Settings: global enable, context injection,
   auto-summary threshold, token budget, encryption toggle, and auto-archive
   days.

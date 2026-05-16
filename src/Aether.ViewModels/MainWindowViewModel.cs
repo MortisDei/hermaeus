@@ -317,6 +317,11 @@ public partial class MainWindowViewModel : ObservableObject
         RunBackgroundTaskAsync("run doctor scan", () => Doctor.ScanCommand.ExecuteAsync(null));
     }
     [RelayCommand] private void ShowMemoriesPanel()    => ActivePanel = "memories";
+    [RelayCommand] private void ShowSessionUsagePanel()
+    {
+        ActivePanel = "session-usage";
+        RunBackgroundTaskAsync("load session usage", () => SessionUsage.RefreshCommand.ExecuteAsync(null));
+    }
     [RelayCommand] private void ShowLogsPanel()        => ActivePanel = "logs";
     [RelayCommand] private void ShowWizardPanel()      => ActivePanel = "wizard";
     [RelayCommand] private void ShowSettingsPanel()    { ActivePanel = "settings"; Settings.Reload(); }
