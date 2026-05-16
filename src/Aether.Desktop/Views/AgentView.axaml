@@ -207,6 +207,39 @@
                                                          TextWrapping="Wrap"
                                                          MinHeight="180" />
                                 </Border>
+                                <Expander Header="Draft Patch" IsExpanded="False" Margin="0,8,0,0">
+                                    <StackPanel Spacing="8">
+                                        <TextBox Text="{Binding DraftRationale}"
+                                                 Watermark="Rationale for this patch..."
+                                                 AcceptsReturn="True"
+                                                 MinHeight="56"
+                                                 TextWrapping="Wrap" />
+                                        <TextBox Text="{Binding DraftProposedContent}"
+                                                 Watermark="Proposed file content..."
+                                                 AcceptsReturn="True"
+                                                 MinHeight="120"
+                                                 TextWrapping="Wrap"
+                                                 FontFamily="Consolas,monospace"
+                                                 FontSize="11" />
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <Button Content="Generate Draft Patch"
+                                                Command="{Binding GenerateDraftPatchCommand}"
+                                                Padding="10,6"
+                                                CornerRadius="6" />
+                                            </StackPanel>
+                                        <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="6"
+                                                Padding="10"
+                                                Background="{DynamicResource SubtleFillColorSecondaryBrush}">
+                                            <SelectableTextBlock Text="{Binding DraftPreview}"
+                                                                 FontFamily="Consolas,monospace"
+                                                                 FontSize="11"
+                                                                 TextWrapping="Wrap"
+                                                                 MinHeight="100" />
+                                        </Border>
+                                    </StackPanel>
+                                </Expander>
                             </StackPanel>
                         </Grid>
                     </StackPanel>

@@ -127,6 +127,9 @@ public partial class AgentViewModel : ObservableObject
     [ObservableProperty] private string _workspaceFileQuery = string.Empty;
     [ObservableProperty] private AgentWorkspaceFileViewModel? _selectedWorkspaceFile;
     [ObservableProperty] private string _workspaceFilePreview = string.Empty;
+    [ObservableProperty] private string _draftRationale = string.Empty;
+    [ObservableProperty] private string _draftProposedContent = string.Empty;
+    [ObservableProperty] private string _draftPreview = string.Empty;
     [ObservableProperty] private string _workspaceFileSummary = string.Empty;
     [ObservableProperty] private bool _isError;
 
@@ -364,6 +367,27 @@ public partial class AgentViewModel : ObservableObject
         var summary = await Task.Run(() => _workspaceTools.SummarizeFile(options, file.RelativePath));
         WorkspaceFilePreview = preview.Content;
         WorkspaceFileSummary = summary.Summary;
+        // Populate draft proposed content with the current file preview by default
+        DraftProposedContent = WorkspaceFilePreview;
+    }
+
+    [RelayCommand]
+    private async Task GenerateDraftPatchAsync()
+    {
+        if (SelectedWorkspaceFile is null) return;
+        try
+        {
+            var relative = SelectedWorkspaceFile.RelativePath;
+            if (string.IsNullOrWhiteSpace(DraftProposedContent))
+                DraftProposedContent = WorkspaceFilePreview;
+
+            var result = await Task.Run(() => _workspaceTools.DraftPatch(relative, DraftRationale ?? string.Empty, DraftProposedContent ?? string.Empty));
+            DraftPreview = result ?? string.Empty;
+        }
+        catch (Exception ex)
+        {
+            SetError(ex.Message);
+        }
     }
 
     [RelayCommand]

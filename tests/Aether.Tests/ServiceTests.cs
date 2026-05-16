@@ -259,6 +259,16 @@ namespace Aether.Tests
             Equal(TrustRiskLevel.High, executable.RiskLevel, "missing executable should be high risk");
         }
 
+        public static Task AgentWorkspaceDraftPatch()
+        {
+            var tools = new Aether.Agent.Services.AgentWorkspaceTools();
+            var draft = tools.DraftPatch("src/Program.cs", "Fix header", "// new content\npublic class Program {}\n");
+            True(draft.Contains("Draft patch for src/Program.cs"), "draft should reference the file path");
+            True(draft.Contains("Rationale:"), "draft should include rationale header");
+            True(draft.Contains("Proposed content:"), "draft should include proposed content header");
+            return Task.CompletedTask;
+        }
+
         public static async Task TrustScanUnsetAiRootIsNeutral()
         {
             using var temp = new TempDir();
