@@ -1,6 +1,6 @@
 # Aether
 
-Version: `0.9.3-alpha`
+Version: `0.9.4-alpha`
 
 A native, local-first Avalonia desktop AI workspace for `llama.cpp`, Ollama,
 OpenAI-compatible APIs, local RAG, agentic task work, and pluggable voice
