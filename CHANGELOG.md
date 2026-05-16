@@ -26,6 +26,9 @@ Pre-1.0 versions may still change internal APIs and storage details.
 - Routine settings saves now skip data-root migration unless a previous data
   root is explicitly provided, preventing startup crashes when the selected
   data root already contains existing databases.
+- RAG ingest embedding failures now return actionable guidance when llama.cpp
+  responds with 501/404, including a hint to enable `--embeddings` and point
+  `LlamaCppBaseUrl` at an embeddings-capable server.
 
 ### Changed
 

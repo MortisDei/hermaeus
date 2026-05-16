@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Net.Http;
@@ -9,6 +10,7 @@ using System.Threading.Tasks;
 using Aether.Core.Models;
 using Aether.Core.Services;
 using Aether.Desktop.Controls;
+using Aether.Rag.Embeddings;
 using Aether.Services;
 using Aether.Services.ProcessManagement;
 using Aether.ViewModels;
@@ -235,6 +237,28 @@ namespace Aether.Tests
             True(template.Contains("/v1/audio/speech", StringComparison.Ordinal), "template should expose speech endpoint");
             True(template.Contains("/health", StringComparison.Ordinal), "template should expose health endpoint");
             return Task.CompletedTask;
+        }
+
+        public static async Task EmbeddingClientSurfacesActionableHintWhenEndpointIsNotImplemented()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.Llm.LlamaCppBaseUrl = "http://localhost:8080";
+
+            using var http = new HttpClient(new FixedStatusHandler(HttpStatusCode.NotImplemented, "embeddings disabled"));
+            var embed = new LlamaCppEmbeddingService(settings, http);
+
+            try
+            {
+                await embed.EmbedBatchAsync(["hello world"]);
+                throw new InvalidOperationException("Expected an InvalidOperationException for HTTP 501 embedding endpoint response.");
+            }
+            catch (InvalidOperationException ex)
+            {
+                True(ex.Message.Contains("--embeddings", StringComparison.Ordinal), "error should explain how to enable embedding support");
+                True(ex.Message.Contains("LlamaCppBaseUrl", StringComparison.Ordinal), "error should mention embedding base url configuration");
+                True(ex.Message.Contains("embeddings disabled", StringComparison.Ordinal), "error should include server response details when available");
+            }
         }
 
         public static async Task TrustScanInsideAiRootIsLowRisk()
@@ -715,6 +739,26 @@ namespace Aether.Tests
 
             var context = service.BuildMemoryContext(selected);
             True(context.Contains("Stored Memories", StringComparison.Ordinal), "memory context should include heading");
+        }
+
+        private sealed class FixedStatusHandler : HttpMessageHandler
+        {
+            private readonly HttpStatusCode _statusCode;
+            private readonly string _body;
+
+            public FixedStatusHandler(HttpStatusCode statusCode, string body)
+            {
+                _statusCode = statusCode;
+                _body = body;
+            }
+
+            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, System.Threading.CancellationToken cancellationToken)
+            {
+                return Task.FromResult(new HttpResponseMessage(_statusCode)
+                {
+                    Content = new StringContent(_body)
+                });
+            }
         }
     }
 }

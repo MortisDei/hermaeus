@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using System.Net;
 using System.Text.Json.Serialization;
 using Aether.Core.Services;
 
@@ -11,15 +12,17 @@ namespace Aether.Rag.Embeddings;
 /// </summary>
 public sealed class LlamaCppEmbeddingService : IEmbeddingService, IDisposable
 {
-    private static readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(60) };
+    private static readonly HttpClient SharedHttp = new() { Timeout = TimeSpan.FromSeconds(60) };
     private readonly ISettingsService _settings;
+    private readonly HttpClient _http;
 
     // nomic-embed-text outputs 768 dims; update if you switch models
     public int Dimensions => 768;
 
-    public LlamaCppEmbeddingService(ISettingsService settings)
+    public LlamaCppEmbeddingService(ISettingsService settings, HttpClient? http = null)
     {
         _settings = settings;
+        _http = http ?? SharedHttp;
     }
 
     private string Base => _settings.Settings.Llm.LlamaCppBaseUrl.TrimEnd('/');
@@ -40,8 +43,9 @@ public sealed class LlamaCppEmbeddingService : IEmbeddingService, IDisposable
             encoding_format = "float"
         };
 
-        var resp = await _http.PostAsJsonAsync($"{Base}/v1/embeddings", payload, ct);
-        resp.EnsureSuccessStatusCode();
+        using var resp = await _http.PostAsJsonAsync($"{Base}/v1/embeddings", payload, ct);
+        if (!resp.IsSuccessStatusCode)
+            throw await CreateEmbeddingEndpointExceptionAsync(resp, ct);
 
         var data = await resp.Content.ReadFromJsonAsync<EmbedResponse>(ct)
             ?? throw new InvalidOperationException("Null response from embedding endpoint");
@@ -50,6 +54,28 @@ public sealed class LlamaCppEmbeddingService : IEmbeddingService, IDisposable
             .OrderBy(d => d.Index)
             .Select(d => d.Embedding)
             .ToList();
+    }
+
+    private async Task<Exception> CreateEmbeddingEndpointExceptionAsync(HttpResponseMessage response, CancellationToken ct)
+    {
+        var status = (int)response.StatusCode;
+        var reason = response.ReasonPhrase ?? "Unknown";
+        var body = await response.Content.ReadAsStringAsync(ct);
+        var baseMessage = $"Embedding request failed at {Base}/v1/embeddings with HTTP {status} ({reason}).";
+
+        if (response.StatusCode is HttpStatusCode.NotImplemented or HttpStatusCode.NotFound)
+        {
+            var hint = "Start llama-server with --embeddings and point LlamaCppBaseUrl to that embeddings-capable server.";
+            if (string.IsNullOrWhiteSpace(body))
+                return new InvalidOperationException($"{baseMessage} {hint}");
+
+            return new InvalidOperationException($"{baseMessage} {hint} Server response: {body.Trim()}");
+        }
+
+        if (string.IsNullOrWhiteSpace(body))
+            return new HttpRequestException(baseMessage, null, response.StatusCode);
+
+        return new HttpRequestException($"{baseMessage} Server response: {body.Trim()}", null, response.StatusCode);
     }
 
     public void Dispose()
