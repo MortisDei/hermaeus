@@ -131,6 +131,12 @@ public sealed class SqliteRagStore
         await EnsureColumnAsync(c, "rag_chunks", "source_path", "TEXT NOT NULL DEFAULT ''", ct);
         await EnsureColumnAsync(c, "rag_chunks", "source_hash", "TEXT NOT NULL DEFAULT ''", ct);
         await EnsureColumnAsync(c, "rag_chunks", "source_modified_utc", "TEXT", ct);
+        await EnsureColumnAsync(c, "rag_chunks", "chunk_kind", "TEXT NOT NULL DEFAULT 'PlainText'", ct);
+        await EnsureColumnAsync(c, "rag_chunks", "heading_path", "TEXT", ct);
+        await EnsureColumnAsync(c, "rag_chunks", "code_symbol_info", "TEXT", ct);
+        await EnsureColumnAsync(c, "rag_chunks", "page_number", "INTEGER", ct);
+        await EnsureColumnAsync(c, "rag_chunks", "event_type", "TEXT", ct);
+        await EnsureColumnAsync(c, "rag_chunks", "source_url", "TEXT", ct);
         _initializedPath = dbPath;
     }
 
@@ -213,8 +219,8 @@ public sealed class SqliteRagStore
         cmd.CommandText = @"
             INSERT OR REPLACE INTO rag_chunks
                 (id,dataset_id,source_file,source_path,source_hash,source_modified_utc,source_title,content,chunk_index,chunk_total,
-                 parent_id,token_count,embedding,created_at)
-            VALUES ($id,$ds,$sf,$sp,$sh,$sm,$st,$ct,$ci,$ctot,$pid,$tc,$emb,$ca)";
+                 parent_id,token_count,embedding,created_at,chunk_kind,heading_path,code_symbol_info,page_number,event_type,source_url)
+            VALUES ($id,$ds,$sf,$sp,$sh,$sm,$st,$ct,$ci,$ctot,$pid,$tc,$emb,$ca,$ck,$hp,$csi,$pn,$et,$su)";
 
         var pId   = cmd.Parameters.Add("$id",   SqliteType.Text);
         var pDs   = cmd.Parameters.Add("$ds",   SqliteType.Text);
@@ -230,6 +236,12 @@ public sealed class SqliteRagStore
         var pTc   = cmd.Parameters.Add("$tc",   SqliteType.Integer);
         var pEmb  = cmd.Parameters.Add("$emb",  SqliteType.Blob);
         var pCa   = cmd.Parameters.Add("$ca",   SqliteType.Text);
+        var pCk   = cmd.Parameters.Add("$ck",   SqliteType.Text);
+        var pHp   = cmd.Parameters.Add("$hp",   SqliteType.Text);
+        var pCsi  = cmd.Parameters.Add("$csi",  SqliteType.Text);
+        var pPn   = cmd.Parameters.Add("$pn",   SqliteType.Integer);
+        var pEt   = cmd.Parameters.Add("$et",   SqliteType.Text);
+        var pSu   = cmd.Parameters.Add("$su",   SqliteType.Text);
 
         foreach (var chunk in chunks)
         {
@@ -247,6 +259,12 @@ public sealed class SqliteRagStore
             pTc.Value   = chunk.TokenCount;
             pEmb.Value  = EmbeddingToBytes(chunk.Embedding);
             pCa.Value   = chunk.CreatedAt.ToString("O");
+            pCk.Value   = chunk.ChunkKind.ToString();
+            pHp.Value   = (object?)chunk.HeadingPath ?? DBNull.Value;
+            pCsi.Value  = (object?)chunk.CodeSymbolInfo ?? DBNull.Value;
+            pPn.Value   = (object?)chunk.PageNumber ?? DBNull.Value;
+            pEt.Value   = (object?)chunk.EventType ?? DBNull.Value;
+            pSu.Value   = (object?)chunk.SourceUrl ?? DBNull.Value;
             await cmd.ExecuteNonQueryAsync(ct);
         }
         await tx.CommitAsync(ct);
@@ -259,7 +277,7 @@ public sealed class SqliteRagStore
         var cmd = c.CreateCommand();
         cmd.CommandText = includeEmbeddings
             ? "SELECT * FROM rag_chunks WHERE dataset_id=$ds AND parent_id IS NULL ORDER BY source_file, chunk_index"
-            : "SELECT id,dataset_id,source_file,source_path,source_hash,source_modified_utc,source_title,content,chunk_index,chunk_total,parent_id,token_count,NULL AS embedding,created_at FROM rag_chunks WHERE dataset_id=$ds AND parent_id IS NULL ORDER BY source_file, chunk_index";
+            : "SELECT id,dataset_id,source_file,source_path,source_hash,source_modified_utc,source_title,content,chunk_index,chunk_total,parent_id,token_count,NULL AS embedding,created_at,chunk_kind,heading_path,code_symbol_info,page_number,event_type,source_url FROM rag_chunks WHERE dataset_id=$ds AND parent_id IS NULL ORDER BY source_file, chunk_index";
         cmd.Parameters.AddWithValue("$ds", datasetId);
         var list = new List<RagChunk>();
         await using var r = await cmd.ExecuteReaderAsync(ct);
@@ -431,19 +449,59 @@ public sealed class SqliteRagStore
         ParentId    = r.IsDBNull(r.GetOrdinal("parent_id")) ? null : r.GetString(r.GetOrdinal("parent_id")),
         TokenCount  = GetInt(r, "token_count"),
         Embedding   = r.IsDBNull(r.GetOrdinal("embedding")) ? [] : BytesToEmbedding((byte[])r.GetValue(r.GetOrdinal("embedding"))),
-        CreatedAt   = DateTime.Parse(GetString(r, "created_at"))
+        CreatedAt   = DateTime.Parse(GetString(r, "created_at")),
+        ChunkKind   = Enum.TryParse<RagChunkKind>(GetString(r, "chunk_kind"), out var ck) ? ck : RagChunkKind.PlainText,
+        HeadingPath = GetNullableString(r, "heading_path"),
+        CodeSymbolInfo = GetNullableString(r, "code_symbol_info"),
+        PageNumber  = GetNullableInt(r, "page_number"),
+        EventType   = GetNullableString(r, "event_type"),
+        SourceUrl   = GetNullableString(r, "source_url")
     };
 
     private static string GetString(SqliteDataReader r, string name)
     {
-        var ordinal = r.GetOrdinal(name);
+        if (!TryGetOrdinal(r, name, out var ordinal))
+            return string.Empty;
+
         return r.IsDBNull(ordinal) ? string.Empty : r.GetString(ordinal);
     }
 
     private static int GetInt(SqliteDataReader r, string name)
     {
-        var ordinal = r.GetOrdinal(name);
+        if (!TryGetOrdinal(r, name, out var ordinal))
+            return 0;
+
         return r.IsDBNull(ordinal) ? 0 : r.GetInt32(ordinal);
+    }
+
+    private static string? GetNullableString(SqliteDataReader r, string name)
+    {
+        if (!TryGetOrdinal(r, name, out var ordinal))
+            return null;
+
+        return r.IsDBNull(ordinal) ? null : r.GetString(ordinal);
+    }
+
+    private static int? GetNullableInt(SqliteDataReader r, string name)
+    {
+        if (!TryGetOrdinal(r, name, out var ordinal))
+            return null;
+
+        return r.IsDBNull(ordinal) ? null : r.GetInt32(ordinal);
+    }
+
+    private static bool TryGetOrdinal(SqliteDataReader r, string name, out int ordinal)
+    {
+        try
+        {
+            ordinal = r.GetOrdinal(name);
+            return true;
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            ordinal = -1;
+            return false;
+        }
     }
 
     private static DateTime? TryParseDate(string value) =>
