@@ -46,6 +46,21 @@ namespace Aether.Tests
             await ThrowsAsync<IOException>(() => service.SaveAsync(previous));
         }
 
+        public static async Task SaveWithoutPreviousDataRootDoesNotAttemptMigration()
+        {
+            using var temp = new TempDir();
+            var next = temp.PathFor("next");
+
+            var service = NewSettings(temp);
+            service.Settings.DataManagement.DataRootDirectory = next;
+            var result = await service.SaveAsync();
+
+            Equal(false, result.DataMigrated, "routine saves should not run migration without an explicit previous data root");
+            Equal(null, result.PreviousDataRoot, "previous data root should be null when migration was not requested");
+            Equal(Path.GetFullPath(next), result.CurrentDataRoot, "save result should still report the resolved current data root");
+            True(Directory.Exists(next), "save should still ensure the current data root directory exists");
+        }
+
         public static async Task DataRootMigrationMovesFiles()
         {
             using var temp = new TempDir();

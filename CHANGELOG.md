@@ -23,6 +23,9 @@ Pre-1.0 versions may still change internal APIs and storage details.
   schema migration actually changes columns.
 - Conversation auto-summary throttling now caches the last summary timestamp
   per conversation to avoid a DB read on every assistant response.
+- Routine settings saves now skip data-root migration unless a previous data
+  root is explicitly provided, preventing startup crashes when the selected
+  data root already contains existing databases.
 
 ### Changed
 

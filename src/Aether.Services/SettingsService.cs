@@ -46,8 +46,14 @@ public sealed class SettingsService : ISettingsService
 
     public async Task<SettingsSaveResult> SaveAsync(string? previousDataRootDirectory = null)
     {
-        var migration = MigrateDataRoot(previousDataRootDirectory, Settings.DataManagement.DataRootDirectory);
-        Directory.CreateDirectory(ResolveDataRoot(Settings));
+        var currentDataRoot = ResolveDataRoot(Settings);
+        ValidateDataRoot(currentDataRoot);
+
+        var migration = previousDataRootDirectory is null
+            ? new SettingsSaveResult(false, null, currentDataRoot, null, 0)
+            : MigrateDataRoot(previousDataRootDirectory, Settings.DataManagement.DataRootDirectory);
+
+        Directory.CreateDirectory(currentDataRoot);
         await File.WriteAllTextAsync(_path, JsonSerializer.Serialize(Settings, Opts));
         SettingsChanged?.Invoke(this, EventArgs.Empty);
         return migration;
