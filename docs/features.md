@@ -119,6 +119,10 @@
 - Aether Doctor checks for storage, runtimes, voice, RAG, GPU, and secrets.
 - Aether Doctor now validates the configured Python and voice backend
   health before installs or playback.
+- Doctor only counts dedicated embedding GGUFs as embedding models, skips
+  embedding backend health until one is installed, and leaves Linux global
+  hotkeys out of problem reporting because system-wide support is not available
+  there yet.
 
 ## System Integration
 
@@ -135,6 +139,8 @@
 - Toast notifications throughout the app.
 - Configurable data root with migration, backup, restore, and conflict refusal.
 - Configurable local AI assets root for models, XTTS, venvs, and encoders.
+  When both `Models` and `models` exist, Aether prefers the folder containing
+  GGUF files for model and reranker defaults.
 - Trust & Safety scan for configured local tools, hashes, AI-root scope, and
   network exposure warnings.
 - Settings are implemented as domain sections for LLM defaults, RAG, data,

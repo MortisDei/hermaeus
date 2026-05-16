@@ -43,6 +43,17 @@ public partial class SetupWizardViewModel : ObservableObject
     public ObservableCollection<VoiceProviderInfo> VoiceOptions { get; } = [];
     public ObservableCollection<string> VoiceOnboardingSteps { get; } = [];
 
+    public string CurrentStepTitle => StepIndex >= 0 && StepIndex < Steps.Count ? Steps[StepIndex] : string.Empty;
+    public bool IsLastStep => StepIndex >= Steps.Count - 1;
+    public bool IsNotLastStep => !IsLastStep;
+    public bool IsStep0 => StepIndex == 0;
+    public bool IsStep1 => StepIndex == 1;
+    public bool IsStep2 => StepIndex == 2;
+    public bool IsStep3 => StepIndex == 3;
+    public bool IsStep4 => StepIndex == 4;
+    public bool IsStep5 => StepIndex == 5;
+    public bool HasVoiceOnboardingSummary => !string.IsNullOrWhiteSpace(VoiceOnboardingSummary);
+
     public Action? RequestDataRootPicker { get; set; }
     public Action? RequestLocalAiAssetsRootPicker { get; set; }
     public Action? RequestModelFolderPicker { get; set; }
@@ -184,6 +195,19 @@ public partial class SetupWizardViewModel : ObservableObject
 
     partial void OnSelectedVoiceProviderChanged(VoiceProviderInfo? value) => UpdateVoiceOnboarding(value);
 
+    partial void OnStepIndexChanged(int value)
+    {
+        OnPropertyChanged(nameof(CurrentStepTitle));
+        OnPropertyChanged(nameof(IsLastStep));
+        OnPropertyChanged(nameof(IsNotLastStep));
+        OnPropertyChanged(nameof(IsStep0));
+        OnPropertyChanged(nameof(IsStep1));
+        OnPropertyChanged(nameof(IsStep2));
+        OnPropertyChanged(nameof(IsStep3));
+        OnPropertyChanged(nameof(IsStep4));
+        OnPropertyChanged(nameof(IsStep5));
+    }
+
     private void UpdateVoiceOnboarding(VoiceProviderInfo? provider)
     {
         VoiceOnboardingSteps.Clear();
@@ -192,12 +216,14 @@ public partial class SetupWizardViewModel : ObservableObject
         {
             VoiceOnboardingSummary = string.Empty;
             VoiceOnboardingRiskNotes = string.Empty;
+            OnPropertyChanged(nameof(HasVoiceOnboardingSummary));
             return;
         }
 
         var plan = _voiceProviders.GetVoiceProvider(provider.Id).InstallPlan();
         VoiceOnboardingSummary = plan.Summary;
         VoiceOnboardingRiskNotes = plan.RiskNotes;
+        OnPropertyChanged(nameof(HasVoiceOnboardingSummary));
         foreach (var step in plan.Steps)
             VoiceOnboardingSteps.Add($"{step.Title}: {step.Detail}");
     }

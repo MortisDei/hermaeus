@@ -1,23 +1,11 @@
 using Avalonia.Controls;
-using Avalonia.Data.Converters;
 using Avalonia.Platform.Storage;
 using Aether.ViewModels;
-using System.Globalization;
 
 namespace Aether.Desktop.Views;
 
 public partial class SetupWizardView : UserControl
 {
-    public static readonly IValueConverter Step0 = new StepIndexConverter(0);
-    public static readonly IValueConverter Step1 = new StepIndexConverter(1);
-    public static readonly IValueConverter Step2 = new StepIndexConverter(2);
-    public static readonly IValueConverter Step3 = new StepIndexConverter(3);
-    public static readonly IValueConverter Step4 = new StepIndexConverter(4);
-    public static readonly IValueConverter Step5 = new StepIndexConverter(5);
-    public static readonly IValueConverter Last = new StepIndexConverter(5, isLast: true);
-    public static readonly IValueConverter NotLast = new StepIndexConverter(5, invert: true);
-    public static readonly IValueConverter HasText = new HasTextConverter();
-
     public SetupWizardView()
     {
         InitializeComponent();
@@ -27,10 +15,6 @@ public partial class SetupWizardView : UserControl
     private void OnDataContextChanged(object? sender, EventArgs e)
     {
         if (DataContext is not SetupWizardViewModel vm) return;
-        // Adjust Last/NotLast converters to the dynamic steps count
-        var lastIndex = Math.Max(0, vm.Steps.Count - 1);
-        typeof(SetupWizardView).GetField("Last")!.SetValue(null, new StepIndexConverter(lastIndex, isLast: true));
-        typeof(SetupWizardView).GetField("NotLast")!.SetValue(null, new StepIndexConverter(lastIndex, invert: true));
         vm.RequestDataRootPicker = async () =>
         {
             var top = TopLevel.GetTopLevel(this);
@@ -75,36 +59,4 @@ public partial class SetupWizardView : UserControl
                 vm.ModelFolder = files[0].Path.LocalPath;
         };
     }
-}
-
-public sealed class StepIndexConverter : IValueConverter
-{
-    private readonly int _target;
-    private readonly bool _invert;
-    private readonly bool _isLast;
-
-    public StepIndexConverter(int target, bool invert = false, bool isLast = false)
-    {
-        _target = target;
-        _invert = invert;
-        _isLast = isLast;
-    }
-
-    public object Convert(object? v, Type t, object? p, CultureInfo c)
-    {
-        if (v is not int index) return false;
-        var matched = _isLast ? index >= _target : index == _target;
-        return _invert ? !matched : matched;
-    }
-
-    public object ConvertBack(object? v, Type t, object? p, CultureInfo c) => throw new NotImplementedException();
-}
-
-public sealed class HasTextConverter : IValueConverter
-{
-    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
-        !string.IsNullOrWhiteSpace(value?.ToString());
-
-    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
-        throw new NotImplementedException();
 }

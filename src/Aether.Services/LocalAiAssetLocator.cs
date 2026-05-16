@@ -32,10 +32,7 @@ public static class LocalAiAssetLocator
         if (!Directory.Exists(root))
             return new LocalAiAssetLayout(root, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, 0);
 
-        var models = FirstExistingDirectory(
-            Path.Combine(root, "models"),
-            Path.Combine(root, "Models"),
-            Path.Combine(root, "gguf"));
+        var models = FindModelsDirectory(root);
         var script = FindFirstFile(root, "xtts_api_server.py");
         var python = FindPython(root);
         var ttsModel = FindXttsModelDirectory(root);
@@ -78,6 +75,56 @@ public static class LocalAiAssetLocator
 
     private static string FirstExistingDirectory(params string[] candidates) =>
         candidates.FirstOrDefault(Directory.Exists) ?? string.Empty;
+
+    private static string FindModelsDirectory(string root)
+    {
+        var candidates = new List<string>
+        {
+            Path.Combine(root, "Models"),
+            Path.Combine(root, "models"),
+            Path.Combine(root, "gguf")
+        };
+
+        try
+        {
+            candidates.AddRange(Directory.EnumerateDirectories(root, "*", SearchOption.TopDirectoryOnly)
+                .Where(path => string.Equals(Path.GetFileName(path), "models", StringComparison.OrdinalIgnoreCase)));
+        }
+        catch
+        {
+            // Fall back to the standard candidate list.
+        }
+
+        candidates = candidates
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var withGguf = candidates
+            .Where(Directory.Exists)
+            .Select(path => new { Path = path, Count = CountGgufFiles(path) })
+            .Where(x => x.Count > 0)
+            .OrderByDescending(x => x.Count)
+            .ThenBy(x => string.Equals(Path.GetFileName(x.Path), "Models", StringComparison.Ordinal) ? 0 : 1)
+            .FirstOrDefault();
+
+        if (withGguf is not null)
+            return withGguf.Path;
+
+        return candidates.FirstOrDefault(Directory.Exists) ?? string.Empty;
+    }
+
+    private static int CountGgufFiles(string path)
+    {
+        try
+        {
+            return Directory.EnumerateFiles(path, "*.gguf", SearchOption.AllDirectories).Count();
+        }
+        catch
+        {
+            return 0;
+        }
+    }
 
     private static string FindFirstFile(string root, string pattern)
     {

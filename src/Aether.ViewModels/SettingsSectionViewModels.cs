@@ -75,6 +75,7 @@ public partial class RagSettingsViewModel : ObservableObject
     public void RefreshEmbeddingModelOptions(string localAiAssetsRoot)
     {
         EmbeddingModelOptions.Clear();
+        AddEmbeddingModelOption(EmbeddingModel);
         try
         {
             var root = string.IsNullOrWhiteSpace(localAiAssetsRoot) ? _fallbackRoot() : Path.GetFullPath(localAiAssetsRoot);
@@ -84,9 +85,20 @@ public partial class RagSettingsViewModel : ObservableObject
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(x => x);
             foreach (var name in ggufs.Where(n => !string.IsNullOrWhiteSpace(n)))
-                EmbeddingModelOptions.Add(name!);
+                AddEmbeddingModelOption(name!);
         }
         catch { }
+    }
+
+    private void AddEmbeddingModelOption(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return;
+
+        if (EmbeddingModelOptions.Any(existing => string.Equals(existing, name, StringComparison.OrdinalIgnoreCase)))
+            return;
+
+        EmbeddingModelOptions.Add(name.Trim());
     }
 }
 

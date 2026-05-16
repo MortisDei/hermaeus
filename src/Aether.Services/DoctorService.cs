@@ -48,6 +48,8 @@ public sealed class DoctorService : IDoctorService
 
     public async Task<DoctorReport> ScanAsync(CancellationToken ct = default)
     {
+        var embeddingModelCheck = CheckEmbeddingModel();
+
         var checks = new List<DoctorCheck>
         {
             await CheckDataRootAsync(ct),
@@ -58,14 +60,18 @@ public sealed class DoctorService : IDoctorService
             await CheckVoiceBackendAsync(ct),
             await CheckPythonAsync(ct),
             await CheckRagDbAsync(ct),
-            CheckEmbeddingModelAsync(),
-            await CheckEmbeddingBackendAsync(ct),
+            embeddingModelCheck,
+            embeddingModelCheck.Status == DoctorCheckStatus.Ready
+                ? await CheckEmbeddingBackendAsync(ct)
+                : CheckEmbeddingBackendSkipped(embeddingModelCheck),
             CheckRerankerAssets(),
             await CheckGpuAsync(ct),
             await CheckSecretsAsync(ct),
-            CheckTraySupport(),
-            CheckHotkeySupport()
+            CheckTraySupport()
         };
+
+        if (!OperatingSystem.IsLinux())
+            checks.Add(CheckHotkeySupport());
 
         var errorCount = checks.Count(c => c.Status == DoctorCheckStatus.Error);
         var warningCount = checks.Count(c => c.Status == DoctorCheckStatus.Warning);
@@ -343,7 +349,7 @@ public sealed class DoctorService : IDoctorService
         }
     }
 
-    private DoctorCheck CheckEmbeddingModelAsync()
+    private DoctorCheck CheckEmbeddingModel()
     {
         var embeddingModel = _settings.Settings.Rag.EmbeddingModel.Trim();
         var search = FindInstalledEmbeddingModel(embeddingModel);
@@ -374,6 +380,18 @@ public sealed class DoctorService : IDoctorService
                 : $"Searched in: {search.SearchedIn}",
             "RAG");
     }
+
+    private DoctorCheck CheckEmbeddingBackendSkipped(DoctorCheck modelCheck) =>
+        BuildCheck(
+            "embeddings",
+            "Embedding backend health",
+            DoctorCheckStatus.Info,
+            "Embedding backend check skipped",
+            "Install or select a dedicated embedding model before checking backend health.",
+            "Details",
+            false,
+            modelCheck.Diagnostics,
+            "RAG");
 
     private DoctorCheck CheckRerankerAssets()
     {
@@ -449,7 +467,8 @@ public sealed class DoctorService : IDoctorService
             return false;
         }
 
-        if (string.IsNullOrWhiteSpace(_settings.Settings.Rag.EmbeddingModel))
+        if (string.IsNullOrWhiteSpace(_settings.Settings.Rag.EmbeddingModel)
+            || !LooksLikeEmbeddingModelName(_settings.Settings.Rag.EmbeddingModel))
             _settings.Settings.Rag.EmbeddingModel = DefaultEmbeddingModelName;
 
         var embeddingServer = _settings.Settings.ManagedServers.FirstOrDefault(s => s.EmbeddingsMode);
@@ -617,7 +636,7 @@ public sealed class DoctorService : IDoctorService
 
             try
             {
-                // Prefer marker-matched files (model name, embedding-related keywords).
+                // Prefer marker-matched files. Do not treat arbitrary chat GGUFs as embedding models.
                 var all = Directory.EnumerateFiles(dir, "*.gguf", SearchOption.AllDirectories).ToList();
                 var matches = all.Where(path => markers.Any(marker => path.Contains(marker, StringComparison.OrdinalIgnoreCase)))
                     .OrderBy(path => path.Length)
@@ -625,10 +644,6 @@ public sealed class DoctorService : IDoctorService
 
                 if (matches.Count > 0)
                     return (true, matches[0], string.Join(", ", directories));
-
-                // Fallback: if there are any GGUF files at all, pick the shortest path (likely the intended model)
-                if (all.Count > 0)
-                    return (true, all.OrderBy(p => p.Length).First(), string.Join(", ", directories));
             }
             catch
             {
@@ -683,12 +698,26 @@ public sealed class DoctorService : IDoctorService
             "gte"
         };
 
-        if (!string.IsNullOrWhiteSpace(embeddingModel))
+        if (!string.IsNullOrWhiteSpace(embeddingModel) && LooksLikeEmbeddingModelName(embeddingModel))
         {
             markers.Add(embeddingModel.Trim());
             markers.Add(embeddingModel.Trim().Replace('/', '-'));
         }
 
         return markers.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private static bool LooksLikeEmbeddingModelName(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+
+        var text = value.Trim();
+        return text.Contains("embed", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("embedding", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("nomic", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("bge", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("e5", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("gte", StringComparison.OrdinalIgnoreCase);
     }
 }

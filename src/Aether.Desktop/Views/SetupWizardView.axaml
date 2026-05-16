@@ -15,9 +15,9 @@
 
             <Border Classes="settings-card" Padding="14">
                 <StackPanel Spacing="12">
-                    <TextBlock Text="{Binding Steps[StepIndex]}" FontSize="14" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding CurrentStepTitle}" FontSize="14" FontWeight="SemiBold" />
 
-                    <StackPanel IsVisible="{Binding StepIndex, Converter={x:Static views:SetupWizardView.Step0}}" Spacing="10">
+                    <StackPanel IsVisible="{Binding IsStep0}" Spacing="10">
                         <TextBlock Text="Choose your data root and AI assets folder." FontSize="12" Opacity="0.6" />
                         <Grid ColumnDefinitions="120,*,Auto" ColumnSpacing="8">
                             <TextBlock Grid.Column="0" Text="Data root" Opacity="0.6" FontSize="12" VerticalAlignment="Center" />
@@ -31,13 +31,13 @@
                         </Grid>
                     </StackPanel>
 
-                    <StackPanel IsVisible="{Binding StepIndex, Converter={x:Static views:SetupWizardView.Step1}}" Spacing="10">
+                    <StackPanel IsVisible="{Binding IsStep1}" Spacing="10">
                         <TextBlock Text="Pick the chat backend you want to use." FontSize="12" Opacity="0.6" />
                         <ComboBox ItemsSource="{Binding RuntimeOptions}"
                                   SelectedItem="{Binding SelectedRuntime}" />
                     </StackPanel>
 
-                    <StackPanel IsVisible="{Binding StepIndex, Converter={x:Static views:SetupWizardView.Step2}}" Spacing="10">
+                    <StackPanel IsVisible="{Binding IsStep2}" Spacing="10">
                         <TextBlock Text="Choose a model folder for llama.cpp." FontSize="12" Opacity="0.6" />
                         <Grid ColumnDefinitions="120,*,Auto" ColumnSpacing="8">
                             <TextBlock Grid.Column="0" Text="Model path" Opacity="0.6" FontSize="12" VerticalAlignment="Center" />
@@ -46,12 +46,12 @@
                         </Grid>
                     </StackPanel>
 
-                    <StackPanel IsVisible="{Binding StepIndex, Converter={x:Static views:SetupWizardView.Step3}}" Spacing="10">
+                    <StackPanel IsVisible="{Binding IsStep3}" Spacing="10">
                         <TextBlock Text="Select a voice provider." FontSize="12" Opacity="0.6" />
                         <ComboBox ItemsSource="{Binding VoiceOptions}"
                                   SelectedItem="{Binding SelectedVoiceProvider}"
                          />
-                        <Border Classes="settings-card" Padding="12" IsVisible="{Binding VoiceOnboardingSummary, Converter={x:Static views:SetupWizardView.HasText}}">
+                        <Border Classes="settings-card" Padding="12" IsVisible="{Binding HasVoiceOnboardingSummary}">
                             <StackPanel Spacing="8">
                                 <TextBlock Text="{Binding VoiceOnboardingSummary}" FontSize="12" FontWeight="SemiBold" />
                                 <ItemsControl ItemsSource="{Binding VoiceOnboardingSteps}">
@@ -66,7 +66,7 @@
                         </Border>
                     </StackPanel>
 
-                    <StackPanel IsVisible="{Binding StepIndex, Converter={x:Static views:SetupWizardView.Step4}}" Spacing="10">
+                    <StackPanel IsVisible="{Binding IsStep4}" Spacing="10">
                         <TextBlock Text="Run Doctor to confirm everything is ready." FontSize="12" Opacity="0.6" />
                         <Button Command="{Binding RunDoctorCommand}"
                                 IsEnabled="{Binding !IsDoctorRunning}"
@@ -74,7 +74,7 @@
                         <TextBlock Text="{Binding DoctorSummary}" FontSize="12" Opacity="0.6" TextWrapping="Wrap" />
                     </StackPanel>
 
-                    <StackPanel IsVisible="{Binding StepIndex, Converter={x:Static views:SetupWizardView.Step5}}" Spacing="8">
+                    <StackPanel IsVisible="{Binding IsStep5}" Spacing="8">
                         <TextBlock Text="Finish setup and start using Aether." FontSize="12" Opacity="0.6" />
                     </StackPanel>
 
@@ -83,10 +83,10 @@
                         <Button Command="{Binding SkipCommand}" Content="Skip" />
                         <Button Command="{Binding NextCommand}"
                             Content="Next"
-                            IsVisible="{Binding StepIndex, Converter={x:Static views:SetupWizardView.NotLast}}" />
+                            IsVisible="{Binding IsNotLastStep}" />
                         <Button Command="{Binding FinishCommand}"
                             Content="Finish"
-                            IsVisible="{Binding StepIndex, Converter={x:Static views:SetupWizardView.Last}}" />
+                            IsVisible="{Binding IsLastStep}" />
                     </StackPanel>
                 </StackPanel>
             </Border>

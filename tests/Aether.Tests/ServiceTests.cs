@@ -11,6 +11,8 @@ using Aether.Core.Models;
 using Aether.Core.Services;
 using Aether.Desktop.Controls;
 using Aether.Rag.Embeddings;
+using Aether.Rag.Retrieval;
+using Aether.Rag.Storage;
 using Aether.Services;
 using Aether.Services.ProcessManagement;
 using Aether.ViewModels;
@@ -133,6 +135,78 @@ namespace Aether.Tests
             Equal(Path.Combine(root, "TTS", "multi-dataset--xtts_v2"), settings.Settings.Tts.ModelDirectory, "xtts model directory should be applied");
             Equal(Path.Combine(root, "models", "reranker"), settings.Settings.Rag.RerankerModelPath, "reranker path should be applied");
             return Task.CompletedTask;
+        }
+
+        public static Task LocalAiAssetsPreferExistingModelsDirectoryWithGgufs()
+        {
+            using var temp = new TempDir();
+            var root = temp.PathFor("AI");
+            Directory.CreateDirectory(Path.Combine(root, "models"));
+            Directory.CreateDirectory(Path.Combine(root, "Models"));
+            File.WriteAllText(Path.Combine(root, "Models", "chat-model.gguf"), "model");
+
+            var layout = LocalAiAssetLocator.Detect(root);
+
+            Equal(Path.Combine(root, "Models"), layout.ModelsDirectory, "asset detection should prefer the existing Models folder with GGUF files");
+            return Task.CompletedTask;
+        }
+
+        public static Task RagSettingsPreservesConfiguredEmbeddingModelOption()
+        {
+            using var temp = new TempDir();
+            var root = temp.PathFor("AI");
+            Directory.CreateDirectory(Path.Combine(root, "Models"));
+            File.WriteAllText(Path.Combine(root, "Models", "NextCoder-7B.Q4_K_M.gguf"), "model");
+
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.LocalAiAssetsRoot = root;
+            settings.Settings.Rag.EmbeddingModel = "nomic-embed-text";
+            var vm = new RagSettingsViewModel(() => root);
+
+            vm.ReloadFrom(settings.Settings, root);
+
+            Equal("nomic-embed-text", vm.EmbeddingModelOptions[0], "current embedding model should remain selectable before discovered GGUFs");
+            Equal("nomic-embed-text", vm.EmbeddingModel, "current embedding model should not be replaced by the first local GGUF");
+            return Task.CompletedTask;
+        }
+
+        public static async Task DoctorDoesNotTreatChatGgufAsEmbeddingModel()
+        {
+            using var temp = new TempDir();
+            var root = temp.PathFor("AI");
+            Directory.CreateDirectory(Path.Combine(root, "Models"));
+            File.WriteAllText(Path.Combine(root, "Models", "NextCoder-7B.Q4_K_M.gguf"), "model");
+
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.LocalAiAssetsRoot = root;
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            settings.Settings.Rag.EmbeddingModel = "NextCoder-7B.Q4_K_M";
+            settings.Settings.ManagedServers.Clear();
+            settings.Settings.ManagedServers.Add(new ServerConfig
+            {
+                Name = "llama.cpp",
+                ExecutablePath = Environment.ProcessPath ?? "dotnet"
+            });
+
+            var doctor = new DoctorService(
+                settings,
+                new RuntimeProfileService(settings),
+                new FakeVoiceProviderRegistry(settings),
+                new FakeSecretStore(),
+                new SqliteRagStore(settings),
+                new ThrowingEmbeddingService(),
+                new FakeSystemInfo(),
+                new PythonHealthValidator(),
+                new NoOpReranker());
+
+            var report = await doctor.ScanAsync();
+            var modelCheck = report.Checks.Single(c => c.Key == "embedding-model");
+            var backendCheck = report.Checks.Single(c => c.Key == "embeddings");
+
+            Equal(DoctorCheckStatus.Warning, modelCheck.Status, "chat GGUF names should not satisfy embedding model availability");
+            Equal(DoctorCheckStatus.Info, backendCheck.Status, "embedding backend should be skipped until an embedding model exists");
+            if (OperatingSystem.IsLinux())
+                False(report.Checks.Any(c => c.Key == "hotkeys"), "Linux global hotkey support should not be reported as a Doctor problem");
         }
 
         public static async Task LocalAiSetupDetectsFolderLayout()
@@ -844,6 +918,17 @@ namespace Aether.Tests
                     Content = new StringContent(_body)
                 });
             }
+        }
+
+        private sealed class ThrowingEmbeddingService : IEmbeddingService
+        {
+            public int Dimensions => 0;
+
+            public Task<float[]> EmbedAsync(string text, System.Threading.CancellationToken ct = default) =>
+                throw new InvalidOperationException("Embedding backend should not be called when no embedding model is installed.");
+
+            public Task<List<float[]>> EmbedBatchAsync(IReadOnlyList<string> texts, System.Threading.CancellationToken ct = default) =>
+                throw new InvalidOperationException("Embedding backend should not be called when no embedding model is installed.");
         }
     }
 }

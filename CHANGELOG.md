@@ -27,6 +27,14 @@ Pre-1.0 versions may still change internal APIs and storage details.
 
 - Setup wizard startup now returns early when the wizard is required, instead
   of loading the rest of the app before showing onboarding.
+- Setup wizard step visibility no longer depends on runtime-mutated XAML
+  converters, preventing a blank first-run wizard surface on launch.
+- Local AI asset detection now prefers the existing `Models` directory when it
+  contains GGUF files, so Doctor and reranker installs do not drift into a
+  separate lowercase `models` folder.
+- Doctor no longer treats arbitrary chat GGUF files as embedding models, skips
+  backend health checks until a dedicated embedding model is installed, and
+  does not report Linux global hotkeys as a problem.
 - Toast history trimming now preserves newest-first ordering when the cap is
   exceeded.
 

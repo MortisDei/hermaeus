@@ -215,7 +215,42 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
         var root = string.IsNullOrWhiteSpace(configured)
             ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Aether")
             : Path.GetFullPath(configured);
-        return Path.Combine(root, "models", "rerank", "ms-marco-MiniLM-L6-v2");
+        var models = ResolveModelsDirectory(root);
+        return Path.Combine(models, "rerank", "ms-marco-MiniLM-L6-v2");
+    }
+
+    private static string ResolveModelsDirectory(string root)
+    {
+        var candidates = new[]
+        {
+            Path.Combine(root, "Models"),
+            Path.Combine(root, "models"),
+            Path.Combine(root, "gguf")
+        };
+
+        var withGguf = candidates
+            .Where(Directory.Exists)
+            .Select(path => new { Path = path, Count = CountGgufFiles(path) })
+            .Where(x => x.Count > 0)
+            .OrderByDescending(x => x.Count)
+            .ThenBy(x => string.Equals(Path.GetFileName(x.Path), "Models", StringComparison.Ordinal) ? 0 : 1)
+            .FirstOrDefault();
+
+        return withGguf?.Path
+            ?? candidates.FirstOrDefault(Directory.Exists)
+            ?? Path.Combine(root, "Models");
+    }
+
+    private static int CountGgufFiles(string path)
+    {
+        try
+        {
+            return Directory.EnumerateFiles(path, "*.gguf", SearchOption.AllDirectories).Count();
+        }
+        catch
+        {
+            return 0;
+        }
     }
 
     private static float Sigmoid(float value)
