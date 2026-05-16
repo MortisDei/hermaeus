@@ -35,6 +35,12 @@ Pre-1.0 versions may still change internal APIs and storage details.
 - RAG ingest now clamps per-chunk embedding input size before calling
   `/v1/embeddings`, preventing single oversized chunks from failing a full
   ingest run on servers with smaller embedding token limits.
+- Doctor now detects missing embedding models and offers one-click download
+  from Hugging Face (nomic-embed-text-v1.5-Q4_K_M by default), automatically
+  configuring the embedding server model path.
+- RAG ingest now pauses non-embedding LLM servers and TTS services during
+  document indexing to reduce memory pressure, then restores them after
+  ingest completion (or cancellation/failure).
 
 ### Changed
 

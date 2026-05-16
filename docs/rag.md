@@ -8,7 +8,7 @@ traces, and native eval support.
 
 ## Getting Started
 
-1. Start an embeddings runtime in **Services**.
+1. Start an embeddings runtime in **Services** (Doctor can auto-download if missing).
 2. Open **RAG** and ingest a folder of `.txt` / `.md` / digital `.pdf` files.
 3. Use **Dry run** to preview the ingest report before writing to SQLite, or
    choose a duplicate policy to skip unchanged sources, replace them, or just
@@ -17,6 +17,16 @@ traces, and native eval support.
 5. Inspect citations, source text, grounding score, query traces, planner
   variants, context packing summaries, and the last ingest report.
 6. Run eval sets from the Eval Harness panel.
+
+### Embedding Model Setup
+
+- Aether requires an embedding model to run the embedding server. If none is found, the
+  **Doctor** panel can automatically download the recommended model (nomic-embed-text-v1.5-Q4_K_M)
+  from Hugging Face.
+- The embedding model is critical for large ingests. **During ingest, Aether automatically
+  pauses other LLM servers and TTS services** to reduce memory pressure, then restores
+  them after ingestion completes.
+- For 6 GB VRAM systems, nomic-embed-text-v1.5-Q4_K_M (Q4 quantization) is recommended.
 
 ## Features
 

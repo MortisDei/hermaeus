@@ -18,6 +18,8 @@ public partial class DoctorViewModel : ObservableObject
     [ObservableProperty] private string _lastScanned = string.Empty;
     [ObservableProperty] private bool _isInstallingReranker;
     [ObservableProperty] private string _rerankerProgress = string.Empty;
+    [ObservableProperty] private bool _isInstallingEmbeddingModel;
+    [ObservableProperty] private string _embeddingModelProgress = string.Empty;
 
     public ObservableCollection<DoctorCheck> Checks { get; } = [];
 
@@ -144,6 +146,32 @@ public partial class DoctorViewModel : ObservableObject
                 IsInstallingReranker = false;
                 RerankerProgress = string.Empty;
                 _installCts = null;
+                return;
+            }
+        }
+
+        if (check.Key == "embedding-model")
+        {
+            try
+            {
+                if (IsInstallingEmbeddingModel) return;
+                IsInstallingEmbeddingModel = true;
+                var progress = new Progress<string>(s => EmbeddingModelProgress = s);
+                var ok = await _doctor.InstallEmbeddingModelAsync(progress);
+                _toasts.Show(ok ? "Embedding model installed" : "Embedding model install failed",
+                    ok ? "Embedding model downloaded and configured." : "See diagnostics for details.",
+                    ok ? ToastKind.Success : ToastKind.Error,
+                    7000);
+                await ScanAsync();
+                EmbeddingModelProgress = string.Empty;
+                IsInstallingEmbeddingModel = false;
+                return;
+            }
+            catch (Exception ex)
+            {
+                _toasts.Show("Embedding model install failed", ex.Message, ToastKind.Error, 7000);
+                IsInstallingEmbeddingModel = false;
+                EmbeddingModelProgress = string.Empty;
                 return;
             }
         }

@@ -8,6 +8,7 @@ using Aether.Rag.Models;
 using Aether.Rag.Pipeline;
 using Aether.Core.Services;
 using Aether.Core.Models;
+using Aether.Services.ProcessManagement;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -105,6 +106,9 @@ public partial class RagViewModel : ObservableObject
     private readonly IToastService   _toasts;
     private readonly IRuntimeLogService _logs;
     private readonly ISettingsService _settings;
+    private readonly ServicesViewModel? _services;
+    private readonly XttsProcessManager? _xtts;
+    private readonly KokoroProcessManager? _kokoro;
     private CancellationTokenSource? _cts;
     private CancellationTokenSource? _ingestCts;
 
@@ -162,7 +166,7 @@ public partial class RagViewModel : ObservableObject
     public Action<string>? RequestCopyToClipboard { get; set; }
     public bool IsLocalIngest => !EnableWebLoader;
 
-    public RagViewModel(RagQueryService query, RagPipeline pipeline, RagEvalService eval, IToastService toasts, IRuntimeLogService logs, ISettingsService settings)
+    public RagViewModel(RagQueryService query, RagPipeline pipeline, RagEvalService eval, IToastService toasts, IRuntimeLogService logs, ISettingsService settings, ServicesViewModel? services = null, XttsProcessManager? xtts = null, KokoroProcessManager? kokoro = null)
     {
         _query    = query;
         _pipeline = pipeline;
@@ -170,6 +174,9 @@ public partial class RagViewModel : ObservableObject
         _toasts   = toasts;
         _logs     = logs;
         _settings  = settings;
+        _services = services;
+        _xtts = xtts;
+        _kokoro = kokoro;
     }
 
     public IEnumerable<IngestDuplicatePolicy> IngestPolicyOptions => Enum.GetValues<IngestDuplicatePolicy>();
@@ -257,9 +264,33 @@ public partial class RagViewModel : ObservableObject
         IsError = false;
         StatusMessage = string.Empty;
         _ingestCts = new CancellationTokenSource();
+        
+        Action? restoreServices = null;
 
         try
         {
+            // Suspend competing services if available
+            if (_services is not null)
+            {
+                var suspendedServerIds = await _services.StopRunningNonEmbeddingServersAsync();
+                var xttsWasRunning = _xtts?.IsRunning == true;
+                var kokoroWasRunning = _kokoro?.IsRunning == true;
+                
+                if (_xtts?.IsRunning == true) _xtts.Stop();
+                if (_kokoro?.IsRunning == true) _kokoro.Stop();
+
+                restoreServices = async () =>
+                {
+                    var errors = new List<string>();
+                    try { await _services.RestartServersAsync(suspendedServerIds); }
+                    catch (Exception ex) { errors.Add($"LLM: {ex.Message}"); }
+                    try { if (xttsWasRunning && _xtts is not null) await _xtts.StartAsync(_settings.Settings, CancellationToken.None); }
+                    catch (Exception ex) { errors.Add($"XTTS: {ex.Message}"); }
+                    try { if (kokoroWasRunning && _kokoro is not null) await _kokoro.StartAsync(_settings.Settings, CancellationToken.None); }
+                    catch (Exception ex) { errors.Add($"Kokoro: {ex.Message}"); }
+                };
+            }
+
             _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Rag,
                 $"RAG ingest started for dataset {NewDatasetName}"));
             var ds = new RagDataset
@@ -351,6 +382,7 @@ public partial class RagViewModel : ObservableObject
             IngestStage = string.Empty;
             _ingestCts?.Dispose();
             _ingestCts = null;
+            restoreServices?.Invoke();
         }
     }
 

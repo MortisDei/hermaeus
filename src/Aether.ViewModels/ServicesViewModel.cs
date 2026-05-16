@@ -213,6 +213,14 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
             await StartAsync();
     }
 
+    public async Task StartIfStoppedAsync()
+    {
+        if (!IsStopped)
+            return;
+
+        await StartAsync();
+    }
+
     public void StopIfRunning() => _mgr.Stop();
 
     private void SyncToConfig()
@@ -452,6 +460,34 @@ public partial class ServicesViewModel : ObservableObject
     {
         foreach (var srv in Servers)
             await srv.AutoStartIfConfiguredAsync();
+    }
+
+    public async Task<IReadOnlyList<string>> StopRunningNonEmbeddingServersAsync()
+    {
+        var suspended = Servers
+            .Where(s => s.IsRunning && !s.EmbeddingsMode)
+            .Select(s => s.Id)
+            .ToList();
+
+        foreach (var serverId in suspended)
+        {
+            var server = Servers.FirstOrDefault(s => s.Id == serverId);
+            server?.StopIfRunning();
+        }
+
+        return await Task.FromResult(suspended);
+    }
+
+    public async Task RestartServersAsync(IEnumerable<string> serverIds)
+    {
+        foreach (var serverId in serverIds)
+        {
+            var server = Servers.FirstOrDefault(s => s.Id == serverId);
+            if (server is null)
+                continue;
+
+            await server.StartIfStoppedAsync();
+        }
     }
 
     public void StopAll()

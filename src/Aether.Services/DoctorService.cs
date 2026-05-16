@@ -8,6 +8,10 @@ namespace Aether.Services;
 
 public sealed class DoctorService : IDoctorService
 {
+    private const string DefaultEmbeddingModelName = "nomic-embed-text-v1.5";
+    private const string DefaultEmbeddingFileName = "nomic-embed-text-v1.5-Q4_K_M.gguf";
+    private const string DefaultEmbeddingDownloadUrl = "https://huggingface.co/bartowski/nomic-embed-text-v1.5-GGUF/resolve/main/nomic-embed-text-v1.5-Q4_K_M.gguf";
+
     private readonly ISettingsService _settings;
     private readonly IRuntimeProfileService _runtimes;
     private readonly IVoiceProviderRegistry _voice;
@@ -17,6 +21,7 @@ public sealed class DoctorService : IDoctorService
     private readonly ISystemInfoService _systemInfo;
     private readonly PythonHealthValidator _pythonValidator;
     private readonly IReranker _reranker;
+    private readonly ModelDownloadService _downloads;
 
     public DoctorService(
         ISettingsService settings,
@@ -38,6 +43,7 @@ public sealed class DoctorService : IDoctorService
         _systemInfo = systemInfo;
         _pythonValidator = pythonValidator;
         _reranker = reranker;
+        _downloads = new ModelDownloadService();
     }
 
     public async Task<DoctorReport> ScanAsync(CancellationToken ct = default)
@@ -52,6 +58,7 @@ public sealed class DoctorService : IDoctorService
             await CheckVoiceBackendAsync(ct),
             await CheckPythonAsync(ct),
             await CheckRagDbAsync(ct),
+            CheckEmbeddingModelAsync(),
             await CheckEmbeddingBackendAsync(ct),
             CheckRerankerAssets(),
             await CheckGpuAsync(ct),
@@ -336,6 +343,38 @@ public sealed class DoctorService : IDoctorService
         }
     }
 
+    private DoctorCheck CheckEmbeddingModelAsync()
+    {
+        var embeddingModel = _settings.Settings.Rag.EmbeddingModel.Trim();
+        var search = FindInstalledEmbeddingModel(embeddingModel);
+        if (search.Found)
+        {
+            return BuildCheck(
+                "embedding-model",
+                "Embedding model availability",
+                DoctorCheckStatus.Ready,
+                "Embedding model found",
+                search.Path,
+                "Open Services",
+                true,
+                search.Path,
+                "RAG");
+        }
+
+        return BuildCheck(
+            "embedding-model",
+            "Embedding model availability",
+            DoctorCheckStatus.Warning,
+            "No embedding model found",
+            "Download a dedicated embedding GGUF model for RAG indexing.",
+            "Download embedding model",
+            true,
+            string.IsNullOrWhiteSpace(search.SearchedIn)
+                ? "No candidate model directories were found."
+                : $"Searched in: {search.SearchedIn}",
+            "RAG");
+    }
+
     private DoctorCheck CheckRerankerAssets()
     {
         if (!_settings.Settings.Rag.RerankerEnabled)
@@ -386,6 +425,40 @@ public sealed class DoctorService : IDoctorService
         }
 
         return false;
+    }
+
+    public Task<bool> InstallEmbeddingModelAsync(CancellationToken ct = default)
+        => InstallEmbeddingModelAsync(null, ct);
+
+    public async Task<bool> InstallEmbeddingModelAsync(IProgress<string>? progress, CancellationToken ct = default)
+    {
+        var destinationDirectory = ResolveEmbeddingModelDirectory();
+        Directory.CreateDirectory(destinationDirectory);
+
+        var destinationPath = Path.Combine(destinationDirectory, DefaultEmbeddingFileName);
+        progress?.Report($"Downloading embedding model to {destinationPath}...");
+
+        var downloadProgress = progress is null
+            ? null
+            : new Progress<DownloadProgress>(p => progress.Report($"Downloading embedding model... {p.PercentComplete:F1}%"));
+
+        var result = await _downloads.DownloadAsync(DefaultEmbeddingDownloadUrl, destinationPath, downloadProgress, ct);
+        if (!result.Success)
+        {
+            progress?.Report(result.Message);
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(_settings.Settings.Rag.EmbeddingModel))
+            _settings.Settings.Rag.EmbeddingModel = DefaultEmbeddingModelName;
+
+        var embeddingServer = _settings.Settings.ManagedServers.FirstOrDefault(s => s.EmbeddingsMode);
+        if (embeddingServer is not null && string.IsNullOrWhiteSpace(embeddingServer.ModelPath))
+            embeddingServer.ModelPath = destinationPath;
+
+        await _settings.SaveAsync();
+        progress?.Report($"Embedding model ready at {destinationPath}");
+        return true;
     }
 
     private async Task<DoctorCheck> CheckGpuAsync(CancellationToken ct)
@@ -530,5 +603,84 @@ public sealed class DoctorService : IDoctorService
     private string ResolveRerankerDirectory()
     {
         return OnnxCrossEncoderReranker.ResolveModelDirectory(_settings.Settings);
+    }
+
+    private (bool Found, string Path, string SearchedIn) FindInstalledEmbeddingModel(string embeddingModel)
+    {
+        var directories = GetEmbeddingCandidateDirectories();
+        var markers = BuildEmbeddingMarkers(embeddingModel);
+
+        foreach (var dir in directories)
+        {
+            if (!Directory.Exists(dir))
+                continue;
+
+            try
+            {
+                var matches = Directory.EnumerateFiles(dir, "*.gguf", SearchOption.AllDirectories)
+                    .Where(path => markers.Any(marker => path.Contains(marker, StringComparison.OrdinalIgnoreCase)))
+                    .OrderBy(path => path.Length)
+                    .ToList();
+                if (matches.Count > 0)
+                    return (true, matches[0], string.Join(", ", directories));
+            }
+            catch
+            {
+                // Keep scanning other directories.
+            }
+        }
+
+        return (false, string.Empty, string.Join(", ", directories));
+    }
+
+    private string ResolveEmbeddingModelDirectory()
+    {
+        var directories = GetEmbeddingCandidateDirectories();
+        var existing = directories.FirstOrDefault(Directory.Exists);
+        if (!string.IsNullOrWhiteSpace(existing))
+            return existing;
+
+        var dataRoot = SettingsService.ResolveDataRoot(_settings.Settings);
+        return Path.Combine(dataRoot, "models");
+    }
+
+    private List<string> GetEmbeddingCandidateDirectories()
+    {
+        var settings = _settings.Settings;
+        var aiRoot = settings.DataManagement.LocalAiAssetsRoot.Trim();
+        var layout = LocalAiAssetLocator.Detect(aiRoot);
+        var dataRoot = SettingsService.ResolveDataRoot(settings);
+
+        return new[]
+        {
+            layout.ModelsDirectory,
+            string.IsNullOrWhiteSpace(aiRoot) ? string.Empty : Path.Combine(Path.GetFullPath(aiRoot), "models"),
+            string.IsNullOrWhiteSpace(aiRoot) ? string.Empty : Path.Combine(Path.GetFullPath(aiRoot), "Models"),
+            Path.Combine(dataRoot, "models")
+        }
+        .Where(path => !string.IsNullOrWhiteSpace(path))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToList();
+    }
+
+    private static List<string> BuildEmbeddingMarkers(string embeddingModel)
+    {
+        var markers = new List<string>
+        {
+            "embed",
+            "embedding",
+            "nomic",
+            "bge",
+            "e5",
+            "gte"
+        };
+
+        if (!string.IsNullOrWhiteSpace(embeddingModel))
+        {
+            markers.Add(embeddingModel.Trim());
+            markers.Add(embeddingModel.Trim().Replace('/', '-'));
+        }
+
+        return markers.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
     }
 }
