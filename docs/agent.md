@@ -32,11 +32,17 @@ The same panel now includes a workspace file browser with query, list,
 preview, and summary support so you can inspect local workspace files without
 leaving the workbench.
 
+Draft patch proposals are also available from the workspace file browser. You
+can enter a rationale, review the generated patch preview, queue the patch for
+review, and then approve or reject queued patches from the dedicated panel.
+
 ### Tools
 
 - Read-only file tools for workspace inspection.
 - Proposed next actions with safety gates.
 - Local logs and JSONL traces for debugging.
+- Approval-gated draft patch queue with approval metadata and task-state
+  persistence.
 
 ## Planned Features (Future)
 

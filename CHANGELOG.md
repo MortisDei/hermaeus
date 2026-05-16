@@ -14,6 +14,9 @@ Pre-1.0 versions may still change internal APIs and storage details.
   a compact summary strip at the top of the panel.
 - Agent workbench now includes a workspace file browser with query, list,
   preview, and summarise behaviour for faster read-first inspection.
+- Agent workbench now supports draft patch proposals from workspace files,
+  with rationale, generated patch preview, approval-gated queueing, and
+  approve/reject actions for queued patches.
 
 ### Changed
 

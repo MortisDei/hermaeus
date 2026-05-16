@@ -269,6 +269,25 @@ namespace Aether.Tests
             return Task.CompletedTask;
         }
 
+        public static Task AgentDraftPatchQueueAndApproval()
+        {
+            var patch = new Aether.Agent.Models.AgentDraftPatch
+            {
+                RelativePath = "src/Utils.cs",
+                Rationale = "Optimize helper function",
+                ProposedContent = "public class Utils { }"
+            };
+            Equal(Aether.Agent.Models.AgentDraftPatchStatus.Pending, patch.Status, "patch should start as pending");
+            True(patch.CreatedAt <= DateTime.UtcNow, "patch created at should be set");
+
+            patch.Status = Aether.Agent.Models.AgentDraftPatchStatus.Approved;
+            patch.ApprovedAt = DateTime.UtcNow;
+            patch.ApprovedBy = "User";
+            Equal(Aether.Agent.Models.AgentDraftPatchStatus.Approved, patch.Status, "patch should be approved");
+            True(patch.ApprovedAt.HasValue, "approved at should be set");
+            return Task.CompletedTask;
+        }
+
         public static async Task TrustScanUnsetAiRootIsNeutral()
         {
             using var temp = new TempDir();

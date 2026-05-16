@@ -92,6 +92,33 @@ public sealed class AgentWorkspaceFileViewModel
     public string ModifiedLabel => $"{ModifiedUtc:yyyy-MM-dd HH:mm} UTC";
 }
 
+public sealed class AgentDraftPatchViewModel
+{
+    public AgentDraftPatchViewModel(AgentDraftPatch patch)
+    {
+        Id = patch.Id;
+        RelativePath = patch.RelativePath;
+        Rationale = patch.Rationale;
+        ProposedContent = patch.ProposedContent;
+        Status = patch.Status;
+        CreatedAt = patch.CreatedAt;
+        ApprovedAt = patch.ApprovedAt;
+        ApprovedBy = patch.ApprovedBy;
+    }
+
+    public string Id { get; }
+    public string RelativePath { get; }
+    public string Rationale { get; }
+    public string ProposedContent { get; }
+    public AgentDraftPatchStatus Status { get; }
+    public DateTime CreatedAt { get; }
+    public DateTime? ApprovedAt { get; }
+    public string? ApprovedBy { get; }
+    public string StatusLabel => Status.ToString();
+    public string CreatedLabel => $"Created {CreatedAt:yyyy-MM-dd HH:mm} UTC";
+    public string ApprovedLabel => ApprovedAt is null ? "Pending approval" : $"Approved {ApprovedAt:yyyy-MM-dd HH:mm} by {ApprovedBy}";
+}
+
 public partial class AgentViewModel : ObservableObject
 {
     private readonly IAgentService _agent;
@@ -110,6 +137,7 @@ public partial class AgentViewModel : ObservableObject
     public ObservableCollection<AgentWorkspaceMemoryEntryViewModel> WorkspaceMemory { get; } = [];
     public ObservableCollection<AgentWorkspaceFileViewModel> WorkspaceFiles { get; } = [];
     public ObservableCollection<AgentContextItemViewModel> RetrievedContext { get; } = [];
+    public ObservableCollection<AgentDraftPatchViewModel> QueuedPatches { get; } = [];
 
     public Action? RequestWorkspaceRootPicker { get; set; }
 
@@ -140,6 +168,8 @@ public partial class AgentViewModel : ObservableObject
     public int ReviewQueueCount => ReviewQueue.Count;
     public int WorkspaceMemoryCount => WorkspaceMemory.Count;
     public int RetrievedContextCount => RetrievedContext.Count;
+    public int QueuedPatchCount => QueuedPatches.Count;
+    public bool HasQueuedPatches => QueuedPatchCount > 0;
 
     public AgentViewModel(
         IAgentService agent,
@@ -187,6 +217,12 @@ public partial class AgentViewModel : ObservableObject
         {
             OnPropertyChanged(nameof(RetrievedContextCount));
             OnPropertyChanged(nameof(HasRetrievedContext));
+        };
+
+        QueuedPatches.CollectionChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(QueuedPatchCount));
+            OnPropertyChanged(nameof(HasQueuedPatches));
         };
     }
 
@@ -283,6 +319,7 @@ public partial class AgentViewModel : ObservableObject
         if (item is null) return;
         CurrentTask = await _store.LoadAsync(item.TaskId);
         RefreshTaskPreview();
+        await RefreshQueuedPatchesAsync();
         RunStepCommand.NotifyCanExecuteChanged();
     }
 
@@ -324,6 +361,17 @@ public partial class AgentViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private async Task RefreshQueuedPatchesAsync()
+    {
+        QueuedPatches.Clear();
+        if (CurrentTask is null)
+            return;
+
+        foreach (var patch in CurrentTask.DraftPatches.Where(p => p.Status == AgentDraftPatchStatus.Pending))
+            QueuedPatches.Add(new AgentDraftPatchViewModel(patch));
+    }
+
+    [RelayCommand]
     private async Task RefreshWorkspaceFilesAsync()
     {
         WorkspaceFiles.Clear();
@@ -359,6 +407,7 @@ public partial class AgentViewModel : ObservableObject
         {
             WorkspaceFilePreview = string.Empty;
             WorkspaceFileSummary = string.Empty;
+            DraftProposedContent = string.Empty;
             return;
         }
 
@@ -383,6 +432,79 @@ public partial class AgentViewModel : ObservableObject
 
             var result = await Task.Run(() => _workspaceTools.DraftPatch(relative, DraftRationale ?? string.Empty, DraftProposedContent ?? string.Empty));
             DraftPreview = result ?? string.Empty;
+        }
+        catch (Exception ex)
+        {
+            SetError(ex.Message);
+        }
+    }
+
+    [RelayCommand]
+    private async Task QueueDraftPatchAsync()
+    {
+        if (CurrentTask is null || SelectedWorkspaceFile is null) return;
+        try
+        {
+            var patch = new AgentDraftPatch
+            {
+                RelativePath = SelectedWorkspaceFile.RelativePath,
+                Rationale = DraftRationale ?? string.Empty,
+                ProposedContent = DraftProposedContent ?? WorkspaceFilePreview
+            };
+            CurrentTask.DraftPatches.Add(patch);
+            await _store.SaveAsync(CurrentTask);
+            QueuedPatches.Add(new AgentDraftPatchViewModel(patch));
+            DraftRationale = string.Empty;
+            DraftProposedContent = string.Empty;
+            DraftPreview = string.Empty;
+            StatusMessage = $"Patch for {SelectedWorkspaceFile.RelativePath} queued for review.";
+            RefreshTaskPreview();
+        }
+        catch (Exception ex)
+        {
+            SetError(ex.Message);
+        }
+    }
+
+    [RelayCommand]
+    private async Task ApprovePatchAsync(AgentDraftPatchViewModel? patch)
+    {
+        if (CurrentTask is null || patch is null) return;
+        try
+        {
+            var found = CurrentTask.DraftPatches.FirstOrDefault(p => p.Id == patch.Id);
+            if (found is not null)
+            {
+                found.Status = AgentDraftPatchStatus.Approved;
+                found.ApprovedAt = DateTime.UtcNow;
+                found.ApprovedBy = "User";
+                await _store.SaveAsync(CurrentTask);
+                QueuedPatches.Remove(patch);
+                StatusMessage = $"Patch for {patch.RelativePath} approved.";
+                RefreshTaskPreview();
+            }
+        }
+        catch (Exception ex)
+        {
+            SetError(ex.Message);
+        }
+    }
+
+    [RelayCommand]
+    private async Task RejectPatchAsync(AgentDraftPatchViewModel? patch)
+    {
+        if (CurrentTask is null || patch is null) return;
+        try
+        {
+            var found = CurrentTask.DraftPatches.FirstOrDefault(p => p.Id == patch.Id);
+            if (found is not null)
+            {
+                found.Status = AgentDraftPatchStatus.Rejected;
+                await _store.SaveAsync(CurrentTask);
+                QueuedPatches.Remove(patch);
+                StatusMessage = $"Patch for {patch.RelativePath} rejected.";
+                RefreshTaskPreview();
+            }
         }
         catch (Exception ex)
         {
@@ -488,16 +610,20 @@ public partial class AgentViewModel : ObservableObject
         OnPropertyChanged(nameof(CurrentTaskStatusLabel));
         OnPropertyChanged(nameof(CurrentTaskGoalLabel));
         OnPropertyChanged(nameof(CurrentTaskSummaryLabel));
+        OnPropertyChanged(nameof(QueuedPatchCount));
+        OnPropertyChanged(nameof(HasQueuedPatches));
 
         if (CurrentTask is null)
         {
             TaskStatePreview = string.Empty;
             CurrentStep = string.Empty;
+            QueuedPatches.Clear();
             return;
         }
 
         CurrentStep = CurrentTask.ActiveStep;
         TaskStatePreview = JsonSerializer.Serialize(CurrentTask, new JsonSerializerOptions { WriteIndented = true });
+        _ = RefreshQueuedPatchesAsync();
     }
 
     private void SetError(string message)
@@ -516,5 +642,9 @@ public partial class AgentViewModel : ObservableObject
         StartCommand.NotifyCanExecuteChanged();
         RunStepCommand.NotifyCanExecuteChanged();
     }
-    partial void OnCurrentTaskChanged(AgentTaskState? value) => RunStepCommand.NotifyCanExecuteChanged();
+    partial void OnCurrentTaskChanged(AgentTaskState? value)
+    {
+        RunStepCommand.NotifyCanExecuteChanged();
+        _ = RefreshQueuedPatchesAsync();
+    }
 }

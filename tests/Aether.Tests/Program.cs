@@ -140,6 +140,40 @@ internal static class AgentTests
     return Task.CompletedTask;
     }
 
+    public static async Task AgentTaskStatePersistsQueuedDraftPatches()
+    {
+    using var temp = new TempDir();
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    await store.InitializeAsync();
+
+    var state = new AgentTaskState
+    {
+        Goal = "Queue a patch",
+        Status = AgentTaskStatus.WaitingForUser,
+        ActiveStep = "Review draft",
+        Summary = "Patch pending review",
+        DraftPatches =
+        [
+            new AgentDraftPatch
+            {
+                RelativePath = "src/Feature.cs",
+                Rationale = "Keep the patch approval gated",
+                ProposedContent = "public sealed class Feature { }"
+            }
+        ]
+    };
+
+    await store.SaveAsync(state);
+    var loaded = await store.LoadAsync(state.TaskId);
+
+    True(loaded is not null, "task state should reload");
+    Equal(1, loaded!.DraftPatches.Count, "draft patches should persist with the task state");
+    Equal("src/Feature.cs", loaded.DraftPatches[0].RelativePath, "draft patch path should round-trip");
+    Equal(AgentDraftPatchStatus.Pending, loaded.DraftPatches[0].Status, "new draft patches should remain pending");
+    }
+
     public static async Task AgentContextPackStaysBounded()
     {
     using var temp = new TempDir();

@@ -35,6 +35,13 @@ public enum AgentToolDisposition
     Blocked
 }
 
+public enum AgentDraftPatchStatus
+{
+    Pending,
+    Approved,
+    Rejected
+}
+
 public sealed class AgentTaskState
 {
     public string TaskId { get; set; } = Guid.NewGuid().ToString("N");
@@ -49,6 +56,7 @@ public sealed class AgentTaskState
     public List<AgentDecision> Decisions { get; set; } = [];
     public List<AgentToolResult> ToolResults { get; set; } = [];
     public List<AgentApprovalRecord> ApprovalHistory { get; set; } = [];
+    public List<AgentDraftPatch> DraftPatches { get; set; } = [];
     public string Summary { get; set; } = string.Empty;
 }
 
@@ -84,6 +92,18 @@ public sealed record AgentApprovalRecord(
     string Action,
     bool Approved,
     DateTime Timestamp);
+
+public sealed class AgentDraftPatch
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string RelativePath { get; set; } = string.Empty;
+    public string Rationale { get; set; } = string.Empty;
+    public string ProposedContent { get; set; } = string.Empty;
+    public AgentDraftPatchStatus Status { get; set; } = AgentDraftPatchStatus.Pending;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? ApprovedAt { get; set; }
+    public string? ApprovedBy { get; set; }
+}
 
 public sealed class AgentContextPack
 {

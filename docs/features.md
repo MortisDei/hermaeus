@@ -42,6 +42,14 @@
   and retrieved context counts for quick scanning.
 - The agent panel also includes a workspace file browser with query, list,
   preview, and summary behaviour for faster read-first inspection.
+- Draft patch proposal UI: users can draft file edits with a rationale, propose
+  content, generate a formatted patch preview, and queue the patch for approval
+  in the task review queue.
+- Queued patches expander shows all pending draft patches with rationale and
+  proposed content, allowing approve/reject actions that track approval state
+  and metadata (approver, approval timestamp).
+- The agent summary strip surfaces queued patch counts so approval work is
+  visible at a glance without opening the lower panel.
 - Workspace memory notes can be saved, reviewed, and deleted per workspace
   root.
 
