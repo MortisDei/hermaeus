@@ -594,7 +594,46 @@ namespace Aether.Tests
             ContainsInOrder(args, "--host", "0.0.0.0", "extra args should be preserved as data arguments");
             False(args.Any(a => a.Contains(';', StringComparison.Ordinal)), "argument builder should not synthesize shell separators");
             True(args.Contains("--embeddings"), "embeddings mode should add embeddings flag");
+            ContainsInOrder(args, "--pooling", "mean", "embeddings mode should default to OAI-compatible mean pooling");
             return Task.CompletedTask;
+        }
+
+        public static Task ServerProcessArgumentsKeepExplicitPoolingChoice()
+        {
+            var args = ServerProcessManager.BuildLaunchArguments(new ServerConfig
+            {
+                ModelPath = "/models/local model.gguf",
+                Port = 9091,
+                ContextSize = 4096,
+                EmbeddingsMode = true,
+                ExtraArgs = "--pooling cls --flag"
+            }).ToList();
+
+            Equal(1, args.Count(a => string.Equals(a, "--pooling", StringComparison.Ordinal)), "explicit pooling should not be duplicated");
+            ContainsInOrder(args, "--pooling", "cls", "explicit pooling value should be preserved");
+            return Task.CompletedTask;
+        }
+
+        public static async Task EmbeddingClientSurfacesPoolingHintWhenServerRejectsNonePooling()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.Llm.LlamaCppBaseUrl = "http://localhost:8080";
+
+            var body = "{\"error\":{\"code\":400,\"message\":\"Pooling type 'none' is not OAI compatible. Please use a different pooling type\",\"type\":\"invalid_request_error\"}}";
+            using var http = new HttpClient(new FixedStatusHandler(HttpStatusCode.BadRequest, body));
+            var embed = new LlamaCppEmbeddingService(settings, http);
+
+            try
+            {
+                await embed.EmbedBatchAsync(["hello world"]);
+                throw new InvalidOperationException("Expected an InvalidOperationException for pooling-incompatible HTTP 400 response.");
+            }
+            catch (InvalidOperationException ex)
+            {
+                True(ex.Message.Contains("--pooling mean", StringComparison.Ordinal), "error should suggest an OAI-compatible pooling mode");
+                True(ex.Message.Contains("embedding model", StringComparison.OrdinalIgnoreCase), "error should suggest using an embedding model");
+            }
         }
 
         public static async Task ConversationAutoSummaryStoresMemoriesWhenImportant()

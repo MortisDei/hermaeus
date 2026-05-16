@@ -271,11 +271,24 @@ public sealed class ServerProcessManager : IDisposable
             parts.Add(cfg.GpuLayers.ToString());
         }
 
+        var extraArgs = string.IsNullOrWhiteSpace(cfg.ExtraArgs)
+            ? []
+            : ExtraArgsParser.Split(cfg.ExtraArgs).ToList();
+
         if (cfg.EmbeddingsMode)
+        {
             parts.Add("--embeddings");
 
-        if (!string.IsNullOrWhiteSpace(cfg.ExtraArgs))
-            parts.AddRange(ExtraArgsParser.Split(cfg.ExtraArgs));
+            var hasPoolingArg = extraArgs.Any(a => string.Equals(a, "--pooling", StringComparison.OrdinalIgnoreCase));
+            if (!hasPoolingArg)
+            {
+                parts.Add("--pooling");
+                parts.Add("mean");
+            }
+        }
+
+        if (extraArgs.Count > 0)
+            parts.AddRange(extraArgs);
 
         return parts;
     }

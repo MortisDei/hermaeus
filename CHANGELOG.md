@@ -29,6 +29,9 @@ Pre-1.0 versions may still change internal APIs and storage details.
 - RAG ingest embedding failures now return actionable guidance when llama.cpp
   responds with 501/404, including a hint to enable `--embeddings` and point
   `LlamaCppBaseUrl` at an embeddings-capable server.
+- Embeddings-mode managed server launches now default to `--pooling mean`
+  (unless explicitly overridden) to keep llama.cpp OpenAI-compatible
+  embeddings requests from failing with pooling type `none`.
 
 ### Changed
 

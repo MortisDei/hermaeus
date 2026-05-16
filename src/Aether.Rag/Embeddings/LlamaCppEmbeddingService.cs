@@ -72,6 +72,13 @@ public sealed class LlamaCppEmbeddingService : IEmbeddingService, IDisposable
             return new InvalidOperationException($"{baseMessage} {hint} Server response: {body.Trim()}");
         }
 
+        if (response.StatusCode == HttpStatusCode.BadRequest
+            && body.Contains("Pooling type 'none'", StringComparison.OrdinalIgnoreCase))
+        {
+            var hint = "Your llama.cpp model/server is not configured for OpenAI-compatible embeddings pooling. Use an embedding model and start the server with --embeddings --pooling mean (or cls), then retry.";
+            return new InvalidOperationException($"{baseMessage} {hint} Server response: {body.Trim()}");
+        }
+
         if (string.IsNullOrWhiteSpace(body))
             return new HttpRequestException(baseMessage, null, response.StatusCode);
 
