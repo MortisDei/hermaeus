@@ -12,6 +12,7 @@ namespace Aether.Rag.Storage;
 /// </summary>
 public sealed class SqliteRagStore
 {
+    private const int SchemaVersion = 1;
     private readonly ISettingsService _settings;
     private string _initializedPath = string.Empty;
     private readonly SemaphoreSlim _initGate = new(1, 1);
@@ -140,21 +141,29 @@ public sealed class SqliteRagStore
                 created_at TEXT NOT NULL
             );";
             await cmd.ExecuteNonQueryAsync(ct);
-            await EnsureColumnAsync(c, "rag_chunks", "source_path", "TEXT NOT NULL DEFAULT ''", ct);
-            await EnsureColumnAsync(c, "rag_chunks", "source_hash", "TEXT NOT NULL DEFAULT ''", ct);
-            await EnsureColumnAsync(c, "rag_chunks", "source_modified_utc", "TEXT", ct);
-            await EnsureColumnAsync(c, "rag_chunks", "chunk_kind", "TEXT NOT NULL DEFAULT 'PlainText'", ct);
-            await EnsureColumnAsync(c, "rag_chunks", "heading_path", "TEXT", ct);
-            await EnsureColumnAsync(c, "rag_chunks", "code_symbol_info", "TEXT", ct);
-            await EnsureColumnAsync(c, "rag_chunks", "page_number", "INTEGER", ct);
-            await EnsureColumnAsync(c, "rag_chunks", "event_type", "TEXT", ct);
-            await EnsureColumnAsync(c, "rag_chunks", "source_url", "TEXT", ct);
-            await EnsureColumnAsync(c, "rag_query_traces", "query_variants_json", "TEXT NOT NULL DEFAULT '[]'", ct);
-            await EnsureColumnAsync(c, "rag_query_traces", "planner_notes", "TEXT NOT NULL DEFAULT ''", ct);
-            await EnsureColumnAsync(c, "rag_query_traces", "context_token_budget", "INTEGER NOT NULL DEFAULT 0", ct);
-            await EnsureColumnAsync(c, "rag_query_traces", "context_packing_summary", "TEXT NOT NULL DEFAULT ''", ct);
-            await EnsureColumnAsync(c, "rag_query_traces", "refused", "INTEGER NOT NULL DEFAULT 0", ct);
-            await EnsureColumnAsync(c, "rag_query_traces", "refusal_reason", "TEXT NOT NULL DEFAULT ''", ct);
+            await SqliteMigrationRunner.ApplyAsync(c, "rag", SchemaVersion,
+            [
+                new SqliteMigration(1, async (db, token) =>
+                {
+                    var changed = false;
+                    changed |= await EnsureColumnAsync(db, "rag_chunks", "source_path", "TEXT NOT NULL DEFAULT ''", token);
+                    changed |= await EnsureColumnAsync(db, "rag_chunks", "source_hash", "TEXT NOT NULL DEFAULT ''", token);
+                    changed |= await EnsureColumnAsync(db, "rag_chunks", "source_modified_utc", "TEXT", token);
+                    changed |= await EnsureColumnAsync(db, "rag_chunks", "chunk_kind", "TEXT NOT NULL DEFAULT 'PlainText'", token);
+                    changed |= await EnsureColumnAsync(db, "rag_chunks", "heading_path", "TEXT", token);
+                    changed |= await EnsureColumnAsync(db, "rag_chunks", "code_symbol_info", "TEXT", token);
+                    changed |= await EnsureColumnAsync(db, "rag_chunks", "page_number", "INTEGER", token);
+                    changed |= await EnsureColumnAsync(db, "rag_chunks", "event_type", "TEXT", token);
+                    changed |= await EnsureColumnAsync(db, "rag_chunks", "source_url", "TEXT", token);
+                    changed |= await EnsureColumnAsync(db, "rag_query_traces", "query_variants_json", "TEXT NOT NULL DEFAULT '[]'", token);
+                    changed |= await EnsureColumnAsync(db, "rag_query_traces", "planner_notes", "TEXT NOT NULL DEFAULT ''", token);
+                    changed |= await EnsureColumnAsync(db, "rag_query_traces", "context_token_budget", "INTEGER NOT NULL DEFAULT 0", token);
+                    changed |= await EnsureColumnAsync(db, "rag_query_traces", "context_packing_summary", "TEXT NOT NULL DEFAULT ''", token);
+                    changed |= await EnsureColumnAsync(db, "rag_query_traces", "refused", "INTEGER NOT NULL DEFAULT 0", token);
+                    changed |= await EnsureColumnAsync(db, "rag_query_traces", "refusal_reason", "TEXT NOT NULL DEFAULT ''", token);
+                    return changed;
+                })
+            ], ct);
             _initializedPath = dbPath;
         }
         finally
@@ -163,7 +172,7 @@ public sealed class SqliteRagStore
         }
     }
 
-    private static async Task EnsureColumnAsync(
+    private static async Task<bool> EnsureColumnAsync(
         SqliteConnection c,
         string table,
         string column,
@@ -177,13 +186,14 @@ public sealed class SqliteRagStore
             while (await r.ReadAsync(ct))
             {
                 if (string.Equals(r.GetString(1), column, StringComparison.OrdinalIgnoreCase))
-                    return;
+                    return false;
             }
         }
 
         await using var alter = c.CreateCommand();
         alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {definition}";
         await alter.ExecuteNonQueryAsync(ct);
+        return true;
     }
 
     // ── Datasets ─────────────────────────────────────────────────────────────

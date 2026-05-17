@@ -12,6 +12,7 @@ using Aether.Rag.Retrieval;
 using Aether.Services;
 using Aether.Tests;
 using Aether.ViewModels;
+using Microsoft.Data.Sqlite;
 using static Aether.Tests.Helpers;
 
 namespace Aether.Tests;
@@ -90,6 +91,43 @@ internal static class AgentTests
     Equal(2, item.ApprovalCount, "review queue should include approval count");
     Equal("publish", item.LastApprovalAction, "review queue should surface the latest approval action");
     False(item.LastApprovalApproved ?? true, "review queue should surface the latest approval decision");
+    }
+
+    public static async Task AgentTaskStateUsesSqliteIndexForLists()
+    {
+    using var temp = new TempDir();
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    await store.InitializeAsync();
+
+    var state = new AgentTaskState
+    {
+        TaskId = "indexed-task",
+        Goal = "Use indexed listing",
+        Status = AgentTaskStatus.WaitingForUser,
+        ActiveStep = "Review",
+        Summary = "Indexed",
+        ApprovalHistory = [new AgentApprovalRecord("draft_patch", true, DateTime.UtcNow)]
+    };
+
+    await store.SaveAsync(state);
+    var indexPath = Path.Combine(settings.Settings.DataManagement.DataRootDirectory, "agent", "task_index.db");
+    True(File.Exists(indexPath), "agent task index database should be created");
+
+    await using (var c = new SqliteConnection($"Data Source={indexPath}"))
+    {
+        await c.OpenAsync();
+        await using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT version FROM aether_schema_versions WHERE scope = 'agent_task_index'";
+        Equal(1L, (long)(await cmd.ExecuteScalarAsync() ?? 0L), "agent task index should record schema version");
+    }
+
+    File.Delete(Path.Combine(store.GetTaskDirectory("indexed-task"), "task_state.json"));
+    var recent = await store.ListRecentAsync();
+    True(recent.Any(item => item.TaskId == "indexed-task"), "recent task list should use the SQLite index");
+    var review = await store.ListReviewQueueAsync();
+    True(review.Any(item => item.TaskId == "indexed-task"), "review queue should use the SQLite index");
     }
 
     public static async Task AgentWorkspaceMemoryPersistsNotesPerWorkspace()

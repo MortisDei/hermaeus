@@ -10,6 +10,7 @@ namespace Aether.Services;
 /// </summary>
 public sealed class MemoryStore : IMemoryStore
 {
+    private const int SchemaVersion = 1;
     private readonly ISettingsService _settings;
     private string _initializedPath = string.Empty;
     private readonly SemaphoreSlim _initGate = new(1, 1);
@@ -79,6 +80,10 @@ public sealed class MemoryStore : IMemoryStore
             CREATE INDEX IF NOT EXISTS idx_updated ON memories(updated_at DESC);
             CREATE INDEX IF NOT EXISTS idx_source_conversation ON memories(source_conversation_id);";
             await cmd.ExecuteNonQueryAsync(ct);
+            await SqliteMigrationRunner.ApplyAsync(c, "memories", SchemaVersion,
+            [
+                new SqliteMigration(1, (_, _) => Task.FromResult(false))
+            ], ct);
             if (!ftsExisted)
                 await RebuildFtsAsync(c, ct);
             _initializedPath = dbPath;

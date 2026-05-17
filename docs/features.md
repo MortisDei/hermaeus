@@ -48,6 +48,9 @@
 
 - Read-first local task workbench with explicit task state, compact context
   packs, local logs/traces, and review queue controls.
+- Recent task and review queue lists are backed by a SQLite task index so large
+  Agent workspaces do not need to scan every `task_state.json` file to render
+  the queue.
 - The agent panel surfaces a compact summary strip with task state, goal,
   summary, recent task history, review queue counts, workspace memory counts,
   and retrieved context counts for quick scanning.
@@ -152,6 +155,8 @@
   hotkeys.
 - Toast notifications throughout the app with opaque popup backgrounds.
 - Configurable data root with migration, backup, restore, and conflict refusal.
+- Local SQLite stores record schema versions and run additive migrations through
+  a shared migration runner.
 - Settings, small local state files, generated setup scripts, and export files
   use atomic replacement writes, and an unreadable `settings.json` is copied
   aside before defaults are loaded.

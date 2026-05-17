@@ -4,7 +4,7 @@
 
 Aether includes a local RAG: structure-aware chunking, query planning,
 hybrid retrieval, ONNX reranking, budget-aware context packing, citations,
-traces, and native eval support.
+traces, versioned SQLite schema migrations, and native eval support.
 
 ## Getting Started
 

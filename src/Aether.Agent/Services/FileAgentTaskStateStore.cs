@@ -2,11 +2,13 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Aether.Agent.Models;
 using Aether.Core.Services;
+using Microsoft.Data.Sqlite;
 
 namespace Aether.Agent.Services;
 
 public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
 {
+    private const int IndexSchemaVersion = 1;
     private const int MaxTaskIdLength = 80;
     private static readonly Regex SafeTaskIdRegex = new("^[A-Za-z0-9_-]+$", RegexOptions.Compiled);
     private static readonly HashSet<string> WindowsReservedNames = new(StringComparer.OrdinalIgnoreCase)
@@ -16,6 +18,8 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
         "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9"
     };
     private readonly ISettingsService _settings;
+    private readonly SemaphoreSlim _initGate = new(1, 1);
+    private string _initializedIndexPath = string.Empty;
 
     public FileAgentTaskStateStore(ISettingsService settings)
     {
@@ -36,8 +40,7 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
 
     public Task InitializeAsync(CancellationToken ct = default)
     {
-        Directory.CreateDirectory(Path.Combine(AgentRoot, "tasks"));
-        return Task.CompletedTask;
+        return EnsureIndexInitializedAsync(ct);
     }
 
     public string GetTaskDirectory(string taskId)
@@ -48,11 +51,13 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
 
     public async Task SaveAsync(AgentTaskState state, CancellationToken ct = default)
     {
+        await EnsureIndexInitializedAsync(ct);
         state.UpdatedAt = DateTime.UtcNow;
         var dir = GetTaskDirectory(state.TaskId);
         Directory.CreateDirectory(dir);
         var path = Path.Combine(dir, "task_state.json");
         await AtomicFileWriter.WriteAllTextAsync(path, JsonSerializer.Serialize(state, AgentJson.Options), ct);
+        await UpsertIndexAsync(state, ct);
     }
 
     public async Task<AgentTaskState?> LoadAsync(string taskId, CancellationToken ct = default)
@@ -65,71 +70,62 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
 
     public async Task<IReadOnlyList<AgentTaskListItem>> ListRecentAsync(int limit = 25, CancellationToken ct = default)
     {
-        await InitializeAsync(ct);
+        await EnsureIndexInitializedAsync(ct);
+        await using var c = new SqliteConnection(IndexConnectionString);
+        await c.OpenAsync(ct);
+        await using var cmd = c.CreateCommand();
+        cmd.CommandText = @"
+            SELECT task_id, goal, status, updated_at
+            FROM agent_task_index
+            ORDER BY updated_at DESC
+            LIMIT $limit";
+        cmd.Parameters.AddWithValue("$limit", Math.Max(1, limit));
         var tasks = new List<AgentTaskListItem>();
-        foreach (var file in Directory.EnumerateFiles(Path.Combine(AgentRoot, "tasks"), "task_state.json", SearchOption.AllDirectories))
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
         {
-            ct.ThrowIfCancellationRequested();
-            try
-            {
-                var json = await File.ReadAllTextAsync(file, ct);
-                var state = JsonSerializer.Deserialize<AgentTaskState>(json, AgentJson.Options);
-                if (state is not null)
-                    tasks.Add(new AgentTaskListItem(state.TaskId, state.Goal, state.Status, state.UpdatedAt));
-            }
-            catch
-            {
-                // Ignore corrupt task state entries so one bad task cannot hide the rest.
-            }
+            tasks.Add(new AgentTaskListItem(
+                r.GetString(0),
+                r.GetString(1),
+                ParseStatus(r.GetString(2)),
+                ParseDate(r.GetString(3))));
         }
 
-        return tasks
-            .OrderByDescending(t => t.UpdatedAt)
-            .Take(Math.Max(1, limit))
-            .ToList();
+        return tasks;
     }
 
     public async Task<IReadOnlyList<AgentReviewQueueItem>> ListReviewQueueAsync(int limit = 25, CancellationToken ct = default)
     {
-        await InitializeAsync(ct);
+        await EnsureIndexInitializedAsync(ct);
+        await using var c = new SqliteConnection(IndexConnectionString);
+        await c.OpenAsync(ct);
+        await using var cmd = c.CreateCommand();
+        cmd.CommandText = @"
+            SELECT task_id, goal, status, updated_at, active_step, summary,
+                   approval_count, last_approval_action, last_approval_approved, last_approval_at
+            FROM agent_task_index
+            WHERE status IN ('WaitingForUser', 'Blocked') OR approval_count > 0
+            ORDER BY updated_at DESC
+            LIMIT $limit";
+        cmd.Parameters.AddWithValue("$limit", Math.Max(1, limit));
         var queue = new List<AgentReviewQueueItem>();
-        foreach (var file in Directory.EnumerateFiles(Path.Combine(AgentRoot, "tasks"), "task_state.json", SearchOption.AllDirectories))
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
         {
-            ct.ThrowIfCancellationRequested();
-            try
-            {
-                var json = await File.ReadAllTextAsync(file, ct);
-                var state = JsonSerializer.Deserialize<AgentTaskState>(json, AgentJson.Options);
-                if (state is null)
-                    continue;
-
-                var approvals = state.ApprovalHistory.OrderByDescending(a => a.Timestamp).ToList();
-                if (state.Status is not AgentTaskStatus.WaitingForUser and not AgentTaskStatus.Blocked && approvals.Count == 0)
-                    continue;
-
-                var last = approvals.FirstOrDefault();
-                queue.Add(new AgentReviewQueueItem(
-                    state.TaskId,
-                    state.Goal,
-                    state.Status,
-                    state.UpdatedAt,
-                    state.ActiveStep,
-                    state.Summary,
-                    approvals.Count,
-                    last?.Action,
-                    last is null ? null : last.Approved,
-                    last?.Timestamp));
-            }
-            catch
-            {
-                // Ignore corrupt task state entries so one bad task cannot hide the rest.
-            }
+            queue.Add(new AgentReviewQueueItem(
+                r.GetString(0),
+                r.GetString(1),
+                ParseStatus(r.GetString(2)),
+                ParseDate(r.GetString(3)),
+                r.GetString(4),
+                r.GetString(5),
+                r.GetInt32(6),
+                r.IsDBNull(7) ? null : r.GetString(7),
+                r.IsDBNull(8) ? null : r.GetInt32(8) != 0,
+                r.IsDBNull(9) ? null : ParseDate(r.GetString(9))));
         }
 
-        return queue
-            .OrderByDescending(t => t.UpdatedAt)
-            .Take(Math.Max(1, limit))
-            .ToList();
+        return queue;
     }
 
     public async Task AppendLogAsync(string taskId, string line, CancellationToken ct = default)
@@ -163,4 +159,133 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
 
         return safeId;
     }
+
+    private string IndexPath => Path.Combine(AgentRoot, "task_index.db");
+    private string IndexConnectionString => $"Data Source={IndexPath}";
+
+    private async Task EnsureIndexInitializedAsync(CancellationToken ct)
+    {
+        var path = IndexPath;
+        if (_initializedIndexPath == path && File.Exists(path))
+            return;
+
+        await _initGate.WaitAsync(ct);
+        try
+        {
+            if (_initializedIndexPath == path && File.Exists(path))
+                return;
+
+            Directory.CreateDirectory(Path.Combine(AgentRoot, "tasks"));
+            await using var c = new SqliteConnection(IndexConnectionString);
+            await c.OpenAsync(ct);
+            await using (var cmd = c.CreateCommand())
+            {
+                cmd.CommandText = @"
+                    PRAGMA journal_mode=WAL;
+                    CREATE TABLE IF NOT EXISTS agent_task_index (
+                        task_id TEXT PRIMARY KEY,
+                        goal TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        active_step TEXT NOT NULL,
+                        summary TEXT NOT NULL,
+                        approval_count INTEGER NOT NULL DEFAULT 0,
+                        last_approval_action TEXT,
+                        last_approval_approved INTEGER,
+                        last_approval_at TEXT
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_agent_task_index_updated ON agent_task_index(updated_at DESC);
+                    CREATE INDEX IF NOT EXISTS idx_agent_task_index_review ON agent_task_index(status, approval_count, updated_at DESC);";
+                await cmd.ExecuteNonQueryAsync(ct);
+            }
+
+            await SqliteMigrationRunner.ApplyAsync(c, "agent_task_index", IndexSchemaVersion,
+            [
+                new SqliteMigration(1, (_, _) => Task.FromResult(false))
+            ], ct);
+            if (await IsIndexEmptyAsync(c, ct))
+                await RebuildIndexAsync(c, ct);
+
+            _initializedIndexPath = path;
+        }
+        finally
+        {
+            _initGate.Release();
+        }
+    }
+
+    private static async Task<bool> IsIndexEmptyAsync(SqliteConnection c, CancellationToken ct)
+    {
+        await using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT COUNT(*) FROM agent_task_index";
+        var value = await cmd.ExecuteScalarAsync(ct);
+        return Convert.ToInt32(value) == 0;
+    }
+
+    private async Task RebuildIndexAsync(SqliteConnection c, CancellationToken ct)
+    {
+        foreach (var file in Directory.EnumerateFiles(Path.Combine(AgentRoot, "tasks"), "task_state.json", SearchOption.AllDirectories))
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                var json = await File.ReadAllTextAsync(file, ct);
+                var state = JsonSerializer.Deserialize<AgentTaskState>(json, AgentJson.Options);
+                if (state is not null)
+                    await UpsertIndexAsync(c, state, ct);
+            }
+            catch
+            {
+                // Ignore corrupt task state entries so one bad task cannot hide the rest.
+            }
+        }
+    }
+
+    private async Task UpsertIndexAsync(AgentTaskState state, CancellationToken ct)
+    {
+        await using var c = new SqliteConnection(IndexConnectionString);
+        await c.OpenAsync(ct);
+        await UpsertIndexAsync(c, state, ct);
+    }
+
+    private static async Task UpsertIndexAsync(SqliteConnection c, AgentTaskState state, CancellationToken ct)
+    {
+        var approvals = state.ApprovalHistory.OrderByDescending(a => a.Timestamp).ToList();
+        var last = approvals.FirstOrDefault();
+        await using var cmd = c.CreateCommand();
+        cmd.CommandText = @"
+            INSERT INTO agent_task_index (
+                task_id, goal, status, updated_at, active_step, summary,
+                approval_count, last_approval_action, last_approval_approved, last_approval_at)
+            VALUES (
+                $task_id, $goal, $status, $updated_at, $active_step, $summary,
+                $approval_count, $last_action, $last_approved, $last_at)
+            ON CONFLICT(task_id) DO UPDATE SET
+                goal = excluded.goal,
+                status = excluded.status,
+                updated_at = excluded.updated_at,
+                active_step = excluded.active_step,
+                summary = excluded.summary,
+                approval_count = excluded.approval_count,
+                last_approval_action = excluded.last_approval_action,
+                last_approval_approved = excluded.last_approval_approved,
+                last_approval_at = excluded.last_approval_at";
+        cmd.Parameters.AddWithValue("$task_id", state.TaskId);
+        cmd.Parameters.AddWithValue("$goal", state.Goal);
+        cmd.Parameters.AddWithValue("$status", state.Status.ToString());
+        cmd.Parameters.AddWithValue("$updated_at", state.UpdatedAt.ToString("O"));
+        cmd.Parameters.AddWithValue("$active_step", state.ActiveStep);
+        cmd.Parameters.AddWithValue("$summary", state.Summary);
+        cmd.Parameters.AddWithValue("$approval_count", approvals.Count);
+        cmd.Parameters.AddWithValue("$last_action", (object?)last?.Action ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$last_approved", last is null ? DBNull.Value : last.Approved ? 1 : 0);
+        cmd.Parameters.AddWithValue("$last_at", last is null ? DBNull.Value : last.Timestamp.ToString("O"));
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    private static AgentTaskStatus ParseStatus(string value) =>
+        Enum.TryParse<AgentTaskStatus>(value, ignoreCase: true, out var status) ? status : AgentTaskStatus.New;
+
+    private static DateTime ParseDate(string value) =>
+        DateTime.TryParse(value, out var date) ? date : DateTime.MinValue;
 }

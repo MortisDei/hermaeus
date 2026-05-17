@@ -9,6 +9,26 @@ FIFO for changelog entries, 10 versions in this file max. Remove older entries
 and append them to `docs/changelog-archive.md` to maintain the 10 version
 limit.
 
+## [0.9.12-alpha] - 2026-05-18
+
+### Changed
+
+- Project version metadata bumped to `0.9.12-alpha`.
+- Conversation, memory, and RAG SQLite stores now maintain an
+  `aether_schema_versions` table and run additive schema changes through a
+  versioned migration runner instead of ad hoc initialization-only column
+  checks.
+- Agent task listing and review queue data now use a SQLite-backed
+  `agent/task_index.db` catalog with indexed status and update-time columns,
+  while `task_state.json` remains the durable per-task source of truth.
+- Existing Agent task JSON files are backfilled into the task index on first
+  initialization when the index is empty.
+
+### Tests
+
+- Added coverage that Agent recent-task and review-queue lists are served from
+  the SQLite index and that the Agent index records its schema version.
+
 ## [0.9.11-alpha] - 2026-05-18
 
 ### Changed

@@ -7,6 +7,7 @@ namespace Aether.Services;
 
 public sealed class ConversationStore : IConversationStore
 {
+    private const int SchemaVersion = 1;
     private readonly ISettingsService _settings;
     private string _initializedPath = string.Empty;
     private readonly SemaphoreSlim _initGate = new(1, 1);
@@ -61,11 +62,18 @@ public sealed class ConversationStore : IConversationStore
             );
             CREATE INDEX IF NOT EXISTS idx_updated ON conversations(updated_at DESC);";
             await cmd.ExecuteNonQueryAsync(ct);
-            var schemaChanged = false;
-            schemaChanged |= await EnsureColumnAsync(c, "folder", "TEXT NOT NULL DEFAULT ''", ct);
-            schemaChanged |= await EnsureColumnAsync(c, "tags_json", "TEXT NOT NULL DEFAULT '[]'", ct);
-            schemaChanged |= await EnsureColumnAsync(c, "is_pinned", "INTEGER NOT NULL DEFAULT 0", ct);
-            schemaChanged |= await EnsureColumnAsync(c, "is_archived", "INTEGER NOT NULL DEFAULT 0", ct);
+            var schemaChanged = await SqliteMigrationRunner.ApplyAsync(c, "conversations", SchemaVersion,
+            [
+                new SqliteMigration(1, async (db, token) =>
+                {
+                    var changed = false;
+                    changed |= await EnsureColumnAsync(db, "folder", "TEXT NOT NULL DEFAULT ''", token);
+                    changed |= await EnsureColumnAsync(db, "tags_json", "TEXT NOT NULL DEFAULT '[]'", token);
+                    changed |= await EnsureColumnAsync(db, "is_pinned", "INTEGER NOT NULL DEFAULT 0", token);
+                    changed |= await EnsureColumnAsync(db, "is_archived", "INTEGER NOT NULL DEFAULT 0", token);
+                    return changed;
+                })
+            ], ct);
             if (!ftsExisted || schemaChanged)
                 await RebuildFtsAsync(c, ct);
             _initializedPath = dbPath;

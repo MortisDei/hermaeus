@@ -1,6 +1,6 @@
 # Aether Security Review And Threat Model
 
-Last refreshed for `0.9.11-alpha`.
+Last refreshed for `0.9.12-alpha`.
 
 Aether is a local-first desktop application. The primary security goal is to
 keep user data, model paths, API keys, local runtimes, and generated voice audio
@@ -64,7 +64,8 @@ penetration-test report.
 | RAG ingest | Local `.txt`/`.md` ingest is the default. Optional web URL ingest is off by default, accepts only explicit HTTP(S) URLs, caps pages, strips script/style blocks from HTML, validates prompt templates, and verifies pinned ONNX reranker assets with SHA256. | Large local files are warned, not refused. Web text extraction is intentionally simple and should not be treated as a browser sandbox or crawler. |
 | Voice backends | Generated voice preview audio is handled in memory by the app workflow. Managed Kokoro and XTTS processes are killed on stop/exit. Local AI setup is provider-aware and no longer suggests XTTS script/model work while Kokoro is selected. | Configured XTTS output directory exists for server operation and could contain files created by the external XTTS server. |
 | Agent workspace tools | Agent file tools are constrained to the selected workspace, reject symlink ancestors, skip symlinked entries, use case-sensitive path checks on case-sensitive platforms, validate task IDs with a safe allowlist, and block unsupported shell/network/install/commit/push actions. | Approved draft patch application can still overwrite intended workspace files, so review remains mandatory. |
-| Local state files | Settings, Agent task/profile/memory state, toast history, exports, generated setup scripts, and local fallback secrets use temp-file replacement for writes. Unreadable settings are copied aside before defaults are loaded. | Sudden power loss can still lose the latest write, but should be less likely to leave a half-written primary JSON file. |
+| Local state files | Settings, Agent task/profile/memory state, toast history, exports, generated setup scripts, and local fallback secrets use temp-file replacement for writes. Agent task list metadata is indexed in SQLite while full task state remains in JSON. Unreadable settings are copied aside before defaults are loaded. | Sudden power loss can still lose the latest write, but should be less likely to leave a half-written primary JSON file. |
+| SQLite schemas | Conversation, memory, RAG, and Agent task-index databases record schema versions in `aether_schema_versions` before running additive migrations. | Existing migrations are additive. Destructive migrations still need bespoke backup and verification steps before public release. |
 | Tray and hotkeys | Close exits and stops managed services. Minimize-to-tray is explicit. Tray menu includes Stop Services and Quit. Local hotkeys only work while focused. Windows global hotkeys are opt-in and registered through the OS hotkey API. | Linux global hotkeys remain deferred because Wayland/X11 compositor behavior varies. |
 | Packaging | Linux/Windows archives include README, license, notice, commercial terms, and checksums. Linux desktop install is user-local. | Archives are unsigned; users must verify checksums from a trusted channel. |
 
@@ -186,6 +187,7 @@ hardening work:
 - Restore rejects unsafe paths and existing-file overwrites.
 - Managed process launch avoids shell execution.
 - Settings and Agent JSON state use atomic replacement writes.
+- SQLite stores record schema versions before applying additive migrations.
 - Corrupt settings are copied aside before defaults are loaded.
 - Visible logs redact common secrets and home paths.
 - Runtime logs redact entries before disk persistence.

@@ -89,6 +89,7 @@ Key hardening features:
 - OS credential-store integration with local fallback
 - Trust & Safety scan for executables, scripts, paths, and network exposure
 - Configurable data root with migration, backup, and restore
+- Versioned SQLite schema records for local stores
 - Data-safety tests for migration, backup/restore, and redaction
 
 See [docs/security-review.md](docs/security-review.md) for the full security
