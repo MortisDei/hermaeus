@@ -135,11 +135,10 @@ public sealed class ConversationMemoryService : IConversationMemoryService
             }
         }
 
-        var recent = await _memories.GetRecentAsync(100, ct);
+        var recent = await _memories.GetRecentByConversationAsync(conversationId, 20, ct);
         var latest = recent
             .Where(m =>
-            string.Equals(m.SourceConversationId, conversationId, StringComparison.Ordinal)
-            && m.UpdatedAt >= cutoff
+            m.UpdatedAt >= cutoff
             && m.Tags.Any(t => string.Equals(t, "auto_summary", StringComparison.OrdinalIgnoreCase)))
             .OrderByDescending(m => m.UpdatedAt)
             .FirstOrDefault();

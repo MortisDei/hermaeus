@@ -7,7 +7,10 @@ public record ChatMessage(string Role, string Content);
 
 public sealed record ChatTokenUsage(int PromptTokens, int CompletionTokens, int TotalTokens);
 
-public sealed record LlmStreamEvent(string ContentDelta = "", ChatTokenUsage? Usage = null, bool IsFinal = false);
+public sealed record LlmStreamEvent(string ContentDelta = "", ChatTokenUsage? Usage = null, bool IsFinal = false)
+{
+    public static LlmStreamEvent Error(string message) => new(message, IsFinal: true);
+}
 
 public interface ILlmService
 {

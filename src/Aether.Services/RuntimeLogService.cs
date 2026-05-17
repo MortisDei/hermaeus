@@ -93,8 +93,10 @@ public sealed class RuntimeLogService : IRuntimeLogService
             var ext = Path.GetExtension(path);
             var stamp = DateTime.UtcNow.ToString("yyyyMMddTHHmmssZ", CultureInfo.InvariantCulture);
             var dest = Path.Combine(dir, $"{name}.{stamp}{ext}");
-            for (var i = 1; File.Exists(dest); i++)
+            for (var i = 1; File.Exists(dest) && i <= 1000; i++)
                 dest = Path.Combine(dir, $"{name}.{stamp}.{i}{ext}");
+            if (File.Exists(dest))
+                dest = Path.Combine(dir, $"{name}.{stamp}.{Guid.NewGuid():N}{ext}");
             File.Move(path, dest);
         }
         catch

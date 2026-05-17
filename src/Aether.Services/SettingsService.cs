@@ -6,6 +6,7 @@ namespace Aether.Services;
 
 public sealed class SettingsService : ISettingsService
 {
+    private const int MaxPerConversationMemoryOverrides = 1000;
     private static readonly JsonSerializerOptions Opts = new() { WriteIndented = true };
     private static readonly string DefaultDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Aether");
@@ -65,6 +66,7 @@ public sealed class SettingsService : ISettingsService
         await _gate.WaitAsync();
         try
         {
+            NormalizeSettings(Settings);
             var currentDataRoot = ResolveDataRoot(Settings);
             ValidateDataRoot(currentDataRoot);
 
@@ -145,6 +147,29 @@ public sealed class SettingsService : ISettingsService
         }
 
         return new SettingsSaveResult(true, previous, next, backupDir, files.Count);
+    }
+
+    private static void NormalizeSettings(AppSettings settings)
+    {
+        if (settings.Memory.EnabledPerConversation.Count == 0)
+            return;
+
+        foreach (var key in settings.Memory.EnabledPerConversation
+                     .Where(pair => pair.Value == settings.Memory.Enabled)
+                     .Select(pair => pair.Key)
+                     .ToList())
+        {
+            settings.Memory.EnabledPerConversation.Remove(key);
+        }
+
+        if (settings.Memory.EnabledPerConversation.Count <= MaxPerConversationMemoryOverrides)
+            return;
+
+        var keep = settings.Memory.EnabledPerConversation
+            .OrderByDescending(pair => pair.Key, StringComparer.Ordinal)
+            .Take(MaxPerConversationMemoryOverrides)
+            .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+        settings.Memory.EnabledPerConversation = keep;
     }
 
     private static IEnumerable<string> EnumerateMigrationFiles(string root)

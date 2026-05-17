@@ -16,6 +16,7 @@ public sealed class BenchmarkService : IBenchmarkService
     private readonly ILlmService _llm;
     private readonly ISystemInfoService _system;
     private string _initializedPath = string.Empty;
+    private string _starterSuitesSeededPath = string.Empty;
 
     public BenchmarkService(ISettingsService settings, ILlmService llm, ISystemInfoService system)
     {
@@ -387,7 +388,11 @@ public sealed class BenchmarkService : IBenchmarkService
         await cmd.ExecuteNonQueryAsync(ct);
         _initializedPath = dbPath;
 
-        await EnsureStarterSuitesAsync(ct);
+        if (_starterSuitesSeededPath != dbPath)
+        {
+            await EnsureStarterSuitesAsync(ct);
+            _starterSuitesSeededPath = dbPath;
+        }
     }
 
     private async Task EnsureStarterSuitesAsync(CancellationToken ct)

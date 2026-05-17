@@ -26,7 +26,7 @@ namespace Aether.Tests
         {
             var redactor = new RedactionService();
             var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            var value = $"{home}/project api_key=abcdefghi123456789 bearer token_123456789012345 sk-abc123456789abcdef ghp_abcdefghijklmnopqrstuvwxyz1234567890?token=querysecret123456&key=anothersecret123";
+            var value = $"{home}/project api_key=abcdefghi123456789 bearer token_123456789012345 sk-abc123456789abcdef ghp_abcdefghijklmnopqrstuvwxyz1234567890?token=querysecret123456&key=anothersecret123&password=urlpass123456 AWS=AKIA1234567890ABCDEF password=localpass123456 azure_key=azuresecret123456";
             var redacted = redactor.Redact(value);
 
             False(redacted.Contains(home, StringComparison.Ordinal), "home path should be redacted");
@@ -36,6 +36,10 @@ namespace Aether.Tests
             False(redacted.Contains("ghp_abcdefghijklmnopqrstuvwxyz1234567890", StringComparison.Ordinal), "GitHub token should be redacted");
             False(redacted.Contains("querysecret123456", StringComparison.Ordinal), "query token should be redacted");
             False(redacted.Contains("anothersecret123", StringComparison.Ordinal), "query key should be redacted");
+            False(redacted.Contains("urlpass123456", StringComparison.Ordinal), "query password should be redacted");
+            False(redacted.Contains("AKIA1234567890ABCDEF", StringComparison.Ordinal), "AWS access key should be redacted");
+            False(redacted.Contains("localpass123456", StringComparison.Ordinal), "password assignment should be redacted");
+            False(redacted.Contains("azuresecret123456", StringComparison.Ordinal), "Azure key assignment should be redacted");
             return Task.CompletedTask;
         }
 
@@ -363,6 +367,15 @@ namespace Aether.Tests
             return Task.CompletedTask;
         }
 
+        public static Task XttsApiTemplateEscapesConfiguredPaths()
+        {
+            var template = new LocalAiSetupService(new PythonHealthValidator()).BuildXttsApiScript("/models/'''/xtts", "/tmp/out\nnext");
+            True(template.Contains("MODEL_DIR = '/models/\\'\\'\\'/xtts'", StringComparison.Ordinal), "template should escape embedded Python quotes");
+            True(template.Contains("OUTPUT_DIR = '/tmp/out\\nnext'", StringComparison.Ordinal), "template should escape embedded newlines");
+            False(template.Contains("MODEL_DIR = r'''", StringComparison.Ordinal), "template should not use injectable raw triple-quoted path literals");
+            return Task.CompletedTask;
+        }
+
         public static async Task EmbeddingClientSurfacesActionableHintWhenEndpointIsNotImplemented()
         {
             using var temp = new TempDir();
@@ -565,11 +578,38 @@ namespace Aether.Tests
                 var json = await File.ReadAllTextAsync(localVault);
                 True(json.Contains("v2:", StringComparison.Ordinal), "fallback vault should use versioned encrypted values");
                 False(json.Contains("sk-test-secret", StringComparison.Ordinal), "fallback vault should not contain plaintext");
+
+                var values = JsonSerializer.Deserialize<Dictionary<string, string>>(json) ?? [];
+                var firstCiphertext = values["openai-api-key"];
+                await store.StoreAsync("openai-api-key", "sk-test-secret");
+                values = JsonSerializer.Deserialize<Dictionary<string, string>>(await File.ReadAllTextAsync(localVault)) ?? [];
+                var secondCiphertext = values["openai-api-key"];
+                True(secondCiphertext.StartsWith("v2:", StringComparison.Ordinal), "fallback ciphertext should keep the versioned prefix");
+                False(string.Equals(firstCiphertext, secondCiphertext, StringComparison.Ordinal), "fallback ciphertext should use a fresh per-secret salt");
+                var decoded = Convert.FromBase64String(secondCiphertext["v2:".Length..]);
+                True(decoded.Length > 32, "fallback ciphertext should include salt, IV, and encrypted payload");
             }
             finally
             {
                 Environment.SetEnvironmentVariable("AETHER_DISABLE_OS_KEYCHAIN", previous);
             }
+        }
+
+        public static async Task SettingsSavePrunesPerConversationMemoryOverrides()
+        {
+            using var temp = new TempDir();
+            var path = temp.PathFor("settings.json");
+            var service = new SettingsService(path);
+            service.Settings.Memory.Enabled = true;
+            service.Settings.Memory.EnabledPerConversation["inherits-global"] = true;
+            service.Settings.Memory.EnabledPerConversation["explicit-off"] = false;
+
+            await service.SaveAsync();
+
+            False(service.Settings.Memory.EnabledPerConversation.ContainsKey("inherits-global"),
+                "settings should drop redundant per-conversation memory overrides");
+            Equal(false, service.Settings.Memory.EnabledPerConversation["explicit-off"],
+                "settings should keep overrides that differ from the global memory setting");
         }
 
         public static async Task RuntimeProfileValidation()

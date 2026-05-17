@@ -13,6 +13,8 @@ public sealed class SecretStore : ISecretStore
     private readonly ISecretBackend _osBackend;
     private const string Prefix = "secret:";
     private const string EncryptedPrefix = "v2:";
+    private const int SaltBytes = 16;
+    private const int AesIvBytes = 16;
     private const int KeyIterations = 100_000;
 
     public SecretStore(ISettingsService settings)
@@ -214,9 +216,11 @@ public sealed class SecretStore : ISecretStore
         aes.Mode = CipherMode.CBC;
         aes.Padding = PaddingMode.PKCS7;
 
-        var key = DeriveKey(GetOrCreateLocalKeyMaterial());
+        var salt = RandomNumberGenerator.GetBytes(SaltBytes);
+        var key = DeriveKey(GetOrCreateLocalKeyMaterial(), salt);
         using var encryptor = aes.CreateEncryptor(key, aes.IV);
         using var ms = new MemoryStream();
+        ms.Write(salt, 0, salt.Length);
         ms.Write(aes.IV, 0, aes.IV.Length);
 
         using (var cs = new CryptoStream(ms, encryptor, CryptoStreamMode.Write))
@@ -230,29 +234,57 @@ public sealed class SecretStore : ISecretStore
 
     private byte[] DecryptWithAes(byte[] ciphertext)
     {
+        var keyMaterial = GetOrCreateLocalKeyMaterial();
+        if (ciphertext.Length >= SaltBytes + AesIvBytes + 1)
+        {
+            try
+            {
+                var salt = new byte[SaltBytes];
+                Array.Copy(ciphertext, 0, salt, 0, salt.Length);
+                return DecryptPayload(ciphertext, SaltBytes, DeriveKey(keyMaterial, salt));
+            }
+            catch (CryptographicException)
+            {
+                // Values written before per-secret salts were introduced have
+                // the same v2 prefix but contain only IV + ciphertext.
+            }
+            catch (ArgumentException)
+            {
+            }
+        }
+
+        return DecryptPayload(ciphertext, 0, DeriveLegacyKey(keyMaterial));
+    }
+
+    private static byte[] DecryptPayload(byte[] ciphertext, int offset, byte[] key)
+    {
         using var aes = Aes.Create();
         aes.KeySize = 256;
         aes.Mode = CipherMode.CBC;
         aes.Padding = PaddingMode.PKCS7;
 
-        var key = DeriveKey(GetOrCreateLocalKeyMaterial());
-        var iv = new byte[aes.IV.Length];
-        Array.Copy(ciphertext, 0, iv, 0, iv.Length);
+        var iv = new byte[AesIvBytes];
+        if (ciphertext.Length < offset + iv.Length)
+            throw new CryptographicException("Invalid local secret payload.");
+
+        Array.Copy(ciphertext, offset, iv, 0, iv.Length);
         aes.IV = iv;
 
         using var decryptor = aes.CreateDecryptor(key, aes.IV);
-        using var ms = new MemoryStream(ciphertext, iv.Length, ciphertext.Length - iv.Length);
+        using var ms = new MemoryStream(ciphertext, offset + iv.Length, ciphertext.Length - offset - iv.Length);
         using var cs = new CryptoStream(ms, decryptor, CryptoStreamMode.Read);
         using var resultMs = new MemoryStream();
         cs.CopyTo(resultMs);
         return resultMs.ToArray();
     }
 
-    private static byte[] DeriveKey(byte[] keyMaterial)
+    private static byte[] DeriveKey(byte[] keyMaterial, byte[] salt)
     {
-        var salt = Encoding.UTF8.GetBytes("aether-secret-store");
         return Rfc2898DeriveBytes.Pbkdf2(keyMaterial, salt, KeyIterations, HashAlgorithmName.SHA256, 32);
     }
+
+    private static byte[] DeriveLegacyKey(byte[] keyMaterial) =>
+        DeriveKey(keyMaterial, Encoding.UTF8.GetBytes("aether-secret-store"));
 
     private interface ISecretBackend
     {

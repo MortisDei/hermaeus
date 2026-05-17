@@ -225,6 +225,7 @@ namespace Aether.Tests
         public string DisplayName => "Fake Voice";
         public VoiceCapability Capabilities => VoiceCapability.TextToSpeech | VoiceCapability.Local;
         public (int Major, int Minor) RequiredPythonVersion => (3, 12);
+        public bool IsInstalled => true;
 
         public VoiceProviderDetection Detect() => new VoiceProviderDetection(true, "Available", "Fake provider available", null);
 

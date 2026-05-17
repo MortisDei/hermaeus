@@ -48,6 +48,7 @@ public sealed class MemoryStore : IMemoryStore
 
             await using var c = new SqliteConnection(Cs);
             await c.OpenAsync(ct);
+            var ftsExisted = await TableExistsAsync(c, "memories_fts", ct);
             var cmd = c.CreateCommand();
             cmd.CommandText = @"
             CREATE TABLE IF NOT EXISTS memories (
@@ -78,7 +79,8 @@ public sealed class MemoryStore : IMemoryStore
             CREATE INDEX IF NOT EXISTS idx_updated ON memories(updated_at DESC);
             CREATE INDEX IF NOT EXISTS idx_source_conversation ON memories(source_conversation_id);";
             await cmd.ExecuteNonQueryAsync(ct);
-            await RebuildFtsAsync(c, ct);
+            if (!ftsExisted)
+                await RebuildFtsAsync(c, ct);
             _initializedPath = dbPath;
         }
         finally
@@ -267,6 +269,21 @@ public sealed class MemoryStore : IMemoryStore
         return r;
     }
 
+    public async Task<List<Memory>> GetRecentByConversationAsync(string conversationId, int limit = 10, CancellationToken ct = default)
+    {
+        await EnsureInitializedAsync(ct);
+        await using var c = new SqliteConnection(Cs);
+        await c.OpenAsync(ct);
+        var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT * FROM memories WHERE source_conversation_id = $src AND is_archived = 0 ORDER BY updated_at DESC LIMIT $limit";
+        cmd.Parameters.AddWithValue("$src", conversationId);
+        cmd.Parameters.AddWithValue("$limit", Math.Max(1, limit));
+        var r = new List<Memory>();
+        await using var rd = await cmd.ExecuteReaderAsync(ct);
+        while (await rd.ReadAsync(ct)) r.Add(Map(rd));
+        return r;
+    }
+
     public async Task<int> GetCountByConversationAsync(string conversationId, bool includeArchived = false, CancellationToken ct = default)
     {
         await EnsureInitializedAsync(ct);
@@ -337,6 +354,15 @@ public sealed class MemoryStore : IMemoryStore
         insert.Parameters.AddWithValue("$content", memory.Content);
         insert.Parameters.AddWithValue("$tags", tagsJson);
         await insert.ExecuteNonQueryAsync(ct);
+    }
+
+    private static async Task<bool> TableExistsAsync(SqliteConnection c, string table, CancellationToken ct)
+    {
+        await using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = $table";
+        cmd.Parameters.AddWithValue("$table", table);
+        var value = await cmd.ExecuteScalarAsync(ct);
+        return value is not null;
     }
 
     private static async Task<List<Memory>> SearchLikeAsync(SqliteConnection c, string q, CancellationToken ct)

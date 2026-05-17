@@ -141,8 +141,9 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
         var rootWithSep = workspaceRoot.EndsWith(Path.DirectorySeparatorChar)
             ? workspaceRoot
             : workspaceRoot + Path.DirectorySeparatorChar;
-        if (!full.StartsWith(rootWithSep, StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(full, workspaceRoot, StringComparison.OrdinalIgnoreCase))
+        var comparison = PathComparison;
+        if (!full.StartsWith(rootWithSep, comparison)
+            && !string.Equals(full, workspaceRoot, comparison))
         {
             throw new InvalidOperationException("Agent path escapes the workspace root.");
         }
@@ -201,12 +202,13 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
         var rootFull = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         var current = Path.GetFullPath(fullPath);
         var directory = Path.GetDirectoryName(current);
+        var comparison = PathComparison;
         while (!string.IsNullOrWhiteSpace(directory)
-               && directory.StartsWith(rootFull, StringComparison.OrdinalIgnoreCase))
+               && directory.StartsWith(rootFull, comparison))
         {
             if (IsSymlink(directory))
                 return true;
-            if (string.Equals(directory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), rootFull, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(directory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), rootFull, comparison))
                 break;
             directory = Path.GetDirectoryName(directory);
         }
@@ -228,6 +230,9 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
 
     private static string ToRelative(string root, string fullPath) =>
         Path.GetRelativePath(root, fullPath).Replace('\\', '/');
+
+    private static StringComparison PathComparison =>
+        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
     private static string CompactSnippet(string text)
     {

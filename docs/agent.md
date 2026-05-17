@@ -15,6 +15,8 @@ safety gates:
 - Builds explicit task state and compact context packs.
 - Records `task_state.json`, `agent.log`, and `agent.trace.jsonl` under the
   Aether data root.
+- Validates task IDs with a short alphanumeric, dash, and underscore allowlist
+  before resolving task directories.
 - Shows a review queue for waiting or blocked tasks with approve/reject
   actions for recorded approvals.
 
@@ -70,6 +72,8 @@ across task sessions.
 ## Safety & Transparency
 
 - All risky actions are classified before execution.
+- Workspace path checks stay case-sensitive on Linux and macOS, and
+  case-insensitive on Windows, matching the platform filesystem rules.
 - Approval queue provides clear visibility into pending actions.
 - Full trace logs enable debugging and auditing of agent behavior.
 - Local execution means no data leaves your machine.

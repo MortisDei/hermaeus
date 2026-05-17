@@ -55,6 +55,9 @@ internal static class AgentTests
 
     Throws<InvalidOperationException>(() => store.GetTaskDirectory(".."));
     Throws<InvalidOperationException>(() => store.GetTaskDirectory(" "));
+    Throws<InvalidOperationException>(() => store.GetTaskDirectory("con"));
+    Throws<InvalidOperationException>(() => store.GetTaskDirectory("task/one"));
+    Throws<InvalidOperationException>(() => store.GetTaskDirectory(new string('a', 81)));
     return Task.CompletedTask;
     }
 

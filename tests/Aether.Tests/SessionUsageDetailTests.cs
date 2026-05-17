@@ -25,6 +25,7 @@ public class SessionUsageDetailTests
         public Task<List<Memory>> SearchAsync(string query, System.Threading.CancellationToken ct = default) => Task.FromResult(_mems.Where(m => m.Content.Contains(query)).ToList());
         public Task<List<Memory>> GetByImportanceAsync(double minScore, System.Threading.CancellationToken ct = default) => Task.FromResult(_mems.Where(m => m.ImportanceScore >= minScore).ToList());
         public Task<List<Memory>> GetRecentAsync(int limit = 10, System.Threading.CancellationToken ct = default) => Task.FromResult(_mems.OrderByDescending(m => m.UpdatedAt).Take(limit).ToList());
+        public Task<List<Memory>> GetRecentByConversationAsync(string conversationId, int limit = 10, System.Threading.CancellationToken ct = default) => Task.FromResult(_mems.Where(m => m.SourceConversationId == conversationId).OrderByDescending(m => m.UpdatedAt).Take(limit).ToList());
         public Task<int> GetCountByConversationAsync(string conversationId, bool includeArchived = false, System.Threading.CancellationToken ct = default) => Task.FromResult(_mems.Count(m => m.SourceConversationId == conversationId));
         public Task<Dictionary<string,int>> GetCountsByConversationAsync(IEnumerable<string> conversationIds, bool includeArchived = false, System.Threading.CancellationToken ct = default) => Task.FromResult(conversationIds.ToDictionary(id => id, id => _mems.Count(m => m.SourceConversationId == id)));
     }

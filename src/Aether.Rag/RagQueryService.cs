@@ -38,7 +38,7 @@ public sealed class RagQueryService
 
     // In-memory chunk cache per dataset  (dataset_id → chunks)
     private const int MaxCachedDatasets = 8;
-    private const long MaxCacheBytes = 256L * 1024L * 1024L;
+    private const long MaxCacheBytes = 128L * 1024L * 1024L;
     private readonly Dictionary<string, List<RagChunk>> _cache = [];
     private readonly Dictionary<string, long> _cacheSizes = [];
     private readonly LinkedList<string> _cacheOrder = new();
@@ -84,8 +84,17 @@ public sealed class RagQueryService
         {
             if (_cacheSizes.Remove(datasetId, out var oldSize))
                 _cacheBytes -= oldSize;
-            _cache[datasetId] = chunks;
             var size = EstimateCacheSize(chunks);
+            if (size > MaxCacheBytes)
+            {
+                _cache.Remove(datasetId);
+                var oldNode = _cacheOrder.Find(datasetId);
+                if (oldNode is not null)
+                    _cacheOrder.Remove(oldNode);
+                return;
+            }
+
+            _cache[datasetId] = chunks;
             _cacheSizes[datasetId] = size;
             _cacheBytes += size;
             TouchCacheUnsafe(datasetId);

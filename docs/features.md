@@ -107,6 +107,9 @@
 - Local AI setup scans are voice-provider aware. Kokoro setup checks Kokoro
   Python imports and does not show XTTS script or model actions unless XTTS v2
   is selected.
+- Generated XTTS helper scripts escape configured model/output paths before
+  writing Python source, so unusual quotes or newlines in paths cannot alter the
+  script body.
 - The Local AI setup can now detect available GPU backends when creating
   a Python venv and will suggest a device (`cuda` for NVIDIA, `rocm` for
   AMD/ROCm, `mps` for Apple Silicon, or `cpu`) to use for TTS/model inference.
@@ -140,7 +143,10 @@
   and features that may send data remotely.
 - Runtime logs with filters, copy, and redacted diagnostics export.
 - Runtime log entries are redacted before disk persistence and archive
-  rotation avoids overwriting archives created in the same second.
+  rotation avoids overwriting archives created in the same second. Redaction
+  covers common API keys, bearer tokens, GitHub-style tokens, AWS-style access
+  keys, Azure-style key assignments, password parameters, query-string secrets,
+  and home paths.
 - Local tasks, reminders, and app-running scheduled automations.
 - Tray integration, minimize-to-tray, local hotkeys, and Windows system-wide
   hotkeys.
@@ -159,8 +165,8 @@
   local AI setup, voice, UI, memory, and trust while preserving one save flow.
 - OS-backed secret references and redacted process logs.
 - Local fallback secrets use an app-created per-data-root key file restricted
-  to the current user and atomic vault writes. Backup excludes both the fallback
-  vault and key file.
+  to the current user, a random salt per encrypted value, and atomic vault
+  writes. Backup excludes both the fallback vault and key file.
 - Data-safety test harness for migration, backup/restore, and redaction.
 - Backup restore rejects traversal and path-prefix escape entries before
   extraction, while still excluding the local fallback secret vault and key.

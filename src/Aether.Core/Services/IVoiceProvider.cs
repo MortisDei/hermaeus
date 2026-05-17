@@ -8,6 +8,7 @@ public interface IVoiceProvider
     string DisplayName { get; }
     VoiceCapability Capabilities { get; }
     (int Major, int Minor) RequiredPythonVersion { get; }
+    bool IsInstalled { get; }
 
     VoiceProviderDetection Detect();
     VoiceInstallPlan InstallPlan();

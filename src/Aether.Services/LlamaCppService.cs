@@ -88,7 +88,7 @@ public sealed class LlamaCppService : IDisposable
         
         if (!success)
         {
-            yield return new LlmStreamEvent(error, IsFinal: true);
+            yield return LlmStreamEvent.Error(error);
             yield break;
         }
 

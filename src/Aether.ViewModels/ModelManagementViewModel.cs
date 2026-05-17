@@ -14,6 +14,7 @@ public partial class ModelManagementViewModel : ObservableObject
     private readonly IToastService _toasts;
     private long _lastRefreshUtcTicks = DateTime.MinValue.Ticks;
     private readonly List<LlmModel> _modelCache = [];
+    private readonly object _modelCacheLock = new();
 
     public ObservableCollection<ModelProfileItemViewModel> Models { get; } = [];
 
@@ -35,17 +36,26 @@ public partial class ModelManagementViewModel : ObservableObject
         IsLoading = true; StatusMessage = string.Empty; IsError = false;
         try
         {
-            var lastTicks = Interlocked.Read(ref _lastRefreshUtcTicks);
-            var lastRefresh = new DateTime(lastTicks, DateTimeKind.Utc);
-            var useCache = !ForceRefresh
-                           && _modelCache.Count > 0
-                           && DateTime.UtcNow - lastRefresh < TimeSpan.FromMinutes(2);
-            var models = useCache ? _modelCache.ToList() : await _llm.GetModelsAsync();
-            if (!useCache)
+            List<LlmModel>? cachedModels;
+            lock (_modelCacheLock)
             {
-                _modelCache.Clear();
-                _modelCache.AddRange(models);
-                Interlocked.Exchange(ref _lastRefreshUtcTicks, DateTime.UtcNow.Ticks);
+                var lastTicks = Interlocked.Read(ref _lastRefreshUtcTicks);
+                var lastRefresh = new DateTime(lastTicks, DateTimeKind.Utc);
+                var useCache = !ForceRefresh
+                               && _modelCache.Count > 0
+                               && DateTime.UtcNow - lastRefresh < TimeSpan.FromMinutes(2);
+                cachedModels = useCache ? _modelCache.ToList() : null;
+            }
+
+            var models = cachedModels ?? await _llm.GetModelsAsync();
+            if (cachedModels is null)
+            {
+                lock (_modelCacheLock)
+                {
+                    _modelCache.Clear();
+                    _modelCache.AddRange(models);
+                    Interlocked.Exchange(ref _lastRefreshUtcTicks, DateTime.UtcNow.Ticks);
+                }
             }
 
             _profiles.ApplyProfiles(models);
@@ -58,7 +68,7 @@ public partial class ModelManagementViewModel : ObservableObject
 
             StatusMessage = models.Count == 0
                 ? "No models reported by the running backends"
-                : $"{models.Count} model(s) loaded{(useCache ? " from cache" : "")}";
+                : $"{models.Count} model(s) loaded{(cachedModels is not null ? " from cache" : "")}";
             ForceRefresh = false;
         }
         catch (Exception ex) { StatusMessage = ex.Message; IsError = true; }
@@ -72,7 +82,8 @@ public partial class ModelManagementViewModel : ObservableObject
 
         await _profiles.SaveAsync(item.ToProfile());
         item.ApplySavedState();
-        _profiles.ApplyProfiles(_modelCache);
+        lock (_modelCacheLock)
+            _profiles.ApplyProfiles(_modelCache);
         _toasts.Show("Model profile saved", $"Updated metadata for {item.DisplayName}.", ToastKind.Success);
     }
 
@@ -83,7 +94,8 @@ public partial class ModelManagementViewModel : ObservableObject
 
         await _profiles.ResetAsync(item.ModelId);
         item.Reset();
-        _profiles.ApplyProfiles(_modelCache);
+        lock (_modelCacheLock)
+            _profiles.ApplyProfiles(_modelCache);
         _toasts.Show("Model profile reset", $"Aether metadata for {item.RawName} was cleared.", ToastKind.Info);
     }
 

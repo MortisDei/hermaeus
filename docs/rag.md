@@ -90,7 +90,9 @@ traces, and native eval support.
 - This prevents heavy network activity during queries and makes reranker
   installation an explicit, observable action.
 - The in-memory query cache is bounded by dataset count and an approximate
-  byte ceiling so large embedding sets cannot grow without limit.
+  byte ceiling. A single dataset that exceeds the byte ceiling is queried but
+  not retained in cache, so very large embedding sets cannot grow memory use
+  without limit.
 
 ## Eval Harness
 

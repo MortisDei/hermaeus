@@ -35,6 +35,7 @@ public class SessionUsageTests
         public Task<List<Aether.Core.Models.Memory>> SearchAsync(string query, System.Threading.CancellationToken ct = default) => throw new System.NotImplementedException();
         public Task<List<Aether.Core.Models.Memory>> GetByImportanceAsync(double minScore, System.Threading.CancellationToken ct = default) => throw new System.NotImplementedException();
         public Task<List<Aether.Core.Models.Memory>> GetRecentAsync(int limit = 10, System.Threading.CancellationToken ct = default) => throw new System.NotImplementedException();
+        public Task<List<Aether.Core.Models.Memory>> GetRecentByConversationAsync(string conversationId, int limit = 10, System.Threading.CancellationToken ct = default) => throw new System.NotImplementedException();
         public Task<int> GetCountByConversationAsync(string conversationId, bool includeArchived = false, System.Threading.CancellationToken ct = default)
             => Task.FromResult(_counts.TryGetValue(conversationId, out var v) ? v : 0);
         public Task<Dictionary<string,int>> GetCountsByConversationAsync(IEnumerable<string> conversationIds, bool includeArchived = false, System.Threading.CancellationToken ct = default)

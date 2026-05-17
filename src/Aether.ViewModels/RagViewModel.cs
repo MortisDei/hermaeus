@@ -265,7 +265,7 @@ public partial class RagViewModel : ObservableObject
         StatusMessage = string.Empty;
         _ingestCts = new CancellationTokenSource();
         
-        Action? restoreServices = null;
+        Func<Task>? restoreServices = null;
 
         try
         {
@@ -382,7 +382,18 @@ public partial class RagViewModel : ObservableObject
             IngestStage = string.Empty;
             _ingestCts?.Dispose();
             _ingestCts = null;
-            restoreServices?.Invoke();
+            if (restoreServices is not null)
+            {
+                try
+                {
+                    await restoreServices();
+                }
+                catch (Exception ex)
+                {
+                    _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Rag,
+                        $"RAG service restore failed: {ex.Message}"));
+                }
+            }
         }
     }
 

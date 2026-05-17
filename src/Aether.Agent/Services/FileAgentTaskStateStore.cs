@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Aether.Agent.Models;
 using Aether.Core.Services;
 
@@ -6,6 +7,14 @@ namespace Aether.Agent.Services;
 
 public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
 {
+    private const int MaxTaskIdLength = 80;
+    private static readonly Regex SafeTaskIdRegex = new("^[A-Za-z0-9_-]+$", RegexOptions.Compiled);
+    private static readonly HashSet<string> WindowsReservedNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "con", "prn", "aux", "nul",
+        "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8", "com9",
+        "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9"
+    };
     private readonly ISettingsService _settings;
 
     public FileAgentTaskStateStore(ISettingsService settings)
@@ -140,9 +149,17 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
 
     private static string NormalizeTaskId(string taskId)
     {
-        var safeId = Path.GetFileName(taskId.Trim());
-        if (string.IsNullOrWhiteSpace(safeId) || safeId is "." or "..")
+        var trimmed = taskId.Trim();
+        var safeId = Path.GetFileName(trimmed);
+        if (string.IsNullOrWhiteSpace(safeId)
+            || !string.Equals(trimmed, safeId, StringComparison.Ordinal)
+            || safeId is "." or ".."
+            || safeId.Length > MaxTaskIdLength
+            || !SafeTaskIdRegex.IsMatch(safeId)
+            || WindowsReservedNames.Contains(safeId))
+        {
             throw new InvalidOperationException("Agent task id is invalid.");
+        }
 
         return safeId;
     }

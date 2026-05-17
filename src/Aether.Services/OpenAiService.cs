@@ -100,7 +100,7 @@ public sealed class OpenAiService : IDisposable
         
         if (!success)
         {
-            yield return new LlmStreamEvent(error, IsFinal: true);
+            yield return LlmStreamEvent.Error(error);
             yield break;
         }
 
@@ -197,7 +197,7 @@ public sealed class OpenAiService : IDisposable
 
     private static async IAsyncEnumerable<LlmStreamEvent> YieldEventError(string message)
     {
-        yield return new LlmStreamEvent(message, IsFinal: true);
+        yield return LlmStreamEvent.Error(message);
         await Task.CompletedTask;
     }
 

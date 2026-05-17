@@ -10,12 +10,14 @@ namespace Aether.Services;
 public sealed class OllamaService : IDisposable
 {
     private const string ProviderTagValue = "ollama";
+    private static readonly HttpClient SharedHttp = new() { Timeout = TimeSpan.FromMinutes(10) };
     private readonly IRuntimeProfileService _profiles;
-    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(10) };
+    private readonly HttpClient _http;
 
     public OllamaService(IRuntimeProfileService profiles)
     {
         _profiles = profiles;
+        _http = SharedHttp;
     }
 
     public async Task<List<LlmModel>> GetModelsAsync(CancellationToken ct = default)
@@ -90,7 +92,7 @@ public sealed class OllamaService : IDisposable
         var profile = _profiles.Profiles.FirstOrDefault(p => p.Id == profileId);
         if (profile is null)
         {
-            yield return new LlmStreamEvent("*Ollama runtime profile not found.*", IsFinal: true);
+            yield return LlmStreamEvent.Error("*Ollama runtime profile not found.*");
             yield break;
         }
 
@@ -166,7 +168,6 @@ public sealed class OllamaService : IDisposable
 
     public void Dispose()
     {
-        _http.Dispose();
     }
 
     private sealed record TagsResponse([property: JsonPropertyName("models")] List<OllamaModel>? Models);

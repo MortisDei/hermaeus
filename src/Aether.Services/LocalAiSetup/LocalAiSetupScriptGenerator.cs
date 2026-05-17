@@ -4,8 +4,8 @@ internal static class LocalAiSetupScriptGenerator
 {
     internal static string BuildXttsApiScript(string? modelDirectory = null, string? outputDirectory = null)
     {
-        var modelDefault = string.IsNullOrWhiteSpace(modelDirectory) ? "None" : $"r'''{modelDirectory.Trim()}'''";
-        var outputDefault = string.IsNullOrWhiteSpace(outputDirectory) ? "None" : $"r'''{outputDirectory.Trim()}'''";
+        var modelDefault = PythonStringOrNone(modelDirectory);
+        var outputDefault = PythonStringOrNone(outputDirectory);
         return $$"""
 #!/usr/bin/env python3
 import argparse
@@ -132,5 +132,18 @@ if __name__ == "__main__":
         load_model()
     uvicorn.run(app, host=settings.host, port=settings.port)
 """;
+    }
+
+    private static string PythonStringOrNone(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return "None";
+
+        var escaped = value.Trim()
+            .Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("'", "\\'", StringComparison.Ordinal)
+            .Replace("\r", "\\r", StringComparison.Ordinal)
+            .Replace("\n", "\\n", StringComparison.Ordinal);
+        return $"'{escaped}'";
     }
 }

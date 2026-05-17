@@ -83,7 +83,7 @@ Key hardening features:
 
 - Localhost binding for managed services
 - Shell-free process launch via `ProcessStartInfo.ArgumentList`
-- AES-256-CBC encryption for secrets with PBKDF2 key derivation
+- AES-256-CBC encryption for fallback secrets with PBKDF2 and per-secret salts
 - Mandatory SHA256 hash verification for critical model downloads
 - Symlink rejection for path traversal hardening
 - OS credential-store integration with local fallback

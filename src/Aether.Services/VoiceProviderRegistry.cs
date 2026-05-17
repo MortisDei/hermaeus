@@ -59,28 +59,28 @@ public sealed class VoiceProviderRegistry : IVoiceProviderRegistry
                 "Kokoro",
                 "Fast local readback. Tiny, Apache-licensed, and low-drama.",
                 VoiceProviderCategory.Recommended,
-                ((KokoroVoiceProvider)_providers[VoiceProvider.Kokoro]).IsInstalled,
+                _providers[VoiceProvider.Kokoro].IsInstalled,
                 _providers[VoiceProvider.Kokoro].Capabilities),
             new VoiceProviderInfo(
                 VoiceProvider.F5Tts,
                 "F5-TTS",
                 "Advanced cloning and experimental high-quality voices. Pretrained models are CC-BY-NC.",
                 VoiceProviderCategory.Advanced,
-                ((F5TtsVoiceProvider)_providers[VoiceProvider.F5Tts]).IsInstalled,
+                _providers[VoiceProvider.F5Tts].IsInstalled,
                 _providers[VoiceProvider.F5Tts].Capabilities),
             new VoiceProviderInfo(
                 VoiceProvider.XttsV2,
                 "XTTS v2",
                 "Coqui-compatible voice cloning backend for XTTS v2 workflows. Requires Python 3.11.",
                 VoiceProviderCategory.Advanced,
-                ((XttsV2VoiceProvider)_providers[VoiceProvider.XttsV2]).IsInstalled,
+                _providers[VoiceProvider.XttsV2].IsInstalled,
                 _providers[VoiceProvider.XttsV2].Capabilities),
             new VoiceProviderInfo(
                 VoiceProvider.OpenAi,
                 "OpenAI",
                 "Remote voice synthesis via OpenAI API.",
                 VoiceProviderCategory.Advanced,
-                ((OpenAiVoiceProvider)_providers[VoiceProvider.OpenAi]).IsInstalled,
+                _providers[VoiceProvider.OpenAi].IsInstalled,
                 _providers[VoiceProvider.OpenAi].Capabilities)
         }
             .OrderBy(p => (int)p.Category)

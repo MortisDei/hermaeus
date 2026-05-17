@@ -9,6 +9,53 @@ FIFO for changelog entries, 10 versions in this file max. Remove older entries
 and append them to `docs/changelog-archive.md` to maintain the 10 version
 limit.
 
+## [0.9.11-alpha] - 2026-05-18
+
+### Changed
+
+- Project version metadata bumped to `0.9.11-alpha`.
+- Local fallback secrets now derive encryption keys with a fresh random salt per
+  stored ciphertext while still reading older fallback vault entries.
+- RAG query caching now uses a tighter byte ceiling and refuses to retain a
+  single oversized dataset cache entry.
+- Conversation auto-summary now checks recent summary memories through a
+  targeted conversation query instead of loading a broad recent-memory page.
+- Benchmark starter suites are seeded once per process and data root.
+- Ollama HTTP access now uses a shared client owned by the service type instead
+  of creating a disposable client per service instance.
+
+### Fixed
+
+- Agent workspace path checks now use case-sensitive comparisons on Linux and
+  macOS while preserving case-insensitive checks on Windows.
+- Agent task IDs now use an explicit safe-character allowlist, reject path
+  separators, reject Windows reserved device names, and enforce a length cap.
+- Generated XTTS API scripts now escape configured paths as normal Python
+  string literals, preventing quote or newline injection into the script body.
+- Memory FTS tables now rebuild only when the FTS table is first created,
+  avoiding a cold-start full reindex on every process start.
+- Model management cache refreshes are now lock-protected so overlapping UI or
+  background refreshes cannot race the cache list.
+- Per-conversation memory override entries that merely duplicate the global
+  setting are pruned during settings saves, and the remaining override map is
+  capped.
+- Voice provider installation checks now use the `IVoiceProvider` contract
+  instead of concrete Kokoro/XTTS casts.
+- Main-window folder filter refresh now restores its reload guard with
+  `finally`, so exceptions cannot leave filter changes suppressed.
+- RAG ingest service restoration is awaited and logged if restoration fails
+  after an ingest attempt.
+- Runtime log redaction now covers AWS-style access keys, Azure-style key
+  assignments, and password query or assignment parameters.
+- Runtime log archive collision handling now has a bounded suffix search with a
+  GUID fallback.
+
+### Tests
+
+- Added coverage for salted local fallback secret ciphertexts, escaped XTTS
+  script paths, stronger Agent task ID validation, settings memory override
+  pruning, and expanded log redaction patterns.
+
 ## [0.9.10-alpha] - 2026-05-17
 
 ### Changed

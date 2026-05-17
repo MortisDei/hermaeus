@@ -199,18 +199,24 @@ public partial class MainWindowViewModel : ObservableObject
     {
         var selected = SelectedFolderFilter;
         _refreshingFolderFilters = true;
-        FolderFilters.Clear();
-        FolderFilters.Add("All");
-        foreach (var folder in convs.Select(c => c.Folder.Trim())
-                     .Where(f => f.Length > 0)
-                     .Distinct(StringComparer.OrdinalIgnoreCase)
-                     .Order(StringComparer.OrdinalIgnoreCase))
+        try
         {
-            FolderFilters.Add(folder);
-        }
+            FolderFilters.Clear();
+            FolderFilters.Add("All");
+            foreach (var folder in convs.Select(c => c.Folder.Trim())
+                         .Where(f => f.Length > 0)
+                         .Distinct(StringComparer.OrdinalIgnoreCase)
+                         .Order(StringComparer.OrdinalIgnoreCase))
+            {
+                FolderFilters.Add(folder);
+            }
 
-        SelectedFolderFilter = FolderFilters.Contains(selected) ? selected : "All";
-        _refreshingFolderFilters = false;
+            SelectedFolderFilter = FolderFilters.Contains(selected) ? selected : "All";
+        }
+        finally
+        {
+            _refreshingFolderFilters = false;
+        }
     }
 
     private static ConversationItemViewModel ToItem(Aether.Core.Models.Conversation c) => new()

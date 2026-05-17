@@ -53,6 +53,11 @@ public interface IMemoryStore
     Task<List<Memory>> GetRecentAsync(int limit = 10, CancellationToken ct = default);
 
     /// <summary>
+    /// Get recent memories for a single source conversation without scanning unrelated recent rows.
+    /// </summary>
+    Task<List<Memory>> GetRecentByConversationAsync(string conversationId, int limit = 10, CancellationToken ct = default);
+
+    /// <summary>
     /// Get the exact count of stored (non-archived by default) memories for a single conversation.
     /// </summary>
     Task<int> GetCountByConversationAsync(string conversationId, bool includeArchived = false, CancellationToken ct = default);
