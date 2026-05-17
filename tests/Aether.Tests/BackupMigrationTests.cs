@@ -70,18 +70,25 @@ namespace Aether.Tests
             Directory.CreateDirectory(previous);
             File.WriteAllText(Path.Combine(previous, "conversations.db"), "db");
             File.WriteAllText(Path.Combine(previous, "conversations.db-shm"), "shm");
+            Directory.CreateDirectory(Path.Combine(previous, "agent", "tasks", "task-1"));
+            File.WriteAllText(Path.Combine(previous, "agent", "task_index.db"), "index");
+            File.WriteAllText(Path.Combine(previous, "agent", "tasks", "task-1", "task_state.json"), "state");
 
             var service = NewSettings(temp);
             service.Settings.DataManagement.DataRootDirectory = next;
             var result = await service.SaveAsync(previous);
 
             Equal(true, result.DataMigrated, "migration should report moved data");
-            Equal(2, result.FilesMoved, "all db files should move");
+            Equal(4, result.FilesMoved, "all db and Agent files should move");
             True(File.Exists(Path.Combine(next, "conversations.db")), "db should exist in new root");
             True(File.Exists(Path.Combine(next, "conversations.db-shm")), "sidecar db file should exist in new root");
+            True(File.Exists(Path.Combine(next, "agent", "task_index.db")), "Agent task index should move");
+            True(File.Exists(Path.Combine(next, "agent", "tasks", "task-1", "task_state.json")), "Agent task JSON should move");
             False(File.Exists(Path.Combine(previous, "conversations.db")), "old db should not be left behind");
             True(result.BackupDirectory is not null && File.Exists(Path.Combine(result.BackupDirectory, "conversations.db")),
                 "migration should keep a backup copy in the target backup folder");
+            True(result.BackupDirectory is not null && File.Exists(Path.Combine(result.BackupDirectory, "agent", "tasks", "task-1", "task_state.json")),
+                "migration should keep a backup copy of Agent state");
         }
 
         public static async Task BackupExcludesSecretsAndRefusesOverwrite()
@@ -134,6 +141,30 @@ namespace Aether.Tests
 
             await ThrowsAsync<InvalidOperationException>(() => backups.RestoreAsync(backup));
             False(File.Exists(Path.Combine(unsafePeer, "escape.txt")), "restore should not write outside the data root prefix");
+        }
+
+        public static async Task BackupRestoreRejectsCaseVariantSiblingOnCaseSensitiveFileSystems()
+        {
+            if (OperatingSystem.IsWindows())
+                return;
+
+            using var temp = new TempDir();
+            var root = temp.PathFor("AetherRoot");
+            var unsafePeer = temp.PathFor("aetherroot");
+            Directory.CreateDirectory(root);
+            Directory.CreateDirectory(unsafePeer);
+            var backup = temp.PathFor("unsafe-case.zip");
+            using (var archive = ZipFile.Open(backup, ZipArchiveMode.Create))
+            {
+                archive.CreateEntry("../aetherroot/escape.txt");
+            }
+
+            var service = NewSettings(temp);
+            service.Settings.DataManagement.DataRootDirectory = root;
+            var backups = new BackupService(service);
+
+            await ThrowsAsync<InvalidOperationException>(() => backups.RestoreAsync(backup));
+            False(File.Exists(Path.Combine(unsafePeer, "escape.txt")), "restore should not treat case-variant siblings as the data root");
         }
     }
 }

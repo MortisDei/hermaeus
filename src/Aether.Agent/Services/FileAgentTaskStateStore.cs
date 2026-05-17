@@ -203,8 +203,7 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
             [
                 new SqliteMigration(1, (_, _) => Task.FromResult(false))
             ], ct);
-            if (await IsIndexEmptyAsync(c, ct))
-                await RebuildIndexAsync(c, ct);
+            await ReconcileIndexAsync(c, ct);
 
             _initializedIndexPath = path;
         }
@@ -214,15 +213,7 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
         }
     }
 
-    private static async Task<bool> IsIndexEmptyAsync(SqliteConnection c, CancellationToken ct)
-    {
-        await using var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT COUNT(*) FROM agent_task_index";
-        var value = await cmd.ExecuteScalarAsync(ct);
-        return Convert.ToInt32(value) == 0;
-    }
-
-    private async Task RebuildIndexAsync(SqliteConnection c, CancellationToken ct)
+    private async Task ReconcileIndexAsync(SqliteConnection c, CancellationToken ct)
     {
         foreach (var file in Directory.EnumerateFiles(Path.Combine(AgentRoot, "tasks"), "task_state.json", SearchOption.AllDirectories))
         {

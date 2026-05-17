@@ -9,6 +9,29 @@ FIFO for changelog entries, 10 versions in this file max. Remove older entries
 and append them to `docs/changelog-archive.md` to maintain the 10 version
 limit.
 
+## [0.9.13-alpha] - 2026-05-18
+
+### Changed
+
+- Project version metadata bumped to `0.9.13-alpha`.
+- Agent task-index initialization now reconciles existing `task_state.json`
+  files on each first initialization per process, so JSON state remains the
+  source of truth if a previous save wrote JSON before the SQLite index update.
+- Data-root migration now moves Agent state under `agent/`, including
+  `task_index.db`, task JSON, logs, traces, and workspace memory files.
+
+### Fixed
+
+- Backup restore containment checks now use case-sensitive path comparison on
+  Linux and macOS while preserving case-insensitive checks on Windows, blocking
+  case-variant sibling directory escapes.
+
+### Tests
+
+- Added regression coverage for case-sensitive backup restore containment,
+  Agent state data-root migration, and Agent task-index reconciliation from
+  JSON source files.
+
 ## [0.9.12-alpha] - 2026-05-18
 
 ### Changed

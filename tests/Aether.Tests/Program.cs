@@ -1,6 +1,8 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using Aether.Agent.Models;
 using Aether.Agent.Services;
@@ -128,6 +130,46 @@ internal static class AgentTests
     True(recent.Any(item => item.TaskId == "indexed-task"), "recent task list should use the SQLite index");
     var review = await store.ListReviewQueueAsync();
     True(review.Any(item => item.TaskId == "indexed-task"), "review queue should use the SQLite index");
+    }
+
+    public static async Task AgentTaskIndexReconcilesJsonSourceOfTruth()
+    {
+    using var temp = new TempDir();
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    await store.SaveAsync(new AgentTaskState
+    {
+        TaskId = "indexed-task",
+        Goal = "Existing indexed task",
+        Status = AgentTaskStatus.Running
+    });
+
+    var orphan = new AgentTaskState
+    {
+        TaskId = "json-only-task",
+        Goal = "Recover JSON-only task",
+        Status = AgentTaskStatus.WaitingForUser,
+        ActiveStep = "Review",
+        Summary = "Recovered from JSON",
+        ApprovalHistory = [new AgentApprovalRecord("draft_patch", true, DateTime.UtcNow)]
+    };
+    var orphanDir = store.GetTaskDirectory(orphan.TaskId);
+    Directory.CreateDirectory(orphanDir);
+    var jsonOptions = new JsonSerializerOptions
+    {
+        WriteIndented = true,
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+        PropertyNameCaseInsensitive = true,
+        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.SnakeCaseLower) }
+    };
+    await File.WriteAllTextAsync(Path.Combine(orphanDir, "task_state.json"), JsonSerializer.Serialize(orphan, jsonOptions));
+
+    var reloaded = new FileAgentTaskStateStore(settings);
+    var recent = await reloaded.ListRecentAsync();
+    True(recent.Any(item => item.TaskId == orphan.TaskId), "initialization should reconcile JSON task files missing from the index");
+    var review = await reloaded.ListReviewQueueAsync();
+    True(review.Any(item => item.TaskId == orphan.TaskId), "review queue should include reconciled JSON task files");
     }
 
     public static async Task AgentWorkspaceMemoryPersistsNotesPerWorkspace()

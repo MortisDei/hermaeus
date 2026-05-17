@@ -6,6 +6,8 @@ namespace Aether.Services;
 
 public sealed class SettingsService : ISettingsService
 {
+    private sealed record MigrationFile(string SourcePath, string RelativePath);
+
     private const int MaxPerConversationMemoryOverrides = 1000;
     private static readonly JsonSerializerOptions Opts = new() { WriteIndented = true };
     private static readonly string DefaultDir = Path.Combine(
@@ -98,7 +100,7 @@ public sealed class SettingsService : ISettingsService
 
         var files = EnumerateMigrationFiles(previous).ToList();
         var conflicts = files
-            .Select(f => Path.Combine(next, Path.GetFileName(f)))
+            .Select(f => Path.Combine(next, f.RelativePath))
             .Where(File.Exists)
             .ToList();
 
@@ -121,22 +123,27 @@ public sealed class SettingsService : ISettingsService
         if (files.Count == 0)
             return new SettingsSaveResult(false, previous, next, null, 0);
 
-        foreach (var name in files)
+        foreach (var file in files)
         {
-            var target = Path.Combine(next, Path.GetFileName(name));
+            var target = Path.Combine(next, file.RelativePath);
             if (File.Exists(target))
                 throw new IOException($"Cannot move Aether data because '{target}' already exists.");
         }
 
         var backupDir = Path.Combine(next, ".aether-backups", DateTime.UtcNow.ToString("yyyyMMdd-HHmmss"));
         Directory.CreateDirectory(backupDir);
-        foreach (var name in files)
-            File.Copy(name, Path.Combine(backupDir, Path.GetFileName(name)));
-
-        foreach (var name in files)
+        foreach (var file in files)
         {
-            var target = Path.Combine(next, Path.GetFileName(name));
-            File.Move(name, target);
+            var backupTarget = Path.Combine(backupDir, file.RelativePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(backupTarget)!);
+            File.Copy(file.SourcePath, backupTarget);
+        }
+
+        foreach (var file in files)
+        {
+            var target = Path.Combine(next, file.RelativePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            File.Move(file.SourcePath, target);
         }
 
         if (!string.Equals(previous, DefaultDir, StringComparison.OrdinalIgnoreCase)
@@ -172,23 +179,37 @@ public sealed class SettingsService : ISettingsService
         settings.Memory.EnabledPerConversation = keep;
     }
 
-    private static IEnumerable<string> EnumerateMigrationFiles(string root)
+    private static IEnumerable<MigrationFile> EnumerateMigrationFiles(string root)
     {
-        foreach (var file in EnumerateFamily(root, "conversations.db*"))
+        foreach (var file in EnumerateFamily(root, "conversations.db*", root))
             yield return file;
-        foreach (var file in EnumerateFamily(root, "memories.db*"))
+        foreach (var file in EnumerateFamily(root, "memories.db*", root))
             yield return file;
-        foreach (var file in EnumerateFamily(root, "benchmarks.db*"))
+        foreach (var file in EnumerateFamily(root, "benchmarks.db*", root))
+            yield return file;
+        foreach (var file in EnumerateDirectory(root, "agent"))
             yield return file;
     }
 
-    private static IEnumerable<string> EnumerateFamily(string root, string pattern)
+    private static IEnumerable<MigrationFile> EnumerateFamily(string root, string pattern, string relativeRoot)
     {
         if (!Directory.Exists(root))
             return [];
 
         return Directory.EnumerateFiles(root, pattern)
-            .Distinct(StringComparer.OrdinalIgnoreCase);
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(path => new MigrationFile(path, Path.GetRelativePath(relativeRoot, path)));
+    }
+
+    private static IEnumerable<MigrationFile> EnumerateDirectory(string root, string relativeDirectory)
+    {
+        var directory = Path.Combine(root, relativeDirectory);
+        if (!Directory.Exists(directory))
+            return [];
+
+        return Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(path => new MigrationFile(path, Path.GetRelativePath(root, path)));
     }
 
     private static void ValidateDataRoot(string path)

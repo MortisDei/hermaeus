@@ -155,6 +155,8 @@
   hotkeys.
 - Toast notifications throughout the app with opaque popup backgrounds.
 - Configurable data root with migration, backup, restore, and conflict refusal.
+- Data-root migration includes Agent task state and workspace memory under
+  `agent/`.
 - Local SQLite stores record schema versions and run additive migrations through
   a shared migration runner.
 - Settings, small local state files, generated setup scripts, and export files

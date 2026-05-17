@@ -17,7 +17,7 @@ safety gates:
   Aether data root.
 - Maintains `agent/task_index.db` as a SQLite catalog for recent-task and review
   queue lists, with `task_state.json` remaining the source of truth for full
-  task state.
+  task state. Initialization reconciles JSON task files back into the index.
 - Validates task IDs with a short alphanumeric, dash, and underscore allowlist
   before resolving task directories.
 - Shows a review queue for waiting or blocked tasks with approve/reject

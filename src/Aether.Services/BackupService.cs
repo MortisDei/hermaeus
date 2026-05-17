@@ -52,6 +52,7 @@ public sealed class BackupService : IBackupService
         Directory.CreateDirectory(root);
         var rootWithSeparator = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
             + Path.DirectorySeparatorChar;
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         using var zip = ZipFile.OpenRead(backupPath);
         foreach (var entry in zip.Entries)
         {
@@ -60,8 +61,8 @@ public sealed class BackupService : IBackupService
                 continue;
 
             var target = Path.GetFullPath(Path.Combine(root, entry.FullName));
-            if (!target.StartsWith(rootWithSeparator, StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(target, root, StringComparison.OrdinalIgnoreCase))
+            if (!target.StartsWith(rootWithSeparator, comparison)
+                && !string.Equals(target, root, comparison))
                 throw new InvalidOperationException("Backup contains an unsafe path.");
             if (File.Exists(target) && !allowOverwrite)
                 throw new IOException($"Restore refused because '{target}' already exists.");
