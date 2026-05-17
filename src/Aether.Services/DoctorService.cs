@@ -8,9 +8,11 @@ namespace Aether.Services;
 
 public sealed class DoctorService : IDoctorService
 {
-    private const string DefaultEmbeddingModelName = "nomic-embed-text-v1.5";
-    private const string DefaultEmbeddingFileName = "nomic-embed-text-v1.5-Q4_K_M.gguf";
-    private const string DefaultEmbeddingDownloadUrl = "https://huggingface.co/bartowski/nomic-embed-text-v1.5-GGUF/resolve/main/nomic-embed-text-v1.5-Q4_K_M.gguf";
+    private static readonly EmbeddingModelDownloadSpec DefaultEmbeddingDownload = new(
+        "nomic-embed-text-v1.5",
+        "nomic-embed-text-v1.5-Q4_K_M.gguf",
+        "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/f750a25aba2d24830d874eb4e1af468f37248a37/nomic-embed-text-v1.5.Q4_K_M.gguf",
+        "d4e388894e09cf3816e8b0896d81d265b55e7a9fff9ab03fe8bf4ef5e11295ac");
 
     private readonly ISettingsService _settings;
     private readonly IRuntimeProfileService _runtimes;
@@ -22,6 +24,7 @@ public sealed class DoctorService : IDoctorService
     private readonly PythonHealthValidator _pythonValidator;
     private readonly IReranker _reranker;
     private readonly ModelDownloadService _downloads;
+    private readonly EmbeddingModelDownloadSpec _embeddingDownload;
 
     public DoctorService(
         ISettingsService settings,
@@ -32,7 +35,9 @@ public sealed class DoctorService : IDoctorService
         IEmbeddingService embeddings,
         ISystemInfoService systemInfo,
         PythonHealthValidator pythonValidator,
-        IReranker reranker)
+        IReranker reranker,
+        ModelDownloadService? downloads = null,
+        EmbeddingModelDownloadSpec? embeddingDownload = null)
     {
         _settings = settings;
         _runtimes = runtimes;
@@ -43,7 +48,8 @@ public sealed class DoctorService : IDoctorService
         _systemInfo = systemInfo;
         _pythonValidator = pythonValidator;
         _reranker = reranker;
-        _downloads = new ModelDownloadService();
+        _downloads = downloads ?? new ModelDownloadService();
+        _embeddingDownload = embeddingDownload ?? DefaultEmbeddingDownload;
     }
 
     public async Task<DoctorReport> ScanAsync(CancellationToken ct = default)
@@ -460,31 +466,68 @@ public sealed class DoctorService : IDoctorService
         var destinationDirectory = ResolveEmbeddingModelDirectory();
         Directory.CreateDirectory(destinationDirectory);
 
-        var destinationPath = Path.Combine(destinationDirectory, DefaultEmbeddingFileName);
+        var destinationPath = Path.Combine(destinationDirectory, _embeddingDownload.FileName);
+        if (File.Exists(destinationPath))
+        {
+            progress?.Report($"Verifying existing embedding model at {destinationPath}...");
+            if (await _downloads.VerifyHashAsync(destinationPath, _embeddingDownload.Sha256, progress, ct))
+            {
+                await ConfigureInstalledEmbeddingModelAsync(destinationPath, ct);
+                progress?.Report($"Embedding model ready at {destinationPath}");
+                return true;
+            }
+
+            TryDelete(destinationPath);
+            progress?.Report("Existing embedding model failed verification and will be downloaded again.");
+        }
+
         progress?.Report($"Downloading embedding model to {destinationPath}...");
 
         var downloadProgress = progress is null
             ? null
             : new Progress<DownloadProgress>(p => progress.Report($"Downloading embedding model... {p.PercentComplete:F1}%"));
 
-        var result = await _downloads.DownloadAsync(DefaultEmbeddingDownloadUrl, destinationPath, downloadProgress, ct);
+        var result = await _downloads.DownloadAsync(_embeddingDownload.Url, destinationPath, downloadProgress, ct);
         if (!result.Success)
         {
             progress?.Report(result.Message);
             return false;
         }
 
-        if (string.IsNullOrWhiteSpace(_settings.Settings.Rag.EmbeddingModel)
-            || !LooksLikeEmbeddingModelName(_settings.Settings.Rag.EmbeddingModel))
-            _settings.Settings.Rag.EmbeddingModel = DefaultEmbeddingModelName;
+        progress?.Report("Verifying embedding model SHA256...");
+        if (!await _downloads.VerifyHashAsync(destinationPath, _embeddingDownload.Sha256, progress, ct))
+        {
+            TryDelete(destinationPath);
+            progress?.Report("Embedding model verification failed. The downloaded file was removed.");
+            return false;
+        }
+
+        await ConfigureInstalledEmbeddingModelAsync(destinationPath, ct);
+        progress?.Report($"Embedding model ready at {destinationPath}");
+        return true;
+    }
+
+    private async Task ConfigureInstalledEmbeddingModelAsync(string destinationPath, CancellationToken ct)
+    {
+        _settings.Settings.Rag.EmbeddingModel = _embeddingDownload.ModelName;
 
         var embeddingServer = _settings.Settings.ManagedServers.FirstOrDefault(s => s.EmbeddingsMode);
-        if (embeddingServer is not null && string.IsNullOrWhiteSpace(embeddingServer.ModelPath))
+        if (embeddingServer is not null)
             embeddingServer.ModelPath = destinationPath;
 
         await _settings.SaveAsync();
-        progress?.Report($"Embedding model ready at {destinationPath}");
-        return true;
+    }
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+        catch
+        {
+        }
     }
 
     private async Task<DoctorCheck> CheckGpuAsync(CancellationToken ct)

@@ -9,6 +9,28 @@ FIFO for changelog entries, 10 versions in this file max. Remove older entries
 and append them to `docs/changelog-archive.md` to maintain the 10 version
 limit.
 
+## [0.9.14-alpha] - 2026-05-18
+
+### Changed
+
+- Project version metadata bumped to `0.9.14-alpha`.
+- Doctor embedding model install now downloads the default
+  `nomic-embed-text-v1.5` GGUF from a pinned Hugging Face commit and verifies
+  its SHA256 before configuring RAG.
+- Doctor embedding install now updates the embedding server model path to the
+  downloaded model, replacing stale or wrong paths instead of only filling an
+  empty value.
+
+### Fixed
+
+- Failed embedding model hash verification now removes the downloaded file and
+  reports the verification failure through Doctor progress.
+
+### Tests
+
+- Added regression coverage for successful verified Doctor embedding installs,
+  stale embedding server path replacement, and hash mismatch rejection.
+
 ## [0.9.13-alpha] - 2026-05-18
 
 ### Changed

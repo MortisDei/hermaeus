@@ -135,6 +135,9 @@
   embedding backend health until one is installed, and leaves Linux global
   hotkeys out of problem reporting because system-wide support is not available
   there yet.
+- Doctor embedding model install downloads the default model from a pinned
+  Hugging Face commit, verifies SHA256, removes failed downloads, and points the
+  embedding server at the verified file.
 
 ## System Integration
 

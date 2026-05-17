@@ -303,6 +303,85 @@ namespace Aether.Tests
             Equal("helloworld", await File.ReadAllTextAsync(destination), "download should append to existing temp file");
         }
 
+        public static async Task DoctorEmbeddingInstallVerifiesHashAndConfiguresServer()
+        {
+            using var temp = new TempDir();
+            var root = temp.PathFor("AI");
+            Directory.CreateDirectory(Path.Combine(root, "Models"));
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.LocalAiAssetsRoot = root;
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            settings.Settings.Rag.EmbeddingModel = "chat-model";
+            settings.Settings.ManagedServers.Clear();
+            settings.Settings.ManagedServers.Add(new ServerConfig
+            {
+                Name = "Embeddings",
+                EmbeddingsMode = true,
+                ModelPath = temp.PathFor("missing/wrong.gguf")
+            });
+
+            var content = "fake embedding model";
+            var downloads = new ModelDownloadService(new HttpClient(new CapturingRangeHttpHandler(content)));
+            var spec = new EmbeddingModelDownloadSpec(
+                "test-embed-model",
+                "test-embed-model.gguf",
+                "https://example.test/test-embed-model.gguf",
+                ExpectedSha256(content));
+            var doctor = new DoctorService(
+                settings,
+                new RuntimeProfileService(settings),
+                new FakeVoiceProviderRegistry(settings),
+                new FakeSecretStore(),
+                new SqliteRagStore(settings),
+                new ThrowingEmbeddingService(),
+                new FakeSystemInfo(),
+                new PythonHealthValidator(),
+                new NoOpReranker(),
+                downloads,
+                spec);
+
+            var ok = await doctor.InstallEmbeddingModelAsync();
+            var expectedPath = Path.Combine(root, "Models", "test-embed-model.gguf");
+
+            True(ok, "embedding model install should succeed when hash matches");
+            Equal(content, await File.ReadAllTextAsync(expectedPath), "downloaded embedding model should be written to the model folder");
+            Equal("test-embed-model", settings.Settings.Rag.EmbeddingModel, "install should configure the embedding model name when the previous value was not an embedding model");
+            Equal(expectedPath, settings.Settings.ManagedServers.Single(s => s.EmbeddingsMode).ModelPath, "install should update stale embedding server model paths");
+        }
+
+        public static async Task DoctorEmbeddingInstallRejectsHashMismatch()
+        {
+            using var temp = new TempDir();
+            var root = temp.PathFor("AI");
+            Directory.CreateDirectory(Path.Combine(root, "Models"));
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.LocalAiAssetsRoot = root;
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var downloads = new ModelDownloadService(new HttpClient(new CapturingRangeHttpHandler("tampered")));
+            var spec = new EmbeddingModelDownloadSpec(
+                "test-embed-model",
+                "test-embed-model.gguf",
+                "https://example.test/test-embed-model.gguf",
+                ExpectedSha256("expected"));
+            var doctor = new DoctorService(
+                settings,
+                new RuntimeProfileService(settings),
+                new FakeVoiceProviderRegistry(settings),
+                new FakeSecretStore(),
+                new SqliteRagStore(settings),
+                new ThrowingEmbeddingService(),
+                new FakeSystemInfo(),
+                new PythonHealthValidator(),
+                new NoOpReranker(),
+                downloads,
+                spec);
+
+            var ok = await doctor.InstallEmbeddingModelAsync();
+
+            False(ok, "embedding model install should fail when SHA256 verification fails");
+            False(File.Exists(Path.Combine(root, "Models", "test-embed-model.gguf")), "failed verification should remove the downloaded file");
+        }
+
         public static Task LlamaServerReleaseDataCoversSupportedPlatforms()
         {
             var service = new LlamaServerSetupService();

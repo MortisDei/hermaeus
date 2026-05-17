@@ -22,7 +22,8 @@ traces, versioned SQLite schema migrations, and native eval support.
 
 - Aether requires an embedding model to run the embedding server. If none is found, the
   **Doctor** panel can automatically download the recommended model (nomic-embed-text-v1.5-Q4_K_M)
-  from Hugging Face.
+  from a pinned Hugging Face commit and verify its SHA256 before configuring
+  the embedding server.
 - Chat or code GGUF files are not treated as embedding models. Doctor will skip
   embedding backend health until a dedicated embedding model is installed or
   selected, avoiding connection-refused noise before setup is complete.

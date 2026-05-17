@@ -37,6 +37,8 @@ public static class HarnessCases
         [new HarnessCase("local AI setup does not ship placeholder hashes", ServiceTests.LocalAiSetupDoesNotShipPlaceholderHashes)],
         [new HarnessCase("local AI setup surfaces Kokoro onboarding", ServiceTests.LocalAiSetupSurfcesKokoroOnboarding)],
         [new HarnessCase("model download resumes with range request", ServiceTests.ModelDownloadResumesWithRangeRequest)],
+        [new HarnessCase("Doctor embedding install verifies hash and configures server", ServiceTests.DoctorEmbeddingInstallVerifiesHashAndConfiguresServer)],
+        [new HarnessCase("Doctor embedding install rejects hash mismatch", ServiceTests.DoctorEmbeddingInstallRejectsHashMismatch)],
         [new HarnessCase("llama-server release data covers supported platforms", ServiceTests.LlamaServerReleaseDataCoversSupportedPlatforms)],
         [new HarnessCase("OpenAI voice resolves secret references", ServiceTests.OpenAiVoiceResolvesSecretReferences)],
         [new HarnessCase("llama-server PATH lookup skips empty segments", ServiceTests.LlamaServerPathLookupSkipsEmptyPathSegments)],
