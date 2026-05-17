@@ -33,7 +33,7 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
 
     public string GetTaskDirectory(string taskId)
     {
-        var safeId = Path.GetFileName(taskId);
+        var safeId = NormalizeTaskId(taskId);
         return Path.Combine(AgentRoot, "tasks", safeId);
     }
 
@@ -43,7 +43,7 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
         var dir = GetTaskDirectory(state.TaskId);
         Directory.CreateDirectory(dir);
         var path = Path.Combine(dir, "task_state.json");
-        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(state, AgentJson.Options), ct);
+        await AtomicFileWriter.WriteAllTextAsync(path, JsonSerializer.Serialize(state, AgentJson.Options), ct);
     }
 
     public async Task<AgentTaskState?> LoadAsync(string taskId, CancellationToken ct = default)
@@ -136,5 +136,14 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
         Directory.CreateDirectory(dir);
         var json = JsonSerializer.Serialize(trace, AgentJson.Options);
         await File.AppendAllTextAsync(Path.Combine(dir, "agent.trace.jsonl"), json + Environment.NewLine, ct);
+    }
+
+    private static string NormalizeTaskId(string taskId)
+    {
+        var safeId = Path.GetFileName(taskId.Trim());
+        if (string.IsNullOrWhiteSpace(safeId) || safeId is "." or "..")
+            throw new InvalidOperationException("Agent task id is invalid.");
+
+        return safeId;
     }
 }

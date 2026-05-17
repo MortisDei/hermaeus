@@ -3,14 +3,19 @@
 All notable changes to Aether will be documented in this file. Append new versions above the previous version.
 
 The project follows semantic versioning once public release candidates begin.
-Pre-1.0 versions may still change internal APIs and storage details. FIFO for changelog entries, 10 max then move to changlog_achive.md in docs.
+Pre-1.0 versions may still change internal APIs and storage details.
+
+FIFO for changelog entries, 10 versions in this file max. Remove older entries
+and append them to `docs/changelog-archive.md` to maintain the 10 version
+limit.
 
 ## [0.9.10-alpha] - 2026-05-17
 
 ### Changed
 
 - Project version metadata bumped to `0.9.10-alpha`.
-- Settings, local fallback secrets, toast history, and Agent JSON state now use
+- Settings, local fallback secrets, toast history, Agent JSON state,
+  conversation exports, benchmark exports, and generated XTTS scripts now use
   atomic file replacement to reduce corruption risk during interrupted writes.
 - Unreadable `settings.json` files are copied aside with a `.corrupt-*` suffix
   before defaults are loaded.
@@ -473,4 +478,3 @@ Pre-1.0 versions may still change internal APIs and storage details. FIFO for ch
   debugging history.
 - Setup Wizard toolbar icon removed to reduce visual clutter; the wizard
   remains accessible via the Settings panel.
-

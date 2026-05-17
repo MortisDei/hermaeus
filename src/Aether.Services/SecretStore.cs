@@ -39,7 +39,7 @@ public sealed class SecretStore : ISecretStore
         all[name] = EncryptSecret(secret);
         var path = PathForStore();
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(all, new JsonSerializerOptions { WriteIndented = true }), ct);
+        await WriteTextAtomicAsync(path, JsonSerializer.Serialize(all, new JsonSerializerOptions { WriteIndented = true }), ct);
         TryRestrictPermissions(path);
         return $"{Prefix}{name}";
     }
@@ -78,7 +78,7 @@ public sealed class SecretStore : ISecretStore
             return;
         }
 
-        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(all, new JsonSerializerOptions { WriteIndented = true }), ct);
+        await WriteTextAtomicAsync(path, JsonSerializer.Serialize(all, new JsonSerializerOptions { WriteIndented = true }), ct);
         TryRestrictPermissions(path);
     }
 
@@ -119,6 +119,37 @@ public sealed class SecretStore : ISecretStore
                 File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
         }
         catch { }
+    }
+
+    private static async Task WriteTextAtomicAsync(string path, string content, CancellationToken ct)
+    {
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrWhiteSpace(directory))
+            Directory.CreateDirectory(directory);
+
+        var temp = $"{path}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            await File.WriteAllTextAsync(temp, content, ct);
+            TryRestrictPermissions(temp);
+            File.Move(temp, path, overwrite: true);
+        }
+        finally
+        {
+            TryDelete(temp);
+        }
+    }
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+        catch
+        {
+        }
     }
 
     private string KeyPath()

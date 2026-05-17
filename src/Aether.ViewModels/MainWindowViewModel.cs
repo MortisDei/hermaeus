@@ -559,7 +559,7 @@ public partial class MainWindowViewModel : ObservableObject
             var list = ToastHistory.Select(t => new ToastHistoryEntry { Title = t.Title, Message = t.Message, Kind = t.Kind, DurationMs = t.DurationMs, Timestamp = t.Timestamp }).ToList();
             var opts = new System.Text.Json.JsonSerializerOptions { WriteIndented = true };
             var json = System.Text.Json.JsonSerializer.Serialize(list, opts);
-            await File.WriteAllTextAsync(path, json);
+            await WriteTextAtomicAsync(path, json);
         }
         catch (Exception ex)
         {
@@ -573,6 +573,31 @@ public partial class MainWindowViewModel : ObservableObject
         const int MaxHistory = 200;
         while (ToastHistory.Count > MaxHistory)
             ToastHistory.RemoveAt(ToastHistory.Count - 1);
+    }
+
+    private static async Task WriteTextAtomicAsync(string path, string content)
+    {
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrWhiteSpace(directory))
+            Directory.CreateDirectory(directory);
+
+        var temp = $"{path}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            await File.WriteAllTextAsync(temp, content);
+            File.Move(temp, path, overwrite: true);
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(temp))
+                    File.Delete(temp);
+            }
+            catch
+            {
+            }
+        }
     }
 
     [RelayCommand]

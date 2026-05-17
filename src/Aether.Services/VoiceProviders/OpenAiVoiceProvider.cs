@@ -8,17 +8,23 @@ namespace Aether.Services;
 
 public sealed class OpenAiVoiceProvider : ITtsService, IVoiceProvider, IDisposable
 {
-    private static readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(2) };
+    private static readonly HttpClient DefaultHttp = new() { Timeout = TimeSpan.FromMinutes(2) };
     private readonly ISettingsService _settings;
+    private readonly ISecretStore _secrets;
+    private readonly HttpClient _http;
+    private readonly bool _ownsHttp;
 
     public VoiceProvider Id => VoiceProvider.OpenAi;
     public string DisplayName => "OpenAI";
     public VoiceCapability Capabilities => VoiceCapability.TextToSpeech | VoiceCapability.Remote | VoiceCapability.RequiresApiKey;
     public (int Major, int Minor) RequiredPythonVersion => (0, 0); // Remote API, no Python required
 
-    public OpenAiVoiceProvider(ISettingsService settings)
+    public OpenAiVoiceProvider(ISettingsService settings, ISecretStore secrets, HttpClient? http = null)
     {
         _settings = settings;
+        _secrets = secrets;
+        _http = http ?? DefaultHttp;
+        _ownsHttp = http is not null;
     }
 
     public bool IsInstalled => !string.IsNullOrWhiteSpace(_settings.Settings.Llm.OpenAiApiKey);
@@ -121,7 +127,7 @@ public sealed class OpenAiVoiceProvider : ITtsService, IVoiceProvider, IDisposab
 
     private async Task<string> RenderToFileAsync(string text, string? voice, string? outputPath, CancellationToken ct)
     {
-        var key = _settings.Settings.Llm.OpenAiApiKey.Trim();
+        var key = (await _secrets.ResolveAsync(_settings.Settings.Llm.OpenAiApiKey, ct)).Trim();
         if (string.IsNullOrWhiteSpace(key))
             throw new InvalidOperationException("OpenAI API key is missing.");
 
@@ -177,6 +183,7 @@ public sealed class OpenAiVoiceProvider : ITtsService, IVoiceProvider, IDisposab
 
     public void Dispose()
     {
-        // HttpClient is static and shared; do not dispose
+        if (_ownsHttp)
+            _http.Dispose();
     }
 }

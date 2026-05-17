@@ -895,9 +895,30 @@ for check_name, passed in checks:
             return new LocalAiSetupResult(false, $"Refused to overwrite existing script at {target}.");
 
         Directory.CreateDirectory(Path.GetDirectoryName(target) ?? Environment.CurrentDirectory);
-        File.WriteAllText(target, LocalAiSetupScriptGenerator.BuildXttsApiScript(settings.Tts.ModelDirectory, settings.Tts.OutputDirectory));
+        WriteTextAtomic(target, LocalAiSetupScriptGenerator.BuildXttsApiScript(settings.Tts.ModelDirectory, settings.Tts.OutputDirectory));
         progress?.Report($"Wrote {target}");
         return new LocalAiSetupResult(true, $"Created XTTS API script at {target}", target);
+    }
+
+    private static void WriteTextAtomic(string path, string content)
+    {
+        var temp = $"{path}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            File.WriteAllText(temp, content, Encoding.UTF8);
+            File.Move(temp, path, overwrite: true);
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(temp))
+                    File.Delete(temp);
+            }
+            catch
+            {
+            }
+        }
     }
 
     private static LocalAiSetupResult CreateSupportDirectory(string target, IProgress<string>? progress)

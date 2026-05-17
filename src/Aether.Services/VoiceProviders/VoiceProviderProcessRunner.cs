@@ -71,7 +71,16 @@ internal static class VoiceProviderProcessRunner
 
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
-        await process.WaitForExitAsync(ct);
+        try
+        {
+            await process.WaitForExitAsync(ct);
+        }
+        catch (OperationCanceledException)
+        {
+            TryKill(process);
+            throw;
+        }
+
         return (process.ExitCode == 0, log.ToString());
     }
 
@@ -188,7 +197,21 @@ internal static class VoiceProviderProcessRunner
             log.AppendLine(line);
     }
 
+    private static void TryKill(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+                process.Kill(entireProcessTree: true);
+        }
+        catch
+        {
+        }
+    }
+
     private static string QuoteIfNeeded(string value) =>
-        value.Contains(' ', StringComparison.Ordinal) ? $"\"{value}\"" : value;
+        value.Contains(' ', StringComparison.Ordinal) || value.Contains('"', StringComparison.Ordinal)
+            ? $"\"{value.Replace("\"", "\\\"", StringComparison.Ordinal)}\""
+            : value;
 
 }

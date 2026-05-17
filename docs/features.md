@@ -146,6 +146,9 @@
   hotkeys.
 - Toast notifications throughout the app with opaque popup backgrounds.
 - Configurable data root with migration, backup, restore, and conflict refusal.
+- Settings, small local state files, generated setup scripts, and export files
+  use atomic replacement writes, and an unreadable `settings.json` is copied
+  aside before defaults are loaded.
 - Configurable local AI assets root for models, XTTS, venvs, and encoders.
   When both `Models` and `models` exist, Aether prefers the folder containing
   GGUF files for model and reranker defaults.
@@ -156,7 +159,8 @@
   local AI setup, voice, UI, memory, and trust while preserving one save flow.
 - OS-backed secret references and redacted process logs.
 - Local fallback secrets use an app-created per-data-root key file restricted
-  to the current user. Backup excludes both the fallback vault and key file.
+  to the current user and atomic vault writes. Backup excludes both the fallback
+  vault and key file.
 - Data-safety test harness for migration, backup/restore, and redaction.
 - Backup restore rejects traversal and path-prefix escape entries before
   extraction, while still excluding the local fallback secret vault and key.

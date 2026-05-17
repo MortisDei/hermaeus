@@ -18,9 +18,9 @@ public sealed class ConversationExportService : IConversationExportService
 
     public async Task<string> ExportAsync(Conversation conversation, string path, ConversationExportFormat format, CancellationToken ct = default)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
-        await File.WriteAllTextAsync(path, BuildExport(conversation, format), Encoding.UTF8, ct);
-        return path;
+        var full = Path.GetFullPath(path);
+        await WriteTextAtomicAsync(full, BuildExport(conversation, format), ct);
+        return full;
     }
 
     private static string BuildMarkdown(Conversation conversation)
@@ -70,4 +70,31 @@ public sealed class ConversationExportService : IConversationExportService
     }
 
     private static string EscapeHeading(string value) => value.Replace("#", "\\#", StringComparison.Ordinal).Trim();
+
+    private static async Task WriteTextAtomicAsync(string path, string content, CancellationToken ct)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var temp = $"{path}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            await File.WriteAllTextAsync(temp, content, Encoding.UTF8, ct);
+            File.Move(temp, path, overwrite: true);
+        }
+        finally
+        {
+            TryDelete(temp);
+        }
+    }
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+        catch
+        {
+        }
+    }
 }

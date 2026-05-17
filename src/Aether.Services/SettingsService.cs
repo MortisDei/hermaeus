@@ -46,6 +46,7 @@ public sealed class SettingsService : ISettingsService
         }
         catch
         {
+            TryBackupUnreadableSettings(_path);
             Settings = new();
             changed = true;
         }
@@ -72,7 +73,7 @@ public sealed class SettingsService : ISettingsService
                 : MigrateDataRoot(previousDataRootDirectory, Settings.DataManagement.DataRootDirectory);
 
             Directory.CreateDirectory(currentDataRoot);
-            await File.WriteAllTextAsync(_path, JsonSerializer.Serialize(Settings, Opts));
+            await WriteTextAtomicAsync(_path, JsonSerializer.Serialize(Settings, Opts));
         }
         finally
         {
@@ -174,5 +175,50 @@ public sealed class SettingsService : ISettingsService
         var full = Path.GetFullPath(path);
         if (string.Equals(full, root, StringComparison.OrdinalIgnoreCase))
             throw new IOException("Aether data root cannot be the filesystem root.");
+    }
+
+    private static async Task WriteTextAtomicAsync(string path, string content)
+    {
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrWhiteSpace(directory))
+            Directory.CreateDirectory(directory);
+
+        var temp = $"{path}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            await File.WriteAllTextAsync(temp, content);
+            File.Move(temp, path, overwrite: true);
+        }
+        finally
+        {
+            TryDelete(temp);
+        }
+    }
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+        catch
+        {
+        }
+    }
+
+    private static void TryBackupUnreadableSettings(string path)
+    {
+        try
+        {
+            if (!File.Exists(path))
+                return;
+
+            var backupPath = $"{path}.corrupt-{DateTime.UtcNow:yyyyMMddHHmmss}";
+            File.Copy(path, backupPath, overwrite: false);
+        }
+        catch
+        {
+        }
     }
 }

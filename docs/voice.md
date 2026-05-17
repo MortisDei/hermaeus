@@ -86,6 +86,8 @@ binary download for the current platform.
 
 - Voice previews use transient generated audio and delete temporary WAV files
   after playback when a local player needs a file path.
+- OpenAI voice resolves saved `secret:` API key references through the Aether
+  secret store before sending requests.
 - Aether does not cache generated WAV responses.
 - Imported clone samples are copied only when explicitly imported.
 - Voice sample import is available in Settings under TTS configuration.

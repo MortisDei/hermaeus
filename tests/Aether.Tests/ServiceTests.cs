@@ -310,6 +310,51 @@ namespace Aether.Tests
             return Task.CompletedTask;
         }
 
+        public static async Task OpenAiVoiceResolvesSecretReferences()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.Llm.OpenAiApiKey = "secret:openai-api-key";
+            settings.Settings.Llm.OpenAiBaseUrl = "https://api.example.test";
+            var secrets = new ResolvingSecretStore("resolved-openai-key");
+            var handler = new CapturingSpeechHandler();
+            using var http = new HttpClient(handler);
+            using var provider = new OpenAiVoiceProvider(settings, secrets, http);
+            var output = temp.PathFor("voice.wav");
+
+            var result = await provider.GenerateSpeechAsync(new VoiceSynthesisRequest("hello", OutputPath: output, PlayAudio: false));
+
+            True(result.Success, "OpenAI voice request should succeed with fake response");
+            Equal("Bearer resolved-openai-key", handler.AuthorizationHeader, "OpenAI voice should resolve secret references before sending auth");
+            Equal("https://api.example.test/v1/audio/speech", handler.RequestUri, "OpenAI voice should call configured endpoint");
+            True(File.Exists(output), "voice response should be written to requested output path");
+        }
+
+        public static Task LlamaServerPathLookupSkipsEmptyPathSegments()
+        {
+            using var temp = new TempDir();
+            var previousPath = Environment.GetEnvironmentVariable("PATH");
+            var previousCwd = Environment.CurrentDirectory;
+            try
+            {
+                var cwd = temp.PathFor("cwd");
+                Directory.CreateDirectory(cwd);
+                Environment.CurrentDirectory = cwd;
+                File.WriteAllText(Path.Combine(cwd, OperatingSystem.IsWindows() ? "llama-server.exe" : "llama-server"), "not trusted");
+                Environment.SetEnvironmentVariable("PATH", $"{Path.PathSeparator}{Path.PathSeparator}");
+
+                False(new LlamaServerSetupService().IsInstalled(temp.PathFor("missing-install")),
+                    "empty PATH segments should not make the current directory look like an installed llama-server");
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("PATH", previousPath);
+                Environment.CurrentDirectory = previousCwd;
+            }
+
+            return Task.CompletedTask;
+        }
+
         public static Task XttsApiTemplateHasRequiredEndpoints()
         {
             var template = new LocalAiSetupService(new PythonHealthValidator()).BuildXttsApiScript();
@@ -609,6 +654,20 @@ namespace Aether.Tests
             {
                 Environment.SetEnvironmentVariable("AETHER_DISABLE_OS_KEYCHAIN", previous);
             }
+        }
+
+        public static async Task SettingsLoadBacksUpUnreadableJson()
+        {
+            using var temp = new TempDir();
+            var path = temp.PathFor("settings/settings.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            await File.WriteAllTextAsync(path, "{ not valid json");
+
+            var settings = new SettingsService(path);
+            await settings.LoadAsync();
+
+            True(Directory.EnumerateFiles(Path.GetDirectoryName(path)!, "settings.json.corrupt-*").Any(),
+                "unreadable settings should be copied aside before defaults are loaded");
         }
 
         public static async Task SettingsChildViewModelsApplyToSettings()
@@ -1022,6 +1081,38 @@ namespace Aether.Tests
                     Content = new StringContent(_body)
                 });
             }
+        }
+
+        private sealed class CapturingSpeechHandler : HttpMessageHandler
+        {
+            public string AuthorizationHeader { get; private set; } = string.Empty;
+            public string RequestUri { get; private set; } = string.Empty;
+
+            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, System.Threading.CancellationToken cancellationToken)
+            {
+                AuthorizationHeader = request.Headers.Authorization?.ToString() ?? string.Empty;
+                RequestUri = request.RequestUri?.ToString() ?? string.Empty;
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new ByteArrayContent(System.Text.Encoding.ASCII.GetBytes("RIFFfakeWAVE"))
+                });
+            }
+        }
+
+        private sealed class ResolvingSecretStore : ISecretStore
+        {
+            private readonly string _resolved;
+
+            public ResolvingSecretStore(string resolved)
+            {
+                _resolved = resolved;
+            }
+
+            public bool IsReference(string value) => value.StartsWith("secret:", StringComparison.OrdinalIgnoreCase);
+            public Task<string> StoreAsync(string name, string secret, System.Threading.CancellationToken ct = default) => Task.FromResult(secret);
+            public Task<string> ResolveAsync(string valueOrReference, System.Threading.CancellationToken ct = default) =>
+                Task.FromResult(IsReference(valueOrReference) ? _resolved : valueOrReference);
+            public Task<string> BackendLabelAsync(System.Threading.CancellationToken ct = default) => Task.FromResult("Resolving fake");
         }
 
         private sealed class ThrowingEmbeddingService : IEmbeddingService

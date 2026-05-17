@@ -216,7 +216,11 @@ public sealed class LlamaServerSetupService
             var separator = OperatingSystem.IsWindows() ? ';' : ':';
             foreach (var dir in pathEnv.Split(separator))
             {
-                var fullPath = Path.Combine(dir.Trim(), exeName);
+                var trimmed = dir.Trim();
+                if (string.IsNullOrWhiteSpace(trimmed))
+                    continue;
+
+                var fullPath = Path.Combine(trimmed, exeName);
                 if (File.Exists(fullPath))
                     return fullPath;
             }

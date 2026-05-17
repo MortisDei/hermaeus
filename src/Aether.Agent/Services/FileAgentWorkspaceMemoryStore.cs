@@ -78,7 +78,7 @@ public sealed class FileAgentWorkspaceMemoryStore : IAgentWorkspaceMemoryStore
             all.Add(entry);
 
         var path = Path.Combine(workspaceDir, "memory.json");
-        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(all.OrderByDescending(x => x.UpdatedAt).ToList(), AgentJson.Options), ct);
+        await AtomicFileWriter.WriteAllTextAsync(path, JsonSerializer.Serialize(all.OrderByDescending(x => x.UpdatedAt).ToList(), AgentJson.Options), ct);
         return entry;
     }
 
@@ -98,7 +98,7 @@ public sealed class FileAgentWorkspaceMemoryStore : IAgentWorkspaceMemoryStore
             return;
         }
 
-        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(items.OrderByDescending(x => x.UpdatedAt).ToList(), AgentJson.Options), ct);
+        await AtomicFileWriter.WriteAllTextAsync(path, JsonSerializer.Serialize(items.OrderByDescending(x => x.UpdatedAt).ToList(), AgentJson.Options), ct);
     }
 
     private static string NormalizeWorkspaceRoot(string workspaceRoot)

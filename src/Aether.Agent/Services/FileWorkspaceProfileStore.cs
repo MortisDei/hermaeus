@@ -40,7 +40,7 @@ public sealed class FileWorkspaceProfileStore : IWorkspaceProfileStore
 
         var path = GetProfilePath(profile.WorkspaceRoot);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(profile, AgentJson.Options), ct);
+        await AtomicFileWriter.WriteAllTextAsync(path, JsonSerializer.Serialize(profile, AgentJson.Options), ct);
         return profile;
     }
 

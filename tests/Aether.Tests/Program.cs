@@ -46,6 +46,18 @@ internal static class AgentTests
     Equal("Check project", loaded?.Goal, "stored task state should reload");
     }
 
+    public static Task AgentTaskStateRejectsUnsafeTaskIds()
+    {
+    using var temp = new TempDir();
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+
+    Throws<InvalidOperationException>(() => store.GetTaskDirectory(".."));
+    Throws<InvalidOperationException>(() => store.GetTaskDirectory(" "));
+    return Task.CompletedTask;
+    }
+
     public static async Task AgentReviewQueueReflectsApprovalHistory()
     {
     using var temp = new TempDir();

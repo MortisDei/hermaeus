@@ -206,9 +206,9 @@ public sealed class BenchmarkService : IBenchmarkService
         var run = await GetRunAsync(runId, ct) ?? throw new InvalidOperationException("Benchmark run was not found.");
         Directory.CreateDirectory(targetDirectory);
         var basePath = Path.Combine(targetDirectory, $"benchmark-{Sanitize(run.SuiteName)}-{run.StartedAt:yyyyMMdd-HHmmss}");
-        await File.WriteAllTextAsync($"{basePath}.json", JsonSerializer.Serialize(run, JsonOpts), ct);
-        await File.WriteAllTextAsync($"{basePath}.md", ToMarkdown(run), ct);
-        await File.WriteAllTextAsync($"{basePath}.csv", ToCsv(run), ct);
+        await WriteTextAtomicAsync($"{basePath}.json", JsonSerializer.Serialize(run, JsonOpts), ct);
+        await WriteTextAtomicAsync($"{basePath}.md", ToMarkdown(run), ct);
+        await WriteTextAtomicAsync($"{basePath}.csv", ToCsv(run), ct);
         return $"{basePath}.md";
     }
 
@@ -678,5 +678,30 @@ public sealed class BenchmarkService : IBenchmarkService
         var invalid = Path.GetInvalidFileNameChars().ToHashSet();
         var clean = new string(name.Select(ch => invalid.Contains(ch) ? '-' : ch).ToArray()).Trim('-', ' ');
         return string.IsNullOrWhiteSpace(clean) ? "benchmark" : clean;
+    }
+
+    private static async Task WriteTextAtomicAsync(string path, string content, CancellationToken ct)
+    {
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrWhiteSpace(directory))
+            Directory.CreateDirectory(directory);
+
+        var temp = $"{path}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            await File.WriteAllTextAsync(temp, content, ct);
+            File.Move(temp, path, overwrite: true);
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(temp))
+                    File.Delete(temp);
+            }
+            catch
+            {
+            }
+        }
     }
 }
