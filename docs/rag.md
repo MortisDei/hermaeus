@@ -33,7 +33,7 @@ traces, and native eval support.
 
 ## Features
 
--### Ingest
+### Ingest
 
 - RAG ingest for text/markdown and digital PDFs.
 - Markdown ingest preserves heading paths so retrieval can boost structural
@@ -83,8 +83,12 @@ traces, and native eval support.
   automatically during query time.
 - Use the **Doctor** panel to install the reranker model and vocabulary.
 - Doctor shows progress messages during the download and loading steps.
+- Downloads are pinned to a specific Hugging Face commit and verified with
+  SHA256 before the ONNX session or tokenizer loads.
 - This prevents heavy network activity during queries and makes reranker
   installation an explicit, observable action.
+- The in-memory query cache is bounded by dataset count and an approximate
+  byte ceiling so large embedding sets cannot grow without limit.
 
 ## Eval Harness
 

@@ -31,17 +31,17 @@ public sealed class AutomationScheduler : IAutomationScheduler
 
     private void Tick()
     {
-        var now = DateTime.Now;
+        var now = DateTime.UtcNow;
         lock (_sync)
         {
             foreach (var task in _settings.Settings.Tasks.Where(t => t.Status != LocalTaskStatus.Done && t.DueAt is not null && !t.ReminderShown))
             {
-                if (task.DueAt!.Value > now) continue;
+                if (ToUtc(task.DueAt!.Value) > now) continue;
                 task.ReminderShown = true;
                 _toasts.Show("Task due", task.Title, ToastKind.Warning, 7000);
             }
 
-            foreach (var automation in _settings.Settings.Automations.Where(a => a.Enabled && a.NextRunAt is not null && a.NextRunAt <= now))
+            foreach (var automation in _settings.Settings.Automations.Where(a => a.Enabled && a.NextRunAt is not null && ToUtc(a.NextRunAt.Value) <= now))
             {
                 automation.Enabled = false;
                 automation.RunHistory.Insert(0, new AutomationRunHistory
@@ -57,6 +57,14 @@ public sealed class AutomationScheduler : IAutomationScheduler
 
         _ = SaveSettingsAsync();
     }
+
+    internal static DateTime ToUtc(DateTime value) =>
+        value.Kind switch
+        {
+            DateTimeKind.Utc => value,
+            DateTimeKind.Local => value.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(value, DateTimeKind.Local).ToUniversalTime()
+        };
 
     private async Task SaveSettingsAsync()
     {

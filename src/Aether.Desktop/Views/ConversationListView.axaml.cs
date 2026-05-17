@@ -57,6 +57,24 @@ public partial class ConversationListView : UserControl
         }
     }
 
+    private void OnDetailsExportMarkdownClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Control { DataContext: ConversationItemViewModel item }
+            && DataContext is MainWindowViewModel vm)
+        {
+            vm.ExportConversationMarkdownCommand.Execute(item);
+        }
+    }
+
+    private void OnDetailsExportJsonClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Control { DataContext: ConversationItemViewModel item }
+            && DataContext is MainWindowViewModel vm)
+        {
+            vm.ExportConversationJsonCommand.Execute(item);
+        }
+    }
+
     private void OnTitleKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key != Key.Enter) return;

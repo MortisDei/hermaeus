@@ -9,11 +9,11 @@ internal static class LocalAiSetupActionFactory
             [DefaultPythonCommand(), "-m", "venv", target], LocalAiSetupRiskLevel.Medium,
             "Creates an isolated Python environment under the selected AI folder.", false, true, true);
 
-    internal static LocalAiSetupAction InstallXttsAction(string pythonPath, bool canRun) =>
+    internal static LocalAiSetupAction InstallVoiceBackendAction(string pythonPath, IReadOnlyList<string> packages, string providerName, bool canRun) =>
         new("install-voice-backend", LocalAiSetupActionKind.InstallXttsDependencies, "Install Voice Backend Packages", pythonPath,
-            [pythonPath, "-m", "pip", "install", ..LocalAiSetupConstants.XttsPackages], LocalAiSetupRiskLevel.High,
+            [pythonPath, "-m", "pip", "install", ..packages], LocalAiSetupRiskLevel.High,
             canRun
-                ? "Installs voice backend packages into the selected venv. This may use the network."
+                ? $"Installs {providerName} voice backend packages into the selected venv. This may use the network."
                 : "Create or choose a venv before installing voice backend packages.",
             true, true, canRun);
 

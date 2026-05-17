@@ -1,14 +1,28 @@
 namespace Aether.Services.ProcessManagement;
 
-internal static class ExtraArgsParser
+public static class ExtraArgsParser
 {
     public static IEnumerable<string> Split(string extraArgs)
     {
         var current = new System.Text.StringBuilder();
         var inQuotes = false;
+        var escaping = false;
 
         foreach (var ch in extraArgs.Trim())
         {
+            if (escaping)
+            {
+                current.Append(ch);
+                escaping = false;
+                continue;
+            }
+
+            if (ch == '\\')
+            {
+                escaping = true;
+                continue;
+            }
+
             if (ch == '"')
             {
                 inQuotes = !inQuotes;
@@ -25,6 +39,9 @@ internal static class ExtraArgsParser
 
             current.Append(ch);
         }
+
+        if (escaping)
+            current.Append('\\');
 
         if (current.Length > 0)
             yield return current.ToString();

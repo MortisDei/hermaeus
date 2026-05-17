@@ -33,7 +33,8 @@
   `learned_behaviors`, `interests`) stored in a local SQLite database.
 - Dedicated Memories panel to review, search, pin, archive, and delete
   memories.
- - Session Usage panel: view per-conversation memory counts and recent activity to help triage which conversations have stored memories.
+- Session Usage panel: view per-conversation memory counts and recent activity
+  to help triage which conversations have stored memories.
 - Configurable memory controls in Settings: global enable, context injection,
   auto-summary threshold, token budget, encryption toggle, and auto-archive
   days.
@@ -103,6 +104,9 @@
   mini reasoning GGUF file and a platform-specific `llama-server` binary when
   they are missing from the selected AI assets folder. Model downloads verify a
   SHA256 hash when Aether has trusted hash metadata for that exact URL.
+- Local AI setup scans are voice-provider aware. Kokoro setup checks Kokoro
+  Python imports and does not show XTTS script or model actions unless XTTS v2
+  is selected.
 - The Local AI setup can now detect available GPU backends when creating
   a Python venv and will suggest a device (`cuda` for NVIDIA, `rocm` for
   AMD/ROCm, `mps` for Apple Silicon, or `cpu`) to use for TTS/model inference.
@@ -119,6 +123,8 @@
 - Aether Doctor checks for storage, runtimes, voice, RAG, GPU, and secrets.
 - Aether Doctor now validates the configured Python and voice backend
   health before installs or playback.
+- Doctor labels the Python check with the selected voice provider's actual
+  requirement, such as Python 3.12 for Kokoro or Python 3.11 for XTTS v2.
 - Doctor only counts dedicated embedding GGUFs as embedding models, skips
   embedding backend health until one is installed, and leaves Linux global
   hotkeys out of problem reporting because system-wide support is not available
@@ -136,7 +142,7 @@
 - Local tasks, reminders, and app-running scheduled automations.
 - Tray integration, minimize-to-tray, local hotkeys, and Windows system-wide
   hotkeys.
-- Toast notifications throughout the app.
+- Toast notifications throughout the app with opaque popup backgrounds.
 - Configurable data root with migration, backup, restore, and conflict refusal.
 - Configurable local AI assets root for models, XTTS, venvs, and encoders.
   When both `Models` and `models` exist, Aether prefers the folder containing
@@ -202,6 +208,11 @@ tokens for the current context pack.
 Chat Trace Viewer now extends the current RAG and agent trace model with
 selected model/runtime, system prompt, attachment count, token estimate,
 provider usage, latency, and error details for completed sends.
+
+Conversations can be exported from chat as Markdown or JSON. Markdown includes
+conversation metadata, the system prompt when present, role-separated messages,
+model IDs, error or incomplete markers, and attached file paths. JSON preserves
+the stored conversation shape for local migration or inspection.
 
 ### Model and Dataset Lifecycle
 

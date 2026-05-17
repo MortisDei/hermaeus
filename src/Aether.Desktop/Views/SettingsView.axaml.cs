@@ -65,6 +65,58 @@ public partial class SettingsView : UserControl
                 vm.Data.RestoreBackupPath = files[0].Path.LocalPath;
         };
 
+        vm.Data.RequestRestoreBackupConfirmation = async () =>
+        {
+            if (TopLevel.GetTopLevel(this) is not Window owner)
+                return false;
+
+            var dialog = new Window
+            {
+                Title = "Restore backup",
+                Width = 460,
+                Height = 230,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Content = new Border
+                {
+                    Padding = new Thickness(18),
+                    Child = new StackPanel
+                    {
+                        Spacing = 14,
+                        Children =
+                        {
+                            new TextBlock
+                            {
+                                Text = "Backups intentionally exclude secrets.local.key. Restored encrypted secrets may be unreadable unless you preserved the original key.",
+                                TextWrapping = Avalonia.Media.TextWrapping.Wrap
+                            },
+                            new TextBlock
+                            {
+                                Text = "Restore will overwrite data from the backup. Continue?",
+                                TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+                                Opacity = 0.7
+                            },
+                            new StackPanel
+                            {
+                                Orientation = Avalonia.Layout.Orientation.Horizontal,
+                                HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
+                                Spacing = 8,
+                                Children =
+                                {
+                                    new Button { Content = "Cancel", MinWidth = 90 },
+                                    new Button { Content = "Restore", MinWidth = 90 }
+                                }
+                            }
+                        }
+                    }
+                }
+            };
+
+            var buttons = ((StackPanel)((StackPanel)((Border)dialog.Content!).Child!).Children[2]);
+            ((Button)buttons.Children[0]).Click += (_, _) => dialog.Close(false);
+            ((Button)buttons.Children[1]).Click += (_, _) => dialog.Close(true);
+            return await dialog.ShowDialog<bool>(owner);
+        };
+
         vm.Tts.RequestTtsScriptPicker = async () =>
         {
             var files = await PickFileAsync(

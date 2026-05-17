@@ -5,10 +5,44 @@ All notable changes to Aether will be documented in this file. Append new versio
 The project follows semantic versioning once public release candidates begin.
 Pre-1.0 versions may still change internal APIs and storage details.
 
-## [0.9.7-alpha] - Unreleased
+## [0.9.8-alpha] - 2026-05-17
 
 ### Changed
 
+- Toast popups now use an opaque background so underlying page text does not
+  bleed through them.
+- Local AI setup scans are now voice-provider aware: Kokoro no longer triggers
+  XTTS script or XTTS model actions, and package install plans are only shown
+  when the selected provider's imports are missing.
+- The Kokoro voice list now includes the full current English voice set from
+  Kokoro-82M instead of the earlier small sample list.
+
+### Fixed
+
+- Doctor now labels the Python check with the selected voice provider's actual
+  required Python version and no longer renders duplicate diagnostics inline.
+- Agent summary counters now render in separate columns instead of overlapping
+  in the first card.
+- Local AI setup now detects a direct `llama-server` binary path as installed.
+- Project version metadata bumped to `0.9.8-alpha`.
+
+## [0.9.7-alpha] - 2026-05-17
+
+### Changed
+
+- Chat now truncates request history to the selected context window while
+  preserving the full stored conversation, and stopped streaming responses are
+  marked as incomplete instead of reloading as finished messages.
+- Agent tools now execute the supported local read-only operations immediately
+  and can apply draft patches only after approval; commands, network access,
+  installs, commits, pushes, uploads, downloads, and history rewrites remain
+  blocked.
+- RAG query caching is now bounded by approximate memory size as well as dataset
+  count, and cache warmups log their current footprint.
+- Task and automation reminder checks now use UTC internally while preserving
+  local date picker behaviour for older unspecified due dates.
+- SQLite store initialization and settings save/load now use async gates to
+  avoid concurrent initialization or settings writes.
 - First-run startup now skips heavyweight panel loading until the setup wizard
   is completed, so the wizard appears sooner and initial launch feels snappier.
 - Toast notifications now use a toast-shaped toolbar icon, and the stored
@@ -25,6 +59,23 @@ Pre-1.0 versions may still change internal APIs and storage details.
 
 ### Fixed
 
+- Memory injection now uses the full configured budget instead of stopping at
+  half the memory count or half the character budget.
+- XTTS API script generation now delegates to the shared generator instead of
+  carrying a duplicated template in the setup service.
+- ONNX reranker downloads are pinned to a Hugging Face commit and verified with
+  SHA256 before loading.
+- Backup restore now warns that encrypted local secrets need the original
+  `secrets.local.key`, which is intentionally excluded from backups.
+- Benchmark CSV export now normalizes embedded newlines inside fields.
+- Extra local runtime arguments now handle escaped quotes inside quoted values.
+- Voice preview skips audio players that are not present on `PATH`.
+- Doctor embedding model detection no longer treats arbitrary `e5` substrings
+  as embedding model evidence.
+- The Ollama service now disposes its owned `HttpClient` instead of carrying a
+  misleading static-client comment.
+- Conversation export is available for Markdown and JSON from chat and the
+  conversation details flyout.
 - Setup wizard startup now returns early when the wizard is required, instead
   of loading the rest of the app before showing onboarding.
 - Setup wizard step visibility no longer depends on runtime-mutated XAML
@@ -37,6 +88,7 @@ Pre-1.0 versions may still change internal APIs and storage details.
   does not report Linux global hotkeys as a problem.
 - Toast history trimming now preserves newest-first ordering when the cap is
   exceeded.
+- Project version metadata bumped to `0.9.7-alpha`.
 
 ## [0.9.6-alpha] - 2026-05-17
 

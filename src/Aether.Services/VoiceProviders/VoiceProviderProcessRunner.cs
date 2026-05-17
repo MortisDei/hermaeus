@@ -77,12 +77,39 @@ internal static class VoiceProviderProcessRunner
 
     internal static async Task PlayWavFileAsync(string wavFilePath, CancellationToken ct)
     {
-        if (await TryPlayWavFileAsync("paplay", [wavFilePath], ct)) return;
-        if (await TryPlayWavFileAsync("pw-play", [wavFilePath], ct)) return;
-        if (await TryPlayWavFileAsync("aplay", ["-q", wavFilePath], ct)) return;
-        if (await TryPlayWavFileAsync("ffplay", ["-nodisp", "-autoexit", wavFilePath], ct)) return;
+        if (IsOnPath("paplay") && await TryPlayWavFileAsync("paplay", [wavFilePath], ct)) return;
+        if (IsOnPath("pw-play") && await TryPlayWavFileAsync("pw-play", [wavFilePath], ct)) return;
+        if (IsOnPath("aplay") && await TryPlayWavFileAsync("aplay", ["-q", wavFilePath], ct)) return;
+        if (IsOnPath("ffplay") && await TryPlayWavFileAsync("ffplay", ["-nodisp", "-autoexit", wavFilePath], ct)) return;
 
         throw new InvalidOperationException("Could not find paplay, pw-play, aplay, or ffplay to play generated audio.");
+    }
+
+    internal static bool IsOnPath(string command) => FindOnPath(command) is not null;
+
+    internal static string? FindOnPath(string command)
+    {
+        if (string.IsNullOrWhiteSpace(command))
+            return null;
+
+        if (Path.IsPathRooted(command) && File.Exists(command))
+            return command;
+
+        var path = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+        var extensions = OperatingSystem.IsWindows()
+            ? (Environment.GetEnvironmentVariable("PATHEXT") ?? ".EXE;.BAT;.CMD").Split(';', StringSplitOptions.RemoveEmptyEntries)
+            : [string.Empty];
+        foreach (var dir in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        {
+            foreach (var ext in extensions)
+            {
+                var candidate = Path.Combine(dir, command + ext);
+                if (File.Exists(candidate))
+                    return candidate;
+            }
+        }
+
+        return null;
     }
 
     private static async Task<bool> TryPlayWavFileAsync(string command, IReadOnlyList<string> args, CancellationToken ct)
@@ -164,18 +191,4 @@ internal static class VoiceProviderProcessRunner
     private static string QuoteIfNeeded(string value) =>
         value.Contains(' ', StringComparison.Ordinal) ? $"\"{value}\"" : value;
 
-    private static string? FindOnPath(string executableName)
-    {
-        var path = Environment.GetEnvironmentVariable("PATH");
-        if (string.IsNullOrWhiteSpace(path)) return null;
-
-        foreach (var dir in path.Split(Path.PathSeparator))
-        {
-            if (string.IsNullOrWhiteSpace(dir)) continue;
-            var candidate = Path.Combine(dir, executableName);
-            if (File.Exists(candidate)) return candidate;
-        }
-
-        return null;
-    }
 }

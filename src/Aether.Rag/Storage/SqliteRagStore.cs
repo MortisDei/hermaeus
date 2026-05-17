@@ -14,6 +14,7 @@ public sealed class SqliteRagStore
 {
     private readonly ISettingsService _settings;
     private string _initializedPath = string.Empty;
+    private readonly SemaphoreSlim _initGate = new(1, 1);
     private string _cachedConnectionString = string.Empty;
     private string _cachedConnectionPath = string.Empty;
     private string DbPath
@@ -71,10 +72,15 @@ public sealed class SqliteRagStore
         var dbPath = DbPath;
         if (_initializedPath == dbPath && File.Exists(dbPath)) return;
 
-        await using var c = new SqliteConnection(Cs);
-        await c.OpenAsync(ct);
-        var cmd = c.CreateCommand();
-        cmd.CommandText = @"
+        await _initGate.WaitAsync(ct);
+        try
+        {
+            if (_initializedPath == dbPath && File.Exists(dbPath)) return;
+
+            await using var c = new SqliteConnection(Cs);
+            await c.OpenAsync(ct);
+            var cmd = c.CreateCommand();
+            cmd.CommandText = @"
             PRAGMA journal_mode=WAL;
 
             CREATE TABLE IF NOT EXISTS rag_datasets (
@@ -133,23 +139,28 @@ public sealed class SqliteRagStore
                 selected_context_json TEXT NOT NULL DEFAULT '[]',
                 created_at TEXT NOT NULL
             );";
-        await cmd.ExecuteNonQueryAsync(ct);
-        await EnsureColumnAsync(c, "rag_chunks", "source_path", "TEXT NOT NULL DEFAULT ''", ct);
-        await EnsureColumnAsync(c, "rag_chunks", "source_hash", "TEXT NOT NULL DEFAULT ''", ct);
-        await EnsureColumnAsync(c, "rag_chunks", "source_modified_utc", "TEXT", ct);
-        await EnsureColumnAsync(c, "rag_chunks", "chunk_kind", "TEXT NOT NULL DEFAULT 'PlainText'", ct);
-        await EnsureColumnAsync(c, "rag_chunks", "heading_path", "TEXT", ct);
-        await EnsureColumnAsync(c, "rag_chunks", "code_symbol_info", "TEXT", ct);
-        await EnsureColumnAsync(c, "rag_chunks", "page_number", "INTEGER", ct);
-        await EnsureColumnAsync(c, "rag_chunks", "event_type", "TEXT", ct);
-        await EnsureColumnAsync(c, "rag_chunks", "source_url", "TEXT", ct);
-        await EnsureColumnAsync(c, "rag_query_traces", "query_variants_json", "TEXT NOT NULL DEFAULT '[]'", ct);
-        await EnsureColumnAsync(c, "rag_query_traces", "planner_notes", "TEXT NOT NULL DEFAULT ''", ct);
-        await EnsureColumnAsync(c, "rag_query_traces", "context_token_budget", "INTEGER NOT NULL DEFAULT 0", ct);
-        await EnsureColumnAsync(c, "rag_query_traces", "context_packing_summary", "TEXT NOT NULL DEFAULT ''", ct);
-        await EnsureColumnAsync(c, "rag_query_traces", "refused", "INTEGER NOT NULL DEFAULT 0", ct);
-        await EnsureColumnAsync(c, "rag_query_traces", "refusal_reason", "TEXT NOT NULL DEFAULT ''", ct);
-        _initializedPath = dbPath;
+            await cmd.ExecuteNonQueryAsync(ct);
+            await EnsureColumnAsync(c, "rag_chunks", "source_path", "TEXT NOT NULL DEFAULT ''", ct);
+            await EnsureColumnAsync(c, "rag_chunks", "source_hash", "TEXT NOT NULL DEFAULT ''", ct);
+            await EnsureColumnAsync(c, "rag_chunks", "source_modified_utc", "TEXT", ct);
+            await EnsureColumnAsync(c, "rag_chunks", "chunk_kind", "TEXT NOT NULL DEFAULT 'PlainText'", ct);
+            await EnsureColumnAsync(c, "rag_chunks", "heading_path", "TEXT", ct);
+            await EnsureColumnAsync(c, "rag_chunks", "code_symbol_info", "TEXT", ct);
+            await EnsureColumnAsync(c, "rag_chunks", "page_number", "INTEGER", ct);
+            await EnsureColumnAsync(c, "rag_chunks", "event_type", "TEXT", ct);
+            await EnsureColumnAsync(c, "rag_chunks", "source_url", "TEXT", ct);
+            await EnsureColumnAsync(c, "rag_query_traces", "query_variants_json", "TEXT NOT NULL DEFAULT '[]'", ct);
+            await EnsureColumnAsync(c, "rag_query_traces", "planner_notes", "TEXT NOT NULL DEFAULT ''", ct);
+            await EnsureColumnAsync(c, "rag_query_traces", "context_token_budget", "INTEGER NOT NULL DEFAULT 0", ct);
+            await EnsureColumnAsync(c, "rag_query_traces", "context_packing_summary", "TEXT NOT NULL DEFAULT ''", ct);
+            await EnsureColumnAsync(c, "rag_query_traces", "refused", "INTEGER NOT NULL DEFAULT 0", ct);
+            await EnsureColumnAsync(c, "rag_query_traces", "refusal_reason", "TEXT NOT NULL DEFAULT ''", ct);
+            _initializedPath = dbPath;
+        }
+        finally
+        {
+            _initGate.Release();
+        }
     }
 
     private static async Task EnsureColumnAsync(

@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using Aether.Core.Models;
 using Aether.Core.Services;
+using Aether.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -11,6 +12,7 @@ public partial class MainWindowViewModel : ObservableObject
     private readonly IConversationStore _store;
     private readonly IToastService _toasts;
     private readonly IRuntimeLogService _logs;
+    private readonly IConversationExportService _exports;
     private readonly SynchronizationContext? _sync;
     private CancellationTokenSource? _searchCts;
     private readonly ISettingsService _settingsService;
@@ -103,11 +105,13 @@ public partial class MainWindowViewModel : ObservableObject
         SetupWizardViewModel wizard,
         ISettingsService settingsService,
         IToastService toasts,
-        IRuntimeLogService runtimeLogs)
+        IRuntimeLogService runtimeLogs,
+        IConversationExportService exports)
     {
         _sync = SynchronizationContext.Current;
         _toasts = toasts;
         _logs = runtimeLogs;
+        _exports = exports;
         _settingsService = settingsService;
         _store = store; Chat = chat; Agent = agent; Settings = settings;
         Models = models; Rag = rag; Services = services; Tasks = tasks;
@@ -314,6 +318,44 @@ public partial class MainWindowViewModel : ObservableObject
         _toasts.Show(item.IsArchived ? "Conversation archived" : "Conversation restored",
             $"\"{item.Title}\" was {(item.IsArchived ? "archived" : "restored")}.",
             ToastKind.Info);
+    }
+
+    [RelayCommand]
+    private async Task ExportConversationMarkdownAsync(ConversationItemViewModel? item) =>
+        await ExportConversationAsync(item, ConversationExportFormat.Markdown);
+
+    [RelayCommand]
+    private async Task ExportConversationJsonAsync(ConversationItemViewModel? item) =>
+        await ExportConversationAsync(item, ConversationExportFormat.Json);
+
+    private async Task ExportConversationAsync(ConversationItemViewModel? item, ConversationExportFormat format)
+    {
+        if (item is null) return;
+        try
+        {
+            var conversation = await _store.GetByIdAsync(item.Id);
+            if (conversation is null)
+            {
+                _toasts.Show("Export failed", "Conversation was not found.", ToastKind.Error);
+                return;
+            }
+
+            var ext = format == ConversationExportFormat.Json ? "json" : "md";
+            var dir = Path.Combine(SettingsService.ResolveDataRoot(_settingsService.Settings), "exports", "conversations");
+            var path = Path.Combine(dir, $"conversation-{SanitizeFileName(conversation.Title)}-{DateTime.UtcNow:yyyyMMddHHmmss}.{ext}");
+            await _exports.ExportAsync(conversation, path, format);
+            _toasts.Show("Conversation exported", path, ToastKind.Success, 7000);
+        }
+        catch (Exception ex)
+        {
+            _toasts.Show("Export failed", ex.Message, ToastKind.Error, 7000);
+        }
+    }
+
+    private static string SanitizeFileName(string value)
+    {
+        var clean = string.Join("-", value.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries)).Trim('-', ' ');
+        return string.IsNullOrWhiteSpace(clean) ? "conversation" : clean;
     }
 
     [RelayCommand] private void ToggleSidebar()       => IsSidebarOpen = !IsSidebarOpen;

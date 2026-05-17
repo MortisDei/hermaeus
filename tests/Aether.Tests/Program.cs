@@ -307,7 +307,7 @@ internal static class AgentTests
     Equal(AgentRiskLevel.Medium, write.RiskLevel, "write-like tools should be medium risk");
 
     var push = gate.Evaluate("push");
-    Equal(AgentToolDisposition.RequiresApproval, push.Disposition, "push should require explicit approval");
+    Equal(AgentToolDisposition.Blocked, push.Disposition, "push should be blocked");
     Equal(AgentRiskLevel.High, push.RiskLevel, "push should be high risk");
 
     var unknown = gate.Evaluate("desktop_control");
@@ -324,7 +324,8 @@ internal static class AgentTests
     var settings = NewSettings(temp);
     settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
     var store = new FileAgentTaskStateStore(settings);
-    var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new FakeAgentLlm());
+    var tools = new AgentWorkspaceTools();
+    var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), new FakeAgentLlm());
     var options = new AgentWorkspaceOptions(root, ModelId: "fake-agent");
 
     var state = await service.CreateTaskAsync("Review docs", options);

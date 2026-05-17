@@ -6,6 +6,7 @@ namespace Aether.Services;
 
 public sealed class ConversationMemoryService : IConversationMemoryService
 {
+    private const int MaxAutoSummaryCacheEntries = 500;
     private static readonly string[] ImportanceKeywords =
     [
         "prefer", "like", "dislike", "always", "never", "important", "remember", "goal", "workflow",
@@ -20,6 +21,7 @@ public sealed class ConversationMemoryService : IConversationMemoryService
     private readonly IRuntimeLogService _logs;
     private readonly object _summaryCacheLock = new();
     private readonly Dictionary<string, DateTime> _lastAutoSummaryByConversation = new(StringComparer.Ordinal);
+    private readonly LinkedList<string> _summaryCacheOrder = new();
 
     public ConversationMemoryService(
         ISettingsService settings,
@@ -127,7 +129,10 @@ public sealed class ConversationMemoryService : IConversationMemoryService
         lock (_summaryCacheLock)
         {
             if (_lastAutoSummaryByConversation.TryGetValue(conversationId, out var cached) && cached >= cutoff)
+            {
+                TouchSummaryCacheUnsafe(conversationId);
                 return true;
+            }
         }
 
         var recent = await _memories.GetRecentAsync(100, ct);
@@ -148,7 +153,24 @@ public sealed class ConversationMemoryService : IConversationMemoryService
     private void MarkAutoSummary(string conversationId, DateTime timestamp)
     {
         lock (_summaryCacheLock)
+        {
             _lastAutoSummaryByConversation[conversationId] = timestamp;
+            TouchSummaryCacheUnsafe(conversationId);
+            while (_lastAutoSummaryByConversation.Count > MaxAutoSummaryCacheEntries && _summaryCacheOrder.First is not null)
+            {
+                var oldest = _summaryCacheOrder.First.Value;
+                _summaryCacheOrder.RemoveFirst();
+                _lastAutoSummaryByConversation.Remove(oldest);
+            }
+        }
+    }
+
+    private void TouchSummaryCacheUnsafe(string conversationId)
+    {
+        var existing = _summaryCacheOrder.Find(conversationId);
+        if (existing is not null)
+            _summaryCacheOrder.Remove(existing);
+        _summaryCacheOrder.AddLast(conversationId);
     }
 
     private async Task<string> ResolveModelIdAsync(string conversationModelId, CancellationToken ct)

@@ -92,6 +92,7 @@ public partial class App : Application
         s.AddSingleton<ISystemInfoService, SystemInfoService>();
         s.AddSingleton<IBenchmarkService,  BenchmarkService>();
         s.AddSingleton<IConversationStore, ConversationStore>();
+        s.AddSingleton<IConversationExportService, ConversationExportService>();
         s.AddSingleton<IMemoryStore, MemoryStore>();
         s.AddSingleton<IMemoryExtractionService, MemoryExtractionService>();
         s.AddSingleton<IMemoryInjectionService, MemoryInjectionService>();
@@ -124,6 +125,7 @@ public partial class App : Application
         s.AddSingleton<IWorkspaceProfileStore, FileWorkspaceProfileStore>();
         s.AddSingleton<IWorkspaceAnalysisService, WorkspaceAnalysisService>();
         s.AddSingleton<IAgentSafetyGate, AgentSafetyGate>();
+        s.AddSingleton<IAgentToolExecutor, AgentToolExecutor>();
         s.AddSingleton<IAgentContextBuilder, AgentContextBuilder>();
         s.AddSingleton<IAgentService, AgentService>();
         s.AddSingleton<IPatchDiffService, PatchDiffService>();

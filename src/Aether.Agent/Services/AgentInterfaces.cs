@@ -38,6 +38,12 @@ public interface IAgentSafetyGate
     AgentToolPolicyDecision Evaluate(string toolName, bool wouldMutate = false);
 }
 
+public interface IAgentToolExecutor
+{
+    bool CanExecute(string toolName);
+    Task<AgentToolResult> ExecuteAsync(string toolName, Dictionary<string, object?> arguments, AgentWorkspaceOptions options, CancellationToken ct = default);
+}
+
 public interface IAgentContextBuilder
 {
     Task<AgentContextPack> BuildAsync(AgentTaskState state, AgentWorkspaceOptions options, CancellationToken ct = default);
@@ -48,7 +54,7 @@ public interface IAgentService
     Task<AgentTaskState> CreateTaskAsync(string goal, AgentWorkspaceOptions options, CancellationToken ct = default);
     Task<AgentStepResult> RunStepAsync(string taskId, AgentWorkspaceOptions options, CancellationToken ct = default);
     Task<IReadOnlyList<AgentTaskListItem>> LoadRecentTasksAsync(CancellationToken ct = default);
-    Task AppendApprovalAsync(string taskId, string action, bool approved, CancellationToken ct = default);
+    Task AppendApprovalAsync(string taskId, string action, bool approved, AgentWorkspaceOptions? options = null, CancellationToken ct = default);
 }
 
 public interface IWorkspaceProfileStore

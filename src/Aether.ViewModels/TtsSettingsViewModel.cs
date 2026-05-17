@@ -24,6 +24,7 @@ public partial class TtsSettingsViewModel : ObservableObject, IDisposable
     private readonly ISettingsService _settings;
     private readonly SynchronizationContext? _sync;
     private bool _externalServiceRunning;
+    private bool _isReloading;
 
     [ObservableProperty] private bool   _ttsEnabled = true;
     [ObservableProperty] private string _ttsServiceUrl = "http://127.0.0.1:8020";
@@ -98,6 +99,9 @@ public partial class TtsSettingsViewModel : ObservableObject, IDisposable
         }
     }
 
+    public bool ShowsXttsFields => IsXttsV2Provider;
+    public bool ShowsVoiceSampleFields => IsXttsV2Provider || IsF5TtsProvider;
+
     public TtsSettingsViewModel(
         ITtsService tts,
         IVoiceProviderRegistry voiceProviderRegistry,
@@ -148,9 +152,9 @@ public partial class TtsSettingsViewModel : ObservableObject, IDisposable
 
     public void ReloadFrom(AppSettings settings)
     {
+        _isReloading = true;
         TtsEnabled = settings.Tts.Enabled;
         TtsServiceUrl = settings.Tts.ServiceUrl;
-        TtsSpeaker = settings.Tts.Speaker;
         TtsPythonPath = _secrets.IsReference(settings.Tts.PythonPath) ? string.Empty : settings.Tts.PythonPath;
         TtsScriptPath = settings.Tts.ScriptPath;
         TtsModelDirectory = settings.Tts.ModelDirectory;
@@ -163,10 +167,14 @@ public partial class TtsSettingsViewModel : ObservableObject, IDisposable
         VoiceProviders.Clear();
         foreach (var provider in _voiceProviderRegistry.GetAvailableProviders())
             VoiceProviders.Add(provider);
-        SelectedVoiceProvider = settings.Tts.VoiceProvider;
-        OnPropertyChanged(nameof(IsXttsV2Provider));
-        OnPropertyChanged(nameof(IsServerManagedProvider));
+        SelectedVoiceProvider = NormalizeProviderName(settings.Tts.VoiceProvider);
+        TtsSpeaker = string.IsNullOrWhiteSpace(settings.Tts.Speaker) && IsKokoroProvider
+            ? "af_heart"
+            : settings.Tts.Speaker;
+        _isReloading = false;
+        NotifyProviderDependentProperties();
         ApplyXttsStatus();
+        _ = RefreshTtsVoicesAsync();
     }
 
     [RelayCommand]
@@ -201,11 +209,7 @@ public partial class TtsSettingsViewModel : ObservableObject, IDisposable
             await _voiceProviderRegistry.SetActiveProviderAsync(provider.Id);
             SelectedVoiceProvider = provider.Name;
             await RefreshTtsVoicesAsync();
-            OnPropertyChanged(nameof(IsXttsV2Provider));
-            OnPropertyChanged(nameof(IsKokoroProvider));
-            OnPropertyChanged(nameof(IsF5TtsProvider));
-            OnPropertyChanged(nameof(IsOpenAiProvider));
-            OnPropertyChanged(nameof(IsServerManagedProvider));
+            NotifyProviderDependentProperties();
             ApplyXttsStatus();
             _toasts.Show("Voice provider changed", $"Now using {provider.Name}.", ToastKind.Success, 4000);
         }
@@ -272,7 +276,9 @@ public partial class TtsSettingsViewModel : ObservableObject, IDisposable
             foreach (var voice in voices)
                 TtsVoices.Add(voice);
 
-            if (!string.IsNullOrWhiteSpace(TtsSpeaker) && !TtsVoices.Contains(TtsSpeaker))
+            if (string.IsNullOrWhiteSpace(TtsSpeaker) && TtsVoices.Count > 0)
+                TtsSpeaker = TtsVoices[0];
+            else if (!string.IsNullOrWhiteSpace(TtsSpeaker) && !TtsVoices.Contains(TtsSpeaker))
                 TtsVoices.Add(TtsSpeaker);
         }
         catch (Exception ex)
@@ -342,4 +348,54 @@ public partial class TtsSettingsViewModel : ObservableObject, IDisposable
 
     private bool CanStartTts() => IsServerManagedProvider && !IsTtsRunning;
     private bool CanStopTts() => IsServerManagedProvider && IsTtsRunning;
+
+    partial void OnSelectedVoiceProviderChanged(string value)
+    {
+        NotifyProviderDependentProperties();
+        ApplyXttsStatus();
+        if (_isReloading)
+            return;
+
+        _ = ActivateSelectedProviderAsync(value);
+    }
+
+    private async Task ActivateSelectedProviderAsync(string providerName)
+    {
+        var provider = VoiceProviders.FirstOrDefault(p => p.Name.Equals(providerName, StringComparison.OrdinalIgnoreCase));
+        if (provider is null)
+            return;
+
+        try
+        {
+            await _voiceProviderRegistry.SetActiveProviderAsync(provider.Id);
+            if (provider.Id == VoiceProvider.Kokoro && string.IsNullOrWhiteSpace(TtsSpeaker))
+                TtsSpeaker = "af_heart";
+            await RefreshTtsVoicesAsync();
+            NotifyProviderDependentProperties();
+            ApplyXttsStatus();
+        }
+        catch (Exception ex)
+        {
+            _toasts.Show("Provider change failed", ex.Message, ToastKind.Error, 6000);
+        }
+    }
+
+    private void NotifyProviderDependentProperties()
+    {
+        OnPropertyChanged(nameof(IsXttsV2Provider));
+        OnPropertyChanged(nameof(IsKokoroProvider));
+        OnPropertyChanged(nameof(IsF5TtsProvider));
+        OnPropertyChanged(nameof(IsOpenAiProvider));
+        OnPropertyChanged(nameof(IsServerManagedProvider));
+        OnPropertyChanged(nameof(ShowsXttsFields));
+        OnPropertyChanged(nameof(ShowsVoiceSampleFields));
+    }
+
+    private string NormalizeProviderName(string providerName)
+    {
+        var match = VoiceProviders.FirstOrDefault(p =>
+            p.Name.Equals(providerName, StringComparison.OrdinalIgnoreCase)
+            || p.Id.ToString().Equals(providerName, StringComparison.OrdinalIgnoreCase));
+        return match?.Name ?? "Kokoro";
+    }
 }

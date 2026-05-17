@@ -31,7 +31,7 @@ public sealed class PythonHealthValidator
         {
             return new PythonHealthReport(false, string.Empty, [
                 new PythonHealthIssue("path-missing", "Python path is empty.")
-            ], "Python path missing", "Configure a Python 3.11 interpreter.", "Python path is empty.");
+            ], "Python path missing", $"Configure a Python {_requiredMajor}.{_requiredMinor} interpreter.", "Python path is empty.");
         }
 
         if (!File.Exists(pythonPath))

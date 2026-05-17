@@ -1,0 +1,73 @@
+using System.Text;
+using System.Text.Json;
+using Aether.Core.Models;
+using Aether.Core.Services;
+
+namespace Aether.Services;
+
+public sealed class ConversationExportService : IConversationExportService
+{
+    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+
+    public string BuildExport(Conversation conversation, ConversationExportFormat format) =>
+        format switch
+        {
+            ConversationExportFormat.Json => JsonSerializer.Serialize(conversation, JsonOptions),
+            _ => BuildMarkdown(conversation)
+        };
+
+    public async Task<string> ExportAsync(Conversation conversation, string path, ConversationExportFormat format, CancellationToken ct = default)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
+        await File.WriteAllTextAsync(path, BuildExport(conversation, format), Encoding.UTF8, ct);
+        return path;
+    }
+
+    private static string BuildMarkdown(Conversation conversation)
+    {
+        var md = new StringBuilder();
+        md.AppendLine($"# {EscapeHeading(conversation.Title)}");
+        md.AppendLine();
+        md.AppendLine($"- Id: `{conversation.Id}`");
+        md.AppendLine($"- Created: `{conversation.CreatedAt:O}`");
+        md.AppendLine($"- Updated: `{conversation.UpdatedAt:O}`");
+        if (!string.IsNullOrWhiteSpace(conversation.ModelId))
+            md.AppendLine($"- Model: `{conversation.ModelId}`");
+        if (!string.IsNullOrWhiteSpace(conversation.Folder))
+            md.AppendLine($"- Folder: `{conversation.Folder}`");
+        if (conversation.Tags.Count > 0)
+            md.AppendLine($"- Tags: {string.Join(", ", conversation.Tags.Select(tag => $"`{tag}`"))}");
+
+        if (!string.IsNullOrWhiteSpace(conversation.SystemPrompt))
+        {
+            md.AppendLine();
+            md.AppendLine("## System Prompt");
+            md.AppendLine();
+            md.AppendLine(conversation.SystemPrompt.Trim());
+        }
+
+        md.AppendLine();
+        md.AppendLine("## Messages");
+        foreach (var message in conversation.Messages.OrderBy(m => m.CreatedAt))
+        {
+            md.AppendLine();
+            md.AppendLine($"### {message.Role} · {message.CreatedAt:O}");
+            if (!string.IsNullOrWhiteSpace(message.ModelId))
+                md.AppendLine($"Model: `{message.ModelId}`");
+            if (message.IsError)
+                md.AppendLine("Status: `error or incomplete`");
+            if (message.AttachedFilePaths.Count > 0)
+            {
+                md.AppendLine("Attachments:");
+                foreach (var path in message.AttachedFilePaths)
+                    md.AppendLine($"- `{path}`");
+            }
+            md.AppendLine();
+            md.AppendLine(message.Content.Trim());
+        }
+
+        return md.ToString();
+    }
+
+    private static string EscapeHeading(string value) => value.Replace("#", "\\#", StringComparison.Ordinal).Trim();
+}

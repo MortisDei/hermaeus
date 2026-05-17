@@ -10,6 +10,18 @@ namespace Aether.Tests;
 public sealed class ChatWorkbenchTests
 {
     [Fact]
+    public void TruncateHistoryKeepsNewestMessages()
+    {
+        var messages = Enumerable.Range(1, 20)
+            .Select(i => new MessageViewModel { Role = i % 2 == 0 ? "assistant" : "user", Content = new string('x', 80) + i })
+            .ToList();
+
+        var truncated = ChatViewModel.TruncateHistoryToContextWindow(messages, contextWindow: 160, systemTokens: 10, currentPromptTokens: 20);
+        Assert.True(truncated.Count < messages.Count);
+        Assert.Equal(messages[^1].Content, truncated[^1].Content);
+    }
+
+    [Fact]
     public async Task ContextInspectorTraceAndCompareModelsWork()
     {
         using var temp = new TempDir();
@@ -24,7 +36,8 @@ public sealed class ChatWorkbenchTests
             new ModelProfileService(settings),
             new FakeToasts(),
             new NoOpConversationMemoryService(),
-            new RuntimeLogService(settings));
+            new RuntimeLogService(settings),
+            new ConversationExportService());
 
         await vm.LoadModelsAsync(force: true);
         vm.SystemPrompt = "Answer briefly.";

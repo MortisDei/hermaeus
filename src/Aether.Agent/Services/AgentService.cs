@@ -10,8 +10,11 @@ public sealed class AgentService : IAgentService
     private const string AgentSystemPrompt = """
         You are Aether Agent, a local-first semi-autonomous task assistant.
         Use explicit task state and retrieved context. Be practical and concise.
-        Do not claim risky actions were executed. Writes, commands, network access,
-        commits, and pushes require approval and are not executable in this alpha.
+        You may request supported local tools: list_files, search_files, read_file,
+        summarize_file, draft_patch, inspect_git_diff, and apply_draft_patch.
+        Read-only tools can execute immediately. Draft patch application requires
+        approval. Commands, network access, installs, commits, pushes, uploads,
+        downloads, and history rewrites are blocked.
         Return only valid JSON matching:
         {
           "thought_summary": "brief user-visible reasoning summary",
@@ -36,17 +39,20 @@ public sealed class AgentService : IAgentService
     private readonly IAgentTaskStateStore _store;
     private readonly IAgentContextBuilder _contextBuilder;
     private readonly IAgentSafetyGate _safetyGate;
+    private readonly IAgentToolExecutor _toolExecutor;
     private readonly ILlmService _llm;
 
     public AgentService(
         IAgentTaskStateStore store,
         IAgentContextBuilder contextBuilder,
         IAgentSafetyGate safetyGate,
+        IAgentToolExecutor toolExecutor,
         ILlmService llm)
     {
         _store = store;
         _contextBuilder = contextBuilder;
         _safetyGate = safetyGate;
+        _toolExecutor = toolExecutor;
         _llm = llm;
     }
 
@@ -117,7 +123,18 @@ public sealed class AgentService : IAgentService
             response.NextAction.RiskLevel = decision.RiskLevel;
             response.NextAction.RequiresApproval = decision.Disposition != AgentToolDisposition.Allowed;
             if (decision.Disposition == AgentToolDisposition.RequiresApproval)
+            {
                 state.Status = AgentTaskStatus.WaitingForUser;
+                if (_toolExecutor.CanExecute(nextTool))
+                {
+                    state.PendingToolAction = new AgentPendingToolAction
+                    {
+                        ToolName = nextTool,
+                        Arguments = response.NextAction.Arguments,
+                        RiskLevel = decision.RiskLevel
+                    };
+                }
+            }
             if (decision.Disposition == AgentToolDisposition.Blocked)
                 state.Status = AgentTaskStatus.Blocked;
 
@@ -132,6 +149,27 @@ public sealed class AgentService : IAgentService
                 },
                 ResultSummary = decision.Reason
             });
+
+            if (decision.Disposition == AgentToolDisposition.Allowed)
+            {
+                if (_toolExecutor.CanExecute(nextTool))
+                {
+                    var toolResult = await _toolExecutor.ExecuteAsync(nextTool, response.NextAction.Arguments, options, ct);
+                    state.ToolResults.Add(toolResult);
+                    state.Status = AgentTaskStatus.Running;
+                    response.UserMessage = $"Executed {nextTool}.";
+                }
+                else
+                {
+                    state.Status = AgentTaskStatus.Blocked;
+                    state.ToolResults.Add(new AgentToolResult
+                    {
+                        Tool = nextTool,
+                        Arguments = response.NextAction.Arguments,
+                        ResultSummary = "Supported policy allowed the tool, but no local executor is registered for it."
+                    });
+                }
+            }
         }
 
         if (response.NextAction.Type == AgentActionKind.AskUser)
@@ -164,14 +202,44 @@ public sealed class AgentService : IAgentService
     public Task<IReadOnlyList<AgentTaskListItem>> LoadRecentTasksAsync(CancellationToken ct = default) =>
         _store.ListRecentAsync(25, ct);
 
-    public async Task AppendApprovalAsync(string taskId, string action, bool approved, CancellationToken ct = default)
+    public async Task AppendApprovalAsync(string taskId, string action, bool approved, AgentWorkspaceOptions? options = null, CancellationToken ct = default)
     {
         var state = await _store.LoadAsync(taskId, ct)
             ?? throw new InvalidOperationException("Agent task was not found.");
         state.ApprovalHistory.Add(new AgentApprovalRecord(action, approved, DateTime.UtcNow));
-        state.Status = approved ? AgentTaskStatus.Running : AgentTaskStatus.WaitingForUser;
+        if (approved && state.PendingToolAction is not null && options is not null)
+        {
+            var pending = state.PendingToolAction;
+            var result = await _toolExecutor.ExecuteAsync(pending.ToolName, pending.Arguments, options, ct);
+            state.ToolResults.Add(result);
+            state.PendingToolAction = null;
+            state.Status = AgentTaskStatus.Running;
+        }
+        else
+        {
+            state.Status = approved ? AgentTaskStatus.Running : AgentTaskStatus.WaitingForUser;
+            if (!approved)
+                state.PendingToolAction = null;
+        }
         await _store.SaveAsync(state, ct);
         await _store.AppendLogAsync(taskId, $"approval recorded: {action} approved={approved}", ct);
+    }
+
+    public async Task<AgentToolResult?> ExecuteApprovedToolAsync(string taskId, AgentWorkspaceOptions options, CancellationToken ct = default)
+    {
+        var state = await _store.LoadAsync(taskId, ct)
+            ?? throw new InvalidOperationException("Agent task was not found.");
+        if (state.PendingToolAction is null)
+            return null;
+
+        var action = state.PendingToolAction;
+        var result = await _toolExecutor.ExecuteAsync(action.ToolName, action.Arguments, options, ct);
+        state.ToolResults.Add(result);
+        state.PendingToolAction = null;
+        state.Status = AgentTaskStatus.Running;
+        await _store.SaveAsync(state, ct);
+        await _store.AppendLogAsync(taskId, $"approved tool executed: {action.ToolName}", ct);
+        return result;
     }
 
     private static string BuildPrompt(AgentContextPack context)

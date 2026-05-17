@@ -428,7 +428,7 @@ public partial class AgentViewModel : ObservableObject
     private async Task ApproveReviewAsync(AgentReviewQueueItemViewModel? item)
     {
         if (item is null) return;
-        await _agent.AppendApprovalAsync(item.TaskId, "review_queue", approved: true);
+        await _agent.AppendApprovalAsync(item.TaskId, "review_queue", approved: true, BuildOptions());
         await RefreshReviewQueueAsync();
         await LoadTaskIfOpenAsync(item.TaskId);
     }
@@ -437,7 +437,7 @@ public partial class AgentViewModel : ObservableObject
     private async Task RejectReviewAsync(AgentReviewQueueItemViewModel? item)
     {
         if (item is null) return;
-        await _agent.AppendApprovalAsync(item.TaskId, "review_queue", approved: false);
+        await _agent.AppendApprovalAsync(item.TaskId, "review_queue", approved: false, BuildOptions());
         await RefreshReviewQueueAsync();
         await LoadTaskIfOpenAsync(item.TaskId);
     }
@@ -613,7 +613,7 @@ public partial class AgentViewModel : ObservableObject
             found.BlockedBy = null;
             found.BlockReason = string.Empty;
             await _store.SaveAsync(CurrentTask);
-            await _agent.AppendApprovalAsync(CurrentTask.TaskId, "draft_patch_apply", approved: true);
+            await _agent.AppendApprovalAsync(CurrentTask.TaskId, "draft_patch_apply", approved: true, BuildOptions());
             StatusMessage = $"Patch for {found.RelativePath} applied.";
             await RefreshWorkspaceFilesAsync();
             if (!string.IsNullOrWhiteSpace(selectedPath))
@@ -640,7 +640,7 @@ public partial class AgentViewModel : ObservableObject
                 found.BlockedBy = "User";
                 found.BlockReason = "Rejected during review.";
                 await _store.SaveAsync(CurrentTask);
-                await _agent.AppendApprovalAsync(CurrentTask.TaskId, "draft_patch_reject", approved: false);
+                await _agent.AppendApprovalAsync(CurrentTask.TaskId, "draft_patch_reject", approved: false, BuildOptions());
                 StatusMessage = $"Patch for {patch.RelativePath} rejected.";
                 await LoadTaskIfOpenAsync(CurrentTask.TaskId);
             }
@@ -667,7 +667,7 @@ public partial class AgentViewModel : ObservableObject
                     ? "Blocked during review."
                     : found.BlockReason;
                 await _store.SaveAsync(CurrentTask);
-                await _agent.AppendApprovalAsync(CurrentTask.TaskId, "draft_patch_block", approved: false);
+                await _agent.AppendApprovalAsync(CurrentTask.TaskId, "draft_patch_block", approved: false, BuildOptions());
                 StatusMessage = $"Patch for {patch.RelativePath} blocked.";
                 await LoadTaskIfOpenAsync(CurrentTask.TaskId);
             }

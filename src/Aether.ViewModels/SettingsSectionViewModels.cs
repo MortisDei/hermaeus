@@ -121,6 +121,7 @@ public partial class DataManagementSettingsViewModel : ObservableObject
     public Action? RequestLocalAiAssetsRootPicker { get; set; }
     public Action? RequestBackupDirectoryPicker { get; set; }
     public Action? RequestRestoreBackupPicker { get; set; }
+    public Func<Task<bool>>? RequestRestoreBackupConfirmation { get; set; }
     public event Action? LocalAiAssetsRootChanged;
 
     public DataManagementSettingsViewModel(
@@ -177,6 +178,9 @@ public partial class DataManagementSettingsViewModel : ObservableObject
         SettingsError = string.Empty;
         try
         {
+            if (RequestRestoreBackupConfirmation is not null
+                && !await RequestRestoreBackupConfirmation())
+                return;
             await _backups.RestoreAsync(RestoreBackupPath.Trim());
             _toasts.Show("Restore complete", "Restart Aether to load restored data.", ToastKind.Success, 7000);
         }

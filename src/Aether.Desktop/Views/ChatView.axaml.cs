@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
+using Aether.Core.Services;
 using Aether.ViewModels;
 
 namespace Aether.Desktop.Views;
@@ -67,6 +68,26 @@ public partial class ChatView : UserControl
 
                 if (files.Count > 0)
                     await vm.AddContextFilesAsync(files.Select(f => f.Path.LocalPath));
+            };
+
+            vm.RequestConversationExportPath = async format =>
+            {
+                var top = TopLevel.GetTopLevel(this);
+                if (top is null) return null;
+
+                var ext = format == ConversationExportFormat.Json ? "json" : "md";
+                var label = format == ConversationExportFormat.Json ? "JSON" : "Markdown";
+                var file = await top.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+                {
+                    Title = $"Export conversation as {label}",
+                    SuggestedFileName = $"aether-conversation.{ext}",
+                    FileTypeChoices =
+                    [
+                        new FilePickerFileType(label) { Patterns = [$"*.{ext}"] },
+                        new FilePickerFileType("All files") { Patterns = ["*"] }
+                    ]
+                });
+                return file?.Path.LocalPath;
             };
         };
     }

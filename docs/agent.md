@@ -5,9 +5,10 @@
 The **Agent** workspace is an experimental local-first task runner. It works one goal at a time and keeps state
 outside the model instead of relying on whole-chat-history context.
 
-## Current Slice: Read-First
+## Current Slice: Local Tool Execution
 
-The current Agent implementation focuses on read-first operations:
+The current Agent implementation executes a small local tool set with explicit
+safety gates:
 
 ### Task Management
 
@@ -29,7 +30,7 @@ memory counts, and retrieved context counts so the workbench is easier to scan
 at a glance.
 
 A compact capability disclosure now sits under the summary strip so the current
-slice is explicit: the workbench is read-first, patch drafting is approval-
+slice is explicit: read-only tools run locally, patch application is approval-
 gated, and shell, network, and remote-control actions remain out of scope.
 
 The same panel now includes a workspace file browser with query, list,
@@ -46,7 +47,9 @@ states so review decisions are visible at a glance.
 
 ### Tools
 
-- Read-only file tools for workspace inspection.
+- Read-only file tools for workspace inspection: `list_files`, `search_files`,
+  `read_file`, `summarize_file`, `draft_patch`, and `inspect_git_diff`.
+- Approval-gated write tool: `apply_draft_patch`.
 - Proposed next actions with safety gates.
 - Local logs and JSONL traces for debugging.
 - Approval-gated draft patch queue with approval metadata and task-state
@@ -54,9 +57,9 @@ states so review decisions are visible at a glance.
 
 ## Planned Features (Future)
 
-Writes, command execution, installs, network actions, commit, and push are not
-executed by this alpha agent. They are surfaced as approval-required or blocked
-next actions for a later automation slice.
+Shell command execution, installs, network actions, commit, push, upload,
+download, and history rewrite actions are not executed by this alpha agent.
+They are blocked even if the model asks for them.
 
 ## Workspace Memory
 
@@ -78,7 +81,7 @@ control or safety. The agent does not:
 
 - execute shell commands
 - install packages
-- access the network (unless explicitly configured by the user)
+- access the network
 - modify files without explicit user approval
 - commit, push, or interact with remote repositories
 - operate outside the selected workspace root
@@ -127,13 +130,13 @@ why an action was allowed, queued, or blocked.
 Patch proposals include structured metadata to make review and application
 robust and auditable. Each proposal contains at least:
 
-- `targetPath` — the workspace-relative target file
-- `rationale` — brief human-readable explanation
-- `patch` — the generated diff or before/after preview
-- `risk` — the classified risk level
-- `sourceContext` — snippets used to generate the patch
-- `createdAt` — timestamp of proposal creation
-- `baseHash` — hash of the target file at proposal time (for stale-file protection)
+- `targetPath`: the workspace-relative target file
+- `rationale`: brief human-readable explanation
+- `patch`: the generated diff or before/after preview
+- `risk`: the classified risk level
+- `sourceContext`: snippets used to generate the patch
+- `createdAt`: timestamp of proposal creation
+- `baseHash`: hash of the target file at proposal time (for stale-file protection)
 
 Approved patches are applied as text edits against the selected workspace file.
 If the file's current hash does not match `baseHash` the patch is blocked and
@@ -186,7 +189,7 @@ results. A typical context pack may include:
 - pending review items
 - declared constraints and blocked actions
 
-Context packs are intentionally small and focused—do not assume they contain
+Context packs are intentionally small and focused. Do not assume they contain
 full chat history or global user memory.
 
 ## Trace Schema Example

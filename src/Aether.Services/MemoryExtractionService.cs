@@ -13,10 +13,10 @@ public sealed class MemoryExtractionService : IMemoryExtractionService
     private static readonly Regex MemoryMarkerRegex = new(
         @"\[MEMORY:\s*(.+?)\]",
         RegexOptions.IgnoreCase | RegexOptions.Compiled,
-        TimeSpan.FromMilliseconds(100));
+        TimeSpan.FromMilliseconds(500));
 
     // Keywords to help categorize memories
-    private static readonly string[] PreferenceKeywords = ["prefer", "like", "prefer", "enjoy", "want", "prefer doing"];
+    private static readonly string[] PreferenceKeywords = ["prefer", "like", "enjoy", "want", "prefer doing"];
     private static readonly string[] BehaviourKeywords = ["learn", "learned", "understand", "realize", "noticed", "remember"];
     private static readonly string[] InterestKeywords = ["interested", "curious", "fascinated", "explore"];
 

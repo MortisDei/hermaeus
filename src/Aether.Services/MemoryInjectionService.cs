@@ -91,8 +91,7 @@ You can include multiple [MEMORY: ...] blocks if needed.
                     usedChars += memorySize;
                 }
 
-                // Stop if we've reached half capacity (safety margin)
-                if (selected.Count >= memories.Count / 2 || usedChars > charBudget / 2)
+                if (usedChars >= charBudget)
                     break;
             }
 

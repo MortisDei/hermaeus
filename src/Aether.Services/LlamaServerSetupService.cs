@@ -49,7 +49,11 @@ public sealed class LlamaServerSetupService
             var searchPaths = new List<string>();
 
             if (!string.IsNullOrWhiteSpace(installPath))
+            {
+                if (File.Exists(installPath))
+                    searchPaths.Add(installPath);
                 searchPaths.Add(Path.Combine(installPath, exeName));
+            }
 
             var pathResult = FindInPath(exeName);
             if (pathResult != null)

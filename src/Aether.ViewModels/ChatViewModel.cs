@@ -83,6 +83,7 @@ public partial class ChatViewModel : ObservableObject
     private readonly IRuntimeLogService _runtimeLogs;
     private readonly IModelProfileService _profiles;
     private readonly IConversationMemoryService _conversationMemory;
+    private readonly IConversationExportService _exports;
     private CancellationTokenSource? _cts;
     private CancellationTokenSource? _ttsCts;
     private CancellationTokenSource? _contextUsageCts;
@@ -129,6 +130,7 @@ public partial class ChatViewModel : ObservableObject
     public event EventHandler<string>? ConversationSaved;
     public Action<string>?            RequestCopyToClipboard { get; set; }
     public Action?                    RequestContextFilePicker { get; set; }
+    public Func<ConversationExportFormat, Task<string?>>? RequestConversationExportPath { get; set; }
     public bool HasContextAttachments => ContextAttachments.Count > 0;
 
     public ChatViewModel(
@@ -140,12 +142,14 @@ public partial class ChatViewModel : ObservableObject
         IModelProfileService profiles,
         IToastService toasts,
         IConversationMemoryService conversationMemory,
-        IRuntimeLogService runtimeLogs)
+        IRuntimeLogService runtimeLogs,
+        IConversationExportService exports)
     {
         _llm = llm; _store = store; _settings = settings; _tts = tts; _profiles = profiles; _toasts = toasts;
         _memoryStore = memoryStore;
         _conversationMemory = conversationMemory;
         _runtimeLogs = runtimeLogs;
+        _exports = exports;
         _temperature  = settings.Settings.Llm.Temperature;
         _systemPrompt = settings.Settings.Llm.DefaultSystemPrompt;
         Messages.CollectionChanged += (_, _) =>
@@ -276,8 +280,11 @@ public partial class ChatViewModel : ObservableObject
         var traceError = string.Empty;
         try
         {
-            var history = Messages.Where(m => !m.IsStreaming)
-                .Select(m => new ChatMessage(m.Role, m.Content)).ToList();
+            var history = TruncateHistoryToContextWindow(
+                Messages.Where(m => !m.IsStreaming).ToList(),
+                ResolveContextWindowLimit(),
+                EstimateTokens(SystemPrompt),
+                Math.Max(0, snapshot.EstimatedTokens - snapshot.HistoryTokens - EstimateTokens(SystemPrompt)));
             if (history.Count > 0 && history[^1].Role == "user")
                 history[^1] = history[^1] with { Content = promptText };
 
@@ -311,7 +318,16 @@ public partial class ChatViewModel : ObservableObject
         catch (OperationCanceledException)
         {
             asst.IsStreaming = false;
-            if (string.IsNullOrWhiteSpace(asst.Content)) Messages.Remove(asst);
+            if (string.IsNullOrWhiteSpace(asst.Content))
+            {
+                Messages.Remove(asst);
+            }
+            else
+            {
+                asst.IsError = true;
+                asst.Content = $"{asst.Content.TrimEnd()}\n\n[Generation stopped before completion.]";
+                await PersistAsync();
+            }
         }
         catch (Exception ex)
         {
@@ -351,6 +367,73 @@ public partial class ChatViewModel : ObservableObject
 
     [RelayCommand]
     private void AttachContextFiles() => RequestContextFilePicker?.Invoke();
+
+    [RelayCommand]
+    private async Task ExportMarkdownAsync() => await ExportConversationAsync(ConversationExportFormat.Markdown);
+
+    [RelayCommand]
+    private async Task ExportJsonAsync() => await ExportConversationAsync(ConversationExportFormat.Json);
+
+    private async Task ExportConversationAsync(ConversationExportFormat format)
+    {
+        try
+        {
+            var conversation = await BuildExportConversationAsync();
+            var path = RequestConversationExportPath is null
+                ? DefaultExportPath(conversation, format)
+                : await RequestConversationExportPath(format);
+            if (string.IsNullOrWhiteSpace(path))
+                return;
+
+            await _exports.ExportAsync(conversation, path, format);
+            _toasts.Show("Conversation exported", path, ToastKind.Success, 7000);
+        }
+        catch (Exception ex)
+        {
+            _toasts.Show("Export failed", ex.Message, ToastKind.Error, 7000);
+        }
+    }
+
+    private async Task<Conversation> BuildExportConversationAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(CurrentConversationId)
+            && await _store.GetByIdAsync(CurrentConversationId) is { } stored)
+            return stored;
+
+        return new Conversation
+        {
+            Id = string.IsNullOrWhiteSpace(CurrentConversationId) ? Guid.NewGuid().ToString() : CurrentConversationId,
+            Title = ConversationTitle,
+            ModelId = SelectedModel?.Id ?? string.Empty,
+            SystemPrompt = SystemPrompt,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            Messages = Messages.Where(m => !m.IsStreaming).Select(m => new Message
+            {
+                Id = m.Id,
+                ConversationId = CurrentConversationId,
+                Role = m.Role,
+                Content = m.Content,
+                OriginalContent = m.OriginalContent,
+                CreatedAt = m.CreatedAt,
+                IsError = m.IsError,
+                ModelId = m.ModelId,
+                DurationMs = m.DurationMs,
+                AttachedFilePaths = m.AttachedFilePaths.ToList()
+            }).ToList()
+        };
+    }
+
+    private static string DefaultExportPath(Conversation conversation, ConversationExportFormat format)
+    {
+        var ext = format == ConversationExportFormat.Json ? "json" : "md";
+        var safeTitle = string.Join("-", conversation.Title.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries)).Trim();
+        if (string.IsNullOrWhiteSpace(safeTitle))
+            safeTitle = "conversation";
+        return Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+            $"aether-{safeTitle}-{DateTime.UtcNow:yyyyMMddHHmmss}.{ext}");
+    }
 
     public async Task AddContextFilesAsync(IEnumerable<string> paths, CancellationToken ct = default)
     {
@@ -710,6 +793,30 @@ public partial class ChatViewModel : ObservableObject
             return chatServer.ContextSize;
 
         return Math.Max(1, _settings.Settings.Llm.MaxTokens);
+    }
+
+    public static List<ChatMessage> TruncateHistoryToContextWindow(
+        IReadOnlyList<MessageViewModel> messages,
+        int contextWindow,
+        int systemTokens = 0,
+        int currentPromptTokens = 0)
+    {
+        var reservedResponseTokens = Math.Max(256, contextWindow / 8);
+        var budget = Math.Max(256, contextWindow - systemTokens - currentPromptTokens - reservedResponseTokens);
+        var selected = new Stack<ChatMessage>();
+        var used = 0;
+
+        for (var i = messages.Count - 1; i >= 0; i--)
+        {
+            var message = messages[i];
+            var tokens = EstimateTokens(message.Content);
+            if (selected.Count > 0 && used + tokens > budget)
+                break;
+            selected.Push(new ChatMessage(message.Role, message.Content));
+            used += tokens;
+        }
+
+        return selected.ToList();
     }
 
     private async Task PersistAsync()

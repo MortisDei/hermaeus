@@ -900,6 +900,105 @@ namespace Aether.Tests
             True(context.Contains("Stored Memories", StringComparison.Ordinal), "memory context should include heading");
         }
 
+        public static async Task MemoryInjectionUsesFullBudget()
+        {
+            var service = new MemoryInjectionService();
+            var memories = Enumerable.Range(1, 6)
+                .Select(i => new Memory
+                {
+                    Id = i.ToString(),
+                    Category = "facts",
+                    Content = new string((char)('a' + i), 40),
+                    ImportanceScore = 1.0 - (i / 10.0),
+                    UpdatedAt = DateTime.UtcNow.AddMinutes(-i)
+                })
+                .ToList();
+
+            var selected = await service.SelectMemoriesForInjectionAsync(memories, tokenBudget: 100);
+            True(selected.Count > memories.Count / 2, "selection should not stop at half the candidate count");
+        }
+
+        public static Task XttsApiTemplateDelegatesToGenerator()
+        {
+            var serviceTemplate = new LocalAiSetupService(new PythonHealthValidator()).BuildXttsApiScript("/models", "/output");
+            var generatorType = typeof(LocalAiSetupService).Assembly.GetType("Aether.Services.LocalAiSetupScriptGenerator")
+                ?? throw new InvalidOperationException("Generator type missing.");
+            var method = generatorType.GetMethod("BuildXttsApiScript", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
+                ?? throw new InvalidOperationException("Generator method missing.");
+            var generatorTemplate = (string)method.Invoke(null, ["/models", "/output"])!;
+            Equal(generatorTemplate, serviceTemplate, "service template should delegate to generator output");
+            return Task.CompletedTask;
+        }
+
+        public static Task ExtraArgsParserHandlesEscapedQuotes()
+        {
+            var args = ExtraArgsParser.Split("--arg \"value with \\\"inner\\\" quotes\" --flag").ToList();
+            Equal(3, args.Count, "parser should return three args");
+            Equal("--arg", args[0], "first arg should be flag");
+            Equal("value with \"inner\" quotes", args[1], "escaped quotes should be preserved");
+            Equal("--flag", args[2], "trailing arg should parse");
+            return Task.CompletedTask;
+        }
+
+        public static Task BenchmarkCsvNormalizesEmbeddedNewlines()
+        {
+            var run = new BenchmarkRun
+            {
+                Results =
+                [
+                    new BenchmarkResult
+                    {
+                        CaseName = "case\none",
+                        Phase = "phase",
+                        Error = "line\r\ntwo",
+                        FailureCategory = "quoted \"value\""
+                    }
+                ]
+            };
+            var method = typeof(BenchmarkService).GetMethod("ToCsv", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
+                ?? throw new InvalidOperationException("ToCsv method missing.");
+            var csv = (string)method.Invoke(null, [run])!;
+            Equal(2, csv.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length, "CSV should contain header plus one data row");
+            True(csv.Contains("\"case one\"", StringComparison.Ordinal), "case newline should become a space");
+            True(csv.Contains("\"line two\"", StringComparison.Ordinal), "error newline should become a space");
+            True(csv.Contains("\"quoted \"\"value\"\"\"", StringComparison.Ordinal), "quotes should stay escaped");
+            return Task.CompletedTask;
+        }
+
+        public static async Task RerankerHashVerificationRejectsMismatch()
+        {
+            using var temp = new TempDir();
+            var file = temp.PathFor("asset.bin");
+            await File.WriteAllTextAsync(file, "known");
+            True(await OnnxCrossEncoderReranker.VerifyFileSha256Async(file, Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes("known"))).ToLowerInvariant()),
+                "known hash should verify");
+            False(await OnnxCrossEncoderReranker.VerifyFileSha256Async(file, OnnxCrossEncoderReranker.VocabSha256),
+                "mismatched hash should fail");
+        }
+
+        public static Task ConversationExportProducesMarkdownAndJson()
+        {
+            var service = new ConversationExportService();
+            var conversation = new Conversation
+            {
+                Id = "conv-export",
+                Title = "Export Test",
+                SystemPrompt = "Be concise.",
+                Messages =
+                [
+                    new Message { Role = "user", Content = "Hello", CreatedAt = DateTime.UtcNow },
+                    new Message { Role = "assistant", Content = "Hi", IsError = true, ModelId = "model-a", CreatedAt = DateTime.UtcNow }
+                ]
+            };
+
+            var md = service.BuildExport(conversation, ConversationExportFormat.Markdown);
+            var json = service.BuildExport(conversation, ConversationExportFormat.Json);
+            True(md.Contains("## System Prompt", StringComparison.Ordinal), "markdown should include system prompt");
+            True(md.Contains("Status: `error or incomplete`", StringComparison.Ordinal), "markdown should mark incomplete/error messages");
+            True(json.Contains("\"Id\": \"conv-export\"", StringComparison.Ordinal), "json should include conversation id");
+            return Task.CompletedTask;
+        }
+
         private sealed class FixedStatusHandler : HttpMessageHandler
         {
             private readonly HttpStatusCode _statusCode;

@@ -267,15 +267,22 @@ public sealed class DoctorService : IDoctorService
 
     private async Task<DoctorCheck> CheckPythonAsync(CancellationToken ct)
     {
+        var provider = _voice.GetActiveVoiceProvider();
         var python = _settings.Settings.Tts.PythonPath.Trim();
-        var report = await _pythonValidator.ValidateAsync(python, ct);
+        var validator = PythonHealthValidator.ForProvider(provider);
+        var report = await validator.ValidateAsync(python, ct);
         var status = report.IsHealthy ? DoctorCheckStatus.Ready : DoctorCheckStatus.Error;
         if (!report.IsHealthy && report.Issues.Any(i => i.Code == "version"))
             status = DoctorCheckStatus.Warning;
 
+        var required = provider.RequiredPythonVersion;
+        var title = required.Major > 0
+            ? $"Python {required.Major}.{required.Minor} for {provider.DisplayName}"
+            : $"Python for {provider.DisplayName}";
+
         return BuildCheck(
             "python",
-            "Python 3.11 for voice",
+            title,
             status,
             report.Summary,
             report.Detail,
@@ -694,7 +701,6 @@ public sealed class DoctorService : IDoctorService
             "embedding",
             "nomic",
             "bge",
-            "e5",
             "gte"
         };
 
@@ -717,7 +723,14 @@ public sealed class DoctorService : IDoctorService
                || text.Contains("embedding", StringComparison.OrdinalIgnoreCase)
                || text.Contains("nomic", StringComparison.OrdinalIgnoreCase)
                || text.Contains("bge", StringComparison.OrdinalIgnoreCase)
-               || text.Contains("e5", StringComparison.OrdinalIgnoreCase)
+               || LooksLikeE5EmbeddingName(text)
                || text.Contains("gte", StringComparison.OrdinalIgnoreCase);
     }
+
+    private static bool LooksLikeE5EmbeddingName(string text) =>
+        text.Equals("e5", StringComparison.OrdinalIgnoreCase)
+        || text.Contains("e5-", StringComparison.OrdinalIgnoreCase)
+        || text.Contains("e5_", StringComparison.OrdinalIgnoreCase)
+        || text.Contains("/e5", StringComparison.OrdinalIgnoreCase)
+        || text.Contains("e5/", StringComparison.OrdinalIgnoreCase);
 }

@@ -1,6 +1,6 @@
 # Aether Security Review And Threat Model
 
-Last refreshed for `0.8.6-alpha`.
+Last refreshed for `0.9.8-alpha`.
 
 Aether is a local-first desktop application. The primary security goal is to
 keep user data, model paths, API keys, local runtimes, and generated voice audio
@@ -56,13 +56,13 @@ penetration-test report.
 | Area | Current control | Residual risk |
 | --- | --- | --- |
 | Secrets | API keys are converted to `secret:` references and stored in Linux Secret Service, macOS Keychain, or Windows Credential Manager when available. A local fallback vault is used only when needed. | Local fallback values are base64 encoded, not encrypted. They rely on user-only file permissions and backup exclusion. |
-| Backups | Backup excludes `secrets.local.json`. Restore rejects path traversal and refuses to overwrite existing files. | Backup archives can still contain chat, RAG, benchmark, and path metadata. Users must store archives carefully. |
+| Backups | Backup excludes `secrets.local.json` and `secrets.local.key`. Restore rejects path traversal and refuses to overwrite existing files. | Backup archives can still contain chat, RAG, benchmark, and path metadata. Restored encrypted secrets may be unreadable unless the original key is preserved. |
 | Data root | Migration previews moved files, refuses destination DB conflicts, rejects filesystem roots, and creates migration backup copies. | A user can still choose a broad writable directory that exposes metadata to other local apps. |
-| Process launch | `llama-server`, XTTS, and secret backend helpers use `ProcessStartInfo.ArgumentList` / no shell execution. | Extra args are still user-controlled runtime behavior and can weaken local-only assumptions. |
+| Process launch | `llama-server`, XTTS, Kokoro, and secret backend helpers use `ProcessStartInfo.ArgumentList` / no shell execution. | Extra args are still user-controlled runtime behavior and can weaken local-only assumptions. |
 | Local server binding | Managed `llama-server` always receives `--host 127.0.0.1` before user extra args. Health checks target `127.0.0.1`. | If `llama.cpp` accepts later duplicate host flags, extra args could override the bind address. Add explicit warning/blocking before public release. |
 | Logs | Visible process logs pass through API-key and home-path redaction. Log buffers are capped. | Redaction is best effort and may miss provider-specific token formats or sensitive filenames outside the home path. |
-| RAG ingest | Local `.txt`/`.md` ingest is the default. Optional web URL ingest is off by default, accepts only explicit HTTP(S) URLs, caps pages, strips script/style blocks from HTML, and validates prompt templates. | Large local files are warned, not refused. Web text extraction is intentionally simple and should not be treated as a browser sandbox or crawler. |
-| XTTS | Generated voice preview audio is handled in memory by the app workflow. Managed XTTS process is killed on stop/exit. | Configured XTTS output directory exists for server operation and could contain files created by the external XTTS server. |
+| RAG ingest | Local `.txt`/`.md` ingest is the default. Optional web URL ingest is off by default, accepts only explicit HTTP(S) URLs, caps pages, strips script/style blocks from HTML, validates prompt templates, and verifies pinned ONNX reranker assets with SHA256. | Large local files are warned, not refused. Web text extraction is intentionally simple and should not be treated as a browser sandbox or crawler. |
+| Voice backends | Generated voice preview audio is handled in memory by the app workflow. Managed Kokoro and XTTS processes are killed on stop/exit. Local AI setup is provider-aware and no longer suggests XTTS script/model work while Kokoro is selected. | Configured XTTS output directory exists for server operation and could contain files created by the external XTTS server. |
 | Tray and hotkeys | Close exits and stops managed services. Minimize-to-tray is explicit. Tray menu includes Stop Services and Quit. Local hotkeys only work while focused. Windows global hotkeys are opt-in and registered through the OS hotkey API. | Linux global hotkeys remain deferred because Wayland/X11 compositor behavior varies. |
 | Packaging | Linux/Windows archives include README, license, notice, commercial terms, and checksums. Linux desktop install is user-local. | Archives are unsigned; users must verify checksums from a trusted channel. |
 
@@ -111,6 +111,9 @@ Current mitigations:
 
 - Restore uses full-path checks and rejects unsafe entry paths.
 - Restore refuses existing target files.
+- Restore UI warns that `secrets.local.key` is not included in backups. Keep the
+  original key with any backup if encrypted secrets must remain readable after
+  restore.
 - Data-root migration refuses conflicting destination DB files.
 - Migration creates timestamped backup copies under the destination.
 

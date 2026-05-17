@@ -54,7 +54,7 @@ public partial class TasksViewModel : ObservableObject
         {
             Title = NewTaskTitle.Trim(),
             Notes = NewTaskNotes.Trim(),
-            DueAt = NewTaskDueAt?.DateTime,
+            DueAt = TaskDateTimeHelpers.ToUtc(NewTaskDueAt),
             LinkedConversationId = _chat.CurrentConversationId
         };
         _settings.Settings.Tasks.Add(task);
@@ -95,7 +95,7 @@ public partial class TasksViewModel : ObservableObject
         {
             Title = NewAutomationTitle.Trim(),
             Prompt = NewAutomationPrompt.Trim(),
-            NextRunAt = NewAutomationRunAt?.DateTime,
+            NextRunAt = TaskDateTimeHelpers.ToUtc(NewAutomationRunAt),
             ModelId = _chat.SelectedModel?.Id ?? string.Empty
         };
         _settings.Settings.Automations.Add(automation);
@@ -152,7 +152,7 @@ public partial class LocalTaskItemViewModel : ObservableObject
         Id = task.Id;
         _title = task.Title;
         _status = task.Status;
-        _dueAt = task.DueAt is null ? null : new DateTimeOffset(task.DueAt.Value);
+        _dueAt = task.DueAt is null ? null : new DateTimeOffset(TaskDateTimeHelpers.ToLocal(task.DueAt.Value));
         _notes = task.Notes;
         LinkedConversationId = task.LinkedConversationId;
     }
@@ -161,7 +161,7 @@ public partial class LocalTaskItemViewModel : ObservableObject
     {
         task.Title = Title.Trim();
         task.Status = Status;
-        task.DueAt = DueAt?.DateTime;
+        task.DueAt = TaskDateTimeHelpers.ToUtc(DueAt);
         task.Notes = Notes.Trim();
         task.ReminderShown = false;
     }
@@ -181,7 +181,7 @@ public partial class AutomationItemViewModel : ObservableObject
         Id = automation.Id;
         _title = automation.Title;
         _prompt = automation.Prompt;
-        _nextRunAt = automation.NextRunAt is null ? null : new DateTimeOffset(automation.NextRunAt.Value);
+        _nextRunAt = automation.NextRunAt is null ? null : new DateTimeOffset(TaskDateTimeHelpers.ToLocal(automation.NextRunAt.Value));
         _enabled = automation.Enabled;
         LastRun = automation.RunHistory.FirstOrDefault()?.Result ?? string.Empty;
     }
@@ -190,7 +190,20 @@ public partial class AutomationItemViewModel : ObservableObject
     {
         automation.Title = Title.Trim();
         automation.Prompt = Prompt.Trim();
-        automation.NextRunAt = NextRunAt?.DateTime;
+        automation.NextRunAt = TaskDateTimeHelpers.ToUtc(NextRunAt);
         automation.Enabled = Enabled;
     }
+}
+
+internal static class TaskDateTimeHelpers
+{
+    public static DateTime? ToUtc(DateTimeOffset? value) => value?.ToUniversalTime().UtcDateTime;
+
+    public static DateTime ToLocal(DateTime value) =>
+        value.Kind switch
+        {
+            DateTimeKind.Utc => value.ToLocalTime(),
+            DateTimeKind.Local => value,
+            _ => DateTime.SpecifyKind(value, DateTimeKind.Local)
+        };
 }

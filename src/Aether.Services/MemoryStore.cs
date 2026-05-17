@@ -12,6 +12,7 @@ public sealed class MemoryStore : IMemoryStore
 {
     private readonly ISettingsService _settings;
     private string _initializedPath = string.Empty;
+    private readonly SemaphoreSlim _initGate = new(1, 1);
 
     private string DbPath
     {
@@ -40,10 +41,15 @@ public sealed class MemoryStore : IMemoryStore
         var dbPath = DbPath;
         if (_initializedPath == dbPath && File.Exists(dbPath)) return;
 
-        await using var c = new SqliteConnection(Cs);
-        await c.OpenAsync(ct);
-        var cmd = c.CreateCommand();
-        cmd.CommandText = @"
+        await _initGate.WaitAsync(ct);
+        try
+        {
+            if (_initializedPath == dbPath && File.Exists(dbPath)) return;
+
+            await using var c = new SqliteConnection(Cs);
+            await c.OpenAsync(ct);
+            var cmd = c.CreateCommand();
+            cmd.CommandText = @"
             CREATE TABLE IF NOT EXISTS memories (
                 id TEXT PRIMARY KEY,
                 category TEXT NOT NULL,
@@ -71,9 +77,14 @@ public sealed class MemoryStore : IMemoryStore
             CREATE INDEX IF NOT EXISTS idx_importance ON memories(importance_score DESC);
             CREATE INDEX IF NOT EXISTS idx_updated ON memories(updated_at DESC);
             CREATE INDEX IF NOT EXISTS idx_source_conversation ON memories(source_conversation_id);";
-        await cmd.ExecuteNonQueryAsync(ct);
-        await RebuildFtsAsync(c, ct);
-        _initializedPath = dbPath;
+            await cmd.ExecuteNonQueryAsync(ct);
+            await RebuildFtsAsync(c, ct);
+            _initializedPath = dbPath;
+        }
+        finally
+        {
+            _initGate.Release();
+        }
     }
 
     private static async Task RebuildFtsAsync(SqliteConnection c, CancellationToken ct)

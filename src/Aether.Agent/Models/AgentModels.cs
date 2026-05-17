@@ -59,6 +59,7 @@ public sealed class AgentTaskState
     public List<AgentToolResult> ToolResults { get; set; } = [];
     public List<AgentApprovalRecord> ApprovalHistory { get; set; } = [];
     public List<AgentDraftPatch> DraftPatches { get; set; } = [];
+    public AgentPendingToolAction? PendingToolAction { get; set; }
     public string Summary { get; set; } = string.Empty;
 }
 
@@ -138,6 +139,14 @@ public sealed class AgentToolResult
     public Dictionary<string, object?> Arguments { get; set; } = [];
     public string ResultSummary { get; set; } = string.Empty;
     public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+}
+
+public sealed class AgentPendingToolAction
+{
+    public string ToolName { get; set; } = string.Empty;
+    public Dictionary<string, object?> Arguments { get; set; } = [];
+    public AgentRiskLevel RiskLevel { get; set; } = AgentRiskLevel.Medium;
+    public DateTime RequestedAt { get; set; } = DateTime.UtcNow;
 }
 
 public sealed class AgentNextAction

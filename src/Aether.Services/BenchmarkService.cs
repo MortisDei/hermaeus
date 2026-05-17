@@ -665,7 +665,14 @@ public sealed class BenchmarkService : IBenchmarkService
         return csv.ToString();
     }
 
-    private static string Csv(string value) => $"\"{value.Replace("\"", "\"\"")}\"";
+    private static string Csv(string value)
+    {
+        var normalized = value
+            .Replace("\r\n", " ", StringComparison.Ordinal)
+            .Replace('\r', ' ')
+            .Replace('\n', ' ');
+        return $"\"{normalized.Replace("\"", "\"\"")}\"";
+    }
     private static string Sanitize(string name)
     {
         var invalid = Path.GetInvalidFileNameChars().ToHashSet();

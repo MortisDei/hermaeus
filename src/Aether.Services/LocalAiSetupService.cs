@@ -9,7 +9,6 @@ namespace Aether.Services;
 
 public sealed class LocalAiSetupService : ILocalAiSetupService
 {
-    private static readonly string[] XttsPackages = ["TTS", "fastapi", "uvicorn", "soundfile"];
     private static readonly Version MinSupportedXttsPython = new(3, 9);
     private static readonly Version MaxSupportedXttsPythonExclusive = new(3, 12);
 
@@ -50,6 +49,9 @@ public sealed class LocalAiSetupService : ILocalAiSetupService
         var defaultVoices = Path.Combine(layout.Root, "TTS", "voices");
         var defaultOutput = Path.Combine(layout.Root, "TTS", "output");
         var venvPython = string.IsNullOrWhiteSpace(layout.TtsPythonPath) ? PythonPathForVenv(defaultVenv) : layout.TtsPythonPath;
+        var activeVoiceProvider = NormalizeVoiceProvider(settings.Tts.VoiceProvider);
+        var voicePackages = VoicePackagesFor(activeVoiceProvider);
+        var voiceProviderLabel = VoiceProviderLabel(activeVoiceProvider);
 
         var hasGgufModels = !string.IsNullOrWhiteSpace(layout.ModelsDirectory)
             && Directory.Exists(layout.ModelsDirectory)
@@ -75,14 +77,32 @@ public sealed class LocalAiSetupService : ILocalAiSetupService
                 health.Detail,
                 true));
         }
-        AddItem(items, "xtts-model", "XTTS v2 model", layout.TtsModelDirectory,
-            "Found XTTS v2 model files.", "XTTS v2 model files were not found.", true);
-        AddItem(items, "xtts-script", "XTTS API script", layout.TtsScriptPath,
-            "Found xtts_api_server.py.", "Aether can create a local API script.", true);
-        AddItem(items, "voices", "Voice samples", layout.TtsVoiceDirectory,
-            "Found voice sample folder.", "Voice folder can be created.", false);
+        var voicePackagesReady = false;
+        if (File.Exists(venvPython))
+        {
+            voicePackagesReady = await HasPythonModulesAsync(venvPython, voicePackages, ct);
+            items.Add(new LocalAiReadinessItem(
+                "voice-packages",
+                $"{voiceProviderLabel} packages",
+                voicePackagesReady ? LocalAiReadinessStatus.Found : LocalAiReadinessStatus.NeedsAction,
+                voicePackagesReady
+                    ? $"Required {voiceProviderLabel} packages are importable."
+                    : $"Missing one or more {voiceProviderLabel} packages: {string.Join(", ", voicePackages)}.",
+                voicePackagesReady ? venvPython : "Install only if this provider is selected and imports fail.",
+                true));
+        }
+
+        if (activeVoiceProvider == VoiceProvider.XttsV2)
+        {
+            AddItem(items, "xtts-model", "XTTS v2 model", layout.TtsModelDirectory,
+                "Found XTTS v2 model files.", "XTTS v2 model files were not found.", true);
+            AddItem(items, "xtts-script", "XTTS API script", layout.TtsScriptPath,
+                "Found xtts_api_server.py.", "Aether can create a local API script.", true);
+            AddItem(items, "voices", "Voice samples", layout.TtsVoiceDirectory,
+                "Found voice sample folder.", "Voice folder can be created.", false);
+        }
         AddItem(items, "output", "Audio output", layout.TtsOutputDirectory,
-            "Found XTTS output folder.", "Output folder can be created.", false);
+            "Found audio output folder.", "Output folder can be created.", false);
         AddItem(items, "reranker", "RAG reranker", layout.RerankerDirectory,
             "Found reranker model folder.", "Reranker is optional for RAG quality.", false);
 
@@ -93,12 +113,13 @@ public sealed class LocalAiSetupService : ILocalAiSetupService
         var installPython = installPythonReady
             ? venvPython
             : PythonPathForVenv(defaultVenv);
-        actions.Add(InstallXttsAction(installPython, installPythonReady));
+        if (!voicePackagesReady)
+            actions.Add(InstallVoiceBackendAction(installPython, voicePackages, voiceProviderLabel, installPythonReady));
 
-        if (string.IsNullOrWhiteSpace(layout.TtsScriptPath))
+        if (activeVoiceProvider == VoiceProvider.XttsV2 && string.IsNullOrWhiteSpace(layout.TtsScriptPath))
             actions.Add(CreateScriptAction(defaultScript));
 
-        if (string.IsNullOrWhiteSpace(layout.TtsVoiceDirectory))
+        if (activeVoiceProvider == VoiceProvider.XttsV2 && string.IsNullOrWhiteSpace(layout.TtsVoiceDirectory))
             actions.Add(CreateDirectoryAction("voices", "Create voice sample folder", defaultVoices));
         if (string.IsNullOrWhiteSpace(layout.TtsOutputDirectory))
             actions.Add(CreateDirectoryAction("output", "Create XTTS output folder", defaultOutput));
@@ -119,7 +140,7 @@ public sealed class LocalAiSetupService : ILocalAiSetupService
 
         // Offer to download llama-server if not found
         var llamaServerPath = _llamaServerSetup.GetDefaultInstallPath(layout.Root);
-        if (!_llamaServerSetup.IsInstalled(llamaServerPath))
+        if (!_llamaServerSetup.IsInstalled(llamaServerPath) && !HasConfiguredLlamaServer(settings))
         {
             actions.Add(DownloadLlamaServerAction(llamaServerPath));
             items.Add(new("llama-server", "llama-server binary", LocalAiReadinessStatus.NeedsAction,
@@ -151,7 +172,7 @@ public sealed class LocalAiSetupService : ILocalAiSetupService
         return action.Kind switch
         {
             LocalAiSetupActionKind.CreateVenv => await CreateVenvAsync(action.TargetPath, settings, progress, ct),
-            LocalAiSetupActionKind.InstallXttsDependencies => await InstallXttsAsync(action.TargetPath, settings, progress, ct),
+            LocalAiSetupActionKind.InstallXttsDependencies => await InstallXttsAsync(action.TargetPath, settings, ExtractPackages(action.CommandPreview), progress, ct),
             LocalAiSetupActionKind.CreateXttsApiScript => CreateXttsApiScript(action.TargetPath, settings, allowOverwrite, progress),
             LocalAiSetupActionKind.CreateDirectory => CreateSupportDirectory(action.TargetPath, progress),
             LocalAiSetupActionKind.DownloadGgufModel => await DownloadGgufModelAsync(action, progress, ct),
@@ -162,136 +183,7 @@ public sealed class LocalAiSetupService : ILocalAiSetupService
     }
 
     public string BuildXttsApiScript(string? modelDirectory = null, string? outputDirectory = null)
-    {
-        var modelDefault = string.IsNullOrWhiteSpace(modelDirectory) ? "None" : $"r'''{modelDirectory.Trim()}'''";
-        var outputDefault = string.IsNullOrWhiteSpace(outputDirectory) ? "None" : $"r'''{outputDirectory.Trim()}'''";
-        return $$"""
-#!/usr/bin/env python3
-import argparse
-import os
-import time
-import uuid
-from pathlib import Path
-from typing import Optional
-
-import uvicorn
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
-from pydantic import BaseModel
-
-
-DEFAULT_MODEL_DIR = {{modelDefault}}
-DEFAULT_OUTPUT_DIR = {{outputDefault}}
-app = FastAPI(title="Aether XTTS v2 API")
-tts_engine = None
-settings = None
-
-
-class SpeechRequest(BaseModel):
-    input: Optional[str] = None
-    text: Optional[str] = None
-    voice: Optional[str] = None
-    speaker: Optional[str] = None
-    speaker_wav: Optional[str] = None
-    language: str = "en"
-    response_format: str = "wav"
-
-
-def find_xtts_model(script_dir: Path) -> Optional[Path]:
-    candidates = [
-        script_dir / "multi-dataset--xtts_v2",
-        script_dir.parent / "multi-dataset--xtts_v2",
-        script_dir.parent / "TTS" / "multi-dataset--xtts_v2",
-    ]
-    for candidate in candidates:
-        if (candidate / "config.json").exists() and ((candidate / "model.pth").exists() or (candidate / "model.safetensors").exists()):
-            return candidate
-    return None
-
-
-def load_model():
-    global tts_engine
-    if tts_engine is not None:
-        return tts_engine
-    try:
-        from TTS.api import TTS
-    except Exception as exc:
-        raise RuntimeError(f"Python package TTS is not installed in this environment: {exc}") from exc
-
-    model_dir = Path(settings.model_dir) if settings.model_dir else find_xtts_model(Path(__file__).resolve().parent)
-    if model_dir is None:
-        model_name = f"tts_models/multilingual/multi-dataset/xtts_v{settings.model_version}"
-        tts_engine = TTS(model_name=model_name)
-    else:
-        config_path = model_dir / "config.json"
-        tts_engine = TTS(model_path=str(model_dir), config_path=str(config_path))
-    if hasattr(tts_engine, "to"):
-        tts_engine = tts_engine.to(settings.device)
-    return tts_engine
-
-
-def voice_candidates() -> list[str]:
-    voice_dir = Path(settings.voice_dir) if settings.voice_dir else Path(settings.output_dir).parent / "voices"
-    if not voice_dir.exists():
-        return []
-    return [str(path) for path in voice_dir.glob("*") if path.suffix.lower() in {".wav", ".mp3", ".flac"}]
-
-
-@app.get("/health")
-def health():
-    return {"ok": True, "model_loaded": tts_engine is not None}
-
-
-@app.get("/voices")
-def voices():
-    return {"voices": voice_candidates()}
-
-
-@app.get("/v1/audio/voices")
-def openai_voices():
-    return {"data": [{"id": path, "name": Path(path).stem} for path in voice_candidates()]}
-
-
-@app.post("/v1/audio/speech")
-def speech(request: SpeechRequest):
-    text = request.input or request.text
-    if not text:
-        raise HTTPException(status_code=400, detail="input or text is required")
-    speaker_wav = request.speaker_wav or request.voice or request.speaker
-    if not speaker_wav:
-        voices = voice_candidates()
-        speaker_wav = voices[0] if voices else None
-    if not speaker_wav:
-        raise HTTPException(status_code=400, detail="speaker_wav or a voice sample is required")
-
-    engine = load_model()
-    output_dir = Path(settings.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / f"aether-{int(time.time())}-{uuid.uuid4().hex}.wav"
-    engine.tts_to_file(text=text, speaker_wav=speaker_wav, language=request.language, file_path=str(output_path))
-    return FileResponse(str(output_path), media_type="audio/wav", filename=output_path.name)
-
-
-def parse_args():
-    parser = argparse.ArgumentParser(description="Aether XTTS v2 API server")
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8020)
-    parser.add_argument("--model-dir", default=DEFAULT_MODEL_DIR)
-    parser.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR or str(Path.cwd() / "output"))
-    parser.add_argument("--voice-dir", default=None)
-    parser.add_argument("--model-version", default="2.0.3")
-    parser.add_argument("--device", default="cpu")
-    parser.add_argument("--preload", action="store_true")
-    return parser.parse_args()
-
-
-if __name__ == "__main__":
-    settings = parse_args()
-    if settings.preload:
-        load_model()
-    uvicorn.run(app, host=settings.host, port=settings.port)
-""";
-    }
+        => LocalAiSetupScriptGenerator.BuildXttsApiScript(modelDirectory, outputDirectory);
 
     private async Task<LocalAiSetupResult> DownloadGgufModelAsync(
         LocalAiSetupAction action,
@@ -424,11 +316,88 @@ if __name__ == "__main__":
             required));
     }
 
+    private static VoiceProvider NormalizeVoiceProvider(string value) => value switch
+    {
+        "Kokoro" => VoiceProvider.Kokoro,
+        "F5Tts" or "F5-TTS" => VoiceProvider.F5Tts,
+        "XttsV2" or "XTTS" or "XTTS v2" => VoiceProvider.XttsV2,
+        "OpenAi" or "OpenAI" => VoiceProvider.OpenAi,
+        _ => VoiceProvider.Kokoro
+    };
+
+    private static string VoiceProviderLabel(VoiceProvider provider) => provider switch
+    {
+        VoiceProvider.XttsV2 => "XTTS v2",
+        VoiceProvider.F5Tts => "F5-TTS",
+        VoiceProvider.OpenAi => "OpenAI",
+        _ => "Kokoro"
+    };
+
+    private static IReadOnlyList<string> VoicePackagesFor(VoiceProvider provider) => provider switch
+    {
+        VoiceProvider.XttsV2 => LocalAiSetupConstants.XttsPackages,
+        VoiceProvider.F5Tts => ["f5-tts", "soundfile"],
+        VoiceProvider.OpenAi => ["openai"],
+        _ => LocalAiSetupConstants.KokoroPackages
+    };
+
+    private static async Task<bool> HasPythonModulesAsync(string pythonPath, IReadOnlyList<string> modules, CancellationToken ct)
+    {
+        if (!File.Exists(pythonPath) || modules.Count == 0)
+            return false;
+
+        var script = string.Join(";", modules.Select(module => $"import {PythonImportName(module)}"));
+        var result = await RunProcessAsync(
+            pythonPath,
+            ["-c", script],
+            Path.GetDirectoryName(pythonPath) ?? Environment.CurrentDirectory,
+            progress: null,
+            ct);
+        return result.Success;
+    }
+
+    private static string PythonImportName(string packageName) => packageName switch
+    {
+        "f5-tts" => "f5_tts",
+        _ => packageName.Replace("-", "_")
+    };
+
+    private static bool HasConfiguredLlamaServer(AppSettings settings) =>
+        settings.ManagedServers.Any(server => LooksLikeExistingLlamaServer(server.ExecutablePath));
+
+    private static bool LooksLikeExistingLlamaServer(string? executablePath)
+    {
+        if (string.IsNullOrWhiteSpace(executablePath))
+            return false;
+
+        var trimmed = executablePath.Trim();
+        if (File.Exists(trimmed))
+            return Path.GetFileName(trimmed).Contains("llama-server", StringComparison.OrdinalIgnoreCase);
+
+        return FindOnPath(trimmed) is not null
+            && Path.GetFileName(trimmed).Contains("llama-server", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static IReadOnlyList<string> ExtractPackages(IReadOnlyList<string> commandPreview)
+    {
+        var installIndex = commandPreview
+            .Select((value, index) => new { value, index })
+            .FirstOrDefault(item => string.Equals(item.value, "install", StringComparison.OrdinalIgnoreCase))
+            ?.index ?? -1;
+        if (installIndex < 0 || installIndex + 1 >= commandPreview.Count)
+            return LocalAiSetupConstants.XttsPackages;
+
+        return commandPreview
+            .Skip(installIndex + 1)
+            .Where(value => !string.IsNullOrWhiteSpace(value) && !value.StartsWith("-", StringComparison.Ordinal))
+            .ToList();
+    }
+
     private static LocalAiSetupAction CreateVenvAction(string target) =>
         LocalAiSetupActionFactory.CreateVenvAction(target);
 
-    private static LocalAiSetupAction InstallXttsAction(string pythonPath, bool canRun) =>
-        LocalAiSetupActionFactory.InstallXttsAction(pythonPath, canRun);
+    private static LocalAiSetupAction InstallVoiceBackendAction(string pythonPath, IReadOnlyList<string> packages, string providerName, bool canRun) =>
+        LocalAiSetupActionFactory.InstallVoiceBackendAction(pythonPath, packages, providerName, canRun);
 
     private static LocalAiSetupAction CreateScriptAction(string target) =>
         LocalAiSetupActionFactory.CreateScriptAction(target);
@@ -549,15 +518,15 @@ if __name__ == "__main__":
         return null;
     }
 
-    private static Task<LocalAiSetupResult> InstallXttsAsync(string pythonPath, AppSettings settings, IProgress<string>? progress, CancellationToken ct)
+    private static Task<LocalAiSetupResult> InstallXttsAsync(string pythonPath, AppSettings settings, IReadOnlyList<string> packages, IProgress<string>? progress, CancellationToken ct)
     {
         if (!File.Exists(pythonPath))
             return Task.FromResult(new LocalAiSetupResult(false, $"Python was not found at {pythonPath}. Create or choose a venv first."));
 
-        return InstallXttsWithRepairAsync(pythonPath, settings, progress, ct);
+        return InstallXttsWithRepairAsync(pythonPath, settings, packages, progress, ct);
     }
 
-    private static async Task<LocalAiSetupResult> InstallXttsWithRepairAsync(string pythonPath, AppSettings settings, IProgress<string>? progress, CancellationToken ct)
+    private static async Task<LocalAiSetupResult> InstallXttsWithRepairAsync(string pythonPath, AppSettings settings, IReadOnlyList<string> packages, IProgress<string>? progress, CancellationToken ct)
     {
         var workingDirectory = Path.GetDirectoryName(pythonPath) ?? Environment.CurrentDirectory;
         var preflight = await RunProcessAsync(
@@ -581,46 +550,49 @@ if __name__ == "__main__":
             workingDirectory = Path.GetDirectoryName(pythonPath) ?? Environment.CurrentDirectory;
         }
 
-        var isValid = await ValidatePythonForXttsAsync(pythonPath, workingDirectory, progress, ct);
-        if (!isValid)
+        var installingXtts = packages.Any(package => string.Equals(package, "TTS", StringComparison.OrdinalIgnoreCase));
+        if (installingXtts)
         {
-            progress?.Report("Python validation failed. Attempting venv rebuild...");
-            var repair = await RebuildVenvAsync(pythonPath, progress, ct);
-            if (!repair.Success)
-                return repair;
-
-            pythonPath = repair.UpdatedPath ?? pythonPath;
-            workingDirectory = Path.GetDirectoryName(pythonPath) ?? Environment.CurrentDirectory;
-
-            isValid = await ValidatePythonForXttsAsync(pythonPath, workingDirectory, progress, ct);
+            var isValid = await ValidatePythonForXttsAsync(pythonPath, workingDirectory, progress, ct);
             if (!isValid)
             {
-                return new LocalAiSetupResult(false,
-                    "XTTS requires a valid Python 3.9-3.11 installation with encodings, venv module, and proper sys.prefix. Please install Python 3.9-3.11 on your system.");
+                progress?.Report("Python validation failed. Attempting venv rebuild...");
+                var repair = await RebuildVenvAsync(pythonPath, progress, ct);
+                if (!repair.Success)
+                    return repair;
+
+                pythonPath = repair.UpdatedPath ?? pythonPath;
+                workingDirectory = Path.GetDirectoryName(pythonPath) ?? Environment.CurrentDirectory;
+
+                isValid = await ValidatePythonForXttsAsync(pythonPath, workingDirectory, progress, ct);
+                if (!isValid)
+                {
+                    return new LocalAiSetupResult(false,
+                        "XTTS requires a valid Python 3.9-3.11 installation with encodings, venv module, and proper sys.prefix. Please install Python 3.9-3.11 on your system.");
+                }
             }
-        }
 
-        // Install a matching PyTorch wheel for the detected backend before installing XTTS packages.
-        try
-        {
-            var detection = await DetectGpuBackendForSettingsAsync(settings, ct);
-            settings.Tts.Device = detection.Device;
-            if (!string.IsNullOrWhiteSpace(detection.Warning))
-                progress?.Report(detection.Warning);
+            try
+            {
+                var detection = await DetectGpuBackendForSettingsAsync(settings, ct);
+                settings.Tts.Device = detection.Device;
+                if (!string.IsNullOrWhiteSpace(detection.Warning))
+                    progress?.Report(detection.Warning);
 
-            progress?.Report($"Installing PyTorch for backend: {detection.Device}...");
-            var torchResult = await InstallTorchForBackendAsync(pythonPath, detection.Device, workingDirectory, progress, ct);
-            if (!torchResult.Success)
-                return new LocalAiSetupResult(false, $"Failed to install PyTorch: {torchResult.Log}");
-        }
-        catch (Exception ex)
-        {
-            progress?.Report($"PyTorch auto-install skipped: {ex.Message}");
+                progress?.Report($"Installing PyTorch for backend: {detection.Device}...");
+                var torchResult = await InstallTorchForBackendAsync(pythonPath, detection.Device, workingDirectory, progress, ct);
+                if (!torchResult.Success)
+                    return new LocalAiSetupResult(false, $"Failed to install PyTorch: {torchResult.Log}");
+            }
+            catch (Exception ex)
+            {
+                progress?.Report($"PyTorch auto-install skipped: {ex.Message}");
+            }
         }
 
         return await RunProcessAsync(
             pythonPath,
-            ["-m", "pip", "install", ..XttsPackages],
+            ["-m", "pip", "install", ..packages],
             workingDirectory,
             progress,
             ct);

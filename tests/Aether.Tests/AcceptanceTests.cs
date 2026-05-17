@@ -73,7 +73,7 @@ namespace Aether.Tests
             var ragStore = new SqliteRagStore(settings);
             await ragStore.InitializeAsync();
             var rag = new RagQueryService(ragStore, new FakeEmbeddingService(), new FakeLlm(), settings, new NoOpReranker());
-            var agentService = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new FakeAgentLlm());
+            var agentService = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), new FakeAgentLlm());
             var logs = new SimpleRuntimeLog(temp.PathFor("aether-test-logs"));
             var profiles = new FileWorkspaceProfileStore(settings);
             var analysis = new WorkspaceAnalysisService(profiles, memoryStore);

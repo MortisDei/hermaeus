@@ -34,28 +34,28 @@
                 </Grid>
 
                 <Grid ColumnDefinitions="*,*,*,*" ColumnSpacing="8">
-                    <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="10">
+                    <Border Grid.Column="0" Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="10">
                         <StackPanel Spacing="2">
                             <TextBlock Text="Task state" FontSize="11" Opacity="0.55" />
                             <TextBlock Text="{Binding CurrentTaskStatusLabel}" FontSize="13" FontWeight="SemiBold" />
                             <TextBlock Text="{Binding CurrentTaskGoalLabel}" FontSize="11" Opacity="0.7" TextTrimming="CharacterEllipsis" />
                         </StackPanel>
                     </Border>
-                    <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="10">
+                    <Border Grid.Column="1" Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="10">
                         <StackPanel Spacing="2">
                             <TextBlock Text="Task history" FontSize="11" Opacity="0.55" />
                             <TextBlock Text="{Binding RecentTaskCount, StringFormat={}{0} recent tasks}" FontSize="13" FontWeight="SemiBold" />
                             <TextBlock Text="{Binding ReviewQueueCount, StringFormat={}{0} queued reviews}" FontSize="11" Opacity="0.7" />
                         </StackPanel>
                     </Border>
-                    <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="10">
+                    <Border Grid.Column="2" Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="10">
                         <StackPanel Spacing="2">
                             <TextBlock Text="Workspace memory" FontSize="11" Opacity="0.55" />
                             <TextBlock Text="{Binding WorkspaceMemoryCount, StringFormat={}{0} saved notes}" FontSize="13" FontWeight="SemiBold" />
                             <TextBlock Text="{Binding RetrievedContextCount, StringFormat={}{0} context items}" FontSize="11" Opacity="0.7" />
                         </StackPanel>
                     </Border>
-                    <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="10">
+                    <Border Grid.Column="3" Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="10">
                         <StackPanel Spacing="2">
                             <TextBlock Text="Summary" FontSize="11" Opacity="0.55" />
                             <TextBlock Text="{Binding CurrentTaskSummaryLabel}" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />

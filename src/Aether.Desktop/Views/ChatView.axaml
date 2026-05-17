@@ -26,7 +26,7 @@
                 Padding="12,6"
                 BorderThickness="0,0,0,1"
                 BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
-            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
 
                 <TextBlock Grid.Column="0" Text="Model"
                            VerticalAlignment="Center" Opacity="0.5" FontSize="12" />
@@ -92,6 +92,20 @@
                         Command="{Binding ToggleCompareModelsCommand}"
                         ToolTip.Tip="Compare models">
                     <PathIcon Data="M4 5h7v14H4V5zm9 0h7v14h-7V5zM6 7v10h3V7H6zm9 0v10h3V7h-3z"
+                              Width="16" Height="16" />
+                </Button>
+
+                <Button Grid.Column="8" Classes="icon-btn"
+                        Command="{Binding ExportMarkdownCommand}"
+                        ToolTip.Tip="Export conversation as Markdown">
+                    <PathIcon Data="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zM13 9V3.5L18.5 9H13zM8 13h8v2H8v-2zm0 4h8v2H8v-2z"
+                              Width="16" Height="16" />
+                </Button>
+
+                <Button Grid.Column="9" Classes="icon-btn"
+                        Command="{Binding ExportJsonCommand}"
+                        ToolTip.Tip="Export conversation as JSON">
+                    <PathIcon Data="M5 3h14v18H5V3zm2 2v14h10V5H7zm2 3h2v2H9V8zm4 0h2v2h-2V8zm-4 4h2v2H9v-2zm4 0h2v2h-2v-2z"
                               Width="16" Height="16" />
                 </Button>
             </Grid>

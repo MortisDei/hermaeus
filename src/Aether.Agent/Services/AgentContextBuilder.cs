@@ -38,7 +38,7 @@ public sealed class AgentContextBuilder : IAgentContextBuilder
             KnownRisks =
             [
                 "Read-only tools may inspect local files under the selected workspace root.",
-                "Writes, command execution, network access, commit, and push are not executed by this alpha agent."
+                "Only approved draft patch application may write files; command execution, network access, commit, and push are blocked."
             ]
         };
 

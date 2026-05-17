@@ -10,6 +10,7 @@ public sealed class SettingsService : ISettingsService
     private static readonly string DefaultDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Aether");
     private readonly string _path;
+    private readonly SemaphoreSlim _gate = new(1, 1);
 
     public AppSettings Settings { get; private set; } = new();
     public event EventHandler? SettingsChanged;
@@ -34,27 +35,50 @@ public sealed class SettingsService : ISettingsService
 
     public async Task LoadAsync()
     {
-        if (!File.Exists(_path)) return;
+        var changed = false;
+        await _gate.WaitAsync();
         try
         {
+            if (!File.Exists(_path)) return;
             var json = await File.ReadAllTextAsync(_path);
             Settings = JsonSerializer.Deserialize<AppSettings>(json, Opts) ?? new();
-            SettingsChanged?.Invoke(this, EventArgs.Empty);
+            changed = true;
         }
-        catch { Settings = new(); }
+        catch
+        {
+            Settings = new();
+            changed = true;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+
+        if (changed)
+            SettingsChanged?.Invoke(this, EventArgs.Empty);
     }
 
     public async Task<SettingsSaveResult> SaveAsync(string? previousDataRootDirectory = null)
     {
-        var currentDataRoot = ResolveDataRoot(Settings);
-        ValidateDataRoot(currentDataRoot);
+        SettingsSaveResult migration;
+        await _gate.WaitAsync();
+        try
+        {
+            var currentDataRoot = ResolveDataRoot(Settings);
+            ValidateDataRoot(currentDataRoot);
 
-        var migration = previousDataRootDirectory is null
-            ? new SettingsSaveResult(false, null, currentDataRoot, null, 0)
-            : MigrateDataRoot(previousDataRootDirectory, Settings.DataManagement.DataRootDirectory);
+            migration = previousDataRootDirectory is null
+                ? new SettingsSaveResult(false, null, currentDataRoot, null, 0)
+                : MigrateDataRoot(previousDataRootDirectory, Settings.DataManagement.DataRootDirectory);
 
-        Directory.CreateDirectory(currentDataRoot);
-        await File.WriteAllTextAsync(_path, JsonSerializer.Serialize(Settings, Opts));
+            Directory.CreateDirectory(currentDataRoot);
+            await File.WriteAllTextAsync(_path, JsonSerializer.Serialize(Settings, Opts));
+        }
+        finally
+        {
+            _gate.Release();
+        }
+
         SettingsChanged?.Invoke(this, EventArgs.Empty);
         return migration;
     }

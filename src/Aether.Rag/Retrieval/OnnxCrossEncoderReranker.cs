@@ -4,15 +4,19 @@ using Aether.Rag.Models;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 using Microsoft.ML.Tokenizers;
+using System.Security.Cryptography;
 
 namespace Aether.Rag.Retrieval;
 
 public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
 {
-    private const string ModelUrl = "https://huggingface.co/cross-encoder/ms-marco-MiniLM-L6-v2/resolve/main/onnx/model_O4.onnx";
-    private const string VocabUrl = "https://huggingface.co/cross-encoder/ms-marco-MiniLM-L6-v2/resolve/main/vocab.txt";
+    private const string ModelCommit = "eeed17e3bfc6fa06a790f2d12a9501fec587fccf";
+    private const string ModelUrl = $"https://huggingface.co/cross-encoder/ms-marco-MiniLM-L6-v2/resolve/{ModelCommit}/onnx/model_O4.onnx";
+    private const string VocabUrl = $"https://huggingface.co/cross-encoder/ms-marco-MiniLM-L6-v2/resolve/{ModelCommit}/vocab.txt";
     private const string ModelFileName = "model_O4.onnx";
     private const string VocabFileName = "vocab.txt";
+    public const string ModelSha256 = "b232c2eeedd97a593edc177e3ce4cbd1d6c8f6d8f61a5c201cd0cdeb8134da18";
+    public const string VocabSha256 = "07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3";
 
     private static readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(10) };
     private readonly ISettingsService _settings;
@@ -83,6 +87,13 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
                 return false;
             }
 
+            if (!await VerifyFileSha256Async(modelPath, ModelSha256, ct)
+                || !await VerifyFileSha256Async(vocabPath, VocabSha256, ct))
+            {
+                _unavailable = true;
+                return false;
+            }
+
             // assets present - load tokenizer and session
             _tokenizer = BertTokenizer.Create(vocabPath);
             _session = new InferenceSession(modelPath);
@@ -114,9 +125,9 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
             var vocabPath = Path.Combine(modelDir, VocabFileName);
             Directory.CreateDirectory(modelDir);
             progress?.Report("Downloading reranker model...");
-            await DownloadIfMissingAsync(modelPath, ModelUrl, progress, ct);
+            await DownloadIfMissingAsync(modelPath, ModelUrl, ModelSha256, progress, ct);
             progress?.Report("Downloading reranker vocabulary...");
-            await DownloadIfMissingAsync(vocabPath, VocabUrl, progress, ct);
+            await DownloadIfMissingAsync(vocabPath, VocabUrl, VocabSha256, progress, ct);
             progress?.Report("Loading reranker model...");
             // load after download
             _tokenizer = BertTokenizer.Create(vocabPath);
@@ -126,8 +137,9 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
             progress?.Report("Reranker installed");
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            progress?.Report($"Reranker install failed: {ex.Message}");
             _unavailable = true;
             _session?.Dispose();
             _session = null;
@@ -189,9 +201,9 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
         }
     }
 
-    private async Task DownloadIfMissingAsync(string path, string url, IProgress<string>? progress, CancellationToken ct)
+    private async Task DownloadIfMissingAsync(string path, string url, string expectedSha256, IProgress<string>? progress, CancellationToken ct)
     {
-        if (File.Exists(path))
+        if (File.Exists(path) && await VerifyFileSha256Async(path, expectedSha256, ct))
             return;
 
         var temp = $"{path}.download";
@@ -201,9 +213,27 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
         await using (var source = await response.Content.ReadAsStreamAsync(ct))
         await using (var target = File.Create(temp))
             await source.CopyToAsync(target, ct);
+        if (!await VerifyFileSha256Async(temp, expectedSha256, ct))
+        {
+            File.Delete(temp);
+            if (File.Exists(path))
+                File.Delete(path);
+            throw new InvalidOperationException($"{Path.GetFileName(path)} failed SHA256 verification.");
+        }
         progress?.Report($"Downloaded: {Path.GetFileName(path)}");
 
         File.Move(temp, path, overwrite: true);
+    }
+
+    public static async Task<bool> VerifyFileSha256Async(string path, string expectedSha256, CancellationToken ct = default)
+    {
+        if (!File.Exists(path))
+            return false;
+
+        await using var stream = File.OpenRead(path);
+        var hash = await SHA256.HashDataAsync(stream, ct);
+        var actual = Convert.ToHexString(hash).ToLowerInvariant();
+        return string.Equals(actual, expectedSha256, StringComparison.OrdinalIgnoreCase);
     }
 
     public static string ResolveModelDirectory(AppSettings settings)

@@ -157,7 +157,7 @@ public sealed class OllamaService : IDisposable
 
     public void Dispose()
     {
-        // HttpClient is static and shared; do not dispose
+        _http.Dispose();
     }
 
     private sealed record TagsResponse([property: JsonPropertyName("models")] List<OllamaModel>? Models);

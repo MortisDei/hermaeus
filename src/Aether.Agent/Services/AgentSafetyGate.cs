@@ -40,7 +40,7 @@ public sealed class AgentSafetyGate : IAgentSafetyGate
             return new AgentToolPolicyDecision(AgentToolDisposition.Allowed, AgentRiskLevel.Low, "Read-only local operation.");
 
         if (HighRiskTools.Contains(toolName))
-            return new AgentToolPolicyDecision(AgentToolDisposition.RequiresApproval, AgentRiskLevel.High, "High-risk or external action requires explicit approval.");
+            return new AgentToolPolicyDecision(AgentToolDisposition.Blocked, AgentRiskLevel.High, "High-risk or external action is blocked.");
 
         if (toolName.Contains("write", StringComparison.OrdinalIgnoreCase)
             || toolName.Contains("apply", StringComparison.OrdinalIgnoreCase)

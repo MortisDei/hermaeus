@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Aether.Core.Models;
 using Aether.Core.Services;
 using Aether.Rag.Embeddings;
 using Aether.Rag.Models;
@@ -33,11 +34,15 @@ public sealed class RagQueryService
     private readonly ILlmService       _llm;
     private readonly ISettingsService  _settings;
     private readonly IReranker         _reranker;
+    private readonly IRuntimeLogService? _logs;
 
     // In-memory chunk cache per dataset  (dataset_id → chunks)
     private const int MaxCachedDatasets = 8;
+    private const long MaxCacheBytes = 256L * 1024L * 1024L;
     private readonly Dictionary<string, List<RagChunk>> _cache = [];
+    private readonly Dictionary<string, long> _cacheSizes = [];
     private readonly LinkedList<string> _cacheOrder = new();
+    private long _cacheBytes;
     private readonly object _cacheSync = new();
 
     public RagQueryService(
@@ -45,9 +50,10 @@ public sealed class RagQueryService
         IEmbeddingService embed,
         ILlmService llm,
         ISettingsService settings,
-        IReranker reranker)
+        IReranker reranker,
+        IRuntimeLogService? logs = null)
     {
-        _store = store; _embed = embed; _llm = llm; _settings = settings; _reranker = reranker;
+        _store = store; _embed = embed; _llm = llm; _settings = settings; _reranker = reranker; _logs = logs;
     }
 
     /// <summary>Warm the in-memory embedding cache for a dataset.</summary>
@@ -55,6 +61,8 @@ public sealed class RagQueryService
     {
         var chunks = await _store.GetChunksAsync(datasetId, includeEmbeddings: true, ct);
         StoreCache(datasetId, chunks);
+        _logs?.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Rag,
+            $"RAG cache warmed for {datasetId}: {chunks.Count} chunk(s), {GetCacheBytes() / 1024 / 1024} MiB cached."));
     }
 
     public void ClearCache(string datasetId)
@@ -62,6 +70,8 @@ public sealed class RagQueryService
         lock (_cacheSync)
         {
             _cache.Remove(datasetId);
+            if (_cacheSizes.Remove(datasetId, out var size))
+                _cacheBytes -= size;
             var node = _cacheOrder.Find(datasetId);
             if (node is not null)
                 _cacheOrder.Remove(node);
@@ -72,9 +82,20 @@ public sealed class RagQueryService
     {
         lock (_cacheSync)
         {
+            if (_cacheSizes.Remove(datasetId, out var oldSize))
+                _cacheBytes -= oldSize;
             _cache[datasetId] = chunks;
+            var size = EstimateCacheSize(chunks);
+            _cacheSizes[datasetId] = size;
+            _cacheBytes += size;
             TouchCacheUnsafe(datasetId);
         }
+    }
+
+    private long GetCacheBytes()
+    {
+        lock (_cacheSync)
+            return _cacheBytes;
     }
 
     private void TouchCache(string datasetId)
@@ -91,17 +112,24 @@ public sealed class RagQueryService
             _cacheOrder.Remove(existing);
         _cacheOrder.AddLast(datasetId);
 
-        // Evict oldest entries if we exceed the max
-        while (_cacheOrder.Count > MaxCachedDatasets)
+        while ((_cacheOrder.Count > MaxCachedDatasets || (_cacheBytes > MaxCacheBytes && _cacheOrder.Count > 1)) && _cacheOrder.First is not null)
         {
-            var oldest = _cacheOrder.First;
-            if (oldest is not null)
-            {
-                _cache.Remove(oldest.Value);
-                _cacheOrder.RemoveFirst();
-            }
+            var oldest = _cacheOrder.First.Value;
+            _cache.Remove(oldest);
+            if (_cacheSizes.Remove(oldest, out var size))
+                _cacheBytes -= size;
+            _cacheOrder.RemoveFirst();
         }
     }
+
+    private static long EstimateCacheSize(IEnumerable<RagChunk> chunks) =>
+        chunks.Sum(chunk =>
+            (long)chunk.Content.Length * sizeof(char)
+            + (long)chunk.SourceFile.Length * sizeof(char)
+            + (long)chunk.SourcePath.Length * sizeof(char)
+            + (long)chunk.SourceTitle.Length * sizeof(char)
+            + (long)chunk.Embedding.Length * sizeof(float)
+            + 256);
 
     public async Task<List<RagDataset>> GetDatasetsAsync(CancellationToken ct = default)
         => await _store.GetDatasetsAsync(ct);
