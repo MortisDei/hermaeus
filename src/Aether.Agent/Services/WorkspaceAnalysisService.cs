@@ -173,7 +173,10 @@ public sealed class WorkspaceAnalysisService : IWorkspaceAnalysisService
         foreach (var relative in InstructionPaths)
         {
             var full = Path.GetFullPath(Path.Combine(root, relative));
-            if (!full.StartsWith(root, StringComparison.OrdinalIgnoreCase) || !File.Exists(full))
+            var rootWithSep = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            if ((!full.StartsWith(rootWithSep, StringComparison.OrdinalIgnoreCase)
+                 && !string.Equals(full, root, StringComparison.OrdinalIgnoreCase))
+                || !File.Exists(full))
                 continue;
 
             var content = await ReadLimitedAsync(full, 24_000, ct);

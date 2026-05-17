@@ -1,4 +1,5 @@
 using System;
+using Avalonia;
 using Avalonia.Data.Converters;
 using Avalonia.Media;
 using System.Globalization;
@@ -23,5 +24,5 @@ public class DiffTypeToBrushConverter : IValueConverter
         return Brushes.Transparent;
     }
 
-    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) => throw new NotImplementedException();
+    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) => AvaloniaProperty.UnsetValue;
 }

@@ -562,7 +562,11 @@ public partial class RagViewModel : ObservableObject
                 SelectedSource.IsSelected = true;
             RefreshCitationOverflow();
         }
-        catch { }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException or KeyNotFoundException)
+        {
+            _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Rag,
+                $"Could not parse RAG source metadata: {ex.Message}"));
+        }
     }
 
     private void ParseTrace(string token)
@@ -589,7 +593,11 @@ public partial class RagViewModel : ObservableObject
             if (root.TryGetProperty("RefusalReason", out var refusalReason))
                 RefusalReason = refusalReason.GetString() ?? string.Empty;
         }
-        catch { }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException or KeyNotFoundException)
+        {
+            _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Rag,
+                $"Could not parse RAG trace metadata: {ex.Message}"));
+        }
     }
 
     private void SetError(string msg) { StatusMessage = msg; IsError = true; }

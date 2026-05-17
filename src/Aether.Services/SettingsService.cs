@@ -125,7 +125,7 @@ public sealed class SettingsService : ISettingsService
                 throw new IOException($"Cannot move Aether data because '{target}' already exists.");
         }
 
-        var backupDir = Path.Combine(next, ".aether-backups", DateTime.Now.ToString("yyyyMMdd-HHmmss"));
+        var backupDir = Path.Combine(next, ".aether-backups", DateTime.UtcNow.ToString("yyyyMMdd-HHmmss"));
         Directory.CreateDirectory(backupDir);
         foreach (var name in files)
             File.Copy(name, Path.Combine(backupDir, Path.GetFileName(name)));

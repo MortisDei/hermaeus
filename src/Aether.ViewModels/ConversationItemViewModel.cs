@@ -25,11 +25,19 @@ public partial class ConversationItemViewModel : ObservableObject
         .Distinct(StringComparer.OrdinalIgnoreCase)
         .ToList();
 
-    public string TimeDisplay => UpdatedAt.Date == DateTime.Today
-        ? UpdatedAt.ToString("HH:mm")
-        : UpdatedAt.Date >= DateTime.Today.AddDays(-7)
-            ? UpdatedAt.ToString("ddd")
-            : UpdatedAt.ToString("d MMM");
+    public string TimeDisplay
+    {
+        get
+        {
+            var local = UpdatedAt.Kind == DateTimeKind.Utc ? UpdatedAt.ToLocalTime() : UpdatedAt;
+            var today = DateTime.Today;
+            return local.Date == today
+                ? local.ToString("HH:mm")
+                : local.Date >= today.AddDays(-7)
+                    ? local.ToString("ddd")
+                    : local.ToString("d MMM");
+        }
+    }
 
     partial void OnUpdatedAtChanged(DateTime value) => OnPropertyChanged(nameof(TimeDisplay));
     partial void OnFolderChanged(string value) => OnPropertyChanged(nameof(FolderDisplay));

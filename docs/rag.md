@@ -70,6 +70,8 @@ traces, and native eval support.
 - RAG citations with `[1] [2] [3] +N`, source inspector, copy source/path.
 - RAG query traces now include query variants, planner notes, packing summaries,
   and refusal reasons.
+- Malformed source or trace metadata markers are logged as warnings instead of
+  being silently ignored.
 - The query planner emits multiple variants so lexical retrieval can score the
   original query, alias-expanded form, and keyword-focused variants together.
 - RAG query service provides hybrid retrieval with structural boosts, optional

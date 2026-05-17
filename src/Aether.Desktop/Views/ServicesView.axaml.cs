@@ -111,5 +111,5 @@ public sealed class StatusColorConverter : IValueConverter
         };
 
     public object ConvertBack(object? v, Type t, object? p, CultureInfo c) =>
-        throw new NotImplementedException();
+        Avalonia.AvaloniaProperty.UnsetValue;
 }

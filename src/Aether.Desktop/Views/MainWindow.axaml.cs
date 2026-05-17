@@ -1,4 +1,5 @@
 using Avalonia.Collections;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Data.Converters;
 using Aether.Core.Models;
@@ -62,5 +63,5 @@ public sealed class AnyRunningConverter : IValueConverter
         return servers.Any(s => s.Status == ServerStatus.Running);
     }
     public object ConvertBack(object? v, Type t, object? p, CultureInfo c)
-        => throw new NotImplementedException();
+        => AvaloniaProperty.UnsetValue;
 }

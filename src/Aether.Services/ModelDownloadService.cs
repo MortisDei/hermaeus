@@ -79,7 +79,6 @@ public sealed class ModelDownloadService
                 }
             }
 
-            File.Delete(destinationPath);
             File.Move(tempPath, destinationPath, overwrite: true);
 
             var finalSize = new FileInfo(destinationPath).Length;

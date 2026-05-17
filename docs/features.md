@@ -139,6 +139,8 @@
   flags, secret backend health, runtime log redaction, data-root backup status,
   and features that may send data remotely.
 - Runtime logs with filters, copy, and redacted diagnostics export.
+- Runtime log entries are redacted before disk persistence and archive
+  rotation avoids overwriting archives created in the same second.
 - Local tasks, reminders, and app-running scheduled automations.
 - Tray integration, minimize-to-tray, local hotkeys, and Windows system-wide
   hotkeys.
@@ -148,13 +150,16 @@
   When both `Models` and `models` exist, Aether prefers the folder containing
   GGUF files for model and reranker defaults.
 - Trust & Safety scan for configured local tools, hashes, AI-root scope, and
-  network exposure warnings.
+  network exposure warnings, including equals-style host override flags such as
+  `--host=0.0.0.0`.
 - Settings are implemented as domain sections for LLM defaults, RAG, data,
   local AI setup, voice, UI, memory, and trust while preserving one save flow.
 - OS-backed secret references and redacted process logs.
 - Local fallback secrets use an app-created per-data-root key file restricted
   to the current user. Backup excludes both the fallback vault and key file.
 - Data-safety test harness for migration, backup/restore, and redaction.
+- Backup restore rejects traversal and path-prefix escape entries before
+  extraction, while still excluding the local fallback secret vault and key.
 
 ## Workbench Glue
 

@@ -114,7 +114,16 @@ public sealed class OllamaService : IDisposable
         {
             var line = await reader.ReadLineAsync(ct);
             if (string.IsNullOrWhiteSpace(line)) continue;
-            var chunk = JsonSerializer.Deserialize<ChatChunk>(line);
+            ChatChunk? chunk;
+            try
+            {
+                chunk = JsonSerializer.Deserialize<ChatChunk>(line);
+            }
+            catch (JsonException)
+            {
+                continue;
+            }
+
             if (!string.IsNullOrEmpty(chunk?.Message?.Content))
                 yield return new LlmStreamEvent(chunk.Message.Content);
             if (chunk?.Done == true)

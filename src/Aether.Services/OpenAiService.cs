@@ -170,7 +170,16 @@ public sealed class OpenAiService : IDisposable
 
     public static LlmStreamEvent? ParseStreamEvent(string json)
     {
-        var chunk = JsonSerializer.Deserialize<StreamChunk>(json, JsonOpts);
+        StreamChunk? chunk;
+        try
+        {
+            chunk = JsonSerializer.Deserialize<StreamChunk>(json, JsonOpts);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+
         var c = chunk?.Choices?.FirstOrDefault()?.Delta?.Content ?? string.Empty;
         var usage = chunk?.Usage is null
             ? null

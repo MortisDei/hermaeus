@@ -26,13 +26,16 @@ namespace Aether.Tests
         {
             var redactor = new RedactionService();
             var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            var value = $"{home}/project api_key=abcdefghi123456789 bearer token_123456789012345 sk-abc123456789abcdef";
+            var value = $"{home}/project api_key=abcdefghi123456789 bearer token_123456789012345 sk-abc123456789abcdef ghp_abcdefghijklmnopqrstuvwxyz1234567890?token=querysecret123456&key=anothersecret123";
             var redacted = redactor.Redact(value);
 
             False(redacted.Contains(home, StringComparison.Ordinal), "home path should be redacted");
             False(redacted.Contains("abcdefghi123456789", StringComparison.Ordinal), "api key should be redacted");
             False(redacted.Contains("token_123456789012345", StringComparison.Ordinal), "bearer token should be redacted");
             False(redacted.Contains("sk-abc123456789abcdef", StringComparison.Ordinal), "openai key should be redacted");
+            False(redacted.Contains("ghp_abcdefghijklmnopqrstuvwxyz1234567890", StringComparison.Ordinal), "GitHub token should be redacted");
+            False(redacted.Contains("querysecret123456", StringComparison.Ordinal), "query token should be redacted");
+            False(redacted.Contains("anothersecret123", StringComparison.Ordinal), "query key should be redacted");
             return Task.CompletedTask;
         }
 
@@ -216,7 +219,9 @@ namespace Aether.Tests
             Directory.CreateDirectory(root);
             File.WriteAllText(Path.Combine(root, "xtts_api_server.py"), "print('xtts')");
             Directory.CreateDirectory(Path.Combine(root, "models"));
+            File.WriteAllText(Path.Combine(root, "models", "chat.gguf"), "model");
             Directory.CreateDirectory(Path.Combine(root, "TTS", "voices"));
+            Directory.CreateDirectory(Path.Combine(root, "TTS", "output"));
 
             var settings = NewSettings(temp);
             settings.Settings.DataManagement.LocalAiAssetsRoot = root;
@@ -458,10 +463,10 @@ namespace Aether.Tests
         public static Task TrustScanDetectsNetworkExtraArgs()
         {
             var warnings = new TrustService().AnalyzeServerExtraArgs(
-                new ServerConfig { Name = "Chat", ExtraArgs = "--host 0.0.0.0 --alias local" },
+                new ServerConfig { Name = "Chat", ExtraArgs = "--host 0.0.0.0 --listen-host=:: --alias local" },
                 DateTime.UtcNow);
 
-            Equal(1, warnings.Count, "network-facing host should produce one warning");
+            Equal(2, warnings.Count, "network-facing host flags should produce warnings");
             Equal(TrustRiskLevel.High, warnings[0].RiskLevel, "network exposure should be high risk");
             False(warnings[0].Target.Contains(';', StringComparison.Ordinal), "trust warnings should not synthesize shell separators");
             return Task.CompletedTask;

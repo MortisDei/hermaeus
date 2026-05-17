@@ -5,6 +5,43 @@ All notable changes to Aether will be documented in this file. Append new versio
 The project follows semantic versioning once public release candidates begin.
 Pre-1.0 versions may still change internal APIs and storage details.
 
+## [0.9.9-alpha] - 2026-05-17
+
+### Changed
+
+- Project version metadata bumped to `0.9.9-alpha`.
+- Runtime logs now redact persisted entries before they reach disk as well as
+  UI log views.
+- Conversation list and memory timestamps now store UTC values and render local
+  display times consistently.
+- Local AI setup now kills child processes when setup is cancelled and quotes
+  command previews more safely.
+- RAG metadata parsing now writes warning log entries when source or trace
+  markers cannot be parsed.
+- Toast history load/save failures now produce runtime warnings instead of
+  disappearing silently.
+
+### Fixed
+
+- Backup restore path checks now reject path-prefix escapes and directory
+  entries before extraction.
+- Agent workspace tools now reject symlink ancestors and skip symlinked
+  directories or files during local inspection.
+- Workspace instruction discovery now uses path-boundary checks when deciding
+  whether files are inside the selected root.
+- OpenAI-compatible, llama.cpp, and Ollama streaming now tolerate malformed
+  JSON event fragments without aborting the whole response.
+- Model downloads now preserve the existing destination file until the completed
+  temp file successfully replaces it.
+- Runtime log rotation now avoids deleting an existing archive when two
+  rotations happen in the same second.
+- Trust & Safety now detects host override flags written as `--host=value` or
+  equivalent `listen-host` forms.
+- One-way Avalonia value converters now return unset values for back conversion
+  instead of throwing in binding paths.
+- Startup voice-provider probing now logs failures instead of swallowing them.
+- Redaction now covers GitHub-style tokens and query-string secret parameters.
+
 ## [0.9.8-alpha] - 2026-05-17
 
 ### Changed

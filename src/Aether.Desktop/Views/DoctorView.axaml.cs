@@ -1,3 +1,4 @@
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Data.Converters;
 using Avalonia.Media;
@@ -41,5 +42,5 @@ public sealed class DoctorStatusColorConverter : IValueConverter
     }
 
     public object ConvertBack(object? v, Type t, object? p, CultureInfo c)
-        => throw new NotImplementedException();
+        => AvaloniaProperty.UnsetValue;
 }

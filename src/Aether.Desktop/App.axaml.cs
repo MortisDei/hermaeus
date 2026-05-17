@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Aether.Agent.Services;
+using Aether.Core.Models;
 using Aether.Core.Services;
 using Aether.Desktop.Views;
 using Aether.Rag;
@@ -69,7 +70,14 @@ public partial class App : Application
             {
                 await vm.Settings.Tts.ProbeActiveProviderHealthAsync();
             }
-            catch { }
+            catch (Exception ex)
+            {
+                sp.GetRequiredService<IRuntimeLogService>().Add(new RuntimeLogEntry(
+                    DateTime.UtcNow,
+                    RuntimeLogLevel.Warning,
+                    RuntimeLogCategory.Service,
+                    $"Voice provider startup probe failed: {ex.Message}"));
+            }
             await vm.InitializeAsync();
         }
         catch (Exception ex)

@@ -16,7 +16,7 @@ public partial class MessageViewModel : ObservableObject
     public bool IsUser      => Role == "user";
     public bool IsAssistant => Role == "assistant";
     public string Id { get; init; } = Guid.NewGuid().ToString();
-    public DateTime CreatedAt { get; init; } = DateTime.Now;
+    public DateTime CreatedAt { get; init; } = DateTime.UtcNow;
     
     /// <summary>
     /// Stores attachment file paths when this is a user message with context attachments.

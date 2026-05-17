@@ -1,3 +1,4 @@
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Data.Converters;
 using Avalonia.Input;
@@ -67,11 +68,11 @@ public partial class RagView : UserControl
 public class IsZeroConverter : IValueConverter
 {
     public object Convert(object? v, Type t, object? p, CultureInfo c) => v is int n && n == 0;
-    public object ConvertBack(object? v, Type t, object? p, CultureInfo c) => throw new NotImplementedException();
+    public object ConvertBack(object? v, Type t, object? p, CultureInfo c) => AvaloniaProperty.UnsetValue;
 }
 
 public class IsNonZeroConverter : IValueConverter
 {
     public object Convert(object? v, Type t, object? p, CultureInfo c) => v is int n && n > 0;
-    public object ConvertBack(object? v, Type t, object? p, CultureInfo c) => throw new NotImplementedException();
+    public object ConvertBack(object? v, Type t, object? p, CultureInfo c) => AvaloniaProperty.UnsetValue;
 }

@@ -938,8 +938,30 @@ for check_name, passed in checks:
 
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
-        await process.WaitForExitAsync(ct);
+        try
+        {
+            await process.WaitForExitAsync(ct);
+        }
+        catch (OperationCanceledException)
+        {
+            TryKill(process);
+            throw;
+        }
+
         return new LocalAiSetupResult(process.ExitCode == 0, log.ToString());
+    }
+
+    private static void TryKill(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+                process.Kill(entireProcessTree: true);
+        }
+        catch
+        {
+            // Best-effort cleanup after cancellation.
+        }
     }
 
     private static void AppendLine(string? line, StringBuilder log, IProgress<string>? progress)
@@ -958,5 +980,7 @@ for check_name, passed in checks:
     private sealed record PythonCommand(string FileName, IReadOnlyList<string> PrefixArgs, string DisplayName);
 
     private static string QuoteIfNeeded(string value) =>
-        value.Contains(" ", StringComparison.Ordinal) ? $"\"{value}\"" : value;
+        value.Contains(" ", StringComparison.Ordinal) || value.Contains('"', StringComparison.Ordinal)
+            ? $"\"{value.Replace("\"", "\\\"", StringComparison.Ordinal)}\""
+            : value;
 }

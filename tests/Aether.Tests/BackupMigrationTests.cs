@@ -1,4 +1,5 @@
 using System;
+using System.IO.Compression;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -112,6 +113,27 @@ namespace Aether.Tests
             await ThrowsAsync<IOException>(() => backups.RestoreAsync(backup.Path));
             await backups.RestoreAsync(backup.Path, allowOverwrite: true);
             Equal("db", await File.ReadAllTextAsync(Path.Combine(restoreRoot, "conversations.db")), "overwrite restore should replace existing files");
+        }
+
+        public static async Task BackupRestoreRejectsUnsafePathPrefix()
+        {
+            using var temp = new TempDir();
+            var root = temp.PathFor("root");
+            var unsafePeer = root + "2";
+            Directory.CreateDirectory(root);
+            Directory.CreateDirectory(unsafePeer);
+            var backup = temp.PathFor("unsafe.zip");
+            using (var archive = ZipFile.Open(backup, ZipArchiveMode.Create))
+            {
+                archive.CreateEntry("../root2/escape.txt");
+            }
+
+            var service = NewSettings(temp);
+            service.Settings.DataManagement.DataRootDirectory = root;
+            var backups = new BackupService(service);
+
+            await ThrowsAsync<InvalidOperationException>(() => backups.RestoreAsync(backup));
+            False(File.Exists(Path.Combine(unsafePeer, "escape.txt")), "restore should not write outside the data root prefix");
         }
     }
 }

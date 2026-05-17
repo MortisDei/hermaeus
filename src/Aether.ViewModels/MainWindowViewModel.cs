@@ -419,7 +419,7 @@ public partial class MainWindowViewModel : ObservableObject
         if (existing is not null)
         {
             existing.Title = Chat.ConversationTitle;
-            existing.UpdatedAt = DateTime.Now;
+            existing.UpdatedAt = DateTime.UtcNow;
             existing.ModelId = Chat.SelectedModel?.Id ?? existing.ModelId;
             var idx = Conversations.IndexOf(existing);
             if (idx > 0) Conversations.Move(idx, 0);
@@ -430,7 +430,7 @@ public partial class MainWindowViewModel : ObservableObject
             {
                 Id = convId, Title = Chat.ConversationTitle,
                 ModelId = Chat.SelectedModel?.Id ?? string.Empty,
-                UpdatedAt = DateTime.Now, IsSelected = true,
+                UpdatedAt = DateTime.UtcNow, IsSelected = true,
                 Folder = string.Empty
             };
             Conversations.Insert(0, item);
@@ -542,7 +542,11 @@ public partial class MainWindowViewModel : ObservableObject
                 TrimToastHistory();
             });
         }
-        catch { }
+        catch (Exception ex)
+        {
+            _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Service,
+                $"Could not load toast history: {ex.Message}"));
+        }
     }
 
     private async Task SaveToastHistoryAsync()
@@ -557,7 +561,11 @@ public partial class MainWindowViewModel : ObservableObject
             var json = System.Text.Json.JsonSerializer.Serialize(list, opts);
             await File.WriteAllTextAsync(path, json);
         }
-        catch { }
+        catch (Exception ex)
+        {
+            _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Service,
+                $"Could not save toast history: {ex.Message}"));
+        }
     }
 
     private void TrimToastHistory()

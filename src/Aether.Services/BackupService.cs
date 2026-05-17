@@ -50,17 +50,27 @@ public sealed class BackupService : IBackupService
 
         var root = SettingsService.ResolveDataRoot(_settings.Settings);
         Directory.CreateDirectory(root);
+        var rootWithSeparator = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            + Path.DirectorySeparatorChar;
         using var zip = ZipFile.OpenRead(backupPath);
         foreach (var entry in zip.Entries)
         {
             ct.ThrowIfCancellationRequested();
+            if (string.IsNullOrWhiteSpace(entry.Name))
+                continue;
+
             var target = Path.GetFullPath(Path.Combine(root, entry.FullName));
-            if (!target.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+            if (!target.StartsWith(rootWithSeparator, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(target, root, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("Backup contains an unsafe path.");
             if (File.Exists(target) && !allowOverwrite)
                 throw new IOException($"Restore refused because '{target}' already exists.");
 
-            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            var targetDirectory = Path.GetDirectoryName(target);
+            if (string.IsNullOrWhiteSpace(targetDirectory))
+                throw new InvalidOperationException("Backup entry target directory could not be resolved.");
+
+            Directory.CreateDirectory(targetDirectory);
             entry.ExtractToFile(target, allowOverwrite);
         }
 

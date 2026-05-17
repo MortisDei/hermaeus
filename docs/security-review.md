@@ -1,6 +1,6 @@
 # Aether Security Review And Threat Model
 
-Last refreshed for `0.9.8-alpha`.
+Last refreshed for `0.9.9-alpha`.
 
 Aether is a local-first desktop application. The primary security goal is to
 keep user data, model paths, API keys, local runtimes, and generated voice audio
@@ -56,13 +56,14 @@ penetration-test report.
 | Area | Current control | Residual risk |
 | --- | --- | --- |
 | Secrets | API keys are converted to `secret:` references and stored in Linux Secret Service, macOS Keychain, or Windows Credential Manager when available. A local fallback vault is used only when needed. | Local fallback values are base64 encoded, not encrypted. They rely on user-only file permissions and backup exclusion. |
-| Backups | Backup excludes `secrets.local.json` and `secrets.local.key`. Restore rejects path traversal and refuses to overwrite existing files. | Backup archives can still contain chat, RAG, benchmark, and path metadata. Restored encrypted secrets may be unreadable unless the original key is preserved. |
+| Backups | Backup excludes `secrets.local.json` and `secrets.local.key`. Restore rejects path traversal, path-prefix escapes, directory entries, and existing-file overwrites. | Backup archives can still contain chat, RAG, benchmark, and path metadata. Restored encrypted secrets may be unreadable unless the original key is preserved. |
 | Data root | Migration previews moved files, refuses destination DB conflicts, rejects filesystem roots, and creates migration backup copies. | A user can still choose a broad writable directory that exposes metadata to other local apps. |
-| Process launch | `llama-server`, XTTS, Kokoro, and secret backend helpers use `ProcessStartInfo.ArgumentList` / no shell execution. | Extra args are still user-controlled runtime behavior and can weaken local-only assumptions. |
-| Local server binding | Managed `llama-server` always receives `--host 127.0.0.1` before user extra args. Health checks target `127.0.0.1`. | If `llama.cpp` accepts later duplicate host flags, extra args could override the bind address. Add explicit warning/blocking before public release. |
-| Logs | Visible process logs pass through API-key and home-path redaction. Log buffers are capped. | Redaction is best effort and may miss provider-specific token formats or sensitive filenames outside the home path. |
+| Process launch | `llama-server`, XTTS, Kokoro, and secret backend helpers use `ProcessStartInfo.ArgumentList` / no shell execution. Setup subprocesses are killed on cancellation. | Extra args are still user-controlled runtime behavior and can weaken local-only assumptions. |
+| Local server binding | Managed `llama-server` always receives `--host 127.0.0.1` before user extra args. Health checks target `127.0.0.1`. Trust scans detect `--host value`, `--host=value`, listen-host forms, and `--listen`. | If `llama.cpp` accepts later duplicate host flags, extra args could override the bind address. Consider optional blocking before public release. |
+| Logs | Runtime and visible process logs pass through redaction for API keys, bearer tokens, GitHub-style tokens, query-string secrets, and home paths. Log buffers are capped and archive rotation is collision-safe. | Redaction is best effort and may miss provider-specific token formats or sensitive filenames outside the home path. |
 | RAG ingest | Local `.txt`/`.md` ingest is the default. Optional web URL ingest is off by default, accepts only explicit HTTP(S) URLs, caps pages, strips script/style blocks from HTML, validates prompt templates, and verifies pinned ONNX reranker assets with SHA256. | Large local files are warned, not refused. Web text extraction is intentionally simple and should not be treated as a browser sandbox or crawler. |
 | Voice backends | Generated voice preview audio is handled in memory by the app workflow. Managed Kokoro and XTTS processes are killed on stop/exit. Local AI setup is provider-aware and no longer suggests XTTS script/model work while Kokoro is selected. | Configured XTTS output directory exists for server operation and could contain files created by the external XTTS server. |
+| Agent workspace tools | Agent file tools are constrained to the selected workspace, reject symlink ancestors, skip symlinked entries, and block unsupported shell/network/install/commit/push actions. | Approved draft patch application can still overwrite intended workspace files, so review remains mandatory. |
 | Tray and hotkeys | Close exits and stops managed services. Minimize-to-tray is explicit. Tray menu includes Stop Services and Quit. Local hotkeys only work while focused. Windows global hotkeys are opt-in and registered through the OS hotkey API. | Linux global hotkeys remain deferred because Wayland/X11 compositor behavior varies. |
 | Packaging | Linux/Windows archives include README, license, notice, commercial terms, and checksums. Linux desktop install is user-local. | Archives are unsigned; users must verify checksums from a trusted channel. |
 
@@ -78,11 +79,12 @@ Current mitigations:
 - Settings store secret references instead of plaintext keys after save.
 - OS credential stores are preferred.
 - Local fallback vault is excluded from backups.
-- Log output redacts `sk-*`, bearer tokens, `api_key=`, and home paths.
+- Log output redacts `sk-*`, bearer tokens, GitHub-style tokens, query-string
+  secret parameters, `api_key=`, and home paths before entries reach disk.
 
 Required follow-up:
 
-- Expand redaction samples for provider-specific token formats.
+- Expand redaction samples for additional provider-specific token formats.
 - Show a clearer UI state when the local fallback vault is active.
 
 ### Accidental LAN Exposure
@@ -98,9 +100,8 @@ Current mitigations:
 
 Required follow-up:
 
-- Detect or block `--host`, `--listen`, and equivalent network-affecting extra
-  args before start.
-- Add tests for host-override warning behavior.
+- Decide whether host override warnings should become hard blocks for
+  public release builds.
 
 ### Unsafe Restore Or Migration
 
@@ -110,6 +111,8 @@ overwrites an existing database.
 Current mitigations:
 
 - Restore uses full-path checks and rejects unsafe entry paths.
+- Restore rejects path-prefix escapes that only look like they are under the
+  data root.
 - Restore refuses existing target files.
 - Restore UI warns that `secrets.local.key` is not included in backups. Keep the
   original key with any backup if encrypted secrets must remain readable after
@@ -179,4 +182,6 @@ hardening work:
 - Restore rejects unsafe paths and existing-file overwrites.
 - Managed process launch avoids shell execution.
 - Visible logs redact common secrets and home paths.
+- Runtime logs redact entries before disk persistence.
+- Trust scans detect both separated and equals-style host override flags.
 - Package archives include license/commercial notices and checksums.

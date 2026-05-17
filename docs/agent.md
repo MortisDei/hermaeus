@@ -170,6 +170,7 @@ that resolve outside the workspace root. Examples that are blocked:
 - `../outside-file`
 - absolute paths outside the workspace root
 - symlinks resolving outside the root
+- files under symlinked ancestor directories
 
 This containment rule prevents accidental or malicious access to unrelated
 files.

@@ -49,9 +49,10 @@ public sealed class TrustService : ITrustService
         for (var i = 0; i < args.Count; i++)
         {
             var arg = args[i];
-            if (UnsafeHostFlags.Contains(arg, StringComparer.OrdinalIgnoreCase))
+            var splitHost = SplitHostFlag(arg);
+            if (UnsafeHostFlags.Contains(arg, StringComparer.OrdinalIgnoreCase) || splitHost is not null)
             {
-                var value = i + 1 < args.Count ? args[i + 1] : string.Empty;
+                var value = splitHost ?? (i + 1 < args.Count ? args[i + 1] : string.Empty);
                 if (IsNonLoopbackHost(value))
                 {
                     items.Add(new TrustItem(
@@ -85,6 +86,18 @@ public sealed class TrustService : ITrustService
         }
 
         return items;
+    }
+
+    private static string? SplitHostFlag(string arg)
+    {
+        foreach (var flag in UnsafeHostFlags)
+        {
+            var prefix = flag + "=";
+            if (arg.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                return arg[prefix.Length..];
+        }
+
+        return null;
     }
 
     private static async Task<TrustItem> InspectPathAsync(

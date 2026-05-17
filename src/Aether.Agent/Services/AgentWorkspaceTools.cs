@@ -150,9 +150,7 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
         if (full.Split(Path.DirectorySeparatorChar).Any(part => IgnoredDirectories.Contains(part)))
             throw new InvalidOperationException("Agent path is inside an ignored directory.");
 
-        // Reject symbolic links for security
-        var info = new FileInfo(full);
-        if (info.LinkTarget is not null)
+        if (PathHasSymlinkAncestor(workspaceRoot, full))
             throw new InvalidOperationException("Agent paths cannot reference symbolic links.");
 
         return full;
@@ -171,7 +169,7 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
 
             foreach (var child in childDirs)
             {
-                if (!IgnoredDirectories.Contains(Path.GetFileName(child)))
+                if (!IgnoredDirectories.Contains(Path.GetFileName(child)) && !IsSymlink(child))
                     pending.Push(child);
             }
 
@@ -193,7 +191,39 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
         if (!info.Exists || info.Length > maxFileBytes) return false;
         if (info.DirectoryName?.Split(Path.DirectorySeparatorChar).Any(part => IgnoredDirectories.Contains(part)) == true)
             return false;
+        if (IsSymlink(info.FullName))
+            return false;
         return TextExtensions.Contains(info.Extension) || TextExtensions.Contains(info.Name);
+    }
+
+    private static bool PathHasSymlinkAncestor(string root, string fullPath)
+    {
+        var rootFull = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var current = Path.GetFullPath(fullPath);
+        var directory = Path.GetDirectoryName(current);
+        while (!string.IsNullOrWhiteSpace(directory)
+               && directory.StartsWith(rootFull, StringComparison.OrdinalIgnoreCase))
+        {
+            if (IsSymlink(directory))
+                return true;
+            if (string.Equals(directory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), rootFull, StringComparison.OrdinalIgnoreCase))
+                break;
+            directory = Path.GetDirectoryName(directory);
+        }
+
+        return false;
+    }
+
+    private static bool IsSymlink(string path)
+    {
+        try
+        {
+            return File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static string ToRelative(string root, string fullPath) =>

@@ -1,3 +1,4 @@
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Data.Converters;
 using Avalonia.Media;
@@ -16,7 +17,7 @@ public class NotEmptyConverter : IValueConverter
     public object Convert(object? v, Type t, object? p, CultureInfo c)
         => v is string s && !string.IsNullOrEmpty(s);
     public object ConvertBack(object? v, Type t, object? p, CultureInfo c)
-        => throw new NotImplementedException();
+        => AvaloniaProperty.UnsetValue;
 }
 
 public class ErrorColorConverter : IValueConverter
@@ -27,14 +28,14 @@ public class ErrorColorConverter : IValueConverter
             ? (IBrush)new SolidColorBrush(Color.Parse("#EF5350"))
             : new SolidColorBrush(Color.Parse("#66BB6A"));
     public object ConvertBack(object? v, Type t, object? p, CultureInfo c)
-        => throw new NotImplementedException();
+        => AvaloniaProperty.UnsetValue;
 }
 
 public class PullingTextConverter : IValueConverter
 {
     public static readonly PullingTextConverter Instance = new();
     public object Convert(object? v, Type t, object? p, CultureInfo c)
-        => v is true ? "Pulling…" : "Pull";
+        => v is true ? "Pulling..." : "Pull";
     public object ConvertBack(object? v, Type t, object? p, CultureInfo c)
-        => throw new NotImplementedException();
+        => AvaloniaProperty.UnsetValue;
 }

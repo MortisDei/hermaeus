@@ -207,11 +207,19 @@ public partial class MemoryItemViewModel : ObservableObject
         _ => Category
     };
 
-    public string CreatedDisplay => CreatedAt.Date == DateTime.Today
-        ? CreatedAt.ToString("HH:mm")
-        : CreatedAt.Date >= DateTime.Today.AddDays(-7)
-            ? CreatedAt.ToString("ddd")
-            : CreatedAt.ToString("d MMM");
+    public string CreatedDisplay
+    {
+        get
+        {
+            var local = CreatedAt.Kind == DateTimeKind.Utc ? CreatedAt.ToLocalTime() : CreatedAt;
+            var today = DateTime.Today;
+            return local.Date == today
+                ? local.ToString("HH:mm")
+                : local.Date >= today.AddDays(-7)
+                    ? local.ToString("ddd")
+                    : local.ToString("d MMM");
+        }
+    }
 
     public string ImportanceDisplay => ImportanceScore switch
     {

@@ -11,17 +11,22 @@ public sealed class RuntimeLogService : IRuntimeLogService
     private const long MaxLogFileBytes = 10 * 1024 * 1024; // 10 MB
     private readonly ConcurrentQueue<RuntimeLogEntry> _entries = new();
     private readonly ISettingsService _settings;
+    private readonly IRedactionService? _redactor;
     private readonly object _fileLock = new();
 
     public event Action<RuntimeLogEntry>? LogAdded;
 
-    public RuntimeLogService(ISettingsService settings)
+    public RuntimeLogService(ISettingsService settings, IRedactionService? redactor = null)
     {
         _settings = settings;
+        _redactor = redactor;
     }
 
     public void Add(RuntimeLogEntry entry)
     {
+        if (_redactor is not null)
+            entry = entry with { Message = _redactor.Redact(entry.Message) };
+
         _entries.Enqueue(entry);
         while (_entries.Count > MaxEntries && _entries.TryDequeue(out _)) { }
 
@@ -83,14 +88,13 @@ public sealed class RuntimeLogService : IRuntimeLogService
             var fi = new FileInfo(path);
             if (fi.Length < MaxLogFileBytes) return;
 
-            // move existing file to timestamped archive
             var dir = Path.GetDirectoryName(path) ?? GetLogDirectory();
             var name = Path.GetFileNameWithoutExtension(path);
             var ext = Path.GetExtension(path);
             var stamp = DateTime.UtcNow.ToString("yyyyMMddTHHmmssZ", CultureInfo.InvariantCulture);
             var dest = Path.Combine(dir, $"{name}.{stamp}{ext}");
-            // ensure destination does not exist
-            if (File.Exists(dest)) File.Delete(dest);
+            for (var i = 1; File.Exists(dest); i++)
+                dest = Path.Combine(dir, $"{name}.{stamp}.{i}{ext}");
             File.Move(path, dest);
         }
         catch
