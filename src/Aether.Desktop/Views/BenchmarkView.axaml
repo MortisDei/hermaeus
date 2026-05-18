@@ -55,7 +55,7 @@
                         <Button Content="Export All"
                                 Command="{Binding ExportAllRunsCommand}"
                                 IsEnabled="{Binding !IsRunning}"
-                                ToolTip.Tip="Export all saved benchmark runs to the data root." />
+                        ToolTip.Tip="Export every saved benchmark run into one timestamped folder." />
                         <Button Content="Clear"
                                 Command="{Binding ClearRunHistoryCommand}"
                                 IsEnabled="{Binding !IsRunning}"
@@ -76,7 +76,7 @@
                                         <TextBlock Text="{Binding Started}" FontSize="10" Opacity="0.35" />
                                     </StackPanel>
                                     <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Top">
-                                        <Button Content="ℹ" Padding="6" MinWidth="32" Command="{Binding #Root.DataContext.ShowRunInfoCommand}" CommandParameter="{Binding .}" ToolTip.Tip="Show run info" />
+                                        <Button Content="ℹ" Padding="6" MinWidth="32" Command="{Binding #Root.DataContext.ShowRunInfoCommand}" CommandParameter="{Binding .}" ToolTip.Tip="Show test details" />
                                         <Button Content="Rerun" Command="{Binding #Root.DataContext.RerunCommand}" CommandParameter="{Binding .}" />
                                         <Button Content="Export" Command="{Binding #Root.DataContext.ExportRunCommand}" CommandParameter="{Binding .}" />
                                         <Button Content="Delete" Command="{Binding #Root.DataContext.DeleteRunCommand}" CommandParameter="{Binding .}" />
@@ -175,11 +175,12 @@
                             <ScrollViewer VerticalScrollBarVisibility="Auto">
                                 <Border Padding="14">
                                     <StackPanel Spacing="10">
-                                        <Grid ColumnDefinitions="*,80,80,100" ColumnSpacing="12" Margin="0,0,0,8">
+                                        <Grid ColumnDefinitions="*,120,80,80,100,Auto" ColumnSpacing="12" Margin="0,0,0,8">
                                             <TextBlock Grid.Column="0" Text="Model" FontWeight="SemiBold" FontSize="11" Opacity="0.6" />
-                                            <TextBlock Grid.Column="1" Text="Score" FontWeight="SemiBold" FontSize="11" Opacity="0.6" TextAlignment="Right" />
-                                            <TextBlock Grid.Column="2" Text="Pass Rate" FontWeight="SemiBold" FontSize="11" Opacity="0.6" TextAlignment="Right" />
-                                            <TextBlock Grid.Column="3" Text="Speed (tok/s)" FontWeight="SemiBold" FontSize="11" Opacity="0.6" TextAlignment="Right" />
+                                            <TextBlock Grid.Column="1" Text="Runs" FontWeight="SemiBold" FontSize="11" Opacity="0.6" TextAlignment="Right" />
+                                            <TextBlock Grid.Column="2" Text="Score" FontWeight="SemiBold" FontSize="11" Opacity="0.6" TextAlignment="Right" />
+                                            <TextBlock Grid.Column="3" Text="Pass Rate" FontWeight="SemiBold" FontSize="11" Opacity="0.6" TextAlignment="Right" />
+                                            <TextBlock Grid.Column="4" Text="Speed (tok/s)" FontWeight="SemiBold" FontSize="11" Opacity="0.6" TextAlignment="Right" />
                                         </Grid>
                                         <ItemsControl ItemsSource="{Binding RankedRuns}">
                                             <ItemsControl.ItemTemplate>
@@ -187,14 +188,25 @@
                                                     <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
                                                             BorderThickness="0,0,0,1"
                                                             Padding="0,8">
-                                                        <Grid ColumnDefinitions="*,80,80,100" ColumnSpacing="12">
+                                                        <Grid ColumnDefinitions="*,120,80,80,100,Auto" ColumnSpacing="12">
                                                             <StackPanel Grid.Column="0" Spacing="1">
                                                                 <TextBlock Text="{Binding Model}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
                                                                 <TextBlock Text="{Binding Title}" FontSize="10" Opacity="0.4" TextTrimming="CharacterEllipsis" />
                                                             </StackPanel>
-                                                            <TextBlock Grid.Column="1" Text="{Binding Score}" FontWeight="SemiBold" VerticalAlignment="Center" TextAlignment="Right" />
-                                                            <TextBlock Grid.Column="2" Text="{Binding PassRate}" Opacity="0.6" VerticalAlignment="Center" TextAlignment="Right" />
-                                                            <TextBlock Grid.Column="3" Text="{Binding Speed}" Opacity="0.6" VerticalAlignment="Center" TextAlignment="Right" />
+                                                            <TextBlock Grid.Column="1" Text="{Binding RunCountLabel}" Opacity="0.6" VerticalAlignment="Center" TextAlignment="Right" />
+                                                            <TextBlock Grid.Column="2" Text="{Binding Score}" FontWeight="SemiBold" VerticalAlignment="Center" TextAlignment="Right" />
+                                                            <TextBlock Grid.Column="3" Text="{Binding PassRate}" Opacity="0.6" VerticalAlignment="Center" TextAlignment="Right" />
+                                                            <TextBlock Grid.Column="4" Text="{Binding Speed}" Opacity="0.6" VerticalAlignment="Center" TextAlignment="Right" />
+                                                            <Button Grid.Column="5"
+                                                                    Content="ℹ"
+                                                                    Padding="8"
+                                                                    MinWidth="32"
+                                                                    MinHeight="32"
+                                                                    VerticalAlignment="Center"
+                                                                    IsEnabled="{Binding HasResults}"
+                                                                    ToolTip.Tip="Show test details"
+                                                                    Command="{Binding #Root.DataContext.ShowRunInfoCommand}"
+                                                                    CommandParameter="{Binding .}" />
                                                         </Grid>
                                                     </Border>
                                                 </DataTemplate>
@@ -208,7 +220,7 @@
                             <ScrollViewer VerticalScrollBarVisibility="Auto">
                                 <Border Padding="14">
                                     <StackPanel Spacing="10">
-                                        <ItemsControl ItemsSource="{Binding RankedRuns}">
+                                        <ItemsControl ItemsSource="{Binding Runs}">
                                             <ItemsControl.ItemTemplate>
                                                 <DataTemplate DataType="vm:BenchmarkRunViewModel">
                                                     <StackPanel Spacing="8" Margin="0,0,0,12">
@@ -278,7 +290,15 @@
                                         <TextBlock Text="{Binding Timings}" FontSize="11" Opacity="0.5" />
                                         <TextBlock Text="{Binding Checks}" FontSize="11" Opacity="0.4" />
                                     </StackPanel>
-                                        <!-- Test details moved to run items; keep results simple -->
+                                    <Button Grid.Column="1"
+                                            Content="ℹ"
+                                            Padding="8"
+                                            MinWidth="32"
+                                            MinHeight="32"
+                                            VerticalAlignment="Top"
+                                            ToolTip.Tip="Show test details"
+                                            Command="{Binding #Root.DataContext.ShowCaseInfoCommand}"
+                                            CommandParameter="{Binding .}" />
                                 </Grid>
                             </Border>
                         </DataTemplate>

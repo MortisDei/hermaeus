@@ -214,6 +214,52 @@ public sealed class BenchmarkService : IBenchmarkService
     public async Task<string> ExportAsync(string runId, string targetDirectory, CancellationToken ct = default)
     {
         var run = await GetRunAsync(runId, ct) ?? throw new InvalidOperationException("Benchmark run was not found.");
+        return await ExportRunAsync(run, targetDirectory, ct);
+    }
+
+    public async Task<string> ExportAllAsync(string targetDirectory, CancellationToken ct = default)
+    {
+        await EnsureInitializedAsync(ct);
+        var runs = await GetRunsAsync(ct);
+        if (runs.Count == 0)
+            throw new InvalidOperationException("No benchmark runs were found.");
+
+        Directory.CreateDirectory(targetDirectory);
+        var exportRoot = Path.Combine(targetDirectory, $"benchmark-all-{DateTime.UtcNow:yyyyMMdd-HHmmss}");
+        Directory.CreateDirectory(exportRoot);
+
+        var markdown = new StringBuilder();
+        markdown.AppendLine("# Benchmark export index");
+        markdown.AppendLine();
+        markdown.AppendLine($"- Exported at: {DateTime.UtcNow:O}");
+        markdown.AppendLine($"- Run count: {runs.Count}");
+        markdown.AppendLine();
+        markdown.AppendLine("| # | Suite | Model | Score | Pass rate | Speed | Export |");
+        markdown.AppendLine("| -: | --- | --- | ---: | ---: | ---: | --- |");
+
+        var csv = new StringBuilder();
+        csv.AppendLine("index,suite,model,started_at,score,pass_rate,median_tokens_per_second,export_directory");
+
+        for (var i = 0; i < runs.Count; i++)
+        {
+            var run = runs[i];
+            var runDirectory = Path.Combine(
+                exportRoot,
+                $"{i + 1:00}-{Sanitize(run.SuiteName)}-{Sanitize(run.ModelName)}-{run.StartedAt:yyyyMMdd-HHmmss}-{ShortId(run.Id)}");
+            var exportedPath = await ExportRunAsync(run, runDirectory, ct);
+            var relativeDirectory = Path.GetRelativePath(exportRoot, Path.GetDirectoryName(exportedPath) ?? runDirectory);
+
+            markdown.AppendLine($"| {i + 1} | {EscapeMarkdown(run.SuiteName)} | {EscapeMarkdown(run.ModelName)} | {run.RankingScore:P0} | {run.PassRate:P0} | {run.MedianApproxTokensPerSecond:F2} tok/s | {EscapeMarkdown(relativeDirectory)} |");
+            csv.AppendLine($"{i + 1},{Csv(run.SuiteName)},{Csv(run.ModelName)},{Csv(run.StartedAt.ToString("O"))},{run.RankingScore:F4},{run.PassRate:F4},{run.MedianApproxTokensPerSecond:F2},{Csv(relativeDirectory)}");
+        }
+
+        await WriteTextAtomicAsync(Path.Combine(exportRoot, "index.md"), markdown.ToString(), ct);
+        await WriteTextAtomicAsync(Path.Combine(exportRoot, "index.csv"), csv.ToString(), ct);
+        return Path.Combine(exportRoot, "index.md");
+    }
+
+    private async Task<string> ExportRunAsync(BenchmarkRun run, string targetDirectory, CancellationToken ct)
+    {
         Directory.CreateDirectory(targetDirectory);
         var basePath = Path.Combine(targetDirectory, $"benchmark-{Sanitize(run.SuiteName)}-{run.StartedAt:yyyyMMdd-HHmmss}");
         await WriteTextAtomicAsync($"{basePath}.json", JsonSerializer.Serialize(run, JsonOpts), ct);
@@ -222,27 +268,10 @@ public sealed class BenchmarkService : IBenchmarkService
         return $"{basePath}.md";
     }
 
-    public async Task<string> ExportAllAsync(string targetDirectory, CancellationToken ct = default)
-    {
-        await EnsureInitializedAsync(ct);
-        var runs = await GetRunsAsync(ct);
-        if (!runs.Any())
-            throw new InvalidOperationException("No benchmark runs to export.");
-
-        var folder = Path.Combine(targetDirectory, $"all-runs-{DateTime.UtcNow:yyyyMMdd-HHmmss}");
-        Directory.CreateDirectory(folder);
-        foreach (var run in runs)
-        {
-            // Reuse ExportAsync to write per-run files into the folder
-            await ExportAsync(run.Id, folder, ct);
-        }
-
-        // Return the folder path (markdown is the friendly entry)
-        return folder;
-    }
-
     public IReadOnlyList<BenchmarkRun> Rank(IEnumerable<BenchmarkRun> runs) =>
-        runs.OrderByDescending(r => r.RankingScore)
+        runs.GroupBy(GetRankingGroupKey, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.OrderByDescending(r => r.RankingScore).ThenByDescending(r => r.StartedAt).First())
+            .OrderByDescending(r => r.RankingScore)
             .ThenByDescending(r => r.StartedAt)
             .ToList();
 
@@ -731,6 +760,14 @@ public sealed class BenchmarkService : IBenchmarkService
             .Replace('\n', ' ');
         return $"\"{normalized.Replace("\"", "\"\"")}\"";
     }
+
+    private static string EscapeMarkdown(string value) => value.Replace("|", "\\|", StringComparison.Ordinal);
+
+    private static string ShortId(string value) => value.Length <= 8 ? value : value[..8];
+
+    private static string GetRankingGroupKey(BenchmarkRun run) =>
+        string.IsNullOrWhiteSpace(run.ModelId) ? run.ModelName : run.ModelId;
+
     private static string Sanitize(string name)
     {
         var invalid = Path.GetInvalidFileNameChars().ToHashSet();

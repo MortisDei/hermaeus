@@ -23,9 +23,12 @@ limit.
   away and returning to the view instead of resetting to the first entry.
 - Benchmark iterations reduced from 3 runs per test case to 1 run for faster
   feedback.
-- Benchmark Rankings display restructured with column headers (Model, Score,
-  Pass Rate, Speed) for clarity, and split into two tabs: Rankings (tabular
-  view) and All Results (detailed per-model metrics breakdown).
+- Benchmark rankings now group saved runs by model so the list shows the best
+  run per model instead of a flat duplicate run history, and the tabular view
+  includes the number of runs behind each ranking.
+- Benchmark Rankings display restructured with column headers (Model, Runs,
+  Score, Pass Rate, Speed) for clarity, and split into two tabs: Rankings
+  (best-per-model tabular view) and All Results (full saved run list).
 - Chat conversation management now provides dual access: existing three-dots
   flyout menu plus new right-click context menu on conversation list items.
 
@@ -35,7 +38,10 @@ limit.
   prompt, expected results (keywords, regex patterns, refusal requirement),
   and system prompt with selectable/copyable text.
 - Benchmark results view now shows info button (ℹ) next to each test case to
-  open the test details modal.
+  open the test details modal, and benchmark ranking rows expose the same test
+  details action for the best run in each model group.
+- Benchmark exports now support exporting all saved benchmark runs into one
+  timestamped folder containing per-run exports plus a generated index.
 - Chat conversation context menu with options: Pin, Archive, Export Markdown,
   Export JSON, and Delete.
 

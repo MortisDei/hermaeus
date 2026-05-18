@@ -89,18 +89,53 @@ namespace Aether.Tests
             var service = new BenchmarkService(NewSettings(new TempDir()), new FakeLlm(), new FakeSystemInfo());
             var slow = new BenchmarkRun
             {
+                ModelId = "model-a",
+                ModelName = "Model A",
+                StartedAt = DateTime.UtcNow.AddMinutes(-10),
                 Results = [new BenchmarkResult { QualityScore = 0.2, ApproxTokensPerSecond = 2, ResourceScore = 0.2 }]
             };
             var fast = new BenchmarkRun
             {
+                ModelId = "model-a",
+                ModelName = "Model A",
+                StartedAt = DateTime.UtcNow,
                 Results = [new BenchmarkResult { QualityScore = 1, ApproxTokensPerSecond = 40, ResourceScore = 1 }]
             };
+            var other = new BenchmarkRun
+            {
+                ModelId = "model-b",
+                ModelName = "Model B",
+                StartedAt = DateTime.UtcNow.AddMinutes(-5),
+                Results = [new BenchmarkResult { QualityScore = 0.6, ApproxTokensPerSecond = 12, ResourceScore = 0.8 }]
+            };
 
-            var scores = service.Rank(new[] { slow, fast });
+            var scores = service.Rank(new[] { slow, fast, other });
 
             Equal(fast.Id, scores[0].Id, "highest scoring run should rank first");
+            Equal(2, scores.Count, "duplicate models should collapse to their best run in rankings");
             True(scores[0].RankingScore >= scores[^1].RankingScore, "scores should be sorted descending");
             return Task.CompletedTask;
+        }
+
+        public static async Task BenchmarkExportAllCreatesBatchFolder()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var service = new BenchmarkService(settings, new FakeLlm(), new FakeSystemInfo());
+
+            var suite = BenchmarkService.StarterSuites().First();
+            suite.MaxCases = 1;
+            await service.SaveSuiteAsync(suite);
+            await service.RunAsync(suite, new LlmModel { Id = "fake-a", Name = "Fake A", Provider = "Test" });
+            await service.RunAsync(suite, new LlmModel { Id = "fake-b", Name = "Fake B", Provider = "Test" });
+
+            var exportRoot = temp.PathFor("exports");
+            var indexPath = await service.ExportAllAsync(exportRoot);
+
+            True(File.Exists(indexPath), "bulk export should create an index markdown file");
+            True(Directory.Exists(Path.GetDirectoryName(indexPath)!), "bulk export should create an export folder");
+            True(Directory.GetFiles(Path.GetDirectoryName(indexPath)!, "*.md", SearchOption.AllDirectories).Length >= 3, "bulk export should include each run export plus the index");
         }
 
         public static async Task SystemInfoSafeFallback()

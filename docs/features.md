@@ -90,9 +90,12 @@
   same prompt across multiple visible models before choosing one for normal
   conversation.
 - Model benchmarks with GGUF discovery, one-click full-suite runs, saved run
-  history, deterministic quality checks, rankings with column headers and
-  tabular display, test info modal for case details, reruns, and
-  Markdown/JSON/CSV export.
+  history, deterministic quality checks, rankings that group runs by model,
+  column headers and tabular display, test info modal for case details,
+  reruns, and Markdown/JSON/CSV export.
+- Benchmark views expose the test-details modal from both the per-result list
+  and the best-run ranking rows, and saved benchmark history can be exported
+  in bulk as one timestamped folder.
 - Doctor checks for untuned GGUF files, stale `llama.cpp` binaries, and pinned
   `nomic-embed-text-v1.5` hash drift, with install actions where available.
 

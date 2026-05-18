@@ -161,6 +161,14 @@ public partial class BenchmarkViewModel : ObservableObject
         _toasts.Show("Benchmark deleted", run.Title, ToastKind.Info);
     }
 
+    [RelayCommand(CanExecute = nameof(CanExportAll))]
+    private async Task ExportAllRunsAsync()
+    {
+        var root = Aether.Services.SettingsService.ResolveDataRoot(_settings.Settings);
+        var path = await _benchmarks.ExportAllAsync(Path.Combine(root, "benchmark-exports"));
+        _toasts.Show("All benchmarks exported", path, ToastKind.Success, 7000);
+    }
+
     [RelayCommand]
     private async Task ClearRunHistoryAsync()
     {
@@ -189,21 +197,20 @@ public partial class BenchmarkViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private async Task ExportAllRunsAsync()
-    {
-        var root = Aether.Services.SettingsService.ResolveDataRoot(_settings.Settings);
-        var path = await _benchmarks.ExportAllAsync(Path.Combine(root, "benchmark-exports"));
-        _toasts.Show("All benchmarks exported", path, ToastKind.Success, 7000);
-    }
-
-    [RelayCommand]
     private async Task ShowRunInfoAsync(BenchmarkRunViewModel? run)
     {
-        if (run is null) return;
-        // Show a simple toast with run summary and metadata; callers can replace with a dialog if desired.
-        var md = $"{run.Title}\n{run.Summary}\nStarted: {run.Started}\nStatus: {run.Status}";
-        _toasts.Show("Run info", md, ToastKind.Info, 8000);
-        await Task.CompletedTask;
+        var result = run?.FirstResult;
+        if (result is not null && RequestShowCaseInfo is not null)
+        {
+            await RequestShowCaseInfo(result);
+            return;
+        }
+
+        if (run is not null)
+        {
+            var md = $"{run.Title}\n{run.Summary}\nStarted: {run.Started}\nStatus: {run.Status}";
+            _toasts.Show("Run info", md, ToastKind.Info, 8000);
+        }
     }
 
     [RelayCommand]
@@ -227,6 +234,7 @@ public partial class BenchmarkViewModel : ObservableObject
         if (SelectedRun is not null && Runs.All(r => r.Id != SelectedRun.Id))
             SelectedRun = null;
         SelectedRun ??= Runs.FirstOrDefault();
+        ExportAllRunsCommand.NotifyCanExecuteChanged();
     }
 
     private void UpdateRankedRuns(List<BenchmarkRunViewModel> runs)
@@ -236,11 +244,21 @@ public partial class BenchmarkViewModel : ObservableObject
         if (SelectedSuite is not null)
             source = source.Where(r => r.SuiteId == SelectedSuite.Id);
 
-        foreach (var run in _benchmarks.Rank(source).Select(r => new BenchmarkRunViewModel(r)))
-            RankedRuns.Add(run);
+        var counts = runs
+            .Where(r => SelectedSuite is null || r.Run.SuiteId == SelectedSuite.Id)
+            .GroupBy(r => GetRankingGroupKey(r.Run), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase);
+
+        foreach (var run in _benchmarks.Rank(source))
+        {
+            counts.TryGetValue(GetRankingGroupKey(run), out var count);
+            RankedRuns.Add(new BenchmarkRunViewModel(run, Math.Max(1, count)));
+        }
     }
 
     private bool CanRun() => !IsRunning && SelectedSuite is not null && SelectedModel is not null;
+
+    private bool CanExportAll() => !IsRunning && Runs.Count > 0;
 
     partial void OnSelectedSuiteChanged(BenchmarkSuite? value)
     {
@@ -261,7 +279,11 @@ public partial class BenchmarkViewModel : ObservableObject
 
         _ = AutoSwitchSelectedModelAsync(value);
     }
-    partial void OnIsRunningChanged(bool value) => RunCommand.NotifyCanExecuteChanged();
+    partial void OnIsRunningChanged(bool value)
+    {
+        RunCommand.NotifyCanExecuteChanged();
+        ExportAllRunsCommand.NotifyCanExecuteChanged();
+    }
 
     partial void OnSelectedRunChanged(BenchmarkRunViewModel? value)
     {
@@ -341,6 +363,9 @@ public partial class BenchmarkViewModel : ObservableObject
         model.Id.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase)
         && File.Exists(model.Id);
 
+    private static string GetRankingGroupKey(BenchmarkRun run) =>
+        string.IsNullOrWhiteSpace(run.ModelId) ? run.ModelName : run.ModelId;
+
     private static BenchmarkSuite CloneSuite(BenchmarkSuite suite) => new()
     {
         Id = suite.Id,
@@ -368,6 +393,7 @@ public partial class BenchmarkViewModel : ObservableObject
 public sealed class BenchmarkRunViewModel
 {
     public BenchmarkRun Run { get; }
+    public int RunCount { get; }
     public string Id => Run.Id;
     public string Title => $"{Run.SuiteName} · {Run.ModelName}";
     public string Model => string.IsNullOrWhiteSpace(Run.Provider) ? Run.ModelName : $"{Run.ModelName} [{Run.Provider}]";
@@ -377,8 +403,15 @@ public sealed class BenchmarkRunViewModel
     public string PassRate => $"{Run.PassRate:P0}";
     public string Speed => $"median {Run.MedianApproxTokensPerSecond:F1} tok/s";
     public string FirstToken => $"median {Run.MedianFirstTokenMs:F0} ms";
+    public string RunCountLabel => RunCount == 1 ? "Best run" : $"Best of {RunCount} runs";
+    public bool HasResults => Run.Results.Count > 0;
+    public BenchmarkResultViewModel? FirstResult => Run.Results.FirstOrDefault() is { } result ? new BenchmarkResultViewModel(result) : null;
     public string Summary => $"{Score} · pass {PassRate} · {Speed} · first {FirstToken} · failures {Run.FailureCount}";
-    public BenchmarkRunViewModel(BenchmarkRun run) => Run = run;
+    public BenchmarkRunViewModel(BenchmarkRun run, int runCount = 1)
+    {
+        Run = run;
+        RunCount = Math.Max(1, runCount);
+    }
 }
 
 public sealed class BenchmarkResultViewModel
