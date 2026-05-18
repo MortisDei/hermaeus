@@ -4,7 +4,8 @@
              xmlns:models="using:Aether.Core.Models"
              x:Class="Aether.Desktop.Views.BenchmarkView"
              x:DataType="vm:BenchmarkViewModel">
-    <Grid Margin="24"
+    <Grid x:Name="Root"
+          Margin="24"
           ColumnDefinitions="260,340,*"
           RowDefinitions="Auto,*"
           ColumnSpacing="16"
@@ -269,7 +270,7 @@
                                             MinHeight="32"
                                             VerticalAlignment="Top"
                                             ToolTip.Tip="Show test details"
-                                            Command="{Binding #Root.((vm:BenchmarkViewModel)DataContext).ShowCaseInfoCommand}"
+                                            Command="{Binding #Root.DataContext.ShowCaseInfoCommand}"
                                             CommandParameter="{Binding .}" />
                                 </Grid>
                             </Border>
