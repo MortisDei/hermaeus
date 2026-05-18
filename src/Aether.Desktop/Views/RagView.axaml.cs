@@ -16,21 +16,32 @@ public partial class RagView : UserControl
     public static readonly IValueConverter NotEmpty  = new NotEmptyConverter();
 
     private RagViewModel? _vm;
+    private EventHandler? _scrollHandler;
 
     public RagView()
     {
         InitializeComponent();
         DataContextChanged += (_, _) =>
         {
-            _vm = DataContext as RagViewModel;
-            if (_vm is null) return;
+            if (_vm is not null && _scrollHandler is not null)
+                _vm.ScrollToBottom -= _scrollHandler;
+            if (_vm is not null)
+                _vm.RequestCopyToClipboard = null;
 
-            _vm.ScrollToBottom += (_, _) =>
+            _vm = DataContext as RagViewModel;
+            if (_vm is null)
+            {
+                _scrollHandler = null;
+                return;
+            }
+
+            _scrollHandler = (_, _) =>
                 Dispatcher.UIThread.Post(() =>
                 {
                     if (this.FindControl<ScrollViewer>("ContentScroller") is { } sv)
                         sv.ScrollToEnd();
                 }, DispatcherPriority.Background);
+            _vm.ScrollToBottom += _scrollHandler;
 
             _vm.RequestCopyToClipboard = async text =>
             {

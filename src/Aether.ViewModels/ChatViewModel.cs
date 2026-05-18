@@ -131,6 +131,7 @@ public partial class ChatViewModel : ObservableObject
     public Action<string>?            RequestCopyToClipboard { get; set; }
     public Action?                    RequestContextFilePicker { get; set; }
     public Func<ConversationExportFormat, Task<string?>>? RequestConversationExportPath { get; set; }
+    public ISettingsService Settings => _settings;
     public bool HasContextAttachments => ContextAttachments.Count > 0;
 
     public ChatViewModel(

@@ -9,6 +9,31 @@ FIFO for changelog entries, 10 versions in this file max. Remove older entries
 and append them to `docs/changelog-archive.md` to maintain the 10 version
 limit.
 
+## [0.9.15-alpha] - 2026-05-18
+
+### Changed
+
+- Project version metadata bumped to `0.9.15-alpha`.
+- Desktop startup now initializes independent SQLite stores in parallel.
+- Session usage detail view models are created per detail navigation instead of
+  being reused as singleton state.
+
+### Fixed
+
+- Chat input now honors the `Ctrl+Enter to send` setting.
+- Chat and RAG views now unsubscribe old scroll handlers when their data
+  context changes.
+- Markdown rendering now parses off the UI thread, avoids heavyweight editors
+  for short code blocks, and handles malformed ordered-list starts safely.
+- Crash logs now write under the app base directory instead of the launch
+  working directory.
+- Tray setup now survives missing tray assets and responds to tray setting
+  changes at runtime.
+- Logs folder opening now handles missing shell openers without crashing.
+- Draft patch preview now uses the injected patch diff service.
+- Restore backup confirmation now uses a dedicated AXAML dialog instead of an
+  inline C# control tree.
+
 ## [0.9.14-alpha] - 2026-05-18
 
 ### Changed

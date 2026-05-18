@@ -36,6 +36,7 @@ public sealed class MarkdownViewer : ContentControl, IDisposable
     private string _lastRenderedMarkdown = string.Empty;
     private bool _lastRenderedIsError;
     private double _lastRenderedFontSize;
+    private int _renderVersion;
 
     public MarkdownViewer()
     {
@@ -89,13 +90,18 @@ public sealed class MarkdownViewer : ContentControl, IDisposable
         _renderTimer.Tick -= OnRenderTimerTick;
     }
 
-    private void OnRenderTimerTick(object? sender, EventArgs e)
+    private async void OnRenderTimerTick(object? sender, EventArgs e)
     {
         _renderTimer.Stop();
-        Render();
+        await RenderAsync();
     }
 
     private void Render()
+    {
+        _ = RenderAsync();
+    }
+
+    private async Task RenderAsync()
     {
         var md = Markdown ?? string.Empty;
         if (md == _lastRenderedMarkdown
@@ -108,6 +114,7 @@ public sealed class MarkdownViewer : ContentControl, IDisposable
         _lastRenderedMarkdown = md;
         _lastRenderedIsError = IsError;
         _lastRenderedFontSize = FontSize;
+        var version = ++_renderVersion;
 
         if (string.IsNullOrEmpty(md))
         {
@@ -127,7 +134,15 @@ public sealed class MarkdownViewer : ContentControl, IDisposable
             return;
         }
 
-        var doc = Markdig.Markdown.Parse(md, Pipeline);
+        var doc = await Task.Run(() => Markdig.Markdown.Parse(md, Pipeline));
+        if (version != _renderVersion)
+            return;
+
+        Render(doc);
+    }
+
+    private void Render(MarkdownDocument doc)
+    {
         var panel = new StackPanel { Spacing = 4 };
         foreach (var block in doc)
             panel.Children.Add(RenderBlock(block));
@@ -206,6 +221,8 @@ public sealed class MarkdownViewer : ContentControl, IDisposable
 
     private Border CodeBorder(string code, string? lang)
     {
+        var lineCount = code.Split('\n').Length;
+        var normalizedLanguage = NormalizeFenceLanguage(lang);
         var header = !string.IsNullOrWhiteSpace(lang)
             ? new TextBlock
             {
@@ -217,21 +234,31 @@ public sealed class MarkdownViewer : ContentControl, IDisposable
             }
             : null;
 
-        var codeBlock = new TextEditor
-        {
-            Text = code,
-            FontFamily = MonoFamily,
-            FontSize = FontSize - 1,
-            IsReadOnly = true,
-            ShowLineNumbers = false,
-            SyntaxHighlighting = ResolveHighlighting(lang),
-            Background = Brushes.Transparent,
-            Foreground = Brushes.WhiteSmoke,
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
-            MinHeight = Math.Max(28, (FontSize + 4) * Math.Max(1, code.Split('\n').Length)),
-            MaxHeight = 420
-        };
+        Control codeBlock = lineCount > 20 && !string.IsNullOrWhiteSpace(normalizedLanguage)
+            ? new TextEditor
+            {
+                Text = code,
+                FontFamily = MonoFamily,
+                FontSize = FontSize - 1,
+                IsReadOnly = true,
+                ShowLineNumbers = false,
+                SyntaxHighlighting = HighlightingManager.Instance.GetDefinition(normalizedLanguage),
+                Background = Brushes.Transparent,
+                Foreground = Brushes.WhiteSmoke,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                MinHeight = Math.Max(28, (FontSize + 4) * Math.Max(1, lineCount)),
+                MaxHeight = 420
+            }
+            : new SelectableTextBlock
+            {
+                Text = code,
+                FontFamily = MonoFamily,
+                FontSize = FontSize - 1,
+                TextWrapping = TextWrapping.NoWrap,
+                Foreground = Brushes.WhiteSmoke,
+                MinHeight = Math.Max(28, (FontSize + 4) * Math.Max(1, lineCount))
+            };
 
         Control child = header is not null
             ? new StackPanel { Spacing = 0, Children = { header, codeBlock } }
@@ -290,7 +317,7 @@ public sealed class MarkdownViewer : ContentControl, IDisposable
     private Panel RenderList(ListBlock list)
     {
         var panel = new StackPanel { Spacing = 3, Margin = new Thickness(8, 2, 0, 2) };
-        int n = list.OrderedStart is not null ? int.Parse(list.OrderedStart) : 1;
+        var n = int.TryParse(list.OrderedStart, out var orderedStart) ? orderedStart : 1;
 
         foreach (var item in list.OfType<ListItemBlock>())
         {

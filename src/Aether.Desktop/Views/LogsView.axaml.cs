@@ -24,15 +24,22 @@ public partial class LogsView : UserControl
         vm.RequestOpenFolder = path =>
         {
             if (string.IsNullOrWhiteSpace(path)) return;
-            var psi = new ProcessStartInfo
+            try
             {
-                FileName = OperatingSystem.IsWindows()
-                    ? "explorer"
-                    : OperatingSystem.IsMacOS() ? "open" : "xdg-open",
-                UseShellExecute = true
-            };
-            psi.ArgumentList.Add(path);
-            Process.Start(psi);
+                var psi = new ProcessStartInfo
+                {
+                    FileName = OperatingSystem.IsWindows()
+                        ? "explorer"
+                        : OperatingSystem.IsMacOS() ? "open" : "xdg-open",
+                    UseShellExecute = true
+                };
+                psi.ArgumentList.Add(path);
+                _ = Process.Start(psi);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Failed to open log folder '{path}': {ex.Message}");
+            }
         };
     }
 }

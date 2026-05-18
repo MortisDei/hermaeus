@@ -1,3 +1,4 @@
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Platform;
@@ -12,6 +13,7 @@ public sealed class DesktopIntegrationService : IDisposable
     private readonly GlobalHotkeyService _globalHotkeys = new();
     private Window? _window;
     private TrayIcon? _tray;
+    private EventHandler<AvaloniaPropertyChangedEventArgs>? _windowPropertyChangedHandler;
     private bool _isQuitting;
 
     public DesktopIntegrationService(MainWindowViewModel vm)
@@ -24,7 +26,7 @@ public sealed class DesktopIntegrationService : IDisposable
         _window = window;
         _vm.Settings.PropertyChanged += OnSettingsPropertyChanged;
         window.KeyDown += OnKeyDown;
-        window.PropertyChanged += (_, e) =>
+        _windowPropertyChangedHandler = (_, e) =>
         {
             if (e.Property == Window.WindowStateProperty
                 && window.WindowState == WindowState.Minimized
@@ -34,6 +36,7 @@ public sealed class DesktopIntegrationService : IDisposable
                 window.Hide();
             }
         };
+        window.PropertyChanged += _windowPropertyChangedHandler;
 
         EnsureTray();
         ConfigureGlobalHotkeys();
@@ -51,15 +54,17 @@ public sealed class DesktopIntegrationService : IDisposable
         if (_isQuitting)
             return false;
 
-        // Closing the window means exiting Aether. Minimize-to-tray only applies
-        // to an explicit minimize action so managed local servers still stop on X.
-        return false;
+        return _vm.Settings.EnableTrayIcon && _vm.Settings.MinimizeToTray;
     }
 
     public void Dispose()
     {
         if (_window is not null)
+        {
             _window.KeyDown -= OnKeyDown;
+            if (_windowPropertyChangedHandler is not null)
+                _window.PropertyChanged -= _windowPropertyChangedHandler;
+        }
         _vm.Settings.PropertyChanged -= OnSettingsPropertyChanged;
         _tray?.Dispose();
         _globalHotkeys.Dispose();
@@ -69,6 +74,8 @@ public sealed class DesktopIntegrationService : IDisposable
     {
         if (e.PropertyName == nameof(SettingsViewModel.EnableGlobalHotkeys))
             ConfigureGlobalHotkeys();
+        else if (e.PropertyName == nameof(SettingsViewModel.EnableTrayIcon))
+            SyncTray();
     }
 
     private void OnKeyDown(object? sender, KeyEventArgs e)
@@ -117,11 +124,31 @@ public sealed class DesktopIntegrationService : IDisposable
         {
             ToolTipText = "Aether",
             IsVisible = true,
-            Icon = new WindowIcon(AssetLoader.Open(new Uri("avares://Aether.Desktop/Assets/aether-tray.png"))),
             Menu = BuildMenu()
         };
+        try
+        {
+            using var iconStream = AssetLoader.Open(new Uri("avares://Aether.Desktop/Assets/aether-tray.png"));
+            tray.Icon = new WindowIcon(iconStream);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Aether tray icon could not be loaded: {ex.Message}");
+        }
         tray.Clicked += (_, _) => ShowAndActivate();
         _tray = tray;
+    }
+
+    private void SyncTray()
+    {
+        if (_vm.Settings.EnableTrayIcon)
+        {
+            EnsureTray();
+            return;
+        }
+
+        _tray?.Dispose();
+        _tray = null;
     }
 
     private void ConfigureGlobalHotkeys()

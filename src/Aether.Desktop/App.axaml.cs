@@ -37,7 +37,11 @@ public partial class App : Application
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             var vm     = sp.GetRequiredService<MainWindowViewModel>();
-            var window = new MainWindow { DataContext = vm };
+            var window = new MainWindow
+            {
+                DataContext = vm,
+                PatchDiffService = sp.GetRequiredService<IPatchDiffService>()
+            };
             _desktopIntegration = new DesktopIntegrationService(vm);
             window.DesktopIntegration = _desktopIntegration;
             _desktopIntegration.Attach(window);
@@ -59,11 +63,12 @@ public partial class App : Application
         try
         {
             await sp.GetRequiredService<ISettingsService>().LoadAsync();
-            await sp.GetRequiredService<IConversationStore>().InitializeAsync();
-            await sp.GetRequiredService<IMemoryStore>().InitializeAsync();
-            await sp.GetRequiredService<SqliteRagStore>().InitializeAsync();
-            await sp.GetRequiredService<IAgentTaskStateStore>().InitializeAsync();
-            await sp.GetRequiredService<IBenchmarkService>().InitializeAsync();
+            await Task.WhenAll(
+                sp.GetRequiredService<IConversationStore>().InitializeAsync(),
+                sp.GetRequiredService<IMemoryStore>().InitializeAsync(),
+                sp.GetRequiredService<SqliteRagStore>().InitializeAsync(),
+                sp.GetRequiredService<IAgentTaskStateStore>().InitializeAsync(),
+                sp.GetRequiredService<IBenchmarkService>().InitializeAsync());
             sp.GetRequiredService<IAutomationScheduler>().Start();
             // Probe active voice provider health at startup to detect externally-running services
             try
@@ -149,7 +154,8 @@ public partial class App : Application
         s.AddSingleton<DoctorViewModel>();
         s.AddSingleton<MemoriesViewModel>();
         s.AddSingleton<SessionUsageViewModel>();
-        s.AddSingleton<SessionUsageDetailViewModel>();
+        s.AddTransient<SessionUsageDetailViewModel>();
+        s.AddSingleton<Func<SessionUsageDetailViewModel>>(sp => () => sp.GetRequiredService<SessionUsageDetailViewModel>());
         s.AddSingleton<LogsViewModel>();
         s.AddSingleton<SetupWizardViewModel>();
         s.AddSingleton<MainWindowViewModel>();

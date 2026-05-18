@@ -4,6 +4,9 @@ namespace Aether.Desktop;
 
 class Program
 {
+    private static string CrashLogPath(string fileName) =>
+        Path.Combine(AppContext.BaseDirectory, fileName);
+
     [STAThread]
     public static void Main(string[] args)
     {
@@ -14,7 +17,7 @@ class Program
             {
                 var ex = e.ExceptionObject as Exception;
                 var msg = ex?.ToString() ?? e.ExceptionObject?.ToString();
-                System.IO.File.AppendAllText("aether_unhandled.log", $"{DateTime.UtcNow}: UNHANDLED: {msg}\n");
+                File.AppendAllText(CrashLogPath("aether_unhandled.log"), $"{DateTime.UtcNow}: UNHANDLED: {msg}\n");
             }
             catch { }
         };
@@ -22,7 +25,7 @@ class Program
         {
             try
             {
-                System.IO.File.AppendAllText("aether_unobserved.log", $"{DateTime.UtcNow}: UNOBSERVED: {e.Exception}\n");
+                File.AppendAllText(CrashLogPath("aether_unobserved.log"), $"{DateTime.UtcNow}: UNOBSERVED: {e.Exception}\n");
             }
             catch { }
         };

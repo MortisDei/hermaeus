@@ -1,4 +1,5 @@
 using System;
+using Avalonia;
 using Avalonia.Data.Converters;
 using System.Globalization;
 
@@ -16,6 +17,6 @@ public class UppercaseConverter : IValueConverter
 
     public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
     {
-        return value;
+        return AvaloniaProperty.UnsetValue;
     }
 }

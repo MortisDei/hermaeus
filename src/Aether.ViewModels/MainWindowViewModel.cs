@@ -14,6 +14,7 @@ public partial class MainWindowViewModel : ObservableObject
     private readonly IRuntimeLogService _logs;
     private readonly IConversationExportService _exports;
     private readonly SynchronizationContext? _sync;
+    private readonly Func<SessionUsageDetailViewModel> _createSessionUsageDetail;
     private CancellationTokenSource? _searchCts;
     private readonly ISettingsService _settingsService;
     private bool _refreshingFolderFilters;
@@ -31,7 +32,6 @@ public partial class MainWindowViewModel : ObservableObject
     public MemoriesViewModel        Memories { get; }
     public LogsViewModel            Logs { get; }
     public SessionUsageViewModel    SessionUsage { get; }
-    public SessionUsageDetailViewModel SessionUsageDetail { get; }
     public SetupWizardViewModel     Wizard { get; }
 
     public ObservableCollection<ConversationItemViewModel> Conversations { get; } = [];
@@ -50,6 +50,7 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty] private bool   _doctorHasErrors;
     [ObservableProperty] private bool   _doctorHasWarnings;
     [ObservableProperty] private bool   _doctorIsOk;
+    [ObservableProperty] private SessionUsageDetailViewModel _sessionUsageDetail;
 
     public bool ShowChat     => ActivePanel == "chat";
     public bool ShowAgent    => ActivePanel == "agent";
@@ -78,6 +79,7 @@ public partial class MainWindowViewModel : ObservableObject
         "doctor"   => Doctor,
         "memories" => Memories,
         "session-usage" => SessionUsage,
+        "session-usage-detail" => SessionUsageDetail,
         "logs"     => Logs,
         "wizard"   => Wizard,
         _          => Chat
@@ -101,7 +103,7 @@ public partial class MainWindowViewModel : ObservableObject
         MemoriesViewModel memories,
         LogsViewModel logs,
         SessionUsageViewModel sessionUsage,
-        SessionUsageDetailViewModel sessionUsageDetail,
+        Func<SessionUsageDetailViewModel> createSessionUsageDetail,
         SetupWizardViewModel wizard,
         ISettingsService settingsService,
         IToastService toasts,
@@ -113,10 +115,11 @@ public partial class MainWindowViewModel : ObservableObject
         _logs = runtimeLogs;
         _exports = exports;
         _settingsService = settingsService;
+        _createSessionUsageDetail = createSessionUsageDetail;
         _store = store; Chat = chat; Agent = agent; Settings = settings;
         Models = models; Rag = rag; Services = services; Tasks = tasks;
         Benchmarks = benchmarks; SystemOverview = systemOverview; Doctor = doctor; Memories = memories; Logs = logs; SessionUsage = sessionUsage; Wizard = wizard;
-        SessionUsageDetail = sessionUsageDetail;
+        _sessionUsageDetail = _createSessionUsageDetail();
         SessionUsage.RequestOpenDetail += (id, title) => ShowSessionUsageDetailPanel(id, title);
         Doctor.RequestNavigate = panel => ActivePanel = panel;
         // Keep toolbar doctor badge in sync with doctor checks
@@ -400,6 +403,7 @@ public partial class MainWindowViewModel : ObservableObject
 
     private void ShowSessionUsageDetailPanel(string conversationId, string? title = null)
     {
+        SessionUsageDetail = _createSessionUsageDetail();
         ActivePanel = "session-usage-detail";
         RunBackgroundTaskAsync("load session usage detail", () => SessionUsageDetail.LoadForConversationAsync(conversationId, title ?? "(untitled)"));
     }
@@ -464,6 +468,9 @@ public partial class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(ActiveViewModel));
         OnPropertyChanged(nameof(WindowTitle));
     }
+
+    partial void OnSessionUsageDetailChanged(SessionUsageDetailViewModel value)
+        => OnPropertyChanged(nameof(ActiveViewModel));
 
     partial void OnSearchQueryChanged(string value)
     {

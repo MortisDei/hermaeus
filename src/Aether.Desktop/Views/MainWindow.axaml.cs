@@ -1,8 +1,8 @@
-using Avalonia.Collections;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Data.Converters;
 using Aether.Core.Models;
+using Aether.Core.Services;
 using Aether.Services;
 using Aether.ViewModels;
 using System.Globalization;
@@ -13,6 +13,7 @@ public partial class MainWindow : Window
 {
     public static readonly IValueConverter AnyRunning = new AnyRunningConverter();
     public DesktopIntegrationService? DesktopIntegration { get; set; }
+    public IPatchDiffService? PatchDiffService { get; set; }
 
     public MainWindow()
     {
@@ -32,7 +33,10 @@ public partial class MainWindow : Window
 
     private async Task<bool> ShowDraftPatchPreviewAsync(DraftPatchPreviewRequest request)
     {
-        var viewModel = new DraftPatchDiffViewModel(new PatchDiffService());
+        if (PatchDiffService is null)
+            throw new InvalidOperationException("Patch diff service is not configured.");
+
+        var viewModel = new DraftPatchDiffViewModel(PatchDiffService);
         await viewModel.LoadAsync(request.RelativePath, request.OldContent, request.NewContent);
         var modal = new DraftPatchPreviewModalView
         {
@@ -59,8 +63,8 @@ public sealed class AnyRunningConverter : IValueConverter
 {
     public object Convert(object? v, Type t, object? p, CultureInfo c)
     {
-        if (v is not AvaloniaList<ServerProcessViewModel> servers) return false;
-        return servers.Any(s => s.Status == ServerStatus.Running);
+        return v is IEnumerable<ServerProcessViewModel> servers
+            && servers.Any(s => s.Status == ServerStatus.Running);
     }
     public object ConvertBack(object? v, Type t, object? p, CultureInfo c)
         => AvaloniaProperty.UnsetValue;

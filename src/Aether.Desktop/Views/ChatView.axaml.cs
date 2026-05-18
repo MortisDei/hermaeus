@@ -11,6 +11,7 @@ namespace Aether.Desktop.Views;
 public partial class ChatView : UserControl
 {
     private ChatViewModel? _vm;
+    private EventHandler? _scrollHandler;
 
     public ChatView()
     {
@@ -18,15 +19,25 @@ public partial class ChatView : UserControl
 
         DataContextChanged += (_, _) =>
         {
+            if (_vm is not null && _scrollHandler is not null)
+                _vm.ScrollToBottom -= _scrollHandler;
+            if (_vm is not null)
+            {
+                _vm.RequestCopyToClipboard = null;
+                _vm.RequestContextFilePicker = null;
+                _vm.RequestConversationExportPath = null;
+            }
+
             if (DataContext is not ChatViewModel vm)
             {
                 _vm = null;
+                _scrollHandler = null;
                 return;
             }
 
             _vm = vm;
 
-            vm.ScrollToBottom += (_, _) =>
+            _scrollHandler = (_, _) =>
                 Dispatcher.UIThread.Post(() =>
                 {
                     if (this.FindControl<ScrollViewer>("MessagesScroll") is { } scroll)
@@ -34,6 +45,7 @@ public partial class ChatView : UserControl
                         scroll.Offset = new Vector(scroll.Offset.X, scroll.Extent.Height);
                     }
                 }, DispatcherPriority.Background);
+            vm.ScrollToBottom += _scrollHandler;
 
             vm.RequestCopyToClipboard = async text =>
             {
@@ -95,7 +107,9 @@ public partial class ChatView : UserControl
     private void OnInputKeyDown(object? sender, KeyEventArgs e)
     {
         if (_vm is null || _vm.IsGenerating) return;
-        if (e.Key == Key.Return && e.KeyModifiers == KeyModifiers.None)
+        var ctrlEnter = _vm.Settings.Settings.Ui.CtrlEnterToSend;
+        var sendModifier = ctrlEnter ? KeyModifiers.Control : KeyModifiers.None;
+        if (e.Key == Key.Return && e.KeyModifiers == sendModifier)
         {
             e.Handled = true;
             if (_vm.SendCommand.CanExecute(null))
