@@ -2,6 +2,267 @@
 
 The CHANGELOG.md in root only contains the current 10 versions of changelogs. The rest are archived here in line with the 10 version limit in the main changelog.
 
+## [0.9.4-alpha] - 2026-05-16
+
+### Added
+
+- Structure-aware RAG chunking for markdown headings, code symbols, PDF pages,
+  log events, and web pages, with metadata carried through storage and traces.
+- Query planning now emits multiple rewritten variants and records them in RAG
+  traces for later inspection.
+- Context packing now respects a configurable token budget and records packing
+  summaries plus refusal reasons in traces.
+- Eval harness results now report Recall@K, MRR, citation hit rate,
+  unsupported answer rate, refusal accuracy, and reranker rank delta.
+- Benchmarks now capture richer run metadata, record repeated cold and warm
+  attempts where possible, and surface median, p95, and failure summaries for
+  more useful comparisons.
+- Voice setup now documents the consolidated provider architecture, isolated
+  venv requirement for F5-TTS and XTTS v2, and Apple Silicon `mps` hardware
+  backend support.
+- Agent workspace now includes an Explain Workspace flow with workspace profile
+  persistence, project instruction detection, safe command recipes, risk notes,
+  suggested `AGENTS.md`, and a RAG ingest plan saved to workspace memory.
+
+- Tools: added a lightweight CLI `TraceValidator` tool for validating
+  `agent.trace.jsonl` event lines. It now uses `JsonSchema.Net` to validate
+  each trace line against `docs/schemas/agent_trace.schema.json`, and ships
+  with convenience runner scripts at `scripts/validate_trace.sh` and
+  `scripts/validate_trace.ps1`.
+- Schemas: added example JSON Schema at `docs/schemas/agent_trace.schema.json`
+  to document the fields emitted in agent traces and to guide future
+  validation tooling.
+- Tests: added an acceptance test that exercises trace schema validation and
+  a view-model style UI acceptance test asserting patch-queue metadata is
+  surfaced by the `AgentViewModel`.
+
+### Changed
+
+- RAG retrieval now uses query-variant BM25 scoring, structural boosts, and
+  budget-aware context selection before answer generation.
+- RAG queries can now refuse early when the retrieved context is too weak to
+  answer reliably.
+
+### Fixed
+
+- RAG storage and trace handling now tolerate older databases while persisting
+  the new chunk, planner, and packing metadata.
+
+## [0.9.3-alpha] - 2026-05-16
+
+### Added
+
+- Agent workbench now surfaces task state, goal, summary, recent task history,
+  review queue counts, workspace memory counts, and retrieved context counts in
+  a compact summary strip at the top of the panel.
+- Agent workbench now includes a workspace file browser with query, list,
+  preview, and summarise behaviour for faster read-first inspection.
+- Agent workbench now supports draft patch proposals from workspace files,
+  with rationale, generated patch preview, approval-gated queueing, and
+  approve/reject actions for queued patches. Approving a draft patch now writes
+  the proposed content back to the selected workspace file and refreshes the
+  preview immediately.
+- Draft patch decisions now expose explicit pending, applied, rejected, and
+  blocked states, plus a direct block action and clearer queue counts in the
+  agent summary strip.
+- Agent workbench now shows a capability disclosure callout that states the
+  current slice is read-first and approval-gated, with shell, network, and
+  remote-control actions kept out of scope.
+- Session usage panel: per-conversation memory counts and recent activity.
+- Draft patch diff preview: side-by-side visual comparison with line numbers,
+  colour-coded changes (green for additions, red for removals), and gutter lines.
+  Preview opens automatically after generating a patch and allows approve or
+  cancel before queueing.
+
+### Changed
+
+- Project version metadata bumped to `0.9.3-alpha`.
+
+## [0.9.2-alpha] - 2026-05-16
+
+### Added
+
+- RAG ingest cancellation controls in the UI, with token propagation through
+  the pipeline so long-running ingests can be stopped cleanly.
+- Conversation search now uses SQLite FTS5 for faster full-text lookup across
+  title, messages, folder, and tags, with LIKE fallback for malformed or very
+  short queries.
+- Chat memory foundations: new memory domain model and settings, SQLite-backed
+  memory store with FTS5 search, extraction service for `[MEMORY: ...]`
+  markers, and context injection service with token-budget selection.
+- New Memories panel in the main toolbar for reviewing, searching, pinning,
+  archiving, and deleting saved memories.
+- Settings now include chat memory controls for enable/disable, prompt
+  injection toggle, auto-summary threshold, injection token budget, encryption
+  toggle, and auto-archive days.
+- Phase 5 memory automation: conversations are now auto-analysed in the
+  background after assistant replies, and durable memories are extracted and
+  persisted only when conversation importance exceeds the configured threshold.
+- Memory test coverage now includes store CRUD/search behaviour, extraction
+  marker parsing/cleanup, and injection token-budget prioritisation.
+- Chat now shows a live memory status line (enabled state and recent counts)
+  in the header area for clearer memory visibility.
+
+### Changed
+
+- Project version metadata bumped to `0.9.2-alpha`.
+- RAG query prompt generation now applies per-dataset `PromptTemplate`
+  configuration, honoring `{context}` and `{question}` placeholders.
+- Benchmark starter suite seeding is now ID-aware, so missing default suites
+  are inserted even when the database already contains other suites.
+- SQL connection string construction in `SqliteRagStore` is now cached and only
+  rebuilt when the resolved database path changes.
+- Kokoro and F5-TTS Python scripts are now shipped as embedded resources rather
+  than multi-hundred-line C# string literals.
+- Local AI setup scripting and action definitions are now split into dedicated
+  helper classes so the service file is easier to navigate and maintain.
+- Chat context usage estimation is now debounced to reduce repeated full
+  recalculations while typing or when messages/attachments change rapidly.
+
+### Fixed
+
+- HttpClient pooling: Converted instance `HttpClient` creation to static class
+  fields across 11 service classes (OpenAiService, LlamaCppService,
+  OllamaService, RuntimeProfileService, ModelDownloadService,
+  LlamaCppEmbeddingService, KokoroVoiceProvider, XttsV2VoiceProvider,
+  OpenAiVoiceProvider, RagPipeline, OnnxCrossEncoderReranker) to prevent socket
+  exhaustion under concurrent connections.
+- `ReaderWriterLockSlim` disposal: `CompositeLlmService` now implements
+  `IDisposable` to properly dispose the shared model cache lock.
+- Async-over-sync anti-pattern: `ServiceTests.SystemInfoSafeFallback()` now
+  uses proper async/await instead of `GetAwaiter().GetResult()`.
+- Port validation: `ServerProcessManager.NormalizeConfig()` now validates port
+  range (1-65535) before process launch to catch invalid configurations early.
+- AutoTune debugging: `ServerProcessManager.AutoTuneAsync()` now tracks and
+  includes process exit code in timeout exception for better diagnostics.
+- Event lifecycle: `ServicesView` now properly unsubscribes from
+  `ObservableCollection.CollectionChanged` on view unload to prevent memory
+  leaks.
+- Symlink security hardening: `AgentWorkspaceTools.ResolveSafePath()` now
+  rejects symbolic links to prevent path traversal attacks.
+- Secret storage encryption: `SecretStore` now uses AES-256-CBC encryption
+  with PBKDF2 key derivation (using machine identifier and 10,000 iterations)
+  instead of Base64 encoding, with backward compatibility fallback.
+- Model download integrity: `LocalAiSetupService` now supports SHA256 hash
+  verification when trusted hash metadata is available. Hash mismatches fail the
+  setup action with a clear error message.
+- Settings voice sample import compile break: `SettingsView` now correctly wires
+  `ImportTtsVoiceSampleCommand` through `TtsSettingsViewModel`.
+- Reranker directory resolution parity between Doctor and runtime reranker:
+  both now use the same path resolution strategy.
+- `MainWindowViewModel` search debounce now disposes prior
+  `CancellationTokenSource` instances to avoid CTS leaks while typing.
+- `KokoroVoiceProvider` and `F5TtsVoiceProvider` now serialise synthesis calls
+  with a semaphore to avoid concurrent Python process stampedes.
+- WAV playback fallback chain restored in `VoiceProviderProcessRunner`:
+  `paplay` → `pw-play` → `aplay` → `ffplay`.
+- `ServicesView` now unsubscribes old collection-changed handlers when
+  DataContext changes, preventing duplicate subscriptions.
+- `AutomationScheduler` settings saves are now guarded and failures are logged
+  to runtime logs instead of being silently swallowed.
+- Chat attachment paths are now persisted in `Message` and round-tripped
+  through `ConversationStore`, so regenerate can reattach after app restart.
+- RAG ingest health reporting now uses `IngestReport.Health` directly;
+  `__health__` sentinel rows are no longer emitted by web ingest.
+- Legacy unused services removed: `XttsService` and `OghmaRagService`.
+- `CompositeLlmService` shared model cache state is now lock-protected, and
+  provider model refresh now runs concurrently instead of sequential timeouts.
+- `RagQueryService` dataset chunk cache and LRU metadata are now synchronised
+  for concurrent query/warm/clear access.
+- Model Management UI no longer shows the misleading non-destructive
+  "Cleanup" action.
+- Data root migration now carries all local SQLite families used by chat and
+  memory features (`conversations.db*`, `memories.db*`, `benchmarks.db*`).
+- Feature documentation now includes a dedicated Memory section describing the
+  UI, settings controls, and background auto-summary behaviour.
+- Chat auto-summary failures are now captured in runtime logs as warnings
+  instead of being silently swallowed.
+
+
+
+## [0.9.1-alpha] - 2026-05-15
+
+### Changed
+
+- Voice provider configuration now uses a dropdown selector to clearly indicate
+  the active provider, with conditional display of provider-specific settings
+  below the selector (Kokoro voice/device/speed controls, F5-TTS options, etc.).
+- Test project `Aether.Tests` is now configured as a proper xUnit test project
+  (`Microsoft.NET.Test.Sdk` + xUnit runner), replacing the custom executable
+  harness so `dotnet test` provides discovered, passed, and failed test counts.
+- xUnit harness cases are now grouped into per-domain fixtures (Backup,
+  Services, RAG, TTS, Agent) for clearer CI output while preserving the same
+  underlying coverage set.
+- Settings: add Kokoro managed service controls and health probe at startup; TTS speed persisted in settings.
+- Kokoro: Start/Stop managed service, venv-aware startup, and GPU-friendly install notes (supports CUDA, AMD, Intel via environment guidance).
+- Kokoro: Start/Stop managed service, venv-aware startup, and GPU-friendly venv setup. The Local AI setup now detects NVIDIA (CUDA) or ROCm and suggests the appropriate device; settings persist TTS device and speed. Manual override available in Settings.
+- Local AI setup now attempts to install a matching PyTorch wheel for the selected backend (CUDA/ROCm/CPU) before installing XTTS packages.
+- Local AI setup now explicitly warns when Intel or AMD GPUs are detected without a supported wheel path and falls back to CPU for XTTS setup instead of silently masking the hardware.
+- Chat: avoid inserting internal runtime/TTS error messages into chat history; surface as runtime logs and toasts instead.
+- RAG Embeddings section expanded with clarification that embeddings convert
+  document text to vectors for semantic search and are cached after first
+  compute, plus notes that reranker is optional and improves search relevance.
+- Tooltips for Local AI Setup Plan and Approve buttons now include more
+  detailed guidance on what each action accomplishes (preview vs. execute).
+- Toast notifications repositioned from top-right to top-left below the menu
+  bar for improved visibility and less overlap with active content areas.
+
+### Fixed
+
+- Chat message list no longer shows a selected-row grey slab when clicked;
+  Chat view now uses a non-selectable `ItemsControl` inside a `ScrollViewer`
+  instead of a selectable `ListBox`.
+- Window title now updates correctly when switching between non-Chat panels
+  (Settings, Agent, Models, RAG, Services, Tasks, etc.).
+- Agent view Grid layout: fixed TextBox/Browse button field overlap by adding
+  a third column definition for proper button sizing.
+- Services view: eliminated duplicate items appearing on scroll or after
+  collection changes by preventing multiple CollectionChanged subscriptions on
+  the same handler.
+- Python version validation now uses per-provider requirements; Kokoro requires
+  Python 3.12 while F5-TTS and XTTS v2 require Python 3.11, with appropriate
+  health check messages for each provider.
+- Reranker model path now resolves correctly against LocalAiAssetsRoot instead
+  of the incorrect DataRootDirectory reference.
+- Resource leak in MarkdownViewer: timer now properly stopped and unsubscribed
+  from events when control is detached from visual tree; prevents timer tick
+  events continuing after control disposal.
+- Resource leak in ServerProcessManager.AutoTuneAsync: TaskCompletionSource
+  now guaranteed to complete even on abnormal process exit; added defensive
+  catch block and finally-block check to ensure completion never hangs.
+- MainWindowViewModel panel commands now consistently use sync commands with
+  background async loading; ShowChatPanelAsync and ShowAgentPanelAsync
+  converted to ShowChatPanel and ShowAgentPanel using RunBackgroundTaskAsync
+  pattern for consistency with other panel switching commands.
+- CompositeLlmService timeouts tuned: per-provider timeout increased from 2s
+  to 5s to accommodate slower model providers; model cache duration increased
+  from 30s to 300s (5 minutes) for more stable model discovery; added explicit
+  error classification for timeout vs other exceptions.
+- RagQueryService LRU cache simplified: replaced complex Queue-based TouchCache
+  with LinkedList for O(n) instead of O(n^2) eviction; cleaner implementation
+  with direct node removal and addition to end.
+- ChatViewModel regenerate now uses proper attachment storage: AttachedFilePaths
+  collection added to MessageViewModel to store file paths; regeneration
+  retrieves paths from message model instead of fragile marker-based parsing.
+- AgentService JSON extraction improved: added brace-matching logic to properly
+  handle nested structures and escaped quotes; validates extracted JSON with
+  JsonDocument.Parse before returning; fallback behavior now attempts multiple
+  extraction strategies instead of failing on first mismatch.
+- SqliteRagStore connection pooling: added Pooling=true and Max Pool Size=5
+  to SQLite connection string for automatic connection reuse across operations.
+- SettingsView.axaml binding consistency: added missing Tts. prefix to
+  IsLegacyVoiceBackend bindings for UI visibility conditions.
+
+- Window title now updates correctly when switching between non-Chat panels
+  (Settings, Agent, Models, RAG, Services, Tasks, etc.).
+### Changed
+
+- Runtime log entry buffer capacity reduced from 2000 to 1000 entries to reduce
+  in-memory overhead during long-running sessions while maintaining adequate
+  debugging history.
+- Setup Wizard toolbar icon removed to reduce visual clutter; the wizard
+  remains accessible via the Settings panel.
+
 ## [0.9.0-alpha] - 2026-05-14
 
 ### Added
