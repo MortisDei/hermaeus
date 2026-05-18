@@ -4,6 +4,8 @@
 
 - Chat history with rename, delete, fast FTS-backed search, folders, tags,
   pins, archive, and direct file context injection for selected text/code files.
+- Conversation management via right-click context menu with delete, archive,
+  export, and pin options for convenient quick access.
 - Chat context usage indicator with provider-reported usage where available and
   local estimates before send.
 - Context Inspector panel shows the exact context pack before send when opened:
@@ -88,7 +90,8 @@
   same prompt across multiple visible models before choosing one for normal
   conversation.
 - Model benchmarks with GGUF discovery, one-click full-suite runs, saved run
-  history, deterministic quality checks, rankings, reruns, and
+  history, deterministic quality checks, rankings with column headers and
+  tabular display, test info modal for case details, reruns, and
   Markdown/JSON/CSV export.
 - Doctor checks for untuned GGUF files, stale `llama.cpp` binaries, and pinned
   `nomic-embed-text-v1.5` hash drift, with install actions where available.
