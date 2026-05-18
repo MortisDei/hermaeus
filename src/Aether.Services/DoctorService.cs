@@ -29,6 +29,7 @@ public sealed class DoctorService : IDoctorService
     private readonly IReranker _reranker;
     private readonly ModelDownloadService _downloads;
     private readonly EmbeddingModelDownloadSpec _embeddingDownload;
+    private readonly LlamaServerSetupService _llamaSetup;
 
     public DoctorService(
         ISettingsService settings,
@@ -41,7 +42,8 @@ public sealed class DoctorService : IDoctorService
         PythonHealthValidator pythonValidator,
         IReranker reranker,
         ModelDownloadService? downloads = null,
-        EmbeddingModelDownloadSpec? embeddingDownload = null)
+        EmbeddingModelDownloadSpec? embeddingDownload = null,
+        LlamaServerSetupService? llamaSetup = null)
     {
         _settings = settings;
         _runtimes = runtimes;
@@ -54,6 +56,7 @@ public sealed class DoctorService : IDoctorService
         _reranker = reranker;
         _downloads = downloads ?? new ModelDownloadService();
         _embeddingDownload = embeddingDownload ?? DefaultEmbeddingDownload;
+        _llamaSetup = llamaSetup ?? new LlamaServerSetupService(_downloads);
     }
 
     public async Task<DoctorReport> ScanAsync(CancellationToken ct = default)
@@ -67,11 +70,13 @@ public sealed class DoctorService : IDoctorService
             CheckLlamaServerBinary(),
             await CheckLlamaServerUpdateAsync(ct),
             CheckGgufModels(),
+            CheckUntunedGgufModels(),
             await CheckOllamaAsync(ct),
             await CheckVoiceBackendAsync(ct),
             await CheckPythonAsync(ct),
             await CheckRagDbAsync(ct),
             embeddingModelCheck,
+            await CheckEmbeddingModelVersionAsync(embeddingModelCheck, ct),
             embeddingModelCheck.Status == DoctorCheckStatus.Ready
                 ? await CheckEmbeddingBackendAsync(ct)
                 : CheckEmbeddingBackendSkipped(embeddingModelCheck),
@@ -275,6 +280,50 @@ public sealed class DoctorService : IDoctorService
             "Runtime");
     }
 
+    private DoctorCheck CheckUntunedGgufModels()
+    {
+        var models = LocalAiAssetLocator.FindGgufModels(_settings.Settings.DataManagement.LocalAiAssetsRoot);
+        if (models.Count == 0)
+        {
+            return BuildCheck(
+                "llama-tune-profiles",
+                "llama.cpp tuned profiles",
+                DoctorCheckStatus.Info,
+                "No local GGUF models found",
+                "Add GGUF models before tuning launch profiles.",
+                "Open Benchmarks",
+                true,
+                "No GGUF files found under the AI assets root.",
+                "Runtime");
+        }
+
+        var untuned = models.Where(model => FindTuneProfile(model) is null).ToList();
+        if (untuned.Count == 0)
+        {
+            return BuildCheck(
+                "llama-tune-profiles",
+                "llama.cpp tuned profiles",
+                DoctorCheckStatus.Ready,
+                "All local GGUF models have tuned profiles",
+                $"{models.Count} model(s) have matching saved tune profiles.",
+                "Open Services",
+                true,
+                string.Join('\n', models),
+                "Runtime");
+        }
+
+        return BuildCheck(
+            "llama-tune-profiles",
+            "llama.cpp tuned profiles",
+            DoctorCheckStatus.Warning,
+            $"{untuned.Count} GGUF model(s) need tuning",
+            "Run Services auto-tune for each model before benchmarking or chatting.",
+            "Open Services",
+            true,
+            string.Join('\n', untuned),
+            "Runtime");
+    }
+
     private async Task<DoctorCheck> CheckOllamaAsync(CancellationToken ct)
     {
         var profiles = _runtimes.Profiles.Where(p => p.Enabled && p.Kind == RuntimeKind.Ollama).ToList();
@@ -469,6 +518,53 @@ public sealed class DoctorService : IDoctorService
             "RAG");
     }
 
+    private async Task<DoctorCheck> CheckEmbeddingModelVersionAsync(DoctorCheck modelCheck, CancellationToken ct)
+    {
+        var configured = _settings.Settings.Rag.EmbeddingModel.Trim();
+        var search = FindInstalledEmbeddingModel(configured);
+        if (!search.Found)
+        {
+            return BuildCheck(
+                "embedding-model-update",
+                "nomic embedding model version",
+                DoctorCheckStatus.Info,
+                "Embedding model version check skipped",
+                "Install the pinned nomic embedding model before checking its file hash.",
+                "Download embedding model",
+                true,
+                modelCheck.Diagnostics,
+                "RAG");
+        }
+
+        if (!LooksLikeNomicEmbeddingName(configured) && !LooksLikeNomicEmbeddingName(Path.GetFileName(search.Path)))
+        {
+            return BuildCheck(
+                "embedding-model-update",
+                "nomic embedding model version",
+                DoctorCheckStatus.Info,
+                "Non-nomic embedding model selected",
+                "Doctor only verifies the pinned nomic-embed-text-v1.5 model hash.",
+                "Open Settings",
+                true,
+                search.Path,
+                "RAG");
+        }
+
+        var hashOk = await _downloads.VerifyHashAsync(search.Path, _embeddingDownload.Sha256, null, ct);
+        return BuildCheck(
+            "embedding-model-update",
+            "nomic embedding model version",
+            hashOk ? DoctorCheckStatus.Ready : DoctorCheckStatus.Warning,
+            hashOk ? "Pinned nomic embedding model verified" : "nomic embedding model should be refreshed",
+            hashOk
+                ? "Installed file matches the pinned nomic-embed-text-v1.5 GGUF."
+                : "Download the pinned nomic-embed-text-v1.5 GGUF so RAG embeddings use the expected model.",
+            "Download embedding model",
+            true,
+            search.Path,
+            "RAG");
+    }
+
     private DoctorCheck CheckEmbeddingBackendSkipped(DoctorCheck modelCheck) =>
         BuildCheck(
             "embeddings",
@@ -582,6 +678,27 @@ public sealed class DoctorService : IDoctorService
         return true;
     }
 
+    public Task<bool> InstallLlamaServerUpdateAsync(CancellationToken ct = default)
+        => InstallLlamaServerUpdateAsync(null, ct);
+
+    public async Task<bool> InstallLlamaServerUpdateAsync(IProgress<string>? progress, CancellationToken ct = default)
+    {
+        var installPath = ResolveLlamaServerInstallDirectory();
+        var result = await _llamaSetup.InstallLatestAsync(installPath, progress, ct);
+        if (!result.Success || string.IsNullOrWhiteSpace(result.UpdatedPath))
+        {
+            progress?.Report(result.Log);
+            return false;
+        }
+
+        foreach (var server in _settings.Settings.ManagedServers)
+            server.ExecutablePath = result.UpdatedPath;
+
+        await _settings.SaveAsync();
+        progress?.Report(result.Log);
+        return true;
+    }
+
     private async Task ConfigureInstalledEmbeddingModelAsync(string destinationPath, CancellationToken ct)
     {
         _settings.Settings.Rag.EmbeddingModel = _embeddingDownload.ModelName;
@@ -591,6 +708,20 @@ public sealed class DoctorService : IDoctorService
             embeddingServer.ModelPath = destinationPath;
 
         await _settings.SaveAsync();
+    }
+
+    private string ResolveLlamaServerInstallDirectory()
+    {
+        var server = _settings.Settings.ManagedServers.FirstOrDefault(s => !s.EmbeddingsMode)
+            ?? _settings.Settings.ManagedServers.FirstOrDefault();
+        var executable = ResolveExecutable(server?.ExecutablePath ?? string.Empty);
+        if (!string.IsNullOrWhiteSpace(executable) && Path.IsPathFullyQualified(executable))
+            return Path.GetDirectoryName(executable) ?? executable;
+
+        var root = _settings.Settings.DataManagement.LocalAiAssetsRoot.Trim();
+        if (string.IsNullOrWhiteSpace(root))
+            root = SettingsService.ResolveDataRoot(_settings.Settings);
+        return _llamaSetup.GetDefaultInstallPath(root);
     }
 
     private static void TryDelete(string path)
@@ -872,6 +1003,19 @@ public sealed class DoctorService : IDoctorService
         return (false, string.Empty, string.Join(", ", directories));
     }
 
+    private LlamaTuneProfile? FindTuneProfile(string modelPath)
+    {
+        if (string.IsNullOrWhiteSpace(modelPath) || !File.Exists(modelPath))
+            return null;
+
+        var normalized = Path.GetFullPath(modelPath);
+        var file = new FileInfo(normalized);
+        return _settings.Settings.LlamaTuneProfiles.FirstOrDefault(profile =>
+            string.Equals(Path.GetFullPath(profile.ModelPath), normalized, StringComparison.OrdinalIgnoreCase)
+            && profile.ModelSizeBytes == file.Length
+            && profile.ModelModifiedAtUtc == file.LastWriteTimeUtc);
+    }
+
     private string ResolveEmbeddingModelDirectory()
     {
         var directories = GetEmbeddingCandidateDirectories();
@@ -937,6 +1081,12 @@ public sealed class DoctorService : IDoctorService
                || LooksLikeE5EmbeddingName(text)
                || text.Contains("gte", StringComparison.OrdinalIgnoreCase);
     }
+
+    private static bool LooksLikeNomicEmbeddingName(string value) =>
+        !string.IsNullOrWhiteSpace(value)
+        && value.Contains("nomic", StringComparison.OrdinalIgnoreCase)
+        && (value.Contains("embed", StringComparison.OrdinalIgnoreCase)
+            || value.Contains("text", StringComparison.OrdinalIgnoreCase));
 
     private static bool LooksLikeE5EmbeddingName(string text) =>
         text.Equals("e5", StringComparison.OrdinalIgnoreCase)

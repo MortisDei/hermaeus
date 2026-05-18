@@ -19,6 +19,8 @@ public partial class DoctorViewModel : ObservableObject
     [ObservableProperty] private string _lastScanned = string.Empty;
     [ObservableProperty] private bool _isInstallingReranker;
     [ObservableProperty] private string _rerankerProgress = string.Empty;
+    [ObservableProperty] private bool _isInstallingLlamaServer;
+    [ObservableProperty] private string _llamaServerProgress = string.Empty;
     [ObservableProperty] private bool _isInstallingEmbeddingModel;
     [ObservableProperty] private string _embeddingModelProgress = string.Empty;
     [ObservableProperty] private double _embeddingModelProgressPercent;
@@ -158,22 +160,6 @@ public partial class DoctorViewModel : ObservableObject
             return;
         }
 
-        if (RequestNavigate is null)
-        {
-            _toasts.Show("Navigation unavailable", "Doctor navigation is not configured.", ToastKind.Warning, 4000);
-            return;
-        }
-
-        var target = check.Category switch
-        {
-            "Runtime" => "services",
-            "RAG" => "rag",
-            "System" => "system",
-            "Voice" => "settings",
-            "Security" => "settings",
-            "Storage" => "settings",
-            _ => "settings"
-        };
         // Special-case reranker installation: perform install action via doctor service
         if (check.Key == "reranker")
         {
@@ -212,7 +198,7 @@ public partial class DoctorViewModel : ObservableObject
             }
         }
 
-        if (check.Key == "embedding-model")
+        if (check.Key is "embedding-model" or "embedding-model-update")
         {
             try
             {
@@ -247,6 +233,55 @@ public partial class DoctorViewModel : ObservableObject
                 return;
             }
         }
+
+        if (check.Key == "llama-server-update")
+        {
+            try
+            {
+                if (IsInstallingLlamaServer) return;
+                IsInstallingLlamaServer = true;
+                _installCts = new CancellationTokenSource();
+                var progress = new Progress<string>(s => LlamaServerProgress = s);
+                var ok = await _doctor.InstallLlamaServerUpdateAsync(progress, _installCts.Token);
+                _toasts.Show(ok ? "llama.cpp updated" : "llama.cpp update failed",
+                    ok ? "llama-server downloaded and configured." : "See diagnostics for details.",
+                    ok ? ToastKind.Success : ToastKind.Error,
+                    7000);
+                await ScanAsync();
+                LlamaServerProgress = string.Empty;
+                IsInstallingLlamaServer = false;
+                _installCts = null;
+                return;
+            }
+            catch (Exception ex)
+            {
+                _toasts.Show(ex is OperationCanceledException ? "llama.cpp update cancelled" : "llama.cpp update failed",
+                    ex is OperationCanceledException ? "Update was cancelled." : ex.Message,
+                    ex is OperationCanceledException ? ToastKind.Info : ToastKind.Error,
+                    7000);
+                LlamaServerProgress = string.Empty;
+                IsInstallingLlamaServer = false;
+                _installCts = null;
+                return;
+            }
+        }
+
+        if (RequestNavigate is null)
+        {
+            _toasts.Show("Navigation unavailable", "Doctor navigation is not configured.", ToastKind.Warning, 4000);
+            return;
+        }
+
+        var target = check.Category switch
+        {
+            "Runtime" => "services",
+            "RAG" => "rag",
+            "System" => "system",
+            "Voice" => "settings",
+            "Security" => "settings",
+            "Storage" => "settings",
+            _ => "settings"
+        };
 
         RequestNavigate(target);
     }

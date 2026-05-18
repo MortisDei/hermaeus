@@ -19,8 +19,12 @@ limit.
   when a discovered model is selected.
 - Services auto-tune now probes descending GPU layer candidates and keeps the
   highest candidate that reaches `/health`, with CPU fallback.
+- Successful Services auto-tune results are now saved as per-GGUF profiles and
+  automatically reapplied before managed server start.
 - Doctor now checks the configured `llama-server` version and compares it with
   the latest `llama.cpp` release when GitHub releases are reachable.
+- Doctor now warns for untuned local GGUF models, offers a `llama.cpp` update
+  install action, and verifies pinned `nomic-embed-text-v1.5` files by hash.
 - Doctor embedding model install now downloads the default
   `nomic-embed-text-v1.5` GGUF from a pinned Hugging Face commit and verifies
   its SHA256 before configuring RAG.
@@ -41,6 +45,8 @@ limit.
   stale embedding server path replacement, and hash mismatch rejection.
 - Added regression coverage for GGUF discovery, auto-tune candidate planning,
   GPU-layer log parsing, and llama.cpp build parsing.
+- Added regression coverage for Doctor untuned-GGUF reporting and current
+  platform llama-server asset selection.
 
 ## [0.9.13-alpha] - 2026-05-18
 
@@ -340,4 +346,3 @@ limit.
 ### Changed
 
 - Project version metadata bumped to `0.9.5-alpha`.
-

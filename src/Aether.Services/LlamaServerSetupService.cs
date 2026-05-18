@@ -1,4 +1,6 @@
 using System.Runtime.InteropServices;
+using System.Net.Http.Json;
+using System.Text.Json.Serialization;
 using Aether.Core.Models;
 
 namespace Aether.Services;
@@ -32,10 +34,12 @@ public sealed class LlamaServerSetupService
     ];
 
     private readonly ModelDownloadService _downloader;
+    private readonly HttpClient _http;
 
-    public LlamaServerSetupService(ModelDownloadService? downloader = null)
+    public LlamaServerSetupService(ModelDownloadService? downloader = null, HttpClient? http = null)
     {
         _downloader = downloader ?? new ModelDownloadService();
+        _http = http ?? new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
     }
 
     /// <summary>
@@ -191,6 +195,114 @@ public sealed class LlamaServerSetupService
         }
     }
 
+    public async Task<LocalAiSetupResult> InstallLatestAsync(
+        string installPath,
+        IProgress<string>? progress = null,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            progress?.Report("Checking latest llama.cpp release...");
+            Directory.CreateDirectory(installPath);
+            var release = await GetLatestDownloadInfoAsync(ct);
+            var exePath = GetExecutablePath(installPath);
+            var tempPath = $"{exePath}.download";
+            if (File.Exists(tempPath))
+                File.Delete(tempPath);
+
+            progress?.Report($"Downloading llama-server {release.TagName} ({release.DisplayName})...");
+            var lastPercent = -1;
+            var downloadProgress = progress is null
+                ? null
+                : new Progress<DownloadProgress>(state =>
+                {
+                    var percent = (int)Math.Floor(state.PercentComplete);
+                    if (percent <= lastPercent)
+                        return;
+
+                    lastPercent = percent;
+                    progress.Report($"Downloading llama-server {release.TagName}... {percent}%");
+                });
+
+            var downloadResult = await _downloader.DownloadAsync(release.Url, tempPath, downloadProgress, ct);
+            if (!downloadResult.Success)
+                return new LocalAiSetupResult(false, $"Failed to download: {downloadResult.Message}");
+
+            if (!OperatingSystem.IsWindows())
+            {
+                try
+                {
+                    var fileInfo = new FileInfo(tempPath);
+                    fileInfo.UnixFileMode |= UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute;
+                }
+                catch { }
+            }
+
+            if (File.Exists(exePath))
+                File.Delete(exePath);
+            File.Move(tempPath, exePath);
+
+            progress?.Report($"llama-server {release.TagName} installed at {exePath}");
+            return new LocalAiSetupResult(true, $"llama-server {release.TagName} installed at {exePath}", exePath);
+        }
+        catch (OperationCanceledException)
+        {
+            return new LocalAiSetupResult(false, "Installation cancelled");
+        }
+        catch (Exception ex)
+        {
+            return new LocalAiSetupResult(false, $"Installation failed: {ex.Message}");
+        }
+    }
+
+    public async Task<LlamaServerLatestDownload> GetLatestDownloadInfoAsync(CancellationToken ct = default)
+    {
+        _http.DefaultRequestHeaders.UserAgent.ParseAdd("Aether-Doctor/1.0");
+        var release = await _http.GetFromJsonAsync<GitHubRelease>(
+            "https://api.github.com/repos/ggerganov/llama.cpp/releases/latest",
+            ct) ?? throw new InvalidOperationException("GitHub did not return llama.cpp release metadata.");
+        var asset = SelectDownloadAsset(release.Assets ?? []);
+        if (asset is null)
+            throw new InvalidOperationException($"No llama-server asset matched this platform in release {release.TagName}.");
+
+        return new LlamaServerLatestDownload(
+            release.TagName,
+            asset.Name,
+            asset.BrowserDownloadUrl,
+            CurrentPlatformDisplayName());
+    }
+
+    public static GitHubReleaseAsset? SelectDownloadAsset(IReadOnlyList<GitHubReleaseAsset> assets)
+    {
+        var candidates = assets
+            .Where(asset => asset.Name.Contains("llama-server", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        bool Has(string value, string token) => value.Contains(token, StringComparison.OrdinalIgnoreCase);
+        if (OperatingSystem.IsWindows())
+        {
+            var arm = RuntimeInformation.ProcessArchitecture == Architecture.Arm64;
+            return candidates.FirstOrDefault(asset =>
+                Has(asset.Name, "win") && (arm ? Has(asset.Name, "arm64") : !Has(asset.Name, "arm64") && (Has(asset.Name, "x64") || Has(asset.Name, "avx2"))));
+        }
+
+        if (OperatingSystem.IsLinux())
+        {
+            var arm = RuntimeInformation.ProcessArchitecture == Architecture.Arm64;
+            return candidates.FirstOrDefault(asset =>
+                Has(asset.Name, "linux") && (arm ? Has(asset.Name, "arm64") : Has(asset.Name, "x64")));
+        }
+
+        if (OperatingSystem.IsMacOS())
+        {
+            var arm = RuntimeInformation.ProcessArchitecture == Architecture.Arm64;
+            return candidates.FirstOrDefault(asset =>
+                (Has(asset.Name, "macos") || Has(asset.Name, "darwin")) && (arm ? Has(asset.Name, "arm64") : Has(asset.Name, "x64")));
+        }
+
+        return null;
+    }
+
     private static string GetExecutableName()
     {
         return OperatingSystem.IsWindows() ? "llama-server.exe" : "llama-server";
@@ -231,6 +343,22 @@ public sealed class LlamaServerSetupService
     }
 
     private sealed record DownloadDefinition(Func<bool> MatchesCurrentPlatform, string DisplayName, string AssetName);
+
+    private static string CurrentPlatformDisplayName()
+    {
+        var os = OperatingSystem.IsWindows() ? "Windows"
+            : OperatingSystem.IsLinux() ? "Linux"
+            : OperatingSystem.IsMacOS() ? "macOS"
+            : "Unknown";
+        return $"{os} {RuntimeInformation.ProcessArchitecture}";
+    }
 }
 
 public sealed record LlamaServerReleaseInfo(string DisplayName, string Url);
+public sealed record LlamaServerLatestDownload(string TagName, string AssetName, string Url, string DisplayName);
+public sealed record GitHubRelease(
+    [property: JsonPropertyName("tag_name")] string TagName,
+    [property: JsonPropertyName("assets")] List<GitHubReleaseAsset>? Assets);
+public sealed record GitHubReleaseAsset(
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("browser_download_url")] string BrowserDownloadUrl);

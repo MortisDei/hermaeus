@@ -83,13 +83,15 @@
 - Model profiles with display names, descriptions, tags, visibility, and defaults.
 - Runtime profiles for `llama.cpp`, Ollama, and OpenAI-compatible endpoints.
 - Managed `llama-server` start/stop, auto-start, logs, and GPU auto-tune that
-  verifies GPU layer candidates before saving a recommendation.
+  verifies GPU layer candidates before saving a per-GGUF tuned profile.
 - Compare Models provides an in-chat practical comparison path for trying the
   same prompt across multiple visible models before choosing one for normal
   conversation.
 - Model benchmarks with GGUF discovery, one-click full-suite runs, saved run
   history, deterministic quality checks, rankings, reruns, and
   Markdown/JSON/CSV export.
+- Doctor checks for untuned GGUF files, stale `llama.cpp` binaries, and pinned
+  `nomic-embed-text-v1.5` hash drift, with install actions where available.
 
 ## RAG
 

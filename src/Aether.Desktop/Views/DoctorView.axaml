@@ -95,6 +95,20 @@
             </StackPanel>
         </Border>
         </Grid>
+        <!-- llama.cpp install modal overlay -->
+        <Grid IsVisible="{Binding IsInstallingLlamaServer}" Background="#80000000">
+        <Border HorizontalAlignment="Center" VerticalAlignment="Center" Background="{DynamicResource BackgroundBrush}" Padding="20" CornerRadius="8">
+            <StackPanel Spacing="12" Width="520">
+                <TextBlock Text="Updating llama.cpp" FontSize="16" FontWeight="SemiBold" />
+                <TextBlock Text="This will download the latest matching llama-server asset and replace the managed binary. You can cancel at any time." Opacity="0.7" TextWrapping="Wrap" />
+                <ProgressBar IsIndeterminate="True" Height="12" />
+                <TextBlock Text="{Binding LlamaServerProgress}" Opacity="0.9" TextWrapping="Wrap" />
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+                    <Button Content="Cancel" Command="{Binding CancelInstallCommand}" Padding="10,6" />
+                </StackPanel>
+            </StackPanel>
+        </Border>
+        </Grid>
         <!-- Embedding model install modal overlay -->
         <Grid IsVisible="{Binding IsInstallingEmbeddingModel}" Background="#80000000">
         <Border HorizontalAlignment="Center" VerticalAlignment="Center" Background="{DynamicResource BackgroundBrush}" Padding="20" CornerRadius="8">

@@ -205,7 +205,7 @@ public sealed class ServerProcessManager : IDisposable
             var layers = observedLayers ?? requestedLayers;
             var log = string.Join('\n', lines);
             progress?.Report($"[aether] Auto-tune: candidate {requestedLayers} reached /health.");
-            return ProbeResult.Ok(new ServerTuneResult(layers, totalLayers, probe.Threads, log));
+            return ProbeResult.Ok(new ServerTuneResult(layers, totalLayers, probe.Threads, ParseLlamaBuildLabel(log), log));
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -255,6 +255,12 @@ public sealed class ServerProcessManager : IDisposable
             return (int.Parse(fitted.Groups["used"].Value), null);
 
         return (null, null);
+    }
+
+    public static string ParseLlamaBuildLabel(string text)
+    {
+        var match = Regex.Match(text ?? string.Empty, @"(?:^|[^a-zA-Z0-9])b(?<build>\d{3,6})(?:[^a-zA-Z0-9]|$)", RegexOptions.IgnoreCase);
+        return match.Success ? $"b{match.Groups["build"].Value}" : string.Empty;
     }
 
     // ── Process build ─────────────────────────────────────────────────────────
@@ -511,6 +517,7 @@ public sealed record ServerTuneResult(
     int GpuLayers,
     int? TotalLayers,
     int Threads,
+    string LlamaServerVersion,
     string RecentLog);
 
 internal sealed record ProbeResult(bool Success, ServerTuneResult? TuneResult, string Error)

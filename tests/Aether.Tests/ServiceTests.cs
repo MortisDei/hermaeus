@@ -235,6 +235,51 @@ namespace Aether.Tests
                 False(report.Checks.Any(c => c.Key == "hotkeys"), "Linux global hotkey support should not be reported as a Doctor problem");
         }
 
+        public static async Task DoctorWarnsForUntunedLocalGgufModels()
+        {
+            using var temp = new TempDir();
+            var root = temp.PathFor("AI");
+            Directory.CreateDirectory(Path.Combine(root, "Models"));
+            var model = Path.Combine(root, "Models", "chat.gguf");
+            File.WriteAllText(model, "model");
+
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.LocalAiAssetsRoot = root;
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+
+            var doctor = new DoctorService(
+                settings,
+                new RuntimeProfileService(settings),
+                new FakeVoiceProviderRegistry(settings),
+                new FakeSecretStore(),
+                new SqliteRagStore(settings),
+                new ThrowingEmbeddingService(),
+                new FakeSystemInfo(),
+                new PythonHealthValidator(),
+                new NoOpReranker());
+
+            var report = await doctor.ScanAsync();
+            var tuneCheck = report.Checks.Single(c => c.Key == "llama-tune-profiles");
+
+            Equal(DoctorCheckStatus.Warning, tuneCheck.Status, "untuned GGUF models should be surfaced in Doctor");
+            True(tuneCheck.Diagnostics.Contains(model, StringComparison.Ordinal), "Doctor diagnostics should list untuned model paths");
+
+            var info = new FileInfo(model);
+            settings.Settings.LlamaTuneProfiles.Add(new LlamaTuneProfile
+            {
+                ModelPath = model,
+                ModelSizeBytes = info.Length,
+                ModelModifiedAtUtc = info.LastWriteTimeUtc,
+                GpuLayers = 12,
+                Threads = 6,
+                ContextSize = 8192
+            });
+
+            report = await doctor.ScanAsync();
+            tuneCheck = report.Checks.Single(c => c.Key == "llama-tune-profiles");
+            Equal(DoctorCheckStatus.Ready, tuneCheck.Status, "matching tune profiles should satisfy Doctor");
+        }
+
         public static async Task LocalAiSetupDetectsFolderLayout()
         {
             using var temp = new TempDir();
@@ -409,6 +454,23 @@ namespace Aether.Tests
             Equal(6, releases.Count, "release data should cover all supported platforms");
             True(releases.All(entry => entry.Url.Contains("b4341", StringComparison.Ordinal)), "release urls should use the expected tag");
             True(releases.Select(entry => entry.DisplayName).Distinct(StringComparer.Ordinal).Count() == releases.Count, "release labels should be unique");
+            return Task.CompletedTask;
+        }
+
+        public static Task LlamaServerLatestAssetSelectionFindsCurrentPlatform()
+        {
+            var selected = LlamaServerSetupService.SelectDownloadAsset(
+            [
+                new GitHubReleaseAsset("llama-server-b9999-linux-x64", "https://example.test/linux"),
+                new GitHubReleaseAsset("llama-server-b9999-win-avx2.exe", "https://example.test/win"),
+                new GitHubReleaseAsset("llama-server-b9999-macos-arm64", "https://example.test/macos")
+            ]);
+
+            if (OperatingSystem.IsLinux() && System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture == System.Runtime.InteropServices.Architecture.X64)
+                Equal("https://example.test/linux", selected?.BrowserDownloadUrl, "latest llama asset selection should match Linux x64");
+            else
+                True(selected is not null, "latest llama asset selection should match the current supported platform");
+
             return Task.CompletedTask;
         }
 

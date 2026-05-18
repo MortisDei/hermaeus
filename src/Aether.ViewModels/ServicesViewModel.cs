@@ -125,6 +125,7 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
 
     private async Task StartCoreAsync(CancellationToken ct)
     {
+        ApplyTuneProfileIfAvailable();
         SyncToConfig();
         await SaveConfigAsync();
         await _mgr.StartAsync(BuildConfig(), ct);
@@ -187,6 +188,7 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
 
             GpuLayers = result.GpuLayers;
             Threads = result.Threads;
+            await SaveTuneProfileAsync(result);
             AutoTuneStatus = result.TotalLayers is int total
                 ? $"Auto-tune verified {result.GpuLayers}/{total} GPU layers with {result.Threads} thread(s). Save and start the service."
                 : $"Auto-tune verified {result.GpuLayers} GPU layers with {result.Threads} thread(s). Save and start the service.";
@@ -237,6 +239,7 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
         if (modelChanged)
         {
             ModelPath = normalized;
+            ApplyTuneProfileIfAvailable();
             SyncToConfig();
             await SaveConfigAsync();
         }
@@ -248,6 +251,86 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
             await StartCoreAsync(ct);
         else if (IsError)
             throw new InvalidOperationException(ErrorMessage);
+    }
+
+    private void ApplyTuneProfileIfAvailable()
+    {
+        var profile = FindTuneProfile(ModelPath);
+        if (profile is null)
+            return;
+
+        GpuLayers = profile.GpuLayers;
+        Threads = profile.Threads;
+        if (profile.ContextSize > 0)
+            ContextSize = profile.ContextSize;
+        if (!string.IsNullOrWhiteSpace(profile.ExtraArgs))
+            ExtraArgs = profile.ExtraArgs;
+    }
+
+    private async Task SaveTuneProfileAsync(ServerTuneResult result)
+    {
+        var normalized = ResolveExistingModelPath(ModelPath);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return;
+
+        var file = new FileInfo(normalized);
+        var profile = FindTuneProfile(normalized);
+        if (profile is null)
+        {
+            profile = new LlamaTuneProfile();
+            _settings.Settings.LlamaTuneProfiles.Add(profile);
+        }
+
+        profile.ModelPath = normalized;
+        profile.ModelSizeBytes = file.Length;
+        profile.ModelModifiedAtUtc = file.LastWriteTimeUtc;
+        profile.GpuLayers = result.GpuLayers;
+        profile.TotalLayers = result.TotalLayers;
+        profile.Threads = result.Threads;
+        profile.ContextSize = ContextSize;
+        profile.ExtraArgs = ExtraArgs;
+        profile.LlamaServerVersion = result.LlamaServerVersion;
+        profile.TunedAtUtc = DateTime.UtcNow;
+        await _settings.SaveAsync();
+    }
+
+    private LlamaTuneProfile? FindTuneProfile(string modelPath)
+    {
+        var normalized = ResolveExistingModelPath(modelPath);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return null;
+
+        var file = new FileInfo(normalized);
+        return _settings.Settings.LlamaTuneProfiles.FirstOrDefault(profile =>
+            string.Equals(Path.GetFullPath(profile.ModelPath), normalized, StringComparison.OrdinalIgnoreCase)
+            && profile.ModelSizeBytes == file.Length
+            && profile.ModelModifiedAtUtc == file.LastWriteTimeUtc);
+    }
+
+    private static string ResolveExistingModelPath(string modelPath)
+    {
+        if (string.IsNullOrWhiteSpace(modelPath))
+            return string.Empty;
+
+        var trimmed = modelPath.Trim();
+        if (File.Exists(trimmed))
+            return Path.GetFullPath(trimmed);
+
+        if (!Directory.Exists(trimmed))
+            return string.Empty;
+
+        try
+        {
+            var models = Directory.EnumerateFiles(trimmed, "*.gguf", SearchOption.AllDirectories)
+                .Order(StringComparer.OrdinalIgnoreCase)
+                .Take(2)
+                .ToArray();
+            return models.Length == 1 ? Path.GetFullPath(models[0]) : string.Empty;
+        }
+        catch
+        {
+            return string.Empty;
+        }
     }
 
     private async Task WaitUntilStartedAsync(CancellationToken ct)

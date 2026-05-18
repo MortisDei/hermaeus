@@ -226,10 +226,23 @@ The **System Overview** page shows the local machine and app environment:
 
 The Services auto-tune action now probes descending GPU layer candidates and
 keeps the highest candidate that starts and reaches `/health`, with CPU fallback
-as the final candidate. Doctor also checks the configured `llama-server` binary
-version and, when GitHub releases are reachable, compares it with the latest
-`llama.cpp` release. If the update check cannot reach GitHub, Doctor reports the
-local version it could read and keeps the scan usable offline.
+as the final candidate. Successful tune results are saved per GGUF model file
+with model size and modified-time metadata. When that model is selected again,
+Aether reapplies the saved GPU layer, thread, context, and extra-argument
+profile before starting the managed server.
+
+Doctor alerts when local GGUF models do not have matching tuned profiles. It
+also checks the configured `llama-server` binary version and, when GitHub
+releases are reachable, compares it with the latest `llama.cpp` release. If an
+update is available, Doctor can download the matching platform asset, replace
+the older managed binary, and update the managed server paths. If the update
+check cannot reach GitHub, Doctor reports the local version it could read and
+keeps the scan usable offline.
+
+Doctor also verifies the pinned `nomic-embed-text-v1.5` embedding GGUF by
+SHA256 when a nomic embedding model is installed. If the file does not match
+the pinned artifact, Doctor offers the same verified embedding-model install
+action used by first-run setup.
 
 ### Storage Tracking
 

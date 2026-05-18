@@ -43,6 +43,11 @@ public class AppSettings
     public List<ModelProfile> ModelProfiles { get; set; } = [];
 
     /// <summary>
+    /// Verified llama.cpp launch settings keyed to local GGUF model files.
+    /// </summary>
+    public List<LlamaTuneProfile> LlamaTuneProfiles { get; set; } = [];
+
+    /// <summary>
     /// Alternative LLM runtime profiles (llama.cpp, Ollama, remote endpoints).
     /// </summary>
     public List<RuntimeProfile> RuntimeProfiles { get; set; } = [];
