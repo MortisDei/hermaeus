@@ -51,11 +51,16 @@
                                Text="Run history"
                                FontWeight="SemiBold"
                                VerticalAlignment="Center" />
-                    <Button Grid.Column="1"
-                            Content="Clear"
-                            Command="{Binding ClearRunHistoryCommand}"
-                            IsEnabled="{Binding !IsRunning}"
-                            ToolTip.Tip="Deletes all saved benchmark runs after confirmation. Export any runs you want to keep first." />
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                        <Button Content="Export All"
+                                Command="{Binding ExportAllRunsCommand}"
+                                IsEnabled="{Binding !IsRunning}"
+                                ToolTip.Tip="Export all saved benchmark runs to the data root." />
+                        <Button Content="Clear"
+                                Command="{Binding ClearRunHistoryCommand}"
+                                IsEnabled="{Binding !IsRunning}"
+                                ToolTip.Tip="Deletes all saved benchmark runs after confirmation. Export any runs you want to keep first." />
+                    </StackPanel>
                 </Grid>
                 <ListBox Grid.Row="3"
                          MaxHeight="180"
@@ -63,11 +68,21 @@
                          SelectedItem="{Binding SelectedRun}">
                     <ListBox.ItemTemplate>
                         <DataTemplate DataType="vm:BenchmarkRunViewModel">
-                            <StackPanel Spacing="2" Margin="0,4">
-                                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                                <TextBlock Text="{Binding Summary}" FontSize="11" Opacity="0.55" />
-                                <TextBlock Text="{Binding Started}" FontSize="10" Opacity="0.35" />
-                            </StackPanel>
+                            <Border Padding="6" Margin="0,4" CornerRadius="6" BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
+                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                    <StackPanel Spacing="2">
+                                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{Binding Summary}" FontSize="11" Opacity="0.55" />
+                                        <TextBlock Text="{Binding Started}" FontSize="10" Opacity="0.35" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Top">
+                                        <Button Content="ℹ" Padding="6" MinWidth="32" Command="{Binding #Root.DataContext.ShowRunInfoCommand}" CommandParameter="{Binding .}" ToolTip.Tip="Show run info" />
+                                        <Button Content="Rerun" Command="{Binding #Root.DataContext.RerunCommand}" CommandParameter="{Binding .}" />
+                                        <Button Content="Export" Command="{Binding #Root.DataContext.ExportRunCommand}" CommandParameter="{Binding .}" />
+                                        <Button Content="Delete" Command="{Binding #Root.DataContext.DeleteRunCommand}" CommandParameter="{Binding .}" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
                         </DataTemplate>
                     </ListBox.ItemTemplate>
                 </ListBox>
@@ -263,15 +278,7 @@
                                         <TextBlock Text="{Binding Timings}" FontSize="11" Opacity="0.5" />
                                         <TextBlock Text="{Binding Checks}" FontSize="11" Opacity="0.4" />
                                     </StackPanel>
-                                    <Button Grid.Column="1"
-                                            Content="ℹ"
-                                            Padding="8"
-                                            MinWidth="32"
-                                            MinHeight="32"
-                                            VerticalAlignment="Top"
-                                            ToolTip.Tip="Show test details"
-                                            Command="{Binding #Root.DataContext.ShowCaseInfoCommand}"
-                                            CommandParameter="{Binding .}" />
+                                        <!-- Test details moved to run items; keep results simple -->
                                 </Grid>
                             </Border>
                         </DataTemplate>

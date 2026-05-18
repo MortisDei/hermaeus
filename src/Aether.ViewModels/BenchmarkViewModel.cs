@@ -189,6 +189,24 @@ public partial class BenchmarkViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private async Task ExportAllRunsAsync()
+    {
+        var root = Aether.Services.SettingsService.ResolveDataRoot(_settings.Settings);
+        var path = await _benchmarks.ExportAllAsync(Path.Combine(root, "benchmark-exports"));
+        _toasts.Show("All benchmarks exported", path, ToastKind.Success, 7000);
+    }
+
+    [RelayCommand]
+    private async Task ShowRunInfoAsync(BenchmarkRunViewModel? run)
+    {
+        if (run is null) return;
+        // Show a simple toast with run summary and metadata; callers can replace with a dialog if desired.
+        var md = $"{run.Title}\n{run.Summary}\nStarted: {run.Started}\nStatus: {run.Status}";
+        _toasts.Show("Run info", md, ToastKind.Info, 8000);
+        await Task.CompletedTask;
+    }
+
+    [RelayCommand]
     private async Task RefreshAsync() => await LoadAsync();
 
     [RelayCommand]
@@ -205,12 +223,21 @@ public partial class BenchmarkViewModel : ObservableObject
         foreach (var run in runs)
             Runs.Add(run);
 
-        RankedRuns.Clear();
-        foreach (var run in _benchmarks.Rank(runs.Select(r => r.Run)).Select(r => new BenchmarkRunViewModel(r)))
-            RankedRuns.Add(run);
+        UpdateRankedRuns(runs);
         if (SelectedRun is not null && Runs.All(r => r.Id != SelectedRun.Id))
             SelectedRun = null;
         SelectedRun ??= Runs.FirstOrDefault();
+    }
+
+    private void UpdateRankedRuns(List<BenchmarkRunViewModel> runs)
+    {
+        RankedRuns.Clear();
+        IEnumerable<BenchmarkRun> source = runs.Select(r => r.Run);
+        if (SelectedSuite is not null)
+            source = source.Where(r => r.SuiteId == SelectedSuite.Id);
+
+        foreach (var run in _benchmarks.Rank(source).Select(r => new BenchmarkRunViewModel(r)))
+            RankedRuns.Add(run);
     }
 
     private bool CanRun() => !IsRunning && SelectedSuite is not null && SelectedModel is not null;
@@ -219,6 +246,11 @@ public partial class BenchmarkViewModel : ObservableObject
     {
         ApplySuiteDefaults();
         RunCommand.NotifyCanExecuteChanged();
+        if (!_isLoading)
+        {
+            // Refresh ranking view to show only runs for the selected suite.
+            _ = Task.Run(async () => await ReloadRunsAsync());
+        }
     }
 
     partial void OnSelectedModelChanged(LlmModel? value)

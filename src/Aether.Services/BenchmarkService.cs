@@ -222,6 +222,25 @@ public sealed class BenchmarkService : IBenchmarkService
         return $"{basePath}.md";
     }
 
+    public async Task<string> ExportAllAsync(string targetDirectory, CancellationToken ct = default)
+    {
+        await EnsureInitializedAsync(ct);
+        var runs = await GetRunsAsync(ct);
+        if (!runs.Any())
+            throw new InvalidOperationException("No benchmark runs to export.");
+
+        var folder = Path.Combine(targetDirectory, $"all-runs-{DateTime.UtcNow:yyyyMMdd-HHmmss}");
+        Directory.CreateDirectory(folder);
+        foreach (var run in runs)
+        {
+            // Reuse ExportAsync to write per-run files into the folder
+            await ExportAsync(run.Id, folder, ct);
+        }
+
+        // Return the folder path (markdown is the friendly entry)
+        return folder;
+    }
+
     public IReadOnlyList<BenchmarkRun> Rank(IEnumerable<BenchmarkRun> runs) =>
         runs.OrderByDescending(r => r.RankingScore)
             .ThenByDescending(r => r.StartedAt)
