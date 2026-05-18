@@ -17,6 +17,8 @@ limit.
 - Desktop startup now initializes independent SQLite stores in parallel.
 - Session usage detail view models are created per detail navigation instead of
   being reused as singleton state.
+- Benchmarks now include a confirmed clear-history action for saved run
+  history.
 
 ### Fixed
 
@@ -33,6 +35,11 @@ limit.
 - Draft patch preview now uses the injected patch diff service.
 - Restore backup confirmation now uses a dedicated AXAML dialog instead of an
   inline C# control tree.
+
+### Tests
+
+- Added regression coverage for clearing saved benchmark run history without
+  removing benchmark suites.
 
 ## [0.9.14-alpha] - 2026-05-18
 

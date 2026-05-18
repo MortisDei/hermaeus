@@ -23,6 +23,8 @@ public partial class BenchmarkViewModel : ObservableObject
     public ObservableCollection<LlmModel> Models { get; } = [];
     public ObservableCollection<BenchmarkResultViewModel> SelectedResults { get; } = [];
 
+    public Func<Task<bool>>? RequestClearRunHistoryConfirmation { get; set; }
+
     [ObservableProperty] private BenchmarkSuite? _selectedSuite;
     [ObservableProperty] private BenchmarkRunViewModel? _selectedRun;
     [ObservableProperty] private BenchmarkResultViewModel? _selectedResult;
@@ -159,6 +161,24 @@ public partial class BenchmarkViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private async Task ClearRunHistoryAsync()
+    {
+        if (Runs.Count == 0)
+            return;
+
+        if (RequestClearRunHistoryConfirmation is not null
+            && !await RequestClearRunHistoryConfirmation())
+            return;
+
+        await _benchmarks.ClearRunsAsync();
+        SelectedRun = null;
+        SelectedResult = null;
+        SelectedResults.Clear();
+        await ReloadRunsAsync();
+        _toasts.Show("Benchmark history cleared", "Saved benchmark runs were removed.", ToastKind.Info);
+    }
+
+    [RelayCommand]
     private async Task ExportRunAsync(BenchmarkRunViewModel? run)
     {
         if (run is null) return;
@@ -180,6 +200,8 @@ public partial class BenchmarkViewModel : ObservableObject
         RankedRuns.Clear();
         foreach (var run in _benchmarks.Rank(runs.Select(r => r.Run)).Select(r => new BenchmarkRunViewModel(r)))
             RankedRuns.Add(run);
+        if (SelectedRun is not null && Runs.All(r => r.Id != SelectedRun.Id))
+            SelectedRun = null;
         SelectedRun ??= Runs.FirstOrDefault();
     }
 

@@ -9,6 +9,7 @@ public interface IBenchmarkService
     Task<IReadOnlyList<BenchmarkRun>> GetRunsAsync(CancellationToken ct = default);
     Task SaveSuiteAsync(BenchmarkSuite suite, CancellationToken ct = default);
     Task DeleteRunAsync(string runId, CancellationToken ct = default);
+    Task ClearRunsAsync(CancellationToken ct = default);
     Task<BenchmarkRun?> GetRunAsync(string runId, CancellationToken ct = default);
     Task<BenchmarkRun> RunAsync(
         BenchmarkSuite suite,

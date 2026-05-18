@@ -64,6 +64,26 @@ namespace Aether.Tests
             True(File.Exists(Path.Combine(settings.Settings.DataManagement.DataRootDirectory, "benchmarks.db")), "benchmark db should be created");
         }
 
+        public static async Task BenchmarkRunHistoryCanBeCleared()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var service = new BenchmarkService(settings, new FakeLlm(), new FakeSystemInfo());
+
+            var suite = BenchmarkService.StarterSuites().First();
+            suite.MaxCases = 1;
+            await service.SaveSuiteAsync(suite);
+            await service.RunAsync(suite, new LlmModel { Id = "fake-agent", Name = "Fake Agent", Provider = "Test" });
+
+            True((await service.GetRunsAsync()).Count > 0, "benchmark run should exist before clearing history");
+
+            await service.ClearRunsAsync();
+
+            Equal(0, (await service.GetRunsAsync()).Count, "clearing history should remove saved runs");
+            True((await service.GetSuitesAsync()).Any(s => s.Id == suite.Id), "clearing history should not remove suites");
+        }
+
         public static Task BenchmarkScoringAndRanking()
         {
             var service = new BenchmarkService(NewSettings(new TempDir()), new FakeLlm(), new FakeSystemInfo());

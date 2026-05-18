@@ -185,8 +185,8 @@ For GPU-capable systems, record:
 ### Benchmark Data Retention
 
 Benchmark run history stores prompts, outputs, scores, and runtime metadata
-under the Aether data root. Users can export, delete, or archive benchmark
-history from the workspace.
+under the Aether data root. Users can export individual runs, delete individual
+runs, or clear all saved run history from the workspace after confirmation.
 
 When benchmarking a remote provider, prompt content is sent to that configured
 provider.
@@ -201,6 +201,7 @@ provider.
 - Managed `llama-server` model switching for discovered local GGUF files
 - Reruns for validation
 - Export to Markdown, JSON, and CSV formats
+- Confirmed clear-history action for saved benchmark runs
 
 ## System Overview
 

@@ -45,7 +45,17 @@
                         </DataTemplate>
                     </ListBox.ItemTemplate>
                 </ListBox>
-                <TextBlock Grid.Row="2" Text="Run history" FontWeight="SemiBold" />
+                <Grid Grid.Row="2" ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                    <TextBlock Grid.Column="0"
+                               Text="Run history"
+                               FontWeight="SemiBold"
+                               VerticalAlignment="Center" />
+                    <Button Grid.Column="1"
+                            Content="Clear"
+                            Command="{Binding ClearRunHistoryCommand}"
+                            IsEnabled="{Binding !IsRunning}"
+                            ToolTip.Tip="Deletes all saved benchmark runs after confirmation. Export any runs you want to keep first." />
+                </Grid>
                 <ListBox Grid.Row="3"
                          MaxHeight="180"
                          ItemsSource="{Binding Runs}"

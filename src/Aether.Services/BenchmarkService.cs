@@ -101,6 +101,15 @@ public sealed class BenchmarkService : IBenchmarkService
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
+    public async Task ClearRunsAsync(CancellationToken ct = default)
+    {
+        await EnsureInitializedAsync(ct);
+        await using var c = new SqliteConnection(Cs); await c.OpenAsync(ct);
+        var cmd = c.CreateCommand();
+        cmd.CommandText = "DELETE FROM benchmark_runs";
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
     public async Task<BenchmarkRun> RunAsync(
         BenchmarkSuite suite,
         LlmModel model,
