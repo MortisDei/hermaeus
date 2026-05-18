@@ -24,6 +24,7 @@ public partial class BenchmarkViewModel : ObservableObject
     public ObservableCollection<BenchmarkResultViewModel> SelectedResults { get; } = [];
 
     public Func<Task<bool>>? RequestClearRunHistoryConfirmation { get; set; }
+    public Func<BenchmarkResultViewModel, Task>? RequestShowCaseInfo { get; set; }
 
     [ObservableProperty] private BenchmarkSuite? _selectedSuite;
     [ObservableProperty] private BenchmarkRunViewModel? _selectedRun;
@@ -64,7 +65,7 @@ public partial class BenchmarkViewModel : ObservableObject
             Suites.Clear();
             foreach (var suite in await _benchmarks.GetSuitesAsync())
                 Suites.Add(suite);
-            SelectedSuite ??= Suites.FirstOrDefault();
+            SelectedSuite = Suites.FirstOrDefault();
             ApplySuiteDefaults();
 
             Models.Clear();
@@ -74,7 +75,7 @@ public partial class BenchmarkViewModel : ObservableObject
                 Models.Add(model);
             foreach (var model in DiscoverLocalGgufModels(models.Select(m => m.Id)))
                 Models.Add(model);
-            SelectedModel ??= Models.FirstOrDefault(m => m.Id == _settings.Settings.Llm.DefaultModel) ?? Models.FirstOrDefault();
+            SelectedModel = Models.FirstOrDefault(m => m.Id == _settings.Settings.Llm.DefaultModel) ?? Models.FirstOrDefault();
 
             await ReloadRunsAsync();
             Status = $"Loaded {Suites.Count} suite(s), {Runs.Count} run(s).";
@@ -189,6 +190,13 @@ public partial class BenchmarkViewModel : ObservableObject
 
     [RelayCommand]
     private async Task RefreshAsync() => await LoadAsync();
+
+    [RelayCommand]
+    private async Task ShowCaseInfoAsync(BenchmarkResultViewModel? result)
+    {
+        if (result is not null && RequestShowCaseInfo is not null)
+            await RequestShowCaseInfo(result);
+    }
 
     private async Task ReloadRunsAsync()
     {

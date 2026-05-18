@@ -12,7 +12,7 @@ public sealed class BenchmarkSuite
     public double Temperature { get; set; } = 0.7;
     public int TimeoutSeconds { get; set; } = 120;
     public int MaxCases { get; set; } = 0;
-    public int IterationsPerCase { get; set; } = 3;
+    public int IterationsPerCase { get; set; } = 1;
     public bool UseJudge { get; set; }
     public string JudgeModelId { get; set; } = string.Empty;
     public List<BenchmarkCase> Cases { get; set; } = [];
