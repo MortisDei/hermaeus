@@ -22,6 +22,24 @@ public sealed record LocalAiAssetLayout(
 
 public static class LocalAiAssetLocator
 {
+    public static IReadOnlyList<string> FindGgufModels(string root)
+    {
+        var layout = Detect(root);
+        if (string.IsNullOrWhiteSpace(layout.ModelsDirectory) || !Directory.Exists(layout.ModelsDirectory))
+            return [];
+
+        try
+        {
+            return Directory.EnumerateFiles(layout.ModelsDirectory, "*.gguf", SearchOption.AllDirectories)
+                .Order(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
     public static LocalAiAssetLayout Detect(string root)
     {
         root = root.Trim();

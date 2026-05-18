@@ -158,6 +158,25 @@ namespace Aether.Tests
             return Task.CompletedTask;
         }
 
+        public static Task LocalAiAssetsListsDiscoveredGgufModels()
+        {
+            using var temp = new TempDir();
+            var root = temp.PathFor("AI");
+            var models = Path.Combine(root, "Models");
+            Directory.CreateDirectory(Path.Combine(models, "nested"));
+            var first = Path.Combine(models, "alpha.gguf");
+            var second = Path.Combine(models, "nested", "beta.gguf");
+            File.WriteAllText(first, "model");
+            File.WriteAllText(second, "model");
+
+            var found = LocalAiAssetLocator.FindGgufModels(root);
+
+            Equal(2, found.Count, "GGUF discovery should include nested model files");
+            True(found.Contains(first), "GGUF discovery should include root model file");
+            True(found.Contains(second), "GGUF discovery should include nested model file");
+            return Task.CompletedTask;
+        }
+
         public static Task RagSettingsPreservesConfiguredEmbeddingModelOption()
         {
             using var temp = new TempDir();
@@ -914,6 +933,18 @@ namespace Aether.Tests
 
             Equal(1, args.Count(a => string.Equals(a, "--pooling", StringComparison.Ordinal)), "explicit pooling should not be duplicated");
             ContainsInOrder(args, "--pooling", "cls", "explicit pooling value should be preserved");
+            return Task.CompletedTask;
+        }
+
+        public static Task ServerAutoTunePlansDescendingGpuCandidates()
+        {
+            var args = ServerProcessManager.BuildGpuLayerCandidates(42);
+
+            ContainsInOrder(args.Select(x => x.ToString()).ToList(), "999", "128", "auto-tune should prefer high GPU layer candidates first");
+            True(args.Contains(42), "configured GPU layer count should be included as a candidate");
+            Equal(0, args[^1], "CPU fallback should be the final auto-tune candidate");
+            Equal(12, ServerProcessManager.ParseGpuLayerLog("llm_load_tensors: offloaded 12/33 layers to GPU").Used, "offloaded layer logs should parse");
+            Equal(4341, DoctorService.TryParseLlamaBuild("llama.cpp b4341"), "llama.cpp build tags should parse");
             return Task.CompletedTask;
         }
 

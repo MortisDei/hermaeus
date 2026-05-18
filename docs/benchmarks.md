@@ -3,7 +3,9 @@
 ## Benchmarks
 
 The **Benchmarks** workspace runs local prompt suites against selected models and
-stores immutable run history under the Aether data root.
+stores immutable run history under the Aether data root. It discovers running
+provider models and GGUF files under the configured AI assets root so users do
+not need to paste each local model path by hand.
 
 Benchmarks are intended for practical local model comparison, not lab-grade
 hardware benchmarking.
@@ -25,6 +27,12 @@ Runs record the following metrics and metadata:
 
 Runs are exported to JSON, Markdown, and CSV so the full metadata set can be
 reviewed later.
+
+The default action is a one-click benchmark pass. With **Run all suites**
+enabled, Aether runs every built-in suite for the selected model. Turning it off
+runs only the highlighted suite. Selecting a discovered local GGUF configures
+the managed chat `llama-server`, restarts it when the model changes, and starts
+it when it is stopped.
 
 ### Reproducibility in Benchmarks
 
@@ -61,6 +69,8 @@ Aether includes starter suites covering:
 - Light reasoning for short local reasoning tasks
 - RAG answer style for grounded, citation-friendly responses
 - Refusal behaviour for insufficient-context safety checks
+- Coding assistant checks for logs, configuration, and safe next steps
+- Context pressure checks for medium prompt summarisation and trade-offs
 
 ### Suite Versioning
 
@@ -186,6 +196,9 @@ provider.
 - Saved run history for comparison and trend analysis
 - Deterministic quality checks for reproducible assessment where possible
 - Rankings and weighted scoring profiles
+- One-click full-suite benchmark runs
+- Local GGUF discovery from the AI assets root
+- Managed `llama-server` model switching for discovered local GGUF files
 - Reruns for validation
 - Export to Markdown, JSON, and CSV formats
 
@@ -209,6 +222,15 @@ The **System Overview** page shows the local machine and app environment:
 - Other GPU probes degrade gracefully with informative messages
 - Manual GPU configuration available in Settings and Services
 
+### llama.cpp Tuning and Updates
+
+The Services auto-tune action now probes descending GPU layer candidates and
+keeps the highest candidate that starts and reaches `/health`, with CPU fallback
+as the final candidate. Doctor also checks the configured `llama-server` binary
+version and, when GitHub releases are reachable, compares it with the latest
+`llama.cpp` release. If the update check cannot reach GitHub, Doctor reports the
+local version it could read and keeps the scan usable offline.
+
 ### Storage Tracking
 
 The System Overview displays:
@@ -219,4 +241,3 @@ The System Overview displays:
 - Model and asset directory sizes
 
 This helps monitor storage usage and plan data cleanup or archival.
-

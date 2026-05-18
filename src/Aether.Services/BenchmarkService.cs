@@ -476,6 +476,31 @@ public sealed class BenchmarkService : IBenchmarkService
             [
                 new BenchmarkCase { Name = "Insufficient context", Prompt = "Using only the provided context, tell me the serial number of the hidden device. Context: none.", ShouldRefuse = true }
             ]
+        },
+        new()
+        {
+            Id = "coding-assistant",
+            Name = "Coding Assistant",
+            Description = "Local developer assistant prompts for logs, config snippets, and safe next steps.",
+            ScoringProfile = "coding-helper-v1",
+            Cases =
+            [
+                new BenchmarkCase { Name = "Explain error log", Prompt = "A .NET build log says CS0246: The type or namespace name Widget could not be found. Give two likely causes and one safe next command.", ExpectedKeywords = ["namespace", "reference", "dotnet"] },
+                new BenchmarkCase { Name = "Config caution", Prompt = "A llama-server extra args field contains --host 0.0.0.0. Explain the risk in one sentence and suggest a safer host.", ExpectedKeywords = ["network", "127.0.0.1"] }
+            ]
+        },
+        new()
+        {
+            Id = "context-pressure",
+            Name = "Context Pressure",
+            Description = "Medium prompts that reveal context handling and summarization quality without requiring huge windows.",
+            ScoringProfile = "balanced-v1",
+            TimeoutSeconds = 180,
+            Cases =
+            [
+                new BenchmarkCase { Name = "Summarize constraints", Prompt = "Summarize these constraints into five concise bullets: local-first, no secret leakage, smallest complete change, update docs when behavior changes, run build and tests, do not rewrite unrelated code.", ExpectedKeywords = ["local", "secret", "docs", "tests"] },
+                new BenchmarkCase { Name = "Prioritize tradeoffs", Prompt = "Rank these optimization goals for a local llama.cpp app and explain briefly: first-token latency, tokens/sec, VRAM stability, response quality.", ExpectedKeywords = ["latency", "VRAM", "quality"] }
+            ]
         }
     ];
 

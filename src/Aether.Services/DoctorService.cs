@@ -3,6 +3,10 @@ using Aether.Core.Services;
 using Aether.Rag.Embeddings;
 using Aether.Rag.Storage;
 using Aether.Rag.Retrieval;
+using System.Diagnostics;
+using System.Net.Http.Json;
+using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 
 namespace Aether.Services;
 
@@ -61,6 +65,7 @@ public sealed class DoctorService : IDoctorService
             await CheckDataRootAsync(ct),
             await CheckAiAssetsRootAsync(ct),
             CheckLlamaServerBinary(),
+            await CheckLlamaServerUpdateAsync(ct),
             CheckGgufModels(),
             await CheckOllamaAsync(ct),
             await CheckVoiceBackendAsync(ct),
@@ -166,6 +171,76 @@ public sealed class DoctorService : IDoctorService
             "Open Services",
             true,
             resolved,
+            "Runtime");
+    }
+
+    private async Task<DoctorCheck> CheckLlamaServerUpdateAsync(CancellationToken ct)
+    {
+        var server = _settings.Settings.ManagedServers.FirstOrDefault();
+        var resolved = ResolveExecutable(server?.ExecutablePath ?? string.Empty);
+        if (string.IsNullOrWhiteSpace(resolved))
+        {
+            return BuildCheck(
+                "llama-server-update",
+                "llama.cpp update check",
+                DoctorCheckStatus.Info,
+                "Update check skipped",
+                "Configure llama-server before checking for updates.",
+                "Open Services",
+                true,
+                "No executable path resolved.",
+                "Runtime");
+        }
+
+        var local = await ReadLlamaServerVersionAsync(resolved, ct);
+        if (local.BuildNumber is null)
+        {
+            return BuildCheck(
+                "llama-server-update",
+                "llama.cpp update check",
+                DoctorCheckStatus.Warning,
+                "llama-server version unknown",
+                "The configured executable did not report a llama.cpp build. Update if this binary is old or not from llama.cpp.",
+                "Open Services",
+                true,
+                $"Executable: {resolved}\nVersion output: {local.Raw}",
+                "Runtime");
+        }
+
+        var latest = await TryGetLatestLlamaReleaseAsync(ct);
+        if (latest is null)
+        {
+            return BuildCheck(
+                "llama-server-update",
+                "llama.cpp update check",
+                DoctorCheckStatus.Info,
+                $"Installed {local.Label}",
+                "Could not reach GitHub releases, so Doctor could not compare against the latest llama.cpp build.",
+                "Open Services",
+                true,
+                $"Executable: {resolved}\nVersion output: {local.Raw}",
+                "Runtime");
+        }
+
+        var status = DoctorCheckStatus.Ready;
+        var summary = $"Installed {local.Label}; latest {latest.TagName}";
+        var detail = "llama-server appears current enough for the known release metadata.";
+        if (latest.BuildNumber is int latestBuild && local.BuildNumber.Value < latestBuild)
+        {
+            status = DoctorCheckStatus.Warning;
+            summary = $"llama-server may be outdated: {local.Label} < {latest.TagName}";
+            detail = "Download a newer llama.cpp release or rerun Local AI setup.";
+        }
+
+        return BuildCheck(
+            "llama-server-update",
+            "llama.cpp update check",
+            status,
+            summary,
+            detail,
+            "Open Services",
+            true,
+            $"Executable: {resolved}\nVersion output: {local.Raw}\nLatest: {latest.TagName} ({latest.PublishedAt:O})",
             "Runtime");
     }
 
@@ -669,10 +744,103 @@ public sealed class DoctorService : IDoctorService
         return string.Empty;
     }
 
+    private static async Task<LlamaVersionInfo> ReadLlamaServerVersionAsync(string executablePath, CancellationToken ct)
+    {
+        var output = await RunVersionCommandAsync(executablePath, "--version", ct);
+        if (string.IsNullOrWhiteSpace(output))
+            output = await RunVersionCommandAsync(executablePath, "--help", ct);
+
+        var build = TryParseLlamaBuild(output);
+        var label = build is int value ? $"b{value}" : "unknown build";
+        return new LlamaVersionInfo(label, build, output.Trim());
+    }
+
+    private static async Task<string> RunVersionCommandAsync(string executablePath, string arg, CancellationToken ct)
+    {
+        using var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = executablePath,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            }
+        };
+        process.StartInfo.ArgumentList.Add(arg);
+
+        try
+        {
+            if (!process.Start())
+                return string.Empty;
+
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(TimeSpan.FromSeconds(3));
+            var stdout = await process.StandardOutput.ReadToEndAsync(timeout.Token);
+            var stderr = await process.StandardError.ReadToEndAsync(timeout.Token);
+            await process.WaitForExitAsync(timeout.Token);
+            return $"{stdout}\n{stderr}".Trim();
+        }
+        catch
+        {
+            try
+            {
+                if (!process.HasExited)
+                    process.Kill(entireProcessTree: true);
+            }
+            catch
+            {
+            }
+
+            return string.Empty;
+        }
+    }
+
+    private static async Task<LlamaLatestRelease?> TryGetLatestLlamaReleaseAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(TimeSpan.FromSeconds(4));
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(4) };
+            http.DefaultRequestHeaders.UserAgent.ParseAdd("Aether-Doctor/1.0");
+            var release = await http.GetFromJsonAsync<GitHubRelease>(
+                "https://api.github.com/repos/ggerganov/llama.cpp/releases/latest",
+                timeout.Token);
+            if (string.IsNullOrWhiteSpace(release?.TagName))
+                return null;
+
+            return new LlamaLatestRelease(
+                release.TagName,
+                TryParseLlamaBuild(release.TagName),
+                release.PublishedAt ?? DateTimeOffset.MinValue);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public static int? TryParseLlamaBuild(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        var match = Regex.Match(value, @"(?:^|[^a-zA-Z0-9])b(?<build>\d{3,6})(?:[^a-zA-Z0-9]|$)", RegexOptions.IgnoreCase);
+        return match.Success && int.TryParse(match.Groups["build"].Value, out var build) ? build : null;
+    }
+
     private string ResolveRerankerDirectory()
     {
         return OnnxCrossEncoderReranker.ResolveModelDirectory(_settings.Settings);
     }
+
+    private sealed record LlamaVersionInfo(string Label, int? BuildNumber, string Raw);
+    private sealed record LlamaLatestRelease(string TagName, int? BuildNumber, DateTimeOffset PublishedAt);
+    private sealed record GitHubRelease(
+        [property: JsonPropertyName("tag_name")] string TagName,
+        [property: JsonPropertyName("published_at")] DateTimeOffset? PublishedAt);
 
     private (bool Found, string Path, string SearchedIn) FindInstalledEmbeddingModel(string embeddingModel)
     {

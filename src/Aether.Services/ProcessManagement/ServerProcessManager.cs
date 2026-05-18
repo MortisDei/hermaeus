@@ -110,27 +110,63 @@ public sealed class ServerProcessManager : IDisposable
         IProgress<string>? progress = null,
         CancellationToken ct = default)
     {
-        var probe = NormalizeConfig(new ServerConfig
+        var baseConfig = NormalizeConfig(new ServerConfig
         {
             Name           = cfg.Name,
             ExecutablePath = cfg.ExecutablePath,
             ModelPath      = cfg.ModelPath,
             Port           = cfg.Port,
             ContextSize    = cfg.ContextSize,
-            GpuLayers      = 0,
+            GpuLayers      = cfg.GpuLayers,
             Threads        = cfg.Threads,
             EmbeddingsMode = cfg.EmbeddingsMode,
             AutoStart      = false,
             ExtraArgs      = cfg.ExtraArgs
         });
 
-        progress?.Report("[aether] Auto-tune: probing llama.cpp auto-fit...");
+        var threads = ChooseThreadCount(baseConfig.Threads);
+        var candidates = BuildGpuLayerCandidates(baseConfig.GpuLayers);
+        var failures = new List<string>();
 
+        progress?.Report($"[aether] Auto-tune: testing GPU layer candidates {string.Join(", ", candidates)} with {threads} thread(s).");
+
+        foreach (var candidate in candidates)
+        {
+            ct.ThrowIfCancellationRequested();
+            var probe = new ServerConfig
+            {
+                Name           = baseConfig.Name,
+                ExecutablePath = baseConfig.ExecutablePath,
+                ModelPath      = baseConfig.ModelPath,
+                Port           = baseConfig.Port,
+                ContextSize    = baseConfig.ContextSize,
+                GpuLayers      = candidate,
+                Threads        = threads,
+                EmbeddingsMode = baseConfig.EmbeddingsMode,
+                AutoStart      = false,
+                ExtraArgs      = baseConfig.ExtraArgs
+            };
+
+            var result = await TryProbeAsync(probe, candidate, progress, ct);
+            if (result.Success)
+                return result.TuneResult!;
+
+            failures.Add(result.Error);
+        }
+
+        throw new InvalidOperationException($"No llama.cpp auto-tune candidate started successfully.\n\n{string.Join("\n\n", failures)}");
+    }
+
+    private static async Task<ProbeResult> TryProbeAsync(
+        ServerConfig probe,
+        int requestedLayers,
+        IProgress<string>? progress,
+        CancellationToken ct)
+    {
         using var process = BuildProcess(probe);
         var lines = new ConcurrentQueue<string>();
-        var completion = new TaskCompletionSource<ServerTuneResult>(
-            TaskCreationOptions.RunContinuationsAsynchronously);
-        var exitCode = -1;  // Track exit code for error reporting
+        int? observedLayers = null;
+        int? totalLayers = null;
 
         void HandleLine(string? raw)
         {
@@ -142,63 +178,38 @@ public sealed class ServerProcessManager : IDisposable
                 lines.TryDequeue(out _);
 
             progress?.Report(line);
-
-            var offloaded = OffloadedLayersRegex.Match(line);
-            if (offloaded.Success)
-            {
-                completion.TrySetResult(new ServerTuneResult(
-                    int.Parse(offloaded.Groups["used"].Value),
-                    int.Parse(offloaded.Groups["total"].Value),
-                    string.Join('\n', lines)));
-                return;
-            }
-
-            var fitted = FitLayersRegex.Match(line);
-            if (fitted.Success)
-            {
-                completion.TrySetResult(new ServerTuneResult(
-                    int.Parse(fitted.Groups["used"].Value),
-                    null,
-                    string.Join('\n', lines)));
-            }
+            var parsed = ParseGpuLayerLog(line);
+            if (parsed.Used is int used)
+                observedLayers = used;
+            if (parsed.Total is int total)
+                totalLayers = total;
         }
 
         process.OutputDataReceived += (_, e) => HandleLine(e.Data);
         process.ErrorDataReceived += (_, e) => HandleLine(e.Data);
-        process.Exited += (_, _) =>
-        {
-            exitCode = process.ExitCode;
-            if (!completion.Task.IsCompleted)
-            {
-                completion.TrySetException(new InvalidOperationException(
-                    $"llama-server exited during auto-tune. Exit code: {exitCode}.\n\nRecent log:\n{string.Join('\n', lines)}"));
-            }
-        };
+
+        progress?.Report($"[aether] Auto-tune: probing --n-gpu-layers {requestedLayers}...");
 
         try
         {
             if (!process.Start())
-                throw new InvalidOperationException($"Failed to start '{probe.ExecutablePath}' for auto-tune.");
+                return ProbeResult.Failed($"Failed to start '{probe.ExecutablePath}'.");
 
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
 
-            using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(3));
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(requestedLayers == 0 ? 45 : 90));
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
-            using var registration = linked.Token.Register(() =>
-            {
-                var exitCodeSuffix = exitCode >= 0 ? $" Process exit code: {exitCode}." : string.Empty;
-                completion.TrySetException(new TimeoutException(
-                    $"Auto-tune did not reach a GPU layer decision within 3 minutes.{exitCodeSuffix}\n\nRecent log:\n{string.Join('\n', lines)}"));
-            });
+            await WaitForHealthAsync(probe.Port, () => process, linked.Token);
 
-            return await completion.Task;
+            var layers = observedLayers ?? requestedLayers;
+            var log = string.Join('\n', lines);
+            progress?.Report($"[aether] Auto-tune: candidate {requestedLayers} reached /health.");
+            return ProbeResult.Ok(new ServerTuneResult(layers, totalLayers, probe.Threads, log));
         }
-        catch (Exception ex) when (!completion.Task.IsCompleted)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            // If an exception occurred and the task hasn't been completed, set it to propagate the error
-            completion.TrySetException(ex);
-            throw;
+            return ProbeResult.Failed($"Candidate {requestedLayers} failed: {ex.Message}\nRecent log:\n{string.Join('\n', lines)}");
         }
         finally
         {
@@ -208,14 +219,42 @@ public sealed class ServerProcessManager : IDisposable
                     process.Kill(entireProcessTree: true);
             }
             catch { }
-
-            // Ensure the task is always completed, even if we exit abnormally
-            if (!completion.Task.IsCompleted)
-            {
-                completion.TrySetException(new InvalidOperationException(
-                    "Auto-tune task was not completed due to unexpected exit."));
-            }
         }
+    }
+
+    public static IReadOnlyList<int> BuildGpuLayerCandidates(int configuredGpuLayers)
+    {
+        var candidates = new List<int>();
+        if (configuredGpuLayers > 0)
+            candidates.Add(configuredGpuLayers);
+
+        candidates.AddRange([999, 128, 96, 64, 48, 32, 24, 16, 8, 4, 0]);
+        return candidates
+            .Where(x => x >= 0)
+            .Distinct()
+            .OrderByDescending(x => x)
+            .ToList();
+    }
+
+    public static int ChooseThreadCount(int configuredThreads)
+    {
+        if (configuredThreads > 0)
+            return configuredThreads;
+
+        return Math.Clamp(Environment.ProcessorCount - 1, 1, 16);
+    }
+
+    public static (int? Used, int? Total) ParseGpuLayerLog(string line)
+    {
+        var offloaded = OffloadedLayersRegex.Match(line);
+        if (offloaded.Success)
+            return (int.Parse(offloaded.Groups["used"].Value), int.Parse(offloaded.Groups["total"].Value));
+
+        var fitted = FitLayersRegex.Match(line);
+        if (fitted.Success)
+            return (int.Parse(fitted.Groups["used"].Value), null);
+
+        return (null, null);
     }
 
     // ── Process build ─────────────────────────────────────────────────────────
@@ -471,4 +510,11 @@ public sealed class ServerProcessManager : IDisposable
 public sealed record ServerTuneResult(
     int GpuLayers,
     int? TotalLayers,
+    int Threads,
     string RecentLog);
+
+internal sealed record ProbeResult(bool Success, ServerTuneResult? TuneResult, string Error)
+{
+    public static ProbeResult Ok(ServerTuneResult result) => new(true, result, string.Empty);
+    public static ProbeResult Failed(string error) => new(false, null, error);
+}

@@ -13,7 +13,9 @@ public partial class BenchmarkViewModel : ObservableObject
     private readonly IModelProfileService _profiles;
     private readonly ISettingsService _settings;
     private readonly IToastService _toasts;
+    private readonly ServicesViewModel? _services;
     private CancellationTokenSource? _runCts;
+    private bool _isLoading;
 
     public ObservableCollection<BenchmarkSuite> Suites { get; } = [];
     public ObservableCollection<BenchmarkRunViewModel> Runs { get; } = [];
@@ -32,40 +34,53 @@ public partial class BenchmarkViewModel : ObservableObject
     [ObservableProperty] private int _timeoutSeconds = 120;
     [ObservableProperty] private int _maxCases;
     [ObservableProperty] private double _temperature = 0.7;
+    [ObservableProperty] private bool _runAllSuites = true;
 
     public BenchmarkViewModel(
         IBenchmarkService benchmarks,
         ILlmService llm,
         IModelProfileService profiles,
         ISettingsService settings,
-        IToastService toasts)
+        IToastService toasts,
+        ServicesViewModel? services = null)
     {
         _benchmarks = benchmarks;
         _llm = llm;
         _profiles = profiles;
         _settings = settings;
         _toasts = toasts;
+        _services = services;
     }
 
     [RelayCommand]
     public async Task LoadAsync()
     {
-        await _benchmarks.InitializeAsync();
-        Suites.Clear();
-        foreach (var suite in await _benchmarks.GetSuitesAsync())
-            Suites.Add(suite);
-        SelectedSuite ??= Suites.FirstOrDefault();
-        ApplySuiteDefaults();
+        _isLoading = true;
+        try
+        {
+            await _benchmarks.InitializeAsync();
+            Suites.Clear();
+            foreach (var suite in await _benchmarks.GetSuitesAsync())
+                Suites.Add(suite);
+            SelectedSuite ??= Suites.FirstOrDefault();
+            ApplySuiteDefaults();
 
-        Models.Clear();
-        var models = await _llm.GetModelsAsync();
-        _profiles.ApplyProfiles(models);
-        foreach (var model in models.Where(m => m.IsVisible))
-            Models.Add(model);
-        SelectedModel ??= Models.FirstOrDefault(m => m.Id == _settings.Settings.Llm.DefaultModel) ?? Models.FirstOrDefault();
+            Models.Clear();
+            var models = await _llm.GetModelsAsync();
+            _profiles.ApplyProfiles(models);
+            foreach (var model in models.Where(m => m.IsVisible))
+                Models.Add(model);
+            foreach (var model in DiscoverLocalGgufModels(models.Select(m => m.Id)))
+                Models.Add(model);
+            SelectedModel ??= Models.FirstOrDefault(m => m.Id == _settings.Settings.Llm.DefaultModel) ?? Models.FirstOrDefault();
 
-        await ReloadRunsAsync();
-        Status = $"Loaded {Suites.Count} suite(s), {Runs.Count} run(s).";
+            await ReloadRunsAsync();
+            Status = $"Loaded {Suites.Count} suite(s), {Runs.Count} run(s).";
+        }
+        finally
+        {
+            _isLoading = false;
+        }
     }
 
     [RelayCommand(CanExecute = nameof(CanRun))]
@@ -78,20 +93,24 @@ public partial class BenchmarkViewModel : ObservableObject
         _runCts = new CancellationTokenSource();
         try
         {
-            var suite = CloneSuite(SelectedSuite);
-            suite.Temperature = Temperature;
-            suite.TimeoutSeconds = TimeoutSeconds;
-            suite.MaxCases = MaxCases;
-            suite.UseJudge = UseJudge;
-            suite.JudgeModelId = JudgeModelId;
-            var run = await _benchmarks.RunAsync(
-                suite,
-                SelectedModel,
-                new Progress<string>(s => Status = s),
-                _runCts.Token);
+            await PrepareSelectedModelAsync(_runCts.Token);
+            var suites = RunAllSuites ? Suites.ToList() : [SelectedSuite];
+            BenchmarkRun? run = null;
+            for (var i = 0; i < suites.Count; i++)
+            {
+                var suite = ConfigureSuite(suites[i]);
+                Status = $"Running suite {i + 1}/{suites.Count}: {suite.Name}";
+                run = await _benchmarks.RunAsync(
+                    suite,
+                    SelectedModel,
+                    new Progress<string>(s => Status = $"{suite.Name}: {s}"),
+                    _runCts.Token);
+            }
+
             await ReloadRunsAsync();
-            SelectedRun = Runs.FirstOrDefault(r => r.Id == run.Id);
-            _toasts.Show("Benchmark complete", $"{run.SuiteName} on {run.ModelName}: {run.RankingScore:P0}", ToastKind.Success, 7000);
+            if (run is not null)
+                SelectedRun = Runs.FirstOrDefault(r => r.Id == run.Id);
+            _toasts.Show("Benchmark complete", $"{suites.Count} suite(s) on {SelectedModel.Name}", ToastKind.Success, 7000);
         }
         finally
         {
@@ -172,7 +191,14 @@ public partial class BenchmarkViewModel : ObservableObject
         RunCommand.NotifyCanExecuteChanged();
     }
 
-    partial void OnSelectedModelChanged(LlmModel? value) => RunCommand.NotifyCanExecuteChanged();
+    partial void OnSelectedModelChanged(LlmModel? value)
+    {
+        RunCommand.NotifyCanExecuteChanged();
+        if (_isLoading || value is null || !IsManagedLocalGguf(value))
+            return;
+
+        _ = AutoSwitchSelectedModelAsync(value);
+    }
     partial void OnIsRunningChanged(bool value) => RunCommand.NotifyCanExecuteChanged();
 
     partial void OnSelectedRunChanged(BenchmarkRunViewModel? value)
@@ -193,6 +219,65 @@ public partial class BenchmarkViewModel : ObservableObject
         UseJudge = SelectedSuite.UseJudge;
         JudgeModelId = SelectedSuite.JudgeModelId;
     }
+
+    private BenchmarkSuite ConfigureSuite(BenchmarkSuite source)
+    {
+        var suite = CloneSuite(source);
+        suite.Temperature = Temperature;
+        suite.TimeoutSeconds = TimeoutSeconds;
+        suite.MaxCases = MaxCases;
+        suite.UseJudge = UseJudge;
+        suite.JudgeModelId = JudgeModelId;
+        return suite;
+    }
+
+    private async Task AutoSwitchSelectedModelAsync(LlmModel model)
+    {
+        try
+        {
+            Status = $"Starting managed llama.cpp for {model.Name}...";
+            await PrepareModelAsync(model, CancellationToken.None);
+            Status = $"Managed llama.cpp ready for {model.Name}.";
+        }
+        catch (Exception ex)
+        {
+            Status = $"Could not start managed llama.cpp: {ex.Message}";
+            _toasts.Show("Model switch failed", ex.Message, ToastKind.Warning, 7000);
+        }
+    }
+
+    private Task PrepareSelectedModelAsync(CancellationToken ct) =>
+        SelectedModel is null ? Task.CompletedTask : PrepareModelAsync(SelectedModel, ct);
+
+    private async Task PrepareModelAsync(LlmModel model, CancellationToken ct)
+    {
+        if (_services is null || !IsManagedLocalGguf(model))
+            return;
+
+        await _services.SelectChatModelAndRestartAsync(model.Id, ct);
+    }
+
+    private List<LlmModel> DiscoverLocalGgufModels(IEnumerable<string> existingIds)
+    {
+        var existing = new HashSet<string>(existingIds, StringComparer.OrdinalIgnoreCase);
+        return Aether.Services.LocalAiAssetLocator.FindGgufModels(_settings.Settings.DataManagement.LocalAiAssetsRoot)
+            .Where(path => !existing.Contains(path))
+            .Select(path => new LlmModel
+            {
+                Id = path,
+                Name = Path.GetFileNameWithoutExtension(path),
+                Provider = "local GGUF",
+                ProviderTag = "llama.cpp",
+                SizeBytes = new FileInfo(path).Length,
+                ModifiedAt = File.GetLastWriteTimeUtc(path),
+                Tags = ["managed", "gguf"]
+            })
+            .ToList();
+    }
+
+    private static bool IsManagedLocalGguf(LlmModel model) =>
+        model.Id.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase)
+        && File.Exists(model.Id);
 
     private static BenchmarkSuite CloneSuite(BenchmarkSuite suite) => new()
     {

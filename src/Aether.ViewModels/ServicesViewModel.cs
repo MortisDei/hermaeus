@@ -121,10 +121,13 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
 
     [RelayCommand]
     private async Task StartAsync()
+        => await StartCoreAsync(CancellationToken.None);
+
+    private async Task StartCoreAsync(CancellationToken ct)
     {
         SyncToConfig();
         await SaveConfigAsync();
-        await _mgr.StartAsync(BuildConfig());
+        await _mgr.StartAsync(BuildConfig(), ct);
     }
 
     [RelayCommand]
@@ -167,17 +170,14 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
 
         IsAutoTuning = true;
         LogExpanded = true;
-        AutoTuneStatus = "Probing llama.cpp auto-fit...";
+        AutoTuneStatus = "Testing llama.cpp GPU layer candidates...";
         _mgr.ClearLog();
         LogOutput = string.Empty;
 
         try
         {
-            var config = BuildConfig();
-            config.GpuLayers = 0;
-
             var result = await ServerProcessManager.AutoTuneAsync(
-                config,
+                BuildConfig(),
                 new Progress<string>(line =>
                 {
                     LogOutput = string.IsNullOrEmpty(LogOutput)
@@ -186,11 +186,10 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
                 }));
 
             GpuLayers = result.GpuLayers;
-            Threads = Math.Max(Threads, Environment.ProcessorCount);
-            ExtraArgs = MergeExtraArgs(ExtraArgs, "--device VULKAN0");
+            Threads = result.Threads;
             AutoTuneStatus = result.TotalLayers is int total
-                ? $"Auto-tune chose {result.GpuLayers}/{total} GPU layers. Save and start the service."
-                : $"Auto-tune chose {result.GpuLayers} GPU layers. Save and start the service.";
+                ? $"Auto-tune verified {result.GpuLayers}/{total} GPU layers with {result.Threads} thread(s). Save and start the service."
+                : $"Auto-tune verified {result.GpuLayers} GPU layers with {result.Threads} thread(s). Save and start the service.";
         }
         catch (Exception ex)
         {
@@ -210,7 +209,7 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
     public async Task AutoStartIfConfiguredAsync()
     {
         if (AutoStart && !string.IsNullOrWhiteSpace(ModelPath))
-            await StartAsync();
+            await StartCoreAsync(CancellationToken.None);
     }
 
     public async Task StartIfStoppedAsync()
@@ -218,10 +217,64 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
         if (!IsStopped)
             return;
 
-        await StartAsync();
+        await StartCoreAsync(CancellationToken.None);
     }
 
     public void StopIfRunning() => _mgr.Stop();
+
+    public async Task SelectModelAndRestartAsync(string modelPath, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(modelPath))
+            return;
+
+        var normalized = Path.GetFullPath(modelPath);
+        var current = string.IsNullOrWhiteSpace(ModelPath) ? string.Empty : Path.GetFullPath(ModelPath);
+        var modelChanged = !string.Equals(current, normalized, StringComparison.OrdinalIgnoreCase);
+
+        if (Status is ServerStatus.Running or ServerStatus.Starting && modelChanged)
+            StopIfRunning();
+
+        if (modelChanged)
+        {
+            ModelPath = normalized;
+            SyncToConfig();
+            await SaveConfigAsync();
+        }
+
+        if (IsStarting)
+            await WaitUntilStartedAsync(ct);
+
+        if (IsStopped)
+            await StartCoreAsync(ct);
+        else if (IsError)
+            throw new InvalidOperationException(ErrorMessage);
+    }
+
+    private async Task WaitUntilStartedAsync(CancellationToken ct)
+    {
+        if (!IsStarting)
+            return;
+
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        void Handler(ServerStatus status)
+        {
+            if (status is ServerStatus.Running or ServerStatus.Error or ServerStatus.Stopped)
+                tcs.TrySetResult();
+        }
+
+        _mgr.StatusChanged += Handler;
+        try
+        {
+            if (!IsStarting)
+                tcs.TrySetResult();
+            using var registration = ct.Register(() => tcs.TrySetCanceled(ct));
+            await tcs.Task;
+        }
+        finally
+        {
+            _mgr.StatusChanged -= Handler;
+        }
+    }
 
     private void SyncToConfig()
     {
@@ -288,16 +341,6 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
         var warning = _trust.AnalyzeServerExtraArgs(BuildConfig(), DateTime.UtcNow).FirstOrDefault();
         if (warning is not null)
             _toasts.Show("Network exposure warning", warning.Recommendation, ToastKind.Warning, 7000);
-    }
-
-    private static string MergeExtraArgs(string current, string arg)
-    {
-        if (current.Split(' ', StringSplitOptions.RemoveEmptyEntries).Contains(arg.Split(' ')[0]))
-            return current;
-
-        return string.IsNullOrWhiteSpace(current)
-            ? arg
-            : $"{current.Trim()} {arg}";
     }
 
     private RuntimeLogEntry MapLog(string line)
@@ -494,6 +537,15 @@ public partial class ServicesViewModel : ObservableObject
     {
         foreach (var srv in Servers)
             srv.StopIfRunning();
+    }
+
+    public async Task SelectChatModelAndRestartAsync(string modelPath, CancellationToken ct = default)
+    {
+        var server = Servers.FirstOrDefault(s => !s.EmbeddingsMode) ?? Servers.FirstOrDefault();
+        if (server is null)
+            return;
+
+        await server.SelectModelAndRestartAsync(modelPath, ct);
     }
 
     private void OnServerPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
