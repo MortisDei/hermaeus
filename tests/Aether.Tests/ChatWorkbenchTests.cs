@@ -58,6 +58,29 @@ public sealed class ChatWorkbenchTests
         Assert.NotNull(vm.ChatTraces[0].ProviderUsage);
     }
 
+    [Fact]
+    public async Task SpeakMessageSkipsBlankContent()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var tts = new CapturingTts();
+        var vm = new ChatViewModel(
+            new FakeLlm(),
+            new InMemoryConversationStore(),
+            new EmptyMemoryStore(),
+            settings,
+            tts,
+            new ModelProfileService(settings),
+            new FakeToasts(),
+            new NoOpConversationMemoryService(),
+            new RuntimeLogService(settings),
+            new ConversationExportService());
+
+        await vm.SpeakMessageCommand.ExecuteAsync(new MessageViewModel { Role = "assistant", Content = "   " });
+
+        False(tts.SpeakCalled, "blank message content should not be sent to TTS");
+    }
+
     private sealed class InMemoryConversationStore : IConversationStore
     {
         private readonly Dictionary<string, Conversation> _items = [];
@@ -100,5 +123,20 @@ public sealed class ChatWorkbenchTests
     private sealed class NoOpConversationMemoryService : IConversationMemoryService
     {
         public Task RunAutoSummaryAsync(string conversationId, CancellationToken ct = default) => Task.CompletedTask;
+    }
+
+    private sealed class CapturingTts : ITtsService
+    {
+        public bool SpeakCalled { get; private set; }
+
+        public Task SpeakAsync(string text, CancellationToken ct = default)
+        {
+            SpeakCalled = true;
+            return Task.CompletedTask;
+        }
+
+        public Task PreviewVoiceAsync(string speaker, string text, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<string> ImportVoiceSampleAsync(string sourcePath, string displayName, CancellationToken ct = default) => Task.FromResult(displayName);
+        public Task<IReadOnlyList<string>> GetVoicesAsync(CancellationToken ct = default) => Task.FromResult<IReadOnlyList<string>>(new List<string> { "default" });
     }
 }

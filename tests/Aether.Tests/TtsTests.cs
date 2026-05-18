@@ -55,5 +55,37 @@ namespace Aether.Tests
 
             return Task.CompletedTask;
         }
+
+        public static async Task VoicePreviewSkipsBlankText()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            var tts = new CapturingTts();
+            var vm = new TtsSettingsViewModel(tts, new FakeVoiceProviderRegistry(settings), new FakeToasts(), new XttsProcessManager(), new KokoroProcessManager(), new FakeSecretStore(), settings);
+
+            vm.TtsPreviewText = "   ";
+            await vm.PreviewTtsVoiceCommand.ExecuteAsync(null);
+
+            False(tts.PreviewCalled, "blank preview text should not be sent to TTS");
+        }
+
+        private sealed class CapturingTts : ITtsService
+        {
+            public bool PreviewCalled { get; private set; }
+
+            public Task SpeakAsync(string text, CancellationToken ct = default) => Task.CompletedTask;
+
+            public Task PreviewVoiceAsync(string speaker, string text, CancellationToken ct = default)
+            {
+                PreviewCalled = true;
+                return Task.CompletedTask;
+            }
+
+            public Task<string> ImportVoiceSampleAsync(string sourcePath, string displayName, CancellationToken ct = default) =>
+                Task.FromResult(displayName);
+
+            public Task<IReadOnlyList<string>> GetVoicesAsync(CancellationToken ct = default) =>
+                Task.FromResult<IReadOnlyList<string>>(new List<string> { "default" });
+        }
     }
 }

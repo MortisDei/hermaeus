@@ -25,6 +25,8 @@ limit.
 
 - Failed embedding model hash verification now removes the downloaded file and
   reports the verification failure through Doctor progress.
+- Chat readback and voice preview now skip empty text instead of sending a
+  blank request to Kokoro.
 
 ### Tests
 

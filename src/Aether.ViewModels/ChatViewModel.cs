@@ -472,7 +472,17 @@ public partial class ChatViewModel : ObservableObject
     [RelayCommand]
     private async Task SpeakMessageAsync(MessageViewModel? msg)
     {
-        if (msg is null || string.IsNullOrWhiteSpace(msg.Content)) return;
+        if (msg is null) return;
+
+        var text = msg.Content;
+        if (string.IsNullOrWhiteSpace(text))
+            text = msg.OriginalContent;
+
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            _toasts.Show("Nothing to read aloud", "This message does not contain any text for playback.", ToastKind.Info, 5000);
+            return;
+        }
 
         _ttsCts?.Cancel();
         _ttsCts?.Dispose();
@@ -480,7 +490,7 @@ public partial class ChatViewModel : ObservableObject
 
         try
         {
-            await _tts.SpeakAsync(msg.Content, _ttsCts.Token);
+            await _tts.SpeakAsync(text, _ttsCts.Token);
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)

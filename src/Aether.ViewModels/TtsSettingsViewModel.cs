@@ -290,6 +290,12 @@ public partial class TtsSettingsViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task PreviewTtsVoiceAsync()
     {
+        if (string.IsNullOrWhiteSpace(TtsPreviewText))
+        {
+            _toasts.Show("Nothing to preview", "Enter some text before playing the voice preview.", ToastKind.Info, 5000);
+            return;
+        }
+
         try
         {
             await _tts.PreviewVoiceAsync(TtsSpeaker, TtsPreviewText);
