@@ -61,6 +61,18 @@
                     </ControlTheme>
                 </ListBox.ItemContainerTheme>
 
+                <ListBox.ContextMenu>
+                    <ContextMenu>
+                        <MenuItem Header="Pin" Click="OnContextMenuPinClick" />
+                        <MenuItem Header="Archive" Click="OnContextMenuArchiveClick" />
+                        <Separator />
+                        <MenuItem Header="Export Markdown" Click="OnContextMenuExportMarkdownClick" />
+                        <MenuItem Header="Export JSON" Click="OnContextMenuExportJsonClick" />
+                        <Separator />
+                        <MenuItem Header="Delete" Click="OnContextMenuDeleteClick" />
+                    </ContextMenu>
+                </ListBox.ContextMenu>
+
                 <ListBox.ItemTemplate>
                     <DataTemplate DataType="vm:ConversationItemViewModel">
                         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="4">

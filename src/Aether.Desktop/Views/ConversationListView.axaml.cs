@@ -110,4 +110,49 @@ public partial class ConversationListView : UserControl
             vm.SaveConversationMetadataCommand.Execute(item);
         }
     }
+
+    private void OnContextMenuPinClick(object? sender, RoutedEventArgs e)
+    {
+        if (ConvList.SelectedItem is ConversationItemViewModel item
+            && DataContext is MainWindowViewModel vm)
+        {
+            vm.TogglePinConversationCommand.Execute(item);
+        }
+    }
+
+    private void OnContextMenuArchiveClick(object? sender, RoutedEventArgs e)
+    {
+        if (ConvList.SelectedItem is ConversationItemViewModel item
+            && DataContext is MainWindowViewModel vm)
+        {
+            vm.ToggleArchiveConversationCommand.Execute(item);
+        }
+    }
+
+    private void OnContextMenuDeleteClick(object? sender, RoutedEventArgs e)
+    {
+        if (ConvList.SelectedItem is ConversationItemViewModel item
+            && DataContext is MainWindowViewModel vm)
+        {
+            vm.DeleteConversationCommand.Execute(item);
+        }
+    }
+
+    private void OnContextMenuExportMarkdownClick(object? sender, RoutedEventArgs e)
+    {
+        if (ConvList.SelectedItem is ConversationItemViewModel item
+            && DataContext is MainWindowViewModel vm)
+        {
+            vm.ExportConversationMarkdownCommand.Execute(item);
+        }
+    }
+
+    private void OnContextMenuExportJsonClick(object? sender, RoutedEventArgs e)
+    {
+        if (ConvList.SelectedItem is ConversationItemViewModel item
+            && DataContext is MainWindowViewModel vm)
+        {
+            vm.ExportConversationJsonCommand.Execute(item);
+        }
+    }
 }
