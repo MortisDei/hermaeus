@@ -6,6 +6,13 @@ using CommunityToolkit.Mvvm.Input;
 
 namespace Aether.ViewModels;
 
+public enum RankingFilterMode
+{
+    All,
+    LatestPerModel,
+    LastN
+}
+
 public partial class BenchmarkViewModel : ObservableObject
 {
     private readonly IBenchmarkService _benchmarks;
@@ -25,6 +32,7 @@ public partial class BenchmarkViewModel : ObservableObject
 
     public Func<Task<bool>>? RequestClearRunHistoryConfirmation { get; set; }
     public Func<BenchmarkResultViewModel, Task>? RequestShowCaseInfo { get; set; }
+    public Func<BenchmarkRunViewModel, Task>? RequestShowRunInfo { get; set; }
 
     [ObservableProperty] private BenchmarkSuite? _selectedSuite;
     [ObservableProperty] private BenchmarkRunViewModel? _selectedRun;
@@ -38,6 +46,16 @@ public partial class BenchmarkViewModel : ObservableObject
     [ObservableProperty] private int _maxCases;
     [ObservableProperty] private double _temperature = 0.7;
     [ObservableProperty] private bool _runAllSuites = true;
+    [ObservableProperty] private RankingFilterMode _selectedRankingMode = RankingFilterMode.All;
+    [ObservableProperty] private int _lastNRuns = 10;
+    [ObservableProperty] private bool _showLastNInput;
+
+    [RelayCommand]
+    private Task SetRankingModeAsync(int mode)
+    {
+        SelectedRankingMode = (RankingFilterMode)mode;
+        return Task.CompletedTask;
+    }
 
     public BenchmarkViewModel(
         IBenchmarkService benchmarks,
@@ -188,7 +206,7 @@ public partial class BenchmarkViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private async Task ExportRunAsync(BenchmarkRunViewModel? run)
+    public async Task ExportRunAsync(BenchmarkRunViewModel? run)
     {
         if (run is null) return;
         var root = Aether.Services.SettingsService.ResolveDataRoot(_settings.Settings);
@@ -197,20 +215,33 @@ public partial class BenchmarkViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private async Task ExportAllRunsZipAsync()
+    {
+        var root = Aether.Services.SettingsService.ResolveDataRoot(_settings.Settings);
+        var path = await _benchmarks.ExportAllZipAsync(Path.Combine(root, "benchmark-exports"));
+        _toasts.Show("All benchmarks exported (zip)", path, ToastKind.Success, 7000);
+    }
+
+    [RelayCommand]
     private async Task ShowRunInfoAsync(BenchmarkRunViewModel? run)
     {
-        var result = run?.FirstResult;
+        if (run is null) return;
+        // Prefer delegate-based dialog from view layer
+        if (RequestShowRunInfo is not null)
+        {
+            await RequestShowRunInfo(run);
+            return;
+        }
+
+        var result = run.FirstResult;
         if (result is not null && RequestShowCaseInfo is not null)
         {
             await RequestShowCaseInfo(result);
             return;
         }
 
-        if (run is not null)
-        {
-            var md = $"{run.Title}\n{run.Summary}\nStarted: {run.Started}\nStatus: {run.Status}";
-            _toasts.Show("Run info", md, ToastKind.Info, 8000);
-        }
+        var md = $"{run.Title}\n{run.Summary}\nStarted: {run.Started}\nStatus: {run.Status}";
+        _toasts.Show("Run info", md, ToastKind.Info, 8000);
     }
 
     [RelayCommand]
@@ -240,16 +271,31 @@ public partial class BenchmarkViewModel : ObservableObject
     private void UpdateRankedRuns(List<BenchmarkRunViewModel> runs)
     {
         RankedRuns.Clear();
-        IEnumerable<BenchmarkRun> source = runs.Select(r => r.Run);
+        var list = runs.Select(r => r.Run).ToList();
         if (SelectedSuite is not null)
-            source = source.Where(r => r.SuiteId == SelectedSuite.Id);
+            list = list.Where(r => r.SuiteId == SelectedSuite.Id).ToList();
 
-        var counts = runs
-            .Where(r => SelectedSuite is null || r.Run.SuiteId == SelectedSuite.Id)
-            .GroupBy(r => GetRankingGroupKey(r.Run), StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase);
+        // counts per model for display
+        var counts = list.GroupBy(r => GetRankingGroupKey(r), StringComparer.OrdinalIgnoreCase)
+                         .ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase);
 
-        foreach (var run in _benchmarks.Rank(source))
+        IEnumerable<BenchmarkRun> candidates = list;
+        switch (SelectedRankingMode)
+        {
+            case RankingFilterMode.LatestPerModel:
+                candidates = list.GroupBy(r => GetRankingGroupKey(r), StringComparer.OrdinalIgnoreCase)
+                                 .Select(g => g.OrderByDescending(r => r.StartedAt).First());
+                break;
+            case RankingFilterMode.LastN:
+                candidates = list.OrderByDescending(r => r.StartedAt).Take(Math.Max(1, LastNRuns));
+                break;
+            default:
+                candidates = list;
+                break;
+        }
+
+        var ranked = _benchmarks.Rank(candidates);
+        foreach (var run in ranked)
         {
             counts.TryGetValue(GetRankingGroupKey(run), out var count);
             RankedRuns.Add(new BenchmarkRunViewModel(run, Math.Max(1, count)));
@@ -283,6 +329,19 @@ public partial class BenchmarkViewModel : ObservableObject
     {
         RunCommand.NotifyCanExecuteChanged();
         ExportAllRunsCommand.NotifyCanExecuteChanged();
+        ExportAllRunsZipCommand.NotifyCanExecuteChanged();
+    }
+
+    partial void OnSelectedRankingModeChanged(RankingFilterMode value)
+    {
+        ShowLastNInput = value == RankingFilterMode.LastN;
+        _ = Task.Run(async () => await ReloadRunsAsync());
+    }
+
+    partial void OnLastNRunsChanged(int value)
+    {
+        if (SelectedRankingMode == RankingFilterMode.LastN)
+            _ = Task.Run(async () => await ReloadRunsAsync());
     }
 
     partial void OnSelectedRunChanged(BenchmarkRunViewModel? value)

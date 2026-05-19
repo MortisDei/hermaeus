@@ -42,6 +42,13 @@ limit.
   details action for the best run in each model group.
 - Benchmark exports now support exporting all saved benchmark runs into one
   timestamped folder containing per-run exports plus a generated index.
+  - Added option to create a single zip archive of all exported runs.
+  - The export UI offers both per-run folder export and a single ZIP export.
+  - Replaced the lightweight toast run-info with a full run-info dialog accessible
+    from the run list and rankings. The dialog displays run summary, metrics,
+    and per-result summaries and provides an export action.
+  - Added ranking timeframe filters: `All`, `Latest per model`, and `Last N runs`.
+    Use the new UI controls on the Rankings tab to switch modes and set `N`.
 - Chat conversation context menu with options: Pin, Archive, Export Markdown,
   Export JSON, and Delete.
 
@@ -221,11 +228,8 @@ limit.
 
 ### Changed
 
-- Project version metadata bumped to `0.9.9-alpha`.
-- Runtime logs now redact persisted entries before they reach disk as well as
-  UI log views.
+- Runtime logs now redact persisted entries before they reach disk as well as UI log views.
 - Conversation list and memory timestamps now store UTC values and render local
-  display times consistently.
 - Local AI setup now kills child processes when setup is cancelled and quotes
   command previews more safely.
 - RAG metadata parsing now writes warning log entries when source or trace

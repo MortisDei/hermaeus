@@ -202,6 +202,9 @@ provider.
 - Reruns for validation
 - Export to Markdown, JSON, and CSV formats
 - Confirmed clear-history action for saved benchmark runs
+- Export all runs into a timestamped folder index or a single zip archive
+- Run info dialog: view run-level summary, metrics, and export from a dialog window
+- Ranking timeframe filters: view All runs, Latest per model, or Last N runs
 
 ## System Overview
 

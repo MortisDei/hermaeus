@@ -51,16 +51,20 @@
                                Text="Run history"
                                FontWeight="SemiBold"
                                VerticalAlignment="Center" />
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
-                        <Button Content="Export All"
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                            <Button Content="Export All"
                                 Command="{Binding ExportAllRunsCommand}"
                                 IsEnabled="{Binding !IsRunning}"
-                        ToolTip.Tip="Export every saved benchmark run into one timestamped folder." />
-                        <Button Content="Clear"
+                                ToolTip.Tip="Export all saved benchmark runs to the data root (per-run files)." />
+                            <Button Content="Export All (zip)"
+                                Command="{Binding ExportAllRunsZipCommand}"
+                                IsEnabled="{Binding !IsRunning}"
+                                ToolTip.Tip="Export all saved benchmark runs into a single zip archive." />
+                            <Button Content="Clear"
                                 Command="{Binding ClearRunHistoryCommand}"
                                 IsEnabled="{Binding !IsRunning}"
                                 ToolTip.Tip="Deletes all saved benchmark runs after confirmation. Export any runs you want to keep first." />
-                    </StackPanel>
+                        </StackPanel>
                 </Grid>
                 <ListBox Grid.Row="3"
                          MaxHeight="180"
@@ -175,6 +179,12 @@
                             <ScrollViewer VerticalScrollBarVisibility="Auto">
                                 <Border Padding="14">
                                     <StackPanel Spacing="10">
+                                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                            <Button Content="All" Command="{Binding SetRankingModeCommand}" CommandParameter="0" />
+                                            <Button Content="Latest per model" Command="{Binding SetRankingModeCommand}" CommandParameter="1" />
+                                            <Button Content="Last N runs" Command="{Binding SetRankingModeCommand}" CommandParameter="2" />
+                                            <NumericUpDown Minimum="1" Maximum="1000" Value="{Binding LastNRuns}" IsVisible="{Binding ShowLastNInput}" Width="80" />
+                                        </StackPanel>
                                         <Grid ColumnDefinitions="*,120,80,80,100,Auto" ColumnSpacing="12" Margin="0,0,0,8">
                                             <TextBlock Grid.Column="0" Text="Model" FontWeight="SemiBold" FontSize="11" Opacity="0.6" />
                                             <TextBlock Grid.Column="1" Text="Runs" FontWeight="SemiBold" FontSize="11" Opacity="0.6" TextAlignment="Right" />

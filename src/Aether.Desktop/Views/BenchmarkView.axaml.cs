@@ -35,5 +35,14 @@ public partial class BenchmarkView : UserControl
             var dialog = new BenchmarkCaseInfoDialog { DataContext = infoVm };
             await dialog.ShowDialog(owner);
         };
+        vm.RequestShowRunInfo = async (runVm) =>
+        {
+            if (TopLevel.GetTopLevel(this) is not Window owner || runVm is null)
+                return;
+
+            var infoVm = new BenchmarkRunInfoViewModel(runVm.Run, vm);
+            var dialog = new BenchmarkRunInfoDialog { DataContext = infoVm };
+            await dialog.ShowDialog(owner);
+        };
     }
 }
