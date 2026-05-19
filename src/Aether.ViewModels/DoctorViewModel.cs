@@ -43,6 +43,16 @@ public partial class DoctorViewModel : ObservableObject
     [RelayCommand]
     private async Task ScanAsync()
     {
+        await ScanCoreAsync(showIssueToast: false);
+    }
+
+    public async Task RunStartupScanAsync()
+    {
+        await ScanCoreAsync(showIssueToast: true);
+    }
+
+    private async Task ScanCoreAsync(bool showIssueToast)
+    {
         if (IsScanning) return;
         IsScanning = true;
         try
@@ -53,6 +63,8 @@ public partial class DoctorViewModel : ObservableObject
                 Checks.Add(check);
             Summary = report.Summary;
             LastScanned = $"Last scan: {report.ScannedAt:yyyy-MM-dd HH:mm} UTC";
+            if (showIssueToast)
+                ShowStartupIssueToast(report);
         }
         catch (Exception ex)
         {
@@ -63,6 +75,18 @@ public partial class DoctorViewModel : ObservableObject
         {
             IsScanning = false;
         }
+    }
+
+    private void ShowStartupIssueToast(DoctorReport report)
+    {
+        if (report.ErrorCount > 0)
+        {
+            _toasts.Show("Aether Doctor found problems", report.Summary, ToastKind.Error, 9000);
+            return;
+        }
+
+        if (report.WarningCount > 0)
+            _toasts.Show("Aether Doctor found warnings", report.Summary, ToastKind.Warning, 9000);
     }
 
     [RelayCommand]

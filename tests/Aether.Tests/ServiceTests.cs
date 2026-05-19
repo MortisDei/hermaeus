@@ -440,6 +440,37 @@ namespace Aether.Tests
             Equal(DoctorCheckStatus.Ready, tuneCheck.Status, "matching tune profiles should satisfy Doctor");
         }
 
+        public static async Task DoctorStartupScanRaisesProblemToast()
+        {
+            using var temp = new TempDir();
+            var toasts = new FakeToasts();
+            var raised = new List<ToastMessage>();
+            toasts.ToastRaised += raised.Add;
+            var report = new DoctorReport(
+                [
+                    new DoctorCheck(
+                        "startup-warning",
+                        "Startup warning",
+                        DoctorCheckStatus.Warning,
+                        "Needs attention",
+                        "A startup check found a problem.",
+                        "Open Settings",
+                        true,
+                        "diagnostics",
+                        "System")
+                ],
+                DateTime.UtcNow,
+                "Doctor scan found 0 error(s) and 1 warning(s).");
+            var vm = new DoctorViewModel(new StaticDoctorService(report), toasts, NewSettings(temp));
+
+            await vm.RunStartupScanAsync();
+
+            Equal(1, vm.Checks.Count, "startup scan should populate Doctor checks");
+            Equal(report.Summary, vm.Summary, "startup scan should update the summary");
+            True(raised.Any(t => t.Title == "Aether Doctor found warnings" && t.Kind == ToastKind.Warning),
+                "startup scan should notify the user when warnings are found");
+        }
+
         public static async Task LocalAiSetupDetectsFolderLayout()
         {
             using var temp = new TempDir();
@@ -1529,6 +1560,24 @@ namespace Aether.Tests
             public Task<string> ResolveAsync(string valueOrReference, System.Threading.CancellationToken ct = default) =>
                 Task.FromResult(IsReference(valueOrReference) ? _resolved : valueOrReference);
             public Task<string> BackendLabelAsync(System.Threading.CancellationToken ct = default) => Task.FromResult("Resolving fake");
+        }
+
+        private sealed class StaticDoctorService : IDoctorService
+        {
+            private readonly DoctorReport _report;
+
+            public StaticDoctorService(DoctorReport report)
+            {
+                _report = report;
+            }
+
+            public Task<DoctorReport> ScanAsync(System.Threading.CancellationToken ct = default) => Task.FromResult(_report);
+            public Task<bool> InstallRerankerAssetsAsync(System.Threading.CancellationToken ct = default) => Task.FromResult(true);
+            public Task<bool> InstallRerankerAssetsAsync(IProgress<string> progress, System.Threading.CancellationToken ct = default) => Task.FromResult(true);
+            public Task<bool> InstallEmbeddingModelAsync(System.Threading.CancellationToken ct = default) => Task.FromResult(true);
+            public Task<bool> InstallEmbeddingModelAsync(IProgress<string> progress, System.Threading.CancellationToken ct = default) => Task.FromResult(true);
+            public Task<bool> InstallLlamaServerUpdateAsync(System.Threading.CancellationToken ct = default) => Task.FromResult(true);
+            public Task<bool> InstallLlamaServerUpdateAsync(IProgress<string> progress, System.Threading.CancellationToken ct = default) => Task.FromResult(true);
         }
 
         private sealed class ThrowingEmbeddingService : IEmbeddingService

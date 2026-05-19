@@ -137,6 +137,9 @@
 ## Aether Doctor
 
 - Aether Doctor checks for storage, runtimes, voice, RAG, GPU, and secrets.
+- Aether runs Doctor in the background after launch and raises a notification
+  when errors or warnings are found, so startup problems are visible before the
+  Doctor panel is opened.
 - Aether Doctor now validates the configured Python and voice backend
   health before installs or playback.
 - Doctor labels the Python check with the selected voice provider's actual

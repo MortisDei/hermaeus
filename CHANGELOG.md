@@ -23,6 +23,8 @@ limit.
   and expose them through a selector.
 - Embedding GGUF discovery now uses the dedicated `Models/embed` folder, so
   chat/code GGUFs no longer appear as RAG embedding choices.
+- Aether Doctor now runs in the background after launch and raises a startup
+  notification when errors or warnings are found.
 
 ### Fixed
 
@@ -46,6 +48,7 @@ limit.
   selection.
 - Added regression coverage for dedicated embedding model discovery and Doctor
   embedding-model migration.
+- Added regression coverage for Doctor startup warning notifications.
 
 ## [0.9.15-alpha] - 2026-05-18
 
