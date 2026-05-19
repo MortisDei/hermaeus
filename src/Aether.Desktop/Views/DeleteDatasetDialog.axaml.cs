@@ -5,6 +5,11 @@ namespace Aether.Desktop.Views;
 
 public partial class DeleteDatasetDialog : Window
 {
+    public DeleteDatasetDialog()
+        : this(string.Empty, 0)
+    {
+    }
+
     public DeleteDatasetDialog(string datasetName, int chunkCount)
     {
         InitializeComponent();

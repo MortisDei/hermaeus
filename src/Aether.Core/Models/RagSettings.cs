@@ -42,6 +42,12 @@ public class RagSettings
     public int RerankerMaxCandidates { get; set; } = 20;
 
     /// <summary>
+    /// Base URL used for embedding requests (/v1/embeddings).
+    /// This can point to a dedicated embeddings server running on a different port.
+    /// </summary>
+    public string EmbeddingBaseUrl { get; set; } = "http://localhost:39202";
+
+    /// <summary>
     /// Embedding model name used for document chunking and retrieval.
     /// </summary>
     public string EmbeddingModel { get; set; } = "nomic-embed-text";

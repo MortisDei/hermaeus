@@ -60,7 +60,12 @@ limit.
 - RAG settings now expose the embedding server base URL next to the embedding
   model selector.
 - Benchmark view startup continues to load benchmark data before display, so
-  the panel no longer opens as an empty black canvas.   
+  the panel no longer opens as an empty black canvas.
+  Chat and embeddings now use separate localhost ports by default so both servers can run at once.
+- RAG now uses a dedicated embedding base URL instead of sharing the chat endpoint.
+- The embeddings toggle only appears on the Embeddings managed server card.
+- RAG settings now expose the embedding server base URL.
+- Legacy localhost defaults are migrated away from 8080 and 8081 on load.   
 
 ### Fixed
 
@@ -78,6 +83,9 @@ limit.
   active.
 - RAG ingest now retries oversized embedding inputs with smaller clamps instead
   of failing the full run on one chunk.
+- Benchmark view now loads on open even if the startup path missed it, so it no longer shows a blank canvas.
+- Auto-tune settings now persist correctly instead of snapping GPU layers back to 999 when starting the server.
+- Delete dataset dialog warning warning no longer triggers the Avalonia XAML warning, because the dialog now has a public parameterless constructor.
 
 ### Tests
 

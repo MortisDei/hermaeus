@@ -7,7 +7,7 @@ namespace Aether.Rag.Embeddings;
 
 /// <summary>
 /// Calls the llama.cpp server's /v1/embeddings endpoint (OpenAI-compatible).
-/// Default: http://localhost:8080
+/// Default: RAG EmbeddingBaseUrl, which now defaults to a separate localhost port.
 /// Model: nomic-embed-text (768 dims)
 /// </summary>
 public sealed class LlamaCppEmbeddingService : IEmbeddingService, IDisposable
@@ -25,7 +25,17 @@ public sealed class LlamaCppEmbeddingService : IEmbeddingService, IDisposable
         _http = http ?? SharedHttp;
     }
 
-    private string Base => _settings.Settings.Llm.LlamaCppBaseUrl.TrimEnd('/');
+    private string Base
+    {
+        get
+        {
+            var configured = _settings.Settings.Rag.EmbeddingBaseUrl?.Trim();
+            if (!string.IsNullOrWhiteSpace(configured))
+                return configured.TrimEnd('/');
+
+            return _settings.Settings.Llm.LlamaCppBaseUrl.TrimEnd('/');
+        }
+    }
 
     public async Task<float[]> EmbedAsync(string text, CancellationToken ct = default)
     {
@@ -65,7 +75,7 @@ public sealed class LlamaCppEmbeddingService : IEmbeddingService, IDisposable
 
         if (response.StatusCode is HttpStatusCode.NotImplemented or HttpStatusCode.NotFound)
         {
-            var hint = "Start llama-server with --embeddings and point LlamaCppBaseUrl to that embeddings-capable server.";
+            var hint = "Start llama-server with --embeddings and point the RAG EmbeddingBaseUrl (older configs may refer to LlamaCppBaseUrl) to that embeddings-capable server.";
             if (string.IsNullOrWhiteSpace(body))
                 return new InvalidOperationException($"{baseMessage} {hint}");
 

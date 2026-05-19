@@ -9,7 +9,7 @@ public class LlmSettings
     /// <summary>
     /// URL endpoint for llama.cpp/llama-server.
     /// </summary>
-    public string LlamaCppBaseUrl { get; set; } = "http://localhost:8080";
+    public string LlamaCppBaseUrl { get; set; } = "http://localhost:39201";
 
     /// <summary>
     /// Enable the llama.cpp provider.

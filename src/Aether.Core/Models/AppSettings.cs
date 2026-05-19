@@ -71,7 +71,7 @@ public class AppSettings
         {
             Name           = "Chat",
             ExecutablePath = "llama-server",
-            Port           = 8080,
+            Port           = 39201,
             ContextSize    = 4096,
             GpuLayers      = 0,
             Threads        = 4,
@@ -82,7 +82,7 @@ public class AppSettings
         {
             Name           = "Embeddings",
             ExecutablePath = "llama-server",
-            Port           = 8081,
+            Port           = 39202,
             ContextSize    = 2048,
             GpuLayers      = 0,
             Threads        = 4,

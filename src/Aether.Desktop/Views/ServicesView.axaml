@@ -275,12 +275,11 @@
                                                        FontSize="13"
                                                        IsEnabled="{Binding CanEdit}"
                                                        ToolTip.Tip="CPU thread count" />
-                                        <CheckBox Grid.Column="1"
-                                                  IsChecked="{Binding EmbeddingsMode}"
-                                                  Content="--embeddings"
-                                                  IsEnabled="{Binding CanEdit}"
-                                                  FontSize="13"
-                                                  VerticalAlignment="Center" />
+                                        <TextBlock Grid.Column="1"
+                                                   Text="--embeddings (fixed)"
+                                                   Opacity="0.65"
+                                                   FontSize="13"
+                                                   VerticalAlignment="Center" />
                                         <CheckBox Grid.Column="2"
                                                   IsChecked="{Binding AutoStart}"
                                                   Content="Auto-start"

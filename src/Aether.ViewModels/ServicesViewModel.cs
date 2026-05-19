@@ -156,6 +156,7 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
     private async Task SaveConfigAsync()
     {
         SyncToConfig();
+        await PersistTuneProfileAsync();
         await _settings.SaveAsync();
         WarnForExtraArgs();
     }
@@ -203,7 +204,8 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
 
             GpuLayers = result.GpuLayers;
             Threads = result.Threads;
-            await SaveTuneProfileAsync(result);
+            await PersistTuneProfileAsync(result);
+            await _settings.SaveAsync();
             AutoTuneStatus = result.TotalLayers is int total
                 ? $"Auto-tune verified {result.GpuLayers}/{total} GPU layers with {result.Threads} thread(s). Save and start the service."
                 : $"Auto-tune verified {result.GpuLayers} GPU layers with {result.Threads} thread(s). Save and start the service.";
@@ -282,11 +284,11 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
             ExtraArgs = profile.ExtraArgs;
     }
 
-    private async Task SaveTuneProfileAsync(ServerTuneResult result)
+    private Task PersistTuneProfileAsync(ServerTuneResult? result = null)
     {
         var normalized = ResolveExistingModelPath(ModelPath);
         if (string.IsNullOrWhiteSpace(normalized))
-            return;
+            return Task.CompletedTask;
 
         var file = new FileInfo(normalized);
         var profile = FindTuneProfile(normalized);
@@ -299,14 +301,14 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
         profile.ModelPath = normalized;
         profile.ModelSizeBytes = file.Length;
         profile.ModelModifiedAtUtc = file.LastWriteTimeUtc;
-        profile.GpuLayers = result.GpuLayers;
-        profile.TotalLayers = result.TotalLayers;
-        profile.Threads = result.Threads;
+        profile.GpuLayers = result?.GpuLayers ?? GpuLayers;
+        profile.TotalLayers = result?.TotalLayers ?? profile.TotalLayers;
+        profile.Threads = result?.Threads ?? Threads;
         profile.ContextSize = ContextSize;
         profile.ExtraArgs = ExtraArgs;
-        profile.LlamaServerVersion = result.LlamaServerVersion;
+        profile.LlamaServerVersion = result?.LlamaServerVersion ?? profile.LlamaServerVersion;
         profile.TunedAtUtc = DateTime.UtcNow;
-        await _settings.SaveAsync();
+        return Task.CompletedTask;
     }
 
     private LlamaTuneProfile? FindTuneProfile(string modelPath)

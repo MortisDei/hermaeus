@@ -10,17 +10,24 @@
                 <TextBlock Text="Configure semantic search and retrieval augmented generation settings."
                            FontSize="11" Opacity="0.55" />
             </StackPanel>
-            <Grid ColumnDefinitions="110,*,Auto" ColumnSpacing="12" RowDefinitions="Auto,Auto" RowSpacing="8">
-                <TextBlock Grid.Row="0" Grid.Column="0" Text="Embed model" VerticalAlignment="Center"
+            <Grid ColumnDefinitions="110,*,Auto" ColumnSpacing="12" RowDefinitions="Auto,Auto,Auto" RowSpacing="8">
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="Embed URL" VerticalAlignment="Center"
                            Opacity="0.6" FontSize="13" />
-                <ComboBox Grid.Row="0" Grid.Column="1" ItemsSource="{Binding EmbeddingModelOptions}"
+                <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding EmbeddingBaseUrl}"
+                         Watermark="http://localhost:39202"
+                         FontSize="13" CornerRadius="6" Padding="10,6" />
+
+                <TextBlock Grid.Row="1" Grid.Column="0" Text="Embed model" VerticalAlignment="Center"
+                           Opacity="0.6" FontSize="13" />
+                <ComboBox Grid.Row="1" Grid.Column="1" ItemsSource="{Binding EmbeddingModelOptions}"
                           SelectedItem="{Binding EmbeddingModel}" FontSize="13" CornerRadius="6" />
-                <TextBlock Grid.Row="1" Grid.Column="0" Text="Reranker" VerticalAlignment="Center"
+
+                <TextBlock Grid.Row="2" Grid.Column="0" Text="Reranker" VerticalAlignment="Center"
                            Opacity="0.6" FontSize="13" />
-                <ComboBox Grid.Row="1" Grid.Column="1" ItemsSource="{Binding RerankerModelPathOptions}"
+                <ComboBox Grid.Row="2" Grid.Column="1" ItemsSource="{Binding RerankerModelPathOptions}"
                           SelectedItem="{Binding RagRerankerModelPath}" FontSize="13" CornerRadius="6" />
             </Grid>
-            <TextBlock Text="The embedding model converts document text into vectors for semantic search. The optional reranker improves result ordering."
+            <TextBlock Text="Use Embed URL to target a dedicated embeddings server on a separate local port. The embedding model converts document text into vectors for semantic search. The optional reranker improves result ordering."
                        FontSize="11" Opacity="0.45" TextWrapping="Wrap" />
         </StackPanel>
     </Border>

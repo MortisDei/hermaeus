@@ -11,7 +11,7 @@ public partial class LlmDefaultsSettingsViewModel : ObservableObject
 {
     private readonly ISecretStore _secrets;
 
-    [ObservableProperty] private string _llamaCppBaseUrl = "http://localhost:8080";
+    [ObservableProperty] private string _llamaCppBaseUrl = "http://localhost:39201";
     [ObservableProperty] private bool _llamaCppEnabled = true;
     [ObservableProperty] private string _openAiBaseUrl = "https://api.openai.com";
     [ObservableProperty] private string _openAiApiKey = string.Empty;
@@ -52,6 +52,7 @@ public partial class RagSettingsViewModel : ObservableObject
 {
     private readonly Func<string> _fallbackRoot;
 
+    [ObservableProperty] private string _embeddingBaseUrl = "http://localhost:39202";
     [ObservableProperty] private string _embeddingModel = "nomic-embed-text";
     [ObservableProperty] private string _ragRerankerModelPath = string.Empty;
 
@@ -62,6 +63,7 @@ public partial class RagSettingsViewModel : ObservableObject
 
     public void ReloadFrom(AppSettings settings, string localAiAssetsRoot)
     {
+        EmbeddingBaseUrl = settings.Rag.EmbeddingBaseUrl;
         EmbeddingModel = settings.Rag.EmbeddingModel;
         RagRerankerModelPath = settings.Rag.RerankerModelPath;
         RefreshLocalAiAssetOptions(localAiAssetsRoot);
@@ -69,6 +71,7 @@ public partial class RagSettingsViewModel : ObservableObject
 
     public void ApplyTo(AppSettings settings)
     {
+        settings.Rag.EmbeddingBaseUrl = EmbeddingBaseUrl.Trim();
         settings.Rag.EmbeddingModel = EmbeddingModel;
         settings.Rag.RerankerModelPath = RagRerankerModelPath.Trim();
     }

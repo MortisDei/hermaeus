@@ -75,27 +75,35 @@ public sealed class SettingsService : ISettingsService
 
     public async Task LoadAsync()
     {
-        var changed = false;
+        var needsPersist = false;
+        var notify = false;
         await _gate.WaitAsync();
         try
         {
             if (!File.Exists(_path)) return;
             var json = await File.ReadAllTextAsync(_path);
             Settings = JsonSerializer.Deserialize<AppSettings>(json, Opts) ?? new();
-            changed = true;
+            needsPersist = MigrateLegacyLocalEndpoints(Settings);
+            notify = true;
         }
         catch
         {
             TryBackupUnreadableSettings(_path);
             Settings = new();
-            changed = true;
+            notify = true;
         }
         finally
         {
             _gate.Release();
         }
 
-        if (changed)
+        if (needsPersist)
+        {
+            await SaveAsync();
+            return;
+        }
+
+        if (notify)
             SettingsChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -218,11 +226,51 @@ public sealed class SettingsService : ISettingsService
         settings.Memory.EnabledPerConversation = keep;
     }
 
+    private static bool MigrateLegacyLocalEndpoints(AppSettings settings)
+    {
+        const string legacyChatBaseUrl = "http://localhost:8080";
+        var changed = false;
+
+        if (string.Equals(settings.Llm.LlamaCppBaseUrl?.Trim(), legacyChatBaseUrl, StringComparison.OrdinalIgnoreCase))
+        {
+            settings.Llm.LlamaCppBaseUrl = "http://localhost:39201";
+            changed = true;
+        }
+
+        var embeddingBaseUrl = settings.Rag.EmbeddingBaseUrl?.Trim();
+        if (string.IsNullOrWhiteSpace(embeddingBaseUrl)
+            || string.Equals(embeddingBaseUrl, legacyChatBaseUrl, StringComparison.OrdinalIgnoreCase))
+        {
+            settings.Rag.EmbeddingBaseUrl = "http://localhost:39202";
+            changed = true;
+        }
+
+        foreach (var server in settings.ManagedServers)
+        {
+            if (!IsDefaultManagedServerName(server))
+                continue;
+
+            if (!server.EmbeddingsMode && server.Port == 8080)
+            {
+                server.Port = 39201;
+                changed = true;
+            }
+
+            if (server.EmbeddingsMode && server.Port == 8081)
+            {
+                server.Port = 39202;
+                changed = true;
+            }
+        }
+
+        return changed;
+    }
+
     private static ServerConfig CreateDefaultServer(bool embeddingsMode) => new()
     {
         Name = embeddingsMode ? "Embeddings" : "Chat",
         ExecutablePath = "llama-server",
-        Port = embeddingsMode ? 8081 : 8080,
+        Port = embeddingsMode ? 39202 : 39201,
         ContextSize = embeddingsMode ? 2048 : 4096,
         GpuLayers = 0,
         Threads = 4,

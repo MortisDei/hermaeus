@@ -12,7 +12,7 @@
                 </StackPanel>
                 <Grid ColumnDefinitions="110,*" ColumnSpacing="12">
                     <TextBlock Grid.Column="0" Text="Base URL" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
-                    <TextBox Grid.Column="1" Text="{Binding LlamaCppBaseUrl}" Watermark="http://localhost:8080"
+                    <TextBox Grid.Column="1" Text="{Binding LlamaCppBaseUrl}" Watermark="http://localhost:39201"
                              FontSize="13" CornerRadius="6" Padding="10,6" />
                 </Grid>
             </StackPanel>
