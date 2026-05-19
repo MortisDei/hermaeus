@@ -31,6 +31,93 @@ public static class LocalAiAssetLocator
         try
         {
             return Directory.EnumerateFiles(layout.ModelsDirectory, "*.gguf", SearchOption.AllDirectories)
+                .Where(path => !IsUnderSpecialModelDirectory(path, layout.ModelsDirectory))
+                .Order(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    public static IReadOnlyList<string> FindEmbeddingModels(string root)
+    {
+        root = root.Trim();
+        if (string.IsNullOrWhiteSpace(root))
+            return [];
+
+        root = Path.GetFullPath(root);
+        if (!Directory.Exists(root))
+            return [];
+
+        var models = FindModelsDirectory(root);
+        if (string.IsNullOrWhiteSpace(models) || !Directory.Exists(models))
+            return [];
+
+        try
+        {
+            var dedicated = GetEmbeddingDirectories(models)
+                .Where(Directory.Exists)
+                .SelectMany(path => Directory.EnumerateFiles(path, "*.gguf", SearchOption.AllDirectories))
+                .Where(LooksLikeEmbeddingGguf)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Order(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (dedicated.Count > 0)
+                return dedicated;
+
+            return Directory.EnumerateFiles(models, "*.gguf", SearchOption.TopDirectoryOnly)
+                .Where(LooksLikeEmbeddingGguf)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Order(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    public static IReadOnlyList<string> FindRerankerDirectories(string root)
+    {
+        root = root.Trim();
+        if (string.IsNullOrWhiteSpace(root))
+            return [];
+
+        root = Path.GetFullPath(root);
+        if (!Directory.Exists(root))
+            return [];
+
+        var models = FindModelsDirectory(root);
+        if (string.IsNullOrWhiteSpace(models) || !Directory.Exists(models))
+            return [];
+
+        var searchRoots = new[]
+        {
+            Path.Combine(models, "rerank"),
+            Path.Combine(models, "reranker")
+        };
+
+        try
+        {
+            var modelRerankers = searchRoots
+                .Where(Directory.Exists)
+                .SelectMany(path => Directory.EnumerateFiles(path, "*.onnx", SearchOption.AllDirectories))
+                .Select(Path.GetDirectoryName)
+                .Where(LooksLikeRerankerDirectory)
+                .Select(path => path!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Order(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (modelRerankers.Count > 0)
+                return modelRerankers;
+
+            return Directory.EnumerateFiles(root, "*.onnx", SearchOption.AllDirectories)
+                .Select(Path.GetDirectoryName)
+                .Where(LooksLikeRerankerDirectory)
+                .Select(path => path!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
                 .Order(StringComparer.OrdinalIgnoreCase)
                 .ToList();
         }
@@ -199,6 +286,10 @@ public static class LocalAiAssetLocator
 
     private static string FindRerankerDirectory(string root)
     {
+        var discovered = FindRerankerDirectories(root).FirstOrDefault();
+        if (!string.IsNullOrWhiteSpace(discovered))
+            return discovered;
+
         try
         {
             return Directory.EnumerateFiles(root, "model_O4.onnx", SearchOption.AllDirectories)
@@ -210,5 +301,53 @@ public static class LocalAiAssetLocator
         {
             return string.Empty;
         }
+    }
+
+    private static bool LooksLikeRerankerDirectory(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
+            return false;
+
+        try
+        {
+            return File.Exists(Path.Combine(path, "vocab.txt"))
+                && Directory.EnumerateFiles(path, "*.onnx", SearchOption.TopDirectoryOnly).Any();
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static IEnumerable<string> GetEmbeddingDirectories(string modelsDirectory)
+    {
+        yield return Path.Combine(modelsDirectory, "embed");
+        yield return Path.Combine(modelsDirectory, "embedding");
+        yield return Path.Combine(modelsDirectory, "embeddings");
+    }
+
+    private static bool LooksLikeEmbeddingGguf(string path)
+    {
+        var name = Path.GetFileNameWithoutExtension(path);
+        return name.Contains("embed", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("embedding", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("nomic", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("bge", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("gte", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("e5", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("e5-", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("e5_", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsUnderSpecialModelDirectory(string path, string modelsDirectory)
+    {
+        var relative = Path.GetRelativePath(modelsDirectory, path);
+        var firstSegment = relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).FirstOrDefault();
+        return firstSegment is not null
+            && (firstSegment.Equals("embed", StringComparison.OrdinalIgnoreCase)
+                || firstSegment.Equals("embedding", StringComparison.OrdinalIgnoreCase)
+                || firstSegment.Equals("embeddings", StringComparison.OrdinalIgnoreCase)
+                || firstSegment.Equals("rerank", StringComparison.OrdinalIgnoreCase)
+                || firstSegment.Equals("reranker", StringComparison.OrdinalIgnoreCase));
     }
 }

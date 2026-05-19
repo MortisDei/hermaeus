@@ -652,6 +652,19 @@ public sealed class DoctorService : IDoctorService
             progress?.Report("Existing embedding model failed verification and will be downloaded again.");
         }
 
+        var existing = FindInstalledEmbeddingModel(_embeddingDownload.ModelName);
+        if (existing.Found && !string.Equals(Path.GetFullPath(existing.Path), Path.GetFullPath(destinationPath), StringComparison.OrdinalIgnoreCase))
+        {
+            progress?.Report($"Verifying existing embedding model at {existing.Path}...");
+            if (await _downloads.VerifyHashAsync(existing.Path, _embeddingDownload.Sha256, progress, ct))
+            {
+                File.Move(existing.Path, destinationPath, true);
+                await ConfigureInstalledEmbeddingModelAsync(destinationPath, ct);
+                progress?.Report($"Embedding model moved to {destinationPath}");
+                return true;
+            }
+        }
+
         progress?.Report($"Downloading embedding model to {destinationPath}...");
 
         var downloadProgress = progress is null
@@ -977,6 +990,12 @@ public sealed class DoctorService : IDoctorService
     {
         var directories = GetEmbeddingCandidateDirectories();
         var markers = BuildEmbeddingMarkers(embeddingModel);
+        var dedicated = LocalAiAssetLocator.FindEmbeddingModels(_settings.Settings.DataManagement.LocalAiAssetsRoot)
+            .Where(path => markers.Any(marker => path.Contains(marker, StringComparison.OrdinalIgnoreCase)))
+            .OrderBy(path => path.Length)
+            .ToList();
+        if (dedicated.Count > 0)
+            return (true, dedicated[0], string.Join(", ", directories));
 
         foreach (var dir in directories)
         {
@@ -1018,13 +1037,19 @@ public sealed class DoctorService : IDoctorService
 
     private string ResolveEmbeddingModelDirectory()
     {
-        var directories = GetEmbeddingCandidateDirectories();
-        var existing = directories.FirstOrDefault(Directory.Exists);
-        if (!string.IsNullOrWhiteSpace(existing))
-            return existing;
+        var settings = _settings.Settings;
+        var aiRoot = settings.DataManagement.LocalAiAssetsRoot.Trim();
+        if (!string.IsNullOrWhiteSpace(aiRoot) && Directory.Exists(aiRoot))
+        {
+            var layout = LocalAiAssetLocator.Detect(aiRoot);
+            var models = !string.IsNullOrWhiteSpace(layout.ModelsDirectory)
+                ? layout.ModelsDirectory
+                : Path.Combine(Path.GetFullPath(aiRoot), "Models");
+            return Path.Combine(models, "embed");
+        }
 
         var dataRoot = SettingsService.ResolveDataRoot(_settings.Settings);
-        return Path.Combine(dataRoot, "models");
+        return Path.Combine(dataRoot, "models", "embed");
     }
 
     private List<string> GetEmbeddingCandidateDirectories()
@@ -1036,11 +1061,11 @@ public sealed class DoctorService : IDoctorService
 
         return new[]
         {
+            string.IsNullOrWhiteSpace(layout.ModelsDirectory) ? string.Empty : Path.Combine(layout.ModelsDirectory, "embed"),
+            string.IsNullOrWhiteSpace(layout.ModelsDirectory) ? string.Empty : Path.Combine(layout.ModelsDirectory, "embedding"),
+            string.IsNullOrWhiteSpace(layout.ModelsDirectory) ? string.Empty : Path.Combine(layout.ModelsDirectory, "embeddings"),
             layout.ModelsDirectory,
-            // Include the root folder itself in case users point directly at a model folder
-            string.IsNullOrWhiteSpace(aiRoot) ? string.Empty : Path.GetFullPath(aiRoot),
-            string.IsNullOrWhiteSpace(aiRoot) ? string.Empty : Path.Combine(Path.GetFullPath(aiRoot), "models"),
-            string.IsNullOrWhiteSpace(aiRoot) ? string.Empty : Path.Combine(Path.GetFullPath(aiRoot), "Models"),
+            Path.Combine(dataRoot, "models", "embed"),
             Path.Combine(dataRoot, "models")
         }
         .Where(path => !string.IsNullOrWhiteSpace(path))

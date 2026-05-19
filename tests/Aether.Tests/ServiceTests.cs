@@ -263,16 +263,54 @@ namespace Aether.Tests
             var root = temp.PathFor("AI");
             var models = Path.Combine(root, "Models");
             Directory.CreateDirectory(Path.Combine(models, "nested"));
+            Directory.CreateDirectory(Path.Combine(models, "embed"));
             var first = Path.Combine(models, "alpha.gguf");
             var second = Path.Combine(models, "nested", "beta.gguf");
+            var embedding = Path.Combine(models, "embed", "nomic-embed-text-v1.5-Q4_K_M.gguf");
             File.WriteAllText(first, "model");
             File.WriteAllText(second, "model");
+            File.WriteAllText(embedding, "embedding");
 
             var found = LocalAiAssetLocator.FindGgufModels(root);
 
             Equal(2, found.Count, "GGUF discovery should include nested model files");
             True(found.Contains(first), "GGUF discovery should include root model file");
             True(found.Contains(second), "GGUF discovery should include nested model file");
+            False(found.Contains(embedding), "chat GGUF discovery should exclude embedding subfolder files");
+            return Task.CompletedTask;
+        }
+
+        public static Task LocalAiAssetsListsDiscoveredEmbeddingModels()
+        {
+            using var temp = new TempDir();
+            var root = temp.PathFor("AI");
+            var models = Path.Combine(root, "Models");
+            Directory.CreateDirectory(Path.Combine(models, "embed"));
+            var chat = Path.Combine(models, "NextCoder-7B.Q4_K_M.gguf");
+            var embedding = Path.Combine(models, "embed", "nomic-embed-text-v1.5-Q4_K_M.gguf");
+            File.WriteAllText(chat, "chat");
+            File.WriteAllText(embedding, "embedding");
+
+            var found = LocalAiAssetLocator.FindEmbeddingModels(root);
+
+            Equal(1, found.Count, "embedding discovery should only include dedicated embedding models");
+            Equal(embedding, found[0], "embedding discovery should scan Models/embed");
+            return Task.CompletedTask;
+        }
+
+        public static Task LocalAiAssetsListsDiscoveredRerankerDirectories()
+        {
+            using var temp = new TempDir();
+            var root = temp.PathFor("AI");
+            var reranker = Path.Combine(root, "Models", "rerank", "ms-marco-MiniLM-L6-v2");
+            Directory.CreateDirectory(reranker);
+            File.WriteAllText(Path.Combine(reranker, "model_O4.onnx"), "model");
+            File.WriteAllText(Path.Combine(reranker, "vocab.txt"), "vocab");
+
+            var found = LocalAiAssetLocator.FindRerankerDirectories(root);
+
+            Equal(1, found.Count, "reranker discovery should include valid reranker model folders");
+            Equal(reranker, found[0], "reranker discovery should prefer folders under Models/rerank");
             return Task.CompletedTask;
         }
 
@@ -292,6 +330,29 @@ namespace Aether.Tests
 
             Equal("nomic-embed-text", vm.EmbeddingModelOptions[0], "current embedding model should remain selectable before discovered GGUFs");
             Equal("nomic-embed-text", vm.EmbeddingModel, "current embedding model should not be replaced by the first local GGUF");
+            False(vm.EmbeddingModelOptions.Any(option => option.Contains("NextCoder", StringComparison.OrdinalIgnoreCase)),
+                "embedding selector should not list chat GGUF models");
+            return Task.CompletedTask;
+        }
+
+        public static Task RagSettingsDiscoversAndSelectsInstalledReranker()
+        {
+            using var temp = new TempDir();
+            var root = temp.PathFor("AI");
+            var reranker = Path.Combine(root, "Models", "rerank", "ms-marco-MiniLM-L6-v2");
+            Directory.CreateDirectory(reranker);
+            File.WriteAllText(Path.Combine(reranker, "model_O4.onnx"), "model");
+            File.WriteAllText(Path.Combine(reranker, "vocab.txt"), "vocab");
+
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.LocalAiAssetsRoot = root;
+            settings.Settings.Rag.RerankerModelPath = string.Empty;
+            var vm = new RagSettingsViewModel(() => root);
+
+            vm.ReloadFrom(settings.Settings, root);
+
+            Equal(reranker, vm.RerankerModelPathOptions[0], "installed reranker should be available as a settings option");
+            Equal(reranker, vm.RagRerankerModelPath, "settings should select the installed reranker when no explicit path is configured");
             return Task.CompletedTask;
         }
 
@@ -504,10 +565,10 @@ namespace Aether.Tests
                 spec);
 
             var ok = await doctor.InstallEmbeddingModelAsync();
-            var expectedPath = Path.Combine(root, "Models", "test-embed-model.gguf");
+            var expectedPath = Path.Combine(root, "Models", "embed", "test-embed-model.gguf");
 
             True(ok, "embedding model install should succeed when hash matches");
-            Equal(content, await File.ReadAllTextAsync(expectedPath), "downloaded embedding model should be written to the model folder");
+            Equal(content, await File.ReadAllTextAsync(expectedPath), "downloaded embedding model should be written to the embed folder");
             Equal("test-embed-model", settings.Settings.Rag.EmbeddingModel, "install should configure the embedding model name when the previous value was not an embedding model");
             Equal(expectedPath, settings.Settings.ManagedServers.Single(s => s.EmbeddingsMode).ModelPath, "install should update stale embedding server model paths");
         }
@@ -542,7 +603,51 @@ namespace Aether.Tests
             var ok = await doctor.InstallEmbeddingModelAsync();
 
             False(ok, "embedding model install should fail when SHA256 verification fails");
-            False(File.Exists(Path.Combine(root, "Models", "test-embed-model.gguf")), "failed verification should remove the downloaded file");
+            False(File.Exists(Path.Combine(root, "Models", "embed", "test-embed-model.gguf")), "failed verification should remove the downloaded file");
+        }
+
+        public static async Task DoctorEmbeddingInstallMigratesRootEmbeddingModel()
+        {
+            using var temp = new TempDir();
+            var root = temp.PathFor("AI");
+            Directory.CreateDirectory(Path.Combine(root, "Models"));
+            var sourcePath = Path.Combine(root, "Models", "test-embed-model.gguf");
+            var content = "fake embedding model";
+            await File.WriteAllTextAsync(sourcePath, content);
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.LocalAiAssetsRoot = root;
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            settings.Settings.ManagedServers.Clear();
+            settings.Settings.ManagedServers.Add(new ServerConfig
+            {
+                Name = "Embeddings",
+                EmbeddingsMode = true
+            });
+            var spec = new EmbeddingModelDownloadSpec(
+                "test-embed-model",
+                "test-embed-model.gguf",
+                "https://example.test/test-embed-model.gguf",
+                ExpectedSha256(content));
+            var doctor = new DoctorService(
+                settings,
+                new RuntimeProfileService(settings),
+                new FakeVoiceProviderRegistry(settings),
+                new FakeSecretStore(),
+                new SqliteRagStore(settings),
+                new ThrowingEmbeddingService(),
+                new FakeSystemInfo(),
+                new PythonHealthValidator(),
+                new NoOpReranker(),
+                new ModelDownloadService(new HttpClient(new CapturingRangeHttpHandler("unused"))),
+                spec);
+
+            var ok = await doctor.InstallEmbeddingModelAsync();
+            var expectedPath = Path.Combine(root, "Models", "embed", "test-embed-model.gguf");
+
+            True(ok, "existing verified embedding model should be accepted");
+            False(File.Exists(sourcePath), "root embedding model should be moved out of the chat model folder");
+            Equal(content, await File.ReadAllTextAsync(expectedPath), "embedding model should be moved into Models/embed");
+            Equal(expectedPath, settings.Settings.ManagedServers.Single(s => s.EmbeddingsMode).ModelPath, "embedding server should point at the migrated model");
         }
 
         public static Task LlamaServerReleaseDataCoversSupportedPlatforms()

@@ -160,7 +160,7 @@ public partial class SettingsViewModel : ObservableObject
             if (e.PropertyName == nameof(UiSettingsViewModel.EnableLocalHotkeys))
                 OnPropertyChanged(nameof(EnableLocalHotkeys));
         };
-        Data.LocalAiAssetsRootChanged += () => Rag.RefreshEmbeddingModelOptions(Data.LocalAiAssetsRoot);
+        Data.LocalAiAssetsRootChanged += () => Rag.RefreshLocalAiAssetOptions(Data.LocalAiAssetsRoot);
 
         Reload();
     }
@@ -300,7 +300,7 @@ public partial class SettingsViewModel : ObservableObject
         try
         {
             if (string.IsNullOrWhiteSpace(root) || string.IsNullOrWhiteSpace(modelId)) return string.Empty;
-            var candidates = Directory.EnumerateFiles(root, "*.gguf", SearchOption.AllDirectories)
+            var candidates = LocalAiAssetLocator.FindEmbeddingModels(root)
                 .Where(p => Path.GetFileNameWithoutExtension(p).IndexOf(modelId, StringComparison.OrdinalIgnoreCase) >= 0)
                 .OrderBy(p => p.Length)
                 .ToList();

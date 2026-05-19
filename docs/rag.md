@@ -24,6 +24,11 @@ traces, versioned SQLite schema migrations, and native eval support.
   **Doctor** panel can automatically download the recommended model (nomic-embed-text-v1.5-Q4_K_M)
   from a pinned Hugging Face commit and verify its SHA256 before configuring
   the embedding server.
+- Embedding GGUF files live under the configured local AI assets root in
+  `Models/embed`. Doctor installs the pinned nomic embedding model there and
+  moves a verified root-level copy into that folder when found.
+- The Settings embedding selector lists dedicated embedding models only. Chat
+  and code GGUF files in the model root are not shown as embedding choices.
 - Chat or code GGUF files are not treated as embedding models. Doctor will skip
   embedding backend health until a dedicated embedding model is installed or
   selected, avoiding connection-refused noise before setup is complete.
@@ -89,6 +94,9 @@ traces, versioned SQLite schema migrations, and native eval support.
 - Reranker install: The ONNX cross-encoder reranker assets are not downloaded
   automatically during query time.
 - Use the **Doctor** panel to install the reranker model and vocabulary.
+- Settings discovers installed reranker folders under the configured local AI
+  assets root at `Models/rerank/*` and lets you choose from the available
+  rerankers instead of typing the path manually.
 - Doctor shows progress messages during the download and loading steps.
 - Downloads are pinned to a specific Hugging Face commit and verified with
   SHA256 before the ONNX session or tokenizer loads.

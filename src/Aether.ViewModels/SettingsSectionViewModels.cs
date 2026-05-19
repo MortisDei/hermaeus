@@ -56,6 +56,7 @@ public partial class RagSettingsViewModel : ObservableObject
     [ObservableProperty] private string _ragRerankerModelPath = string.Empty;
 
     public ObservableCollection<string> EmbeddingModelOptions { get; } = [];
+    public ObservableCollection<string> RerankerModelPathOptions { get; } = [];
 
     public RagSettingsViewModel(Func<string> fallbackRoot) => _fallbackRoot = fallbackRoot;
 
@@ -63,7 +64,7 @@ public partial class RagSettingsViewModel : ObservableObject
     {
         EmbeddingModel = settings.Rag.EmbeddingModel;
         RagRerankerModelPath = settings.Rag.RerankerModelPath;
-        RefreshEmbeddingModelOptions(localAiAssetsRoot);
+        RefreshLocalAiAssetOptions(localAiAssetsRoot);
     }
 
     public void ApplyTo(AppSettings settings)
@@ -80,12 +81,36 @@ public partial class RagSettingsViewModel : ObservableObject
         {
             var root = string.IsNullOrWhiteSpace(localAiAssetsRoot) ? _fallbackRoot() : Path.GetFullPath(localAiAssetsRoot);
             if (!Directory.Exists(root)) return;
-            var ggufs = Directory.EnumerateFiles(root, "*.gguf", SearchOption.AllDirectories)
+            var ggufs = LocalAiAssetLocator.FindEmbeddingModels(root)
                 .Select(Path.GetFileNameWithoutExtension)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(x => x);
             foreach (var name in ggufs.Where(n => !string.IsNullOrWhiteSpace(n)))
                 AddEmbeddingModelOption(name!);
+        }
+        catch { }
+    }
+
+    public void RefreshLocalAiAssetOptions(string localAiAssetsRoot)
+    {
+        RefreshEmbeddingModelOptions(localAiAssetsRoot);
+        RefreshRerankerModelPathOptions(localAiAssetsRoot);
+    }
+
+    public void RefreshRerankerModelPathOptions(string localAiAssetsRoot)
+    {
+        RerankerModelPathOptions.Clear();
+        AddRerankerModelPathOption(RagRerankerModelPath);
+        try
+        {
+            var root = string.IsNullOrWhiteSpace(localAiAssetsRoot) ? _fallbackRoot() : Path.GetFullPath(localAiAssetsRoot);
+            if (!Directory.Exists(root)) return;
+
+            foreach (var path in LocalAiAssetLocator.FindRerankerDirectories(root))
+                AddRerankerModelPathOption(path);
+
+            if (string.IsNullOrWhiteSpace(RagRerankerModelPath) && RerankerModelPathOptions.Count > 0)
+                RagRerankerModelPath = RerankerModelPathOptions[0];
         }
         catch { }
     }
@@ -99,6 +124,18 @@ public partial class RagSettingsViewModel : ObservableObject
             return;
 
         EmbeddingModelOptions.Add(name.Trim());
+    }
+
+    private void AddRerankerModelPathOption(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return;
+
+        path = Path.GetFullPath(path.Trim());
+        if (RerankerModelPathOptions.Any(existing => string.Equals(existing, path, StringComparison.OrdinalIgnoreCase)))
+            return;
+
+        RerankerModelPathOptions.Add(path);
     }
 }
 

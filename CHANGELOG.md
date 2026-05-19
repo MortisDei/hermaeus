@@ -19,6 +19,10 @@ limit.
 - Built-in benchmark starter suites now include code generation, structured
   output stress, multi-step reasoning, Aether workflows, and hallucination
   resistance suites.
+- RAG settings now discover installed reranker folders under `Models/rerank`
+  and expose them through a selector.
+- Embedding GGUF discovery now uses the dedicated `Models/embed` folder, so
+  chat/code GGUFs no longer appear as RAG embedding choices.
 
 ### Fixed
 
@@ -27,6 +31,10 @@ limit.
 - Directory RAG ingest now chunks, embeds, and stores local files in bounded
   file batches instead of holding the full corpus and all embeddings in memory
   until the end.
+- RAG settings now select the installed Doctor-managed reranker when no explicit
+  reranker path has been saved.
+- Doctor now installs the pinned nomic embedding model under `Models/embed` and
+  migrates a verified root-level copy into that folder.
 
 ### Tests
 
@@ -34,6 +42,10 @@ limit.
   single-iteration benchmark export run-mode labeling.
 - Added regression coverage for persisted directory-ingest file batches after
   cancellation.
+- Added regression coverage for reranker folder discovery and settings
+  selection.
+- Added regression coverage for dedicated embedding model discovery and Doctor
+  embedding-model migration.
 
 ## [0.9.15-alpha] - 2026-05-18
 
