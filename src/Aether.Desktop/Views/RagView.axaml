@@ -103,28 +103,38 @@
                                             CornerRadius="8"
                                             Padding="12"
                                             Margin="0,0,0,8">
-                                        <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12">
+                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                                             <StackPanel Grid.Column="0" Spacing="4">
                                                 <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold" />
                                                 <TextBlock Text="{Binding Description}" FontSize="11" Opacity="0.55" TextWrapping="Wrap" />
                                                 <TextBlock Text="{Binding ReindexStatus}" FontSize="11" Opacity="0.7" TextWrapping="Wrap" />
                                                 <TextBlock Text="{Binding DimensionsLabel}" FontSize="11" Opacity="0.55" />
                                             </StackPanel>
-                                            <UniformGrid Grid.Column="1" Columns="2" Rows="3" MinWidth="260">
-                                                <TextBlock Text="{Binding ChunkCount, StringFormat=Chunks: {0}}" FontSize="11" />
-                                                <TextBlock Text="{Binding SourceCount, StringFormat=Sources: {0}}" FontSize="11" />
-                                                <TextBlock Text="{Binding MissingFiles, StringFormat=Missing: {0}}" FontSize="11" />
-                                                <TextBlock Text="{Binding StaleFiles, StringFormat=Stale: {0}}" FontSize="11" />
-                                                <TextBlock Text="{Binding DuplicateSources, StringFormat=Duplicates: {0}}" FontSize="11" />
-                                                <TextBlock Text="{Binding LastIngestLabel}" FontSize="11" />
-                                            </UniformGrid>
-                                            <Button Grid.Column="2"
-                                                    Content="Add"
-                                                    Command="{Binding $parent[ItemsControl].DataContext.AddToDatasetCommand}"
-                                                    CommandParameter="{Binding}"
-                                                    Padding="10,6"
-                                                    CornerRadius="6"
-                                                    ToolTip.Tip="Add more documents to this dataset" />
+                                            <Grid Grid.Column="1" ColumnDefinitions="Auto" RowDefinitions="Auto,Auto,Auto,Auto">
+                                                <UniformGrid Grid.Row="0" Columns="2" Rows="3" MinWidth="260">
+                                                    <TextBlock Text="{Binding ChunkCount, StringFormat=Chunks: {0}}" FontSize="11" />
+                                                    <TextBlock Text="{Binding SourceCount, StringFormat=Sources: {0}}" FontSize="11" />
+                                                    <TextBlock Text="{Binding MissingFiles, StringFormat=Missing: {0}}" FontSize="11" />
+                                                    <TextBlock Text="{Binding StaleFiles, StringFormat=Stale: {0}}" FontSize="11" />
+                                                    <TextBlock Text="{Binding DuplicateSources, StringFormat=Duplicates: {0}}" FontSize="11" />
+                                                    <TextBlock Text="{Binding LastIngestLabel}" FontSize="11" />
+                                                </UniformGrid>
+                                                <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8">
+                                                    <Button Content="Add"
+                                                            Command="{Binding $parent[ItemsControl].DataContext.AddToDatasetCommand}"
+                                                            CommandParameter="{Binding}"
+                                                            Padding="10,6"
+                                                            CornerRadius="6"
+                                                            ToolTip.Tip="Add more documents to this dataset" />
+                                                    <Button Content="Delete"
+                                                            Command="{Binding $parent[ItemsControl].DataContext.DeleteDatasetCommand}"
+                                                            CommandParameter="{Binding}"
+                                                            Padding="10,6"
+                                                            CornerRadius="6"
+                                                            Foreground="Red"
+                                                            ToolTip.Tip="Delete this dataset (cannot be undone)" />
+                                                </StackPanel>
+                                            </Grid>
                                         </Grid>
                                     </Border>
                                 </DataTemplate>

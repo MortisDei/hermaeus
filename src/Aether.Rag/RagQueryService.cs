@@ -146,6 +146,14 @@ public sealed class RagQueryService
     public async Task<List<RagChunk>> GetChunksForDatasetAsync(string datasetId, bool includeEmbeddings = false, CancellationToken ct = default)
         => await _store.GetChunksAsync(datasetId, includeEmbeddings, ct);
 
+    public async Task DeleteDatasetAsync(string datasetId, CancellationToken ct = default)
+    {
+        ClearCache(datasetId);
+        await _store.DeleteDatasetAsync(datasetId, ct);
+        _logs?.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Rag,
+            $"RAG dataset deleted: {datasetId}"));
+    }
+
     public async Task<RagRetrievalResult> RetrieveAsync(
         string datasetId,
         string question,

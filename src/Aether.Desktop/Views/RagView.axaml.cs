@@ -48,6 +48,16 @@ public partial class RagView : UserControl
                 if (TopLevel.GetTopLevel(this)?.Clipboard is { } cb)
                     await cb.SetTextAsync(text);
             };
+
+            _vm.RequestDeleteDatasetConfirmation = async item =>
+            {
+                if (TopLevel.GetTopLevel(this) is not Window owner)
+                    return false;
+
+                var dialog = new DeleteDatasetDialog(item.Name, item.ChunkCount);
+                var result = await dialog.ShowDialog<bool>(owner);
+                return result;
+            };
         };
     }
 

@@ -11,6 +11,12 @@ limit.
 
 ## [0.9.16-alpha] - 2026-05-19
 
+### Added
+
+- RAG dataset manager now includes a "Delete" button on each dataset to remove
+  datasets with a confirmation dialog warning. Deletion cascades to all
+  associated chunks and is permanent.
+
 ### Changed
 
 - Project version metadata bumped to `0.9.16-alpha`.

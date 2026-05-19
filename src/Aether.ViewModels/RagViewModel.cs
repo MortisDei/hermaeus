@@ -168,6 +168,7 @@ public partial class RagViewModel : ObservableObject
 
     public event EventHandler? ScrollToBottom;
     public Action<string>? RequestCopyToClipboard { get; set; }
+    public Func<RagDatasetManagerItemViewModel, Task<bool>>? RequestDeleteDatasetConfirmation { get; set; }
     public bool IsLocalIngest => !EnableWebLoader;
 
     public RagViewModel(RagQueryService query, RagPipeline pipeline, RagEvalService eval, IToastService toasts, IRuntimeLogService logs, ISettingsService settings, ServicesViewModel? services = null, XttsProcessManager? xtts = null, KokoroProcessManager? kokoro = null)
@@ -453,6 +454,43 @@ public partial class RagViewModel : ObservableObject
         
         // Scroll to ingest section (could be done via UI event if needed)
         StatusMessage = $"Ready to add documents to '{item.Dataset.Name}'. Select a directory or configure URLs below.";
+    }
+
+    [RelayCommand]
+    private async Task DeleteDatasetAsync(RagDatasetManagerItemViewModel item)
+    {
+        if (item?.Dataset is null)
+            return;
+
+        var confirmed = RequestDeleteDatasetConfirmation is not null
+            ? await RequestDeleteDatasetConfirmation(item)
+            : false;
+        
+        if (!confirmed)
+            return;
+
+        try
+        {
+            await _query.DeleteDatasetAsync(item.Dataset.Id);
+            
+            // Update UI state
+            if (SelectedDataset?.Id == item.Dataset.Id)
+                SelectedDataset = null;
+            
+            await LoadDatasetsAsync();
+            await RefreshDatasetManagerAsync();
+            
+            StatusMessage = $"Dataset '{item.Dataset.Name}' deleted.";
+            _toasts.Show("Dataset deleted", $"'{item.Dataset.Name}' has been removed.", ToastKind.Info, 5000);
+            _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Rag,
+                $"RAG dataset deleted by user: {item.Dataset.Name} ({item.Dataset.Id})"));
+        }
+        catch (Exception ex)
+        {
+            SetError($"Failed to delete dataset: {ex.Message}");
+            _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Error, RuntimeLogCategory.Rag,
+                $"Failed to delete dataset: {ex.Message}"));
+        }
     }
 
     [RelayCommand]
