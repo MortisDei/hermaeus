@@ -238,8 +238,15 @@
                     <ScrollViewer Grid.Row="1"
                                   MaxHeight="340"
                                   VerticalScrollBarVisibility="Auto">
-                        <ItemsControl ItemsSource="{Binding Chat.Messages}">
-                            <ItemsControl.ItemTemplate>
+                        <ListBox ItemsSource="{Binding Chat.Messages}"
+                                 Background="Transparent"
+                                 BorderThickness="0">
+                            <ListBox.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <VirtualizingStackPanel />
+                                </ItemsPanelTemplate>
+                            </ListBox.ItemsPanel>
+                            <ListBox.ItemTemplate>
                                 <DataTemplate DataType="vm:MessageViewModel">
                                     <Border Padding="8"
                                             Margin="0,0,0,6"
@@ -251,8 +258,8 @@
                                                    MaxHeight="110" />
                                     </Border>
                                 </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
                     </ScrollViewer>
                     <Grid Grid.Row="2" ColumnDefinitions="*,Auto" ColumnSpacing="8">
                         <TextBox Grid.Column="0"

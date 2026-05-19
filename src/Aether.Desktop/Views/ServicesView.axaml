@@ -111,8 +111,15 @@
                 </StackPanel>
             </Border>
 
-            <ItemsControl ItemsSource="{Binding Servers}">
-                <ItemsControl.ItemTemplate>
+            <ListBox ItemsSource="{Binding Servers}"
+                     Background="Transparent"
+                     BorderThickness="0">
+                <ListBox.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <VirtualizingStackPanel />
+                    </ItemsPanelTemplate>
+                </ListBox.ItemsPanel>
+                <ListBox.ItemTemplate>
                     <DataTemplate DataType="vm:ServerProcessViewModel">
                         <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
                                 BorderThickness="1" CornerRadius="10"
@@ -361,8 +368,8 @@
                             </StackPanel>
                         </Border>
                     </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
+                </ListBox.ItemTemplate>
+            </ListBox>
 
         </StackPanel>
     </ScrollViewer>
