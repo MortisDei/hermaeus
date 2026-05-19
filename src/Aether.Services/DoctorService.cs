@@ -30,7 +30,7 @@ public sealed class DoctorService : IDoctorService
     private readonly ModelDownloadService _downloads;
     private readonly EmbeddingModelDownloadSpec _embeddingDownload;
     private readonly LlamaServerSetupService _llamaSetup;
-    private readonly IRuntimeLogService _runtimeLogs;
+    private readonly IRuntimeLogService? _runtimeLogs;
 
     public DoctorService(
         ISettingsService settings,
@@ -59,7 +59,7 @@ public sealed class DoctorService : IDoctorService
         _downloads = downloads ?? new ModelDownloadService();
         _embeddingDownload = embeddingDownload ?? DefaultEmbeddingDownload;
         _llamaSetup = llamaSetup ?? new LlamaServerSetupService(_downloads);
-        _runtimeLogs = runtimeLogs ?? new RuntimeLogService();
+        _runtimeLogs = runtimeLogs;
     }
 
     public async Task<DoctorReport> ScanAsync(CancellationToken ct = default)
@@ -628,13 +628,29 @@ public sealed class DoctorService : IDoctorService
         {
             var result = await onnx.InstallAssetsAsync(progress, ct);
             if (!result)
-                _runtimeLogs.Log("Doctor", "Reranker asset installation failed");
+            {
+                _runtimeLogs?.Add(new RuntimeLogEntry(
+                    DateTime.UtcNow,
+                    RuntimeLogLevel.Error,
+                    RuntimeLogCategory.Service,
+                    "Reranker asset installation failed"));
+            }
             else
-                _runtimeLogs.Log("Doctor", "Reranker assets installed successfully");
+            {
+                _runtimeLogs?.Add(new RuntimeLogEntry(
+                    DateTime.UtcNow,
+                    RuntimeLogLevel.Info,
+                    RuntimeLogCategory.Service,
+                    "Reranker assets installed successfully"));
+            }
             return result;
         }
 
-        _runtimeLogs.Log("Doctor", "Reranker installation skipped: reranker not available");
+        _runtimeLogs?.Add(new RuntimeLogEntry(
+            DateTime.UtcNow,
+            RuntimeLogLevel.Warning,
+            RuntimeLogCategory.Service,
+            "Reranker installation skipped: reranker not available"));
         return false;
     }
 
@@ -685,7 +701,11 @@ public sealed class DoctorService : IDoctorService
         {
             var errorMsg = $"Embedding model download failed: {result.Message}";
             progress?.Report(result.Message);
-            _runtimeLogs.Log("Doctor", errorMsg);
+            _runtimeLogs?.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Error,
+                RuntimeLogCategory.Service,
+                errorMsg));
             return false;
         }
 
@@ -695,13 +715,21 @@ public sealed class DoctorService : IDoctorService
             TryDelete(destinationPath);
             var errorMsg = "Embedding model verification failed. The downloaded file was removed.";
             progress?.Report(errorMsg);
-            _runtimeLogs.Log("Doctor", errorMsg);
+            _runtimeLogs?.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Error,
+                RuntimeLogCategory.Service,
+                errorMsg));
             return false;
         }
 
         await ConfigureInstalledEmbeddingModelAsync(destinationPath, ct);
         progress?.Report($"Embedding model ready at {destinationPath}");
-        _runtimeLogs.Log("Doctor", $"Embedding model installed successfully at {destinationPath}");
+        _runtimeLogs?.Add(new RuntimeLogEntry(
+            DateTime.UtcNow,
+            RuntimeLogLevel.Info,
+            RuntimeLogCategory.Service,
+            $"Embedding model installed successfully at {destinationPath}"));
         return true;
     }
 
@@ -715,8 +743,11 @@ public sealed class DoctorService : IDoctorService
         if (!result.Success || string.IsNullOrWhiteSpace(result.UpdatedPath))
         {
             progress?.Report(result.Log);
-            var errorMsg = $"llama.cpp update failed: {result.Log}";
-            _runtimeLogs.Log("Doctor", errorMsg);
+            _runtimeLogs?.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Error,
+                RuntimeLogCategory.Service,
+                $"llama.cpp update failed: {result.Log}"));
             return false;
         }
 
@@ -725,7 +756,11 @@ public sealed class DoctorService : IDoctorService
 
         await _settings.SaveAsync();
         progress?.Report(result.Log);
-        _runtimeLogs.Log("Doctor", $"llama.cpp updated successfully: {result.UpdatedPath}");
+        _runtimeLogs?.Add(new RuntimeLogEntry(
+            DateTime.UtcNow,
+            RuntimeLogLevel.Info,
+            RuntimeLogCategory.Service,
+            $"llama.cpp updated successfully: {result.UpdatedPath}"));
         return true;
     }
 
