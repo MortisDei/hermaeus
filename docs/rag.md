@@ -60,8 +60,10 @@ traces, versioned SQLite schema migrations, and native eval support.
   the whole corpus in memory.
 - The ingest pipeline uses cancellable, batched embedding and storage steps to
   reduce DB lock contention and make long ingests abortable from the UI.
-- Large ingests report progress per embedding and storage batch so the UI can
-  surface better feedback and cancel if needed.
+- Large ingests report separate overall progress and current-stage progress.
+  Embedding progress identifies both the file batch and embedding batch, and
+  oversized embedding inputs are retried with smaller clamps before failing the
+  ingest.
 
 ### Web Loading
 

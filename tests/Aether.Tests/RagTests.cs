@@ -91,6 +91,33 @@ namespace Aether.Tests
             True(chunks.Any(c => c.SourceFile == "notes.md"), "markdown content should still ingest");
         }
 
+        public static async Task RagDirectoryIngestReportsOverallProgress()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var store = new SqliteRagStore(settings);
+            await store.InitializeAsync();
+            var docs = temp.PathFor("docs");
+            Directory.CreateDirectory(docs);
+            for (var i = 0; i < 55; i++)
+                await File.WriteAllTextAsync(Path.Combine(docs, $"notes-{i:D2}.md"), $"markdown source {i} alpha beta gamma");
+
+            var dataset = new RagDataset { Name = "progress" };
+            var pipeline = new RagPipeline(store, new FakeEmbeddingService());
+            var reports = new List<IngestProgress>();
+            await pipeline.IngestDirectoryAsync(dataset, docs, new InlineProgress(reports.Add));
+
+            var overall = reports.Where(p => p.OverallTotal > 0).ToList();
+            True(overall.Count > 0, "directory ingest should report overall progress");
+            True(overall.Zip(overall.Skip(1), (a, b) => b.OverallDone >= a.OverallDone).All(x => x),
+                "overall progress should never reset between file batches");
+            True(reports.Any(p => p.Stage == "Embedding"
+                && p.OverallDetail.Contains("File batch", StringComparison.Ordinal)
+                && p.Detail.Contains("embedding batch", StringComparison.Ordinal)),
+                "embedding progress should identify both the file batch and embedding batch");
+        }
+
         public static async Task RagDirectoryDryRunReportsWithoutPersisting()
         {
             using var temp = new TempDir();
@@ -284,7 +311,7 @@ namespace Aether.Tests
             await File.WriteAllTextAsync(Path.Combine(docs, "long.txt"), new string('a', 8000));
 
             var dataset = new RagDataset { Name = "long-embedding" };
-            var strictEmbed = new MaxLengthEmbeddingService(maxChars: 1400);
+            var strictEmbed = new MaxLengthEmbeddingService(maxChars: 700);
             var pipeline = new RagPipeline(store, strictEmbed);
 
             await pipeline.IngestDirectoryAsync(dataset, docs);
@@ -292,11 +319,13 @@ namespace Aether.Tests
             var chunks = await store.GetChunksAsync(dataset.Id, includeEmbeddings: true);
             True(chunks.Count > 0, "ingest should store chunks even when source text is very long");
             True(chunks.All(c => c.Embedding.Length > 0), "all stored chunks should have embeddings");
+            True(strictEmbed.FailedAttempts > 0, "ingest should retry when the embedding backend rejects an oversized input");
         }
 
         private sealed class MaxLengthEmbeddingService : Aether.Rag.Embeddings.IEmbeddingService
         {
             private readonly int _maxChars;
+            public int FailedAttempts { get; private set; }
 
             public MaxLengthEmbeddingService(int maxChars)
             {
@@ -308,7 +337,10 @@ namespace Aether.Tests
             public Task<float[]> EmbedAsync(string text, CancellationToken ct = default)
             {
                 if (text.Length > _maxChars)
+                {
+                    FailedAttempts++;
                     throw new InvalidOperationException($"input too large for test embedding service: {text.Length} chars");
+                }
 
                 return Task.FromResult(new[] { 1f, text.Length % 17, text.Length % 31, 0.25f });
             }

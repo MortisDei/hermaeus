@@ -10,7 +10,14 @@ using System.Text.RegularExpressions;
 
 namespace Aether.Rag.Pipeline;
 
-public record IngestProgress(string Stage, int Done, int Total, string Detail = "");
+public record IngestProgress(
+    string Stage,
+    int Done,
+    int Total,
+    string Detail = "",
+    int OverallDone = 0,
+    int OverallTotal = 0,
+    string OverallDetail = "");
 
 /// <summary>
 /// Orchestrates the full ingest pipeline:
@@ -27,7 +34,8 @@ public sealed class RagPipeline
     private const int EmbedBatchSize = 10;
     private const int DirectoryFileBatchSize = 50;
     private const int MaxWebPageBytes = 2 * 1024 * 1024;
-    private const int MaxEmbeddingInputTokens = 320;
+    private const int MaxEmbeddingInputTokens = 192;
+    private static readonly int[] EmbeddingInputRetryTokenLimits = [MaxEmbeddingInputTokens, 128, 64];
 
     public RagPipeline(SqliteRagStore store, IEmbeddingService embed)
         : this(store, embed, null)
@@ -62,7 +70,9 @@ public sealed class RagPipeline
         if (files.Count == 0)
             throw new InvalidOperationException($"No .txt, .md, or .pdf files found in {directory}");
 
-        progress?.Report(new IngestProgress("Chunking", 0, files.Count, $"Found {files.Count} files"));
+        var fileBatchCount = (int)Math.Ceiling(files.Count / (double)DirectoryFileBatchSize);
+        var overallTotal = Math.Max(1, fileBatchCount * 3 + 2);
+        progress?.Report(new IngestProgress("Chunking", 0, files.Count, $"Found {files.Count} files", 0, overallTotal, $"File batch 0 of {fileBatchCount}"));
 
         var report = new IngestReport();
 
@@ -78,6 +88,10 @@ public sealed class RagPipeline
         for (int batchStart = 0; batchStart < files.Count; batchStart += DirectoryFileBatchSize)
         {
             ct.ThrowIfCancellationRequested();
+            var batchIndex = batchStart / DirectoryFileBatchSize;
+            var batchNumber = batchIndex + 1;
+            var batchStepBase = batchIndex * 3;
+            var batchLabel = $"File batch {batchNumber} of {fileBatchCount}";
             var fileBatch = files.Skip(batchStart).Take(DirectoryFileBatchSize).ToList();
             var batchChunks = new List<RagChunk>();
             var batchParents = new List<RagChunk>();
@@ -91,7 +105,7 @@ public sealed class RagPipeline
                 var document = await LoadLocalDocumentAsync(file, health, ct);
                 if (document is null)
                 {
-                    progress?.Report(new IngestProgress("Chunking", absoluteFileIndex + 1, files.Count, $"Skipped {Path.GetFileName(file)}"));
+                    progress?.Report(new IngestProgress("Chunking", absoluteFileIndex + 1, files.Count, $"Skipped {Path.GetFileName(file)}", batchStepBase, overallTotal, batchLabel));
                     continue;
                 }
 
@@ -102,7 +116,7 @@ public sealed class RagPipeline
                     if (options.DuplicatePolicy == IngestDuplicatePolicy.SkipIfUnchanged)
                     {
                         report.Documents.Add(new DocumentIngestReport { Path = document.SourcePath, Status = DocumentIngestStatus.SkippedUnchanged, Message = "Source unchanged, skipping" });
-                        progress?.Report(new IngestProgress("Chunking", absoluteFileIndex + 1, files.Count, $"Skipped unchanged: {Path.GetFileName(file)}"));
+                        progress?.Report(new IngestProgress("Chunking", absoluteFileIndex + 1, files.Count, $"Skipped unchanged: {Path.GetFileName(file)}", batchStepBase, overallTotal, batchLabel));
                         continue;
                     }
                     else if (options.DuplicatePolicy == IngestDuplicatePolicy.ReportOnly)
@@ -156,16 +170,16 @@ public sealed class RagPipeline
                 }
 
                 totalChunksSeen += textChunks.Count;
-                progress?.Report(new IngestProgress("Chunking", absoluteFileIndex + 1, files.Count, $"{document.Title} -> {textChunks.Count} chunks"));
+                progress?.Report(new IngestProgress("Chunking", absoluteFileIndex + 1, files.Count, $"{document.Title} -> {textChunks.Count} chunks", batchStepBase, overallTotal, batchLabel));
             }
 
             if (options.DryRun || batchChunks.Count == 0)
                 continue;
 
-            await EmbedChunksAsync(dataset, batchChunks, progress, ct);
+            await EmbedChunksAsync(dataset, batchChunks, progress, ct, batchStepBase + 1, overallTotal, batchLabel);
 
             progress?.Report(new IngestProgress("Storing", Math.Min(batchStart + fileBatch.Count, files.Count), files.Count,
-                $"Writing file batch {batchStart / DirectoryFileBatchSize + 1} to SQLite..."));
+                $"Writing {batchLabel.ToLowerInvariant()} to SQLite...", batchStepBase + 2, overallTotal, batchLabel));
             ct.ThrowIfCancellationRequested();
             await _store.DeleteChunksForSourcesAsync(dataset.Id, changedSourcePaths, ct);
 
@@ -188,7 +202,7 @@ public sealed class RagPipeline
         }
 
         // ── 3. BM25 stats ─────────────────────────────────────────────────
-        progress?.Report(new IngestProgress("Indexing", 0, 1, "Building BM25 stats..."));
+        progress?.Report(new IngestProgress("Indexing", 0, 1, "Building BM25 stats...", overallTotal - 1, overallTotal, "Final index"));
         var allStoredChunks = await _store.GetChunksAsync(dataset.Id, includeEmbeddings: false, ct);
         var stats = Bm25Scorer.BuildStats(allStoredChunks);
         await _store.SaveBm25StatsAsync(dataset.Id, stats, ct);
@@ -198,7 +212,7 @@ public sealed class RagPipeline
         await _store.SaveDatasetAsync(dataset, ct);
 
         progress?.Report(new IngestProgress("Done", allStoredChunks.Count, allStoredChunks.Count,
-            $"{totalChunksSeen} chunks processed from {files.Count} files. Health: {BuildHealthSummary(health)}"));
+            $"{totalChunksSeen} chunks processed from {files.Count} files. Health: {BuildHealthSummary(health)}", overallTotal, overallTotal, "Complete"));
 
         report.Health = health;
         return report;
@@ -461,25 +475,38 @@ public sealed class RagPipeline
         await StoreChunksAsync(dataset, allChunks, parentChunks, changedSourcePaths, progress, ct);
     }
 
-    private async Task EmbedChunksAsync(RagDataset dataset, List<RagChunk> allChunks, IProgress<IngestProgress>? progress, CancellationToken ct)
+    private async Task EmbedChunksAsync(
+        RagDataset dataset,
+        List<RagChunk> allChunks,
+        IProgress<IngestProgress>? progress,
+        CancellationToken ct,
+        int overallDone = 0,
+        int overallTotal = 0,
+        string overallDetail = "")
     {
         int total = allChunks.Count;
-        progress?.Report(new IngestProgress("Embedding", 0, total, $"Embedding {total} chunks..."));
+        var embeddingBatchTotal = (int)Math.Ceiling(total / (double)EmbedBatchSize);
+        progress?.Report(new IngestProgress("Embedding", 0, total, $"Embedding {total} chunks...", overallDone, overallTotal, overallDetail));
 
         for (int i = 0; i < allChunks.Count; i += EmbedBatchSize)
         {
             ct.ThrowIfCancellationRequested();
             var batch = allChunks.Skip(i).Take(EmbedBatchSize).ToList();
-            var texts = batch.Select(c => BuildEmbeddingInput(c, dataset.Config)).ToList();
-            var embeddings = await _embed.EmbedBatchAsync(texts, ct);
+            var embeddings = await EmbedBatchWithRetryAsync(batch, dataset.Config, ct);
             if (embeddings.Count > 0)
                 dataset.Config.EmbeddingDimensions = embeddings[0].Length;
 
             for (int j = 0; j < batch.Count; j++)
                 batch[j].Embedding = embeddings[j];
 
+            var embeddingBatchNumber = i / EmbedBatchSize + 1;
             progress?.Report(new IngestProgress("Embedding", Math.Min(i + EmbedBatchSize, total), total,
-                $"Batch {i / EmbedBatchSize + 1}"));
+                string.IsNullOrWhiteSpace(overallDetail)
+                    ? $"Embedding batch {embeddingBatchNumber} of {embeddingBatchTotal}"
+                    : $"{overallDetail}: embedding batch {embeddingBatchNumber} of {embeddingBatchTotal}",
+                overallDone,
+                overallTotal,
+                overallDetail));
         }
     }
 
@@ -576,10 +603,37 @@ public sealed class RagPipeline
             File.GetLastWriteTimeUtc(file));
     }
 
-    private static string BuildEmbeddingInput(RagChunk chunk, RagDatasetConfig cfg)
+    private async Task<List<float[]>> EmbedBatchWithRetryAsync(IReadOnlyList<RagChunk> batch, RagDatasetConfig cfg, CancellationToken ct)
+    {
+        Exception? lastError = null;
+        foreach (var tokenLimit in EmbeddingInputRetryTokenLimits)
+        {
+            var texts = batch.Select(c => BuildEmbeddingInput(c, cfg, tokenLimit)).ToList();
+            try
+            {
+                return await _embed.EmbedBatchAsync(texts, ct);
+            }
+            catch (InvalidOperationException ex) when (LooksLikeOversizedEmbeddingInput(ex))
+            {
+                lastError = ex;
+            }
+        }
+
+        throw lastError ?? new InvalidOperationException("Embedding failed for an unknown reason.");
+    }
+
+    private static bool LooksLikeOversizedEmbeddingInput(Exception ex)
+    {
+        var message = ex.Message;
+        return message.Contains("too large", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("physical batch size", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("context size", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string BuildEmbeddingInput(RagChunk chunk, RagDatasetConfig cfg, int maxTokens = MaxEmbeddingInputTokens)
     {
         var text = BuildEmbeddingText(chunk, cfg);
-        return ClampEmbeddingInput(text, MaxEmbeddingInputTokens);
+        return ClampEmbeddingInput(text, maxTokens);
     }
 
     private static string ClampEmbeddingInput(string text, int maxTokens)

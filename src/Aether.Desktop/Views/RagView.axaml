@@ -448,14 +448,8 @@
                                                Text="{Binding IngestStage}"
                                                FontSize="12" Opacity="0.6" />
                                     <TextBlock Grid.Column="1"
-                                               FontSize="12" Opacity="0.5">
-                                        <TextBlock.Text>
-                                            <MultiBinding StringFormat="{}{0} / {1}">
-                                                <Binding Path="IngestDone" />
-                                                <Binding Path="IngestTotal" />
-                                            </MultiBinding>
-                                        </TextBlock.Text>
-                                    </TextBlock>
+                                               Text="{Binding IngestProgressLabel}"
+                                               FontSize="12" Opacity="0.5" />
                                 </Grid>
                                 <ProgressBar Value="{Binding IngestDone}"
                                              Maximum="{Binding IngestTotal}"

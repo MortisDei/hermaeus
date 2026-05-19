@@ -135,7 +135,10 @@ public partial class RagViewModel : ObservableObject
     [ObservableProperty] private bool        _isError;
     [ObservableProperty] private int         _ingestDone;
     [ObservableProperty] private int         _ingestTotal;
+    [ObservableProperty] private int         _ingestStageDone;
+    [ObservableProperty] private int         _ingestStageTotal;
     [ObservableProperty] private string      _ingestStage     = string.Empty;
+    [ObservableProperty] private string      _ingestProgressLabel = string.Empty;
     [ObservableProperty] private bool        _useParentChild;
     [ObservableProperty] private float       _groundingScore;
     [ObservableProperty] private bool        _hasAnswer;
@@ -315,8 +318,11 @@ public partial class RagViewModel : ObservableObject
             var progress = new Progress<IngestProgress>(p =>
             {
                 IngestStage = p.Stage;
-                IngestDone  = p.Done;
-                IngestTotal = p.Total;
+                IngestStageDone = p.Done;
+                IngestStageTotal = p.Total;
+                IngestDone = p.OverallTotal > 0 ? p.OverallDone : p.Done;
+                IngestTotal = p.OverallTotal > 0 ? p.OverallTotal : p.Total;
+                IngestProgressLabel = BuildIngestProgressLabel(p);
                 StatusMessage = p.Detail;
             });
 
@@ -380,6 +386,7 @@ public partial class RagViewModel : ObservableObject
         {
             IsIngesting = false;
             IngestStage = string.Empty;
+            IngestProgressLabel = string.Empty;
             _ingestCts?.Dispose();
             _ingestCts = null;
             if (restoreServices is not null)
@@ -395,6 +402,22 @@ public partial class RagViewModel : ObservableObject
                 }
             }
         }
+    }
+
+    private static string BuildIngestProgressLabel(IngestProgress progress)
+    {
+        var current = progress.Total > 0
+            ? $"{progress.Done:N0} / {progress.Total:N0}"
+            : $"{progress.Done:N0}";
+
+        if (progress.OverallTotal <= 0)
+            return current;
+
+        var overallPercent = Math.Clamp(progress.OverallDone / (double)progress.OverallTotal, 0, 1);
+        var overall = $"{overallPercent:P0}";
+        return string.IsNullOrWhiteSpace(progress.OverallDetail)
+            ? $"{overall} overall - {current}"
+            : $"{overall} overall - {progress.OverallDetail} - {current}";
     }
 
     [RelayCommand]

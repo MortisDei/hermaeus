@@ -27,6 +27,8 @@ limit.
   notification when errors or warnings are found.
 - Managed Services now normalize duplicate default Chat/Embeddings cards and
   stop a running peer on the same port before starting another managed server.
+- RAG ingest progress now separates overall progress from current-stage
+  progress and labels file batches alongside embedding batches.
 
 ### Fixed
 
@@ -42,6 +44,8 @@ limit.
 - RAG ingest now starts the managed embedding server after suspending competing
   LLM services, so a shared chat/embedding port works when only one process is
   active.
+- RAG ingest now retries oversized embedding inputs with smaller clamps instead
+  of failing the full run on one chunk.
 
 ### Tests
 
@@ -55,6 +59,8 @@ limit.
   embedding-model migration.
 - Added regression coverage for Doctor startup warning notifications.
 - Added regression coverage for duplicate managed service card cleanup.
+- Added regression coverage for non-resetting RAG ingest progress and oversized
+  embedding-input retries.
 
 ## [0.9.15-alpha] - 2026-05-18
 
