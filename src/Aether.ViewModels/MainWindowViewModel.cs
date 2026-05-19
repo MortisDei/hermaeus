@@ -161,6 +161,7 @@ public partial class MainWindowViewModel : ObservableObject
 
             await Rag.LoadDatasetsAsync();
             await Agent.LoadAsync();
+            await Benchmarks.LoadAsync();
             await Services.AutoStartAllAsync();
             await Chat.LoadModelsAsync();
             RunBackgroundTaskAsync("run startup doctor scan", () => Doctor.RunStartupScanAsync());
