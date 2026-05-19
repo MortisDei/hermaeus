@@ -24,6 +24,8 @@ public static class HarnessCases
     [
         [new HarnessCase("redaction hides common secrets and home path", ServiceTests.RedactionHidesSecrets)],
         [new HarnessCase("benchmark db creates starter suites and records runs", ServiceTests.BenchmarkDbCreatesAndRecordsRuns)],
+        [new HarnessCase("benchmark starter suites include expanded deterministic set", ServiceTests.BenchmarkStarterSuitesIncludeExpandedDeterministicSet)],
+        [new HarnessCase("benchmark single iteration exports cold run mode", ServiceTests.BenchmarkSingleIterationRunExportsColdRunMode)],
         [new HarnessCase("benchmark run history can be cleared", ServiceTests.BenchmarkRunHistoryCanBeCleared)],
         [new HarnessCase("benchmark scoring and ranking are deterministic", ServiceTests.BenchmarkScoringAndRanking)],
         [new HarnessCase("system info returns safe fallback values", ServiceTests.SystemInfoSafeFallback)],

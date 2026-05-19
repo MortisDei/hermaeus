@@ -9,6 +9,27 @@ FIFO for changelog entries, 10 versions in this file max. Remove older entries
 and append them to `docs/changelog-archive.md` to maintain the 10 version
 limit.
 
+## [0.9.16-alpha] - 2026-05-19
+
+### Changed
+
+- Project version metadata bumped to `0.9.16-alpha`.
+- Single-iteration benchmark runs now report run mode as `Cold` instead of
+  `ColdWarm` in saved runs and exports.
+- Built-in benchmark starter suites now include code generation, structured
+  output stress, multi-step reasoning, Aether workflows, and hallucination
+  resistance suites.
+
+### Fixed
+
+- Benchmark rankings now collapse multiple runs for the same model to the best
+  scoring run as intended.
+
+### Tests
+
+- Added regression coverage for expanded starter-suite seeding and
+  single-iteration benchmark export run-mode labeling.
+
 ## [0.9.15-alpha] - 2026-05-18
 
 ### Changed
@@ -342,68 +363,3 @@ limit.
 - Toast history trimming now preserves newest-first ordering when the cap is
   exceeded.
 - Project version metadata bumped to `0.9.7-alpha`.
-
-## [0.9.6-alpha] - 2026-05-17
-
-### Fixed
-
-- Memories now shows the empty state only when there are no memories.
-- Removed the placeholder Phi-4 SHA256 entry so setup no longer fails every
-  default model download against a known-wrong hash.
-- Local fallback secrets now use a stable per-data-root key file and
-  `Rfc2898DeriveBytes` instead of hostname-derived hand-rolled PBKDF2.
-- TTS settings now unsubscribes process status events during shutdown.
-- Chat regeneration now uses stored original message text and attachment paths
-  instead of parsing the display-only attachment summary.
-- Background panel load failures now surface a warning toast as well as a
-  runtime log entry.
-- Conversation FTS rebuilds now run only when the FTS table is missing or a
-  schema migration actually changes columns.
-- Conversation auto-summary throttling now caches the last summary timestamp
-  per conversation to avoid a DB read on every assistant response.
-- Routine settings saves now skip data-root migration unless a previous data
-  root is explicitly provided, preventing startup crashes when the selected
-  data root already contains existing databases.
-- RAG ingest embedding failures now return actionable guidance when llama.cpp
-  responds with 501/404, including a hint to enable `--embeddings` and point
-  `LlamaCppBaseUrl` at an embeddings-capable server.
-- Embeddings-mode managed server launches now default to `--pooling mean`
-  (unless explicitly overridden) to keep llama.cpp OpenAI-compatible
-  embeddings requests from failing with pooling type `none`.
-- RAG ingest now clamps per-chunk embedding input size before calling
-  `/v1/embeddings`, preventing single oversized chunks from failing a full
-  ingest run on servers with smaller embedding token limits.
-- Doctor now detects missing embedding models and offers one-click download
-  from Hugging Face (nomic-embed-text-v1.5-Q4_K_M by default), automatically
-  configuring the embedding server model path.
-- RAG ingest now pauses non-embedding LLM servers and TTS services during
-  document indexing to reduce memory pressure, then restores them after
-  ingest completion (or cancellation/failure).
-- First-run startup now skips heavyweight panel loading until the setup wizard
-  is completed, so the wizard appears sooner and initial launch feels snappier.
-- Toast notifications now use a toast-shaped toolbar icon, and the stored
-  notification history shows the newest items first.
-
-### Changed
-
-- Draft patch preview decisions now use async callbacks rather than
-  fire-and-forget `Action` callbacks.
-- Backups now exclude the local fallback secret key file, and restore supports
-  an explicit overwrite path for future UI use.
-- Starter benchmark checks now use more specific expected keywords.
-- Project version metadata bumped to `0.9.6-alpha`.
-
-## [0.9.5-alpha] - 2026-05-16
-
-### Added
-
-- Chat context inspector and trace viewer for transparent model calls.
-- Compare Models workflow for side-by-side prompt checks across selected models.
-- RAG dataset manager with lifecycle, embedding, stale/missing source, and
-  reindex status details.
-- Privacy audit dashboard for remote-provider, local-server, secret, log, and
-  backup visibility.
-
-### Changed
-
-- Project version metadata bumped to `0.9.5-alpha`.

@@ -52,16 +52,60 @@ namespace Aether.Tests
 
             var suite = BenchmarkService.StarterSuites().First();
             suite.MaxCases = 1;
-            await service.SaveSuiteAsync(suite);
 
             var suites = await service.GetSuitesAsync();
-            True(suites.Any(s => s.Id == suite.Id), "saved suite should be listed");
+            Equal(12, suites.Count, "fresh benchmark db should seed all starter suites");
+            True(suites.Any(s => s.Id == suite.Id), "starter suite should be listed");
 
             var run = await service.RunAsync(suite, new LlmModel { Id = "fake-agent", Name = "Fake Agent", Provider = "Test" });
             True(run.Results.Count > 0, "benchmark run should record results");
             var runs = await service.GetRunsAsync();
             Equal(1, runs.Count, "recorded run should be listed");
             True(File.Exists(Path.Combine(settings.Settings.DataManagement.DataRootDirectory, "benchmarks.db")), "benchmark db should be created");
+        }
+
+        public static Task BenchmarkStarterSuitesIncludeExpandedDeterministicSet()
+        {
+            var suites = BenchmarkService.StarterSuites();
+            var ids = suites.Select(s => s.Id).ToHashSet(StringComparer.Ordinal);
+
+            Equal(12, suites.Count, "starter suite count should include the original seven plus five expanded suites");
+            True(ids.IsSupersetOf([
+                "speed-smoke",
+                "instruction-following",
+                "reasoning-light",
+                "rag-answer-style",
+                "refusal-safety",
+                "coding-assistant",
+                "context-pressure",
+                "code-generation",
+                "structured-output-stress",
+                "multi-step-reasoning",
+                "aether-workflows",
+                "hallucination-resistance"
+            ]), "starter suites should include every built-in suite id");
+            True(suites.Single(s => s.Id == "hallucination-resistance").Cases.All(c => c.ShouldRefuse), "hallucination resistance cases should reward uncertainty/refusal behavior");
+            True(suites.Single(s => s.Id == "code-generation").Cases.All(c => c.ExpectedRegexes.Count > 0), "code generation cases should have structural regex checks");
+            return Task.CompletedTask;
+        }
+
+        public static async Task BenchmarkSingleIterationRunExportsColdRunMode()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var service = new BenchmarkService(settings, new FakeLlm(), new FakeSystemInfo());
+
+            var suite = BenchmarkService.StarterSuites().First();
+            suite.MaxCases = 1;
+            suite.IterationsPerCase = 1;
+
+            var run = await service.RunAsync(suite, new LlmModel { Id = "fake-agent", Name = "Fake Agent", Provider = "Test" });
+            Equal("Cold", run.RunMode, "single-iteration benchmark runs should be labeled cold");
+
+            var exportPath = await service.ExportAsync(run.Id, temp.PathFor("exports"));
+            var markdown = await File.ReadAllTextAsync(exportPath);
+            True(markdown.Contains("- Run mode: `Cold`", StringComparison.Ordinal), "markdown export should show cold run mode");
         }
 
         public static async Task BenchmarkRunHistoryCanBeCleared()

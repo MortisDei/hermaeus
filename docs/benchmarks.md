@@ -23,7 +23,8 @@ Runs record the following metrics and metadata:
 - Run metadata including model identity, backend/runtime, context size,
 	sampler settings, app version, OS, CPU, RAM, and GPU summary
 - Suite version, case version, scoring profile, and run mode
-- Cold and warm phase attempts where possible, with repeated iterations per case
+- Cold-only single-iteration runs, or cold and warm phase attempts when suites
+	use repeated iterations per case
 
 Runs are exported to JSON, Markdown, and CSV so the full metadata set can be
 reviewed later.
@@ -56,9 +57,10 @@ than single-run measurements.
 Benchmarks distinguish cold-start measurements from warm-run measurements where
 possible.
 
-- Cold runs include model load or startup overhead.
-- Warm runs measure already-loaded model behaviour.
-- Repeated iterations help separate startup noise from steady-state speed.
+- Cold runs have no prior KV cache state for the prompt.
+- Warm runs are only reported when a suite uses more than one iteration per
+	case, allowing later passes of the same prompt to reuse cached prefill state.
+- Repeated iterations help separate cache-state effects from steady-state speed.
 
 ### Built-In Starter Suites
 
@@ -71,6 +73,12 @@ Aether includes starter suites covering:
 - Refusal behaviour for insufficient-context safety checks
 - Coding assistant checks for logs, configuration, and safe next steps
 - Context pressure checks for medium prompt summarisation and trade-offs
+- Code generation checks for structurally plausible function output
+- Structured output stress checks for nested JSON and enumerated formats
+- Multi-step reasoning checks for intermediate working and final answers
+- Aether workflow checks for summary, memory marker, and system prompt tasks
+- Hallucination resistance checks for uncertainty on fictional or unverifiable
+	claims
 
 ### Suite Versioning
 
@@ -133,11 +141,13 @@ The starter suites are organised by purpose:
 
 - Performance suites: first token, throughput, long context, memory pressure
 - Behaviour suites: instruction following, refusal behaviour, formatting,
-	tool-call style
+	structured output, hallucination resistance, tool-call style
 - RAG suites: grounded answer style, citation correctness, refusal when
 	unsupported, source faithfulness
 - Coding suites: patch explanation, small bug diagnosis, config troubleshooting,
-	command suggestion safety
+	command suggestion safety, structural code generation
+- Aether workflow suites: conversation summarisation, memory marker extraction,
+	and assistant system prompt generation
 
 For Aether specifically, a local dev assistant suite should also cover log,
 config, and code excerpt analysis with safe next-step suggestions and no
