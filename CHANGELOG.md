@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Aether will be documented in this file. Append new versions above the previous version.
+All notable changes to Aether will be documented in this file. Append newapp versions above the previous version (not the bottom of the doc or where ever feels right at the time).
 
 The project follows semantic versioning once public release candidates begin.
 Pre-1.0 versions may still change internal APIs and storage details.
@@ -9,7 +9,21 @@ FIFO for changelog entries, 10 versions in this file max. Remove older entries
 and append them to `docs/changelog-archive.md` to maintain the 10 version
 limit.
 
-## [0.9.16-alpha] - 2026-05-19
+## [0.9.17-alpha] - Placeholder
+
+### Changed
+
+
+
+### Fixed
+
+
+
+### Tests
+
+
+
+## [0.9.16-alpha] - Unreleased
 
 ### Added
 
@@ -35,6 +49,18 @@ limit.
   stop a running peer on the same port before starting another managed server.
 - RAG ingest progress now separates overall progress from current-stage
   progress and labels file batches alongside embedding batches.
+ - Managed llama.cpp chat and embedding defaults now use separate high localhost
+  ports so both servers can run at once without colliding with common scan
+  targets.
+- RAG now uses a dedicated embedding base URL, so embedding requests can point
+  at a separate embeddings-capable server while chat keeps using the chat
+  server endpoint.
+- Managed Services now show the `--embeddings` toggle only on the Embeddings
+  server card, which removes the confusing checkbox from the Chat card.
+- RAG settings now expose the embedding server base URL next to the embedding
+  model selector.
+- Benchmark view startup continues to load benchmark data before display, so
+  the panel no longer opens as an empty black canvas.   
 
 ### Fixed
 
@@ -67,6 +93,8 @@ limit.
 - Added regression coverage for duplicate managed service card cleanup.
 - Added regression coverage for non-resetting RAG ingest progress and oversized
   embedding-input retries.
+- Verified with `dotnet build` and `dotnet test` after the split-endpoint and
+  UI changes.
 
 ## [0.9.15-alpha] - 2026-05-18
 
@@ -400,4 +428,3 @@ limit.
   does not report Linux global hotkeys as a problem.
 - Toast history trimming now preserves newest-first ordering when the cap is
   exceeded.
-- Project version metadata bumped to `0.9.7-alpha`.
