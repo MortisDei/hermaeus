@@ -70,6 +70,7 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
 
     public Action<string>? RequestFilePicker  { get; set; }
     public Action<string>? RequestFolderPicker { get; set; }
+    public Func<ServerProcessViewModel, Task>? BeforeStartAsync { get; set; }
 
     public ServerProcessViewModel(
         ServerConfig config,
@@ -128,6 +129,8 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
         ApplyTuneProfileIfAvailable();
         SyncToConfig();
         await SaveConfigAsync();
+        if (BeforeStartAsync is not null)
+            await BeforeStartAsync(this);
         await _mgr.StartAsync(BuildConfig(), ct);
     }
 
@@ -491,6 +494,7 @@ public partial class ServicesViewModel : ObservableObject
 
     private void Rebuild()
     {
+        Aether.Services.SettingsService.NormalizeManagedServers(_settings.Settings.ManagedServers);
         var existing = Servers.ToDictionary(s => s.Id);
 
         foreach (var srv in Servers) srv.PropertyChanged -= OnServerPropertyChanged;
@@ -513,6 +517,7 @@ public partial class ServicesViewModel : ObservableObject
                 ? current
                 : new ServerProcessViewModel(cfg, _settings, _redactor, _trust, _toasts, _runtimeLogs);
 
+            vm.BeforeStartAsync = StopSamePortPeersBeforeStartAsync;
             vm.PropertyChanged += OnServerPropertyChanged;
             Servers.Add(vm);
         }
@@ -604,6 +609,15 @@ public partial class ServicesViewModel : ObservableObject
         return await Task.FromResult(suspended);
     }
 
+    public async Task<IReadOnlyList<string>> PrepareEmbeddingServerForWorkAsync()
+    {
+        var suspended = await StopRunningNonEmbeddingServersAsync();
+        var embeddingServer = Servers.FirstOrDefault(s => s.EmbeddingsMode);
+        if (embeddingServer is not null)
+            await embeddingServer.StartIfStoppedAsync();
+        return suspended;
+    }
+
     public async Task RestartServersAsync(IEnumerable<string> serverIds)
     {
         foreach (var serverId in serverIds)
@@ -629,6 +643,20 @@ public partial class ServicesViewModel : ObservableObject
             return;
 
         await server.SelectModelAndRestartAsync(modelPath, ct);
+    }
+
+    private Task StopSamePortPeersBeforeStartAsync(ServerProcessViewModel starting)
+    {
+        foreach (var peer in Servers)
+        {
+            if (ReferenceEquals(peer, starting))
+                continue;
+
+            if (peer.Port == starting.Port && peer.IsRunning)
+                peer.StopIfRunning();
+        }
+
+        return Task.CompletedTask;
     }
 
     private void OnServerPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)

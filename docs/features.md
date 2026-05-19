@@ -86,6 +86,10 @@
 - Runtime profiles for `llama.cpp`, Ollama, and OpenAI-compatible endpoints.
 - Managed `llama-server` start/stop, auto-start, logs, and GPU auto-tune that
   verifies GPU layer candidates before saving a per-GGUF tuned profile.
+- Managed Chat and Embeddings cards are normalized so duplicate default cards
+  are removed. Starting a managed server stops any running peer on the same
+  port first, allowing Chat and Embeddings to share a port when only one is
+  active.
 - Compare Models provides an in-chat practical comparison path for trying the
   same prompt across multiple visible models before choosing one for normal
   conversation.

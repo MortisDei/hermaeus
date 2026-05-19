@@ -1007,6 +1007,29 @@ namespace Aether.Tests
                 "settings should keep overrides that differ from the global memory setting");
         }
 
+        public static async Task SettingsSaveDeduplicatesDefaultManagedServers()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            var firstChat = new ServerConfig { Name = "Chat", EmbeddingsMode = false, Port = 8080 };
+            var duplicateChat = new ServerConfig { Name = "Chat", EmbeddingsMode = false, Port = 8080 };
+            var firstEmbedding = new ServerConfig { Name = "Embeddings", EmbeddingsMode = true, Port = 8080 };
+            var duplicateEmbedding = new ServerConfig { Name = "Embeddings", EmbeddingsMode = true, Port = 8080 };
+            settings.Settings.ManagedServers =
+            [
+                firstChat,
+                duplicateChat,
+                firstEmbedding,
+                duplicateEmbedding
+            ];
+
+            await settings.SaveAsync();
+
+            Equal(2, settings.Settings.ManagedServers.Count, "default managed server cards should not duplicate");
+            Equal(1, settings.Settings.ManagedServers.Count(s => !s.EmbeddingsMode && s.Name == "Chat"), "one chat card should remain");
+            Equal(1, settings.Settings.ManagedServers.Count(s => s.EmbeddingsMode && s.Name == "Embeddings"), "one embeddings card should remain");
+        }
+
         public static async Task RuntimeProfileValidation()
         {
             using var temp = new TempDir();

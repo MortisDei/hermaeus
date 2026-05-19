@@ -272,7 +272,7 @@ public partial class RagViewModel : ObservableObject
             // Suspend competing services if available
             if (_services is not null)
             {
-                var suspendedServerIds = await _services.StopRunningNonEmbeddingServersAsync();
+                var suspendedServerIds = await _services.PrepareEmbeddingServerForWorkAsync();
                 var xttsWasRunning = _xtts?.IsRunning == true;
                 var kokoroWasRunning = _kokoro?.IsRunning == true;
                 

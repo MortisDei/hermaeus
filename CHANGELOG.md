@@ -25,6 +25,8 @@ limit.
   chat/code GGUFs no longer appear as RAG embedding choices.
 - Aether Doctor now runs in the background after launch and raises a startup
   notification when errors or warnings are found.
+- Managed Services now normalize duplicate default Chat/Embeddings cards and
+  stop a running peer on the same port before starting another managed server.
 
 ### Fixed
 
@@ -37,6 +39,9 @@ limit.
   reranker path has been saved.
 - Doctor now installs the pinned nomic embedding model under `Models/embed` and
   migrates a verified root-level copy into that folder.
+- RAG ingest now starts the managed embedding server after suspending competing
+  LLM services, so a shared chat/embedding port works when only one process is
+  active.
 
 ### Tests
 
@@ -49,6 +54,7 @@ limit.
 - Added regression coverage for dedicated embedding model discovery and Doctor
   embedding-model migration.
 - Added regression coverage for Doctor startup warning notifications.
+- Added regression coverage for duplicate managed service card cleanup.
 
 ## [0.9.15-alpha] - 2026-05-18
 

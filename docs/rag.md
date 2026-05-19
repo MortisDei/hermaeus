@@ -33,8 +33,9 @@ traces, versioned SQLite schema migrations, and native eval support.
   embedding backend health until a dedicated embedding model is installed or
   selected, avoiding connection-refused noise before setup is complete.
 - The embedding model is critical for large ingests. **During ingest, Aether automatically
-  pauses other LLM servers and TTS services** to reduce memory pressure, then restores
-  them after ingestion completes.
+  pauses other LLM servers and TTS services** to reduce memory pressure, starts
+  the managed embedding server if needed, then restores suspended services after
+  ingestion completes.
 - For 6 GB VRAM systems, nomic-embed-text-v1.5-Q4_K_M (Q4 quantization) is recommended.
 
 ## Features

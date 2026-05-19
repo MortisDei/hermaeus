@@ -36,6 +36,43 @@ public sealed class SettingsService : ISettingsService
         return string.IsNullOrWhiteSpace(configured) ? DefaultDir : Path.GetFullPath(configured);
     }
 
+    public static void NormalizeManagedServers(List<ServerConfig> servers)
+    {
+        if (servers.Count == 0)
+        {
+            servers.Add(CreateDefaultServer(false));
+            servers.Add(CreateDefaultServer(true));
+            return;
+        }
+
+        var seenIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var seenDefaultRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (var i = servers.Count - 1; i >= 0; i--)
+        {
+            var server = servers[i];
+            if (string.IsNullOrWhiteSpace(server.Id))
+                server.Id = Guid.NewGuid().ToString();
+
+            if (!seenIds.Add(server.Id))
+            {
+                servers.RemoveAt(i);
+                continue;
+            }
+
+            if (!IsDefaultManagedServerName(server))
+                continue;
+
+            var role = server.EmbeddingsMode ? "embeddings" : "chat";
+            if (!seenDefaultRoles.Add(role))
+                servers.RemoveAt(i);
+        }
+
+        if (!servers.Any(server => !server.EmbeddingsMode))
+            servers.Insert(0, CreateDefaultServer(false));
+        if (!servers.Any(server => server.EmbeddingsMode))
+            servers.Add(CreateDefaultServer(true));
+    }
+
     public async Task LoadAsync()
     {
         var changed = false;
@@ -158,6 +195,8 @@ public sealed class SettingsService : ISettingsService
 
     private static void NormalizeSettings(AppSettings settings)
     {
+        NormalizeManagedServers(settings.ManagedServers);
+
         if (settings.Memory.EnabledPerConversation.Count == 0)
             return;
 
@@ -177,6 +216,26 @@ public sealed class SettingsService : ISettingsService
             .Take(MaxPerConversationMemoryOverrides)
             .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
         settings.Memory.EnabledPerConversation = keep;
+    }
+
+    private static ServerConfig CreateDefaultServer(bool embeddingsMode) => new()
+    {
+        Name = embeddingsMode ? "Embeddings" : "Chat",
+        ExecutablePath = "llama-server",
+        Port = embeddingsMode ? 8081 : 8080,
+        ContextSize = embeddingsMode ? 2048 : 4096,
+        GpuLayers = 0,
+        Threads = 4,
+        EmbeddingsMode = embeddingsMode,
+        AutoStart = false
+    };
+
+    private static bool IsDefaultManagedServerName(ServerConfig server)
+    {
+        var name = server.Name.Trim();
+        return server.EmbeddingsMode
+            ? name.Equals("Embeddings", StringComparison.OrdinalIgnoreCase)
+            : name.Equals("Chat", StringComparison.OrdinalIgnoreCase);
     }
 
     private static IEnumerable<MigrationFile> EnumerateMigrationFiles(string root)
