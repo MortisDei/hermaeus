@@ -48,8 +48,12 @@ traces, versioned SQLite schema migrations, and native eval support.
 - Optional explicit web URLs (off by default).
 - Reindex diffing and corpus health warnings.
 - In-progress cancellation support.
-- The ingest pipeline now uses cancellable, batched embedding and storage steps
-  to reduce DB lock contention and make long ingests abortable from the UI.
+- Directory ingest processes local files in bounded file batches, embedding and
+  flushing each batch to SQLite before loading the next one. Large folders can
+  resume with **Skip unchanged** after an interrupted run instead of rebuilding
+  the whole corpus in memory.
+- The ingest pipeline uses cancellable, batched embedding and storage steps to
+  reduce DB lock contention and make long ingests abortable from the UI.
 - Large ingests report progress per embedding and storage batch so the UI can
   surface better feedback and cancel if needed.
 

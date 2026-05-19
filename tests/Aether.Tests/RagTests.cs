@@ -198,6 +198,40 @@ namespace Aether.Tests
             True(chunks.Count < 500, "cancellation during embedding should reduce final chunk count significantly");
         }
 
+        public static async Task RagDirectoryIngestPersistsCompletedFileBatches()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var store = new SqliteRagStore(settings);
+            await store.InitializeAsync();
+            var docs = temp.PathFor("docs");
+            Directory.CreateDirectory(docs);
+            for (var i = 0; i < 60; i++)
+                await File.WriteAllTextAsync(Path.Combine(docs, $"file-{i:D2}.txt"), $"batch checkpoint source {i} alpha beta gamma");
+
+            var dataset = new RagDataset { Name = "checkpointed-ingest" };
+            var pipeline = new RagPipeline(store, new FakeEmbeddingService());
+            using var cts = new CancellationTokenSource();
+            var progress = new InlineProgress(p =>
+            {
+                if (p.Stage == "Chunking" && p.Done > 50)
+                    cts.Cancel();
+            });
+
+            try
+            {
+                await pipeline.IngestDirectoryAsync(dataset, docs, progress, cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+
+            var chunks = await store.GetChunksAsync(dataset.Id, includeEmbeddings: false);
+            True(chunks.Any(c => c.SourceFile == "file-00.txt"), "completed file batches should be persisted before later cancellation");
+            False(chunks.Any(c => c.SourceFile == "file-59.txt"), "cancelled later batches should not be fully persisted");
+        }
+
         public static async Task RagIngestCancellationDuringStorage()
         {
             using var temp = new TempDir();
@@ -286,6 +320,18 @@ namespace Aether.Tests
                     result.Add(await EmbedAsync(text, ct));
                 return result;
             }
+        }
+
+        private sealed class InlineProgress : IProgress<IngestProgress>
+        {
+            private readonly Action<IngestProgress> _handler;
+
+            public InlineProgress(Action<IngestProgress> handler)
+            {
+                _handler = handler;
+            }
+
+            public void Report(IngestProgress value) => _handler(value);
         }
     }
 }

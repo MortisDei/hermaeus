@@ -24,11 +24,16 @@ limit.
 
 - Benchmark rankings now collapse multiple runs for the same model to the best
   scoring run as intended.
+- Directory RAG ingest now chunks, embeds, and stores local files in bounded
+  file batches instead of holding the full corpus and all embeddings in memory
+  until the end.
 
 ### Tests
 
 - Added regression coverage for expanded starter-suite seeding and
   single-iteration benchmark export run-mode labeling.
+- Added regression coverage for persisted directory-ingest file batches after
+  cancellation.
 
 ## [0.9.15-alpha] - 2026-05-18
 
