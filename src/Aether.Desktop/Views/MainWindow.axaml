@@ -287,7 +287,7 @@
                     <Border Width="360"
                             CornerRadius="8"
                             Padding="14"
-                            Background="#F2181818"
+                            Background="#181818"
                             BorderBrush="{DynamicResource AccentFillColorDefaultBrush}"
                             BorderThickness="1"
                             Opacity="1">

@@ -30,6 +30,7 @@ public sealed class DoctorService : IDoctorService
     private readonly ModelDownloadService _downloads;
     private readonly EmbeddingModelDownloadSpec _embeddingDownload;
     private readonly LlamaServerSetupService _llamaSetup;
+    private readonly IRuntimeLogService _runtimeLogs;
 
     public DoctorService(
         ISettingsService settings,
@@ -43,7 +44,8 @@ public sealed class DoctorService : IDoctorService
         IReranker reranker,
         ModelDownloadService? downloads = null,
         EmbeddingModelDownloadSpec? embeddingDownload = null,
-        LlamaServerSetupService? llamaSetup = null)
+        LlamaServerSetupService? llamaSetup = null,
+        IRuntimeLogService? runtimeLogs = null)
     {
         _settings = settings;
         _runtimes = runtimes;
@@ -57,6 +59,7 @@ public sealed class DoctorService : IDoctorService
         _downloads = downloads ?? new ModelDownloadService();
         _embeddingDownload = embeddingDownload ?? DefaultEmbeddingDownload;
         _llamaSetup = llamaSetup ?? new LlamaServerSetupService(_downloads);
+        _runtimeLogs = runtimeLogs ?? new RuntimeLogService();
     }
 
     public async Task<DoctorReport> ScanAsync(CancellationToken ct = default)
@@ -623,9 +626,15 @@ public sealed class DoctorService : IDoctorService
     {
         if (_reranker is Aether.Rag.Retrieval.OnnxCrossEncoderReranker onnx)
         {
-            return await onnx.InstallAssetsAsync(progress, ct);
+            var result = await onnx.InstallAssetsAsync(progress, ct);
+            if (!result)
+                _runtimeLogs.Log("Doctor", "Reranker asset installation failed");
+            else
+                _runtimeLogs.Log("Doctor", "Reranker assets installed successfully");
+            return result;
         }
 
+        _runtimeLogs.Log("Doctor", "Reranker installation skipped: reranker not available");
         return false;
     }
 
@@ -674,7 +683,9 @@ public sealed class DoctorService : IDoctorService
         var result = await _downloads.DownloadAsync(_embeddingDownload.Url, destinationPath, downloadProgress, ct);
         if (!result.Success)
         {
+            var errorMsg = $"Embedding model download failed: {result.Message}";
             progress?.Report(result.Message);
+            _runtimeLogs.Log("Doctor", errorMsg);
             return false;
         }
 
@@ -682,12 +693,15 @@ public sealed class DoctorService : IDoctorService
         if (!await _downloads.VerifyHashAsync(destinationPath, _embeddingDownload.Sha256, progress, ct))
         {
             TryDelete(destinationPath);
-            progress?.Report("Embedding model verification failed. The downloaded file was removed.");
+            var errorMsg = "Embedding model verification failed. The downloaded file was removed.";
+            progress?.Report(errorMsg);
+            _runtimeLogs.Log("Doctor", errorMsg);
             return false;
         }
 
         await ConfigureInstalledEmbeddingModelAsync(destinationPath, ct);
         progress?.Report($"Embedding model ready at {destinationPath}");
+        _runtimeLogs.Log("Doctor", $"Embedding model installed successfully at {destinationPath}");
         return true;
     }
 
@@ -701,6 +715,8 @@ public sealed class DoctorService : IDoctorService
         if (!result.Success || string.IsNullOrWhiteSpace(result.UpdatedPath))
         {
             progress?.Report(result.Log);
+            var errorMsg = $"llama.cpp update failed: {result.Log}";
+            _runtimeLogs.Log("Doctor", errorMsg);
             return false;
         }
 
@@ -709,6 +725,7 @@ public sealed class DoctorService : IDoctorService
 
         await _settings.SaveAsync();
         progress?.Report(result.Log);
+        _runtimeLogs.Log("Doctor", $"llama.cpp updated successfully: {result.UpdatedPath}");
         return true;
     }
 
