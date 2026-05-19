@@ -141,6 +141,18 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
+    private void ClearError()
+    {
+        if (Status == ServerStatus.Error)
+        {
+            ErrorMessage = string.Empty;
+            // Try to detect actual status by attempting minimal communication
+            // If process is actually running, the next status update will fix it
+            _mgr.RefreshStatus();
+        }
+    }
+
+    [RelayCommand]
     private async Task SaveConfigAsync()
     {
         SyncToConfig();

@@ -7,6 +7,8 @@ public class RagDataset
     public string Description { get; set; } = string.Empty;
     public int    ChunkCount  { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? LastIngestUtc { get; set; }
+    public string LastIngestPath { get; set; } = string.Empty;
     public RagDatasetConfig Config { get; set; } = new();
 }
 

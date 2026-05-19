@@ -98,6 +98,25 @@ public sealed class ServerProcessManager : IDisposable
         while (_logRing.TryDequeue(out _)) { }
     }
 
+    public void RefreshStatus()
+    {
+        if (Status == ServerStatus.Error)
+        {
+            // Check if process is actually alive
+            if (_process is not null && !_process.HasExited)
+            {
+                // Process is running despite error state, update status
+                ErrorMessage = string.Empty;
+                SetStatus(ServerStatus.Running);
+            }
+            else if (Status == ServerStatus.Error)
+            {
+                // Process is not running, move to stopped state
+                SetStatus(ServerStatus.Stopped);
+            }
+        }
+    }
+
     public void Dispose()
     {
         _monitorCts?.Cancel();

@@ -111,6 +111,7 @@ public partial class RagViewModel : ObservableObject
     private readonly KokoroProcessManager? _kokoro;
     private CancellationTokenSource? _cts;
     private CancellationTokenSource? _ingestCts;
+    private RagDataset? _targetDatasetForIngest;
 
     public ObservableCollection<RagDataset>       Datasets  { get; } = [];
     public ObservableCollection<RagSourceViewModel> Sources  { get; } = [];
@@ -296,13 +297,17 @@ public partial class RagViewModel : ObservableObject
 
             _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Rag,
                 $"RAG ingest started for dataset {NewDatasetName}"));
-            var ds = new RagDataset
+            
+            var ds = _targetDatasetForIngest ?? new RagDataset();
+            
+            if (_targetDatasetForIngest == null)
             {
-                Name        = NewDatasetName.Trim(),
-                Description = EnableWebLoader
+                // Creating a new dataset
+                ds.Name = NewDatasetName.Trim();
+                ds.Description = EnableWebLoader
                     ? "Ingested from explicitly configured web URLs"
-                    : $"Ingested from {IngestPath}",
-                Config      = new RagDatasetConfig
+                    : $"Ingested from {IngestPath}";
+                ds.Config = new RagDatasetConfig
                 {
                     UseParentChild = UseParentChild,
                     EmbeddingModel = _settings.Settings.Rag.EmbeddingModel,
@@ -312,8 +317,16 @@ public partial class RagViewModel : ObservableObject
                     ExtractionMode = EnableWebLoader
                         ? RagExtractionMode.WebUrl
                         : RagExtractionMode.TextMarkdown
-                }
-            };
+                };
+            }
+            else
+            {
+                // Adding to existing dataset - update path and timestamp
+                ds.LastIngestPath = EnableWebLoader
+                    ? WebUrlList.Trim()
+                    : IngestPath;
+                ds.LastIngestUtc = DateTime.UtcNow;
+            }
 
             var progress = new Progress<IngestProgress>(p =>
             {
@@ -363,6 +376,7 @@ public partial class RagViewModel : ObservableObject
                 WebUrlList = string.Empty;
             else
                 IngestPath = string.Empty;
+            _targetDatasetForIngest = null;
             StatusMessage   = "Ingestion complete.";
             _toasts.Show("RAG ingest complete", $"{report.Summary()}", ToastKind.Success);
             _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Rag,
@@ -424,6 +438,21 @@ public partial class RagViewModel : ObservableObject
     private void StopIngest()
     {
         _ingestCts?.Cancel();
+    }
+
+    [RelayCommand]
+    private void AddToDataset(RagDatasetManagerItemViewModel item)
+    {
+        if (item?.Dataset is null)
+            return;
+
+        _targetDatasetForIngest = item.Dataset;
+        NewDatasetName = item.Dataset.Name;
+        IngestPath = item.Dataset.LastIngestPath;
+        EnableWebLoader = item.Dataset.Config.EnableWebLoader;
+        
+        // Scroll to ingest section (could be done via UI event if needed)
+        StatusMessage = $"Ready to add documents to '{item.Dataset.Name}'. Select a directory or configure URLs below.";
     }
 
     [RelayCommand]

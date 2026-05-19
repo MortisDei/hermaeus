@@ -108,6 +108,13 @@ public sealed class DesktopIntegrationService : IDisposable
             return;
         }
 
+        if (modifiers == KeyModifiers.Control && e.Key == Key.Q)
+        {
+            Quit();
+            e.Handled = true;
+            return;
+        }
+
         if (e.Key == Key.Escape && _vm.ShowQuickChat)
         {
             _vm.HideQuickChat();
