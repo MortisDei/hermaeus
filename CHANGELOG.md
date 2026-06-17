@@ -9,7 +9,7 @@ FIFO for changelog entries, 10 versions in this file max. Remove older entries
 and append them to `docs/changelog-archive.md` to maintain the 10 version
 limit.
 
-## [0.9.17-alpha] - Placeholder
+## [0.9.17-alpha] - Unreleased
 
 ### Changed
 
@@ -23,7 +23,7 @@ limit.
 
 
 
-## [0.9.16-alpha] - Unreleased
+## [0.9.16-alpha] - 2026-05-18
 
 ### Added
 
