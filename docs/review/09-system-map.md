@@ -77,13 +77,15 @@ Tracked explicitly so no new work deepens them:
    **RESOLVED**. One `TraceRecord` schema, three projections.
 3. Context: chat and workspace both own "what the model sees" — **RESOLVED**.
    One `ContextPackBuilder` used by Chat, Agent, and RAG.
-4. Evaluation: benchmarks vs. compare vs. evals — **OPEN**. Design exists
-   (doc 10); not yet implemented.
+4. Evaluation: benchmarks vs. compare vs. evals — **IN PROGRESS** (doc 10).
+   Steps 1-3 of 4 done: shared models/storage, Compare Models, and the RAG
+   eval harness all write through `IEvalStore`/`EvalRun`. Step 4 (retiring
+   the duplicated export/ranking code) remains.
 5. Inspection: Doctor vs. Setup scan vs. Trust vs. Privacy Audit each own
    "is this install healthy/safe" — **RESOLVED** by the check/fix registry;
    each is a filtered projection of one `IInspectionEngine`.
 
-Only the Evaluation System merge remains open from this register.
+Only step 4 of the Evaluation System merge remains open from this register.
 
 New-feature test (add to review checklist): *which existing system does this
 project onto?* If the answer is "it needs its own store/panel/checks", the

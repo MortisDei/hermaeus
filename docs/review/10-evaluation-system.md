@@ -65,7 +65,13 @@ score columns.
    per target; `ChatViewModel.CompareSelectedModelsAsync` maps those runs
    onto the existing `ModelCompareResultViewModel` UI. Nothing is persisted
    (matches prior behavior); there is no pin-to-save affordance yet.
-3. Move the RAG eval harness (adds the retrieval score provider).
+3. **DONE.** Move the RAG eval harness onto the shared shape. `RagEvalService.RunAsync`
+   still runs retrieval/full-answer cases and writes its own `run.jsonl`/`report.md`
+   (unchanged), but now also projects the run through `RagEvalService.ToEvalRun` and
+   writes it to `IEvalStore`. Retrieval metrics (Recall@K, MRR, citation hit,
+   unsupported answer, refusal accuracy, grounding, reranker delta) become score
+   *providers*: entries in `CaseResult.Scores`, not engine features. No UI reads the
+   new store for RAG eval yet.
 4. Retire duplicated export/ranking code paths.
 
 Each step is independently shippable and each strictly deletes code after it

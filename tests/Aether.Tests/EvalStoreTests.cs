@@ -1,4 +1,6 @@
 using Aether.Core.Models;
+using Aether.Rag.Eval;
+using Aether.Rag.Models;
 using Aether.Services;
 using Xunit;
 using static Aether.Tests.Helpers;
@@ -94,5 +96,46 @@ public sealed class EvalStoreTests
         Assert.Equal(2, evalRun.CaseResults.Count);
         Assert.Equal(250, evalRun.CaseResults[0].LatencyMs);
         Assert.Equal("timeout", evalRun.CaseResults[1].Error);
+    }
+
+    [Fact]
+    public void RagEvalRun_projects_onto_shared_eval_shape()
+    {
+        var run = new RagEvalRun
+        {
+            Id = "rag-1",
+            DatasetId = "dataset-a",
+            EvalName = "Smoke eval",
+            StartedAt = DateTime.UtcNow,
+            FinishedAt = DateTime.UtcNow,
+            Results =
+            [
+                new RagEvalResult
+                {
+                    CaseId = "case-1",
+                    Answer = "the answer",
+                    LatencyMs = 180,
+                    Passed = true,
+                    RecallAtK = 1.0,
+                    ReciprocalRank = 1.0,
+                    CitationHit = true,
+                    RefusalCorrect = true,
+                    KeywordHit = true,
+                    RetrievalHit = true
+                },
+                new RagEvalResult { CaseId = "case-2", Passed = false, Notes = "expected source missing" }
+            ]
+        };
+
+        var evalRun = RagEvalService.ToEvalRun(run);
+
+        Assert.Equal(EvalMode.Retrieval, evalRun.Mode);
+        Assert.Equal("dataset-a", evalRun.Target.ModelId);
+        Assert.Equal("dataset-a", evalRun.Target.DatasetId);
+        Assert.Equal(2, evalRun.CaseResults.Count);
+        Assert.Equal(180, evalRun.CaseResults[0].LatencyMs);
+        Assert.Equal(1.0, evalRun.CaseResults[0].Scores!["recall_at_k"]);
+        Assert.Null(evalRun.CaseResults[0].Error);
+        Assert.Equal("expected source missing", evalRun.CaseResults[1].Error);
     }
 }

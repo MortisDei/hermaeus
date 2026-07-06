@@ -52,6 +52,12 @@ limit.
   ("OpenAI"). A remote voice provider is now flagged even when no remote chat
   provider is enabled, and adding a new remote chat provider to
   `CompositeLlmService.Providers` needs no Privacy Audit changes.
+- Evaluation System step 3: the RAG eval harness now projects each retrieval
+  run onto the shared eval shape and writes it through `IEvalStore`, alongside
+  its existing `run.jsonl`/`report.md` export. Retrieval metrics (Recall@K,
+  MRR, citation hit, unsupported answer, refusal accuracy, grounding,
+  reranker delta) become `CaseResult.Scores` entries rather than engine
+  features, keeping the shared engine agnostic to how retrieval is scored.
 - Evaluation System step 2: Chat's "Compare Models" now runs through the
   shared `IEvalEngine.RunQuickCompareAsync`, which executes one case against
   each selected target and returns one `EvalRun` per target, instead of a

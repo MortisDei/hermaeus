@@ -17,4 +17,7 @@
   <ItemGroup>
     <ProjectReference Include="../Aether.Core/Aether.Core.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Aether.Tests" />
+  </ItemGroup>
 </Project>

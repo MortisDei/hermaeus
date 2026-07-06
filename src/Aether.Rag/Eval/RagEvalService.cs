@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using Aether.Core.Models;
 using Aether.Core.Services;
 using Aether.Rag.Models;
 
@@ -11,11 +12,13 @@ public sealed class RagEvalService
     private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true };
     private readonly RagQueryService _query;
     private readonly ISettingsService _settings;
+    private readonly IEvalStore _evalStore;
 
-    public RagEvalService(RagQueryService query, ISettingsService settings)
+    public RagEvalService(RagQueryService query, ISettingsService settings, IEvalStore evalStore)
     {
         _query = query;
         _settings = settings;
+        _evalStore = evalStore;
     }
 
     public async Task<RagEvalRun> RunAsync(
@@ -49,8 +52,38 @@ public sealed class RagEvalService
 
         run.FinishedAt = DateTime.UtcNow;
         await ExportAsync(run, ct);
+        await _evalStore.SaveRunAsync(ToEvalRun(run), ct);
         return run;
     }
+
+    /// <summary>Projects a retrieval run onto the shared eval shape. Retrieval metrics
+    /// (recall, MRR, citation hit, and so on) become score entries rather than engine
+    /// features, so the shared store stays agnostic to how they were computed.</summary>
+    internal static EvalRun ToEvalRun(RagEvalRun run) => new(
+        Id: run.Id,
+        Mode: EvalMode.Retrieval,
+        Target: new EvalTarget(run.DatasetId, DatasetId: run.DatasetId, Label: run.EvalName),
+        CaseResults: run.Results.Select(r => new CaseResult(
+            CaseId: r.CaseId,
+            Output: r.Answer,
+            LatencyMs: (long)r.LatencyMs,
+            Scores: ToScores(r),
+            Error: r.Passed ? null : r.Notes)).ToList(),
+        StartedAt: run.StartedAt,
+        FinishedAt: run.FinishedAt);
+
+    private static Dictionary<string, double> ToScores(RagEvalResult r) => new()
+    {
+        ["recall_at_k"] = r.RecallAtK,
+        ["reciprocal_rank"] = r.ReciprocalRank,
+        ["citation_hit"] = r.CitationHit ? 1d : 0d,
+        ["unsupported_answer"] = r.UnsupportedAnswer ? 1d : 0d,
+        ["refusal_correct"] = r.RefusalCorrect ? 1d : 0d,
+        ["keyword_hit"] = r.KeywordHit ? 1d : 0d,
+        ["retrieval_hit"] = r.RetrievalHit ? 1d : 0d,
+        ["grounding"] = r.GroundingScore,
+        ["reranker_delta"] = r.RerankerDelta
+    };
 
     private async Task<RagEvalResult> RunRetrievalCaseAsync(string datasetId, RagEvalCase test, CancellationToken ct)
     {

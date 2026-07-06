@@ -32,7 +32,7 @@ namespace Aether.Tests
 
             var query = new RagQueryService(store, new FakeEmbeddingService(), new FakeLlm(), settings, new NoOpReranker());
             var pipeline = new RagPipeline(store, new FakeEmbeddingService());
-            var eval = new Aether.Rag.Eval.RagEvalService(query, settings);
+            var eval = new Aether.Rag.Eval.RagEvalService(query, settings, new FakeEvalStore());
             var toasts = new FakeToasts();
             var logs = new SimpleRuntimeLog(temp.PathFor("runtime-logs"));
 
