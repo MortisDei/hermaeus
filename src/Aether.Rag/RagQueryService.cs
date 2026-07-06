@@ -478,72 +478,33 @@ public sealed class RagQueryService
 
     private static ContextPack BuildContext(IReadOnlyList<ScoredChunk> chunks, RagQueryOptions opts)
     {
-        var budget = Math.Max(opts.ContextTokenBudget, 128);
-        var maxChunks = Math.Max(opts.MaxContextChunks, 1);
-        var perSourceLimit = Math.Max(opts.MaxChunksPerSource, 1);
+        var candidates = chunks.Select(scored => new ContextPart(
+            "rag-chunk",
+            scored.Chunk.SourceTitle,
+            scored.Chunk.Content,
+            GroupKey: string.IsNullOrWhiteSpace(scored.Chunk.SourcePath) ? scored.Chunk.SourceFile : scored.Chunk.SourcePath,
+            Tokens: Math.Max(scored.Chunk.TokenCount, 1),
+            Data: scored.Chunk)).ToList();
+
+        var packed = ContextPackBuilder.Pack(
+            candidates,
+            opts.ContextTokenBudget,
+            maxParts: opts.MaxContextChunks,
+            maxPerGroup: opts.MaxChunksPerSource);
 
         var sb = new StringBuilder();
-        var usedTokens = 0;
-        var usedChunks = 0;
-        var sourceCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        var notes = new List<string>();
-
-        foreach (var scored in chunks)
+        var rank = 0;
+        foreach (var part in packed.Parts)
         {
-            if (usedChunks >= maxChunks)
-            {
-                notes.Add($"chunk limit {maxChunks} reached");
-                break;
-            }
-
-            var chunk = scored.Chunk;
-            var sourceKey = string.IsNullOrWhiteSpace(chunk.SourcePath) ? chunk.SourceFile : chunk.SourcePath;
-            sourceCounts.TryGetValue(sourceKey, out var sourceCount);
-            if (sourceCount >= perSourceLimit)
-                continue;
-
-            var tokenCount = Math.Max(chunk.TokenCount, 1);
-            var remaining = budget - usedTokens;
-            if (remaining <= 0)
-            {
-                notes.Add($"budget {budget} tokens exhausted");
-                break;
-            }
-
-            if (tokenCount > remaining)
-            {
-                var truncated = TruncateContent(chunk.Content, remaining * 4);
-                if (string.IsNullOrWhiteSpace(truncated))
-                    continue;
-
-                AppendContextChunk(sb, usedChunks + 1, chunk, truncated, truncated: true);
-                usedTokens = budget;
-                usedChunks++;
-                notes.Add($"truncated {chunk.SourceTitle} to fit budget");
-                break;
-            }
-
-            AppendContextChunk(sb, usedChunks + 1, chunk, chunk.Content, truncated: false);
-            usedTokens += tokenCount;
-            usedChunks++;
-            sourceCounts[sourceKey] = sourceCount + 1;
-        }
-
-        if (usedChunks == 0 && chunks.Count > 0)
-        {
-            var fallback = chunks[0].Chunk;
-            var snippet = TruncateContent(fallback.Content, Math.Max(budget * 4, 512));
-            AppendContextChunk(sb, 1, fallback, snippet, truncated: true);
-            usedChunks = 1;
-            usedTokens = Math.Min(budget, Math.Max(fallback.TokenCount, 1));
-            notes.Add("fallback chunk used because budget selection was empty");
+            if (part.Data is RagChunk chunk)
+                AppendContextChunk(sb, ++rank, chunk, part.Content, part.Truncated);
         }
 
         return new ContextPack(
             sb.ToString().Trim(),
-            usedTokens,
-            usedChunks,
-            string.Join("; ", notes));
+            packed.TokensUsed,
+            packed.Parts.Count,
+            packed.Summary);
     }
 
     private static void AppendContextChunk(StringBuilder sb, int rank, RagChunk chunk, string content, bool truncated)
@@ -563,16 +524,6 @@ public sealed class RagQueryService
         if (truncated)
             sb.AppendLine("Note: truncated to respect context budget");
         sb.AppendLine(content.Trim());
-    }
-
-    private static string TruncateContent(string content, int maxChars)
-    {
-        if (string.IsNullOrWhiteSpace(content) || maxChars <= 0)
-            return string.Empty;
-
-        return content.Length <= maxChars
-            ? content.Trim()
-            : content[..maxChars].TrimEnd() + "...";
     }
 
     private static string BuildPrompt(string question, string context, RagDatasetConfig? config)

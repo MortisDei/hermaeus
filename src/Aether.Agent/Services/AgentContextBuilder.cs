@@ -1,4 +1,5 @@
 using Aether.Agent.Models;
+using Aether.Core.Services;
 using Aether.Rag;
 using Aether.Rag.Storage;
 
@@ -6,6 +7,12 @@ namespace Aether.Agent.Services;
 
 public sealed class AgentContextBuilder : IAgentContextBuilder
 {
+    // Generous per-section token budgets so a single oversized note or chunk
+    // cannot flood the agent prompt; selection itself is shared with chat/RAG
+    // via ContextPackBuilder.
+    private const int MemoryTokenBudget = 4000;
+    private const int RagTokenBudget = 4000;
+
     private readonly IAgentWorkspaceTools _workspaceTools;
     private readonly RagQueryService _rag;
     private readonly SqliteRagStore _ragStore;
@@ -53,12 +60,18 @@ public sealed class AgentContextBuilder : IAgentContextBuilder
         try
         {
             var entries = await _workspaceMemory.ListAsync(options.WorkspaceRoot, ct);
-            foreach (var entry in entries.OrderByDescending(e => e.UpdatedAt).Take(options.MaxContextItems))
+            var candidates = entries.OrderByDescending(e => e.UpdatedAt)
+                .Select(entry => new ContextPart(
+                    "workspace-memory", entry.Title, entry.Body, Data: entry))
+                .ToList();
+            var packed = ContextPackBuilder.Pack(candidates, MemoryTokenBudget, maxParts: options.MaxContextItems);
+            foreach (var part in packed.Parts)
             {
+                var entry = (AgentWorkspaceMemoryEntry)part.Data!;
                 pack.RetrievedMemory.Add(new AgentRetrievedItem(
                     "workspace-memory",
                     entry.Title,
-                    entry.Body,
+                    part.Content,
                     1.0,
                     entry.UpdatedAt));
             }
@@ -119,14 +132,23 @@ public sealed class AgentContextBuilder : IAgentContextBuilder
                 new RagQueryOptions(TopK: Math.Max(1, Math.Min(5, options.MaxContextItems))),
                 ct);
 
-            pack.RetrievedMemory.AddRange(retrieval.Selected
-                .Take(options.MaxContextItems)
-                .Select(s => new AgentRetrievedItem(
-                    "rag",
-                    s.Chunk.SourceTitle,
-                    s.Chunk.Content,
-                    s.Score,
-                    s.Chunk.SourceModifiedUtc)));
+            var candidates = retrieval.Selected
+                .Select(s => new ContextPart(
+                    "rag", s.Chunk.SourceTitle, s.Chunk.Content,
+                    Tokens: Math.Max(s.Chunk.TokenCount, 1), Data: s))
+                .ToList();
+            var packed = ContextPackBuilder.Pack(candidates, RagTokenBudget, maxParts: options.MaxContextItems);
+            pack.RetrievedMemory.AddRange(packed.Parts
+                .Select(part =>
+                {
+                    var scored = (Aether.Rag.Models.ScoredChunk)part.Data!;
+                    return new AgentRetrievedItem(
+                        "rag",
+                        scored.Chunk.SourceTitle,
+                        part.Content,
+                        scored.Score,
+                        scored.Chunk.SourceModifiedUtc);
+                }));
         }
         catch (Exception ex)
         {

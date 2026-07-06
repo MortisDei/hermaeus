@@ -682,8 +682,7 @@ public partial class ChatViewModel : ObservableObject
         && SelectedModel is not null
         && (!string.IsNullOrWhiteSpace(InputText) || ContextAttachments.Any(a => a.IsReady));
 
-    public static int EstimateTokens(string text) =>
-        string.IsNullOrEmpty(text) ? 0 : Math.Max(1, (int)Math.Ceiling(text.Length / 4.0));
+    public static int EstimateTokens(string text) => ContextPackBuilder.EstimateTokens(text);
 
     private int EstimateTokensForSend(string promptText)
     {
@@ -697,37 +696,21 @@ public partial class ChatViewModel : ObservableObject
     {
         var promptText = ChatContextAttachment.BuildPrompt(text, attachments);
         var historyTokens = Messages.Where(m => !m.IsStreaming).Sum(m => EstimateTokens(m.Content));
-        var parts = new List<ChatContextPartViewModel>();
 
+        var contextParts = new List<ContextPart>();
         if (!string.IsNullOrWhiteSpace(SystemPrompt))
-        {
-            parts.Add(new ChatContextPartViewModel
-            {
-                Kind = "System",
-                Title = "System prompt",
-                Content = SystemPrompt,
-                EstimatedTokens = EstimateTokens(SystemPrompt)
-            });
-        }
-
-        parts.Add(new ChatContextPartViewModel
-        {
-            Kind = "User",
-            Title = "Draft message",
-            Content = text,
-            EstimatedTokens = EstimateTokens(text)
-        });
-
+            contextParts.Add(new ContextPart("System", "System prompt", SystemPrompt));
+        contextParts.Add(new ContextPart("User", "Draft message", text));
         foreach (var attachment in attachments.Where(a => a.IsReady))
+            contextParts.Add(new ContextPart("Attachment", attachment.FullPath, attachment.Content));
+
+        var parts = contextParts.Select(part => new ChatContextPartViewModel
         {
-            parts.Add(new ChatContextPartViewModel
-            {
-                Kind = "Attachment",
-                Title = attachment.FullPath,
-                Content = attachment.Content,
-                EstimatedTokens = EstimateTokens(attachment.Content)
-            });
-        }
+            Kind = part.Kind,
+            Title = part.Title,
+            Content = part.Content,
+            EstimatedTokens = part.EffectiveTokens
+        }).ToList();
 
         var total = EstimateTokens(SystemPrompt) + EstimateTokens(promptText) + historyTokens;
         return new ChatContextSnapshot(promptText, total, parts, historyTokens);
