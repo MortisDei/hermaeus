@@ -75,7 +75,7 @@ maintenance dollar.
 | Privacy Audit dashboard | **Essential** | Signature feature; make it the marquee screen. |
 | Runtime logs + redaction | **Essential** | Redaction-before-persist is correct and rare. |
 | Backup/restore/data-root migration | **Essential** | Boring excellence. |
-| Local tasks/reminders/automations | **Deprecate** | A to-do app inside an AI workstation is classic creep — it composes with nothing and competes with every OS's native reminders. Sunset unless it becomes agent-scheduling infrastructure (in which case rebuild it as that). |
+| Local tasks/reminders/automations | **Deprecate — DONE** | Removed entirely: `TasksViewModel`, `AutomationScheduler`, `TasksView`, the settings-schema `Tasks`/`Automations` lists, and the sidebar entry point. It composed with nothing and competed with every OS's native reminders. If agent-scheduling infrastructure is needed later, it should be built as that (e.g. under the Agent Workbench), not resurrected from this code. |
 | Toast system, System Overview | **Essential** | — |
 
 ## Pattern to note

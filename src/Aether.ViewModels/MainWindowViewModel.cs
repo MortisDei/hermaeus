@@ -24,7 +24,6 @@ public partial class MainWindowViewModel : ObservableObject
     public ModelManagementViewModel Models   { get; }
     public RagViewModel             Rag      { get; }
     public ServicesViewModel        Services { get; }
-    public TasksViewModel           Tasks    { get; }
     public BenchmarkViewModel       Benchmarks { get; }
     public SystemOverviewViewModel  SystemOverview { get; }
     public DoctorViewModel          Doctor { get; }
@@ -55,7 +54,6 @@ public partial class MainWindowViewModel : ObservableObject
     public bool ShowModels   => ActivePanel == "models";
     public bool ShowRag      => ActivePanel == "rag";
     public bool ShowServices => ActivePanel == "services";
-    public bool ShowTasks    => ActivePanel == "tasks";
     public bool ShowBenchmarks => ActivePanel == "benchmarks";
     public bool ShowSystem => ActivePanel == "system";
     public bool ShowDoctor => ActivePanel == "doctor";
@@ -69,7 +67,6 @@ public partial class MainWindowViewModel : ObservableObject
         "models"   => Models,
         "rag"      => Rag,
         "services" => Services,
-        "tasks"    => Tasks,
         "benchmarks" => Benchmarks,
         "system"   => SystemOverview,
         "doctor"   => Doctor,
@@ -90,7 +87,6 @@ public partial class MainWindowViewModel : ObservableObject
         ModelManagementViewModel models,
         RagViewModel rag,
         ServicesViewModel services,
-        TasksViewModel tasks,
         BenchmarkViewModel benchmarks,
         SystemOverviewViewModel systemOverview,
         DoctorViewModel doctor,
@@ -108,7 +104,7 @@ public partial class MainWindowViewModel : ObservableObject
         _exports = exports;
         _settingsService = settingsService;
         _store = store; Chat = chat; Agent = agent; Settings = settings;
-        Models = models; Rag = rag; Services = services; Tasks = tasks;
+        Models = models; Rag = rag; Services = services;
         Benchmarks = benchmarks; SystemOverview = systemOverview; Doctor = doctor; Memories = memories; Logs = logs; Wizard = wizard;
         Doctor.RequestNavigate = panel => ActivePanel = panel;
         // Keep toolbar doctor badge in sync with doctor checks
@@ -377,7 +373,6 @@ public partial class MainWindowViewModel : ObservableObject
     [RelayCommand] private void ShowRagPanel()         => ActivePanel = "rag";
     [RelayCommand] private void ShowModelsPanel()      { ActivePanel = "models"; RunBackgroundTaskAsync("refresh models panel", () => Models.RefreshCommand.ExecuteAsync(null)); }
     [RelayCommand] private void ShowServicesPanel()    => ActivePanel = "services";
-    [RelayCommand] private void ShowTasksPanel()       { Tasks.Reload(); ActivePanel = "tasks"; }
     [RelayCommand] private void ShowBenchmarksPanel()  { ActivePanel = "benchmarks"; RunBackgroundTaskAsync("load benchmarks panel", () => Benchmarks.LoadCommand.ExecuteAsync(null)); }
     [RelayCommand] private void ShowSystemPanel()      { ActivePanel = "system"; RunBackgroundTaskAsync("refresh system panel", () => SystemOverview.RefreshCommand.ExecuteAsync(null)); }
     [RelayCommand] private void ShowDoctorPanel()
@@ -441,7 +436,6 @@ public partial class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowModels));
         OnPropertyChanged(nameof(ShowRag));
         OnPropertyChanged(nameof(ShowServices));
-        OnPropertyChanged(nameof(ShowTasks));
         OnPropertyChanged(nameof(ShowBenchmarks));
         OnPropertyChanged(nameof(ShowSystem));
         OnPropertyChanged(nameof(ShowDoctor));

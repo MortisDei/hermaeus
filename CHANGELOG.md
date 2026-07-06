@@ -91,6 +91,16 @@ limit.
 
 ### Removed
 
+- Local tasks/reminders/automations (docs/review/05-feature-audit.md: rated
+  "Deprecate"). Deleted `TasksViewModel`, `AutomationScheduler`,
+  `IAutomationScheduler`, `TasksView`, `TaskAutomationModels.cs`
+  (`LocalTaskItem`, `ScheduledAutomation`, `AutomationRunHistory`), and the
+  `Tasks`/`Automations` lists from `AppSettings`. Existing `settings.json`
+  files with those fields simply ignore them on next load; no migration
+  needed since nothing reads them anymore. The sidebar lost its "Tasks and
+  automations" entry point. This is unrelated to the Agent Workbench's own
+  task-state persistence (`IAgentTaskStateStore`/`FileAgentTaskStateStore`),
+  which is untouched.
 - Benchmarking suite scope trim (docs/review/05-feature-audit.md: rated
   "Over-engineered"). Deleted `ExportAllZipAsync` (a thin wrapper that re-ran
   `ExportAllAsync` and zipped the result, a duplicate bulk-export path next

@@ -53,16 +53,6 @@ public class AppSettings
     public List<RuntimeProfile> RuntimeProfiles { get; set; } = [];
 
     /// <summary>
-    /// Local task items for task automation and scheduling.
-    /// </summary>
-    public List<LocalTaskItem> Tasks { get; set; } = [];
-
-    /// <summary>
-    /// Scheduled automations for periodic task execution.
-    /// </summary>
-    public List<ScheduledAutomation> Automations { get; set; } = [];
-
-    /// <summary>
     /// Managed llama-server instances (Chat, Embeddings) with port, thread, and GPU configuration.
     /// </summary>
     public List<ServerConfig> ManagedServers { get; set; } =

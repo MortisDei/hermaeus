@@ -170,7 +170,6 @@
   covers common API keys, bearer tokens, GitHub-style tokens, AWS-style access
   keys, Azure-style key assignments, password parameters, query-string secrets,
   and home paths.
-- Local tasks, reminders, and app-running scheduled automations.
 - Tray integration, minimize-to-tray, local hotkeys, and Windows system-wide
   hotkeys.
 - Toast notifications throughout the app with opaque popup backgrounds.

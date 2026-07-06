@@ -70,7 +70,6 @@ public partial class App : Application
                 sp.GetRequiredService<IAgentTaskStateStore>().InitializeAsync(),
                 sp.GetRequiredService<IBenchmarkService>().InitializeAsync(),
                 sp.GetRequiredService<IEvalStore>().InitializeAsync());
-            sp.GetRequiredService<IAutomationScheduler>().Start();
             // Probe active voice provider health at startup to detect externally-running services
             try
             {
@@ -137,7 +136,6 @@ public partial class App : Application
         s.AddSingleton<XttsProcessManager>();
         s.AddSingleton<KokoroProcessManager>();
         s.AddSingleton<IToastService,      ToastService>();
-        s.AddSingleton<IAutomationScheduler, AutomationScheduler>();
         s.AddSingleton<SqliteRagStore>();
         s.AddSingleton<IEmbeddingService,  LlamaCppEmbeddingService>();
         s.AddSingleton<IReranker,          OnnxCrossEncoderReranker>();
@@ -161,7 +159,6 @@ public partial class App : Application
         s.AddSingleton<ModelManagementViewModel>();
         s.AddSingleton<RagViewModel>();
         s.AddSingleton<ServicesViewModel>();
-        s.AddSingleton<TasksViewModel>();
         s.AddSingleton<BenchmarkViewModel>();
         s.AddSingleton<SystemOverviewViewModel>();
         s.AddSingleton<DoctorViewModel>();
