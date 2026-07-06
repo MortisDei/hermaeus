@@ -53,50 +53,23 @@ public sealed class OpenAiService : IDisposable
         catch { return []; }
     }
 
-    public IAsyncEnumerable<string> StreamChatAsync(
+    public IAsyncEnumerable<LlmStreamEvent> StreamChatAsync(
         string modelId,
         IReadOnlyList<ChatMessage> messages,
-        string? systemPrompt = null,
-        double temperature = 0.7,
-        CancellationToken ct = default)
-    {
-        if (!IsConfigured) return YieldError("*OpenAI API key not configured.*");
-        return StreamTextInternal(modelId, messages, systemPrompt, temperature, ct);
-    }
-
-    public IAsyncEnumerable<LlmStreamEvent> StreamChatEventsAsync(
-        string modelId,
-        IReadOnlyList<ChatMessage> messages,
-        string? systemPrompt = null,
-        double temperature = 0.7,
+        LlmChatOptions? options = null,
         CancellationToken ct = default)
     {
         if (!IsConfigured) return YieldEventError("*OpenAI API key not configured.*");
-        return StreamEventsInternal(modelId, messages, systemPrompt, temperature, ct);
-    }
-
-    private async IAsyncEnumerable<string> StreamTextInternal(
-        string modelId,
-        IReadOnlyList<ChatMessage> messages,
-        string? systemPrompt,
-        double temperature,
-        [EnumeratorCancellation] CancellationToken ct)
-    {
-        await foreach (var evt in StreamEventsInternal(modelId, messages, systemPrompt, temperature, ct))
-        {
-            if (!string.IsNullOrEmpty(evt.ContentDelta))
-                yield return evt.ContentDelta;
-        }
+        return StreamEventsInternal(modelId, messages, options ?? LlmChatOptions.Default, ct);
     }
 
     private async IAsyncEnumerable<LlmStreamEvent> StreamEventsInternal(
         string modelId,
         IReadOnlyList<ChatMessage> messages,
-        string? systemPrompt,
-        double temperature,
+        LlmChatOptions options,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        var (success, resp, error) = await GetStreamResponseAsync(modelId, messages, systemPrompt, temperature, ct);
+        var (success, resp, error) = await GetStreamResponseAsync(modelId, messages, options, ct);
         
         if (!success)
         {
@@ -126,14 +99,15 @@ public sealed class OpenAiService : IDisposable
     private async Task<(bool Success, HttpResponseMessage? Response, string Error)> GetStreamResponseAsync(
         string modelId,
         IReadOnlyList<ChatMessage> messages,
-        string? systemPrompt,
-        double temperature,
+        LlmChatOptions options,
         CancellationToken ct)
     {
         try
         {
             await AuthAsync(ct);
-            var payload = BuildChatPayload(modelId, messages, systemPrompt, temperature, _settings.Settings.Llm.MaxTokens);
+            var payload = BuildChatPayload(
+                modelId, messages, options.SystemPrompt, options.Temperature,
+                options.MaxTokens ?? _settings.Settings.Llm.MaxTokens);
             var req = new HttpRequestMessage(HttpMethod.Post, $"{Base}/v1/chat/completions")
                 { Content = JsonContent.Create(payload, options: JsonOpts) };
             var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
@@ -190,19 +164,12 @@ public sealed class OpenAiService : IDisposable
         return new LlmStreamEvent(c, usage, isFinal);
     }
 
-    private static async IAsyncEnumerable<string> YieldError(string message)
-    {
-        yield return message;
-    }
-
     private static async IAsyncEnumerable<LlmStreamEvent> YieldEventError(string message)
     {
         yield return LlmStreamEvent.Error(message);
         await Task.CompletedTask;
     }
 
-    public Task PullModelAsync(string m, IProgress<string>? p = null, CancellationToken ct = default) => Task.CompletedTask;
-    public Task DeleteModelAsync(string m, CancellationToken ct = default) => Task.CompletedTask;
     public void Dispose()
     {
         // HttpClient is static and shared; do not dispose

@@ -289,10 +289,14 @@ public partial class ChatViewModel : ObservableObject
             if (history.Count > 0 && history[^1].Role == "user")
                 history[^1] = history[^1] with { Content = promptText };
 
-            await foreach (var evt in _llm.StreamChatEventsAsync(
+            await foreach (var evt in _llm.StreamChatAsync(
                 selectedModelId, history,
-                string.IsNullOrWhiteSpace(SystemPrompt) ? null : SystemPrompt,
-                Temperature, _cts.Token))
+                new LlmChatOptions
+                {
+                    SystemPrompt = string.IsNullOrWhiteSpace(SystemPrompt) ? null : SystemPrompt,
+                    Temperature = Temperature
+                },
+                _cts.Token))
             {
                 if (evt.Usage is not null)
                 {
@@ -621,11 +625,14 @@ public partial class ChatViewModel : ObservableObject
                 var error = string.Empty;
                 try
                 {
-                    await foreach (var evt in _llm.StreamChatEventsAsync(
+                    await foreach (var evt in _llm.StreamChatAsync(
                         option.Model.Id,
                         history,
-                        string.IsNullOrWhiteSpace(SystemPrompt) ? null : SystemPrompt,
-                        Temperature))
+                        new LlmChatOptions
+                        {
+                            SystemPrompt = string.IsNullOrWhiteSpace(SystemPrompt) ? null : SystemPrompt,
+                            Temperature = Temperature
+                        }))
                     {
                         if (evt.Usage is not null)
                             usage = evt.Usage;

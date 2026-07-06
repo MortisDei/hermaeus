@@ -101,20 +101,16 @@ namespace Aether.Tests
         public Task<List<LlmModel>> GetModelsAsync(CancellationToken ct = default) =>
             Task.FromResult(new List<LlmModel> { new() { Id = "fake", Name = "Fake", Provider = "Test" } });
 
-        public async IAsyncEnumerable<string> StreamChatAsync(
+        public async IAsyncEnumerable<LlmStreamEvent> StreamChatAsync(
             string modelId,
             IReadOnlyList<ChatMessage> messages,
-            string? systemPrompt = null,
-            double temperature = 0.7,
+            LlmChatOptions? options = null,
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
         {
             await Task.Delay(1, ct);
-            yield return "local ";
-            yield return "ready alpha beta 42";
+            yield return new LlmStreamEvent("local ");
+            yield return new LlmStreamEvent("ready alpha beta 42");
         }
-
-        public Task PullModelAsync(string modelId, IProgress<string>? progress = null, CancellationToken ct = default) => Task.CompletedTask;
-        public Task DeleteModelAsync(string modelId, CancellationToken ct = default) => Task.CompletedTask;
     }
 
     sealed class CapturingLlm : ILlmService
@@ -126,20 +122,16 @@ namespace Aether.Tests
         public Task<List<LlmModel>> GetModelsAsync(CancellationToken ct = default) =>
             Task.FromResult(new List<LlmModel> { new() { Id = "capture", Name = "Capture", Provider = "Test" } });
 
-        public async IAsyncEnumerable<string> StreamChatAsync(
+        public async IAsyncEnumerable<LlmStreamEvent> StreamChatAsync(
             string modelId,
             IReadOnlyList<ChatMessage> messages,
-            string? systemPrompt = null,
-            double temperature = 0.7,
+            LlmChatOptions? options = null,
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
         {
             LastMessages = messages.ToList();
             await Task.Delay(1, ct);
-            yield return "captured";
+            yield return new LlmStreamEvent("captured");
         }
-
-        public Task PullModelAsync(string modelId, IProgress<string>? progress = null, CancellationToken ct = default) => Task.CompletedTask;
-        public Task DeleteModelAsync(string modelId, CancellationToken ct = default) => Task.CompletedTask;
     }
 
     sealed class UsageLlm : ILlmService
@@ -149,34 +141,16 @@ namespace Aether.Tests
         public Task<List<LlmModel>> GetModelsAsync(CancellationToken ct = default) =>
             Task.FromResult(new List<LlmModel> { new() { Id = "usage", Name = "Usage", Provider = "Test", DefaultContextSize = 100 } });
 
-        public async IAsyncEnumerable<string> StreamChatAsync(
+        public async IAsyncEnumerable<LlmStreamEvent> StreamChatAsync(
             string modelId,
             IReadOnlyList<ChatMessage> messages,
-            string? systemPrompt = null,
-            double temperature = 0.7,
-            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
-        {
-            await foreach (var evt in StreamChatEventsAsync(modelId, messages, systemPrompt, temperature, ct))
-            {
-                if (!string.IsNullOrEmpty(evt.ContentDelta))
-                    yield return evt.ContentDelta;
-            }
-        }
-
-        public async IAsyncEnumerable<LlmStreamEvent> StreamChatEventsAsync(
-            string modelId,
-            IReadOnlyList<ChatMessage> messages,
-            string? systemPrompt = null,
-            double temperature = 0.7,
+            LlmChatOptions? options = null,
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
         {
             await Task.Delay(1, ct);
             yield return new LlmStreamEvent("ok");
             yield return new LlmStreamEvent(Usage: new ChatTokenUsage(30, 10, 40), IsFinal: true);
         }
-
-        public Task PullModelAsync(string modelId, IProgress<string>? progress = null, CancellationToken ct = default) => Task.CompletedTask;
-        public Task DeleteModelAsync(string modelId, CancellationToken ct = default) => Task.CompletedTask;
     }
 
     sealed class MemoryMarkerLlm : ILlmService
@@ -194,19 +168,15 @@ namespace Aether.Tests
         public Task<List<LlmModel>> GetModelsAsync(CancellationToken ct = default) =>
             Task.FromResult(new List<LlmModel> { new() { Id = "memory-test", Name = "Memory Test", Provider = "Test" } });
 
-        public async IAsyncEnumerable<string> StreamChatAsync(
+        public async IAsyncEnumerable<LlmStreamEvent> StreamChatAsync(
             string modelId,
             IReadOnlyList<ChatMessage> messages,
-            string? systemPrompt = null,
-            double temperature = 0.7,
+            LlmChatOptions? options = null,
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
         {
             await Task.Delay(1, ct);
-            yield return _response;
+            yield return new LlmStreamEvent(_response);
         }
-
-        public Task PullModelAsync(string modelId, IProgress<string>? progress = null, CancellationToken ct = default) => Task.CompletedTask;
-        public Task DeleteModelAsync(string modelId, CancellationToken ct = default) => Task.CompletedTask;
     }
 
     sealed class FakeTts : ITtsService
@@ -447,15 +417,14 @@ namespace Aether.Tests
         public Task<List<LlmModel>> GetModelsAsync(CancellationToken ct = default) =>
             Task.FromResult(new List<LlmModel> { new() { Id = "fake-agent", Name = "Fake Agent", Provider = "Test" } });
 
-        public async IAsyncEnumerable<string> StreamChatAsync(
+        public async IAsyncEnumerable<LlmStreamEvent> StreamChatAsync(
             string modelId,
             IReadOnlyList<ChatMessage> messages,
-            string? systemPrompt = null,
-            double temperature = 0.7,
+            LlmChatOptions? options = null,
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
         {
             await Task.Delay(1, ct);
-            yield return """
+            yield return new LlmStreamEvent("""
                 {
                   "thought_summary": "Read the available context and found the docs.",
                   "current_step": "Wait for approval before any write.",
@@ -474,11 +443,8 @@ namespace Aether.Tests
                   },
                   "user_message": "I found the relevant docs and can draft a patch for review."
                 }
-                """;
+                """);
         }
-
-        public Task PullModelAsync(string modelId, IProgress<string>? progress = null, CancellationToken ct = default) => Task.CompletedTask;
-        public Task DeleteModelAsync(string modelId, CancellationToken ct = default) => Task.CompletedTask;
     }
 
     sealed class FakeSystemInfo : ISystemInfoService

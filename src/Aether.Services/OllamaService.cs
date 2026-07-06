@@ -47,47 +47,15 @@ public sealed class OllamaService : IDisposable
         return all;
     }
 
-    public IAsyncEnumerable<string> StreamChatAsync(
+    public async IAsyncEnumerable<LlmStreamEvent> StreamChatAsync(
         string modelId,
         IReadOnlyList<ChatMessage> messages,
-        string? systemPrompt = null,
-        double temperature = 0.7,
-        CancellationToken ct = default)
+        LlmChatOptions? options = null,
+        [EnumeratorCancellation] CancellationToken ct = default)
     {
-        return StreamTextInternal(modelId, messages, systemPrompt, temperature, ct);
-    }
-
-    public IAsyncEnumerable<LlmStreamEvent> StreamChatEventsAsync(
-        string modelId,
-        IReadOnlyList<ChatMessage> messages,
-        string? systemPrompt = null,
-        double temperature = 0.7,
-        CancellationToken ct = default)
-    {
-        return StreamEventsInternal(modelId, messages, systemPrompt, temperature, ct);
-    }
-
-    private async IAsyncEnumerable<string> StreamTextInternal(
-        string modelId,
-        IReadOnlyList<ChatMessage> messages,
-        string? systemPrompt,
-        double temperature,
-        [EnumeratorCancellation] CancellationToken ct)
-    {
-        await foreach (var evt in StreamEventsInternal(modelId, messages, systemPrompt, temperature, ct))
-        {
-            if (!string.IsNullOrEmpty(evt.ContentDelta))
-                yield return evt.ContentDelta;
-        }
-    }
-
-    private async IAsyncEnumerable<LlmStreamEvent> StreamEventsInternal(
-        string modelId,
-        IReadOnlyList<ChatMessage> messages,
-        string? systemPrompt,
-        double temperature,
-        [EnumeratorCancellation] CancellationToken ct)
-    {
+        options ??= LlmChatOptions.Default;
+        var systemPrompt = options.SystemPrompt;
+        var temperature = options.Temperature;
         var (profileId, modelName) = ParseId(modelId);
         var profile = _profiles.Profiles.FirstOrDefault(p => p.Id == profileId);
         if (profile is null)

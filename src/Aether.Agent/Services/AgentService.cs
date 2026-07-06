@@ -104,11 +104,10 @@ public sealed class AgentService : IAgentService
         var prompt = BuildPrompt(context);
         var modelId = options.ModelId;
         var raw = new StringBuilder();
-        await foreach (var token in _llm.StreamChatAsync(
+        await foreach (var token in _llm.StreamChatTextAsync(
             modelId,
             [new ChatMessage("user", prompt)],
-            AgentSystemPrompt,
-            temperature: 0.2,
+            new LlmChatOptions { SystemPrompt = AgentSystemPrompt, Temperature = 0.2 },
             ct))
         {
             raw.Append(token);

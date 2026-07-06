@@ -346,11 +346,14 @@ public sealed class BenchmarkService : IBenchmarkService
 
         try
         {
-            await foreach (var token in _llm.StreamChatAsync(
+            await foreach (var token in _llm.StreamChatTextAsync(
                                model.Id,
                                [new ChatMessage("user", test.Prompt)],
-                               string.IsNullOrWhiteSpace(test.SystemPrompt) ? null : test.SystemPrompt,
-                               suite.Temperature,
+                               new LlmChatOptions
+                               {
+                                   SystemPrompt = string.IsNullOrWhiteSpace(test.SystemPrompt) ? null : test.SystemPrompt,
+                                   Temperature = suite.Temperature
+                               },
                                timeout.Token))
             {
                 if (firstTokenMs == 0 && !string.IsNullOrEmpty(token))

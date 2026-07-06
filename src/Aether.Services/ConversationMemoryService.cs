@@ -190,12 +190,15 @@ public sealed class ConversationMemoryService : IConversationMemoryService
         var prompt = BuildSummaryPrompt(transcript);
         var buffer = new StringBuilder();
 
-        await foreach (var token in _llm.StreamChatAsync(
+        await foreach (var token in _llm.StreamChatTextAsync(
                            modelId,
                            [new ChatMessage("user", prompt)],
-                           systemPrompt: "You are a memory extraction assistant. Follow the output format exactly.",
-                           temperature: 0.2,
-                           ct: ct))
+                           new LlmChatOptions
+                           {
+                               SystemPrompt = "You are a memory extraction assistant. Follow the output format exactly.",
+                               Temperature = 0.2
+                           },
+                           ct))
         {
             buffer.Append(token);
         }

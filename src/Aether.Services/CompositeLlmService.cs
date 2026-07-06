@@ -119,40 +119,20 @@ public sealed class CompositeLlmService : ILlmService, IDisposable
         Avatar = model.Avatar
     };
 
-    public IAsyncEnumerable<string> StreamChatAsync(
+    public IAsyncEnumerable<LlmStreamEvent> StreamChatAsync(
         string modelId, IReadOnlyList<ChatMessage> messages,
-        string? systemPrompt = null, double temperature = 0.7,
+        LlmChatOptions? options = null,
         CancellationToken ct = default)
     {
         return ResolveProviderTag(modelId) switch
         {
-            OpenAiProviderTagValue => _openAi.StreamChatAsync(modelId, messages, systemPrompt, temperature, ct),
-            OllamaProviderTagValue => _ollama.StreamChatAsync(modelId, messages, systemPrompt, temperature, ct),
-            LlamaCppProviderTagValue => _llamaCpp.StreamChatAsync(modelId, messages, systemPrompt, temperature, ct),
-            _ when OllamaService.IsOllamaModelId(modelId) => _ollama.StreamChatAsync(modelId, messages, systemPrompt, temperature, ct),
-            _ => _llamaCpp.StreamChatAsync(modelId, messages, systemPrompt, temperature, ct)
+            OpenAiProviderTagValue => _openAi.StreamChatAsync(modelId, messages, options, ct),
+            OllamaProviderTagValue => _ollama.StreamChatAsync(modelId, messages, options, ct),
+            LlamaCppProviderTagValue => _llamaCpp.StreamChatAsync(modelId, messages, options, ct),
+            _ when OllamaService.IsOllamaModelId(modelId) => _ollama.StreamChatAsync(modelId, messages, options, ct),
+            _ => _llamaCpp.StreamChatAsync(modelId, messages, options, ct)
         };
     }
-
-    public IAsyncEnumerable<LlmStreamEvent> StreamChatEventsAsync(
-        string modelId, IReadOnlyList<ChatMessage> messages,
-        string? systemPrompt = null, double temperature = 0.7,
-        CancellationToken ct = default)
-    {
-        return ResolveProviderTag(modelId) switch
-        {
-            OpenAiProviderTagValue => _openAi.StreamChatEventsAsync(modelId, messages, systemPrompt, temperature, ct),
-            OllamaProviderTagValue => _ollama.StreamChatEventsAsync(modelId, messages, systemPrompt, temperature, ct),
-            LlamaCppProviderTagValue => _llamaCpp.StreamChatEventsAsync(modelId, messages, systemPrompt, temperature, ct),
-            _ when OllamaService.IsOllamaModelId(modelId) => _ollama.StreamChatEventsAsync(modelId, messages, systemPrompt, temperature, ct),
-            _ => _llamaCpp.StreamChatEventsAsync(modelId, messages, systemPrompt, temperature, ct)
-        };
-    }
-
-    public Task PullModelAsync(string m, IProgress<string>? p = null, CancellationToken ct = default)
-        => Task.CompletedTask;
-    public Task DeleteModelAsync(string m, CancellationToken ct = default)
-        => Task.CompletedTask;
 
     private string? ResolveProviderTag(string modelId)
     {

@@ -280,7 +280,7 @@ public sealed class RagQueryService
 
         // ── 9. Stream LLM answer ─────────────────────────────────────────
         var answer = new StringBuilder();
-        await foreach (var token in _llm.StreamChatAsync(
+        await foreach (var token in _llm.StreamChatTextAsync(
             modelId,
             [new ChatMessage("user", prompt)],
             ct: ct))
