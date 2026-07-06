@@ -104,30 +104,37 @@ Documented remediation in Dependency Review (ONNX-first voice).
 Fix vocabulary in docs and types at the same time as the unifications; naming
 debt compounds through every new contributor.
 
-## 8. Custom test harness
+## 8. Custom test harness — coverage gap closed, harness itself unchanged
 
 `Program.cs` runner + xunit shim means standard tooling (`dotnet test`, IDE
-runners, CI matrix, coverage) doesn't work out of the box. Also correlates
-with the thinnest coverage being exactly where it matters most: risk
-classifier, path-boundary enforcement, redaction regexes, migration runner.
-These are security-load-bearing and regex/path logic is where platform quirks
-(Windows case-insensitivity, UNC paths, symlinks) breed CVEs.
+runners, CI matrix, coverage) doesn't work out of the box; `dotnet test`
+already runs the suite regardless (`Aether.Tests.csproj` is a standard xUnit
+project). The coverage half of this item is resolved: risk classifier,
+path-boundary enforcement, redaction regexes, and the migration runner all
+have tests (`ArchitectureTests.cs`, `ServiceTests.cs`,
+`MigrationRunnerTests.cs`, `Program.cs`'s harness cases). The `Program.cs`
+runner + xunit shim itself is unchanged; replacing it with a fully idiomatic
+xUnit layout is a mechanical migration, not a correctness risk, and is left
+for whenever it's convenient rather than bundled into this pass.
 
-## 9. Unbounded growth surfaces
+## 9. Unbounded growth surfaces — DONE
 
 Benchmark history, chat/RAG/agent traces, runtime log archives, per-GGUF tune
 profiles, memory rows with auto-extraction enabled. Each is small; together
-they make the data root a landfill after a year of use. One retention policy
-mechanism, applied everywhere, before 1.0.
+they make the data root a landfill after a year of use. All five now have a
+cap: traces at 500 rows/kind, runtime logs keep the newest 10 archives,
+benchmark history keeps the newest 200 runs, tune profiles prune entries for
+deleted/replaced models and cap at 200, and memory rows already had
+`MaxMemoriesPerConversation`/retention-policy settings.
 
-## 10. Docs describe intent as fact in places
+## 10. Docs describe intent as fact in places — DONE
 
-`features.md` contains "should" statements (Doctor Fixes queue, safe command
-recipe cards) inside feature documentation, and README front-matter version
-(`0.9.4-alpha`) trails `Directory.Build.props` (`0.9.16`). Minor, but for a
-project whose brand is trustworthiness, docs that overstate or trail reality
-are on-brand damage. Add a doc-truth pass to the release checklist and derive
-the README version or drop it.
+Audited: `features.md`'s Doctor Fixes queue and safe command recipe
+mentions already correctly hedge future work as tracked-in-roadmap rather
+than shipped, and README carries no version front-matter to drift. The one
+real drift found was `Directory.Build.props` (`0.9.16`) trailing the
+CHANGELOG's already-staged `0.9.17-alpha` unreleased section; fixed by the
+0.9.20 version bump that closes out this release.
 
 ## 11. `Aether.Core` purity erosion
 

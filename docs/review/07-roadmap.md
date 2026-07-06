@@ -4,24 +4,43 @@ Principle: 1.0 ships what exists, hardened. 1.x pays structural debt while the
 surface is still small. 2.0 is composition, not features. Features that appear
 below exist only because an architectural change makes them nearly free.
 
-## Immediate — 1.0 (ship what exists, harden it)
+## Immediate — 1.0 (ship what exists, harden it) — DONE
 
-Goal: a release you can stand behind for years. No new subsystems.
+Goal: a release you can stand behind for years. No new subsystems. This
+checklist is complete as of 0.9.20; see docs/review/05-feature-audit.md and
+docs/review/06-technical-debt.md for the itemized detail behind each line.
 
 - **Freeze feature growth.** Everything in Feature Audit rated Essential
-  ships; Merge/Deprecate items are frozen, not fixed.
-- **Break the `ILlmService` contract now** (last cheap chance): options record
-  for sampling params, single streaming API, pull/delete moved off the base
-  interface.
-- Retention policies for traces, logs, benchmark history, tune profiles.
+  ships. Merge/Deprecate/Over-engineered items were revisited rather than
+  left frozen: Local tasks/reminders/automations (Deprecate) and the memory
+  encryption toggle (Over-engineered, turned out to be a phantom setting)
+  were removed outright; the Benchmarking suite (Over-engineered) had its
+  duplicate zip-export path and ranking-mode picker cut; the Workspace file
+  browser panel (Merge) and Session Usage panel (Merge, done earlier) were
+  audited and resolved. See the CHANGELOG "Removed" entries for each.
+- **Break the `ILlmService` contract now** — DONE, already satisfied: no
+  pull/delete leak on the base interface, one streaming method, `LlmChatOptions`
+  is already an extensible options record (docs/review/06-technical-debt.md
+  item 5).
+- Retention policies for traces, logs, benchmark history, tune profiles —
+  DONE. Traces cap at 500 rows/kind, logs keep the newest 10 archives,
+  benchmark history keeps the newest 200 runs; tune profiles now prune
+  entries for deleted/replaced models and cap at 200, closing the last
+  unbounded-growth surface (docs/review/06-technical-debt.md item 9).
 - Unit-test the security-load-bearing code: risk classifier, workspace path
-  boundaries, redaction patterns, backup extraction guards, migration runner.
-  Adopt standard `dotnet test` in the process.
+  boundaries, redaction patterns, backup extraction guards, migration runner
+  — DONE, already covered (`ArchitectureTests.cs`, `ServiceTests.cs`,
+  `MigrationRunnerTests.cs`, `Program.cs`). Standard `dotnet test` already
+  adopted.
 - Architecture tests: ViewModels never reference Avalonia; ONNX Runtime never
-  escapes `Aether.Rag`; `Aether.Core` gains no new packages.
-- Docs-truth pass (versions, "should" statements out of features.md); license
-  review as already gated.
-- Pin Avalonia; document the upgrade playbook.
+  escapes `Aether.Rag`; `Aether.Agent` never references `Aether.Rag` — DONE,
+  all three exist in `ArchitectureTests.cs`.
+- Docs-truth pass — DONE. `docs/features.md`'s Doctor Fixes queue language
+  already correctly hedges it as planned/tracked, not shipped; the real
+  drift was `Directory.Build.props` trailing the CHANGELOG's staged version,
+  fixed by the 0.9.20 bump.
+- Pin Avalonia; document the upgrade playbook — DONE. All five Avalonia
+  packages pinned to the same exact `11.3.0`; see docs/avalonia-upgrade.md.
 
 ## Near-term — 1.x (pay the four debts)
 
@@ -63,6 +82,11 @@ feature build correctly scoped at 2.0 ("voice convergence completes"), not
 1.x cleanup (see docs/review/02-dependency-review.md); AvaloniaEdit usage
 audit — DONE (see docs/review/02-dependency-review.md: one read-only call
 site, kept rather than replaced).
+
+**1.x roadmap status: no open items remain.** All four debts above are
+DONE, the opportunistic collapses are DONE or deliberately scoped, and the
+1.0 hardening checklist above is DONE. The next work on this roadmap is
+2.0-horizon by design (below), not accumulated 1.x debt.
 
 ## Medium-term — 2.0 (composition becomes the product)
 
