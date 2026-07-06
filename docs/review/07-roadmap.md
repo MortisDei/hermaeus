@@ -50,11 +50,19 @@ Each is independently shippable and each *deletes* code:
    `SessionUsageViewModel`/`SessionUsageDetailViewModel` and their views are
    deleted; the sidebar has one memory entry point instead of two.
 
-Also in 1.x: collapse single-implementation interfaces opportunistically;
-move CommunityToolkit out of Core — DONE; begin voice convergence
-(Kokoro-ONNX default, Python providers marked advanced/best-effort);
-AvaloniaEdit usage audit — DONE (see docs/review/02-dependency-review.md:
-one read-only call site, kept rather than replaced).
+Also in 1.x: collapse single-implementation interfaces opportunistically —
+partially DONE (see docs/review/06-technical-debt.md item 4: provider
+routing/label tag-switches collapsed; the settings-schema half is
+deliberately deferred); move CommunityToolkit out of Core — DONE; begin
+voice convergence (Kokoro-ONNX default, Python providers marked
+advanced/best-effort) — the settings-default and UI-labeling half was
+already done before this pass (Kokoro is the default, `VoiceProviderCategory`
+already marks XTTS/F5 "Advanced"); the "ONNX" half is not — Kokoro is still
+a Python 3.12 subprocess, and making it native ONNX Runtime inference is a
+feature build correctly scoped at 2.0 ("voice convergence completes"), not
+1.x cleanup (see docs/review/02-dependency-review.md); AvaloniaEdit usage
+audit — DONE (see docs/review/02-dependency-review.md: one read-only call
+site, kept rather than replaced).
 
 ## Medium-term — 2.0 (composition becomes the product)
 

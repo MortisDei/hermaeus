@@ -91,6 +91,17 @@ limit.
 
 ### Changed
 
+- Voice convergence status audit (docs/review/02-dependency-review.md,
+  docs/review/07-roadmap.md). No code change: confirmed the settings-default
+  and UI-labeling half of "Kokoro-ONNX default, Python providers marked
+  advanced/best-effort" was already in place (Kokoro is the settings
+  default; `VoiceProviderCategory` already marks XTTS/F5 "Advanced" in the
+  Settings UI). Documented, rather than silently left stale, that Kokoro
+  itself still runs as a Python 3.12 subprocess (`KokoroProcessManager`),
+  not native ONNX Runtime inference: the "ONNX" half of that roadmap line
+  was aspirational, not fact. Making it real is a feature build (tokenizer,
+  phonemizer, ONNX session, audio postprocessing), correctly scoped at 2.0
+  ("voice convergence completes"), not folded into this pass.
 - AvaloniaEdit usage audit (docs/review/02-dependency-review.md). Exactly one
   call site, read-only chat-markdown code-block rendering
   (`MarkdownViewer.cs`), no editing anywhere in the app. Deleted a dead,

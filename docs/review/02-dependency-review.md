@@ -127,6 +127,23 @@ manage it. See Feature Audit: the long-term answer is fewer Python-based voice
 providers, favouring ONNX-runnable ones (Kokoro has ONNX exports) so voice
 rides the ONNX Runtime you already ship.
 
+**Status check (audited this pass):** the settings/UI half of "begin voice
+convergence" is done and predates this note being written down as an open
+item — `VoiceProvider.Kokoro` is the settings default
+(`VoiceProviderRegistry.ParseProviderFromSettings` falls back to it), and
+`VoiceProviderCategory` already sorts Kokoro as `Recommended` and both
+Python-venv providers (XTTS v2, F5-TTS) as `Advanced`, surfaced in the
+Settings UI dropdown via `CategoryLabel`. **What is not done, and is not a
+1.x-sized task:** Kokoro itself still runs as a Python 3.12 subprocess
+(`KokoroProcessManager` spawns an embedded `kokoro_server.py`;
+`KokoroVoiceProvider.RequiredPythonVersion` is `(3, 12)`) — it is not yet
+native ONNX Runtime inference in-process, so "Kokoro-ONNX" is aspirational,
+not current fact. Making it real means implementing Kokoro's tokenizer,
+phonemizer, ONNX session, and audio postprocessing natively in C# — a
+feature build on the order of the RAG embedding pipeline, not a cleanup.
+Correctly scoped as the 2.0 "voice convergence completes" milestone below,
+not bundled into this pass.
+
 ## Staged dependency-reduction roadmap
 
 1. **1.0:** No removals. Add architecture tests: ViewModels must not reference
@@ -138,8 +155,9 @@ rides the ONNX Runtime you already ship.
    feature reimplementation, not a refactor). Move CommunityToolkit.Mvvm out
    of `Aether.Core` — **DONE**.
 3. **1.x–2.0:** Reduce Python surface: adopt ONNX-based Kokoro as the default
-   local voice path; demote Python-venv providers (XTTS/F5) to "advanced,
-   best-effort" status or a companion add-on.
+   local voice path — **settings default and "advanced" demotion for
+   XTTS/F5 DONE; the actual ONNX runtime migration for Kokoro is still
+   outstanding** (see status check above).
 4. **2.0:** Evaluate shipping ONNX Runtime as a Doctor-installed component
    rather than a bundled package, shrinking base distribution size.
 5. **Ongoing:** hard rule — any new package needs a written justification in
