@@ -117,6 +117,8 @@ public partial class ModelProfileItemViewModel : ObservableObject
     public string Provider { get; }
     public string SizeDisplay { get; }
     public string ModifiedDisplay { get; }
+    public int? ProbedContextLength { get; }
+    public string ContextWatermark => ProbedContextLength is { } n ? $"Detected: {n}" : "Default context";
 
     [ObservableProperty] private string _displayName;
     [ObservableProperty] private string _description;
@@ -134,6 +136,7 @@ public partial class ModelProfileItemViewModel : ObservableObject
         Provider = model.Provider;
         SizeDisplay = model.SizeDisplay;
         ModifiedDisplay = model.ModifiedAt?.ToString("d MMM yyyy") ?? string.Empty;
+        ProbedContextLength = model.ProbedContextLength;
         _displayName = profile.DisplayName;
         _description = profile.Description;
         _tagsText = string.Join(", ", profile.Tags);

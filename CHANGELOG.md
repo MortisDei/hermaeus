@@ -52,6 +52,14 @@ limit.
   ("OpenAI"). A remote voice provider is now flagged even when no remote chat
   provider is enabled, and adding a new remote chat provider to
   `CompositeLlmService.Providers` needs no Privacy Audit changes.
+- Runtime capability discovery: `LlamaCppService` probes llama-server's
+  `/props` endpoint and `OllamaService` probes `/api/show` per model, caching
+  the result and populating `LlmModel.ProbedContextLength`.
+  `ModelProfileService.ApplyProfiles` uses the probed value as the context
+  size when no explicit per-model override is saved, so chat's context-budget
+  math uses a real number instead of a guessed default. The Model Management
+  context-size field now shows "Detected: N" as its placeholder when a probe
+  succeeded.
 
 ### Changed
 

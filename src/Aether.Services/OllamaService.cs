@@ -11,6 +11,7 @@ public sealed class OllamaService : IDisposable
 {
     private const string ProviderTagValue = "ollama";
     private static readonly HttpClient SharedHttp = new() { Timeout = TimeSpan.FromMinutes(10) };
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> _contextLengthCache = new();
     private readonly IRuntimeProfileService _profiles;
     private readonly HttpClient _http;
 
@@ -42,7 +43,8 @@ public sealed class OllamaService : IDisposable
                         Provider = $"Ollama:{profile.Name}",
                         ProviderTag = ProviderTagValue,
                         SizeBytes = model.Size,
-                        ModifiedAt = model.ModifiedAt
+                        ModifiedAt = model.ModifiedAt,
+                        ProbedContextLength = await ProbeContextLengthAsync(profile.BaseUrl, model.Name, ct)
                     });
                 }
             }
@@ -50,6 +52,53 @@ public sealed class OllamaService : IDisposable
         }
 
         return all;
+    }
+
+    private async Task<int?> ProbeContextLengthAsync(string baseUrl, string modelName, CancellationToken ct)
+    {
+        var cacheKey = $"{baseUrl}:{modelName}";
+        if (_contextLengthCache.TryGetValue(cacheKey, out var cached))
+            return cached;
+
+        try
+        {
+            using var resp = await _http.PostAsJsonAsync($"{baseUrl.TrimEnd('/')}/api/show", new { model = modelName }, ct);
+            if (!resp.IsSuccessStatusCode)
+                return null;
+
+            var contextLength = ParseShowContextLength(await resp.Content.ReadAsStringAsync(ct));
+            if (contextLength is { } value)
+                _contextLengthCache[cacheKey] = value;
+
+            return contextLength;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Reads "{architecture}.context_length" from an Ollama /api/show response. Public for tests.</summary>
+    public static int? ParseShowContextLength(string showJson)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(showJson);
+            if (!doc.RootElement.TryGetProperty("model_info", out var modelInfo))
+                return null;
+
+            var architecture = modelInfo.TryGetProperty("general.architecture", out var arch) ? arch.GetString() : null;
+            if (string.IsNullOrEmpty(architecture))
+                return null;
+
+            return modelInfo.TryGetProperty($"{architecture}.context_length", out var ctxProp) && ctxProp.TryGetInt32(out var contextLength)
+                ? contextLength
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     public async IAsyncEnumerable<LlmStreamEvent> StreamChatAsync(

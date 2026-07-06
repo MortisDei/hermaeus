@@ -4,7 +4,7 @@ Each candidate is evaluated, not assumed. "Adopt", "Defer", or "Reject" — with
 the problem it solves. The bar: every abstraction must solve a problem Aether
 demonstrably has today or will unavoidably have.
 
-## 1. Provider capability model — ADOPT (highest priority)
+## 1. Provider capability model — ADOPT (highest priority) — DONE
 
 **Problem today:** `CompositeLlmService` hard-codes three providers with
 if-chains and settings flags; `PullModelAsync`/`DeleteModelAsync` sit on
@@ -23,13 +23,29 @@ instead of maintaining its own provider list. Strip pull/delete from
 This is not speculative flexibility — it deletes existing duplication in four
 places and is the precondition for tool-calling agents (next item).
 
-## 2. Runtime capability discovery — ADOPT, minimal form
+`ILlmService` never carried `PullModelAsync`/`DeleteModelAsync` in the
+reviewed codebase state, so that specific leak was already a non-issue;
+`ProviderDescriptor` (kind + capability flags) exists and Privacy Audit reads
+it instead of matching provider name strings.
+
+## 2. Runtime capability discovery — ADOPT, minimal form — DONE
 
 **Problem:** context-window size, tool-call support, and vision support are
 currently user-asserted or guessed. llama-server `/v1/models` and Ollama
 `/api/show` expose real metadata. Populate the capability model above from
 live probes, cached per model. Do not build a general "capability negotiation
 protocol" — a probe-and-cache function per provider is enough.
+
+**Shipped as the minimal form:** `LlamaCppService` probes `/props`
+(`default_generation_settings.n_ctx`) once per base URL; `OllamaService`
+probes `/api/show` per model, reading `model_info["{architecture}.context_length"]`.
+Both cache successful results in-memory and populate
+`LlmModel.ProbedContextLength`; `ModelProfileService.ApplyProfiles` falls back
+to it when no explicit per-model `DefaultContextSize` override exists, so
+`ChatViewModel`'s context-budget math (which already reads
+`SelectedModel.DefaultContextSize`) uses a real number instead of a guess.
+Tool-call/vision probing was not built — no consumer reads those flags yet
+(see #3, and the "no speculative flags" principle this doc already states).
 
 ## 3. Model capability registry — MERGE INTO #1/#2, do not build separately
 
@@ -38,7 +54,7 @@ quicksand: the model landscape churns monthly and you'd be signing up to
 curate it forever. Derive capabilities from probes + GGUF metadata + benchmark
 history you already store. Reject as an independent subsystem.
 
-## 4. Unified memory with scopes — ADOPT (see Architecture Review §2)
+## 4. Unified memory with scopes — ADOPT (see Architecture Review §2) — DONE
 
 One `IMemoryService` with scope = global / workspace / conversation, one
 retrieval path, one UI. Chat memory, workspace memory, and workspace-profile
@@ -47,7 +63,7 @@ change that makes features "compose naturally rather than becoming isolated
 modules" — currently the memory features are the clearest violation of that
 principle.
 
-## 5. Check/fix registry (Doctor, Setup, Trust, Privacy Audit) — ADOPT
+## 5. Check/fix registry (Doctor, Setup, Trust, Privacy Audit) — ADOPT — DONE
 
 Four systems today independently inspect the installation. Define one
 contract: a check has an id, subsystem, severity, message, and optionally an
@@ -58,7 +74,7 @@ Each subsystem contributes its own checks, so adding a feature never means
 editing DoctorService again. This is a simplification disguised as an
 abstraction — it should reduce net code.
 
-## 6. Context-pack builder as a first-class service — ADOPT
+## 6. Context-pack builder as a first-class service — ADOPT — DONE
 
 Chat builds context (system prompt, memory injection, attachments, history
 budget) inside `ChatViewModel`; the Agent builds context packs inside

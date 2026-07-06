@@ -11,6 +11,7 @@ public sealed class LlamaCppService : IDisposable
 {
     private const string ProviderTagValue = "llama.cpp";
     private static readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(10) };
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> _contextLengthCache = new();
     private readonly ISettingsService _settings;
 
     private static readonly JsonSerializerOptions JsonOpts = new()
@@ -40,12 +41,69 @@ public sealed class LlamaCppService : IDisposable
             var resp = await _http.GetAsync($"{Base}/v1/models", ct);
             resp.EnsureSuccessStatusCode();
             var data = await resp.Content.ReadFromJsonAsync<ModelsResponse>(JsonOpts, ct);
-            return data?.Data?
+            var models = data?.Data?
                 .Select(m => new LlmModel { Id = m.Id, Name = m.Id, Provider = "llama.cpp", ProviderTag = ProviderTagValue })
                 .ToList() ?? [];
+
+            // llama-server hosts exactly one model at a time, so the probed context
+            // length from /props applies to whatever it returned above.
+            if (models.Count > 0)
+            {
+                var contextLength = await ProbeContextLengthAsync(ct);
+                foreach (var model in models)
+                    model.ProbedContextLength = contextLength;
+            }
+
+            return models;
         }
         catch { return []; }
     }
+
+    private async Task<int?> ProbeContextLengthAsync(CancellationToken ct)
+    {
+        var baseUrl = Base;
+        if (_contextLengthCache.TryGetValue(baseUrl, out var cached))
+            return cached;
+
+        try
+        {
+            var resp = await _http.GetAsync($"{baseUrl}/props", ct);
+            if (!resp.IsSuccessStatusCode)
+                return null;
+
+            var nCtx = ParsePropsContextLength(await resp.Content.ReadAsStringAsync(ct));
+            if (nCtx is { } value)
+            {
+                _contextLengthCache[baseUrl] = value;
+                return value;
+            }
+
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Reads n_ctx from a llama-server /props response. Public for tests.</summary>
+    public static int? ParsePropsContextLength(string propsJson)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(propsJson);
+            var root = doc.RootElement;
+            return TryGetInt(root, "n_ctx")
+                ?? (root.TryGetProperty("default_generation_settings", out var settings) ? TryGetInt(settings, "n_ctx") : null);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static int? TryGetInt(JsonElement element, string property) =>
+        element.TryGetProperty(property, out var prop) && prop.TryGetInt32(out var value) ? value : null;
 
     public async IAsyncEnumerable<LlmStreamEvent> StreamChatAsync(
         string modelId,

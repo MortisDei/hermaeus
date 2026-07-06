@@ -133,6 +133,7 @@ public sealed class CompositeLlmService : ILlmService, IDisposable
         DefaultTemperature = model.DefaultTemperature,
         DefaultContextSize = model.DefaultContextSize,
         DefaultMaxTokens = model.DefaultMaxTokens,
+        ProbedContextLength = model.ProbedContextLength,
         IsVisible = model.IsVisible,
         Avatar = model.Avatar
     };

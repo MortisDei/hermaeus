@@ -27,18 +27,25 @@ Goal: a release you can stand behind for years. No new subsystems.
 
 Each is independently shippable and each *deletes* code:
 
-1. **Check/fix registry** — Doctor, Setup scan, Trust & Safety, Privacy Audit
-   become filtered views over one contribution-based inspection engine.
-   Doctor Fixes queue (already designed in docs) falls out of this.
-2. **Provider capability model + runtime capability discovery** — registry
-   with descriptors and probed capabilities; Composite becomes a router;
-   Privacy Audit and Services UI read capabilities instead of provider names.
-3. **Context-pack builder extraction** — one budget-aware packer with
-   provenance, used by Chat, Agent, and RAG; Context Inspector and all traces
-   read from it. Unify the three trace shapes onto one schema while there.
-4. **Unified memory with scopes** — one service, one panel, one retrieval
-   path; migrate chat memory, workspace memory, and profile facts. Session
-   Usage panel retires.
+1. **Check/fix registry** — DONE. Doctor, Trust & Safety, and Privacy Audit
+   contribute `IInspectionCheckProvider` checks into one `IInspectionEngine`,
+   filtered by view. Setup Wizard already delegated to `IDoctorService`
+   directly, so it needed no change.
+2. **Provider capability model + runtime capability discovery** — DONE.
+   `ProviderDescriptor` (kind + capability flags) already existed and Privacy
+   Audit now reads `IsRemote`/`VoiceCapability.Remote` instead of matching
+   provider name strings. Runtime capability discovery (context-length probes
+   for llama.cpp `/props` and Ollama `/api/show`, cached, feeding
+   `LlmModel.ProbedContextLength` as the default when no user override is
+   set) is also done.
+3. **Context-pack builder extraction** — DONE. `ContextPackBuilder` is the
+   single budget-aware packer used by Chat, Agent, and RAG; traces converged
+   on one `TraceRecord` schema with per-surface projections.
+4. **Unified memory with scopes** — DONE (storage/retrieval). `IMemoryStore`
+   carries scopes (global/workspace/conversation); workspace notes read/write
+   through the same store instead of a separate schema. Still open: the
+   Session Usage panel (Feature Audit: Merge) has not yet been folded into
+   the Memories panel — it remains a separate ViewModel/view.
 
 Also in 1.x: collapse single-implementation interfaces opportunistically;
 move CommunityToolkit out of Core; begin voice convergence (Kokoro-ONNX

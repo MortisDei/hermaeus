@@ -38,16 +38,21 @@ public sealed class ModelProfileService : IModelProfileService
         foreach (var model in models)
         {
             var profile = Get(model.Id);
-            if (profile is null) continue;
+            if (profile is not null)
+            {
+                model.ProfileDisplayName = profile.DisplayName;
+                model.Description = profile.Description;
+                model.Tags = NormalizeTags(profile.Tags);
+                model.DefaultTemperature = profile.DefaultTemperature;
+                model.DefaultContextSize = profile.DefaultContextSize;
+                model.DefaultMaxTokens = profile.DefaultMaxTokens;
+                model.IsVisible = profile.IsVisible;
+                model.Avatar = profile.Avatar;
+            }
 
-            model.ProfileDisplayName = profile.DisplayName;
-            model.Description = profile.Description;
-            model.Tags = NormalizeTags(profile.Tags);
-            model.DefaultTemperature = profile.DefaultTemperature;
-            model.DefaultContextSize = profile.DefaultContextSize;
-            model.DefaultMaxTokens = profile.DefaultMaxTokens;
-            model.IsVisible = profile.IsVisible;
-            model.Avatar = profile.Avatar;
+            // No explicit user override: fall back to the live-probed context
+            // length instead of leaving budget math to guess.
+            model.DefaultContextSize ??= model.ProbedContextLength;
         }
     }
 

@@ -14,6 +14,8 @@ public class LlmModel
     public double? DefaultTemperature { get; set; }
     public int? DefaultContextSize { get; set; }
     public int? DefaultMaxTokens { get; set; }
+    /// <summary>Context length read live from the provider (llama.cpp /props, Ollama /api/show), if available.</summary>
+    public int? ProbedContextLength { get; set; }
     public bool IsVisible { get; set; } = true;
     public string Avatar { get; set; } = string.Empty;
 

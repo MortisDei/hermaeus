@@ -48,7 +48,7 @@ RAG retrieval history. They are one system:
 | Chat trace, RAG trace, agent trace | one trace schema, three **projections** (viewers) |
 | Context Inspector, agent context pack, RAG packing | one **ContextPackBuilder** with budgets + provenance; three consumers |
 
-Implementation order (each shippable alone):
+Implementation order (each shippable alone) — **all three done**:
 1. Unified trace schema (the cheapest collision to fix, and it makes the next
    two observable).
 2. ContextPackBuilder extracted from ChatViewModel; Agent and RAG packers
@@ -70,13 +70,20 @@ freeze: none of the three may grow features independently.
 
 Tracked explicitly so no new work deepens them:
 
-1. Memory: chat layer vs. agent layer both own persistence of "facts".
-2. Traces: three schemas for one concept ("what happened in a send/run").
-3. Context: chat and workspace both own "what the model sees".
-4. Evaluation: benchmarks vs. compare vs. evals.
+1. Memory: chat layer vs. agent layer both own persistence of "facts" —
+   **RESOLVED**. One scoped `IMemoryStore`; workspace notes are a scope, not
+   a separate schema.
+2. Traces: three schemas for one concept ("what happened in a send/run") —
+   **RESOLVED**. One `TraceRecord` schema, three projections.
+3. Context: chat and workspace both own "what the model sees" — **RESOLVED**.
+   One `ContextPackBuilder` used by Chat, Agent, and RAG.
+4. Evaluation: benchmarks vs. compare vs. evals — **OPEN**. Design exists
+   (doc 10); not yet implemented.
 5. Inspection: Doctor vs. Setup scan vs. Trust vs. Privacy Audit each own
-   "is this install healthy/safe" — resolved by the check/fix registry, where
-   each becomes a filtered projection of one engine.
+   "is this install healthy/safe" — **RESOLVED** by the check/fix registry;
+   each is a filtered projection of one `IInspectionEngine`.
+
+Only the Evaluation System merge remains open from this register.
 
 New-feature test (add to review checklist): *which existing system does this
 project onto?* If the answer is "it needs its own store/panel/checks", the
