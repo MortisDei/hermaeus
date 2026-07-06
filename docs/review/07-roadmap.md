@@ -92,9 +92,15 @@ DONE, the opportunistic collapses are DONE or deliberately scoped, and the
 
 Built *on* the 1.x refactors, in dependency order:
 
-1. **Workspace as the organizing concept.** Project-level AI configuration
-   (`.aether/` in-repo config): opening a workspace activates its model,
-   dataset, instructions, and memory scope. This is mostly wiring after 1.x.
+1. **Workspace as the organizing concept — DONE.** An in-repo `.aether/workspace.json`
+   manifest (`WorkspaceManifestService`) records preferred model, embedding
+   model, linked RAG dataset, and instruction paths; `WorkspaceActivationService`
+   reads it (falling back to the pre-existing app-side `WorkspaceProfile` when
+   no manifest exists) and the Agent panel applies the activation atomically
+   after analysis. A "Save as Workspace Defaults" action writes the manifest so
+   it ships with the repo. Chat carries an optional, opt-in activation path for
+   the same manifest. Memory scope needed no change: `MemoryScope.Workspace`
+   already addresses by normalized workspace root.
 2. **Agent: approval-gated command execution.** The next capability slice,
    under the unchanged constitution (risk classes, review queue, traces).
    Safe-command recipes from workspace profiles become the on-ramp.

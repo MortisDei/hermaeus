@@ -77,8 +77,10 @@ namespace Aether.Tests
             var logs = new SimpleRuntimeLog(temp.PathFor("aether-test-logs"));
             var profiles = new FileWorkspaceProfileStore(settings);
             var analysis = new WorkspaceAnalysisService(profiles, memoryStore);
+            var manifests = new WorkspaceManifestService();
+            var activation = new WorkspaceActivationService(manifests, profiles);
 
-            var vm = new AgentViewModel(agentService, store, memoryStore, tools, new FakeLlm(), rag, logs, analysis);
+            var vm = new AgentViewModel(agentService, store, memoryStore, tools, new FakeLlm(), rag, logs, analysis, activation, manifests);
             vm.WorkspaceRoot = workspace;
 
             // Create a task and set it as current

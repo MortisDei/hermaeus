@@ -148,6 +148,8 @@ public partial class App : Application
         s.AddSingleton<IAgentWorkspaceTools, AgentWorkspaceTools>();
         s.AddSingleton<IWorkspaceProfileStore, FileWorkspaceProfileStore>();
         s.AddSingleton<IWorkspaceAnalysisService, WorkspaceAnalysisService>();
+        s.AddSingleton<IWorkspaceManifestStore, WorkspaceManifestService>();
+        s.AddSingleton<IWorkspaceActivationService, WorkspaceActivationService>();
         s.AddSingleton<IAgentSafetyGate, AgentSafetyGate>();
         s.AddSingleton<IAgentToolExecutor, AgentToolExecutor>();
         s.AddSingleton<IAgentContextBuilder, AgentContextBuilder>();

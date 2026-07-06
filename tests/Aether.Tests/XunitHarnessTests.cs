@@ -135,7 +135,10 @@ public static class HarnessCases
         [new HarnessCase("agent draft patch view model shows outcome labels", AgentTests.AgentDraftPatchViewModelShowsOutcomeLabels)],
         [new HarnessCase("agent context pack stays bounded", AgentTests.AgentContextPackStaysBounded)],
         [new HarnessCase("agent tool policy gates risky actions", AgentTests.AgentToolPolicyGatesRiskyActions)],
-        [new HarnessCase("agent loop writes state log and trace", AgentTests.AgentLoopWritesStateLogAndTrace)]
+        [new HarnessCase("agent loop writes state log and trace", AgentTests.AgentLoopWritesStateLogAndTrace)],
+        [new HarnessCase("workspace manifest round trips through in-repo file", AgentTests.WorkspaceManifestRoundTripsThroughInRepoFile)],
+        [new HarnessCase("workspace activation prefers manifest over profile", AgentTests.WorkspaceActivationPrefersManifestOverProfile)],
+        [new HarnessCase("workspace manifest requires an existing workspace root", AgentTests.WorkspaceManifestRequiresAnExistingWorkspaceRoot)]
     ];
 }
 

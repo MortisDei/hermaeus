@@ -229,6 +229,60 @@ internal static class AgentTests
     Equal("local-model", saved?.PreferredModelId, "workspace profile should persist preferred model");
     }
 
+    public static async Task WorkspaceManifestRoundTripsThroughInRepoFile()
+    {
+    using var temp = new TempDir();
+    var workspace = temp.PathFor("workspace");
+    Directory.CreateDirectory(workspace);
+    var manifests = new WorkspaceManifestService();
+    var manifest = new WorkspaceManifest
+    {
+        PreferredModelId = "local-model",
+        LinkedRagDatasetId = "dataset-1",
+        InstructionPaths = ["AGENTS.md"]
+    };
+
+    await manifests.SaveAsync(workspace, manifest);
+    True(File.Exists(Path.Combine(workspace, ".aether", "workspace.json")), "manifest should be written in-repo under .aether/");
+
+    var loaded = await manifests.LoadAsync(workspace);
+    Equal("local-model", loaded?.PreferredModelId, "loaded manifest should round-trip the preferred model");
+    Equal("dataset-1", loaded?.LinkedRagDatasetId, "loaded manifest should round-trip the linked dataset");
+    }
+
+    public static async Task WorkspaceActivationPrefersManifestOverProfile()
+    {
+    using var temp = new TempDir();
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var workspace = temp.PathFor("workspace");
+    Directory.CreateDirectory(workspace);
+
+    var profiles = new FileWorkspaceProfileStore(settings);
+    await profiles.SaveAsync(new WorkspaceProfile { WorkspaceRoot = workspace, PreferredModelId = "profile-model" });
+
+    var manifests = new WorkspaceManifestService();
+    var activationService = new WorkspaceActivationService(manifests, profiles);
+
+    var fromProfile = await activationService.ActivateAsync(workspace);
+    Equal("profile-model", fromProfile.PreferredModelId, "activation should fall back to the app-side profile when no manifest exists");
+    False(fromProfile.FromManifest, "activation should report it did not come from a manifest");
+
+    await manifests.SaveAsync(workspace, new WorkspaceManifest { PreferredModelId = "manifest-model" });
+    var fromManifest = await activationService.ActivateAsync(workspace);
+    Equal("manifest-model", fromManifest.PreferredModelId, "activation should prefer the in-repo manifest once one exists");
+    True(fromManifest.FromManifest, "activation should report it came from a manifest");
+    }
+
+    public static Task WorkspaceManifestRequiresAnExistingWorkspaceRoot()
+    {
+    using var temp = new TempDir();
+    var missingWorkspace = temp.PathFor("does-not-exist");
+    var manifests = new WorkspaceManifestService();
+    Throws<DirectoryNotFoundException>(() => manifests.LoadAsync(missingWorkspace).GetAwaiter().GetResult());
+    return Task.CompletedTask;
+    }
+
     public static Task AgentWorkspaceToolsEnforcePathSafety()
     {
     using var temp = new TempDir();

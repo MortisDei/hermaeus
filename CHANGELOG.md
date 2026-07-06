@@ -11,6 +11,9 @@ limit.
 
 ## [Unreleased]
 
+### Added
+- Workspace as the organizing concept (2.0 roadmap item 1, first slice): an in-repo `.aether/workspace.json` manifest records a workspace's preferred model, embedding model, linked RAG dataset, and instruction file list. `IWorkspaceActivationService` reads it (falling back to the existing app-side `WorkspaceProfile` when no manifest exists) and the Agent panel now activates the matching model/dataset automatically after "Explain Workspace" runs, instead of leaving them as stale independent selections. A new "Save as Workspace Defaults" button writes the current selection back to the manifest so it ships with the repo. Chat also gained an optional `ActiveWorkspaceRoot`/`ActivateWorkspaceCommand` so the same manifest can activate a preferred model outside the Agent panel; both are opt-in and no-op unless a workspace root is set.
+
 ## [0.9.20-alpha] - 2026-07-07
 
 This release closes out the v1.0 architecture review and roadmap

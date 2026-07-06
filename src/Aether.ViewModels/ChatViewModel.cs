@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using Aether.Agent.Services;
 using Aether.Core.Models;
 using Aether.Core.Services;
 using Aether.Services;
@@ -88,6 +89,7 @@ public partial class ChatViewModel : ObservableObject
     private readonly IConversationExportService _exports;
     private readonly ITraceStore? _traceStore;
     private readonly IEvalEngine _evalEngine;
+    private readonly IWorkspaceActivationService? _workspaceActivation;
     private CancellationTokenSource? _cts;
     private CancellationTokenSource? _ttsCts;
     private CancellationTokenSource? _contextUsageCts;
@@ -129,6 +131,7 @@ public partial class ChatViewModel : ObservableObject
     [ObservableProperty] private ChatTraceViewModel? _selectedChatTrace;
     [ObservableProperty] private bool      _isComparingModels;
     [ObservableProperty] private string    _compareStatus = string.Empty;
+    [ObservableProperty] private string    _activeWorkspaceRoot = string.Empty;
 
     public event EventHandler?        ScrollToBottom;
     public event EventHandler<string>? ConversationSaved;
@@ -150,7 +153,8 @@ public partial class ChatViewModel : ObservableObject
         IRuntimeLogService runtimeLogs,
         IConversationExportService exports,
         ITraceStore? traceStore = null,
-        IEvalEngine? evalEngine = null)
+        IEvalEngine? evalEngine = null,
+        IWorkspaceActivationService? workspaceActivation = null)
     {
         _llm = llm; _store = store; _settings = settings; _tts = tts; _profiles = profiles; _toasts = toasts;
         _memoryStore = memoryStore;
@@ -159,6 +163,7 @@ public partial class ChatViewModel : ObservableObject
         _exports = exports;
         _traceStore = traceStore;
         _evalEngine = evalEngine ?? new EvalEngine(llm);
+        _workspaceActivation = workspaceActivation;
         _temperature  = settings.Settings.Llm.Temperature;
         _systemPrompt = settings.Settings.Llm.DefaultSystemPrompt;
         Messages.CollectionChanged += (_, _) =>
@@ -205,6 +210,24 @@ public partial class ChatViewModel : ObservableObject
             SelectedModel = null;
         }
         _modelsLoadedAtUtc = DateTime.UtcNow;
+    }
+
+    [RelayCommand]
+    public async Task ActivateWorkspaceAsync()
+    {
+        if (_workspaceActivation is null || string.IsNullOrWhiteSpace(ActiveWorkspaceRoot) || !Directory.Exists(ActiveWorkspaceRoot))
+            return;
+
+        var activation = await _workspaceActivation.ActivateAsync(ActiveWorkspaceRoot);
+        if (string.IsNullOrWhiteSpace(activation.PreferredModelId))
+            return;
+
+        if (AvailableModels.Count == 0)
+            await LoadModelsAsync();
+
+        var model = AvailableModels.FirstOrDefault(m => m.Id == activation.PreferredModelId);
+        if (model is not null)
+            SelectedModel = model;
     }
 
     public async Task LoadConversationAsync(string id)

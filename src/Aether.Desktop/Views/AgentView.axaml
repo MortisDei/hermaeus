@@ -172,6 +172,11 @@
                         Content="Explain Workspace"
                         Padding="14,8"
                         CornerRadius="6" />
+                    <Button Command="{Binding SaveWorkspaceManifestCommand}"
+                        Content="Save as Workspace Defaults"
+                        ToolTip.Tip="Writes the selected model, dataset, and instruction files to .aether/workspace.json so they activate for anyone who opens this workspace."
+                        Padding="14,8"
+                        CornerRadius="6" />
                     <TextBlock Text="{Binding StatusMessage}"
                                VerticalAlignment="Center"
                                FontSize="12"

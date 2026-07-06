@@ -239,6 +239,22 @@ public sealed record WorkspaceCommandRecipe(
     string Why,
     AgentRiskLevel RiskLevel);
 
+public sealed class WorkspaceManifest
+{
+    public int SchemaVersion { get; set; } = 1;
+    public string PreferredModelId { get; set; } = string.Empty;
+    public string PreferredEmbeddingModelId { get; set; } = string.Empty;
+    public string? LinkedRagDatasetId { get; set; }
+    public List<string> InstructionPaths { get; set; } = [];
+}
+
+public sealed record WorkspaceActivation(
+    string? PreferredModelId,
+    string? PreferredEmbeddingModelId,
+    string? LinkedRagDatasetId,
+    IReadOnlyList<string> InstructionPaths,
+    bool FromManifest);
+
 public sealed class WorkspaceAnalysisReport
 {
     public WorkspaceProfile Profile { get; set; } = new();

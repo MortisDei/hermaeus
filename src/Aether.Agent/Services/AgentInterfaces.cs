@@ -67,3 +67,14 @@ public interface IWorkspaceAnalysisService
 {
     Task<WorkspaceAnalysisReport> AnalyzeAsync(AgentWorkspaceOptions options, CancellationToken ct = default);
 }
+
+public interface IWorkspaceManifestStore
+{
+    Task<WorkspaceManifest?> LoadAsync(string workspaceRoot, CancellationToken ct = default);
+    Task SaveAsync(string workspaceRoot, WorkspaceManifest manifest, CancellationToken ct = default);
+}
+
+public interface IWorkspaceActivationService
+{
+    Task<WorkspaceActivation> ActivateAsync(string workspaceRoot, CancellationToken ct = default);
+}

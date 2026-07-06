@@ -181,6 +181,8 @@ public partial class AgentViewModel : ObservableObject
     private readonly RagQueryService _rag;
     private readonly IRuntimeLogService _logs;
     private readonly IWorkspaceAnalysisService _workspaceAnalysis;
+    private readonly IWorkspaceActivationService _workspaceActivation;
+    private readonly IWorkspaceManifestStore _workspaceManifests;
     private CancellationTokenSource? _cts;
 
     public ObservableCollection<LlmModel> AvailableModels { get; } = [];
@@ -258,7 +260,9 @@ public partial class AgentViewModel : ObservableObject
         ILlmService llm,
         RagQueryService rag,
         IRuntimeLogService logs,
-        IWorkspaceAnalysisService workspaceAnalysis)
+        IWorkspaceAnalysisService workspaceAnalysis,
+        IWorkspaceActivationService workspaceActivation,
+        IWorkspaceManifestStore workspaceManifests)
     {
         _agent = agent;
         _store = store;
@@ -268,6 +272,8 @@ public partial class AgentViewModel : ObservableObject
         _rag = rag;
         _logs = logs;
         _workspaceAnalysis = workspaceAnalysis;
+        _workspaceActivation = workspaceActivation;
+        _workspaceManifests = workspaceManifests;
         WorkspaceRoot = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
         RecentTasks.CollectionChanged += (_, _) =>
@@ -750,6 +756,7 @@ public partial class AgentViewModel : ObservableObject
                 Tags = ["workspace", "profile", "auto"]
             });
             await RefreshWorkspaceMemoryAsync();
+            await ActivateWorkspaceAsync();
             StatusMessage = "Workspace profile updated.";
         }
         catch (Exception ex)
@@ -760,6 +767,36 @@ public partial class AgentViewModel : ObservableObject
         {
             IsAnalyzingWorkspace = false;
         }
+    }
+
+    private async Task ActivateWorkspaceAsync()
+    {
+        var activation = await _workspaceActivation.ActivateAsync(WorkspaceRoot);
+        if (!string.IsNullOrWhiteSpace(activation.PreferredModelId))
+        {
+            var model = AvailableModels.FirstOrDefault(m => m.Id == activation.PreferredModelId);
+            if (model is not null) SelectedModel = model;
+        }
+
+        if (!string.IsNullOrWhiteSpace(activation.LinkedRagDatasetId))
+        {
+            var dataset = Datasets.FirstOrDefault(d => d.Id == activation.LinkedRagDatasetId);
+            if (dataset is not null) SelectedDataset = dataset;
+        }
+    }
+
+    [RelayCommand]
+    private async Task SaveWorkspaceManifestAsync()
+    {
+        if (string.IsNullOrWhiteSpace(WorkspaceRoot) || !Directory.Exists(WorkspaceRoot))
+            return;
+
+        var manifest = await _workspaceManifests.LoadAsync(WorkspaceRoot) ?? new WorkspaceManifest();
+        manifest.PreferredModelId = SelectedModel?.Id ?? string.Empty;
+        manifest.LinkedRagDatasetId = SelectedDataset?.Id;
+        manifest.InstructionPaths = ProjectInstructions.Select(i => i.RelativePath).ToList();
+        await _workspaceManifests.SaveAsync(WorkspaceRoot, manifest);
+        StatusMessage = "Saved workspace defaults to .aether/workspace.json.";
     }
 
     private async Task LoadTaskIfOpenAsync(string taskId)
