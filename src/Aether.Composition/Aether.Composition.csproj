@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Aether.Composition</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.4" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Aether.Core/Aether.Core.csproj" />
+    <ProjectReference Include="../Aether.Services/Aether.Services.csproj" />
+    <ProjectReference Include="../Aether.Agent/Aether.Agent.csproj" />
+    <ProjectReference Include="../Aether.Rag/Aether.Rag.csproj" />
+    <ProjectReference Include="../Aether.Mcp/Aether.Mcp.csproj" />
+  </ItemGroup>
+</Project>
