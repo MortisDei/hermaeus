@@ -283,6 +283,18 @@ internal static class AgentTests
     return Task.CompletedTask;
     }
 
+    public static Task AgentSafetyGateAlwaysRequiresApprovalForMcpTools()
+    {
+    var gate = new AgentSafetyGate();
+
+    var trusted = gate.Evaluate("mcp:filesystem:read_file");
+    Equal(AgentToolDisposition.RequiresApproval, trusted.Disposition, "mcp: tools should never auto-allow even if their name looks read-only");
+
+    var readNamed = gate.Evaluate("mcp:server1:read_something");
+    Equal(AgentToolDisposition.RequiresApproval, readNamed.Disposition, "mcp: tools should require approval regardless of naming");
+    return Task.CompletedTask;
+    }
+
     public static Task AgentWorkspaceToolsEnforcePathSafety()
     {
     using var temp = new TempDir();

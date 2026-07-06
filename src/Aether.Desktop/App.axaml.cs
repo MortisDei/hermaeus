@@ -5,6 +5,7 @@ using Aether.Agent.Services;
 using Aether.Core.Models;
 using Aether.Core.Services;
 using Aether.Desktop.Views;
+using Aether.Mcp;
 using Aether.Rag;
 using Aether.Rag.Embeddings;
 using Aether.Rag.Eval;
@@ -151,6 +152,7 @@ public partial class App : Application
         s.AddSingleton<IWorkspaceManifestStore, WorkspaceManifestService>();
         s.AddSingleton<IWorkspaceActivationService, WorkspaceActivationService>();
         s.AddSingleton<IAgentSafetyGate, AgentSafetyGate>();
+        s.AddSingleton<IMcpToolBridge, McpToolBridge>();
         s.AddSingleton<IAgentToolExecutor, AgentToolExecutor>();
         s.AddSingleton<IAgentContextBuilder, AgentContextBuilder>();
         s.AddSingleton<IAgentService, AgentService>();

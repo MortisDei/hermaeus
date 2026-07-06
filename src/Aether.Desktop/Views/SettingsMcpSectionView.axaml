@@ -1,0 +1,69 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Aether.ViewModels"
+             x:Class="Aether.Desktop.Views.SettingsMcpSectionView"
+             x:DataType="vm:McpSettingsViewModel">
+    <Border Classes="settings-card">
+        <StackPanel Spacing="12">
+            <TextBlock Text="MCP servers" FontSize="14" FontWeight="SemiBold" />
+            <TextBlock Text="Local Model Context Protocol servers the Agent can call as tools. Each server is a child process launched over stdio; every tool call still requires approval, regardless of what the server claims about itself."
+                       FontSize="11" Opacity="0.55" TextWrapping="Wrap" />
+
+            <ItemsControl ItemsSource="{Binding Servers}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="vm:McpServerConfigViewModel">
+                        <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                BorderThickness="1"
+                                CornerRadius="8"
+                                Padding="12"
+                                Margin="0,0,0,8">
+                            <Grid ColumnDefinitions="1.2*,1.4*,1.4*,Auto"
+                                  RowDefinitions="Auto,Auto"
+                                  ColumnSpacing="8"
+                                  RowSpacing="8">
+                                <TextBox Grid.Row="0" Grid.Column="0"
+                                         Text="{Binding Name}"
+                                         Watermark="Server name"
+                                         CornerRadius="6"
+                                         Padding="10,6" />
+                                <TextBox Grid.Row="0" Grid.Column="1"
+                                         Text="{Binding Command}"
+                                         Watermark="Executable, e.g. npx"
+                                         CornerRadius="6"
+                                         Padding="10,6" />
+                                <TextBox Grid.Row="0" Grid.Column="2"
+                                         Text="{Binding ArgumentsText}"
+                                         Watermark="Arguments, space separated"
+                                         CornerRadius="6"
+                                         Padding="10,6" />
+                                <StackPanel Grid.Row="0" Grid.Column="3"
+                                            Orientation="Horizontal"
+                                            Spacing="8">
+                                    <CheckBox Content="Enabled"
+                                              IsChecked="{Binding Enabled}"
+                                              VerticalAlignment="Center"
+                                              FontSize="12" />
+                                    <Button Content="Remove"
+                                            Command="{Binding $parent[ItemsControl].DataContext.RemoveServerCommand}"
+                                            CommandParameter="{Binding}" />
+                                </StackPanel>
+
+                                <TextBox Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3"
+                                         Text="{Binding WorkingDirectory}"
+                                         Watermark="Working directory (optional)"
+                                         CornerRadius="6"
+                                         Padding="10,6" />
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <Button Command="{Binding AddServerCommand}"
+                    Content="Add MCP server"
+                    Padding="14,8"
+                    CornerRadius="6"
+                    HorizontalAlignment="Left" />
+        </StackPanel>
+    </Border>
+</UserControl>

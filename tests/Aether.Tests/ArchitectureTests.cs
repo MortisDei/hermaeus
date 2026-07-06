@@ -51,6 +51,26 @@ public sealed class ArchitectureTests
     }
 
     [Fact]
+    public void Agent_does_not_reference_Mcp()
+    {
+        var offenders = RefNames(AgentAsm)
+            .Where(n => n.StartsWith("Aether.Mcp", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        Assert.True(offenders.Count == 0,
+            $"Aether.Agent must depend on Aether.Core's MCP bridge interface, not Aether.Mcp directly; found: {string.Join(", ", offenders)}");
+    }
+
+    [Fact]
+    public void ViewModels_do_not_reference_Mcp()
+    {
+        var offenders = RefNames(ViewModels)
+            .Where(n => n.StartsWith("Aether.Mcp", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        Assert.True(offenders.Count == 0,
+            $"Aether.ViewModels must manage MCP servers through settings data only, not Aether.Mcp directly; found: {string.Join(", ", offenders)}");
+    }
+
+    [Fact]
     public void Core_references_only_approved_assemblies()
     {
         var allowedPrefixes = new[]

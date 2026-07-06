@@ -85,4 +85,9 @@ public class AppSettings
     /// Chat memory feature configuration (storage, injection, retention, encryption).
     /// </summary>
     public MemorySettings Memory { get; set; } = new();
+
+    /// <summary>
+    /// Configured Model Context Protocol servers the Agent can call as tools.
+    /// </summary>
+    public McpSettings Mcp { get; set; } = new();
 }

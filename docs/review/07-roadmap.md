@@ -112,9 +112,16 @@ Built *on* the 1.x refactors, in dependency order:
    auto-allowed even though the recipe is "safe"), runs workspace-root-bound
    with a 5-minute timeout, and audits through the same trace/tool-result
    trail as every other tool.
-3. **MCP client as the tool surface.** External tools via an open protocol at
-   a process boundary, every call risk-classified — extensibility without a
-   proprietary plugin API.
+3. **MCP client as the tool surface — DONE (stdio transport).** `Aether.Mcp`
+   speaks JSON-RPC 2.0 over the stdio of locally spawned MCP servers
+   (handshake, `tools/list`, `tools/call`); no remote HTTP/SSE transport, by
+   scope decision, since local-first stdio servers cover the common case.
+   Servers are configured in Settings and each discovered tool is exposed as
+   `mcp:{serverId}:{toolName}` through the existing tool-execution seam via a
+   thin `IMcpToolBridge` interface in `Aether.Core`, so `Aether.Agent` never
+   references `Aether.Mcp` directly (new architecture test). Every `mcp:` call
+   always requires approval, regardless of what the server claims about
+   itself, giving extensibility without a proprietary plugin API.
 4. **Headless core / local API.** The composition root hosts the same
    services without the UI; a localhost API (with the same secret/consent
    posture) lets editors and scripts use Aether's models, memory, and RAG.

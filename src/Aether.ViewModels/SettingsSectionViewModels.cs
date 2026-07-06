@@ -320,6 +320,62 @@ public partial class MemorySettingsViewModel : ObservableObject
     }
 }
 
+public sealed partial class McpServerConfigViewModel : ObservableObject
+{
+    public McpServerConfigViewModel(McpServerConfig config)
+    {
+        Id = config.Id;
+        _name = config.Name;
+        _command = config.Command;
+        _argumentsText = string.Join(' ', config.Arguments);
+        _workingDirectory = config.WorkingDirectory;
+        _enabled = config.Enabled;
+    }
+
+    public string Id { get; }
+    [ObservableProperty] private string _name;
+    [ObservableProperty] private string _command;
+    [ObservableProperty] private string _argumentsText;
+    [ObservableProperty] private string _workingDirectory;
+    [ObservableProperty] private bool _enabled;
+
+    public McpServerConfig ToConfig() => new()
+    {
+        Id = Id,
+        Name = Name,
+        Command = Command,
+        Arguments = ArgumentsText.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList(),
+        WorkingDirectory = WorkingDirectory,
+        Enabled = Enabled
+    };
+}
+
+public partial class McpSettingsViewModel : ObservableObject
+{
+    public ObservableCollection<McpServerConfigViewModel> Servers { get; } = [];
+
+    public void ReloadFrom(AppSettings settings)
+    {
+        Servers.Clear();
+        foreach (var server in settings.Mcp.Servers)
+            Servers.Add(new McpServerConfigViewModel(server));
+    }
+
+    public void ApplyTo(AppSettings settings)
+    {
+        settings.Mcp.Servers = Servers.Select(s => s.ToConfig()).ToList();
+    }
+
+    [RelayCommand]
+    private void AddServer() => Servers.Add(new McpServerConfigViewModel(new McpServerConfig { Name = "New MCP server" }));
+
+    [RelayCommand]
+    private void RemoveServer(McpServerConfigViewModel? item)
+    {
+        if (item is not null) Servers.Remove(item);
+    }
+}
+
 public partial class LocalAiSetupSettingsViewModel : ObservableObject
 {
     private readonly ISettingsService _settings;

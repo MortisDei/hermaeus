@@ -36,6 +36,9 @@ public sealed class AgentSafetyGate : IAgentSafetyGate
         if (wouldMutate)
             return new AgentToolPolicyDecision(AgentToolDisposition.RequiresApproval, AgentRiskLevel.Medium, "Local write actions require approval.");
 
+        if (toolName.StartsWith("mcp:", StringComparison.OrdinalIgnoreCase))
+            return new AgentToolPolicyDecision(AgentToolDisposition.RequiresApproval, AgentRiskLevel.Medium, "MCP tool calls always require approval, regardless of what the server claims about itself.");
+
         if (ReadOnlyTools.Contains(toolName))
             return new AgentToolPolicyDecision(AgentToolDisposition.Allowed, AgentRiskLevel.Low, "Read-only local operation.");
 

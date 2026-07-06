@@ -24,6 +24,7 @@
     <ProjectReference Include="../Aether.Services/Aether.Services.csproj" />
     <ProjectReference Include="../Aether.ViewModels/Aether.ViewModels.csproj" />
     <ProjectReference Include="../Aether.Rag/Aether.Rag.csproj" />
+    <ProjectReference Include="../Aether.Mcp/Aether.Mcp.csproj" />
   </ItemGroup>
   <ItemGroup>
     <AvaloniaResource Include="Assets/**" />

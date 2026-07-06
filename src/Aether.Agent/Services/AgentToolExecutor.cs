@@ -1,20 +1,30 @@
 using System.Text.Json;
 using System.Diagnostics;
 using Aether.Agent.Models;
+using Aether.Core.Services;
 
 namespace Aether.Agent.Services;
 
 public sealed class AgentToolExecutor : IAgentToolExecutor
 {
     private readonly IAgentWorkspaceTools _workspaceTools;
+    private readonly IMcpToolBridge? _mcpBridge;
 
-    public AgentToolExecutor(IAgentWorkspaceTools workspaceTools)
+    public AgentToolExecutor(IAgentWorkspaceTools workspaceTools, IMcpToolBridge? mcpBridge = null)
     {
         _workspaceTools = workspaceTools;
+        _mcpBridge = mcpBridge;
     }
 
-    public bool CanExecute(string toolName) => Normalize(toolName) is
-        "list_files" or "search_files" or "read_file" or "summarize_file" or "draft_patch" or "inspect_git_diff" or "apply_draft_patch" or "run_command";
+    public bool CanExecute(string toolName)
+    {
+        var trimmed = toolName.Trim();
+        if (trimmed.StartsWith("mcp:", StringComparison.OrdinalIgnoreCase))
+            return _mcpBridge?.CanExecute(trimmed) == true;
+
+        return Normalize(toolName) is
+            "list_files" or "search_files" or "read_file" or "summarize_file" or "draft_patch" or "inspect_git_diff" or "apply_draft_patch" or "run_command";
+    }
 
     public async Task<AgentToolResult> ExecuteAsync(
         string toolName,
@@ -23,6 +33,21 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
         CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
+        var trimmedToolName = toolName.Trim();
+        if (trimmedToolName.StartsWith("mcp:", StringComparison.OrdinalIgnoreCase))
+        {
+            if (_mcpBridge is null || !_mcpBridge.CanExecute(trimmedToolName))
+                throw new InvalidOperationException($"No MCP bridge is configured to execute '{toolName}'.");
+
+            var mcpOutput = await _mcpBridge.ExecuteAsync(trimmedToolName, arguments, ct);
+            return new AgentToolResult
+            {
+                Tool = trimmedToolName,
+                Arguments = new Dictionary<string, object?>(arguments, StringComparer.OrdinalIgnoreCase),
+                ResultSummary = Summarize(mcpOutput)
+            };
+        }
+
         var normalized = Normalize(toolName);
         object result = normalized switch
         {

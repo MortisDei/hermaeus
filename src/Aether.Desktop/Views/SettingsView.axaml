@@ -25,7 +25,7 @@
             </Grid>
 
             <Grid ColumnDefinitions="*,*"
-                  RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto"
+                  RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto"
                   ColumnSpacing="16"
                   RowSpacing="16">
                 <views:SettingsLlmSectionView Grid.Row="0" Grid.Column="0" DataContext="{Binding Llm}" />
@@ -35,7 +35,8 @@
                 <views:SettingsLocalAiSetupSectionView Grid.Row="2" Grid.Column="1" DataContext="{Binding LocalAiSetup}" />
                 <views:SettingsUiSectionView Grid.Row="3" Grid.Column="0" DataContext="{Binding Ui}" />
                 <views:SettingsMemorySectionView Grid.Row="3" Grid.Column="1" DataContext="{Binding Memory}" />
-                <views:SettingsTrustSectionView Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2" DataContext="{Binding Trust}" />
+                <views:SettingsMcpSectionView Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2" DataContext="{Binding Mcp}" />
+                <views:SettingsTrustSectionView Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="2" DataContext="{Binding Trust}" />
             </Grid>
 
             <StackPanel Orientation="Horizontal" Spacing="10">
