@@ -30,6 +30,7 @@ public class SessionUsageTests
         public Task<List<Aether.Core.Models.Memory>> GetAllAsync(bool includeArchived = false, System.Threading.CancellationToken ct = default) => throw new System.NotImplementedException();
         public Task<Aether.Core.Models.Memory?> GetByIdAsync(string id, System.Threading.CancellationToken ct = default) => throw new System.NotImplementedException();
         public Task<List<Aether.Core.Models.Memory>> GetByCategoryAsync(string category, System.Threading.CancellationToken ct = default) => throw new System.NotImplementedException();
+        public Task<List<Aether.Core.Models.Memory>> GetByScopeAsync(Aether.Core.Models.MemoryScope scope, string? scopeId = null, bool includeArchived = false, System.Threading.CancellationToken ct = default) => throw new System.NotImplementedException();
         public Task SaveAsync(Aether.Core.Models.Memory memory, System.Threading.CancellationToken ct = default) => throw new System.NotImplementedException();
         public Task DeleteAsync(string id, System.Threading.CancellationToken ct = default) => throw new System.NotImplementedException();
         public Task<List<Aether.Core.Models.Memory>> SearchAsync(string query, System.Threading.CancellationToken ct = default) => throw new System.NotImplementedException();

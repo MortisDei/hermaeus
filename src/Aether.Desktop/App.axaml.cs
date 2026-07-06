@@ -134,7 +134,7 @@ public partial class App : Application
         s.AddSingleton<RagQueryService>();
         s.AddSingleton<RagEvalService>();
         s.AddSingleton<IAgentTaskStateStore, FileAgentTaskStateStore>();
-        s.AddSingleton<IAgentWorkspaceMemoryStore, FileAgentWorkspaceMemoryStore>();
+        s.AddSingleton<IAgentWorkspaceMemoryStore, WorkspaceMemoryStore>();
         s.AddSingleton<IAgentWorkspaceTools, AgentWorkspaceTools>();
         s.AddSingleton<IWorkspaceProfileStore, FileWorkspaceProfileStore>();
         s.AddSingleton<IWorkspaceAnalysisService, WorkspaceAnalysisService>();

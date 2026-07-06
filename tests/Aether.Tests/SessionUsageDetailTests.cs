@@ -20,6 +20,7 @@ public class SessionUsageDetailTests
         public Task<List<Memory>> GetAllAsync(bool includeArchived = false, System.Threading.CancellationToken ct = default) => Task.FromResult(_mems.ToList());
         public Task<Memory?> GetByIdAsync(string id, System.Threading.CancellationToken ct = default) => Task.FromResult(_mems.FirstOrDefault(m => m.Id == id));
         public Task<List<Memory>> GetByCategoryAsync(string category, System.Threading.CancellationToken ct = default) => Task.FromResult(_mems.Where(m => m.Category == category).ToList());
+        public Task<List<Memory>> GetByScopeAsync(MemoryScope scope, string? scopeId = null, bool includeArchived = false, System.Threading.CancellationToken ct = default) => Task.FromResult(_mems.Where(m => m.Scope == scope && (scopeId is null || m.ScopeId == scopeId)).ToList());
         public Task SaveAsync(Memory memory, System.Threading.CancellationToken ct = default) => Task.CompletedTask;
         public Task DeleteAsync(string id, System.Threading.CancellationToken ct = default) => Task.CompletedTask;
         public Task<List<Memory>> SearchAsync(string query, System.Threading.CancellationToken ct = default) => Task.FromResult(_mems.Where(m => m.Content.Contains(query)).ToList());

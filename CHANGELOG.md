@@ -30,6 +30,16 @@ limit.
   full detail as the record payload instead of a bespoke write-only table,
   and agent steps are indexed in the shared store alongside the
   schema-validated per-task JSONL artifact.
+- Shared `ContextPackBuilder` (Context System step 2): chat context snapshots,
+  RAG chunk selection, and agent memory/RAG packing all use one
+  budget-and-truncate algorithm in `Aether.Core` (`ContextPart` in,
+  `PackedContext` out) instead of three divergent implementations.
+- Memory scopes (Context System step 3): memories carry
+  `Scope`/`ScopeId`/`Title` (`Global`, `Conversation`, `Workspace`) with an
+  additive `memories.db` schema migration. Agent workspace notes now live in
+  the shared memory store as Workspace-scoped rows via a new
+  `WorkspaceMemoryStore`; legacy per-workspace `memory.json` files are
+  imported once on startup and renamed to `memory.json.migrated`.
 
 ### Changed
 

@@ -1,6 +1,17 @@
 namespace Aether.Core.Models;
 
 /// <summary>
+/// Where a memory applies. Chat-extracted facts are Global; agent workspace
+/// notes are Workspace; Conversation is reserved for chat-local memory.
+/// </summary>
+public enum MemoryScope
+{
+    Global,
+    Conversation,
+    Workspace
+}
+
+/// <summary>
 /// Represents a stored memory fact, preference, learned behaviour, or interest
 /// extracted from conversations or generated through auto-summary.
 /// </summary>
@@ -10,6 +21,22 @@ public class Memory
     /// Unique identifier for this memory.
     /// </summary>
     public string Id { get; set; } = Guid.NewGuid().ToString();
+
+    /// <summary>
+    /// Scope this memory applies to. Defaults to Global (visible everywhere).
+    /// </summary>
+    public MemoryScope Scope { get; set; } = MemoryScope.Global;
+
+    /// <summary>
+    /// Scope key: empty for Global, conversation id for Conversation,
+    /// normalized workspace root for Workspace.
+    /// </summary>
+    public string ScopeId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Optional short title (used by workspace notes; empty for extracted facts).
+    /// </summary>
+    public string Title { get; set; } = string.Empty;
 
     /// <summary>
     /// Category of memory: facts, preferences, learned_behaviors, or interests.

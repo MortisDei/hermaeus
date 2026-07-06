@@ -10,7 +10,7 @@ namespace Aether.Services;
 /// </summary>
 public sealed class MemoryStore : IMemoryStore
 {
-    private const int SchemaVersion = 1;
+    private const int SchemaVersion = 2;
     private readonly ISettingsService _settings;
     private string _initializedPath = string.Empty;
     private readonly SemaphoreSlim _initGate = new(1, 1);
@@ -67,7 +67,10 @@ public sealed class MemoryStore : IMemoryStore
                 last_merge_time TEXT,
                 expiration_date TEXT,
                 relationships_json TEXT DEFAULT '[]',
-                is_encrypted INTEGER DEFAULT 0
+                is_encrypted INTEGER DEFAULT 0,
+                scope TEXT NOT NULL DEFAULT 'Global',
+                scope_id TEXT NOT NULL DEFAULT '',
+                title TEXT NOT NULL DEFAULT ''
             );
             CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
                 id UNINDEXED,
@@ -82,7 +85,15 @@ public sealed class MemoryStore : IMemoryStore
             await cmd.ExecuteNonQueryAsync(ct);
             await SqliteMigrationRunner.ApplyAsync(c, "memories", SchemaVersion,
             [
-                new SqliteMigration(1, (_, _) => Task.FromResult(false))
+                new SqliteMigration(1, (_, _) => Task.FromResult(false)),
+                new SqliteMigration(2, async (db, token) =>
+                {
+                    var changed = false;
+                    changed |= await EnsureColumnAsync(db, "scope", "TEXT NOT NULL DEFAULT 'Global'", token);
+                    changed |= await EnsureColumnAsync(db, "scope_id", "TEXT NOT NULL DEFAULT ''", token);
+                    changed |= await EnsureColumnAsync(db, "title", "TEXT NOT NULL DEFAULT ''", token);
+                    return changed;
+                })
             ], ct);
             if (!ftsExisted)
                 await RebuildFtsAsync(c, ct);
@@ -92,6 +103,20 @@ public sealed class MemoryStore : IMemoryStore
         {
             _initGate.Release();
         }
+    }
+
+    private static async Task<bool> EnsureColumnAsync(SqliteConnection c, string column, string definition, CancellationToken ct)
+    {
+        await using var check = c.CreateCommand();
+        check.CommandText = "SELECT COUNT(1) FROM pragma_table_info('memories') WHERE name = $name";
+        check.Parameters.AddWithValue("$name", column);
+        if (Convert.ToInt32(await check.ExecuteScalarAsync(ct)) > 0)
+            return false;
+
+        await using var alter = c.CreateCommand();
+        alter.CommandText = $"ALTER TABLE memories ADD COLUMN {column} {definition}";
+        await alter.ExecuteNonQueryAsync(ct);
+        return true;
     }
 
     private static async Task RebuildFtsAsync(SqliteConnection c, CancellationToken ct)
@@ -149,6 +174,25 @@ public sealed class MemoryStore : IMemoryStore
         return r;
     }
 
+    public async Task<List<Memory>> GetByScopeAsync(MemoryScope scope, string? scopeId = null, bool includeArchived = false, CancellationToken ct = default)
+    {
+        await EnsureInitializedAsync(ct);
+        await using var c = new SqliteConnection(Cs);
+        await c.OpenAsync(ct);
+        var cmd = c.CreateCommand();
+        var archived = includeArchived ? "" : " AND is_archived = 0";
+        cmd.CommandText = scopeId is null
+            ? $"SELECT * FROM memories WHERE scope = $scope{archived} ORDER BY is_pinned DESC, updated_at DESC"
+            : $"SELECT * FROM memories WHERE scope = $scope AND scope_id = $scopeId{archived} ORDER BY is_pinned DESC, updated_at DESC";
+        cmd.Parameters.AddWithValue("$scope", scope.ToString());
+        if (scopeId is not null)
+            cmd.Parameters.AddWithValue("$scopeId", scopeId);
+        var r = new List<Memory>();
+        await using var rd = await cmd.ExecuteReaderAsync(ct);
+        while (await rd.ReadAsync(ct)) r.Add(Map(rd));
+        return r;
+    }
+
     public async Task SaveAsync(Memory memory, CancellationToken ct = default)
     {
         await EnsureInitializedAsync(ct);
@@ -160,11 +204,14 @@ public sealed class MemoryStore : IMemoryStore
         await c.OpenAsync(ct);
         var cmd = c.CreateCommand();
         cmd.CommandText = @"
-            INSERT INTO memories (id,category,content,created_at,updated_at,source_conversation_id,importance_score,tags_json,is_pinned,is_archived,frequency_count,last_merge_time,expiration_date,relationships_json,is_encrypted)
-            VALUES ($id,$cat,$content,$ca,$ua,$src,$imp,$tags,$pin,$arch,$freq,$merge,$exp,$rel,$enc)
+            INSERT INTO memories (id,category,content,created_at,updated_at,source_conversation_id,importance_score,tags_json,is_pinned,is_archived,frequency_count,last_merge_time,expiration_date,relationships_json,is_encrypted,scope,scope_id,title)
+            VALUES ($id,$cat,$content,$ca,$ua,$src,$imp,$tags,$pin,$arch,$freq,$merge,$exp,$rel,$enc,$scope,$scopeId,$title)
             ON CONFLICT(id) DO UPDATE SET
                 category=excluded.category,
                 content=excluded.content,
+                scope=excluded.scope,
+                scope_id=excluded.scope_id,
+                title=excluded.title,
                 updated_at=excluded.updated_at,
                 importance_score=excluded.importance_score,
                 tags_json=excluded.tags_json,
@@ -191,6 +238,9 @@ public sealed class MemoryStore : IMemoryStore
         cmd.Parameters.AddWithValue("$exp", memory.ExpirationDate?.ToString("O") ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("$rel", relationshipsJson);
         cmd.Parameters.AddWithValue("$enc", memory.IsEncrypted ? 1 : 0);
+        cmd.Parameters.AddWithValue("$scope", memory.Scope.ToString());
+        cmd.Parameters.AddWithValue("$scopeId", memory.ScopeId);
+        cmd.Parameters.AddWithValue("$title", memory.Title);
 
         await cmd.ExecuteNonQueryAsync(ct);
         await UpsertFtsAsync(c, memory, tagsJson, ct);
@@ -414,7 +464,10 @@ public sealed class MemoryStore : IMemoryStore
         LastMergeTime = GetDateTimeNullable(r, "last_merge_time"),
         ExpirationDate = GetDateTimeNullable(r, "expiration_date"),
         RelatedMemoryIds = JsonSerializer.Deserialize<List<string>>(GetString(r, "relationships_json", "[]")) ?? [],
-        IsEncrypted = GetInt(r, "is_encrypted") != 0
+        IsEncrypted = GetInt(r, "is_encrypted") != 0,
+        Scope = Enum.TryParse<MemoryScope>(GetString(r, "scope", "Global"), out var scope) ? scope : MemoryScope.Global,
+        ScopeId = GetString(r, "scope_id"),
+        Title = GetString(r, "title")
     };
 
     private static string GetString(SqliteDataReader r, string name, string fallback = "")

@@ -28,6 +28,13 @@ public interface IMemoryStore
     Task<List<Memory>> GetByCategoryAsync(string category, CancellationToken ct = default);
 
     /// <summary>
+    /// Get memories for a scope. A null scopeId returns every row in the scope;
+    /// otherwise rows are filtered to the exact scope key (conversation id or
+    /// workspace root).
+    /// </summary>
+    Task<List<Memory>> GetByScopeAsync(MemoryScope scope, string? scopeId = null, bool includeArchived = false, CancellationToken ct = default);
+
+    /// <summary>
     /// Save or update a memory.
     /// </summary>
     Task SaveAsync(Memory memory, CancellationToken ct = default);
