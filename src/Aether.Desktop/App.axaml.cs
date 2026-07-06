@@ -68,7 +68,8 @@ public partial class App : Application
                 sp.GetRequiredService<IMemoryStore>().InitializeAsync(),
                 sp.GetRequiredService<SqliteRagStore>().InitializeAsync(),
                 sp.GetRequiredService<IAgentTaskStateStore>().InitializeAsync(),
-                sp.GetRequiredService<IBenchmarkService>().InitializeAsync());
+                sp.GetRequiredService<IBenchmarkService>().InitializeAsync(),
+                sp.GetRequiredService<IEvalStore>().InitializeAsync());
             sp.GetRequiredService<IAutomationScheduler>().Start();
             // Probe active voice provider health at startup to detect externally-running services
             try
@@ -111,6 +112,7 @@ public partial class App : Application
         s.AddSingleton<IInspectionCheckProvider>(sp => sp.GetRequiredService<PrivacyAuditService>());
         s.AddSingleton<IInspectionEngine, InspectionEngine>();
         s.AddSingleton<ISystemInfoService, SystemInfoService>();
+        s.AddSingleton<IEvalStore,         SqliteEvalStore>();
         s.AddSingleton<IBenchmarkService,  BenchmarkService>();
         s.AddSingleton<ITraceStore,        SqliteTraceStore>();
         s.AddSingleton<IConversationStore, ConversationStore>();

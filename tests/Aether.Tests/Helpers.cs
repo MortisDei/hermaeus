@@ -479,6 +479,25 @@ namespace Aether.Tests
         });
     }
 
+    sealed class FakeEvalStore : IEvalStore
+    {
+        private readonly Dictionary<string, EvalRun> _runs = new();
+
+        public Task InitializeAsync(CancellationToken ct = default) => Task.CompletedTask;
+
+        public Task SaveRunAsync(EvalRun run, CancellationToken ct = default)
+        {
+            _runs[run.Id] = run;
+            return Task.CompletedTask;
+        }
+
+        public Task<IReadOnlyList<EvalRun>> GetRunsAsync(EvalMode? mode = null, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<EvalRun>>(_runs.Values.Where(r => mode is null || r.Mode == mode).ToList());
+
+        public Task<EvalRun?> GetRunAsync(string id, CancellationToken ct = default) =>
+            Task.FromResult(_runs.GetValueOrDefault(id));
+    }
+
     sealed class FakeDoctorService : IDoctorService
     {
         public Task<DoctorReport> ScanAsync(CancellationToken ct = default) =>

@@ -48,7 +48,7 @@ namespace Aether.Tests
             using var temp = new TempDir();
             var settings = NewSettings(temp);
             settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
-            var service = new BenchmarkService(settings, new FakeLlm(), new FakeSystemInfo());
+            var service = new BenchmarkService(settings, new FakeLlm(), new FakeSystemInfo(), new FakeEvalStore());
 
             var suite = BenchmarkService.StarterSuites().First();
             suite.MaxCases = 1;
@@ -94,7 +94,7 @@ namespace Aether.Tests
             using var temp = new TempDir();
             var settings = NewSettings(temp);
             settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
-            var service = new BenchmarkService(settings, new FakeLlm(), new FakeSystemInfo());
+            var service = new BenchmarkService(settings, new FakeLlm(), new FakeSystemInfo(), new FakeEvalStore());
 
             var suite = BenchmarkService.StarterSuites().First();
             suite.MaxCases = 1;
@@ -113,7 +113,7 @@ namespace Aether.Tests
             using var temp = new TempDir();
             var settings = NewSettings(temp);
             settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
-            var service = new BenchmarkService(settings, new FakeLlm(), new FakeSystemInfo());
+            var service = new BenchmarkService(settings, new FakeLlm(), new FakeSystemInfo(), new FakeEvalStore());
 
             var suite = BenchmarkService.StarterSuites().First();
             suite.MaxCases = 1;
@@ -130,7 +130,7 @@ namespace Aether.Tests
 
         public static Task BenchmarkScoringAndRanking()
         {
-            var service = new BenchmarkService(NewSettings(new TempDir()), new FakeLlm(), new FakeSystemInfo());
+            var service = new BenchmarkService(NewSettings(new TempDir()), new FakeLlm(), new FakeSystemInfo(), new FakeEvalStore());
             var slow = new BenchmarkRun
             {
                 ModelId = "model-a",
@@ -166,7 +166,7 @@ namespace Aether.Tests
             using var temp = new TempDir();
             var settings = NewSettings(temp);
             settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
-            var service = new BenchmarkService(settings, new FakeLlm(), new FakeSystemInfo());
+            var service = new BenchmarkService(settings, new FakeLlm(), new FakeSystemInfo(), new FakeEvalStore());
 
             var suite = BenchmarkService.StarterSuites().First();
             suite.MaxCases = 1;

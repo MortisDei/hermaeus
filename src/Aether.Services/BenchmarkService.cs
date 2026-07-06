@@ -15,14 +15,16 @@ public sealed class BenchmarkService : IBenchmarkService
     private readonly ISettingsService _settings;
     private readonly ILlmService _llm;
     private readonly ISystemInfoService _system;
+    private readonly IEvalStore _evalStore;
     private string _initializedPath = string.Empty;
     private string _starterSuitesSeededPath = string.Empty;
 
-    public BenchmarkService(ISettingsService settings, ILlmService llm, ISystemInfoService system)
+    public BenchmarkService(ISettingsService settings, ILlmService llm, ISystemInfoService system, IEvalStore evalStore)
     {
         _settings = settings;
         _llm = llm;
         _system = system;
+        _evalStore = evalStore;
     }
 
     private string DbPath
@@ -439,7 +441,33 @@ public sealed class BenchmarkService : IBenchmarkService
         cmd.Parameters.AddWithValue("$json", JsonSerializer.Serialize(run, JsonOpts));
         await cmd.ExecuteNonQueryAsync(ct);
         await PruneRunHistoryAsync(c, ct);
+
+        await _evalStore.SaveRunAsync(ToEvalRun(run), ct);
     }
+
+    /// <summary>
+    /// Projects a benchmark run onto the shared Evaluation System shape
+    /// (docs/review/10-evaluation-system.md). Storage only for now; the
+    /// Benchmarks UI still reads/writes its own richer model.
+    /// </summary>
+    internal static EvalRun ToEvalRun(BenchmarkRun run) => new(
+        Id: run.Id,
+        Mode: EvalMode.Suite,
+        Target: new EvalTarget(run.ModelId, Label: run.ModelName),
+        CaseResults: run.Results.Select(r => new CaseResult(
+            CaseId: r.CaseId,
+            Output: r.Output,
+            LatencyMs: r.TotalMs,
+            FirstTokenMs: r.FirstTokenMs,
+            Scores: new Dictionary<string, double>
+            {
+                ["quality"] = r.QualityScore,
+                ["resource"] = r.ResourceScore
+            },
+            Error: r.HasError || r.TimedOut || r.Cancelled ? r.Error : null)).ToList(),
+        StartedAt: run.StartedAt,
+        FinishedAt: run.FinishedAt,
+        SuiteId: run.SuiteId);
 
     private const int MaxSavedRuns = 200;
 

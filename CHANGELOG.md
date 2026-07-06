@@ -52,6 +52,14 @@ limit.
   ("OpenAI"). A remote voice provider is now flagged even when no remote chat
   provider is enabled, and adding a new remote chat provider to
   `CompositeLlmService.Providers` needs no Privacy Audit changes.
+- Evaluation System step 1 (docs/review/10-evaluation-system.md): shared
+  `EvalCase`/`EvalTarget`/`EvalRun`/`CaseResult` models in `Aether.Core` and
+  an additive `IEvalStore`/`SqliteEvalStore` (`eval_runs.db`, capped at the
+  newest 500 runs). `BenchmarkService` now projects each saved run onto the
+  shared shape and writes it through the new store alongside its existing
+  `benchmarks.db` persistence; the Benchmarks UI is unchanged. This is the
+  first of four steps that converge Benchmarks, Compare Models, and the RAG
+  eval harness onto one engine.
 - Runtime capability discovery: `LlamaCppService` probes llama-server's
   `/props` endpoint and `OllamaService` probes `/api/show` per model, caching
   the result and populating `LlmModel.ProbedContextLength`.

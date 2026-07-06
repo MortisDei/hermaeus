@@ -53,8 +53,12 @@ score columns.
 
 ## Sequencing
 
-1. Introduce the shared models + storage alongside the benchmark store
-   (additive migration; benchmarks read/write through the new shapes).
+1. **DONE.** Introduce the shared models + storage alongside the benchmark
+   store (additive migration; benchmarks read/write through the new shapes).
+   `EvalCase`/`EvalTarget`/`EvalRun`/`CaseResult` live in `Aether.Core`;
+   `SqliteEvalStore` (`eval_runs.db`) is additive; `BenchmarkService` projects
+   each saved run through `BenchmarkService.ToEvalRun` and writes it to both
+   stores. No UI reads the new store yet.
 2. Move Compare Models onto the engine (smallest surface, proves the
    transient-run path).
 3. Move the RAG eval harness (adds the retrieval score provider).
