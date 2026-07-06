@@ -234,12 +234,18 @@ public sealed class MarkdownViewer : ContentControl, IDisposable
             }
             : null;
 
+        var codeFontSize = FontSize - 1;
+        var minHeight = Math.Max(28, (FontSize + 4) * Math.Max(1, lineCount));
+
+        // AvaloniaEdit's TextEditor is used strictly read-only, and only when there's
+        // a recognized language and enough lines to make syntax coloring worth the
+        // heavier control; short or unrecognized-language blocks get a plain text run.
         Control codeBlock = lineCount > 20 && !string.IsNullOrWhiteSpace(normalizedLanguage)
             ? new TextEditor
             {
                 Text = code,
                 FontFamily = MonoFamily,
-                FontSize = FontSize - 1,
+                FontSize = codeFontSize,
                 IsReadOnly = true,
                 ShowLineNumbers = false,
                 SyntaxHighlighting = HighlightingManager.Instance.GetDefinition(normalizedLanguage),
@@ -247,17 +253,17 @@ public sealed class MarkdownViewer : ContentControl, IDisposable
                 Foreground = Brushes.WhiteSmoke,
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
                 VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
-                MinHeight = Math.Max(28, (FontSize + 4) * Math.Max(1, lineCount)),
+                MinHeight = minHeight,
                 MaxHeight = 420
             }
             : new SelectableTextBlock
             {
                 Text = code,
                 FontFamily = MonoFamily,
-                FontSize = FontSize - 1,
+                FontSize = codeFontSize,
                 TextWrapping = TextWrapping.NoWrap,
                 Foreground = Brushes.WhiteSmoke,
-                MinHeight = Math.Max(28, (FontSize + 4) * Math.Max(1, lineCount))
+                MinHeight = minHeight
             };
 
         Control child = header is not null
@@ -304,14 +310,6 @@ public sealed class MarkdownViewer : ContentControl, IDisposable
             "java" => "Java",
             _ => null
         };
-    }
-
-    private static IHighlightingDefinition? ResolveHighlighting(string? lang)
-    {
-        var normalized = NormalizeFenceLanguage(lang);
-        if (string.IsNullOrWhiteSpace(normalized))
-            return null;
-        return HighlightingManager.Instance.GetDefinition(normalized);
     }
 
     private Panel RenderList(ListBlock list)

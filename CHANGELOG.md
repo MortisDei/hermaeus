@@ -91,6 +91,14 @@ limit.
 
 ### Changed
 
+- AvaloniaEdit usage audit (docs/review/02-dependency-review.md). Exactly one
+  call site, read-only chat-markdown code-block rendering
+  (`MarkdownViewer.cs`), no editing anywhere in the app. Deleted a dead,
+  unused method (`ResolveHighlighting`) and de-duplicated shared style
+  values between the two code-block rendering branches. Decision: keep the
+  dependency rather than replace it with a bespoke highlighter, since that
+  would mean reimplementing per-language tokenizers, a feature build, not a
+  refactor, for a single well-scoped, actively-maintained package.
 - Collapsed two provider tag-switches into the capability model
   (docs/review/06-technical-debt.md item 4). `CompositeLlmService.StreamChatAsync`
   now routes through a delegate table keyed by `ProviderDescriptor.Tag`

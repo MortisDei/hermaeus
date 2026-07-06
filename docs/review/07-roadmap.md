@@ -51,9 +51,10 @@ Each is independently shippable and each *deletes* code:
    deleted; the sidebar has one memory entry point instead of two.
 
 Also in 1.x: collapse single-implementation interfaces opportunistically;
-move CommunityToolkit out of Core; begin voice convergence (Kokoro-ONNX
-default, Python providers marked advanced/best-effort); AvaloniaEdit usage
-audit.
+move CommunityToolkit out of Core — DONE; begin voice convergence
+(Kokoro-ONNX default, Python providers marked advanced/best-effort);
+AvaloniaEdit usage audit — DONE (see docs/review/02-dependency-review.md:
+one read-only call site, kept rather than replaced).
 
 ## Medium-term — 2.0 (composition becomes the product)
 

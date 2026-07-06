@@ -38,7 +38,25 @@ the rest.
   code blocks, diff previews) rather than editing, a bespoke read-only
   highlighted-text control over your Markdig pipeline would drop a sizeable,
   lightly-maintained dependency. Audit actual usage; if no editing, plan
-  removal in 1.x.
+  removal in 1.x. **Audited.** Exactly one call site
+  (`Aether.Desktop/Controls/MarkdownViewer.cs`), read-only (`IsReadOnly =
+  true`) chat-markdown fenced-code rendering only, no editing anywhere in the
+  app, no TextMate/grammar-registry usage (built-in `HighlightingManager`
+  only), and confirmed absent from `Aether.ViewModels` (no layering leak).
+  One piece of dead code found and deleted (`ResolveHighlighting`, an unused
+  duplicate of the inline `HighlightingManager.GetDefinition` call).
+  Decision: keep the dependency rather than replace it. A bespoke read-only
+  highlighter would need to reimplement per-language tokenizers for the ~15
+  languages `NormalizeFenceLanguage` already maps (C#, Python, JS, Bash,
+  SQL, XML, and so on) — that is a real feature reimplementation, not a
+  refactor, and disproportionate to what's actually a single well-scoped,
+  actively-maintained Avalonia satellite package (unlike the much larger,
+  genuinely fragile Python voice stack this doc flags separately). Revisit
+  only if AvaloniaEdit itself becomes unmaintained or a real editing use
+  case appears. `Aether.Desktop/Controls/DiffView.axaml` renders diffs with
+  plain `TextBlock`s, not AvaloniaEdit — that's a deliberate difference
+  (line-level add/remove coloring, not language syntax), not an
+  inconsistency to fix.
 
 ### CommunityToolkit.Mvvm 8.3
 
@@ -114,9 +132,11 @@ rides the ONNX Runtime you already ship.
 1. **1.0:** No removals. Add architecture tests: ViewModels must not reference
    Avalonia; ONNX Runtime types must not escape `Aether.Rag`; Core must not
    grow package references. Pin Avalonia minor version.
-2. **1.x:** Audit AvaloniaEdit usage; replace with an internal read-only
-   highlighted-text control if no editing is needed. Move
-   CommunityToolkit.Mvvm out of `Aether.Core`.
+2. **1.x:** ~~Audit AvaloniaEdit usage; replace with an internal read-only
+   highlighted-text control if no editing is needed.~~ **DONE**: audited,
+   kept (see above — single read-only call site, replacement would be a
+   feature reimplementation, not a refactor). Move CommunityToolkit.Mvvm out
+   of `Aether.Core` — **DONE**.
 3. **1.x–2.0:** Reduce Python surface: adopt ONNX-based Kokoro as the default
    local voice path; demote Python-venv providers (XTTS/F5) to "advanced,
    best-effort" status or a companion add-on.
