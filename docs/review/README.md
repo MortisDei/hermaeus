@@ -11,6 +11,7 @@ of evolution. Read in order; later documents reference earlier ones.
 6. [Technical Debt](06-technical-debt.md) — ranked debt register
 7. [Roadmap](07-roadmap.md) — 1.0 / 1.x / 2.0 / long-term, architecture-first
 8. [Brutal Critique](08-brutal-critique.md) — the unvarnished pre-release assessment
+9. [System Map](09-system-map.md) — spine/capabilities/tools buckets, the Context and Evaluation System unifications, and the dual-ownership register
 
 The recurring conclusion: Aether's foundations are strong; its risk is
 parallel vertical features. Four unifications (memory scopes, check/fix
