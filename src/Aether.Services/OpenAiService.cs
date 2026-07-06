@@ -21,6 +21,10 @@ public sealed class OpenAiService : IDisposable
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
+    public static readonly ProviderDescriptor Descriptor = new(
+        ProviderTagValue, "OpenAI-compatible", ProviderKind.RemoteApi,
+        ProviderCapabilities.Streaming | ProviderCapabilities.UsageReporting);
+
     public string ProviderName => "OpenAI";
     public bool   IsConfigured => !string.IsNullOrWhiteSpace(_settings.Settings.Llm.OpenAiApiKey);
 

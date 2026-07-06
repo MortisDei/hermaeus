@@ -23,6 +23,24 @@ public sealed class CompositeLlmService : ILlmService, IDisposable
     public bool   IsConfigured => _llamaCpp.IsConfigured || _openAi.IsConfigured
                                    || _runtimeProfiles.Profiles.Any(p => p.Enabled && p.Kind == RuntimeKind.Ollama);
 
+    /// <summary>All providers this composite can route to, with capabilities.</summary>
+    public static IReadOnlyList<ProviderDescriptor> Providers { get; } =
+    [
+        LlamaCppService.Descriptor,
+        OllamaService.Descriptor,
+        OpenAiService.Descriptor
+    ];
+
+    /// <summary>Describes the provider a model id routes to.</summary>
+    public ProviderDescriptor DescribeModel(string modelId)
+    {
+        var tag = ResolveProviderTag(modelId);
+        if (tag is null && OllamaService.IsOllamaModelId(modelId))
+            tag = OllamaService.Descriptor.Tag;
+        return Providers.FirstOrDefault(p => string.Equals(p.Tag, tag, StringComparison.OrdinalIgnoreCase))
+               ?? LlamaCppService.Descriptor;
+    }
+
     public CompositeLlmService(
         LlamaCppService llamaCpp,
         OpenAiService openAi,
@@ -124,12 +142,11 @@ public sealed class CompositeLlmService : ILlmService, IDisposable
         LlmChatOptions? options = null,
         CancellationToken ct = default)
     {
-        return ResolveProviderTag(modelId) switch
+        var tag = DescribeModel(modelId).Tag;
+        return tag switch
         {
             OpenAiProviderTagValue => _openAi.StreamChatAsync(modelId, messages, options, ct),
             OllamaProviderTagValue => _ollama.StreamChatAsync(modelId, messages, options, ct),
-            LlamaCppProviderTagValue => _llamaCpp.StreamChatAsync(modelId, messages, options, ct),
-            _ when OllamaService.IsOllamaModelId(modelId) => _ollama.StreamChatAsync(modelId, messages, options, ct),
             _ => _llamaCpp.StreamChatAsync(modelId, messages, options, ct)
         };
     }

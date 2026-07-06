@@ -19,6 +19,10 @@ public sealed class LlamaCppService : IDisposable
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
+    public static readonly ProviderDescriptor Descriptor = new(
+        ProviderTagValue, "llama.cpp", ProviderKind.ManagedLocal,
+        ProviderCapabilities.Streaming | ProviderCapabilities.UsageReporting);
+
     public string ProviderName => "llama.cpp";
     public bool   IsConfigured => true;
 

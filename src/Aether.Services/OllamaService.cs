@@ -14,6 +14,11 @@ public sealed class OllamaService : IDisposable
     private readonly IRuntimeProfileService _profiles;
     private readonly HttpClient _http;
 
+    public static readonly ProviderDescriptor Descriptor = new(
+        ProviderTagValue, "Ollama", ProviderKind.LocalApi,
+        ProviderCapabilities.Streaming | ProviderCapabilities.UsageReporting
+        | ProviderCapabilities.ModelPull | ProviderCapabilities.ModelDelete);
+
     public OllamaService(IRuntimeProfileService profiles)
     {
         _profiles = profiles;
