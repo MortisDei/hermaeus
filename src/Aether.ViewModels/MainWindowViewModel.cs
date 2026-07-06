@@ -14,7 +14,6 @@ public partial class MainWindowViewModel : ObservableObject
     private readonly IRuntimeLogService _logs;
     private readonly IConversationExportService _exports;
     private readonly SynchronizationContext? _sync;
-    private readonly Func<SessionUsageDetailViewModel> _createSessionUsageDetail;
     private CancellationTokenSource? _searchCts;
     private readonly ISettingsService _settingsService;
     private bool _refreshingFolderFilters;
@@ -31,7 +30,6 @@ public partial class MainWindowViewModel : ObservableObject
     public DoctorViewModel          Doctor { get; }
     public MemoriesViewModel        Memories { get; }
     public LogsViewModel            Logs { get; }
-    public SessionUsageViewModel    SessionUsage { get; }
     public SetupWizardViewModel     Wizard { get; }
 
     public ObservableCollection<ConversationItemViewModel> Conversations { get; } = [];
@@ -50,7 +48,6 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty] private bool   _doctorHasErrors;
     [ObservableProperty] private bool   _doctorHasWarnings;
     [ObservableProperty] private bool   _doctorIsOk;
-    [ObservableProperty] private SessionUsageDetailViewModel _sessionUsageDetail;
 
     public bool ShowChat     => ActivePanel == "chat";
     public bool ShowAgent    => ActivePanel == "agent";
@@ -63,7 +60,6 @@ public partial class MainWindowViewModel : ObservableObject
     public bool ShowSystem => ActivePanel == "system";
     public bool ShowDoctor => ActivePanel == "doctor";
     public bool ShowMemories => ActivePanel == "memories";
-    public bool ShowSessionUsage => ActivePanel == "session-usage";
     public bool ShowLogs => ActivePanel == "logs";
     public bool ShowWizard => ActivePanel == "wizard";
     public object ActiveViewModel => ActivePanel switch
@@ -78,8 +74,6 @@ public partial class MainWindowViewModel : ObservableObject
         "system"   => SystemOverview,
         "doctor"   => Doctor,
         "memories" => Memories,
-        "session-usage" => SessionUsage,
-        "session-usage-detail" => SessionUsageDetail,
         "logs"     => Logs,
         "wizard"   => Wizard,
         _          => Chat
@@ -102,8 +96,6 @@ public partial class MainWindowViewModel : ObservableObject
         DoctorViewModel doctor,
         MemoriesViewModel memories,
         LogsViewModel logs,
-        SessionUsageViewModel sessionUsage,
-        Func<SessionUsageDetailViewModel> createSessionUsageDetail,
         SetupWizardViewModel wizard,
         ISettingsService settingsService,
         IToastService toasts,
@@ -115,12 +107,9 @@ public partial class MainWindowViewModel : ObservableObject
         _logs = runtimeLogs;
         _exports = exports;
         _settingsService = settingsService;
-        _createSessionUsageDetail = createSessionUsageDetail;
         _store = store; Chat = chat; Agent = agent; Settings = settings;
         Models = models; Rag = rag; Services = services; Tasks = tasks;
-        Benchmarks = benchmarks; SystemOverview = systemOverview; Doctor = doctor; Memories = memories; Logs = logs; SessionUsage = sessionUsage; Wizard = wizard;
-        _sessionUsageDetail = _createSessionUsageDetail();
-        SessionUsage.RequestOpenDetail += (id, title) => ShowSessionUsageDetailPanel(id, title);
+        Benchmarks = benchmarks; SystemOverview = systemOverview; Doctor = doctor; Memories = memories; Logs = logs; Wizard = wizard;
         Doctor.RequestNavigate = panel => ActivePanel = panel;
         // Keep toolbar doctor badge in sync with doctor checks
         Doctor.Checks.CollectionChanged += (_, _) => UpdateDoctorStatus();
@@ -396,18 +385,10 @@ public partial class MainWindowViewModel : ObservableObject
         ActivePanel = "doctor";
         RunBackgroundTaskAsync("run doctor scan", () => Doctor.ScanCommand.ExecuteAsync(null));
     }
-    [RelayCommand] private void ShowMemoriesPanel()    => ActivePanel = "memories";
-    [RelayCommand] private void ShowSessionUsagePanel()
+    [RelayCommand] private void ShowMemoriesPanel()
     {
-        ActivePanel = "session-usage";
-        RunBackgroundTaskAsync("load session usage", () => SessionUsage.RefreshCommand.ExecuteAsync(null));
-    }
-
-    private void ShowSessionUsageDetailPanel(string conversationId, string? title = null)
-    {
-        SessionUsageDetail = _createSessionUsageDetail();
-        ActivePanel = "session-usage-detail";
-        RunBackgroundTaskAsync("load session usage detail", () => SessionUsageDetail.LoadForConversationAsync(conversationId, title ?? "(untitled)"));
+        ActivePanel = "memories";
+        RunBackgroundTaskAsync("load memories", () => Memories.InitializeCommand.ExecuteAsync(null));
     }
     [RelayCommand] private void ShowLogsPanel()        => ActivePanel = "logs";
     [RelayCommand] private void ShowWizardPanel()      => ActivePanel = "wizard";
@@ -470,9 +451,6 @@ public partial class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(ActiveViewModel));
         OnPropertyChanged(nameof(WindowTitle));
     }
-
-    partial void OnSessionUsageDetailChanged(SessionUsageDetailViewModel value)
-        => OnPropertyChanged(nameof(ActiveViewModel));
 
     partial void OnSearchQueryChanged(string value)
     {

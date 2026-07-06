@@ -113,15 +113,9 @@
                         </Button>
 
                         <Button Classes="icon-btn" Command="{Binding ShowMemoriesPanelCommand}"
-                                ToolTip.Tip="Memories - review and manage chat memories">
+                                ToolTip.Tip="Memories - review, manage, and triage chat memories by conversation">
                             <PathIcon Data="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.5 6.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z"
                                       Width="17" Height="17" />
-                        </Button>
-
-                        <Button Classes="icon-btn" Command="{Binding ShowSessionUsagePanelCommand}"
-                            ToolTip.Tip="Session Usage - per-conversation memory counts">
-                            <PathIcon Data="M3 17h2v-7H3v7zm4 0h2V7H7v10zm4 0h2v-4h-2v4zm4 0h2V4h-2v13zm4 0h2v-9h-2v9z"
-                                  Width="17" Height="17" />
                         </Button>
 
                         <Button Classes="icon-btn" Command="{Binding ShowLogsPanelCommand}"
@@ -190,12 +184,6 @@
                     </DataTemplate>
                     <DataTemplate DataType="vm:MemoriesViewModel">
                         <views:MemoriesView />
-                    </DataTemplate>
-                    <DataTemplate DataType="vm:SessionUsageViewModel">
-                        <views:SessionUsageView />
-                    </DataTemplate>
-                    <DataTemplate DataType="vm:SessionUsageDetailViewModel">
-                        <views:SessionUsageDetailView />
                     </DataTemplate>
                     <DataTemplate DataType="vm:LogsViewModel">
                         <views:LogsView />

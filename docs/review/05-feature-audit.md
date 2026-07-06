@@ -22,7 +22,7 @@ maintenance dollar.
 | --- | --- | --- |
 | Persistent memories + panel | **Essential** | — |
 | Auto-summary extraction pipeline | **Refine** | Valuable but trust-sensitive; needs visible provenance ("saved because of conversation X") to match the audit posture. |
-| Session Usage panel | **Merge** | A triage view for a problem (memory sprawl) that better memory UX should prevent. Fold into the Memories panel. |
+| Session Usage panel | **Merge — DONE** | Folded into the Memories panel: a conversation filter drives per-conversation counts and a scoped CSV export; the standalone panel/ViewModels are deleted. |
 | Memory encryption toggle | **Over-engineered** | A toggle means users must understand a threat model. Pick a default (encrypt) and delete the option. |
 | Fixed categories (facts/preferences/…) | **Refine** | Categories should give way to scopes when memory unifies (see Opportunities #4). |
 

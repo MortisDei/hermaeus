@@ -91,6 +91,12 @@ limit.
 
 ### Changed
 
+- Folded the Session Usage panel into Memories (Feature Audit: Merge).
+  `MemoriesViewModel` now carries a conversation filter (per-conversation
+  memory counts, the old panel's whole purpose) with a "Clear" reset and a
+  CSV export scoped to the selected conversation. `SessionUsageViewModel`,
+  `SessionUsageDetailViewModel`, and their views are deleted; the sidebar has
+  one memory entry point instead of two.
 - `ILlmService` contract break ahead of 1.0: sampling parameters moved into
   an `LlmChatOptions` record, the interface has a single event-based
   `StreamChatAsync` (text-only callers use the `StreamChatTextAsync`

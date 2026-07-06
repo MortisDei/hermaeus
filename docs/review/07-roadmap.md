@@ -41,11 +41,14 @@ Each is independently shippable and each *deletes* code:
 3. **Context-pack builder extraction** — DONE. `ContextPackBuilder` is the
    single budget-aware packer used by Chat, Agent, and RAG; traces converged
    on one `TraceRecord` schema with per-surface projections.
-4. **Unified memory with scopes** — DONE (storage/retrieval). `IMemoryStore`
-   carries scopes (global/workspace/conversation); workspace notes read/write
-   through the same store instead of a separate schema. Still open: the
-   Session Usage panel (Feature Audit: Merge) has not yet been folded into
-   the Memories panel — it remains a separate ViewModel/view.
+4. **Unified memory with scopes** — DONE. `IMemoryStore` carries scopes
+   (global/workspace/conversation); workspace notes read/write through the
+   same store instead of a separate schema. The Session Usage panel (Feature
+   Audit: Merge) is folded into Memories: `MemoriesViewModel` now carries a
+   conversation filter (per-conversation memory counts, the old panel's
+   whole purpose) and a CSV export scoped to the selected conversation.
+   `SessionUsageViewModel`/`SessionUsageDetailViewModel` and their views are
+   deleted; the sidebar has one memory entry point instead of two.
 
 Also in 1.x: collapse single-implementation interfaces opportunistically;
 move CommunityToolkit out of Core; begin voice convergence (Kokoro-ONNX

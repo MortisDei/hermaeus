@@ -12,20 +12,29 @@ namespace Aether.ViewModels;
 public partial class MemoriesViewModel : ObservableObject
 {
     private readonly IMemoryStore _store;
+    private readonly IConversationStore _conversations;
+    private readonly ISettingsService _settings;
     private readonly IToastService _toasts;
 
     public ObservableCollection<MemoryItemViewModel> Memories { get; } = [];
 
+    /// <summary>Per-conversation memory counts, for triaging where memory sprawl is
+    /// coming from. Replaces the standalone Session Usage panel (Feature Audit: Merge).</summary>
+    public ObservableCollection<ConversationFilterItemViewModel> ConversationFilters { get; } = [];
+
     [ObservableProperty] private string _searchText = string.Empty;
     [ObservableProperty] private string _selectedCategory = string.Empty;  // Filter by category
+    [ObservableProperty] private ConversationFilterItemViewModel? _selectedConversationFilter;
     [ObservableProperty] private bool _isLoading;
     [ObservableProperty] private int _totalCount;
 
     public List<string> AvailableCategories { get; } = ["All", "facts", "preferences", "learned_behaviors", "interests"];
 
-    public MemoriesViewModel(IMemoryStore store, IToastService toasts)
+    public MemoriesViewModel(IMemoryStore store, IConversationStore conversations, ISettingsService settings, IToastService toasts)
     {
         _store = store;
+        _conversations = conversations;
+        _settings = settings;
         _toasts = toasts;
         _selectedCategory = "All";
         Memories.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasNoMemories));
@@ -37,6 +46,41 @@ public partial class MemoriesViewModel : ObservableObject
     public async Task InitializeAsync()
     {
         await LoadMemoriesAsync();
+        await RefreshConversationFiltersAsync();
+    }
+
+    [RelayCommand]
+    public async Task RefreshConversationFiltersAsync()
+    {
+        try
+        {
+            var convs = await _conversations.GetAllAsync(includeArchived: true);
+            var ids = convs.Select(c => c.Id).ToList();
+            var counts = ids.Count > 0
+                ? await _store.GetCountsByConversationAsync(ids, includeArchived: true)
+                : new Dictionary<string, int>();
+
+            var previouslySelected = SelectedConversationFilter?.ConversationId;
+            ConversationFilters.Clear();
+            foreach (var c in convs.OrderByDescending(c => c.UpdatedAt))
+            {
+                counts.TryGetValue(c.Id, out var count);
+                ConversationFilters.Add(new ConversationFilterItemViewModel
+                {
+                    ConversationId = c.Id,
+                    Title = string.IsNullOrWhiteSpace(c.Title) ? "(untitled)" : c.Title,
+                    MemoryCount = count
+                });
+            }
+
+            SelectedConversationFilter = previouslySelected is null
+                ? null
+                : ConversationFilters.FirstOrDefault(f => f.ConversationId == previouslySelected);
+        }
+        catch (Exception ex)
+        {
+            _toasts.Show("Error", $"Failed to load conversation list: {ex.Message}", ToastKind.Error);
+        }
     }
 
     [RelayCommand]
@@ -60,6 +104,9 @@ public partial class MemoriesViewModel : ObservableObject
                     results = results.Where(m => m.Category == SelectedCategory).ToList();
             }
 
+            if (SelectedConversationFilter is not null)
+                results = results.Where(m => string.Equals(m.SourceConversationId, SelectedConversationFilter.ConversationId, StringComparison.Ordinal)).ToList();
+
             Memories.Clear();
             foreach (var memory in results.OrderByDescending(m => m.IsPinned).ThenByDescending(m => m.ImportanceScore))
             {
@@ -72,6 +119,33 @@ public partial class MemoriesViewModel : ObservableObject
         {
             IsLoading = false;
         }
+    }
+
+    [RelayCommand(CanExecute = nameof(CanExportConversationCsv))]
+    public async Task ExportConversationCsvAsync()
+    {
+        if (SelectedConversationFilter is null) return;
+
+        var outDir = Path.Combine(Aether.Services.SettingsService.ResolveDataRoot(_settings.Settings), "exports");
+        var file = Path.Combine(outDir, $"memories-{SelectedConversationFilter.ConversationId}-{DateTime.UtcNow:yyyyMMddHHmmss}.csv");
+
+        var lines = new List<string> { "Id,Category,CreatedAt,Importance,Content" };
+        foreach (var m in Memories)
+        {
+            var safe = m.Content.Replace("\r", " ").Replace("\n", " ").Replace(",", " ");
+            lines.Add($"{m.Id},{m.Category},{m.CreatedAt:o},{m.ImportanceScore},{safe}");
+        }
+
+        await AtomicFile.WriteAllTextAsync(file, string.Join(Environment.NewLine, lines));
+        _toasts.Show("Exported", $"Wrote {Memories.Count} memories to {file}", ToastKind.Success);
+    }
+
+    private bool CanExportConversationCsv() => SelectedConversationFilter is not null;
+
+    [RelayCommand]
+    public void ClearConversationFilter()
+    {
+        SelectedConversationFilter = null;
     }
 
     [RelayCommand]
@@ -161,8 +235,14 @@ public partial class MemoriesViewModel : ObservableObject
         SearchCommand.Execute(null);
     }
 
-    partial void OnSelectedCategoryChanged(string value) 
+    partial void OnSelectedCategoryChanged(string value)
     {
+        SearchCommand.Execute(null);
+    }
+
+    partial void OnSelectedConversationFilterChanged(ConversationFilterItemViewModel? value)
+    {
+        ExportConversationCsvCommand.NotifyCanExecuteChanged();
         SearchCommand.Execute(null);
     }
 
@@ -230,4 +310,17 @@ public partial class MemoryItemViewModel : ObservableObject
     };
 
     public string PinButtonLabel => IsPinned ? "Unpin" : "Pin";
+}
+
+/// <summary>
+/// One entry in the conversation filter list: a conversation and how many
+/// memories it has contributed, used to triage memory sprawl per-conversation.
+/// </summary>
+public partial class ConversationFilterItemViewModel : ObservableObject
+{
+    public required string ConversationId { get; init; }
+    public required string Title { get; init; }
+    [ObservableProperty] private int _memoryCount;
+
+    public string Display => $"{Title} ({MemoryCount})";
 }

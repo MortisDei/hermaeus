@@ -165,9 +165,6 @@ public partial class App : Application
         s.AddSingleton<SystemOverviewViewModel>();
         s.AddSingleton<DoctorViewModel>();
         s.AddSingleton<MemoriesViewModel>();
-        s.AddSingleton<SessionUsageViewModel>();
-        s.AddTransient<SessionUsageDetailViewModel>();
-        s.AddSingleton<Func<SessionUsageDetailViewModel>>(sp => () => sp.GetRequiredService<SessionUsageDetailViewModel>());
         s.AddSingleton<LogsViewModel>();
         s.AddSingleton<SetupWizardViewModel>();
         s.AddSingleton<MainWindowViewModel>();
