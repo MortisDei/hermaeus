@@ -203,7 +203,7 @@ namespace Aether.Tests
                 ExtraArgs = "--host 0.0.0.0"
             });
 
-            var privacyAudit = new PrivacyAuditService(settings, new FakeSecretStore(), new RuntimeLogService(settings));
+            var privacyAudit = new PrivacyAuditService(settings, new FakeSecretStore(), new RuntimeLogService(settings), new FakeVoiceProviderRegistry(settings));
             var vm = new SystemOverviewViewModel(
                 new FakeSystemInfo(),
                 new FakeToasts(),
@@ -213,6 +213,22 @@ namespace Aether.Tests
 
             True(vm.PrivacyAuditItems.Any(i => i.Name == "Remote providers" && i.Status == "Review"), "remote providers should require review");
             True(vm.PrivacyAuditItems.Any(i => i.Name == "Exposed local servers" && i.Status == "Warning"), "network-facing server args should warn");
+        }
+
+        public static async Task PrivacyAuditFlagsRemoteVoiceProviderWithNoChatProviderEnabled()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.Llm.OpenAiEnabled = false;
+            settings.Settings.Llm.LlamaCppEnabled = false;
+            settings.Settings.Tts.VoiceProvider = "F5Tts"; // FakeVoiceProviderRegistry marks F5-TTS as VoiceCapability.Remote
+
+            var privacyAudit = new PrivacyAuditService(settings, new FakeSecretStore(), new RuntimeLogService(settings), new FakeVoiceProviderRegistry(settings));
+            var items = await privacyAudit.ScanAsync();
+
+            var remote = items.Single(i => i.Name == "Remote providers");
+            Equal("Review", remote.Status, "a remote voice provider alone should require review, driven by VoiceCapability not a hardcoded provider name");
+            True(remote.Detail.Contains("F5-TTS", StringComparison.Ordinal), "detail should name the remote voice provider");
         }
 
         public static Task LocalAiAssetsDetectAndApplyPaths()
@@ -986,7 +1002,7 @@ namespace Aether.Tests
                 new PythonHealthValidator(),
                 new NoOpReranker());
             var trust = new TrustService(settings);
-            var privacy = new PrivacyAuditService(settings, new FakeSecretStore(), new RuntimeLogService(settings));
+            var privacy = new PrivacyAuditService(settings, new FakeSecretStore(), new RuntimeLogService(settings), new FakeVoiceProviderRegistry(settings));
             var engine = new InspectionEngine([doctor, trust, privacy]);
 
             var doctorReport = await engine.RunAsync("doctor");

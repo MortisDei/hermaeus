@@ -14,35 +14,48 @@ public sealed class PrivacyAuditService : IPrivacyAuditService, IInspectionCheck
     private readonly ISettingsService _settings;
     private readonly ISecretStore _secrets;
     private readonly IRuntimeLogService _logs;
+    private readonly IVoiceProviderRegistry _voiceProviders;
 
     public IReadOnlyList<string> Views { get; } = ["privacy"];
 
-    public PrivacyAuditService(ISettingsService settings, ISecretStore secrets, IRuntimeLogService logs)
+    public PrivacyAuditService(ISettingsService settings, ISecretStore secrets, IRuntimeLogService logs, IVoiceProviderRegistry voiceProviders)
     {
         _settings = settings;
         _secrets = secrets;
         _logs = logs;
+        _voiceProviders = voiceProviders;
     }
 
     public async Task<IReadOnlyList<PrivacyAuditItem>> ScanAsync(CancellationToken ct = default)
     {
         var items = new List<PrivacyAuditItem>();
         var settings = _settings.Settings;
-        var openAiRemote = settings.Llm.OpenAiEnabled
-            || settings.VoiceProviderConfigs.ContainsKey("OpenAI")
-            || settings.Tts.VoiceProvider.Equals("OpenAI", StringComparison.OrdinalIgnoreCase);
+
+        var remoteChatProviders = CompositeLlmService.Providers
+            .Where(p => p.IsRemote && IsChatProviderEnabled(p, settings))
+            .ToList();
+        var activeVoiceProvider = Enum.TryParse<VoiceProvider>(settings.Tts.VoiceProvider, ignoreCase: true, out var voiceId)
+            ? _voiceProviders.GetAvailableProviders().FirstOrDefault(p => p.Id == voiceId)
+            : null;
+        var voiceRemote = activeVoiceProvider?.Capabilities.HasFlag(VoiceCapability.Remote) ?? false;
+        var anyRemote = remoteChatProviders.Count > 0 || voiceRemote;
 
         items.Add(new PrivacyAuditItem(
             "Remote providers",
-            openAiRemote ? "Review" : "Local",
-            openAiRemote
-                ? $"OpenAI-compatible endpoint configured at {settings.Llm.OpenAiBaseUrl}. Prompts may leave the machine when selected."
-                : "No enabled remote chat provider detected in settings."));
+            anyRemote ? "Review" : "Local",
+            anyRemote
+                ? string.Join(" ", remoteChatProviders
+                    .Select(p => $"{p.DisplayName} chat endpoint configured at {settings.Llm.OpenAiBaseUrl}. Prompts may leave the machine when selected.")
+                    .Concat(voiceRemote ? [$"Voice provider {activeVoiceProvider!.Name} sends audio off the machine."] : []))
+                : "No enabled remote chat or voice provider detected in settings."));
 
         items.Add(new PrivacyAuditItem(
             "Local providers",
             "Local",
-            $"llama.cpp {(settings.Llm.LlamaCppEnabled ? "enabled" : "disabled")}; TTS provider {settings.Tts.VoiceProvider}; RAG {(settings.Rag.Enabled ? "enabled" : "available")}."));
+            string.Join("; ", CompositeLlmService.Providers
+                .Where(p => !p.IsRemote)
+                .Select(p => $"{p.DisplayName} {(IsChatProviderEnabled(p, settings) ? "enabled" : "disabled")}"))
+                + $"; TTS provider {settings.Tts.VoiceProvider}; RAG {(settings.Rag.Enabled ? "enabled" : "available")}."));
 
         var exposedServers = settings.ManagedServers.Where(HasNetworkExposureFlag).ToList();
         items.Add(new PrivacyAuditItem(
@@ -72,11 +85,19 @@ public sealed class PrivacyAuditService : IPrivacyAuditService, IInspectionCheck
 
         items.Add(new PrivacyAuditItem(
             "Features that may send data remotely",
-            openAiRemote ? "Review" : "Local",
+            anyRemote ? "Review" : "Local",
             "Remote chat/voice providers can send prompt, document, or voice data outside the local machine when explicitly configured. RAG web ingest remains dataset-scoped and approval driven."));
 
         return items;
     }
+
+    private static bool IsChatProviderEnabled(ProviderDescriptor descriptor, AppSettings settings) => descriptor.Tag switch
+    {
+        "openai" => settings.Llm.OpenAiEnabled,
+        "llama.cpp" => settings.Llm.LlamaCppEnabled,
+        "ollama" => settings.RuntimeProfiles.Any(p => p.Enabled && p.Kind == RuntimeKind.Ollama),
+        _ => false
+    };
 
     public async Task<IReadOnlyList<InspectionCheck>> GetChecksAsync(CancellationToken ct = default)
     {

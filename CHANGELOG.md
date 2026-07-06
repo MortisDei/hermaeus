@@ -47,6 +47,11 @@ limit.
   Privacy Audit is extracted out of `SystemOverviewViewModel` into a real,
   testable `PrivacyAuditService`. New inspection areas register a provider
   instead of editing an existing service.
+- Privacy Audit now derives "remote providers" from `ProviderDescriptor.IsRemote`
+  and `VoiceCapability.Remote` instead of string-matching provider names
+  ("OpenAI"). A remote voice provider is now flagged even when no remote chat
+  provider is enabled, and adding a new remote chat provider to
+  `CompositeLlmService.Providers` needs no Privacy Audit changes.
 
 ### Changed
 
