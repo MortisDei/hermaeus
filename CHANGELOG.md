@@ -11,16 +11,55 @@ limit.
 
 ## [0.9.17-alpha] - Unreleased
 
+### Added
+
+- Architecture and strategy review under `docs/review/` (architecture,
+  dependencies, opportunities, vision, feature audit, technical debt,
+  roadmap, critique, system map, Evaluation System design), plus a rewritten
+  `AGENTS.md` and project skills under `.claude/skills/`.
+- Provider capability model: each chat provider declares a
+  `ProviderDescriptor` (tag, managed-local/local-api/remote-api kind, and
+  capabilities such as streaming, usage reporting, and model pull/delete).
+  `CompositeLlmService` exposes the registry and routes through it.
+- Retention policies: runtime log rotation keeps the newest 10 archives per
+  log file, and benchmark history keeps the newest 200 saved runs.
+
 ### Changed
 
-
+- `ILlmService` contract break ahead of 1.0: sampling parameters moved into
+  an `LlmChatOptions` record, the interface has a single event-based
+  `StreamChatAsync` (text-only callers use the `StreamChatTextAsync`
+  extension), and the unused `PullModelAsync`/`DeleteModelAsync` methods were
+  removed.
+- `Aether.Core` no longer references CommunityToolkit.Mvvm (it was unused);
+  Core is now BCL-only and an architecture test enforces it.
+- Tests standardized on `dotnet test` (the previous `dotnet run` invocation
+  was a silent no-op); xunit parallelization is disabled because harness
+  cases share temp data roots and SQLite pools.
 
 ### Fixed
 
-
+- Pinned `SQLitePCLRaw.bundle_e_sqlite3` 3.0.0 to replace the vulnerable
+  native SQLite pulled transitively by Microsoft.Data.Sqlite
+  (GHSA-2m69-gcr7-jv3q); bumped Microsoft.Data.Sqlite and
+  System.Numerics.Tensors to 9.0.9. Fresh restores previously failed under
+  warnings-as-errors.
+- Local AI asset detection now prefers the actual on-disk casing of the
+  models directory instead of a guessed `Models`/`models` variant, with a
+  platform-appropriate comparer; fixes wrong reranker/model paths and 24
+  Windows-only test failures.
+- Temp-directory cleanup in tests clears SQLite connection pools and retries,
+  so test databases delete reliably on Windows.
 
 ### Tests
 
+- Architecture tests: ViewModels must not reference Avalonia, ONNX Runtime
+  stays confined to `Aether.Rag`, and `Aether.Core` may not gain package
+  references.
+- `SqliteMigrationRunner` contract pinned (ordering, idempotence, target
+  version, scope independence).
+- Provider descriptor registry semantics pinned (unique tags, remote surface,
+  model-management capabilities).
 
 
 ## [0.9.16-alpha] - 2026-05-18

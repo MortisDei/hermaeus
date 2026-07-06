@@ -12,6 +12,7 @@ of evolution. Read in order; later documents reference earlier ones.
 7. [Roadmap](07-roadmap.md) — 1.0 / 1.x / 2.0 / long-term, architecture-first
 8. [Brutal Critique](08-brutal-critique.md) — the unvarnished pre-release assessment
 9. [System Map](09-system-map.md) — spine/capabilities/tools buckets, the Context and Evaluation System unifications, and the dual-ownership register
+10. [Evaluation System](10-evaluation-system.md) — design for folding Benchmarks, Compare Models, and the RAG eval harness into one engine with three projections
 
 The recurring conclusion: Aether's foundations are strong; its risk is
 parallel vertical features. Four unifications (memory scopes, check/fix
