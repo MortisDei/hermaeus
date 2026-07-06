@@ -43,12 +43,9 @@ public sealed class ArchitectureTests
     [Fact]
     public void Core_references_only_approved_assemblies()
     {
-        // CommunityToolkit.Mvvm is temporarily tolerated; removing it is a
-        // tracked 1.x task. Everything else must be BCL.
         var allowedPrefixes = new[]
         {
-            "System", "netstandard", "mscorlib", "Microsoft.CSharp",
-            "CommunityToolkit.Mvvm"
+            "System", "netstandard", "mscorlib", "Microsoft.CSharp"
         };
         var offenders = RefNames(Core)
             .Where(n => !allowedPrefixes.Any(p => n.StartsWith(p, StringComparison.Ordinal)))
