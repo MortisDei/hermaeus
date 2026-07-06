@@ -413,38 +413,6 @@ public sealed class SqliteRagStore
         return val is string json ? JsonSerializer.Deserialize<Bm25Stats>(json) : null;
     }
 
-    public async Task SaveRagQueryTraceAsync(RagQueryTrace trace, CancellationToken ct = default)
-    {
-        await EnsureInitializedAsync(ct);
-        await using var c = new SqliteConnection(Cs); await c.OpenAsync(ct);
-        var cmd = c.CreateCommand();
-        cmd.CommandText = @"
-            INSERT INTO rag_query_traces
-                (id,dataset_id,question,expanded_question,query_variants_json,planner_notes,context_token_budget,context_packing_summary,refused,refusal_reason,model_id,retrieval_latency_ms,total_latency_ms,
-                 grounding_score,grounding_mode,retrieved_chunks_json,selected_context_json,created_at)
-            VALUES
-                ($id,$ds,$q,$eq,$variants,$notes,$budget,$packing,$refused,$refusal,$model,$retrieval,$total,$grounding,$mode,$retrieved,$selected,$created)";
-        cmd.Parameters.AddWithValue("$id", trace.Id);
-        cmd.Parameters.AddWithValue("$ds", trace.DatasetId);
-        cmd.Parameters.AddWithValue("$q", trace.Question);
-        cmd.Parameters.AddWithValue("$eq", trace.ExpandedQuestion);
-        cmd.Parameters.AddWithValue("$variants", JsonSerializer.Serialize(trace.QueryVariants));
-        cmd.Parameters.AddWithValue("$notes", trace.PlannerNotes);
-        cmd.Parameters.AddWithValue("$budget", trace.ContextTokenBudget);
-        cmd.Parameters.AddWithValue("$packing", trace.ContextPackingSummary);
-        cmd.Parameters.AddWithValue("$refused", trace.Refused ? 1 : 0);
-        cmd.Parameters.AddWithValue("$refusal", trace.RefusalReason);
-        cmd.Parameters.AddWithValue("$model", trace.ModelId);
-        cmd.Parameters.AddWithValue("$retrieval", trace.RetrievalLatencyMs);
-        cmd.Parameters.AddWithValue("$total", trace.TotalLatencyMs);
-        cmd.Parameters.AddWithValue("$grounding", trace.GroundingScore);
-        cmd.Parameters.AddWithValue("$mode", trace.GroundingMode.ToString());
-        cmd.Parameters.AddWithValue("$retrieved", JsonSerializer.Serialize(trace.RetrievedChunks));
-        cmd.Parameters.AddWithValue("$selected", JsonSerializer.Serialize(trace.SelectedContext));
-        cmd.Parameters.AddWithValue("$created", trace.CreatedAt.ToString("O"));
-        await cmd.ExecuteNonQueryAsync(ct);
-    }
-
     // ── Serialisation helpers ─────────────────────────────────────────────────
 
     internal static byte[] EmbeddingToBytes(float[] emb)

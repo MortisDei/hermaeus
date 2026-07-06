@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using Aether.Agent.Models;
+using Aether.Core.Models;
 using Aether.Core.Services;
 
 namespace Aether.Agent.Services;
@@ -41,19 +42,22 @@ public sealed class AgentService : IAgentService
     private readonly IAgentSafetyGate _safetyGate;
     private readonly IAgentToolExecutor _toolExecutor;
     private readonly ILlmService _llm;
+    private readonly ITraceStore? _traces;
 
     public AgentService(
         IAgentTaskStateStore store,
         IAgentContextBuilder contextBuilder,
         IAgentSafetyGate safetyGate,
         IAgentToolExecutor toolExecutor,
-        ILlmService llm)
+        ILlmService llm,
+        ITraceStore? traces = null)
     {
         _store = store;
         _contextBuilder = contextBuilder;
         _safetyGate = safetyGate;
         _toolExecutor = toolExecutor;
         _llm = llm;
+        _traces = traces;
     }
 
     public async Task<AgentTaskState> CreateTaskAsync(
@@ -194,6 +198,34 @@ public sealed class AgentService : IAgentService
             response,
             logged_at = DateTime.UtcNow
         }, ct);
+
+        if (_traces is not null)
+        {
+            // The task-directory JSONL above is the reviewable workspace artifact
+            // (schema-validated); the unified store row indexes the step for the
+            // shared trace timeline.
+            try
+            {
+                await _traces.AppendAsync(new TraceRecord
+                {
+                    Kind = TraceKind.Agent,
+                    SourceId = taskId,
+                    Operation = "agent-step",
+                    DetailJson = JsonSerializer.Serialize(new
+                    {
+                        status = state.Status.ToString(),
+                        action = response.NextAction.Type.ToString(),
+                        tool = response.NextAction.ToolName,
+                        step = state.ActiveStep,
+                        message = logEntry
+                    })
+                }, ct);
+            }
+            catch
+            {
+                // The JSONL artifact above already recorded the step.
+            }
+        }
 
         return new AgentStepResult(state, context, response, logEntry);
     }

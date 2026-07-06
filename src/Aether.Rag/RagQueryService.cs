@@ -35,6 +35,7 @@ public sealed class RagQueryService
     private readonly ISettingsService  _settings;
     private readonly IReranker         _reranker;
     private readonly IRuntimeLogService? _logs;
+    private readonly ITraceStore?      _traces;
 
     // In-memory chunk cache per dataset  (dataset_id → chunks)
     private const int MaxCachedDatasets = 8;
@@ -51,9 +52,11 @@ public sealed class RagQueryService
         ILlmService llm,
         ISettingsService settings,
         IReranker reranker,
-        IRuntimeLogService? logs = null)
+        IRuntimeLogService? logs = null,
+        ITraceStore? traces = null)
     {
         _store = store; _embed = embed; _llm = llm; _settings = settings; _reranker = reranker; _logs = logs;
+        _traces = traces;
     }
 
     /// <summary>Warm the in-memory embedding cache for a dataset.</summary>
@@ -261,7 +264,7 @@ public sealed class RagQueryService
                 RetrievedChunks = semantic.Select((r, i) => ToTraceChunk(r, i + 1)).ToList(),
                 SelectedContext = fused.Select((r, i) => ToTraceChunk(r, i + 1)).ToList()
             };
-            await _store.SaveRagQueryTraceAsync(refusalTrace, ct);
+            await PersistTraceAsync(refusalTrace, ct);
             yield return $"__RAG_TRACE__{JsonSerializer.Serialize(new { refusalTrace.Id, refusalTrace.RetrievalLatencyMs, refusalTrace.TotalLatencyMs, refusalTrace.GroundingScore, refusalTrace.Refused, refusalTrace.RefusalReason, mode = refusalTrace.GroundingMode.ToString() })}__END_TRACE__";
             yield break;
         }
@@ -310,11 +313,38 @@ public sealed class RagQueryService
             RetrievedChunks = semantic.Select((r, i) => ToTraceChunk(r, i + 1)).ToList(),
             SelectedContext = fused.Select((r, i) => ToTraceChunk(r, i + 1)).ToList()
         };
-        await _store.SaveRagQueryTraceAsync(trace, ct);
+        await PersistTraceAsync(trace, ct);
         yield return $"__RAG_TRACE__{JsonSerializer.Serialize(new { trace.Id, trace.RetrievalLatencyMs, trace.TotalLatencyMs, trace.GroundingScore, mode = trace.GroundingMode.ToString() })}__END_TRACE__";
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
+
+    private async Task PersistTraceAsync(RagQueryTrace trace, CancellationToken ct)
+    {
+        if (_traces is null)
+            return;
+
+        try
+        {
+            await _traces.AppendAsync(new TraceRecord
+            {
+                Id = trace.Id,
+                Kind = TraceKind.Rag,
+                CreatedAt = trace.CreatedAt,
+                SourceId = trace.DatasetId,
+                ModelId = trace.ModelId,
+                Operation = trace.Refused ? "rag-refusal" : "rag-query",
+                TotalLatencyMs = trace.TotalLatencyMs,
+                Error = trace.RefusalReason,
+                DetailJson = JsonSerializer.Serialize(trace)
+            }, ct);
+        }
+        catch (Exception ex)
+        {
+            _logs?.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Rag,
+                $"RAG trace persistence failed: {ex.Message}"));
+        }
+    }
 
     private async Task<QueryPlan> BuildQueryPlanAsync(string datasetId, string question, CancellationToken ct)
     {

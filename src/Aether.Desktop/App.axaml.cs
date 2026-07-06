@@ -104,6 +104,7 @@ public partial class App : Application
         s.AddSingleton<IDoctorService,     DoctorService>();
         s.AddSingleton<ISystemInfoService, SystemInfoService>();
         s.AddSingleton<IBenchmarkService,  BenchmarkService>();
+        s.AddSingleton<ITraceStore,        SqliteTraceStore>();
         s.AddSingleton<IConversationStore, ConversationStore>();
         s.AddSingleton<IConversationExportService, ConversationExportService>();
         s.AddSingleton<IMemoryStore, MemoryStore>();

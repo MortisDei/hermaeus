@@ -23,6 +23,13 @@ limit.
   `CompositeLlmService` exposes the registry and routes through it.
 - Retention policies: runtime log rotation keeps the newest 10 archives per
   log file, and benchmark history keeps the newest 200 saved runs.
+- Unified trace model (Context System step 1): one `TraceRecord` envelope and
+  `ITraceStore` (SQLite `traces.db`, capped at 500 rows per kind) now backs
+  chat, RAG, and agent traces as projections of a single schema. Chat traces
+  persist across restarts (previously in-memory only), RAG traces write their
+  full detail as the record payload instead of a bespoke write-only table,
+  and agent steps are indexed in the shared store alongside the
+  schema-validated per-task JSONL artifact.
 
 ### Changed
 
