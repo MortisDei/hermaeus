@@ -91,6 +91,16 @@ limit.
 
 ### Removed
 
+- Memory encryption toggle (docs/review/05-feature-audit.md: rated
+  "Over-engineered"). `MemorySettings.EncryptMemoriesAtRest` and the
+  Settings UI "Encrypt at rest" checkbox turned out to be a phantom
+  control: the flag was persisted but no code anywhere actually performed
+  AES encryption or decryption on memory content, so the setting implied a
+  security property Aether didn't have. Removed the setting and the UI
+  control rather than picking a default for it, since there was no real
+  encryption to default on. `Memory.IsEncrypted` stays in the schema
+  (always `false` now, harmless) rather than trigger a `memories.db` column
+  migration for this cleanup.
 - Local tasks/reminders/automations (docs/review/05-feature-audit.md: rated
   "Deprecate"). Deleted `TasksViewModel`, `AutomationScheduler`,
   `IAutomationScheduler`, `TasksView`, `TaskAutomationModels.cs`

@@ -79,7 +79,6 @@ public sealed class ConversationMemoryService : IConversationMemoryService
         foreach (var memory in picked)
         {
             memory.ImportanceScore = Math.Clamp((memory.ImportanceScore + importance) / 2.0, 0, 1);
-            memory.IsEncrypted = memorySettings.EncryptMemoriesAtRest;
             memory.Tags = memory.Tags
                 .Append("auto_summary")
                 .Distinct(StringComparer.OrdinalIgnoreCase)

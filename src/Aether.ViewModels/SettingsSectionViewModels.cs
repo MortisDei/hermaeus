@@ -299,7 +299,6 @@ public partial class MemorySettingsViewModel : ObservableObject
     [ObservableProperty] private bool _memoryInjectIntoContext;
     [ObservableProperty] private double _memoryImportanceThreshold = 0.6;
     [ObservableProperty] private int _memoryInjectionTokenBudget = 500;
-    [ObservableProperty] private bool _memoryEncryptionEnabled;
     [ObservableProperty] private int _memoryAutoArchiveDays = 90;
 
     public void ReloadFrom(AppSettings settings)
@@ -308,7 +307,6 @@ public partial class MemorySettingsViewModel : ObservableObject
         MemoryInjectIntoContext = settings.Memory.InjectMemoriesIntoContext;
         MemoryImportanceThreshold = settings.Memory.AutoSummarizeImportanceThreshold;
         MemoryInjectionTokenBudget = settings.Memory.InjectionTokenBudget;
-        MemoryEncryptionEnabled = settings.Memory.EncryptMemoriesAtRest;
         MemoryAutoArchiveDays = settings.Memory.AutoArchiveAfterDays;
     }
 
@@ -318,7 +316,6 @@ public partial class MemorySettingsViewModel : ObservableObject
         settings.Memory.InjectMemoriesIntoContext = MemoryInjectIntoContext;
         settings.Memory.AutoSummarizeImportanceThreshold = MemoryImportanceThreshold;
         settings.Memory.InjectionTokenBudget = MemoryInjectionTokenBudget;
-        settings.Memory.EncryptMemoriesAtRest = MemoryEncryptionEnabled;
         settings.Memory.AutoArchiveAfterDays = MemoryAutoArchiveDays;
     }
 }

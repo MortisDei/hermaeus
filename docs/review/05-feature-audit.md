@@ -23,7 +23,7 @@ maintenance dollar.
 | Persistent memories + panel | **Essential** | — |
 | Auto-summary extraction pipeline | **Refine** | Valuable but trust-sensitive; needs visible provenance ("saved because of conversation X") to match the audit posture. |
 | Session Usage panel | **Merge — DONE** | Folded into the Memories panel: a conversation filter drives per-conversation counts and a scoped CSV export; the standalone panel/ViewModels are deleted. |
-| Memory encryption toggle | **Over-engineered** | A toggle means users must understand a threat model. Pick a default (encrypt) and delete the option. |
+| Memory encryption toggle | **Over-engineered — DONE, removed (not defaulted-on)** | Audited before removal: `EncryptMemoriesAtRest`/`Memory.IsEncrypted` were a phantom setting — the flag was persisted per row but no code anywhere actually performed AES encryption or decryption on memory content. "Pick a default and delete the option" wasn't achievable since there was no real encryption to default on; building one is a real feature (key management via `SecretStore`, an actual AES transform), not a defaults change. Removed the misleading checkbox/setting instead of leaving a control that implied a security property that didn't exist. The dead `IsEncrypted` column in `memories.db` is left in place (always `false` now) rather than run a schema migration to drop it. |
 | Fixed categories (facts/preferences/…) | **Refine** | Categories should give way to scopes when memory unifies (see Opportunities #4). |
 
 ## Agent Workbench

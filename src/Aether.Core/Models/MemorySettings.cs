@@ -1,7 +1,7 @@
 namespace Aether.Core.Models;
 
 /// <summary>
-/// Configuration for the chat memory feature including toggling, injection budget, retention, and encryption.
+/// Configuration for the chat memory feature including toggling, injection budget, and retention.
 /// </summary>
 public class MemorySettings
 {
@@ -39,12 +39,6 @@ public class MemorySettings
     /// Default 500 tokens.
     /// </summary>
     public int InjectionTokenBudget { get; set; } = 500;
-
-    /// <summary>
-    /// Whether to encrypt memory content at rest using AES-256.
-    /// Default false for performance; enable for sensitive data.
-    /// </summary>
-    public bool EncryptMemoriesAtRest { get; set; } = false;
 
     /// <summary>
     /// Retention policy for memory lifecycle: KeepAll, ArchiveAfter30Days, DeleteAfter90Days.
