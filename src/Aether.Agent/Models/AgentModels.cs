@@ -246,6 +246,7 @@ public sealed class WorkspaceManifest
     public string PreferredEmbeddingModelId { get; set; } = string.Empty;
     public string? LinkedRagDatasetId { get; set; }
     public List<string> InstructionPaths { get; set; } = [];
+    public List<WorkspaceCommandRecipe> AllowedCommands { get; set; } = [];
 }
 
 public sealed record WorkspaceActivation(

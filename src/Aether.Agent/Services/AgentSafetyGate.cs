@@ -53,4 +53,19 @@ public sealed class AgentSafetyGate : IAgentSafetyGate
 
         return new AgentToolPolicyDecision(AgentToolDisposition.Blocked, AgentRiskLevel.High, "Unknown tool is blocked.");
     }
+
+    public AgentToolPolicyDecision EvaluateCommand(string? requestedCommand, IReadOnlyList<WorkspaceCommandRecipe> allowedCommands)
+    {
+        var command = requestedCommand?.Trim() ?? string.Empty;
+        if (command.Length == 0)
+            return new AgentToolPolicyDecision(AgentToolDisposition.Blocked, AgentRiskLevel.High, "No command specified.");
+
+        if (!WorkspaceCommandRecipes.Executable.ContainsKey(command))
+            return new AgentToolPolicyDecision(AgentToolDisposition.Blocked, AgentRiskLevel.High, "Command is not one of the fixed, safe executable recipes.");
+
+        if (!allowedCommands.Any(recipe => string.Equals(recipe.Command.Trim(), command, StringComparison.OrdinalIgnoreCase)))
+            return new AgentToolPolicyDecision(AgentToolDisposition.Blocked, AgentRiskLevel.High, "Command was not declared as a safe recipe for this workspace.");
+
+        return new AgentToolPolicyDecision(AgentToolDisposition.RequiresApproval, AgentRiskLevel.Medium, "Recipe-scoped command execution always requires approval.");
+    }
 }

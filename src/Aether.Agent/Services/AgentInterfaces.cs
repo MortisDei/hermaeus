@@ -36,6 +36,7 @@ public interface IAgentWorkspaceTools
 public interface IAgentSafetyGate
 {
     AgentToolPolicyDecision Evaluate(string toolName, bool wouldMutate = false);
+    AgentToolPolicyDecision EvaluateCommand(string? requestedCommand, IReadOnlyList<WorkspaceCommandRecipe> allowedCommands);
 }
 
 public interface IAgentToolExecutor

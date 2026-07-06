@@ -101,9 +101,17 @@ Built *on* the 1.x refactors, in dependency order:
    it ships with the repo. Chat carries an optional, opt-in activation path for
    the same manifest. Memory scope needed no change: `MemoryScope.Workspace`
    already addresses by normalized workspace root.
-2. **Agent: approval-gated command execution.** The next capability slice,
-   under the unchanged constitution (risk classes, review queue, traces).
-   Safe-command recipes from workspace profiles become the on-ramp.
+2. **Agent: approval-gated command execution — DONE.** `run_command` executes
+   only a recipe the workspace itself declared safe (`AllowedCommands` on the
+   `.aether/workspace.json` manifest from item 1, sourced from the existing
+   command-recipe detection), and only if that recipe also appears in a fixed,
+   hardcoded allowlist (`dotnet build`/`dotnet test`/`npm test`/`cargo test`/
+   `pytest`) so a hand-edited manifest can never smuggle in an arbitrary
+   command. The model selects a recipe by name; it never constructs a command
+   line. Always requires approval through the existing review queue (never
+   auto-allowed even though the recipe is "safe"), runs workspace-root-bound
+   with a 5-minute timeout, and audits through the same trace/tool-result
+   trail as every other tool.
 3. **MCP client as the tool surface.** External tools via an open protocol at
    a process boundary, every call risk-classified — extensibility without a
    proprietary plugin API.

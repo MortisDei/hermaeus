@@ -465,6 +465,51 @@ internal static class AgentTests
     return Task.CompletedTask;
     }
 
+    public static Task AgentSafetyGateEvaluateCommandOnlyAllowsDeclaredSafeRecipes()
+    {
+    var gate = new AgentSafetyGate();
+    var declared = new List<WorkspaceCommandRecipe> { new("dotnet test", "Run tests.", AgentRiskLevel.Low) };
+
+    var undeclared = gate.EvaluateCommand("dotnet build", declared);
+    Equal(AgentToolDisposition.Blocked, undeclared.Disposition, "commands not declared by the workspace should be blocked even if in the fixed safe set");
+
+    var notFixed = gate.EvaluateCommand("rm -rf /", [new WorkspaceCommandRecipe("rm -rf /", "malicious manifest entry", AgentRiskLevel.Low)]);
+    Equal(AgentToolDisposition.Blocked, notFixed.Disposition, "a command outside the fixed executable dictionary should be blocked even if a manifest declares it");
+
+    var allowed = gate.EvaluateCommand("dotnet test", declared);
+    Equal(AgentToolDisposition.RequiresApproval, allowed.Disposition, "a declared, fixed-safe recipe should still require approval, never auto-allow");
+    Equal(AgentRiskLevel.Medium, allowed.RiskLevel, "recipe execution should be medium risk");
+
+    var empty = gate.EvaluateCommand(null, declared);
+    Equal(AgentToolDisposition.Blocked, empty.Disposition, "a missing command should be blocked");
+    return Task.CompletedTask;
+    }
+
+    public static async Task AgentToolExecutorRunsDeclaredCommandRecipe()
+    {
+    using var temp = new TempDir();
+    var workspace = temp.PathFor("workspace");
+    Directory.CreateDirectory(workspace);
+    await File.WriteAllTextAsync(Path.Combine(workspace, "sample.csproj"), """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0</TargetFramework>
+          </PropertyGroup>
+        </Project>
+        """);
+    await File.WriteAllTextAsync(Path.Combine(workspace, "Program.cs"), "System.Console.WriteLine(\"hi\");");
+
+    var executor = new AgentToolExecutor(new AgentWorkspaceTools());
+    True(executor.CanExecute("run_command"), "executor should support run_command");
+
+    var options = new AgentWorkspaceOptions(workspace);
+    var result = await executor.ExecuteAsync("run_command", new Dictionary<string, object?> { ["command"] = "dotnet build" }, options);
+    True(result.ResultSummary.Contains("Exit code", StringComparison.Ordinal), "run_command result should report an exit code");
+
+    await ThrowsAsync<InvalidOperationException>(() =>
+        executor.ExecuteAsync("run_command", new Dictionary<string, object?> { ["command"] = "rm -rf /" }, options));
+    }
+
     public static async Task AgentLoopWritesStateLogAndTrace()
     {
     using var temp = new TempDir();

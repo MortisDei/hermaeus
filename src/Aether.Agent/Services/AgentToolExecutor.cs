@@ -14,9 +14,9 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
     }
 
     public bool CanExecute(string toolName) => Normalize(toolName) is
-        "list_files" or "search_files" or "read_file" or "summarize_file" or "draft_patch" or "inspect_git_diff" or "apply_draft_patch";
+        "list_files" or "search_files" or "read_file" or "summarize_file" or "draft_patch" or "inspect_git_diff" or "apply_draft_patch" or "run_command";
 
-    public Task<AgentToolResult> ExecuteAsync(
+    public async Task<AgentToolResult> ExecuteAsync(
         string toolName,
         Dictionary<string, object?> arguments,
         AgentWorkspaceOptions options,
@@ -39,15 +39,56 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
                 options,
                 Arg(arguments, "relative_path", "path"),
                 Arg(arguments, "proposed_content", "content")),
+            "run_command" => await RunCommandAsync(options, Arg(arguments, "command"), ct),
             _ => throw new InvalidOperationException($"Unsupported agent tool: {toolName}")
         };
 
-        return Task.FromResult(new AgentToolResult
+        return new AgentToolResult
         {
             Tool = normalized,
             Arguments = new Dictionary<string, object?>(arguments, StringComparer.OrdinalIgnoreCase),
             ResultSummary = Summarize(result)
-        });
+        };
+    }
+
+    private static async Task<string> RunCommandAsync(AgentWorkspaceOptions options, string command, CancellationToken ct)
+    {
+        var root = AgentWorkspaceTools.ResolveWorkspaceRoot(options.WorkspaceRoot);
+        var trimmed = command.Trim();
+        if (!WorkspaceCommandRecipes.Executable.TryGetValue(trimmed, out var recipe))
+            throw new InvalidOperationException($"'{command}' is not one of the fixed, safe executable recipes.");
+
+        var psi = new ProcessStartInfo
+        {
+            FileName = recipe.FileName,
+            WorkingDirectory = root,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        foreach (var arg in recipe.Args)
+            psi.ArgumentList.Add(arg);
+
+        using var process = Process.Start(psi) ?? throw new InvalidOperationException($"Could not start '{command}'.");
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(TimeSpan.FromMinutes(5));
+        var stdoutTask = process.StandardOutput.ReadToEndAsync(timeoutCts.Token);
+        var stderrTask = process.StandardError.ReadToEndAsync(timeoutCts.Token);
+        try
+        {
+            await process.WaitForExitAsync(timeoutCts.Token);
+        }
+        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !ct.IsCancellationRequested)
+        {
+            try { process.Kill(entireProcessTree: true); }
+            catch { }
+            return $"Command '{command}' timed out after 5 minutes and was terminated.";
+        }
+
+        var stdout = await stdoutTask;
+        var stderr = await stderrTask;
+        return $"Exit code {process.ExitCode}\n\nstdout:\n{stdout.Trim()}\n\nstderr:\n{stderr.Trim()}";
     }
 
     private static string InspectGitDiff(AgentWorkspaceOptions options)
@@ -85,7 +126,7 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
         return string.IsNullOrWhiteSpace(output) ? "No working tree changes." : output.Trim();
     }
 
-    private static string Arg(Dictionary<string, object?> args, params string[] names)
+    internal static string Arg(Dictionary<string, object?> args, params string[] names)
     {
         foreach (var name in names)
         {

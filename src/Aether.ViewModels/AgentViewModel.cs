@@ -202,7 +202,8 @@ public partial class AgentViewModel : ObservableObject
     [
         "Read-first workspace inspection: list, search, read, and summarise local files.",
         "Approval-gated patch drafting: propose content, queue it for review, and apply only after approval.",
-        "No general shell, network, or remote-control actions in this slice.",
+        "Approval-gated command execution: only the workspace's own declared build/test recipes can run, never freeform shell text.",
+        "No network, install, commit, push, or remote-control actions in this slice.",
         "Workspace memory and review queues remain local and explicit."
     ];
 
@@ -795,6 +796,9 @@ public partial class AgentViewModel : ObservableObject
         manifest.PreferredModelId = SelectedModel?.Id ?? string.Empty;
         manifest.LinkedRagDatasetId = SelectedDataset?.Id;
         manifest.InstructionPaths = ProjectInstructions.Select(i => i.RelativePath).ToList();
+        manifest.AllowedCommands = CommandRecipes
+            .Select(r => new WorkspaceCommandRecipe(r.Command, r.Why, r.RiskLevel))
+            .ToList();
         await _workspaceManifests.SaveAsync(WorkspaceRoot, manifest);
         StatusMessage = "Saved workspace defaults to .aether/workspace.json.";
     }

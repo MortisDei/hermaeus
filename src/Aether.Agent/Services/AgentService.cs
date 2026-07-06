@@ -12,10 +12,14 @@ public sealed class AgentService : IAgentService
         You are Aether Agent, a local-first semi-autonomous task assistant.
         Use explicit task state and retrieved context. Be practical and concise.
         You may request supported local tools: list_files, search_files, read_file,
-        summarize_file, draft_patch, inspect_git_diff, and apply_draft_patch.
-        Read-only tools can execute immediately. Draft patch application requires
-        approval. Commands, network access, installs, commits, pushes, uploads,
-        downloads, and history rewrites are blocked.
+        summarize_file, draft_patch, inspect_git_diff, apply_draft_patch, and
+        run_command. Read-only tools can execute immediately. Draft patch
+        application and run_command always require approval. run_command only
+        accepts one of the workspace's own pre-declared safe recipes (for
+        example "dotnet build" or "dotnet test") passed verbatim as the
+        "command" argument; it cannot run arbitrary shell text. Network access,
+        installs, commits, pushes, uploads, downloads, and history rewrites
+        remain blocked.
         Return only valid JSON matching:
         {
           "thought_summary": "brief user-visible reasoning summary",
@@ -43,6 +47,7 @@ public sealed class AgentService : IAgentService
     private readonly IAgentToolExecutor _toolExecutor;
     private readonly ILlmService _llm;
     private readonly ITraceStore? _traces;
+    private readonly IWorkspaceManifestStore? _manifests;
 
     public AgentService(
         IAgentTaskStateStore store,
@@ -50,7 +55,8 @@ public sealed class AgentService : IAgentService
         IAgentSafetyGate safetyGate,
         IAgentToolExecutor toolExecutor,
         ILlmService llm,
-        ITraceStore? traces = null)
+        ITraceStore? traces = null,
+        IWorkspaceManifestStore? manifests = null)
     {
         _store = store;
         _contextBuilder = contextBuilder;
@@ -58,6 +64,7 @@ public sealed class AgentService : IAgentService
         _toolExecutor = toolExecutor;
         _llm = llm;
         _traces = traces;
+        _manifests = manifests;
     }
 
     public async Task<AgentTaskState> CreateTaskAsync(
@@ -122,7 +129,17 @@ public sealed class AgentService : IAgentService
         var nextTool = response.NextAction.ToolName ?? string.Empty;
         if (response.NextAction.Type == AgentActionKind.Tool)
         {
-            var decision = _safetyGate.Evaluate(nextTool, response.NextAction.RequiresApproval);
+            AgentToolPolicyDecision decision;
+            if (string.Equals(nextTool, "run_command", StringComparison.OrdinalIgnoreCase))
+            {
+                var requestedCommand = AgentToolExecutor.Arg(response.NextAction.Arguments, "command");
+                var manifest = _manifests is null ? null : await _manifests.LoadAsync(options.WorkspaceRoot, ct);
+                decision = _safetyGate.EvaluateCommand(requestedCommand, manifest?.AllowedCommands ?? []);
+            }
+            else
+            {
+                decision = _safetyGate.Evaluate(nextTool, response.NextAction.RequiresApproval);
+            }
             response.NextAction.RiskLevel = decision.RiskLevel;
             response.NextAction.RequiresApproval = decision.Disposition != AgentToolDisposition.Allowed;
             if (decision.Disposition == AgentToolDisposition.RequiresApproval)
