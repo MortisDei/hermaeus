@@ -15,6 +15,7 @@ using Aether.Rag.Embeddings;
 using Aether.Services;
 using Aether.Services.ProcessManagement;
 using Aether.ViewModels;
+using Microsoft.Data.Sqlite;
 
 namespace Aether.Tests
 {
@@ -89,8 +90,27 @@ namespace Aether.Tests
 
         public void Dispose()
         {
-            if (Directory.Exists(_root))
+            if (!Directory.Exists(_root))
+                return;
+
+            // Pooled SQLite connections keep file handles open on Windows;
+            // clear pools so temp databases can be deleted, and retry once
+            // to absorb slow handle release.
+            SqliteConnection.ClearAllPools();
+            try
+            {
                 Directory.Delete(_root, recursive: true);
+            }
+            catch (IOException)
+            {
+                Thread.Sleep(150);
+                Directory.Delete(_root, recursive: true);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                Thread.Sleep(150);
+                Directory.Delete(_root, recursive: true);
+            }
         }
     }
 

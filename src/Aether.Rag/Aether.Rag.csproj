@@ -8,9 +8,11 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.25.1" />
     <PackageReference Include="Microsoft.ML.Tokenizers" Version="2.0.0" />
-    <PackageReference Include="Microsoft.Data.Sqlite"         Version="9.0.4" />
+    <PackageReference Include="Microsoft.Data.Sqlite"         Version="9.0.9" />
+    <!-- Pins the patched native SQLite; Microsoft.Data.Sqlite 9.0.x still pulls the vulnerable 2.1.10 (GHSA-2m69-gcr7-jv3q) -->
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.0" />
     <PackageReference Include="PdfPig" Version="0.1.14" />
-    <PackageReference Include="System.Numerics.Tensors"       Version="9.0.4" />
+    <PackageReference Include="System.Numerics.Tensors"       Version="9.0.9" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Aether.Core/Aether.Core.csproj" />

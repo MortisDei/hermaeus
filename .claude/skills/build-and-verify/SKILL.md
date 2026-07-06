@@ -9,16 +9,16 @@ description: How to build, test, and run Aether correctly, including the custom 
 
 ```bash
 dotnet build Aether.sln
-dotnet run --project tests/Aether.Tests/Aether.Tests.csproj
+dotnet test tests/Aether.Tests/Aether.Tests.csproj
 dotnet run --project src/Aether.Desktop        # manual/visual verification
 ```
 
 ## Critical facts
 
-- **Do not use `dotnet test`.** The test project is a console app with a
-  custom runner (`tests/Aether.Tests/Program.cs`). Run it with `dotnet run`;
-  a non-zero exit code means failures. Read its console output for the
-  pass/fail summary.
+- **Use `dotnet test`.** The suite is xunit (`XunitHarnessTests.cs` wraps the
+  harness case lists). Parallelization is disabled at the assembly level
+  because cases share temp data roots and SQLite pools; do not re-enable it.
+  `dotnet run` on the test project is a silent no-op (there is no Main).
 - **`TreatWarningsAsErrors` is on solution-wide** (`Directory.Build.props`).
   Any warning fails the build. Fix root causes; never blanket-suppress.
 - Tests are integration-flavoured and touch temp data roots; they must not

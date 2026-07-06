@@ -1,5 +1,8 @@
 using Xunit;
 
+// Harness cases share temp data roots and SQLite pools; run sequentially.
+[assembly: CollectionBehavior(DisableTestParallelization = true)]
+
 namespace Aether.Tests;
 
 public sealed record HarnessCase(string Name, Func<Task> Run)

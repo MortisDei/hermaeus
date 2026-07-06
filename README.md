@@ -121,7 +121,7 @@ Linux system-wide hotkeys remain unavailable pending a reliable compositor API.
 
 ```bash
 dotnet build Aether.sln
-dotnet run --project tests/Aether.Tests/Aether.Tests.csproj
+dotnet test tests/Aether.Tests/Aether.Tests.csproj
 ./build.sh --skip-restore
 pwsh ./build.ps1 -SkipRestore
 ```

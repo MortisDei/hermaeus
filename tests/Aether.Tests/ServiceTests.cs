@@ -253,7 +253,11 @@ namespace Aether.Tests
 
             var layout = LocalAiAssetLocator.Detect(root);
 
-            Equal(Path.Combine(root, "Models"), layout.ModelsDirectory, "asset detection should prefer the existing Models folder with GGUF files");
+            // On case-insensitive filesystems "models" and "Models" are the same
+            // directory; expect whichever on-disk casing actually holds the GGUF.
+            var expected = Directory.EnumerateDirectories(root)
+                .Single(path => Directory.EnumerateFiles(path, "*.gguf").Any());
+            Equal(expected, layout.ModelsDirectory, "asset detection should prefer the existing models folder with GGUF files");
             return Task.CompletedTask;
         }
 

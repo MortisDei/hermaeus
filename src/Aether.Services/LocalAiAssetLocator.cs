@@ -183,13 +183,9 @@ public static class LocalAiAssetLocator
 
     private static string FindModelsDirectory(string root)
     {
-        var candidates = new List<string>
-        {
-            Path.Combine(root, "Models"),
-            Path.Combine(root, "models"),
-            Path.Combine(root, "gguf")
-        };
-
+        // Actual on-disk directories go first so case-insensitive dedup keeps
+        // the real casing instead of a guessed "Models"/"models" variant.
+        var candidates = new List<string>();
         try
         {
             candidates.AddRange(Directory.EnumerateDirectories(root, "*", SearchOption.TopDirectoryOnly)
@@ -200,9 +196,19 @@ public static class LocalAiAssetLocator
             // Fall back to the standard candidate list.
         }
 
+        candidates.Add(Path.Combine(root, "Models"));
+        candidates.Add(Path.Combine(root, "models"));
+        candidates.Add(Path.Combine(root, "gguf"));
+
+        // Case-insensitive dedup on Windows collapses guessed variants onto the
+        // real directory; on case-sensitive filesystems "Models" and "models"
+        // are genuinely different directories and must both stay candidates.
+        var pathComparer = OperatingSystem.IsWindows()
+            ? StringComparer.OrdinalIgnoreCase
+            : StringComparer.Ordinal;
         candidates = candidates
             .Where(path => !string.IsNullOrWhiteSpace(path))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Distinct(pathComparer)
             .ToList();
 
         var withGguf = candidates
