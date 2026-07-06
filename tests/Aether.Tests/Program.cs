@@ -365,7 +365,8 @@ internal static class AgentTests
     settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
     var ragStore = new SqliteRagStore(settings);
     var rag = new RagQueryService(ragStore, new FakeEmbeddingService(), new FakeLlm(), settings, new NoOpReranker());
-    var builder = new AgentContextBuilder(new AgentWorkspaceTools(), rag, ragStore, new FileAgentWorkspaceMemoryStore(settings));
+    var retrieval = new AgentRetrievalService(rag, ragStore);
+    var builder = new AgentContextBuilder(new AgentWorkspaceTools(), retrieval, new FileAgentWorkspaceMemoryStore(settings));
     var state = new AgentTaskState
     {
         Goal = "Find alpha",

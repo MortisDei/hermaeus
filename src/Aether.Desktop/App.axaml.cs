@@ -143,6 +143,7 @@ public partial class App : Application
         s.AddSingleton<IReranker,          OnnxCrossEncoderReranker>();
         s.AddSingleton<RagPipeline>();
         s.AddSingleton<RagQueryService>();
+        s.AddSingleton<IAgentRetrievalService, AgentRetrievalService>();
         s.AddSingleton<RagEvalService>();
         s.AddSingleton<IAgentTaskStateStore, FileAgentTaskStateStore>();
         s.AddSingleton<IAgentWorkspaceMemoryStore, WorkspaceMemoryStore>();

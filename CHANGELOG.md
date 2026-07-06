@@ -91,6 +91,16 @@ limit.
 
 ### Changed
 
+- Decoupled `Aether.Agent` from `Aether.Rag` (docs/review/06-technical-debt.md
+  item 11). `AgentContextBuilder` now depends on a new
+  `Aether.Core.Services.IAgentRetrievalService` seam (dataset existence check
+  + scored-chunk retrieval) instead of `RagQueryService`/`SqliteRagStore`
+  directly; `Aether.Rag.AgentRetrievalService` implements it. Deleted two
+  pieces of dead code found along the way: `AgentModels.cs`'s
+  `AgentRagRetrievalResult` (never constructed anywhere) and Core's
+  `IRagService`/`RagResult`/`RagSource` (never implemented or consumed).
+  `Aether.Agent.csproj` no longer references `Aether.Rag.csproj`; a new
+  architecture test enforces it stays that way.
 - Folded the Session Usage panel into Memories (Feature Audit: Merge).
   `MemoriesViewModel` now carries a conversation filter (per-conversation
   memory counts, the old panel's whole purpose) with a "Clear" reset and a

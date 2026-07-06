@@ -41,6 +41,16 @@ public sealed class ArchitectureTests
     }
 
     [Fact]
+    public void Agent_does_not_reference_Rag()
+    {
+        var offenders = RefNames(AgentAsm)
+            .Where(n => n.StartsWith("Aether.Rag", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        Assert.True(offenders.Count == 0,
+            $"Aether.Agent must depend on Aether.Core's retrieval interface, not Aether.Rag directly; found: {string.Join(", ", offenders)}");
+    }
+
+    [Fact]
     public void Core_references_only_approved_assemblies()
     {
         var allowedPrefixes = new[]

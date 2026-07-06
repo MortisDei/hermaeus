@@ -1,5 +1,3 @@
-using Aether.Rag.Models;
-
 namespace Aether.Agent.Models;
 
 public enum AgentTaskStatus
@@ -214,10 +212,6 @@ public sealed record AgentFileSummaryResult(
     string RelativePath,
     string Summary,
     bool Truncated);
-
-public sealed record AgentRagRetrievalResult(
-    RagDataset Dataset,
-    IReadOnlyList<AgentRetrievedItem> Items);
 
 public sealed class WorkspaceProfile
 {

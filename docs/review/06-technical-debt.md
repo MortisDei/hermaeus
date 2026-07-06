@@ -120,6 +120,13 @@ the README version or drop it.
 
 Core carries `CommunityToolkit.Mvvm` — UI-framework-adjacent machinery inside
 the contract layer — **DONE**, removed; an architecture test now enforces
-`Aether.Core` stays BCL-only. Still open: `Aether.Agent` references
-`Aether.Rag` directly (`AgentModels.cs`, `AgentContextBuilder.cs`), coupling
-the agent to the retrieval implementation rather than an interface in Core.
+`Aether.Core` stays BCL-only. **DONE**: `Aether.Agent` no longer references
+`Aether.Rag`. `AgentModels.cs`'s `AgentRagRetrievalResult` was dead code
+(never constructed anywhere) and was deleted outright.
+`AgentContextBuilder.cs` now depends on `Aether.Core.Services.IAgentRetrievalService`
+(a two-method seam: does a dataset exist, retrieve scored chunks for a
+query), implemented by `Aether.Rag.AgentRetrievalService` and wired in DI.
+This also deleted the dead, never-implemented `IRagService`/`RagResult`/`RagSource`
+that previously sat unused in Core. `Aether.Agent.csproj` no longer
+references `Aether.Rag.csproj`; an architecture test
+(`Agent_does_not_reference_Rag`) enforces it stays that way.

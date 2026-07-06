@@ -1,7 +1,5 @@
 using Aether.Agent.Models;
 using Aether.Core.Services;
-using Aether.Rag;
-using Aether.Rag.Storage;
 
 namespace Aether.Agent.Services;
 
@@ -14,19 +12,16 @@ public sealed class AgentContextBuilder : IAgentContextBuilder
     private const int RagTokenBudget = 4000;
 
     private readonly IAgentWorkspaceTools _workspaceTools;
-    private readonly RagQueryService _rag;
-    private readonly SqliteRagStore _ragStore;
+    private readonly IAgentRetrievalService _retrieval;
     private readonly IAgentWorkspaceMemoryStore _workspaceMemory;
 
     public AgentContextBuilder(
         IAgentWorkspaceTools workspaceTools,
-        RagQueryService rag,
-        SqliteRagStore ragStore,
+        IAgentRetrievalService retrieval,
         IAgentWorkspaceMemoryStore workspaceMemory)
     {
         _workspaceTools = workspaceTools;
-        _rag = rag;
-        _ragStore = ragStore;
+        _retrieval = retrieval;
         _workspaceMemory = workspaceMemory;
     }
 
@@ -118,36 +113,32 @@ public sealed class AgentContextBuilder : IAgentContextBuilder
 
         try
         {
-            var datasets = await _ragStore.GetDatasetsAsync(ct);
-            var dataset = datasets.FirstOrDefault(d => d.Id == options.RagDatasetId);
-            if (dataset is null)
+            if (!await _retrieval.DatasetExistsAsync(options.RagDatasetId, ct))
             {
                 pack.KnownRisks.Add("Selected RAG dataset was not found.");
                 return;
             }
 
-            var retrieval = await _rag.RetrieveAsync(
-                dataset.Id,
+            var chunks = await _retrieval.RetrieveAsync(
+                options.RagDatasetId,
                 string.IsNullOrWhiteSpace(state.ActiveStep) ? state.Goal : $"{state.Goal}\n{state.ActiveStep}",
-                new RagQueryOptions(TopK: Math.Max(1, Math.Min(5, options.MaxContextItems))),
+                Math.Max(1, Math.Min(5, options.MaxContextItems)),
                 ct);
 
-            var candidates = retrieval.Selected
-                .Select(s => new ContextPart(
-                    "rag", s.Chunk.SourceTitle, s.Chunk.Content,
-                    Tokens: Math.Max(s.Chunk.TokenCount, 1), Data: s))
+            var candidates = chunks
+                .Select(c => new ContextPart("rag", c.Title, c.Content, Tokens: c.TokenCount, Data: c))
                 .ToList();
             var packed = ContextPackBuilder.Pack(candidates, RagTokenBudget, maxParts: options.MaxContextItems);
             pack.RetrievedMemory.AddRange(packed.Parts
                 .Select(part =>
                 {
-                    var scored = (Aether.Rag.Models.ScoredChunk)part.Data!;
+                    var chunk = (RetrievedChunk)part.Data!;
                     return new AgentRetrievedItem(
                         "rag",
-                        scored.Chunk.SourceTitle,
+                        chunk.Title,
                         part.Content,
-                        scored.Score,
-                        scored.Chunk.SourceModifiedUtc);
+                        chunk.Score,
+                        chunk.SourceModifiedUtc);
                 }));
         }
         catch (Exception ex)
