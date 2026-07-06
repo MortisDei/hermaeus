@@ -89,6 +89,19 @@ limit.
   context-size field now shows "Detected: N" as its placeholder when a probe
   succeeded.
 
+### Changed (audited, no code change)
+
+- Workspace file browser panel (docs/review/05-feature-audit.md: rated
+  "Merge" — "a file manager inside a chat app is scope creep"). Audited
+  before cutting: the "Workspace Files" panel is a flat, search-only list
+  feeding a preview pane, nested under "Draft Patch"; `SelectedWorkspaceFile`
+  is the only way to choose a patch target, and `AgentWorkspaceTools.ListFiles`/
+  `SearchFiles` are read-only, extension-filtered, path-bounded (no folder
+  tree, no rename/move/delete/create). This is already scoped to exactly
+  what patch review needs, not a general file manager; trimming it would
+  remove the sole patch-target picker with no replacement, a regression
+  rather than a simplification. Left unchanged.
+
 ### Removed
 
 - Memory encryption toggle (docs/review/05-feature-audit.md: rated

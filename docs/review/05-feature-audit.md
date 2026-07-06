@@ -32,7 +32,7 @@ maintenance dollar.
 | --- | --- | --- |
 | Read-first task runner, risk gates, traces | **Essential** | The most strategically important subsystem. The discipline here is the moat. |
 | Draft patch queue + baseHash staleness | **Essential** | Elegant: correct, minimal, auditable. |
-| Workspace file browser in-panel | **Merge** | A file manager inside a chat app is scope creep; keep only what patch review needs. Users have file managers. |
+| Workspace file browser in-panel | **Merge — audited, no cut needed** | Investigated before trimming: the "Workspace Files" panel in `AgentView.axaml`/`AgentViewModel.cs` is a flat, search-only file list feeding a preview pane, nested directly under "Draft Patch" — `SelectedWorkspaceFile` is the only mechanism for choosing which file a patch targets. There is no folder-tree navigation, no rename/move/delete/create, and `AgentWorkspaceTools.ListFiles`/`SearchFiles` are read-only, extension-filtered, and path-bounded. This already is "only what patch review needs," not a general file manager; cutting the search/list would remove the sole way to select a patch target with no replacement. No code change made. |
 | Workspace memory notes | **Merge** | Into unified memory (workspace scope). |
 | Workspace profile analysis / Explain Workspace | **Essential** | This is "project intelligence" and feeds everything else. |
 | Capability disclosure callout | **Essential** | Cheap, honest, on-brand. |
