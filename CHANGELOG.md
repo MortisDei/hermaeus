@@ -9,7 +9,20 @@ FIFO for changelog entries, 10 versions in this file max. Remove older entries
 and append them to `docs/changelog-archive.md` to maintain the 10 version
 limit.
 
-## [0.9.17-alpha] - Unreleased
+## [Unreleased]
+
+## [0.9.20-alpha] - 2026-07-07
+
+This release closes out the v1.0 architecture review and roadmap
+(docs/review/): all four 1.x structural debts are paid down, the 1.0
+hardening checklist (retention policies, architecture tests, docs-truth,
+Avalonia pin) is complete, and every Feature Audit Merge/Deprecate/
+Over-engineered item has been either resolved or explicitly, honestly
+deferred with reasoning recorded in the review docs. What remains is 2.0+
+work (workspace-as-organizing-concept, approval-gated agent execution, MCP
+client, headless core/local API, voice convergence completing) by design,
+not leftover 1.x debt. The version jumps from 0.9.16 to 0.9.20 to reflect
+the actual scope of this pass rather than a routine patch bump.
 
 ### Added
 
@@ -92,7 +105,8 @@ limit.
 ### Changed (audited, no code change)
 
 - Workspace file browser panel (docs/review/05-feature-audit.md: rated
-  "Merge" — "a file manager inside a chat app is scope creep"). Audited
+  "Merge", flagged as "a file manager inside a chat app is scope creep").
+  Audited
   before cutting: the "Workspace Files" panel is a flat, search-only list
   feeding a preview pane, nested under "Draft Patch"; `SelectedWorkspaceFile`
   is the only way to choose a patch target, and `AgentWorkspaceTools.ListFiles`/
