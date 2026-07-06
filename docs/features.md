@@ -273,9 +273,6 @@ logs, and runtime checks into one view covering remote providers, local-only
 providers, features that may send data remotely, exposed local servers, secret
 health, log redaction status, and data-root backup status.
 
-A Doctor Fixes queue should turn Doctor findings into explicit approval-gated
-actions with target paths, command previews, risk notes, and recorded outcomes.
-
-Safe command recipe cards should suggest manual commands, explain why they are
-useful, classify risk, and provide copy controls. This keeps early agent work
-safe while leaving a clear path toward approval-gated execution later.
+Planned work such as a Doctor Fixes queue and safe command recipe cards is
+tracked in [docs/review/07-roadmap.md](review/07-roadmap.md), not documented
+here as existing behaviour.
