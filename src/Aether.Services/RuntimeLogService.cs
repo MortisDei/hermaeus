@@ -98,10 +98,30 @@ public sealed class RuntimeLogService : IRuntimeLogService
             if (File.Exists(dest))
                 dest = Path.Combine(dir, $"{name}.{stamp}.{Guid.NewGuid():N}{ext}");
             File.Move(path, dest);
+            PruneArchives(dir, name, ext);
         }
         catch
         {
             // best-effort rotation; swallow errors
+        }
+    }
+
+    private const int MaxArchivedLogFiles = 10;
+
+    private static void PruneArchives(string dir, string name, string ext)
+    {
+        try
+        {
+            var stale = Directory.EnumerateFiles(dir, $"{name}.*{ext}")
+                .OrderByDescending(Path.GetFileName, StringComparer.Ordinal)
+                .Skip(MaxArchivedLogFiles)
+                .ToList();
+            foreach (var file in stale)
+                File.Delete(file);
+        }
+        catch
+        {
+            // best-effort retention; swallow errors
         }
     }
 }

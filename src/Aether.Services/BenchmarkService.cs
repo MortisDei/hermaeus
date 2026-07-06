@@ -438,6 +438,21 @@ public sealed class BenchmarkService : IBenchmarkService
         cmd.Parameters.AddWithValue("$score", run.RankingScore);
         cmd.Parameters.AddWithValue("$json", JsonSerializer.Serialize(run, JsonOpts));
         await cmd.ExecuteNonQueryAsync(ct);
+        await PruneRunHistoryAsync(c, ct);
+    }
+
+    private const int MaxSavedRuns = 200;
+
+    private static async Task PruneRunHistoryAsync(SqliteConnection c, CancellationToken ct)
+    {
+        // Saved runs grow without bound otherwise; keep the newest window.
+        await using var cmd = c.CreateCommand();
+        cmd.CommandText = @"
+            DELETE FROM benchmark_runs WHERE id NOT IN (
+                SELECT id FROM benchmark_runs ORDER BY started_at DESC LIMIT $keep
+            )";
+        cmd.Parameters.AddWithValue("$keep", MaxSavedRuns);
+        await cmd.ExecuteNonQueryAsync(ct);
     }
 
     private async Task EnsureInitializedAsync(CancellationToken ct)
