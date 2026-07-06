@@ -4,14 +4,39 @@ using Aether.Rag.Embeddings;
 using Aether.Rag.Storage;
 using Aether.Rag.Retrieval;
 using System.Diagnostics;
+using System.Linq;
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
 namespace Aether.Services;
 
-public sealed class DoctorService : IDoctorService
+public sealed class DoctorService : IDoctorService, IInspectionCheckProvider
 {
+    public IReadOnlyList<string> Views { get; } = ["doctor"];
+
+    public async Task<IReadOnlyList<InspectionCheck>> GetChecksAsync(CancellationToken ct = default)
+    {
+        var report = await ScanAsync(ct);
+        return report.Checks.Select(c => new InspectionCheck(
+            Id: c.Key,
+            View: "doctor",
+            Category: c.Category,
+            Title: c.Title,
+            Severity: c.Status switch
+            {
+                DoctorCheckStatus.Ready => CheckSeverity.Ready,
+                DoctorCheckStatus.Warning => CheckSeverity.Warning,
+                DoctorCheckStatus.Error => CheckSeverity.Error,
+                _ => CheckSeverity.Info
+            },
+            Summary: c.Summary,
+            Detail: c.Detail,
+            FixLabel: c.FixLabel,
+            CanFix: c.CanFix,
+            Diagnostics: c.Diagnostics)).ToList();
+    }
+
     private static readonly EmbeddingModelDownloadSpec DefaultEmbeddingDownload = new(
         "nomic-embed-text-v1.5",
         "nomic-embed-text-v1.5-Q4_K_M.gguf",

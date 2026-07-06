@@ -40,6 +40,13 @@ limit.
   the shared memory store as Workspace-scoped rows via a new
   `WorkspaceMemoryStore`; legacy per-workspace `memory.json` files are
   imported once on startup and renamed to `memory.json.migrated`.
+- Check/fix registry: a shared `IInspectionEngine` aggregates checks from
+  `IInspectionCheckProvider` implementations, tagged by view (`doctor`,
+  `trust`, `privacy`). Doctor and Trust now contribute their existing checks
+  as providers instead of standalone report types with no shared shape, and
+  Privacy Audit is extracted out of `SystemOverviewViewModel` into a real,
+  testable `PrivacyAuditService`. New inspection areas register a provider
+  instead of editing an existing service.
 
 ### Changed
 

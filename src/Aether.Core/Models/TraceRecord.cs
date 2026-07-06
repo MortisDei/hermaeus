@@ -1,0 +1,37 @@
+namespace Aether.Core.Models;
+
+/// <summary>Which subsystem produced a trace. Viewers filter on this; the schema is shared.</summary>
+public enum TraceKind
+{
+    Chat,
+    Rag,
+    Agent
+}
+
+/// <summary>
+/// One record of "what happened in a send/run" across chat, RAG, and agent.
+/// The envelope is common; kind-specific detail lives in <see cref="DetailJson"/>.
+/// </summary>
+public sealed record TraceRecord
+{
+    public string Id { get; init; } = Guid.NewGuid().ToString("N");
+    public TraceKind Kind { get; init; }
+    public DateTime CreatedAt { get; init; } = DateTime.UtcNow;
+
+    /// <summary>Conversation id (chat), dataset id (RAG), or task id (agent).</summary>
+    public string SourceId { get; init; } = string.Empty;
+    public string ModelId { get; init; } = string.Empty;
+
+    /// <summary>Short operation label, e.g. "send", "rag-query", "agent-step".</summary>
+    public string Operation { get; init; } = string.Empty;
+
+    public long FirstTokenMs { get; init; }
+    public long TotalLatencyMs { get; init; }
+    public int PromptTokens { get; init; }
+    public int CompletionTokens { get; init; }
+    public int TotalTokens { get; init; }
+    public string Error { get; init; } = string.Empty;
+
+    /// <summary>Kind-specific payload as JSON (RagQueryTrace, chat context summary, agent step).</summary>
+    public string DetailJson { get; init; } = "{}";
+}

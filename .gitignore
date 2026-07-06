@@ -34,7 +34,6 @@ __pycache__/
 *.bin
 *.pth
 *.pt
-models/
 
 # Local secrets
 local.settings.json

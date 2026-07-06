@@ -203,12 +203,11 @@ namespace Aether.Tests
                 ExtraArgs = "--host 0.0.0.0"
             });
 
+            var privacyAudit = new PrivacyAuditService(settings, new FakeSecretStore(), new RuntimeLogService(settings));
             var vm = new SystemOverviewViewModel(
                 new FakeSystemInfo(),
                 new FakeToasts(),
-                settings,
-                new FakeSecretStore(),
-                new RuntimeLogService(settings));
+                privacyAudit);
 
             await vm.RefreshPrivacyAuditCommand.ExecuteAsync(null);
 
@@ -927,6 +926,78 @@ namespace Aether.Tests
             Equal(TrustRiskLevel.High, warnings[0].RiskLevel, "network exposure should be high risk");
             False(warnings[0].Target.Contains(';', StringComparison.Ordinal), "trust warnings should not synthesize shell separators");
             return Task.CompletedTask;
+        }
+
+        private sealed class FakeCheckProvider : IInspectionCheckProvider
+        {
+            private readonly Func<Task<IReadOnlyList<InspectionCheck>>> _factory;
+            public IReadOnlyList<string> Views { get; }
+
+            public FakeCheckProvider(IReadOnlyList<string> views, Func<Task<IReadOnlyList<InspectionCheck>>> factory)
+            {
+                Views = views;
+                _factory = factory;
+            }
+
+            public Task<IReadOnlyList<InspectionCheck>> GetChecksAsync(CancellationToken ct = default) => _factory();
+        }
+
+        private static InspectionCheck Check(string id, string view, CheckSeverity severity = CheckSeverity.Ready) =>
+            new(id, view, "Test", id, severity, "summary", "detail", string.Empty, false, string.Empty);
+
+        public static async Task InspectionEngineFiltersProvidersByView()
+        {
+            var doctorProvider = new FakeCheckProvider(["doctor"], () => Task.FromResult<IReadOnlyList<InspectionCheck>>([Check("d1", "doctor")]));
+            var trustProvider = new FakeCheckProvider(["trust"], () => Task.FromResult<IReadOnlyList<InspectionCheck>>([Check("t1", "trust")]));
+            var engine = new InspectionEngine([doctorProvider, trustProvider]);
+
+            var doctorReport = await engine.RunAsync("doctor");
+            True(doctorReport.Checks.Select(c => c.Id).SequenceEqual(["d1"]), "doctor view should only include doctor checks");
+
+            var allReport = await engine.RunAsync();
+            Equal(2, allReport.Checks.Count, "null view should run every provider");
+        }
+
+        public static async Task InspectionEngineReportsProviderFailureAsErrorCheck()
+        {
+            var failing = new FakeCheckProvider(["doctor"], () => throw new InvalidOperationException("boom"));
+            var engine = new InspectionEngine([failing]);
+
+            var report = await engine.RunAsync("doctor");
+            var check = report.Checks.Single();
+            Equal(CheckSeverity.Error, check.Severity, "a throwing provider should surface as an error check, not crash the scan");
+            True(check.Diagnostics.Contains("boom", StringComparison.Ordinal), "diagnostics should include the exception detail");
+        }
+
+        public static async Task DoctorTrustPrivacyContributeChecksToOwnView()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+
+            var doctor = new DoctorService(
+                settings,
+                new RuntimeProfileService(settings),
+                new FakeVoiceProviderRegistry(settings),
+                new FakeSecretStore(),
+                new SqliteRagStore(settings),
+                new ThrowingEmbeddingService(),
+                new FakeSystemInfo(),
+                new PythonHealthValidator(),
+                new NoOpReranker());
+            var trust = new TrustService(settings);
+            var privacy = new PrivacyAuditService(settings, new FakeSecretStore(), new RuntimeLogService(settings));
+            var engine = new InspectionEngine([doctor, trust, privacy]);
+
+            var doctorReport = await engine.RunAsync("doctor");
+            True(doctorReport.Checks.Count > 0, "doctor view should include Doctor's own checks");
+            True(doctorReport.Checks.All(c => c.View == "doctor"), "doctor view should not leak trust or privacy checks");
+
+            var trustReport = await engine.RunAsync("trust");
+            True(trustReport.Checks.All(c => c.View == "trust"), "trust view should only contain trust checks");
+
+            var privacyReport = await engine.RunAsync("privacy");
+            True(privacyReport.Checks.Count > 0, "privacy view should include Privacy Audit's checks");
         }
 
         public static Task SourceStringsAvoidLongDashes()

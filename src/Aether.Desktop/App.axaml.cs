@@ -100,8 +100,16 @@ public partial class App : Application
         s.AddSingleton<PythonHealthValidator>();
         s.AddSingleton<IBackupService,     BackupService>();
         s.AddSingleton<ILocalAiSetupService, LocalAiSetupService>();
-        s.AddSingleton<ITrustService,      TrustService>();
-        s.AddSingleton<IDoctorService,     DoctorService>();
+        s.AddSingleton<TrustService>();
+        s.AddSingleton<ITrustService>(sp => sp.GetRequiredService<TrustService>());
+        s.AddSingleton<IInspectionCheckProvider>(sp => sp.GetRequiredService<TrustService>());
+        s.AddSingleton<DoctorService>();
+        s.AddSingleton<IDoctorService>(sp => sp.GetRequiredService<DoctorService>());
+        s.AddSingleton<IInspectionCheckProvider>(sp => sp.GetRequiredService<DoctorService>());
+        s.AddSingleton<PrivacyAuditService>();
+        s.AddSingleton<IPrivacyAuditService>(sp => sp.GetRequiredService<PrivacyAuditService>());
+        s.AddSingleton<IInspectionCheckProvider>(sp => sp.GetRequiredService<PrivacyAuditService>());
+        s.AddSingleton<IInspectionEngine, InspectionEngine>();
         s.AddSingleton<ISystemInfoService, SystemInfoService>();
         s.AddSingleton<IBenchmarkService,  BenchmarkService>();
         s.AddSingleton<ITraceStore,        SqliteTraceStore>();
