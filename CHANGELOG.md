@@ -52,6 +52,12 @@ limit.
   ("OpenAI"). A remote voice provider is now flagged even when no remote chat
   provider is enabled, and adding a new remote chat provider to
   `CompositeLlmService.Providers` needs no Privacy Audit changes.
+- Evaluation System step 2: Chat's "Compare Models" now runs through the
+  shared `IEvalEngine.RunQuickCompareAsync`, which executes one case against
+  each selected target and returns one `EvalRun` per target, instead of a
+  private streaming loop inside `ChatViewModel`. Behavior is unchanged
+  (sequential execution, per-model latency/usage/error capture); the compare
+  loop is no longer duplicated code.
 - Evaluation System step 1 (docs/review/10-evaluation-system.md): shared
   `EvalCase`/`EvalTarget`/`EvalRun`/`CaseResult` models in `Aether.Core` and
   an additive `IEvalStore`/`SqliteEvalStore` (`eval_runs.db`, capped at the

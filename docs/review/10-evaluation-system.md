@@ -59,8 +59,12 @@ score columns.
    `SqliteEvalStore` (`eval_runs.db`) is additive; `BenchmarkService` projects
    each saved run through `BenchmarkService.ToEvalRun` and writes it to both
    stores. No UI reads the new store yet.
-2. Move Compare Models onto the engine (smallest surface, proves the
-   transient-run path).
+2. **DONE.** Move Compare Models onto the engine (smallest surface, proves
+   the transient-run path). `IEvalEngine.RunQuickCompareAsync` executes one
+   case against N targets, sequentially, returning one transient `EvalRun`
+   per target; `ChatViewModel.CompareSelectedModelsAsync` maps those runs
+   onto the existing `ModelCompareResultViewModel` UI. Nothing is persisted
+   (matches prior behavior); there is no pin-to-save affordance yet.
 3. Move the RAG eval harness (adds the retrieval score provider).
 4. Retire duplicated export/ranking code paths.
 

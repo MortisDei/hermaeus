@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Aether.Core.Models;
 using Aether.Core.Services;
+using Aether.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -86,6 +87,7 @@ public partial class ChatViewModel : ObservableObject
     private readonly IConversationMemoryService _conversationMemory;
     private readonly IConversationExportService _exports;
     private readonly ITraceStore? _traceStore;
+    private readonly IEvalEngine _evalEngine;
     private CancellationTokenSource? _cts;
     private CancellationTokenSource? _ttsCts;
     private CancellationTokenSource? _contextUsageCts;
@@ -147,7 +149,8 @@ public partial class ChatViewModel : ObservableObject
         IConversationMemoryService conversationMemory,
         IRuntimeLogService runtimeLogs,
         IConversationExportService exports,
-        ITraceStore? traceStore = null)
+        ITraceStore? traceStore = null,
+        IEvalEngine? evalEngine = null)
     {
         _llm = llm; _store = store; _settings = settings; _tts = tts; _profiles = profiles; _toasts = toasts;
         _memoryStore = memoryStore;
@@ -155,6 +158,7 @@ public partial class ChatViewModel : ObservableObject
         _runtimeLogs = runtimeLogs;
         _exports = exports;
         _traceStore = traceStore;
+        _evalEngine = evalEngine ?? new EvalEngine(llm);
         _temperature  = settings.Settings.Llm.Temperature;
         _systemPrompt = settings.Settings.Llm.DefaultSystemPrompt;
         Messages.CollectionChanged += (_, _) =>
@@ -615,57 +619,39 @@ public partial class ChatViewModel : ObservableObject
             return;
 
         var snapshot = BuildContextSnapshot(text, attachments);
+        var history = BuildHistory(snapshot.PromptText);
+        var caseId = Guid.NewGuid().ToString("n");
+        var targets = selected.Select(o => new EvalTarget(o.Model.Id, Label: o.Model.DisplayName)).ToList();
+
         CompareResults.Clear();
         IsComparingModels = true;
         CompareStatus = $"Comparing {selected.Count} model(s)...";
         try
         {
-            foreach (var option in selected)
-            {
-                var clock = Stopwatch.StartNew();
-                long? firstTokenMs = null;
-                ChatTokenUsage? usage = null;
-                var answer = new StringBuilder();
-                var history = BuildHistory(snapshot.PromptText);
-                var error = string.Empty;
-                try
+            var runs = await _evalEngine.RunQuickCompareAsync(
+                caseId,
+                history,
+                targets,
+                new LlmChatOptions
                 {
-                    await foreach (var evt in _llm.StreamChatAsync(
-                        option.Model.Id,
-                        history,
-                        new LlmChatOptions
-                        {
-                            SystemPrompt = string.IsNullOrWhiteSpace(SystemPrompt) ? null : SystemPrompt,
-                            Temperature = Temperature
-                        }))
-                    {
-                        if (evt.Usage is not null)
-                            usage = evt.Usage;
-                        if (!string.IsNullOrEmpty(evt.ContentDelta))
-                        {
-                            firstTokenMs ??= clock.ElapsedMilliseconds;
-                            answer.Append(evt.ContentDelta);
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    error = ex.Message;
-                }
-                finally
-                {
-                    clock.Stop();
-                }
+                    SystemPrompt = string.IsNullOrWhiteSpace(SystemPrompt) ? null : SystemPrompt,
+                    Temperature = Temperature
+                });
 
+            foreach (var run in runs)
+            {
+                var result = run.CaseResults[0];
                 CompareResults.Add(new ModelCompareResultViewModel
                 {
-                    ModelId = option.Model.Id,
-                    DisplayName = option.Model.DisplayName,
-                    Answer = answer.ToString(),
-                    FirstTokenMs = firstTokenMs ?? 0,
-                    TotalLatencyMs = clock.ElapsedMilliseconds,
-                    Usage = usage,
-                    Error = error
+                    ModelId = run.Target.ModelId,
+                    DisplayName = run.Target.Label ?? run.Target.ModelId,
+                    Answer = result.Output,
+                    FirstTokenMs = result.FirstTokenMs ?? 0,
+                    TotalLatencyMs = result.LatencyMs,
+                    Usage = result.PromptTokens is { } pt
+                        ? new ChatTokenUsage(pt, result.CompletionTokens ?? 0, pt + (result.CompletionTokens ?? 0))
+                        : null,
+                    Error = result.Error ?? string.Empty
                 });
             }
 

@@ -113,6 +113,7 @@ public partial class App : Application
         s.AddSingleton<IInspectionEngine, InspectionEngine>();
         s.AddSingleton<ISystemInfoService, SystemInfoService>();
         s.AddSingleton<IEvalStore,         SqliteEvalStore>();
+        s.AddSingleton<IEvalEngine,        EvalEngine>();
         s.AddSingleton<IBenchmarkService,  BenchmarkService>();
         s.AddSingleton<ITraceStore,        SqliteTraceStore>();
         s.AddSingleton<IConversationStore, ConversationStore>();
