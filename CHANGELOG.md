@@ -89,6 +89,23 @@ limit.
   context-size field now shows "Detected: N" as its placeholder when a probe
   succeeded.
 
+### Removed
+
+- Benchmarking suite scope trim (docs/review/05-feature-audit.md: rated
+  "Over-engineered"). Deleted `ExportAllZipAsync` (a thin wrapper that re-ran
+  `ExportAllAsync` and zipped the result, a duplicate bulk-export path next
+  to the existing "Export All" folder export) and the "All / Latest per
+  model / Last N" ranking-mode picker (`RankingFilterMode`, its three
+  buttons, and the `NumericUpDown` for N). Rankings now always show the
+  latest run per model, the only mode that actually answers "which model
+  should I use," instead of a small analytics dashboard with three
+  interchangeable views. Left alone, deliberately: the triple CSV/JSON/MD
+  export per run, the run-info/case-info dialog split, and the 12 starter
+  suites, since cutting those changes user-facing export formats and
+  existing test expectations rather than removing pure surface duplication;
+  see docs/review/05-feature-audit.md for the full trim list considered and
+  what was scoped out.
+
 ### Changed
 
 - Voice convergence status audit (docs/review/02-dependency-review.md,

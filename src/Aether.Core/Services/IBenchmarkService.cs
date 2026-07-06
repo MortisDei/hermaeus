@@ -22,6 +22,5 @@ public interface IBenchmarkService
         CancellationToken ct = default);
     Task<string> ExportAsync(string runId, string targetDirectory, CancellationToken ct = default);
     Task<string> ExportAllAsync(string targetDirectory, CancellationToken ct = default);
-    Task<string> ExportAllZipAsync(string targetDirectory, CancellationToken ct = default);
     IReadOnlyList<BenchmarkRun> Rank(IEnumerable<BenchmarkRun> runs);
 }

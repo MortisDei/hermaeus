@@ -6,13 +6,6 @@ using CommunityToolkit.Mvvm.Input;
 
 namespace Aether.ViewModels;
 
-public enum RankingFilterMode
-{
-    All,
-    LatestPerModel,
-    LastN
-}
-
 public partial class BenchmarkViewModel : ObservableObject
 {
     private readonly IBenchmarkService _benchmarks;
@@ -46,16 +39,6 @@ public partial class BenchmarkViewModel : ObservableObject
     [ObservableProperty] private int _maxCases;
     [ObservableProperty] private double _temperature = 0.7;
     [ObservableProperty] private bool _runAllSuites = true;
-    [ObservableProperty] private RankingFilterMode _selectedRankingMode = RankingFilterMode.All;
-    [ObservableProperty] private int _lastNRuns = 10;
-    [ObservableProperty] private bool _showLastNInput;
-
-    [RelayCommand]
-    private Task SetRankingModeAsync(int mode)
-    {
-        SelectedRankingMode = (RankingFilterMode)mode;
-        return Task.CompletedTask;
-    }
 
     public BenchmarkViewModel(
         IBenchmarkService benchmarks,
@@ -215,14 +198,6 @@ public partial class BenchmarkViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private async Task ExportAllRunsZipAsync()
-    {
-        var root = Aether.Services.SettingsService.ResolveDataRoot(_settings.Settings);
-        var path = await _benchmarks.ExportAllZipAsync(Path.Combine(root, "benchmark-exports"));
-        _toasts.Show("All benchmarks exported (zip)", path, ToastKind.Success, 7000);
-    }
-
-    [RelayCommand]
     private async Task ShowRunInfoAsync(BenchmarkRunViewModel? run)
     {
         if (run is null) return;
@@ -279,20 +254,8 @@ public partial class BenchmarkViewModel : ObservableObject
         var counts = list.GroupBy(r => GetRankingGroupKey(r), StringComparer.OrdinalIgnoreCase)
                          .ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase);
 
-        IEnumerable<BenchmarkRun> candidates = list;
-        switch (SelectedRankingMode)
-        {
-            case RankingFilterMode.LatestPerModel:
-                candidates = list.GroupBy(r => GetRankingGroupKey(r), StringComparer.OrdinalIgnoreCase)
-                                 .Select(g => g.OrderByDescending(r => r.StartedAt).First());
-                break;
-            case RankingFilterMode.LastN:
-                candidates = list.OrderByDescending(r => r.StartedAt).Take(Math.Max(1, LastNRuns));
-                break;
-            default:
-                candidates = list;
-                break;
-        }
+        var candidates = list.GroupBy(r => GetRankingGroupKey(r), StringComparer.OrdinalIgnoreCase)
+                             .Select(g => g.OrderByDescending(r => r.StartedAt).First());
 
         var ranked = _benchmarks.Rank(candidates);
         foreach (var run in ranked)
@@ -329,19 +292,6 @@ public partial class BenchmarkViewModel : ObservableObject
     {
         RunCommand.NotifyCanExecuteChanged();
         ExportAllRunsCommand.NotifyCanExecuteChanged();
-        ExportAllRunsZipCommand.NotifyCanExecuteChanged();
-    }
-
-    partial void OnSelectedRankingModeChanged(RankingFilterMode value)
-    {
-        ShowLastNInput = value == RankingFilterMode.LastN;
-        _ = Task.Run(async () => await ReloadRunsAsync());
-    }
-
-    partial void OnLastNRunsChanged(int value)
-    {
-        if (SelectedRankingMode == RankingFilterMode.LastN)
-            _ = Task.Run(async () => await ReloadRunsAsync());
     }
 
     partial void OnSelectedRunChanged(BenchmarkRunViewModel? value)

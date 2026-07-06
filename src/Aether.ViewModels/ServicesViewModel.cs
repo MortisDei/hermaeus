@@ -284,6 +284,8 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
             ExtraArgs = profile.ExtraArgs;
     }
 
+    private const int MaxTuneProfiles = 200;
+
     private Task PersistTuneProfileAsync(ServerTuneResult? result = null)
     {
         var normalized = ResolveExistingModelPath(ModelPath);
@@ -308,7 +310,20 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
         profile.ExtraArgs = ExtraArgs;
         profile.LlamaServerVersion = result?.LlamaServerVersion ?? profile.LlamaServerVersion;
         profile.TunedAtUtc = DateTime.UtcNow;
+        PruneTuneProfiles();
         return Task.CompletedTask;
+    }
+
+    private void PruneTuneProfiles()
+    {
+        var profiles = _settings.Settings.LlamaTuneProfiles;
+        profiles.RemoveAll(p => !File.Exists(p.ModelPath));
+        if (profiles.Count > MaxTuneProfiles)
+        {
+            var stale = profiles.OrderByDescending(p => p.TunedAtUtc).Skip(MaxTuneProfiles).ToList();
+            foreach (var p in stale)
+                profiles.Remove(p);
+        }
     }
 
     private LlamaTuneProfile? FindTuneProfile(string modelPath)

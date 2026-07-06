@@ -43,7 +43,7 @@ maintenance dollar.
 | --- | --- | --- |
 | Model + runtime profiles | **Essential** | Needs the capability model (Opportunities #1) underneath. |
 | Managed llama-server + GPU auto-tune | **Essential** | Hard to build, real differentiation vs. every WebView competitor. |
-| Benchmarking suite | **Over-engineered** | 45 KB service, rankings, modals, bulk export, CSV/JSON/MD… for a desktop app this is a product-within-a-product. Freeze feature growth; simplify toward "which of my models should I use for X on this machine" and feed the answer into model selection instead of dead-ending in reports. |
+| Benchmarking suite | **Over-engineered, trimmed** | Removed the duplicate zip bulk-export path and the All/Latest/Last-N ranking-mode picker; rankings now always show latest-per-model, the one view that answers "which model should I use." Triple CSV/JSON/MD export per run, the run-info/case-info dialog split, and the 12 starter suites are deliberately untouched (see docs/review/06-technical-debt.md item 1 and CHANGELOG) since cutting those changes user-facing behavior and test expectations, not just duplication. |
 | Doctor | **Essential / Refine** | Essential function, wrong architecture (god service — see review §1). |
 
 ## RAG

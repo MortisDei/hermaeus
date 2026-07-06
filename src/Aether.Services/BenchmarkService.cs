@@ -268,21 +268,6 @@ public sealed class BenchmarkService : IBenchmarkService
         return Path.Combine(exportRoot, "index.md");
     }
 
-    public async Task<string> ExportAllZipAsync(string targetDirectory, CancellationToken ct = default)
-    {
-        var folder = await ExportAllAsync(targetDirectory, ct);
-        var zipName = Path.Combine(targetDirectory, $"benchmarks-{DateTime.UtcNow:yyyyMMdd-HHmmss}.zip");
-        try
-        {
-            if (File.Exists(zipName)) File.Delete(zipName);
-            System.IO.Compression.ZipFile.CreateFromDirectory(folder, zipName, System.IO.Compression.CompressionLevel.Optimal, includeBaseDirectory: false);
-            return zipName;
-        }
-        catch (Exception ex)
-        {
-            throw new InvalidOperationException("Failed to create zip archive.", ex);
-        }
-    }
     private async Task<string> ExportRunAsync(BenchmarkRun run, string targetDirectory, CancellationToken ct)
     {
         Directory.CreateDirectory(targetDirectory);
