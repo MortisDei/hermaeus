@@ -8,6 +8,9 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
@@ -18,6 +21,7 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" Version="9.0.4" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Aether.Core/Aether.Core.csproj" />
@@ -27,5 +31,7 @@
     <ProjectReference Include="../../src/Aether.ViewModels/Aether.ViewModels.csproj" />
     <ProjectReference Include="../../src/Aether.Desktop/Aether.Desktop.csproj" />
     <ProjectReference Include="../../src/Aether.Mcp/Aether.Mcp.csproj" />
+    <ProjectReference Include="../../src/Aether.Composition/Aether.Composition.csproj" />
+    <ProjectReference Include="../../src/Aether.LocalApi/Aether.LocalApi.csproj" />
   </ItemGroup>
 </Project>

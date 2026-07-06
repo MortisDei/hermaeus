@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Security.Cryptography;
 using Aether.Core.Models;
 using Aether.Core.Services;
 using Aether.Services;
@@ -640,6 +641,43 @@ public partial class LocalAiSetupSettingsViewModel : ObservableObject
         }
 
         return packages;
+    }
+}
+
+public partial class LocalApiSettingsViewModel : ObservableObject
+{
+    private readonly ISecretStore _secrets;
+
+    [ObservableProperty] private bool _enabled;
+    [ObservableProperty] private int _port = 39300;
+    [ObservableProperty] private string _apiToken = string.Empty;
+    [ObservableProperty] private string _apiTokenStatus = "No token generated yet.";
+
+    public LocalApiSettingsViewModel(ISecretStore secrets) => _secrets = secrets;
+
+    public void ReloadFrom(AppSettings settings)
+    {
+        Enabled = settings.LocalApi.Enabled;
+        Port = settings.LocalApi.Port;
+        ApiToken = string.Empty;
+        ApiTokenStatus = string.IsNullOrWhiteSpace(settings.LocalApi.ApiToken)
+            ? "No token generated yet. The local API refuses every request until one is saved."
+            : "A token is stored. Generate and save a new one to replace it.";
+    }
+
+    public async Task ApplyToAsync(AppSettings settings)
+    {
+        settings.LocalApi.Enabled = Enabled;
+        settings.LocalApi.Port = Port;
+        if (!string.IsNullOrWhiteSpace(ApiToken))
+            settings.LocalApi.ApiToken = await _secrets.StoreAsync("local-api-token", ApiToken.Trim());
+    }
+
+    [RelayCommand]
+    private void GenerateToken()
+    {
+        ApiToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
+        ApiTokenStatus = "New token generated below. Copy it now and click Save; it will not be shown again.";
     }
 }
 

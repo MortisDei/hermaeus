@@ -122,9 +122,16 @@ Built *on* the 1.x refactors, in dependency order:
    references `Aether.Mcp` directly (new architecture test). Every `mcp:` call
    always requires approval, regardless of what the server claims about
    itself, giving extensibility without a proprietary plugin API.
-4. **Headless core / local API.** The composition root hosts the same
-   services without the UI; a localhost API (with the same secret/consent
-   posture) lets editors and scripts use Aether's models, memory, and RAG.
+4. **Headless core / local API — DONE.** The non-UI service graph moved into
+   `Aether.Composition` (`AetherServiceRegistration.AddAetherCoreServices`),
+   shared by `Aether.Desktop` and a new `Aether.LocalApi` host. The host is
+   off by default, binds `127.0.0.1` only, and exposes the minimal read/action
+   surface decided for this pass: chat completion, memory query, and RAG
+   query (no agent/benchmark/settings endpoints). Every request requires a
+   token (generated from Settings, resolved through the existing
+   `ISecretStore`); the host fails closed with a 503 rather than allowing
+   unauthenticated access when no token is configured yet, matching the same
+   secret/consent posture as the rest of the app.
 5. Voice convergence completes: Python-venv providers deprecated.
 
 ## Long-term vision (2.x+)

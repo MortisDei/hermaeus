@@ -150,6 +150,16 @@ public static class HarnessCases
         [new HarnessCase("MCP client calls tool and returns text content", McpTests.McpClientCallsToolAndReturnsTextContent)],
         [new HarnessCase("MCP bridge parses namespaced tool names", McpTests.McpBridgeParsesNamespacedToolNames)]
     ];
+
+    public static IEnumerable<object[]> LocalApi =>
+    [
+        [new HarnessCase("chat completion endpoint returns aggregated content", LocalApiTests.ChatCompletionEndpointReturnsAggregatedContent)],
+        [new HarnessCase("requests without a token are rejected", LocalApiTests.RequestsWithoutTokenAreRejected)],
+        [new HarnessCase("requests are rejected when no token is configured", LocalApiTests.RequestsAreRejectedWhenNoTokenIsConfigured)],
+        [new HarnessCase("memory query endpoint returns matching memories", LocalApiTests.MemoryQueryEndpointReturnsMatchingMemories)],
+        [new HarnessCase("RAG query endpoint refuses when dataset has no context", LocalApiTests.RagQueryEndpointRefusesWhenDatasetHasNoContext)],
+        [new HarnessCase("chat completion rejects missing fields", LocalApiTests.ChatCompletionRejectsMissingFields)]
+    ];
 }
 
 public sealed class BackupHarnessTests
@@ -207,6 +217,16 @@ public sealed class McpHarnessTests
     [Theory]
     [MemberData(nameof(HarnessCases.Mcp), MemberType = typeof(HarnessCases))]
     public async Task Runs_Mcp_Cases(HarnessCase testCase)
+    {
+        await testCase.Run();
+    }
+}
+
+public sealed class LocalApiHarnessTests
+{
+    [Theory]
+    [MemberData(nameof(HarnessCases.LocalApi), MemberType = typeof(HarnessCases))]
+    public async Task Runs_LocalApi_Cases(HarnessCase testCase)
     {
         await testCase.Run();
     }

@@ -1,0 +1,33 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Aether.ViewModels"
+             x:Class="Aether.Desktop.Views.SettingsLocalApiSectionView"
+             x:DataType="vm:LocalApiSettingsViewModel">
+    <Border Classes="settings-card">
+        <StackPanel Spacing="12">
+            <TextBlock Text="Local API" FontSize="14" FontWeight="SemiBold" />
+            <TextBlock Text="A loopback-only HTTP host (127.0.0.1) that lets editors and scripts on this machine reuse Aether's chat, memory, and RAG. Off by default; every request requires the token below."
+                       FontSize="11" Opacity="0.55" TextWrapping="Wrap" />
+
+            <CheckBox Content="Enable local API" IsChecked="{Binding Enabled}" />
+
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock Text="Port" VerticalAlignment="Center" FontSize="12" Opacity="0.7" />
+                <NumericUpDown Value="{Binding Port}" Minimum="1024" Maximum="65535" Width="140" />
+            </StackPanel>
+
+            <StackPanel Spacing="6">
+                <TextBox Text="{Binding ApiToken}"
+                         Watermark="Generate a token, then Save"
+                         PasswordChar="*"
+                         RevealPassword="False"
+                         CornerRadius="6"
+                         Padding="10,6" />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button Content="Generate token" Command="{Binding GenerateTokenCommand}" Padding="12,6" CornerRadius="6" />
+                    <TextBlock Text="{Binding ApiTokenStatus}" FontSize="11" Opacity="0.6" VerticalAlignment="Center" TextWrapping="Wrap" />
+                </StackPanel>
+            </StackPanel>
+        </StackPanel>
+    </Border>
+</UserControl>

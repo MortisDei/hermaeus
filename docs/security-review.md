@@ -68,6 +68,7 @@ penetration-test report.
 | SQLite schemas | Conversation, memory, RAG, and Agent task-index databases record schema versions in `aether_schema_versions` before running additive migrations. | Existing migrations are additive. Destructive migrations still need bespoke backup and verification steps before public release. |
 | Tray and hotkeys | Close exits and stops managed services. Minimize-to-tray is explicit. Tray menu includes Stop Services and Quit. Local hotkeys only work while focused. Windows global hotkeys are opt-in and registered through the OS hotkey API. | Linux global hotkeys remain deferred because Wayland/X11 compositor behavior varies. |
 | Packaging | Linux/Windows archives include README, license, notice, commercial terms, and checksums. Linux desktop install is user-local. | Archives are unsigned; users must verify checksums from a trusted channel. |
+| Local API host | `Aether.LocalApi` is off by default and only started when a user explicitly enables it in Settings. It binds `127.0.0.1` only, never `0.0.0.0`. Every request must present a matching `X-Aether-Token` header; the host fails closed (503) when no token has been generated yet, rather than allowing unauthenticated access. The surface is deliberately minimal: chat completion, memory query, and RAG query only, no agent/benchmark/settings endpoints. | Any other local process on a shared machine that learns the token can call the API for as long as it stays running; there is no token rotation UI beyond regenerate-and-save. |
 
 ## Threat Scenarios
 
@@ -167,6 +168,26 @@ Current mitigations:
 Required follow-up:
 
 - Consider hash display/pinning for known local runtime binaries.
+
+### Local API Token Compromise
+
+Attack path: another local process or user on a shared machine calls the
+optional `Aether.LocalApi` host and reads chat, memory, or RAG data.
+
+Current mitigations:
+
+- The host is off by default; the desktop app only launches it when the user
+  explicitly enables it in Settings.
+- Binds `127.0.0.1` only, never a LAN-reachable interface.
+- Every request requires a token in `X-Aether-Token`, compared with a
+  constant-time check; the host refuses all requests with 503 until a token has
+  been generated and saved, rather than defaulting to open access.
+- The surface is intentionally minimal (chat completion, memory query, RAG
+  query) so a compromised token exposes less than the full desktop app would.
+
+Required follow-up:
+
+- Add a token rotation/revocation affordance beyond regenerate-and-save.
 
 ## Release Gate Status
 

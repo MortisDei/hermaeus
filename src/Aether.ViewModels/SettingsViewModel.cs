@@ -24,6 +24,7 @@ public partial class SettingsViewModel : ObservableObject
     public UiSettingsViewModel Ui { get; }
     public MemorySettingsViewModel Memory { get; }
     public McpSettingsViewModel Mcp { get; }
+    public LocalApiSettingsViewModel LocalApi { get; }
     public TrustSettingsViewModel Trust { get; }
     public TtsSettingsViewModel Tts { get; }
 
@@ -141,6 +142,7 @@ public partial class SettingsViewModel : ObservableObject
         Ui = new UiSettingsViewModel();
         Memory = new MemorySettingsViewModel();
         Mcp = new McpSettingsViewModel();
+        LocalApi = new LocalApiSettingsViewModel(secrets);
         Tts = new TtsSettingsViewModel(tts, voiceProviderRegistry, _toasts, xttsProcess, kokoroProcess, secrets, _svc);
         LocalAiSetup = new LocalAiSetupSettingsViewModel(_svc, localAiSetup, _toasts, Tts, Data, Rag, SaveAsync);
         Trust = new TrustSettingsViewModel(_svc, trust, _toasts, Tts, Data, Rag);
@@ -185,6 +187,7 @@ public partial class SettingsViewModel : ObservableObject
         Ui.ReloadFrom(settings);
         Memory.ReloadFrom(settings);
         Mcp.ReloadFrom(settings);
+        LocalApi.ReloadFrom(settings);
         SettingsError = string.Empty;
     }
 
@@ -205,6 +208,7 @@ public partial class SettingsViewModel : ObservableObject
         Ui.ApplyTo(settings);
         Memory.ApplyTo(settings);
         Mcp.ApplyTo(settings);
+        await LocalApi.ApplyToAsync(settings);
         ApplyTtsTo(settings);
 
         try

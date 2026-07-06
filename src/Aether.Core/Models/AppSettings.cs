@@ -90,4 +90,9 @@ public class AppSettings
     /// Configured Model Context Protocol servers the Agent can call as tools.
     /// </summary>
     public McpSettings Mcp { get; set; } = new();
+
+    /// <summary>
+    /// Optional headless local API host configuration (off by default).
+    /// </summary>
+    public LocalApiSettings LocalApi { get; set; } = new();
 }
