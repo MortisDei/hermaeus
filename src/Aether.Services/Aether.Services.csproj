@@ -17,4 +17,7 @@
   <ItemGroup>
     <EmbeddedResource Include="Resources/Python/*.py" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Aether.Tests" />
+  </ItemGroup>
 </Project>
