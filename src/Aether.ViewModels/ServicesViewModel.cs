@@ -701,12 +701,7 @@ public partial class RuntimeProfileViewModel : ObservableObject
     public string Id { get; }
     public bool HasUnsafeHost => BaseUrl.Contains("://0.0.0.0", StringComparison.OrdinalIgnoreCase)
                                  || BaseUrl.Contains("//0.0.0.0", StringComparison.OrdinalIgnoreCase);
-    public string KindLabel => Kind switch
-    {
-        RuntimeKind.LlamaCpp => "llama.cpp",
-        RuntimeKind.Ollama => "Ollama",
-        _ => "OpenAI-compatible"
-    };
+    public string KindLabel => Aether.Services.CompositeLlmService.DescriptorFor(Kind).DisplayName;
 
     public RuntimeProfileViewModel(RuntimeProfile profile)
     {

@@ -34,4 +34,13 @@ public sealed class ProviderDescriptorTests
             Assert.Equal(p.Tag == "ollama", canManageModels);
         }
     }
+
+    [Theory]
+    [InlineData(RuntimeKind.LlamaCpp, "llama.cpp")]
+    [InlineData(RuntimeKind.Ollama, "ollama")]
+    [InlineData(RuntimeKind.OpenAiCompatible, "openai")]
+    public void DescriptorFor_maps_every_runtime_kind_to_its_provider_tag(RuntimeKind kind, string expectedTag)
+    {
+        Assert.Equal(expectedTag, CompositeLlmService.DescriptorFor(kind).Tag);
+    }
 }

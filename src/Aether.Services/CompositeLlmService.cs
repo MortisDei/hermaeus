@@ -6,14 +6,15 @@ namespace Aether.Services;
 
 public sealed class CompositeLlmService : ILlmService, IDisposable
 {
-    private const string OpenAiProviderTagValue = "openai";
-    private const string LlamaCppProviderTagValue = "llama.cpp";
-    private const string OllamaProviderTagValue = "ollama";
     private readonly LlamaCppService _llamaCpp;
     private readonly OpenAiService _openAi;
     private readonly OllamaService _ollama;
     private readonly ISettingsService _settings;
     private readonly IRuntimeProfileService _runtimeProfiles;
+    private delegate IAsyncEnumerable<LlmStreamEvent> StreamChatDelegate(
+        string modelId, IReadOnlyList<ChatMessage> messages, LlmChatOptions? options, CancellationToken ct);
+
+    private readonly Dictionary<string, StreamChatDelegate> _streamByTag;
     private readonly List<LlmModel> _cachedModels = [];
     private readonly Dictionary<string, string> _providerTagsByModelId = new(StringComparer.OrdinalIgnoreCase);
     private readonly ReaderWriterLockSlim _cacheLock = new();
@@ -30,6 +31,15 @@ public sealed class CompositeLlmService : ILlmService, IDisposable
         OllamaService.Descriptor,
         OpenAiService.Descriptor
     ];
+
+    /// <summary>Maps a runtime profile's kind to the provider descriptor it corresponds
+    /// to, so UI display strings come from one registry instead of a duplicated switch.</summary>
+    public static ProviderDescriptor DescriptorFor(RuntimeKind kind) => kind switch
+    {
+        RuntimeKind.LlamaCpp => LlamaCppService.Descriptor,
+        RuntimeKind.Ollama => OllamaService.Descriptor,
+        _ => OpenAiService.Descriptor
+    };
 
     /// <summary>Describes the provider a model id routes to.</summary>
     public ProviderDescriptor DescribeModel(string modelId)
@@ -49,6 +59,12 @@ public sealed class CompositeLlmService : ILlmService, IDisposable
         IRuntimeProfileService runtimeProfiles)
     {
         _llamaCpp = llamaCpp; _openAi = openAi; _ollama = ollama; _settings = settings; _runtimeProfiles = runtimeProfiles;
+        _streamByTag = new(StringComparer.OrdinalIgnoreCase)
+        {
+            [LlamaCppService.Descriptor.Tag] = llamaCpp.StreamChatAsync,
+            [OllamaService.Descriptor.Tag] = ollama.StreamChatAsync,
+            [OpenAiService.Descriptor.Tag] = openAi.StreamChatAsync
+        };
     }
 
     public async Task<List<LlmModel>> GetModelsAsync(CancellationToken ct = default)
@@ -144,12 +160,8 @@ public sealed class CompositeLlmService : ILlmService, IDisposable
         CancellationToken ct = default)
     {
         var tag = DescribeModel(modelId).Tag;
-        return tag switch
-        {
-            OpenAiProviderTagValue => _openAi.StreamChatAsync(modelId, messages, options, ct),
-            OllamaProviderTagValue => _ollama.StreamChatAsync(modelId, messages, options, ct),
-            _ => _llamaCpp.StreamChatAsync(modelId, messages, options, ct)
-        };
+        var stream = _streamByTag.TryGetValue(tag, out var fn) ? fn : _llamaCpp.StreamChatAsync;
+        return stream(modelId, messages, options, ct);
     }
 
     private string? ResolveProviderTag(string modelId)

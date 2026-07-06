@@ -54,11 +54,24 @@ Provider tag strings (`"openai"`, `"llama.cpp"`, `"ollama"`) and per-provider
 booleans in settings are consumed by Composite, Services UI, Doctor, and
 Privacy Audit independently. Any provider addition or rename is a shotgun
 change. Remediation: Opportunities #1 — **DONE** for Privacy Audit
-(`ProviderDescriptor.IsRemote`); `IsChatProviderEnabled`'s tag switch in
-`PrivacyAuditService` and the settings-flag-per-provider shape in
-`CompositeLlmService`/`ServicesViewModel` still exist and would need a
-routing-table change to fully collapse, which is a larger refactor than the
-Privacy Audit fix alone.
+(`ProviderDescriptor.IsRemote`). **DONE, scoped** for the two routing
+tag-switches that were pure code-organization duplication, with no settings
+schema involved: `CompositeLlmService.StreamChatAsync` routed on a
+hand-written `tag switch` calling one of three concrete services; it now
+looks up a `Dictionary<string, StreamChatDelegate>` built once in the
+constructor and keyed by each provider's own `ProviderDescriptor.Tag`, so
+adding a provider means adding one dictionary entry, not a new switch arm.
+`ServicesViewModel.RuntimeProfileViewModel.KindLabel` duplicated the same
+three display strings in its own switch on the unrelated `RuntimeKind` enum;
+it now reads `CompositeLlmService.DescriptorFor(kind).DisplayName`, one
+source of truth for the label. Still open, deliberately: `PrivacyAuditService.IsChatProviderEnabled`'s
+tag switch and `CompositeLlmService.GetModelsAsync`/`IsConfigured`'s
+per-provider `if`s bridge to a flat, per-provider settings shape
+(`Llm.LlamaCppEnabled`, `Llm.OpenAiEnabled`, `RuntimeProfiles`) that isn't
+keyed by tag. Collapsing that means changing the settings schema (and
+migrating existing `settings.json` files), which is a materially bigger and
+riskier change than a routing-table extraction — left for a dedicated
+settings-migration effort, not bundled into this cleanup.
 
 ## 5. Leaky abstractions on `ILlmService` — DONE
 

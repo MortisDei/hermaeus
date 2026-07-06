@@ -91,6 +91,16 @@ limit.
 
 ### Changed
 
+- Collapsed two provider tag-switches into the capability model
+  (docs/review/06-technical-debt.md item 4). `CompositeLlmService.StreamChatAsync`
+  now routes through a delegate table keyed by `ProviderDescriptor.Tag`
+  instead of a hand-written switch; `ServicesViewModel`'s duplicate
+  provider-label switch now reads `CompositeLlmService.DescriptorFor(...)`.
+  Adding a provider means one dictionary entry, not two separate switches to
+  update in sync. Left alone, deliberately: the settings-flag-per-provider
+  shape (`Llm.LlamaCppEnabled` etc.) and `PrivacyAuditService`'s tag switch,
+  since collapsing those means a settings-schema migration, a bigger and
+  riskier change than this cleanup.
 - Decoupled `Aether.Agent` from `Aether.Rag` (docs/review/06-technical-debt.md
   item 11). `AgentContextBuilder` now depends on a new
   `Aether.Core.Services.IAgentRetrievalService` seam (dataset existence check

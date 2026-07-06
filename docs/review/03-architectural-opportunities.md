@@ -26,7 +26,15 @@ places and is the precondition for tool-calling agents (next item).
 `ILlmService` never carried `PullModelAsync`/`DeleteModelAsync` in the
 reviewed codebase state, so that specific leak was already a non-issue;
 `ProviderDescriptor` (kind + capability flags) exists and Privacy Audit reads
-it instead of matching provider name strings.
+it instead of matching provider name strings. `CompositeLlmService`'s
+routing if-chain is also gone: `StreamChatAsync` now looks up a delegate
+table keyed by each provider's `ProviderDescriptor.Tag` instead of a
+hand-written switch, and `ServicesViewModel`'s duplicate provider-label
+switch reads `CompositeLlmService.DescriptorFor(...)` instead. What's not
+done: embeddings/tool-calls/vision/max-context capability flags (still
+unimplemented; no consumer needs them yet), and the settings-flag-per-provider
+shape (`Llm.LlamaCppEnabled` etc.) is unchanged — see
+docs/review/06-technical-debt.md item 4 for why that's deliberately deferred.
 
 ## 2. Runtime capability discovery — ADOPT, minimal form — DONE
 
