@@ -26,14 +26,19 @@ Evaluation System, doc 10, and Review §5).
   **DONE**, one `TraceRecord` schema with per-surface projections.
 - **Three context packers:** ChatViewModel, Agent context packs, RagPipeline —
   **DONE**, one `ContextPackBuilder` used by all three.
-- **Two model-comparison systems:** Compare Models and Benchmarks — still
-  open; see the Evaluation System design (doc 10), not yet implemented.
+- **Two model-comparison systems:** Compare Models and Benchmarks — **DONE,
+  scoped**; see the Evaluation System design (doc 10). Both, plus the RAG
+  eval harness, now write through the shared `IEvalStore`/`EvalRun` shape and
+  a shared atomic-file-write helper. The panels still read from their own
+  richer, system-specific stores since nothing yet reads `EvalRun`s back out
+  of the shared store; that is new feature work (a shared history/compare
+  reader), not remaining duplication.
 
 Each duplication is invisible to users today and becomes a consistency bug
 factory tomorrow (e.g., redaction applied to one trace format but not
 another). This is the debt to pay down before 2.0, and most of it *reduces*
-code. Four of five collisions here are resolved; the Evaluation System merge
-is the remaining one.
+code. All five collisions here are resolved to the extent a refactor safely
+can; the Evaluation System's remaining gap is a reader UI, not duplication.
 
 ## 3. Interface ceremony without seams
 

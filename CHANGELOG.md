@@ -52,6 +52,14 @@ limit.
   ("OpenAI"). A remote voice provider is now flagged even when no remote chat
   provider is enabled, and adding a new remote chat provider to
   `CompositeLlmService.Providers` needs no Privacy Audit changes.
+- Evaluation System step 4 (final): Benchmarks and RAG eval export now share
+  one atomic write-then-rename helper (`Aether.Core.Services.AtomicFile`)
+  instead of each carrying its own copy; RAG eval's report writes are now
+  crash-safe (previously a plain, non-atomic write). Ranking already had a
+  single implementation, so there was nothing to retire there. Fully
+  deleting the two systems' own stores is deferred: nothing yet reads
+  `EvalRun`s back out of `IEvalStore`, so their panels still read their own
+  richer, system-specific data; see docs/review/10-evaluation-system.md.
 - Evaluation System step 3: the RAG eval harness now projects each retrieval
   run onto the shared eval shape and writes it through `IEvalStore`, alongside
   its existing `run.jsonl`/`report.md` export. Retrieval metrics (Recall@K,

@@ -191,11 +191,10 @@ public sealed class RagEvalService
             ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Aether")
             : Path.GetFullPath(configured);
         var dir = Path.Combine(root, "eval-runs", run.Id);
-        Directory.CreateDirectory(dir);
 
-        await File.WriteAllLinesAsync(
+        await AtomicFile.WriteAllTextAsync(
             Path.Combine(dir, "run.jsonl"),
-            run.Results.Select(r => JsonSerializer.Serialize(r)),
+            string.Join(Environment.NewLine, run.Results.Select(r => JsonSerializer.Serialize(r))),
             ct);
 
         var md = new StringBuilder();
@@ -228,7 +227,7 @@ public sealed class RagEvalService
             md.AppendLine($"- Notes: {result.Notes}");
             md.AppendLine();
         }
-        await File.WriteAllTextAsync(Path.Combine(dir, "report.md"), md.ToString(), ct);
+        await AtomicFile.WriteAllTextAsync(Path.Combine(dir, "report.md"), md.ToString(), ct);
     }
 
     private static int CountExpectedHits(IEnumerable<RagTraceChunk> chunks, IEnumerable<string> expectedSources)

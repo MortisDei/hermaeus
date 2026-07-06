@@ -72,7 +72,27 @@ score columns.
    unsupported answer, refusal accuracy, grounding, reranker delta) become score
    *providers*: entries in `CaseResult.Scores`, not engine features. No UI reads the
    new store for RAG eval yet.
-4. Retire duplicated export/ranking code paths.
+4. **DONE, scoped.** Retired the one genuine duplicate: both exporters carried
+   their own copy of a write-to-temp-then-rename helper (`BenchmarkService`
+   had a private `WriteTextAtomicAsync`; `RagEvalService` had no atomic write
+   at all, a latent partial-write bug on crash). Both now share
+   `Aether.Core.Services.AtomicFile.WriteAllTextAsync`. Ranking has exactly
+   one implementation (`BenchmarkService.Rank`, used only by
+   `BenchmarkViewModel`), so there was nothing to retire there.
+
+   What this step did **not** do, and why: doc 10's "What gets deleted"
+   section describes shrinking `BenchmarkService`'s bespoke run/save/export
+   plumbing and deleting the RAG eval harness's own runner/export entirely.
+   That is not safe yet, because after steps 1-3 nothing reads `EvalRun`s
+   back out of `IEvalStore` — Benchmarks and RAG eval both still write to the
+   shared store, but the Benchmarks and RAG eval panels still read/render
+   from their own richer, system-specific shapes (`BenchmarkRun` carries
+   hardware snapshots, percentiles, and stability scores; `RagEvalResult`
+   carries per-chunk retrieval detail) which the generic `CaseResult.Scores`
+   dictionary does not hold. Deleting either store now would silently break
+   its panel. Full retirement needs a reader (a shared history/compare view
+   built on `IEvalStore`) before the old stores can be deleted; that is new
+   feature work, not a refactor, and is not scoped by this design note.
 
 Each step is independently shippable and each strictly deletes code after it
 lands. Target: early 1.x, after the check/fix registry, before unified

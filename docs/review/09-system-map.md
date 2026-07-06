@@ -77,15 +77,20 @@ Tracked explicitly so no new work deepens them:
    **RESOLVED**. One `TraceRecord` schema, three projections.
 3. Context: chat and workspace both own "what the model sees" — **RESOLVED**.
    One `ContextPackBuilder` used by Chat, Agent, and RAG.
-4. Evaluation: benchmarks vs. compare vs. evals — **IN PROGRESS** (doc 10).
-   Steps 1-3 of 4 done: shared models/storage, Compare Models, and the RAG
-   eval harness all write through `IEvalStore`/`EvalRun`. Step 4 (retiring
-   the duplicated export/ranking code) remains.
+4. Evaluation: benchmarks vs. compare vs. evals — **RESOLVED, scoped** (doc
+   10). All four steps landed: shared models/storage, Compare Models, and
+   the RAG eval harness write through `IEvalStore`/`EvalRun`; the one real
+   duplicate (atomic file writes) is retired into `Aether.Core.Services.AtomicFile`.
+   Benchmarks and RAG eval still read from their own richer, system-specific
+   stores (nothing yet reads `EvalRun`s back out of `IEvalStore`) — fully
+   deleting those stores needs a shared history/compare reader UI first,
+   which is new feature work, not part of this design note's scope.
 5. Inspection: Doctor vs. Setup scan vs. Trust vs. Privacy Audit each own
    "is this install healthy/safe" — **RESOLVED** by the check/fix registry;
    each is a filtered projection of one `IInspectionEngine`.
 
-Only step 4 of the Evaluation System merge remains open from this register.
+Nothing remains open from this register; the residual "read from the shared
+store" work for Evaluation is a new feature, not a duplication to resolve.
 
 New-feature test (add to review checklist): *which existing system does this
 project onto?* If the answer is "it needs its own store/panel/checks", the

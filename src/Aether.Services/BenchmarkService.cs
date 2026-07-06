@@ -263,8 +263,8 @@ public sealed class BenchmarkService : IBenchmarkService
             csv.AppendLine($"{i + 1},{Csv(run.SuiteName)},{Csv(run.ModelName)},{Csv(run.StartedAt.ToString("O"))},{run.RankingScore:F4},{run.PassRate:F4},{run.MedianApproxTokensPerSecond:F2},{Csv(relativeDirectory)}");
         }
 
-        await WriteTextAtomicAsync(Path.Combine(exportRoot, "index.md"), markdown.ToString(), ct);
-        await WriteTextAtomicAsync(Path.Combine(exportRoot, "index.csv"), csv.ToString(), ct);
+        await AtomicFile.WriteAllTextAsync(Path.Combine(exportRoot, "index.md"), markdown.ToString(), ct);
+        await AtomicFile.WriteAllTextAsync(Path.Combine(exportRoot, "index.csv"), csv.ToString(), ct);
         return Path.Combine(exportRoot, "index.md");
     }
 
@@ -287,9 +287,9 @@ public sealed class BenchmarkService : IBenchmarkService
     {
         Directory.CreateDirectory(targetDirectory);
         var basePath = Path.Combine(targetDirectory, $"benchmark-{Sanitize(run.SuiteName)}-{run.StartedAt:yyyyMMdd-HHmmss}");
-        await WriteTextAtomicAsync($"{basePath}.json", JsonSerializer.Serialize(run, JsonOpts), ct);
-        await WriteTextAtomicAsync($"{basePath}.md", ToMarkdown(run), ct);
-        await WriteTextAtomicAsync($"{basePath}.csv", ToCsv(run), ct);
+        await AtomicFile.WriteAllTextAsync($"{basePath}.json", JsonSerializer.Serialize(run, JsonOpts), ct);
+        await AtomicFile.WriteAllTextAsync($"{basePath}.md", ToMarkdown(run), ct);
+        await AtomicFile.WriteAllTextAsync($"{basePath}.csv", ToCsv(run), ct);
         return $"{basePath}.md";
     }
 
@@ -967,30 +967,5 @@ public sealed class BenchmarkService : IBenchmarkService
         var invalid = Path.GetInvalidFileNameChars().ToHashSet();
         var clean = new string(name.Select(ch => invalid.Contains(ch) ? '-' : ch).ToArray()).Trim('-', ' ');
         return string.IsNullOrWhiteSpace(clean) ? "benchmark" : clean;
-    }
-
-    private static async Task WriteTextAtomicAsync(string path, string content, CancellationToken ct)
-    {
-        var directory = Path.GetDirectoryName(path);
-        if (!string.IsNullOrWhiteSpace(directory))
-            Directory.CreateDirectory(directory);
-
-        var temp = $"{path}.{Guid.NewGuid():N}.tmp";
-        try
-        {
-            await File.WriteAllTextAsync(temp, content, ct);
-            File.Move(temp, path, overwrite: true);
-        }
-        finally
-        {
-            try
-            {
-                if (File.Exists(temp))
-                    File.Delete(temp);
-            }
-            catch
-            {
-            }
-        }
     }
 }
