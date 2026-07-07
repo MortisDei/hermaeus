@@ -84,7 +84,7 @@ Keep interfaces where there genuinely are or will be multiple implementations
 (`ILlmService`, `IVoiceProvider`, `ISecretStore` backends) and collapse the
 rest to concrete classes. DI works fine with concrete registrations.
 
-### 5. ViewModel breadth = hidden orchestration layer (MEDIUM)
+### 5. ViewModel breadth = hidden orchestration layer (MEDIUM) — partially DONE
 
 `ChatViewModel`, `AgentViewModel`, and `RagViewModel` each orchestrate
 multi-service workflows (context packing, attachment reading, memory
@@ -94,6 +94,36 @@ the orchestration into plain services (`ChatSessionService` /
 `ContextPackBuilder`) and leave ViewModels as thin bindable adapters. This
 matters strategically: the context-pack builder is the heart of the product
 and it currently lives inside a ViewModel.
+
+**Extracted, in five slices (2026-07):**
+- `ChatContextUsageCalculator` (Core): context-window resolution and usage
+  label/percent/warning-level math, previously inline in `ChatViewModel`.
+- `RagStreamProtocol` (Rag): the `__RAG_SOURCES__`/`__RAG_TRACE__` sentinel
+  parser `RagViewModel` and `RagEvalService` each implemented independently.
+- `WorkspaceActivationSelection` (Agent): the preferred-model/dataset id
+  lookup `ChatViewModel` and `AgentViewModel` each duplicated.
+- `RagDatasetHealthService` (Rag): the per-dataset source/duplicate/missing/
+  stale-file computation from `RagViewModel.RefreshDatasetManagerAsync`.
+- `ChatTraceService` (Services): chat trace persistence/reload, previously
+  `ChatViewModel`'s direct `ITraceStore` calls plus DetailJson mapping.
+- `AgentPatchReviewService` (Agent): the apply/reject/block status-transition
+  and audit sequence from `AgentViewModel`'s three patch-decision commands.
+- `ChatConversationBuilder.AutoTitleFrom` (Core): conversation auto-titling
+  from `ChatViewModel.PersistAsync`.
+
+All seven are independently unit-tested without any UI plumbing, closing the
+"untestable without UI plumbing" complaint for the pieces moved so far.
+
+**Explicitly not done, and materially higher risk/effort than the above:**
+`ChatViewModel.SendAsync` (the live streaming send loop itself),
+`RagViewModel.IngestAsync` (the suspend-competing-services/ingest/restore
+sequence), and `ChatViewModel.CompareSelectedModelsAsync`. These are the
+largest remaining orchestration blobs, but extracting them safely needs
+either new integration-test coverage for streaming/cancellation behavior
+first (today's coverage is integration-style, not unit-level, for exactly
+this code) or accepting real regression risk on the three most-used
+surfaces in the app. Revisit as a deliberate, separately-scoped pass rather
+than folding into this one.
 
 ### 6. Settings monolith (MEDIUM) — evaluated, REJECT full narrowing
 

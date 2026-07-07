@@ -12,9 +12,12 @@ Doctor and Setup encode cross-cutting knowledge of every subsystem — the
 maintenance trap is that adding *any* feature means editing them, so they grow
 monotonically. Remediation: check/fix registry (Opportunities #5) — **DONE**,
 Doctor/Trust/Privacy Audit are now `IInspectionCheckProvider` contributors
-over one `IInspectionEngine`. `BenchmarkService` and the three big
-ViewModels' non-inspection orchestration are still unaddressed (see
-Evaluation System, doc 10, and Review §5).
+over one `IInspectionEngine`. The three big ViewModels' non-inspection
+orchestration is **partially DONE** (see Review §5 for the seven pieces
+extracted and the three large ones deliberately left for a separate pass).
+`BenchmarkService` itself remains unaddressed — it's a large service, not
+ViewModel-hidden orchestration, so it's a different shape of problem than
+this item's remediation targets; see Evaluation System, doc 10.
 
 ## 2. Duplicated concepts (the biggest hidden complexity)
 
