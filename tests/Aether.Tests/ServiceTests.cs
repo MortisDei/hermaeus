@@ -1130,7 +1130,7 @@ namespace Aether.Tests
             {
                 Id = "runtime-1",
                 Name = "  Custom Runtime  ",
-                Kind = RuntimeKind.OpenAiCompatible,
+                Kind = RuntimeKind.LlamaCpp,
                 BaseUrl = "  https://example.test/v1/  ",
                 ApiKey = " secret:runtime ",
                 Enabled = true,
@@ -1142,7 +1142,16 @@ namespace Aether.Tests
             Equal("Custom Runtime", saved.Name, "runtime profile name should be trimmed");
             Equal("https://example.test/v1", saved.BaseUrl, "runtime profile URL should be trimmed");
             Equal("secret:runtime", saved.ApiKey, "runtime profile API key should be trimmed");
-            Equal("server-1", saved.LinkedServerId, "linked server id should be trimmed");
+            Equal("server-1", saved.LinkedServerId, "linked server id should be trimmed for a llama.cpp profile");
+
+            var nonLlama = RuntimeProfileService.NormalizeProfile(new RuntimeProfile
+            {
+                Kind = RuntimeKind.OpenAiCompatible,
+                StartManagedLlamaServer = true,
+                LinkedServerId = "server-1"
+            });
+            False(nonLlama.StartManagedLlamaServer, "StartManagedLlamaServer is a llama.cpp-only concept and should be inert for other runtime kinds");
+            Equal(string.Empty, nonLlama.LinkedServerId, "LinkedServerId is a llama.cpp-only concept and should be cleared for other runtime kinds");
 
             var defaulted = RuntimeProfileService.NormalizeProfile(new RuntimeProfile
             {

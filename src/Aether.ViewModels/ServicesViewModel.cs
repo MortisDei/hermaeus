@@ -718,6 +718,12 @@ public partial class RuntimeProfileViewModel : ObservableObject
                                  || BaseUrl.Contains("//0.0.0.0", StringComparison.OrdinalIgnoreCase);
     public string KindLabel => Aether.Services.CompositeLlmService.DescriptorFor(Kind).DisplayName;
 
+    /// <summary>
+    /// StartManagedLlamaServer/LinkedServerId are llama.cpp-only settings (see
+    /// RuntimeProfile's doc comments); only show them for that runtime kind.
+    /// </summary>
+    public bool IsLlamaCpp => Kind == RuntimeKind.LlamaCpp;
+
     public RuntimeProfileViewModel(RuntimeProfile profile)
     {
         Id = profile.Id;
@@ -743,5 +749,9 @@ public partial class RuntimeProfileViewModel : ObservableObject
     };
 
     partial void OnBaseUrlChanged(string value) => OnPropertyChanged(nameof(HasUnsafeHost));
-    partial void OnKindChanged(RuntimeKind value) => OnPropertyChanged(nameof(KindLabel));
+    partial void OnKindChanged(RuntimeKind value)
+    {
+        OnPropertyChanged(nameof(KindLabel));
+        OnPropertyChanged(nameof(IsLlamaCpp));
+    }
 }

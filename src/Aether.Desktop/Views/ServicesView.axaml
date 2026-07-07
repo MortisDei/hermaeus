@@ -78,6 +78,7 @@
                                         <CheckBox Grid.Row="1" Grid.Column="1"
                                                   Content="Start managed llama.cpp"
                                                   IsChecked="{Binding StartManagedLlamaServer}"
+                                                  IsVisible="{Binding IsLlamaCpp}"
                                                   FontSize="12"
                                                   VerticalAlignment="Center" />
                                         <StackPanel Grid.Row="1" Grid.Column="2"

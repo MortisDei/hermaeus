@@ -11,6 +11,15 @@ limit.
 
 ## [Unreleased]
 
+## [0.9.24-alpha] - 2026-07-07
+
+Model landscape hedging audit (docs/review/07-roadmap.md, 3.0 long-term
+vision): confirmed the LLM runtime layer is already thin and provider-agnostic,
+and fixed the one real leak found.
+
+### Fixed
+- `RuntimeProfile.StartManagedLlamaServer`/`LinkedServerId` are llama.cpp-only concepts that were sitting on a record shared by all three `RuntimeKind`s (`LlamaCpp`, `Ollama`, `OpenAiCompatible`), meaning a future runtime kind could silently inherit meaningless llama-specific state. `RuntimeProfileService.NormalizeProfile` now forces both fields inert for any non-`LlamaCpp` profile, and the Services view's "Start managed llama.cpp" checkbox is only shown when that runtime kind is selected.
+
 ## [0.9.23-alpha] - 2026-07-07
 
 Opens the 3.0-horizon "long-term vision" roadmap with the first slice of

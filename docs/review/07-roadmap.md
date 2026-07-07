@@ -180,10 +180,25 @@ landed, including the default flip for voice convergence.
   slice.
 - Multi-machine sync of the data root via user-owned transport (file sync,
   no Aether cloud) — sovereignty preserved.
-- Agent workflow composition — only if 2.0's execution slice demonstrates
-  real sequencing demand (see Opportunities #9).
-- Model landscape hedging: keep the runtime layer thin enough that whatever
-  replaces GGUF/llama.cpp is an adapter, not a rewrite.
+- Agent workflow composition — still explicitly deferred per Opportunities #9:
+  `run_command` has had no real-world usage time yet to generate the
+  sequencing pain the review said to wait for. Not started.
+- **Model landscape hedging — DONE, audited.** Goal: keep the runtime layer
+  thin enough that whatever replaces GGUF/llama.cpp is an adapter, not a
+  rewrite. Audit result: the abstraction was already in good shape.
+  `ILlmService`/`LlmChatOptions`/`ChatMessage`/`LlmStreamEvent` are fully
+  provider-agnostic; each of the three providers (`LlamaCppService`,
+  `OllamaService`, `OpenAiService`) contains its own endpoint quirks and
+  context-length probing internally; `LlmModel`/`ModelProfile` have no
+  GGUF-only fields. One genuine leak found and fixed: `RuntimeProfile`'s
+  `StartManagedLlamaServer`/`LinkedServerId` are llama.cpp-only concepts that
+  sat on a record shared by all three `RuntimeKind`s. `RuntimeProfileService.NormalizeProfile`
+  now forces both fields inert for any non-`LlamaCpp` kind, and the Services
+  view only shows the "Start managed llama.cpp" checkbox when that kind is
+  selected, so a future fourth runtime can't inherit stray llama-only state.
+  The Settings-UI/`RuntimeProfiles` duplication noted in
+  docs/review/06-technical-debt.md item 4 remains deliberately deferred, as
+  already documented there — not a hedging gap, a separately tracked one.
 
 ## Explicit non-goals at every horizon
 

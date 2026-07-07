@@ -129,8 +129,10 @@ public sealed class RuntimeProfileService : IRuntimeProfileService, IDisposable
         BaseUrl = Trim(profile.BaseUrl),
         ApiKey = profile.ApiKey.Trim(),
         Enabled = profile.Enabled,
-        StartManagedLlamaServer = profile.StartManagedLlamaServer,
-        LinkedServerId = profile.LinkedServerId.Trim()
+        // StartManagedLlamaServer/LinkedServerId are llama.cpp-only concepts; force them
+        // inert for every other runtime kind so a future runtime can never inherit them.
+        StartManagedLlamaServer = profile.Kind == RuntimeKind.LlamaCpp && profile.StartManagedLlamaServer,
+        LinkedServerId = profile.Kind == RuntimeKind.LlamaCpp ? profile.LinkedServerId.Trim() : string.Empty
     };
 
     private static string Trim(string url) => string.IsNullOrWhiteSpace(url)
