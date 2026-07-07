@@ -185,6 +185,7 @@ public partial class AgentViewModel : ObservableObject
     private readonly IWorkspaceAnalysisService _workspaceAnalysis;
     private readonly IWorkspaceActivationService _workspaceActivation;
     private readonly IWorkspaceManifestStore _workspaceManifests;
+    private readonly AgentPatchReviewService _patchReview;
     private CancellationTokenSource? _cts;
 
     public ObservableCollection<LlmModel> AvailableModels { get; } = [];
@@ -277,6 +278,7 @@ public partial class AgentViewModel : ObservableObject
         _workspaceAnalysis = workspaceAnalysis;
         _workspaceActivation = workspaceActivation;
         _workspaceManifests = workspaceManifests;
+        _patchReview = new AgentPatchReviewService(workspaceTools, store, agent);
         WorkspaceRoot = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
         RecentTasks.CollectionChanged += (_, _) =>
@@ -614,15 +616,7 @@ public partial class AgentViewModel : ObservableObject
         try
         {
             var selectedPath = SelectedWorkspaceFile?.RelativePath;
-            _workspaceTools.ApplyDraftPatch(BuildOptions(), found.RelativePath, found.ProposedContent);
-            found.Status = AgentDraftPatchStatus.Applied;
-            found.ApprovedAt = DateTime.UtcNow;
-            found.ApprovedBy = "User";
-            found.BlockedAt = null;
-            found.BlockedBy = null;
-            found.BlockReason = string.Empty;
-            await _store.SaveAsync(CurrentTask);
-            await _agent.AppendApprovalAsync(CurrentTask.TaskId, "draft_patch_apply", approved: true, BuildOptions());
+            await _patchReview.ApplyAsync(CurrentTask, found, BuildOptions());
             StatusMessage = $"Patch for {found.RelativePath} applied.";
             await RefreshWorkspaceFilesAsync();
             if (!string.IsNullOrWhiteSpace(selectedPath))
@@ -644,12 +638,7 @@ public partial class AgentViewModel : ObservableObject
             var found = CurrentTask.DraftPatches.FirstOrDefault(p => p.Id == patch.Id);
             if (found is not null)
             {
-                found.Status = AgentDraftPatchStatus.Rejected;
-                found.BlockedAt = DateTime.UtcNow;
-                found.BlockedBy = "User";
-                found.BlockReason = "Rejected during review.";
-                await _store.SaveAsync(CurrentTask);
-                await _agent.AppendApprovalAsync(CurrentTask.TaskId, "draft_patch_reject", approved: false, BuildOptions());
+                await _patchReview.RejectAsync(CurrentTask, found, BuildOptions());
                 StatusMessage = $"Patch for {patch.RelativePath} rejected.";
                 await LoadTaskIfOpenAsync(CurrentTask.TaskId);
             }
@@ -669,14 +658,7 @@ public partial class AgentViewModel : ObservableObject
             var found = CurrentTask.DraftPatches.FirstOrDefault(p => p.Id == patch.Id);
             if (found is not null)
             {
-                found.Status = AgentDraftPatchStatus.Blocked;
-                found.BlockedAt = DateTime.UtcNow;
-                found.BlockedBy = "User";
-                found.BlockReason = string.IsNullOrWhiteSpace(found.BlockReason)
-                    ? "Blocked during review."
-                    : found.BlockReason;
-                await _store.SaveAsync(CurrentTask);
-                await _agent.AppendApprovalAsync(CurrentTask.TaskId, "draft_patch_block", approved: false, BuildOptions());
+                await _patchReview.BlockAsync(CurrentTask, found, BuildOptions());
                 StatusMessage = $"Patch for {patch.RelativePath} blocked.";
                 await LoadTaskIfOpenAsync(CurrentTask.TaskId);
             }

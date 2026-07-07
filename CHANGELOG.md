@@ -11,6 +11,13 @@ limit.
 
 ## [Unreleased]
 
+## [0.9.35-alpha] - 2026-07-07
+
+ViewModel orchestration extraction, part 4.
+
+### Added
+- `Aether.Agent.Services.AgentPatchReviewService`: the apply/reject/block status-transition, persist, and audit sequence shared by `AgentViewModel`'s `ApprovePatchAsync`/`RejectPatchAsync`/`BlockPatchAsync`. The ViewModel still owns the approval-preview UI flow (`RequestDraftPatchPreview`); this owns what happens once a decision is made.
+
 ## [0.9.34-alpha] - 2026-07-07
 
 ViewModel orchestration extraction, part 3.
