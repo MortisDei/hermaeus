@@ -44,6 +44,7 @@ public static class AetherServiceRegistration
         s.AddSingleton<EvalEngine>();
         s.AddSingleton<BenchmarkService>();
         s.AddSingleton<ITraceStore, SqliteTraceStore>();
+        s.AddSingleton<ChatTraceService>();
         s.AddSingleton<IConversationStore, ConversationStore>();
         s.AddSingleton<ConversationExportService>();
         s.AddSingleton<IMemoryStore, MemoryStore>();

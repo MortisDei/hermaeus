@@ -88,7 +88,7 @@ public partial class ChatViewModel : ObservableObject
     private readonly ModelProfileService _profiles;
     private readonly IConversationMemoryService _conversationMemory;
     private readonly ConversationExportService _exports;
-    private readonly ITraceStore? _traceStore;
+    private readonly ChatTraceService? _chatTraces;
     private readonly EvalEngine _evalEngine;
     private readonly IWorkspaceActivationService? _workspaceActivation;
     private CancellationTokenSource? _cts;
@@ -153,7 +153,7 @@ public partial class ChatViewModel : ObservableObject
         IConversationMemoryService conversationMemory,
         IRuntimeLogService runtimeLogs,
         ConversationExportService exports,
-        ITraceStore? traceStore = null,
+        ChatTraceService? chatTraces = null,
         EvalEngine? evalEngine = null,
         IWorkspaceActivationService? workspaceActivation = null)
     {
@@ -162,7 +162,7 @@ public partial class ChatViewModel : ObservableObject
         _conversationMemory = conversationMemory;
         _runtimeLogs = runtimeLogs;
         _exports = exports;
-        _traceStore = traceStore;
+        _chatTraces = chatTraces;
         _evalEngine = evalEngine ?? new EvalEngine(llm);
         _workspaceActivation = workspaceActivation;
         _temperature  = settings.Settings.Llm.Temperature;
@@ -766,96 +766,38 @@ public partial class ChatViewModel : ObservableObject
         while (ChatTraces.Count > 50)
             ChatTraces.RemoveAt(ChatTraces.Count - 1);
 
-        _ = Task.Run(() => PersistChatTraceAsync(trace));
-    }
-
-    private async Task PersistChatTraceAsync(ChatTraceViewModel trace)
-    {
-        if (_traceStore is null)
-            return;
-
-        try
-        {
-            await _traceStore.AppendAsync(new TraceRecord
-            {
-                Id = trace.Id,
-                Kind = TraceKind.Chat,
-                CreatedAt = trace.Timestamp,
-                SourceId = CurrentConversationId,
-                ModelId = trace.ModelId,
-                Operation = "send",
-                FirstTokenMs = trace.FirstTokenMs,
-                TotalLatencyMs = trace.TotalLatencyMs,
-                PromptTokens = trace.ProviderUsage?.PromptTokens ?? 0,
-                CompletionTokens = trace.ProviderUsage?.CompletionTokens ?? 0,
-                TotalTokens = trace.ProviderUsage?.TotalTokens ?? trace.EstimatedTokens,
-                Error = trace.ErrorDetails,
-                DetailJson = JsonSerializer.Serialize(new ChatTraceDetail(
-                    trace.Provider, trace.Runtime, trace.SystemPrompt, trace.AttachmentCount, trace.EstimatedTokens))
-            });
-        }
-        catch (Exception ex)
-        {
-            _runtimeLogs.Add(new RuntimeLogEntry(
-                DateTime.UtcNow,
-                RuntimeLogLevel.Warning,
-                RuntimeLogCategory.Service,
-                $"Chat trace persistence failed: {ex.Message}"));
-        }
+        var entry = new ChatTraceEntry(
+            trace.Id, trace.Timestamp, trace.ModelId, trace.Provider, trace.Runtime, trace.SystemPrompt,
+            trace.AttachmentCount, trace.EstimatedTokens, trace.ProviderUsage, trace.FirstTokenMs,
+            trace.TotalLatencyMs, trace.ErrorDetails);
+        _ = Task.Run(() => _chatTraces?.PersistAsync(entry, CurrentConversationId) ?? Task.CompletedTask);
     }
 
     private async Task LoadPersistedChatTracesAsync()
     {
-        if (_traceStore is null)
+        if (_chatTraces is null || ChatTraces.Count > 0)
             return;
 
-        try
+        var entries = await _chatTraces.LoadRecentAsync(50);
+        foreach (var entry in entries)
         {
-            var records = await _traceStore.GetRecentAsync(TraceKind.Chat, 50);
-            if (records.Count == 0 || ChatTraces.Count > 0)
-                return;
-
-            foreach (var record in records)
+            ChatTraces.Add(new ChatTraceViewModel
             {
-                var detail = TryParseChatTraceDetail(record.DetailJson);
-                ChatTraces.Add(new ChatTraceViewModel
-                {
-                    Id = record.Id,
-                    Timestamp = record.CreatedAt,
-                    ModelId = record.ModelId,
-                    Provider = detail?.Provider ?? string.Empty,
-                    Runtime = detail?.Runtime ?? string.Empty,
-                    SystemPrompt = detail?.SystemPrompt ?? string.Empty,
-                    AttachmentCount = detail?.AttachmentCount ?? 0,
-                    EstimatedTokens = detail?.EstimatedTokens ?? record.TotalTokens,
-                    ProviderUsage = record.PromptTokens > 0 || record.CompletionTokens > 0
-                        ? new ChatTokenUsage(record.PromptTokens, record.CompletionTokens, record.TotalTokens)
-                        : null,
-                    FirstTokenMs = record.FirstTokenMs,
-                    TotalLatencyMs = record.TotalLatencyMs,
-                    ErrorDetails = record.Error
-                });
-            }
-        }
-        catch
-        {
-            // Trace history is best-effort; the panel simply starts empty.
+                Id = entry.Id,
+                Timestamp = entry.Timestamp,
+                ModelId = entry.ModelId,
+                Provider = entry.Provider,
+                Runtime = entry.Runtime,
+                SystemPrompt = entry.SystemPrompt,
+                AttachmentCount = entry.AttachmentCount,
+                EstimatedTokens = entry.EstimatedTokens,
+                ProviderUsage = entry.ProviderUsage,
+                FirstTokenMs = entry.FirstTokenMs,
+                TotalLatencyMs = entry.TotalLatencyMs,
+                ErrorDetails = entry.ErrorDetails
+            });
         }
     }
-
-    private static ChatTraceDetail? TryParseChatTraceDetail(string json)
-    {
-        try
-        {
-            return JsonSerializer.Deserialize<ChatTraceDetail>(json);
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
-
-    private sealed record ChatTraceDetail(string Provider, string Runtime, string SystemPrompt, int AttachmentCount, int EstimatedTokens);
 
     private void RefreshEstimatedContextUsage()
     {

@@ -11,6 +11,13 @@ limit.
 
 ## [Unreleased]
 
+## [0.9.34-alpha] - 2026-07-07
+
+ViewModel orchestration extraction, part 3.
+
+### Added
+- `Aether.Services.ChatTraceService`: persists and reloads chat traces through the shared `ITraceStore`, extracted from `ChatViewModel`'s `AddChatTrace`/`PersistChatTraceAsync`/`LoadPersistedChatTracesAsync`/`TryParseChatTraceDetail` group. `ChatViewModel`'s constructor now takes `ChatTraceService?` instead of `ITraceStore?`; the ViewModel only builds/binds the UI-facing `ChatTraceViewModel`, the service owns the trace-store read/write and DetailJson mapping.
+
 ## [0.9.33-alpha] - 2026-07-07
 
 ViewModel orchestration extraction, part 2.
