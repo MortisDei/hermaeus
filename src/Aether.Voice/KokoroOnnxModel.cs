@@ -26,38 +26,46 @@ internal sealed class KokoroOnnxModel : IDisposable
     private static readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(20) };
     private static readonly IReadOnlyDictionary<string, string> VoiceSha256 = KokoroVoiceAssets.Sha256ByVoice;
 
-    private readonly string _assetsRoot;
+    private readonly Func<string> _assetsRootProvider;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private InferenceSession? _session;
+    private string? _loadedAssetsRoot;
     private readonly Dictionary<string, float[]> _voiceStyleCache = new(StringComparer.OrdinalIgnoreCase);
     private bool _unavailable;
 
-    public KokoroOnnxModel(string assetsRoot)
+    /// <summary>
+    /// Re-resolved on every access rather than captured once, so a
+    /// LocalAiAssetsRoot change in Settings takes effect on the next
+    /// install/load without requiring an app restart (this singleton is
+    /// constructed once for the process lifetime).
+    /// </summary>
+    private string AssetsRoot => _assetsRootProvider();
+
+    public KokoroOnnxModel(Func<string> assetsRootProvider)
     {
-        _assetsRoot = assetsRoot;
+        _assetsRootProvider = assetsRootProvider;
     }
 
     public static string ModelPath(string assetsRoot) => Path.Combine(assetsRoot, ModelFileName);
     public static string VoicePath(string assetsRoot, string voice) => Path.Combine(assetsRoot, "voices", $"{voice}.bin");
 
     public bool AssetsPresent(string voice) =>
-        File.Exists(ModelPath(_assetsRoot)) && File.Exists(VoicePath(_assetsRoot, voice));
+        File.Exists(ModelPath(AssetsRoot)) && File.Exists(VoicePath(AssetsRoot, voice));
 
     public async Task<bool> EnsureLoadedAsync(string voice, CancellationToken ct)
     {
-        if (_session is not null)
-            return true;
-
         await _gate.WaitAsync(ct);
         try
         {
+            InvalidateIfRootChanged();
+
             if (_session is not null)
                 return true;
 
             if (_unavailable)
                 return false;
 
-            var modelPath = ModelPath(_assetsRoot);
+            var modelPath = ModelPath(AssetsRoot);
             if (!File.Exists(modelPath) || !await VerifySha256Async(modelPath, ModelSha256, ct))
             {
                 _unavailable = true;
@@ -65,7 +73,8 @@ internal sealed class KokoroOnnxModel : IDisposable
             }
 
             LogPreflight("about to load InferenceSession from EnsureLoadedAsync");
-            _session = new InferenceSession(modelPath);
+            _session = new InferenceSession(modelPath, BuildSessionOptions());
+            _loadedAssetsRoot = AssetsRoot;
             return true;
         }
         catch
@@ -91,12 +100,14 @@ internal sealed class KokoroOnnxModel : IDisposable
         await _gate.WaitAsync(ct);
         try
         {
-            Directory.CreateDirectory(_assetsRoot);
-            Directory.CreateDirectory(Path.Combine(_assetsRoot, "voices"));
+            InvalidateIfRootChanged();
+
+            Directory.CreateDirectory(AssetsRoot);
+            Directory.CreateDirectory(Path.Combine(AssetsRoot, "voices"));
             LogPreflight("install starting");
 
             progress?.Report("Downloading Kokoro ONNX model...");
-            await DownloadIfMissingAsync(ModelPath(_assetsRoot), ModelUrl, ModelSha256, progress, ct);
+            await DownloadIfMissingAsync(ModelPath(AssetsRoot), ModelUrl, ModelSha256, progress, ct);
             LogPreflight("model download+verify complete");
 
             foreach (var voice in voices)
@@ -106,7 +117,7 @@ internal sealed class KokoroOnnxModel : IDisposable
 
                 progress?.Report($"Downloading voice: {voice}...");
                 await DownloadIfMissingAsync(
-                    VoicePath(_assetsRoot, voice),
+                    VoicePath(AssetsRoot, voice),
                     $"{RepoBaseUrl}/voices/{voice}.bin",
                     expectedHash,
                     progress,
@@ -121,7 +132,8 @@ internal sealed class KokoroOnnxModel : IDisposable
             // to disk immediately before the risky call so a crash still leaves a
             // record of exactly where it happened.
             LogPreflight("about to load InferenceSession after install");
-            _session = new InferenceSession(ModelPath(_assetsRoot));
+            _session = new InferenceSession(ModelPath(AssetsRoot), BuildSessionOptions());
+            _loadedAssetsRoot = AssetsRoot;
             _unavailable = false;
             progress?.Report("Kokoro native voice assets installed.");
         }
@@ -170,7 +182,7 @@ internal sealed class KokoroOnnxModel : IDisposable
     private float[] LoadStyleVector(string voice, int tokenCount)
     {
         const int StyleDimensions = 256;
-        var path = VoicePath(_assetsRoot, voice);
+        var path = VoicePath(AssetsRoot, voice);
         if (!_voiceStyleCache.TryGetValue(path, out var allStyles))
         {
             var bytes = File.ReadAllBytes(path);
@@ -222,13 +234,47 @@ internal sealed class KokoroOnnxModel : IDisposable
         return string.Equals(actual, expectedSha256, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// Deliberately conservative: the default (all-optimizations, all-thread)
+    /// session options have been observed to crash the whole process natively
+    /// (bypassing managed exception handling) when loading this specific
+    /// quantized graph on at least one real machine. Disabling graph-fusion
+    /// optimizations and multi-threaded execution trades a little inference
+    /// speed for avoiding whatever fused/parallel kernel path was crashing.
+    /// </summary>
+    private static SessionOptions BuildSessionOptions() => new()
+    {
+        GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_BASIC,
+        ExecutionMode = ExecutionMode.ORT_SEQUENTIAL,
+        InterOpNumThreads = 1,
+        IntraOpNumThreads = 1
+    };
+
+    /// <summary>
+    /// Must be called under <see cref="_gate"/>. Drops any loaded session and
+    /// cached voice styles if LocalAiAssetsRoot changed since they were
+    /// loaded, so a mid-session settings change doesn't leave this singleton
+    /// serving a model/voice from a stale, no-longer-configured location.
+    /// </summary>
+    private void InvalidateIfRootChanged()
+    {
+        if (_loadedAssetsRoot is null || _loadedAssetsRoot == AssetsRoot)
+            return;
+
+        _session?.Dispose();
+        _session = null;
+        _unavailable = false;
+        _voiceStyleCache.Clear();
+        _loadedAssetsRoot = null;
+    }
+
     private void LogPreflight(string message)
     {
         try
         {
             File.AppendAllText(
-                Path.Combine(_assetsRoot, "kokoro_native_install.log"),
-                $"{DateTime.UtcNow:O} {message} (model size: {SafeFileLength(ModelPath(_assetsRoot))} bytes)\n");
+                Path.Combine(AssetsRoot, "kokoro_native_install.log"),
+                $"{DateTime.UtcNow:O} {message} (model size: {SafeFileLength(ModelPath(AssetsRoot))} bytes)\n");
         }
         catch { }
     }

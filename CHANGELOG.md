@@ -11,6 +11,12 @@ limit.
 
 ## [Unreleased]
 
+## [0.9.40-alpha] - 2026-07-07
+
+### Fixed
+- `NativeKokoroVoiceProvider`/`KokoroOnnxModel` resolved `LocalAiAssetsRoot` once at DI-singleton construction time and cached it forever; changing the setting later in the same running session silently kept reading/writing the old location. The assets root is now re-resolved from current settings on every access, and a loaded ONNX session/voice-style cache is dropped and reloaded if the root changes underneath it.
+- Diagnosed a real crash: the Kokoro Native install actually completed successfully (model + all 28 voices downloaded, SHA256 verified) but a subsequent model load via `new InferenceSession(...)` crashed the whole process natively (bypassing all managed exception handling) on at least one machine. `InferenceSession` construction now uses explicit, conservative `SessionOptions` (basic graph optimization, single-threaded, sequential execution) instead of the all-optimizations default, trading a little inference speed for avoiding whatever fused/parallel kernel path was crashing.
+
 ## [0.9.39-alpha] - 2026-07-07
 
 ### Added

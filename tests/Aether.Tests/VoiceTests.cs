@@ -63,7 +63,7 @@ internal static class VoiceTests
     public static async Task OnnxModelRefusesToLoadWhenAssetsAreMissing()
     {
         using var temp = new TempDir();
-        var model = new KokoroOnnxModel(temp.PathFor("kokoro-assets"));
+        var model = new KokoroOnnxModel(() => temp.PathFor("kokoro-assets"));
         var loaded = await model.EnsureLoadedAsync("af_heart", CancellationToken.None);
         False(loaded, "Model must not report loaded when its ONNX file has not been downloaded yet.");
         False(model.AssetsPresent("af_heart"), "AssetsPresent must be false when the model directory is empty.");
@@ -88,6 +88,29 @@ internal static class VoiceTests
 
         var detection = provider.Detect();
         False(detection.IsAvailable, "Detect() must report unavailable when the ONNX model file is missing.");
+        return Task.CompletedTask;
+    }
+
+    public static Task NativeProviderReResolvesAssetsRootAfterSettingsChange()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.LocalAiAssetsRoot = temp.PathFor("ai-assets-a");
+
+        using var provider = new NativeKokoroVoiceProvider(settings);
+        False(provider.Detect().IsAvailable, "Must report unavailable before any assets root has a model.");
+
+        // Point LocalAiAssetsRoot somewhere else and drop a model file there,
+        // without recreating the provider (it is a DI singleton in the real
+        // app and is never reconstructed just because settings changed).
+        var newRoot = temp.PathFor("ai-assets-b");
+        settings.Settings.DataManagement.LocalAiAssetsRoot = newRoot;
+        var kokoroDir = Path.Combine(newRoot, "Models", "voice", "kokoro-native");
+        Directory.CreateDirectory(kokoroDir);
+        File.WriteAllText(Path.Combine(kokoroDir, "model_q8f16.onnx"), "placeholder");
+
+        True(provider.Detect().IsAvailable,
+            "The provider must re-resolve LocalAiAssetsRoot from current settings rather than caching the value from construction time.");
         return Task.CompletedTask;
     }
 

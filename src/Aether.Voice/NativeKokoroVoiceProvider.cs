@@ -34,7 +34,7 @@ public sealed class NativeKokoroVoiceProvider : ITtsService, IVoiceProvider, IDi
     public NativeKokoroVoiceProvider(ISettingsService settings)
     {
         _settings = settings;
-        _model = new KokoroOnnxModel(ResolveAssetsDirectory(settings.Settings));
+        _model = new KokoroOnnxModel(() => ResolveAssetsDirectory(_settings.Settings));
     }
 
     public static string ResolveAssetsDirectory(AppSettings settings)

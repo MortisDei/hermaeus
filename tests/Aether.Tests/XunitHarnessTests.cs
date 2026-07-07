@@ -177,6 +177,7 @@ public static class HarnessCases
         [new HarnessCase("onnx model refuses to load when assets are missing", VoiceTests.OnnxModelRefusesToLoadWhenAssetsAreMissing)],
         [new HarnessCase("onnx model hash verification rejects tampered file", VoiceTests.OnnxModelHashVerificationRejectsTamperedFile)],
         [new HarnessCase("native provider reports not installed without assets", VoiceTests.NativeProviderReportsNotInstalledWithoutAssets)],
+        [new HarnessCase("native provider re-resolves assets root after settings change", VoiceTests.NativeProviderReResolvesAssetsRootAfterSettingsChange)],
         [new HarnessCase("native provider requires no python version", VoiceTests.NativeProviderRequiresNoPythonVersion)]
     ];
 }
