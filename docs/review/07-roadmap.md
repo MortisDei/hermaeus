@@ -153,8 +153,22 @@ landed, including the default flip for voice convergence.
 
 ## Long-term vision (2.x+)
 
-- Aether as the machine's AI substrate: other apps' AI features quietly
-  backed by Aether's local API; per-app data-flow visibility in Privacy Audit.
+- **Aether as the machine's AI substrate — phase 1 DONE.** `Aether.LocalApi`
+  gained a fourth endpoint, `GET /v1/models` (wraps `ILlmService.GetModelsAsync`
+  + `IModelProfileService.ApplyProfiles`, visible models only), so a calling
+  app can discover what's available before picking a `modelId` for
+  `/v1/chat/completions` instead of hardcoding one. Every local API call
+  (all four endpoints) is now logged to the shared `ITraceStore` as a new
+  `TraceKind.LocalApi`, keyed by the caller's self-reported `X-Aether-Client`
+  header (default `"unknown"` if absent). Privacy Audit gained a "Local API
+  activity" item reporting distinct calling apps, call counts, and last-seen
+  time from that trace history — the "per-app data-flow visibility" half of
+  this roadmap line. **Explicitly deferred:** per-app tokens (today's auth is
+  still one shared token; the client header is self-reported and advisory,
+  not an access-control primitive — a caller could lie about its name), an
+  embeddings endpoint, a settings/capabilities probe endpoint, and an agent
+  run/step endpoint (the last of these needs its own design pass around how
+  a non-interactive caller satisfies the agent's approval-gate flow).
 - **Provenance everywhere — phase 1 DONE, in progress.** Goal: any answer can
   be traced to memories, chunks, files, and tool output — "citations"
   generalized from RAG to the whole product. `Aether.Core.Models.SourceReference`

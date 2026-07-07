@@ -6,6 +6,7 @@ using Aether.LocalApi;
 using Aether.Rag;
 using Aether.Rag.Retrieval;
 using Aether.Rag.Storage;
+using Aether.Services;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
@@ -75,6 +76,8 @@ internal static class LocalApiTests
                     services.AddSingleton<ILlmService>(new FakeLlm());
                     services.AddSingleton<IMemoryStore>(memories);
                     services.AddSingleton(rag);
+                    services.AddSingleton<ITraceStore>(new SqliteTraceStore(settingsService));
+                    services.AddSingleton<IModelProfileService>(new ModelProfileService(settingsService));
                 });
                 webBuilder.Configure(app =>
                 {
@@ -174,5 +177,72 @@ internal static class LocalApiTests
                 new ChatCompletionRequest("", [], null, null));
             Equal(HttpStatusCode.BadRequest, response.StatusCode, "modelId/messages are required.");
         }
+    }
+
+    public static async Task ModelsEndpointReturnsVisibleModels()
+    {
+        using var temp = new TempDir();
+        var (host, client) = await StartTestHostAsync(temp);
+        using (host)
+        {
+            client.DefaultRequestHeaders.Add(LocalApiTokenAuth.TokenHeaderName, TestToken);
+            var response = await client.GetAsync("/v1/models");
+            True(response.IsSuccessStatusCode, "Models list should succeed with a valid token.");
+            var body = await response.Content.ReadFromJsonAsync<ModelsResponse>();
+            True(body is not null && body.Models.Any(m => m.Id == "fake"),
+                "Models list should include the fake provider's model.");
+        }
+    }
+
+    public static async Task CallsAreLoggedToTraceStoreWithCallerName()
+    {
+        using var temp = new TempDir();
+        var settingsService = NewSettings(temp);
+        await settingsService.LoadAsync();
+        settingsService.Settings.LocalApi.ApiToken = TestToken;
+        settingsService.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        var traces = new SqliteTraceStore(settingsService);
+
+        var memories = new FakeMemoryStore([]);
+        var ragStore = new SqliteRagStore(settingsService);
+        await ragStore.InitializeAsync();
+        var rag = new RagQueryService(ragStore, new FakeEmbeddingService(), new FakeLlm(), settingsService, new NoOpReranker());
+
+        var hostBuilder = new HostBuilder()
+            .ConfigureWebHost(webBuilder =>
+            {
+                webBuilder.UseTestServer();
+                webBuilder.ConfigureServices(services =>
+                {
+                    services.AddRouting();
+                    services.AddSingleton<ISettingsService>(settingsService);
+                    services.AddSingleton<ISecretStore, FakeSecretStore>();
+                    services.AddSingleton<ILlmService>(new FakeLlm());
+                    services.AddSingleton<IMemoryStore>(memories);
+                    services.AddSingleton(rag);
+                    services.AddSingleton<ITraceStore>(traces);
+                    services.AddSingleton<IModelProfileService>(new ModelProfileService(settingsService));
+                });
+                webBuilder.Configure(app =>
+                {
+                    app.UseRouting();
+                    app.UseLocalApiTokenAuth();
+                    app.UseEndpoints(endpoints => endpoints.MapLocalApiEndpoints());
+                });
+            });
+
+        using var host = await hostBuilder.StartAsync();
+        var client = host.GetTestClient();
+        client.DefaultRequestHeaders.Add(LocalApiTokenAuth.TokenHeaderName, TestToken);
+        client.DefaultRequestHeaders.Add(LocalApiEndpoints.ClientHeaderName, "my-test-app");
+
+        var response = await client.PostAsJsonAsync("/v1/chat/completions",
+            new ChatCompletionRequest("fake", [new ChatMessageDto("user", "hi")], null, null));
+        True(response.IsSuccessStatusCode, "Chat completion should succeed.");
+
+        var recent = await traces.GetRecentAsync(TraceKind.LocalApi, 10);
+        True(recent.Count == 1, "Exactly one local API call should have been traced.");
+        Equal("my-test-app", recent[0].SourceId, "the trace should record the caller's self-reported client name");
+        Equal("chat.completions", recent[0].Operation, "the trace should record which endpoint was called");
     }
 }

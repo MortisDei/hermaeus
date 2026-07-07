@@ -15,15 +15,22 @@ public sealed class PrivacyAuditService : IPrivacyAuditService, IInspectionCheck
     private readonly ISecretStore _secrets;
     private readonly IRuntimeLogService _logs;
     private readonly IVoiceProviderRegistry _voiceProviders;
+    private readonly ITraceStore _traces;
 
     public IReadOnlyList<string> Views { get; } = ["privacy"];
 
-    public PrivacyAuditService(ISettingsService settings, ISecretStore secrets, IRuntimeLogService logs, IVoiceProviderRegistry voiceProviders)
+    public PrivacyAuditService(
+        ISettingsService settings,
+        ISecretStore secrets,
+        IRuntimeLogService logs,
+        IVoiceProviderRegistry voiceProviders,
+        ITraceStore traces)
     {
         _settings = settings;
         _secrets = secrets;
         _logs = logs;
         _voiceProviders = voiceProviders;
+        _traces = traces;
     }
 
     public async Task<IReadOnlyList<PrivacyAuditItem>> ScanAsync(CancellationToken ct = default)
@@ -83,12 +90,46 @@ public sealed class PrivacyAuditService : IPrivacyAuditService, IInspectionCheck
                 ? "Data root is using default resolution. Configure and back it up before relying on long-term history."
                 : settings.DataManagement.DataRootDirectory));
 
+        items.Add(await BuildLocalApiActivityItemAsync(settings, ct));
+
         items.Add(new PrivacyAuditItem(
             "Features that may send data remotely",
             anyRemote ? "Review" : "Local",
             "Remote chat/voice providers can send prompt, document, or voice data outside the local machine when explicitly configured. RAG web ingest remains dataset-scoped and approval driven."));
 
         return items;
+    }
+
+    /// <summary>
+    /// Per-app data-flow visibility for the optional local API host: which
+    /// apps (self-reported via X-Aether-Client) have called Aether, and how
+    /// often, sourced from the shared TraceKind.LocalApi trace history.
+    /// </summary>
+    private async Task<PrivacyAuditItem> BuildLocalApiActivityItemAsync(AppSettings settings, CancellationToken ct)
+    {
+        if (!settings.LocalApi.Enabled)
+            return new PrivacyAuditItem(
+                "Local API activity",
+                "Disabled",
+                "The local API host is off; no other app can reach Aether through it.");
+
+        var recent = await _traces.GetRecentAsync(TraceKind.LocalApi, 200, ct);
+        if (recent.Count == 0)
+            return new PrivacyAuditItem(
+                "Local API activity",
+                "No calls yet",
+                $"Local API is enabled on port {settings.LocalApi.Port}. No calls have been recorded yet.");
+
+        var byClient = recent
+            .GroupBy(r => string.IsNullOrWhiteSpace(r.SourceId) ? "unknown" : r.SourceId)
+            .OrderByDescending(g => g.Max(r => r.CreatedAt))
+            .Select(g => $"{g.Key}: {g.Count()} call(s), last {g.Max(r => r.CreatedAt):u}")
+            .ToList();
+
+        return new PrivacyAuditItem(
+            "Local API activity",
+            "Review",
+            $"{recent.Count} recent call(s) from {byClient.Count} distinct app(s) (self-reported, not access-controlled): {string.Join("; ", byClient)}");
     }
 
     private static bool IsChatProviderEnabled(ProviderDescriptor descriptor, AppSettings settings) => descriptor.Tag switch

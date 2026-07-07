@@ -11,6 +11,22 @@ limit.
 
 ## [Unreleased]
 
+## [0.9.25-alpha] - 2026-07-07
+
+Aether as the machine's AI substrate, phase 1 (docs/review/07-roadmap.md,
+3.0 long-term vision): deepens `Aether.LocalApi` and adds per-app data-flow
+visibility to Privacy Audit.
+
+### Added
+- `GET /v1/models` on `Aether.LocalApi`: lists visible models (id, name, provider, context length) so a calling app can discover what's available instead of hardcoding a `modelId`.
+- Every local API call is now logged to the shared `ITraceStore` as a new `TraceKind.LocalApi`, keyed by the caller's self-reported `X-Aether-Client` header (defaults to `"unknown"` if the caller doesn't send one).
+- Privacy Audit gained a "Local API activity" item: reports distinct calling apps, per-app call counts, and last-seen time, sourced from that trace history. Reports "Disabled" when the host is off and "No calls yet" when enabled but unused.
+
+### Changed
+- `TraceKind` gained a fourth value, `LocalApi`, alongside `Chat`/`Rag`/`Agent`.
+
+Explicitly deferred: per-app tokens (the client header is self-reported and advisory, not verified; today's auth is still one shared token), an embeddings endpoint, a settings/capabilities probe endpoint, and an agent run/step endpoint (needs its own design pass for how a non-interactive caller satisfies the agent's approval gate).
+
 ## [0.9.24-alpha] - 2026-07-07
 
 Model landscape hedging audit (docs/review/07-roadmap.md, 3.0 long-term

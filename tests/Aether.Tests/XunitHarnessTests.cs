@@ -34,6 +34,7 @@ public static class HarnessCases
         [new HarnessCase("system info returns safe fallback values", ServiceTests.SystemInfoSafeFallback)],
         [new HarnessCase("privacy audit reports remote providers and exposed servers", ServiceTests.PrivacyAuditReportsRemoteAndNetworkExposure)],
         [new HarnessCase("privacy audit flags a remote voice provider even with no chat provider enabled", ServiceTests.PrivacyAuditFlagsRemoteVoiceProviderWithNoChatProviderEnabled)],
+        [new HarnessCase("privacy audit shows per-app local API activity", ServiceTests.PrivacyAuditShowsPerAppLocalApiActivity)],
         [new HarnessCase("local ai assets detect and apply paths", ServiceTests.LocalAiAssetsDetectAndApplyPaths)],
         [new HarnessCase("local ai assets prefer existing Models directory with GGUFs", ServiceTests.LocalAiAssetsPreferExistingModelsDirectoryWithGgufs)],
         [new HarnessCase("local ai assets list discovered GGUF models", ServiceTests.LocalAiAssetsListsDiscoveredGgufModels)],
@@ -159,7 +160,9 @@ public static class HarnessCases
         [new HarnessCase("requests are rejected when no token is configured", LocalApiTests.RequestsAreRejectedWhenNoTokenIsConfigured)],
         [new HarnessCase("memory query endpoint returns matching memories", LocalApiTests.MemoryQueryEndpointReturnsMatchingMemories)],
         [new HarnessCase("RAG query endpoint refuses when dataset has no context", LocalApiTests.RagQueryEndpointRefusesWhenDatasetHasNoContext)],
-        [new HarnessCase("chat completion rejects missing fields", LocalApiTests.ChatCompletionRejectsMissingFields)]
+        [new HarnessCase("chat completion rejects missing fields", LocalApiTests.ChatCompletionRejectsMissingFields)],
+        [new HarnessCase("models endpoint returns visible models", LocalApiTests.ModelsEndpointReturnsVisibleModels)],
+        [new HarnessCase("calls are logged to trace store with caller name", LocalApiTests.CallsAreLoggedToTraceStoreWithCallerName)]
     ];
 
     public static IEnumerable<object[]> Voice =>

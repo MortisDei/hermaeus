@@ -68,7 +68,7 @@ penetration-test report.
 | SQLite schemas | Conversation, memory, RAG, and Agent task-index databases record schema versions in `aether_schema_versions` before running additive migrations. | Existing migrations are additive. Destructive migrations still need bespoke backup and verification steps before public release. |
 | Tray and hotkeys | Close exits and stops managed services. Minimize-to-tray is explicit. Tray menu includes Stop Services and Quit. Local hotkeys only work while focused. Windows global hotkeys are opt-in and registered through the OS hotkey API. | Linux global hotkeys remain deferred because Wayland/X11 compositor behavior varies. |
 | Packaging | Linux/Windows archives include README, license, notice, commercial terms, and checksums. Linux desktop install is user-local. | Archives are unsigned; users must verify checksums from a trusted channel. |
-| Local API host | `Aether.LocalApi` is off by default and only started when a user explicitly enables it in Settings. It binds `127.0.0.1` only, never `0.0.0.0`. Every request must present a matching `X-Aether-Token` header; the host fails closed (503) when no token has been generated yet, rather than allowing unauthenticated access. The surface is deliberately minimal: chat completion, memory query, and RAG query only, no agent/benchmark/settings endpoints. | Any other local process on a shared machine that learns the token can call the API for as long as it stays running; there is no token rotation UI beyond regenerate-and-save. |
+| Local API host | `Aether.LocalApi` is off by default and only started when a user explicitly enables it in Settings. It binds `127.0.0.1` only, never `0.0.0.0`. Every request must present a matching `X-Aether-Token` header; the host fails closed (503) when no token has been generated yet, rather than allowing unauthenticated access. The surface is deliberately minimal: chat completion, memory query, RAG query, and a read-only models list, no agent/benchmark/settings endpoints. Every call is logged to the shared trace store (`TraceKind.LocalApi`) keyed by the caller's self-reported `X-Aether-Client` header, and Privacy Audit's "Local API activity" item shows which apps have been calling in, and how often. | Any other local process on a shared machine that learns the token can call the API for as long as it stays running; there is no token rotation UI beyond regenerate-and-save. The `X-Aether-Client` name is self-reported and not verified, so it is a visibility aid, not an access-control or attribution guarantee. |
 
 ## Threat Scenarios
 
@@ -183,11 +183,18 @@ Current mitigations:
   constant-time check; the host refuses all requests with 503 until a token has
   been generated and saved, rather than defaulting to open access.
 - The surface is intentionally minimal (chat completion, memory query, RAG
-  query) so a compromised token exposes less than the full desktop app would.
+  query, models list) so a compromised token exposes less than the full
+  desktop app would.
+- Every call is logged (caller name, endpoint, timing) to the shared trace
+  store and surfaced in Privacy Audit, so unexpected activity is at least
+  visible after the fact, even though the self-reported caller name cannot
+  be verified.
 
 Required follow-up:
 
 - Add a token rotation/revocation affordance beyond regenerate-and-save.
+- Move from a single shared token to per-app tokens so caller identity is
+  verified rather than self-reported.
 
 ## Release Gate Status
 

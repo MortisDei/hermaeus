@@ -5,7 +5,8 @@ public enum TraceKind
 {
     Chat,
     Rag,
-    Agent
+    Agent,
+    LocalApi
 }
 
 /// <summary>
@@ -18,7 +19,10 @@ public sealed record TraceRecord
     public TraceKind Kind { get; init; }
     public DateTime CreatedAt { get; init; } = DateTime.UtcNow;
 
-    /// <summary>Conversation id (chat), dataset id (RAG), or task id (agent).</summary>
+    /// <summary>
+    /// Conversation id (chat), dataset id (RAG), task id (agent), or the
+    /// calling app's self-reported name from <c>X-Aether-Client</c> (local API).
+    /// </summary>
     public string SourceId { get; init; } = string.Empty;
     public string ModelId { get; init; } = string.Empty;
 

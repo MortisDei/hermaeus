@@ -203,7 +203,7 @@ namespace Aether.Tests
                 ExtraArgs = "--host 0.0.0.0"
             });
 
-            var privacyAudit = new PrivacyAuditService(settings, new FakeSecretStore(), new RuntimeLogService(settings), new FakeVoiceProviderRegistry(settings));
+            var privacyAudit = new PrivacyAuditService(settings, new FakeSecretStore(), new RuntimeLogService(settings), new FakeVoiceProviderRegistry(settings), new SqliteTraceStore(settings));
             var vm = new SystemOverviewViewModel(
                 new FakeSystemInfo(),
                 new FakeToasts(),
@@ -223,12 +223,39 @@ namespace Aether.Tests
             settings.Settings.Llm.LlamaCppEnabled = false;
             settings.Settings.Tts.VoiceProvider = "F5Tts"; // FakeVoiceProviderRegistry marks F5-TTS as VoiceCapability.Remote
 
-            var privacyAudit = new PrivacyAuditService(settings, new FakeSecretStore(), new RuntimeLogService(settings), new FakeVoiceProviderRegistry(settings));
+            var privacyAudit = new PrivacyAuditService(settings, new FakeSecretStore(), new RuntimeLogService(settings), new FakeVoiceProviderRegistry(settings), new SqliteTraceStore(settings));
             var items = await privacyAudit.ScanAsync();
 
             var remote = items.Single(i => i.Name == "Remote providers");
             Equal("Review", remote.Status, "a remote voice provider alone should require review, driven by VoiceCapability not a hardcoded provider name");
             True(remote.Detail.Contains("F5-TTS", StringComparison.Ordinal), "detail should name the remote voice provider");
+        }
+
+        public static async Task PrivacyAuditShowsPerAppLocalApiActivity()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var traces = new SqliteTraceStore(settings);
+            var privacyAudit = new PrivacyAuditService(settings, new FakeSecretStore(), new RuntimeLogService(settings), new FakeVoiceProviderRegistry(settings), traces);
+
+            var disabledItems = await privacyAudit.ScanAsync();
+            var disabled = disabledItems.Single(i => i.Name == "Local API activity");
+            Equal("Disabled", disabled.Status, "local API activity should report disabled when the host is off");
+
+            settings.Settings.LocalApi.Enabled = true;
+            var noCallsItems = await privacyAudit.ScanAsync();
+            Equal("No calls yet", noCallsItems.Single(i => i.Name == "Local API activity").Status, "an enabled but unused local API should report no calls yet");
+
+            await traces.AppendAsync(new TraceRecord { Kind = TraceKind.LocalApi, SourceId = "my-app", Operation = "chat.completions" });
+            await traces.AppendAsync(new TraceRecord { Kind = TraceKind.LocalApi, SourceId = "my-app", Operation = "models.list" });
+            await traces.AppendAsync(new TraceRecord { Kind = TraceKind.LocalApi, SourceId = "other-app", Operation = "memory.query" });
+
+            var activeItems = await privacyAudit.ScanAsync();
+            var active = activeItems.Single(i => i.Name == "Local API activity");
+            Equal("Review", active.Status, "recorded local API calls should surface as review");
+            True(active.Detail.Contains("my-app", StringComparison.Ordinal), "detail should name the calling app");
+            True(active.Detail.Contains("other-app", StringComparison.Ordinal), "detail should name every distinct calling app");
         }
 
         public static Task LocalAiAssetsDetectAndApplyPaths()
@@ -1002,7 +1029,7 @@ namespace Aether.Tests
                 new PythonHealthValidator(),
                 new NoOpReranker());
             var trust = new TrustService(settings);
-            var privacy = new PrivacyAuditService(settings, new FakeSecretStore(), new RuntimeLogService(settings), new FakeVoiceProviderRegistry(settings));
+            var privacy = new PrivacyAuditService(settings, new FakeSecretStore(), new RuntimeLogService(settings), new FakeVoiceProviderRegistry(settings), new SqliteTraceStore(settings));
             var engine = new InspectionEngine([doctor, trust, privacy]);
 
             var doctorReport = await engine.RunAsync("doctor");

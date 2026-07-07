@@ -15,3 +15,7 @@ public sealed record RagQueryRequest(string DatasetId, string Question, int? Top
 public sealed record RagSourceDto(string Title, string File, string Path, float Score);
 
 public sealed record RagQueryResponse(string Answer, List<RagSourceDto> Sources);
+
+public sealed record ModelDto(string Id, string Name, string Provider, int? ContextLength);
+
+public sealed record ModelsResponse(List<ModelDto> Models);
