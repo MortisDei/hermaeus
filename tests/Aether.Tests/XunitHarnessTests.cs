@@ -135,6 +135,7 @@ public static class HarnessCases
         [new HarnessCase("agent task state persists blocked draft patches", AgentTests.AgentTaskStatePersistsBlockedDraftPatches)],
         [new HarnessCase("agent draft patch view model shows outcome labels", AgentTests.AgentDraftPatchViewModelShowsOutcomeLabels)],
         [new HarnessCase("agent context pack stays bounded", AgentTests.AgentContextPackStaysBounded)],
+        [new HarnessCase("agent context pack includes activated project instructions", AgentTests.AgentContextPackIncludesActivatedProjectInstructions)],
         [new HarnessCase("agent tool policy gates risky actions", AgentTests.AgentToolPolicyGatesRiskyActions)],
         [new HarnessCase("agent safety gate evaluate command only allows declared safe recipes", AgentTests.AgentSafetyGateEvaluateCommandOnlyAllowsDeclaredSafeRecipes)],
         [new HarnessCase("agent safety gate always requires approval for mcp tools", AgentTests.AgentSafetyGateAlwaysRequiresApprovalForMcpTools)],

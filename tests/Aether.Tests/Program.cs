@@ -433,7 +433,8 @@ internal static class AgentTests
     var ragStore = new SqliteRagStore(settings);
     var rag = new RagQueryService(ragStore, new FakeEmbeddingService(), new FakeLlm(), settings, new NoOpReranker());
     var retrieval = new AgentRetrievalService(rag, ragStore);
-    var builder = new AgentContextBuilder(new AgentWorkspaceTools(), retrieval, new FileAgentWorkspaceMemoryStore(settings));
+    var activation = new WorkspaceActivationService(new WorkspaceManifestService(), new FileWorkspaceProfileStore(settings));
+    var builder = new AgentContextBuilder(new AgentWorkspaceTools(), retrieval, new FileAgentWorkspaceMemoryStore(settings), activation);
     var state = new AgentTaskState
     {
         Goal = "Find alpha",
@@ -476,6 +477,32 @@ internal static class AgentTests
 
     var listResult = await executor.ExecuteAsync("list_files", new Dictionary<string, object?>(), options);
     True(listResult.Source is null, "list_files has no single source, so it should not fabricate one");
+    }
+
+    public static async Task AgentContextPackIncludesActivatedProjectInstructions()
+    {
+    using var temp = new TempDir();
+    var workspace = temp.PathFor("workspace");
+    Directory.CreateDirectory(workspace);
+    await File.WriteAllTextAsync(Path.Combine(workspace, "AGENTS.md"), "Always run tests before finishing.");
+
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var ragStore = new SqliteRagStore(settings);
+    var rag = new RagQueryService(ragStore, new FakeEmbeddingService(), new FakeLlm(), settings, new NoOpReranker());
+    var retrieval = new AgentRetrievalService(rag, ragStore);
+
+    var manifests = new WorkspaceManifestService();
+    await manifests.SaveAsync(workspace, new WorkspaceManifest { InstructionPaths = ["AGENTS.md"] });
+    var activation = new WorkspaceActivationService(manifests, new FileWorkspaceProfileStore(settings));
+
+    var builder = new AgentContextBuilder(new AgentWorkspaceTools(), retrieval, new FileAgentWorkspaceMemoryStore(settings), activation);
+    var state = new AgentTaskState { Goal = "Ship a fix", ActiveStep = "Implement", Summary = "summary" };
+
+    var pack = await builder.BuildAsync(state, new AgentWorkspaceOptions(workspace));
+    True(pack.ProjectInstructions.Count == 1, "context pack should include the activated project instruction file");
+    Equal("AGENTS.md", pack.ProjectInstructions[0].Locator, "project instruction items should carry their relative path as a locator");
+    True(pack.ProjectInstructions[0].Content.Contains("Always run tests"), "project instruction content should be readable to the model");
     }
 
     public static Task AgentToolPolicyGatesRiskyActions()

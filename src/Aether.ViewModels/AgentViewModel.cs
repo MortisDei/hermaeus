@@ -825,7 +825,7 @@ public partial class AgentViewModel : ObservableObject
         StatusMessage = result.LogEntry;
         NextActionPreview = JsonSerializer.Serialize(result.PlannerResponse.NextAction, new JsonSerializerOptions { WriteIndented = true });
         RetrievedContext.Clear();
-        foreach (var item in result.ContextPack.RetrievedMemory.Concat(result.ContextPack.RetrievedFiles))
+        foreach (var item in result.ContextPack.RetrievedMemory.Concat(result.ContextPack.RetrievedFiles).Concat(result.ContextPack.ProjectInstructions))
         {
             RetrievedContext.Add(new AgentContextItemViewModel
             {

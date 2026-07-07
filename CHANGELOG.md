@@ -11,6 +11,17 @@ limit.
 
 ## [Unreleased]
 
+## [0.9.26-alpha] - 2026-07-07
+
+Project-level AI configuration (docs/review/03-architectural-opportunities.md
+item 10): finishes the "selecting a workspace activates its full
+configuration" thought. `.aether/workspace.json`'s instruction paths already
+round-tripped, but nothing ever read the files back into the agent's context.
+
+### Added
+- `AgentContextPack.ProjectInstructions`: the Agent now reads each activated workspace's declared instruction files (`AGENTS.md`, `CLAUDE.md`, etc., whichever were saved via "Save as Workspace Defaults") and folds their content into the context pack sent to the model, budget-capped like every other context section. Previously these paths were stored and shown in the UI but never actually reached the model.
+- The Agent panel's Retrieved Context list now also shows activated project instructions, alongside retrieved memory and files.
+
 ## [0.9.25-alpha] - 2026-07-07
 
 Aether as the machine's AI substrate, phase 1 (docs/review/07-roadmap.md,

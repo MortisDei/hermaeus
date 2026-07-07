@@ -10,19 +10,23 @@ public sealed class AgentContextBuilder : IAgentContextBuilder
     // via ContextPackBuilder.
     private const int MemoryTokenBudget = 4000;
     private const int RagTokenBudget = 4000;
+    private const int InstructionsTokenBudget = 3000;
 
     private readonly IAgentWorkspaceTools _workspaceTools;
     private readonly IAgentRetrievalService _retrieval;
     private readonly IAgentWorkspaceMemoryStore _workspaceMemory;
+    private readonly IWorkspaceActivationService _activation;
 
     public AgentContextBuilder(
         IAgentWorkspaceTools workspaceTools,
         IAgentRetrievalService retrieval,
-        IAgentWorkspaceMemoryStore workspaceMemory)
+        IAgentWorkspaceMemoryStore workspaceMemory,
+        IWorkspaceActivationService activation)
     {
         _workspaceTools = workspaceTools;
         _retrieval = retrieval;
         _workspaceMemory = workspaceMemory;
+        _activation = activation;
     }
 
     public async Task<AgentContextPack> BuildAsync(
@@ -47,7 +51,42 @@ public sealed class AgentContextBuilder : IAgentContextBuilder
         AddWorkspaceContext(pack, options);
         await AddWorkspaceMemoryAsync(pack, options, ct);
         await AddRagContextAsync(pack, state, options, ct);
+        await AddProjectInstructionsAsync(pack, options, ct);
         return pack;
+    }
+
+    private async Task AddProjectInstructionsAsync(AgentContextPack pack, AgentWorkspaceOptions options, CancellationToken ct)
+    {
+        try
+        {
+            var activation = await _activation.ActivateAsync(options.WorkspaceRoot, ct);
+            if (activation.InstructionPaths.Count == 0) return;
+
+            var candidates = new List<ContextPart>();
+            foreach (var path in activation.InstructionPaths)
+            {
+                try
+                {
+                    var read = _workspaceTools.ReadFile(options, path);
+                    candidates.Add(new ContextPart("instructions", read.RelativePath, read.Content, Data: read));
+                }
+                catch
+                {
+                    // A stale or removed instruction path should not fail context building.
+                }
+            }
+
+            var packed = ContextPackBuilder.Pack(candidates, InstructionsTokenBudget, maxParts: options.MaxContextItems);
+            pack.ProjectInstructions.AddRange(packed.Parts.Select(part =>
+            {
+                var read = (AgentFileReadResult)part.Data!;
+                return new AgentRetrievedItem("instructions", read.RelativePath, part.Content, 1.0, Locator: read.RelativePath);
+            }));
+        }
+        catch (Exception ex)
+        {
+            pack.KnownRisks.Add($"Project instructions unavailable: {ex.Message}");
+        }
     }
 
     private async Task AddWorkspaceMemoryAsync(AgentContextPack pack, AgentWorkspaceOptions options, CancellationToken ct)

@@ -192,6 +192,18 @@ landed, including the default flip for voice convergence.
   and memory injection into the prompt is wired but unused from
   `ChatViewModel`) — a chat "Sources" panel is net-new UI, not part of this
   slice.
+- **Project-level AI configuration (Opportunities #10) — DONE.** The
+  `.aether/workspace.json` manifest from 2.0 item 1 already round-tripped
+  `InstructionPaths`, but nothing ever read the files back in: they were
+  stored and shown in the Agent panel's file list, never folded into the
+  model's context. `AgentContextBuilder` now resolves the activated
+  workspace's instruction paths, reads each one through the existing
+  path-safe `IAgentWorkspaceTools.ReadFile`, and packs their content into a
+  new `AgentContextPack.ProjectInstructions` section (same budget/bounding
+  discipline as memory and RAG context), surfaced in the Retrieved Context
+  panel. Model and dataset selection already activated atomically via 2.0
+  item 1; this closes the last piece ("system-prompt additions from project
+  instructions"). Memory scope needed no change, as already noted.
 - Multi-machine sync of the data root via user-owned transport (file sync,
   no Aether cloud) — sovereignty preserved.
 - Agent workflow composition — still explicitly deferred per Opportunities #9:

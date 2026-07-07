@@ -120,6 +120,7 @@ public sealed class AgentContextPack
     public string TaskStateSummary { get; set; } = string.Empty;
     public List<AgentRetrievedItem> RetrievedMemory { get; set; } = [];
     public List<AgentRetrievedItem> RetrievedFiles { get; set; } = [];
+    public List<AgentRetrievedItem> ProjectInstructions { get; set; } = [];
     public List<AgentToolResult> ToolResults { get; set; } = [];
     public List<string> KnownRisks { get; set; } = [];
     public string RequiredOutputFormat { get; set; } =

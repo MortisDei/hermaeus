@@ -123,7 +123,7 @@ execution has been in users' hands and real sequencing pain is observed.
 Building an orchestrator before the primitives are proven is how projects
 acquire their worst code.
 
-## 10. Project-level AI configuration — ADOPT, cheap and high-value
+## 10. Project-level AI configuration — ADOPT, cheap and high-value — DONE
 
 Workspace profiles already record preferred chat model + linked RAG dataset.
 Finish the thought: selecting a workspace should activate its full
@@ -132,6 +132,14 @@ instructions, memory scope). Add a discoverable on-disk form (e.g.
 `.aether/config.json` in the workspace) so configuration travels with the
 repo. This composes existing features rather than adding one; it is the "glue"
 the docs already gesture at.
+
+Shipped via the `.aether/workspace.json` manifest introduced for 2.0 item 1
+(model + dataset activation) plus a follow-up closing the one piece that
+manifest didn't finish: `AgentContextBuilder` now reads the manifest's
+declared instruction files back into the model's context
+(`AgentContextPack.ProjectInstructions`), so project instructions actually
+reach the agent instead of only being displayed in the UI. See
+docs/review/07-roadmap.md's long-term-vision section for the detail.
 
 ## 11. Provider failover — REJECT
 
