@@ -775,17 +775,11 @@ public partial class AgentViewModel : ObservableObject
     private async Task ActivateWorkspaceAsync()
     {
         var activation = await _workspaceActivation.ActivateAsync(WorkspaceRoot);
-        if (!string.IsNullOrWhiteSpace(activation.PreferredModelId))
-        {
-            var model = AvailableModels.FirstOrDefault(m => m.Id == activation.PreferredModelId);
-            if (model is not null) SelectedModel = model;
-        }
+        var model = activation.ResolvePreferredModel(AvailableModels, m => m.Id);
+        if (model is not null) SelectedModel = model;
 
-        if (!string.IsNullOrWhiteSpace(activation.LinkedRagDatasetId))
-        {
-            var dataset = Datasets.FirstOrDefault(d => d.Id == activation.LinkedRagDatasetId);
-            if (dataset is not null) SelectedDataset = dataset;
-        }
+        var dataset = activation.ResolveLinkedDataset(Datasets, d => d.Id);
+        if (dataset is not null) SelectedDataset = dataset;
     }
 
     [RelayCommand]

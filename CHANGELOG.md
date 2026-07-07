@@ -11,6 +11,19 @@ limit.
 
 ## [Unreleased]
 
+## [0.9.32-alpha] - 2026-07-07
+
+ViewModel orchestration extraction, part 1 (docs/review/01-architecture-review.md
+item 5): pulls pure, testable logic out of `ChatViewModel`/`AgentViewModel`/
+`RagViewModel` into plain services, leaving the ViewModels thinner. First of
+several slices.
+
+### Added
+- `Aether.Core.Services.ChatContextUsageCalculator`: resolves the effective context window and computes usage label/percent/warning-level display values, extracted from `ChatViewModel.UpdateContextUsage`/`ResolveContextWindowLimit`. `ChatViewModel.TruncateHistoryToContextWindow` now delegates to the calculator's version, keeping its existing public signature for the one test call site that depends on it.
+- `Aether.Rag.RagStreamProtocol`: parses the `__RAG_SOURCES__`/`__RAG_TRACE__` sentinel blocks `RagQueryService` interleaves into its answer stream. `RagViewModel` and `Aether.Rag.Eval.RagEvalService` each had their own independent copy of this exact parsing logic; both now share one implementation.
+- `Aether.Agent.Models.WorkspaceActivationSelection`: resolves a `WorkspaceActivation`'s preferred model/dataset ids against a ViewModel's loaded candidate list. `ChatViewModel` and `AgentViewModel` each duplicated this id-to-object lookup inline.
+- Unit tests for all three new pure-logic classes (`ChatContextUsageCalculatorTests`, `RagStreamProtocolTests`, `WorkspaceActivationSelectionTests`), testable without any UI plumbing for the first time.
+
 ## [0.9.31-alpha] - 2026-07-07
 
 Closes the remaining half of docs/review/06-technical-debt.md item 4

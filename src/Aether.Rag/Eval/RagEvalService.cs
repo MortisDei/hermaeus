@@ -129,7 +129,7 @@ public sealed class RagEvalService
         {
             if (token.StartsWith("__RAG_SOURCES__"))
             {
-                retrieved = ParseSources(token);
+                retrieved = RagStreamProtocol.ParseSources(token);
                 continue;
             }
             if (token.StartsWith("__RAG_TRACE__"))
@@ -298,20 +298,4 @@ public sealed class RagEvalService
         Content = scored.Chunk.Content
     };
 
-    private static List<RagTraceChunk> ParseSources(string token)
-    {
-        var start = "__RAG_SOURCES__";
-        var end = "__END_SOURCES__";
-        var json = token[start.Length..token.IndexOf(end, StringComparison.Ordinal)];
-        using var doc = JsonDocument.Parse(json);
-        return doc.RootElement.EnumerateArray().Select(el => new RagTraceChunk
-        {
-            Rank = el.GetProperty("rank").GetInt32(),
-            Title = el.GetProperty("title").GetString() ?? string.Empty,
-            File = el.GetProperty("file").GetString() ?? string.Empty,
-            Path = el.TryGetProperty("path", out var path) ? path.GetString() ?? string.Empty : string.Empty,
-            Score = el.GetProperty("score").GetSingle(),
-            Content = el.TryGetProperty("content", out var content) ? content.GetString() ?? string.Empty : string.Empty
-        }).ToList();
-    }
 }

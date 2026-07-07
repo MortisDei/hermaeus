@@ -640,23 +640,19 @@ public partial class RagViewModel : ObservableObject
     {
         try
         {
-            var json = Regex.Match(header, @"__RAG_SOURCES__(.+)__END_SOURCES__").Groups[1].Value;
-            var list = JsonSerializer.Deserialize<List<JsonElement>>(json);
-            if (list is null) return;
+            var chunks = RagStreamProtocol.ParseSources(header);
             Sources.Clear();
             SelectedSource = null;
             ShowSourceInspector = false;
-            foreach (var el in list)
+            foreach (var chunk in chunks)
                 Sources.Add(new RagSourceViewModel
                 {
-                    Rank  = el.GetProperty("rank").GetInt32(),
-                    Title = el.GetProperty("title").GetString() ?? string.Empty,
-                    File  = el.GetProperty("file").GetString()  ?? string.Empty,
-                    Path  = el.TryGetProperty("path", out var path) ? path.GetString() ?? string.Empty : string.Empty,
-                    Score = el.GetProperty("score").GetSingle(),
-                    Content = el.TryGetProperty("content", out var content)
-                        ? content.GetString() ?? string.Empty
-                        : string.Empty
+                    Rank = chunk.Rank,
+                    Title = chunk.Title,
+                    File = chunk.File,
+                    Path = chunk.Path,
+                    Score = chunk.Score,
+                    Content = chunk.Content
                 });
             SelectedSource = Sources.FirstOrDefault();
             if (SelectedSource is not null)
@@ -674,25 +670,23 @@ public partial class RagViewModel : ObservableObject
     {
         try
         {
-            var json = Regex.Match(token, @"__RAG_TRACE__(.+)__END_TRACE__").Groups[1].Value;
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-            LastTraceId = root.GetProperty("Id").GetString() ?? string.Empty;
-            LastRetrievalLatencyMs = root.GetProperty("RetrievalLatencyMs").GetInt64();
-            LastTotalLatencyMs = root.GetProperty("TotalLatencyMs").GetInt64();
-            GroundingScore = root.GetProperty("GroundingScore").GetSingle();
-            if (root.TryGetProperty("ExpandedQuery", out var expandedQuery))
-                ExpandedQuery = expandedQuery.GetString() ?? string.Empty;
-            if (root.TryGetProperty("QueryVariants", out var variants))
-                QueryVariants = string.Join("\n", variants.EnumerateArray().Select(v => v.GetString()).Where(v => !string.IsNullOrWhiteSpace(v)));
-            if (root.TryGetProperty("PlannerNotes", out var plannerNotes))
-                PlannerNotes = plannerNotes.GetString() ?? string.Empty;
-            if (root.TryGetProperty("ContextPackingSummary", out var packingSummary))
-                ContextPackingSummary = packingSummary.GetString() ?? string.Empty;
-            if (root.TryGetProperty("Refused", out var refused))
-                TraceRefused = refused.GetBoolean();
-            if (root.TryGetProperty("RefusalReason", out var refusalReason))
-                RefusalReason = refusalReason.GetString() ?? string.Empty;
+            var update = RagStreamProtocol.ParseTrace(token);
+            LastTraceId = update.Id;
+            LastRetrievalLatencyMs = update.RetrievalLatencyMs;
+            LastTotalLatencyMs = update.TotalLatencyMs;
+            GroundingScore = update.GroundingScore;
+            if (update.ExpandedQuery is not null)
+                ExpandedQuery = update.ExpandedQuery;
+            if (update.QueryVariants is not null)
+                QueryVariants = update.QueryVariants;
+            if (update.PlannerNotes is not null)
+                PlannerNotes = update.PlannerNotes;
+            if (update.ContextPackingSummary is not null)
+                ContextPackingSummary = update.ContextPackingSummary;
+            if (update.Refused is not null)
+                TraceRefused = update.Refused.Value;
+            if (update.RefusalReason is not null)
+                RefusalReason = update.RefusalReason;
         }
         catch (Exception ex) when (ex is JsonException or InvalidOperationException or KeyNotFoundException)
         {

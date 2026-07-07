@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using Aether.Agent.Models;
 using Aether.Agent.Services;
 using Aether.Core.Models;
 using Aether.Core.Services;
@@ -225,7 +226,7 @@ public partial class ChatViewModel : ObservableObject
         if (AvailableModels.Count == 0)
             await LoadModelsAsync();
 
-        var model = AvailableModels.FirstOrDefault(m => m.Id == activation.PreferredModelId);
+        var model = activation.ResolvePreferredModel(AvailableModels, m => m.Id);
         if (model is not null)
             SelectedModel = model;
     }
@@ -873,56 +874,37 @@ public partial class ChatViewModel : ObservableObject
     private void UpdateContextUsage(ChatTokenUsage usage, string kind)
     {
         var limit = ResolveContextWindowLimit();
-        var total = usage.TotalTokens > 0 ? usage.TotalTokens : usage.PromptTokens + usage.CompletionTokens;
+        var result = ChatContextUsageCalculator.Compute(usage, limit, kind);
         ContextUsageKind = kind;
-        ContextUsageLabel = $"{total:N0} / {limit:N0} tokens";
-        ContextUsagePercent = limit <= 0 ? 0 : Math.Clamp(total * 100.0 / limit, 0, 999);
-        ContextUsageWarningLevel = ContextUsagePercent >= 95 ? "Critical" :
-            ContextUsagePercent >= 80 ? "Warning" : "None";
-        IsContextUsageCritical = ContextUsageWarningLevel == "Critical";
-        IsContextUsageWarning = ContextUsageWarningLevel == "Warning";
-        ContextUsageTooltip = kind == "Reported by provider"
-            ? $"Reported by provider. Prompt {usage.PromptTokens:N0}, completion {usage.CompletionTokens:N0}, total {total:N0}."
-            : $"Estimated locally from visible chat, system prompt, draft input, and ready attachments. About {ContextUsagePercent:F0}% of the selected context window.";
+        ContextUsageLabel = result.Label;
+        ContextUsagePercent = result.Percent;
+        ContextUsageWarningLevel = result.WarningLevel;
+        IsContextUsageCritical = result.IsCritical;
+        IsContextUsageWarning = result.IsWarning;
+        ContextUsageTooltip = result.Tooltip;
     }
 
     private int ResolveContextWindowLimit()
     {
-        if (SelectedModel?.DefaultContextSize is { } modelLimit && modelLimit > 0)
-            return modelLimit;
-
         var chatServer = _settings.Settings.ManagedServers
             .FirstOrDefault(s => s.Name.Equals("Chat", StringComparison.OrdinalIgnoreCase)
                 && !s.EmbeddingsMode);
-        if (chatServer?.ContextSize is > 0)
-            return chatServer.ContextSize;
-
-        return Math.Max(1, _settings.Settings.Llm.MaxTokens);
+        return ChatContextUsageCalculator.ResolveContextWindowLimit(
+            SelectedModel?.DefaultContextSize,
+            chatServer?.ContextSize,
+            _settings.Settings.Llm.MaxTokens);
     }
 
     public static List<ChatMessage> TruncateHistoryToContextWindow(
         IReadOnlyList<MessageViewModel> messages,
         int contextWindow,
         int systemTokens = 0,
-        int currentPromptTokens = 0)
-    {
-        var reservedResponseTokens = Math.Max(256, contextWindow / 8);
-        var budget = Math.Max(256, contextWindow - systemTokens - currentPromptTokens - reservedResponseTokens);
-        var selected = new Stack<ChatMessage>();
-        var used = 0;
-
-        for (var i = messages.Count - 1; i >= 0; i--)
-        {
-            var message = messages[i];
-            var tokens = EstimateTokens(message.Content);
-            if (selected.Count > 0 && used + tokens > budget)
-                break;
-            selected.Push(new ChatMessage(message.Role, message.Content));
-            used += tokens;
-        }
-
-        return selected.ToList();
-    }
+        int currentPromptTokens = 0) =>
+        ChatContextUsageCalculator.TruncateHistoryToContextWindow(
+            messages.Select(m => new ChatMessage(m.Role, m.Content)).ToList(),
+            contextWindow,
+            systemTokens,
+            currentPromptTokens);
 
     private async Task PersistAsync()
     {

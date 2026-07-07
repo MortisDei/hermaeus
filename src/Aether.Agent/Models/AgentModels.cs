@@ -267,6 +267,24 @@ public sealed record WorkspaceActivation(
     IReadOnlyList<string> InstructionPaths,
     bool FromManifest);
 
+/// <summary>
+/// Resolves a <see cref="WorkspaceActivation"/>'s preferred-id fields against
+/// a ViewModel's already-loaded candidate list. Both Chat and Agent used to
+/// duplicate this id-to-object lookup inline.
+/// </summary>
+public static class WorkspaceActivationSelection
+{
+    public static T? ResolvePreferredModel<T>(this WorkspaceActivation activation, IEnumerable<T> candidates, Func<T, string> id) =>
+        string.IsNullOrWhiteSpace(activation.PreferredModelId)
+            ? default
+            : candidates.FirstOrDefault(c => id(c) == activation.PreferredModelId);
+
+    public static T? ResolveLinkedDataset<T>(this WorkspaceActivation activation, IEnumerable<T> candidates, Func<T, string> id) =>
+        string.IsNullOrWhiteSpace(activation.LinkedRagDatasetId)
+            ? default
+            : candidates.FirstOrDefault(c => id(c) == activation.LinkedRagDatasetId);
+}
+
 public sealed class WorkspaceAnalysisReport
 {
     public WorkspaceProfile Profile { get; set; } = new();
