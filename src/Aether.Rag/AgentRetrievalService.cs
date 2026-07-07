@@ -32,7 +32,8 @@ public sealed class AgentRetrievalService : IAgentRetrievalService
                 Content: s.Chunk.Content,
                 TokenCount: Math.Max(s.Chunk.TokenCount, 1),
                 Score: s.Score,
-                SourceModifiedUtc: s.Chunk.SourceModifiedUtc))
+                SourceModifiedUtc: s.Chunk.SourceModifiedUtc,
+                Locator: string.IsNullOrWhiteSpace(s.Chunk.SourcePath) ? s.Chunk.SourceFile : s.Chunk.SourcePath))
             .ToList();
     }
 }

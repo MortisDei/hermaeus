@@ -11,6 +11,20 @@ limit.
 
 ## [Unreleased]
 
+## [0.9.23-alpha] - 2026-07-07
+
+Opens the 3.0-horizon "long-term vision" roadmap with the first slice of
+"provenance everywhere" (docs/review/07-roadmap.md).
+
+### Added
+- `Aether.Core.Models.SourceReference` and `ProvenanceKind`: a small shared record for pointing back to where a piece of content came from (a RAG chunk, a memory, a workspace file, or an agent tool result), the seed of generalizing RAG's citations to the rest of the product.
+
+### Fixed
+- The agent's minimal RAG retrieval contract (`RetrievedChunk` in `Aether.Core.Services`) was silently dropping the source file/path for every chunk pulled into agent context. It now carries a `Locator`, threaded through `AgentRetrievedItem` into the Agent view's "Retrieved Context" panel, so RAG-sourced context in the Agent panel is traceable back to its file again.
+
+### Changed
+- `AgentToolResult` gained an optional `SourceReference? Source`, populated for tools with one clear locator (`read_file`, `summarize_file`, `draft_patch`, `apply_draft_patch`, `mcp:*`); left null where a single source doesn't make sense (`run_command`, `list_files`).
+
 ## [0.9.22-alpha] - 2026-07-07
 
 Flips the native Kokoro-ONNX voice path from opt-in to the default, closing

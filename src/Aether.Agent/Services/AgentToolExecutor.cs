@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Diagnostics;
 using Aether.Agent.Models;
+using Aether.Core.Models;
 using Aether.Core.Services;
 
 namespace Aether.Agent.Services;
@@ -44,7 +45,8 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
             {
                 Tool = trimmedToolName,
                 Arguments = new Dictionary<string, object?>(arguments, StringComparer.OrdinalIgnoreCase),
-                ResultSummary = Summarize(mcpOutput)
+                ResultSummary = Summarize(mcpOutput),
+                Source = new SourceReference(ProvenanceKind.AgentTool, trimmedToolName, Locator: trimmedToolName)
             };
         }
 
@@ -72,7 +74,19 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
         {
             Tool = normalized,
             Arguments = new Dictionary<string, object?>(arguments, StringComparer.OrdinalIgnoreCase),
-            ResultSummary = Summarize(result)
+            ResultSummary = Summarize(result),
+            Source = BuildSource(normalized, arguments)
+        };
+    }
+
+    private static SourceReference? BuildSource(string normalizedTool, Dictionary<string, object?> arguments)
+    {
+        var relativePath = Arg(arguments, "relative_path", "path");
+        return normalizedTool switch
+        {
+            "read_file" or "summarize_file" or "draft_patch" or "apply_draft_patch" when !string.IsNullOrWhiteSpace(relativePath) =>
+                new SourceReference(ProvenanceKind.Workspace, relativePath, Locator: relativePath),
+            _ => null
         };
     }
 

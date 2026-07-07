@@ -68,7 +68,8 @@ public sealed class AgentContextBuilder : IAgentContextBuilder
                     entry.Title,
                     part.Content,
                     1.0,
-                    entry.UpdatedAt));
+                    entry.UpdatedAt,
+                    Locator: entry.Id));
             }
 
             if (entries.Count > 0)
@@ -88,11 +89,11 @@ public sealed class AgentContextBuilder : IAgentContextBuilder
             var results = string.IsNullOrWhiteSpace(query)
                 ? _workspaceTools.ListFiles(options)
                     .Take(options.MaxContextItems)
-                    .Select(path => new AgentRetrievedItem("workspace", path, path, 0))
+                    .Select(path => new AgentRetrievedItem("workspace", path, path, 0, Locator: path))
                     .ToList()
                 : _workspaceTools.SearchFiles(options, query)
                     .Take(options.MaxContextItems)
-                    .Select(r => new AgentRetrievedItem("workspace", r.RelativePath, r.Snippet, 0, r.ModifiedUtc))
+                    .Select(r => new AgentRetrievedItem("workspace", r.RelativePath, r.Snippet, 0, r.ModifiedUtc, Locator: r.RelativePath))
                     .ToList();
 
             pack.RetrievedFiles.AddRange(results);
@@ -138,7 +139,8 @@ public sealed class AgentContextBuilder : IAgentContextBuilder
                         chunk.Title,
                         part.Content,
                         chunk.Score,
-                        chunk.SourceModifiedUtc);
+                        chunk.SourceModifiedUtc,
+                        Locator: chunk.Locator);
                 }));
         }
         catch (Exception ex)

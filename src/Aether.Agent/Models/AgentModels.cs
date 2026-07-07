@@ -1,3 +1,5 @@
+using Aether.Core.Models;
+
 namespace Aether.Agent.Models;
 
 public enum AgentTaskStatus
@@ -129,7 +131,8 @@ public sealed record AgentRetrievedItem(
     string Title,
     string Content,
     double Score,
-    DateTime? Timestamp = null);
+    DateTime? Timestamp = null,
+    string? Locator = null);
 
 public sealed class AgentToolResult
 {
@@ -137,6 +140,13 @@ public sealed class AgentToolResult
     public Dictionary<string, object?> Arguments { get; set; } = [];
     public string ResultSummary { get; set; } = string.Empty;
     public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+
+    /// <summary>
+    /// Where this result's evidence actually came from (a file path, a
+    /// dataset/chunk, an MCP server:tool pair), when the tool has one clear
+    /// locator. Left null for tools with no single source (e.g. run_command).
+    /// </summary>
+    public SourceReference? Source { get; set; }
 }
 
 public sealed class AgentPendingToolAction

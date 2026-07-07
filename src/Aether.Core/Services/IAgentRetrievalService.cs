@@ -8,7 +8,8 @@ public sealed record RetrievedChunk(
     string Content,
     int TokenCount,
     double Score,
-    DateTime? SourceModifiedUtc);
+    DateTime? SourceModifiedUtc,
+    string? Locator = null);
 
 /// <summary>The minimal retrieval seam the agent depends on. Implemented by
 /// Aether.Rag so Aether.Agent never references the retrieval implementation

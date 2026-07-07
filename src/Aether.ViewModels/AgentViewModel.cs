@@ -17,6 +17,8 @@ public sealed class AgentContextItemViewModel
     public string Title { get; init; } = string.Empty;
     public string Content { get; init; } = string.Empty;
     public string ScoreDisplay { get; init; } = string.Empty;
+    public string Locator { get; init; } = string.Empty;
+    public bool HasLocator => !string.IsNullOrWhiteSpace(Locator);
 }
 
 public sealed class AgentReviewQueueItemViewModel
@@ -830,7 +832,8 @@ public partial class AgentViewModel : ObservableObject
                 Source = item.Source,
                 Title = item.Title,
                 Content = item.Content,
-                ScoreDisplay = item.Score > 0 ? item.Score.ToString("F3") : string.Empty
+                ScoreDisplay = item.Score > 0 ? item.Score.ToString("F3") : string.Empty,
+                Locator = item.Locator ?? string.Empty
             });
         }
 

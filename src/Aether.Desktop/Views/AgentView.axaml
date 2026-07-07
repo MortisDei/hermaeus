@@ -405,6 +405,12 @@
                                                    FontSize="12"
                                                    Opacity="0.65"
                                                    MaxHeight="92" />
+                                        <TextBlock Text="{Binding Locator}"
+                                                   IsVisible="{Binding HasLocator}"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   FontSize="10"
+                                                   FontFamily="Consolas,monospace"
+                                                   Opacity="0.5" />
                                     </StackPanel>
                                 </Border>
                             </DataTemplate>

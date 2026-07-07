@@ -155,8 +155,29 @@ landed, including the default flip for voice convergence.
 
 - Aether as the machine's AI substrate: other apps' AI features quietly
   backed by Aether's local API; per-app data-flow visibility in Privacy Audit.
-- Provenance everywhere: any answer can be traced to memories, chunks, files,
-  and model versions — "citations" generalized from RAG to the whole product.
+- **Provenance everywhere — phase 1 DONE, in progress.** Goal: any answer can
+  be traced to memories, chunks, files, and tool output — "citations"
+  generalized from RAG to the whole product. `Aether.Core.Models.SourceReference`
+  (a `Kind`/`Title`/`Locator`/`Snippet`/`Score`/`Timestamp` record) is the new
+  shared shape. Phase 1 closed a real data-loss bug at the Agent/RAG seam:
+  `RetrievedChunk` (the agent's minimal retrieval contract, `Aether.Core.Services`)
+  was dropping the source file/path entirely; it now carries a `Locator`, and
+  `AgentRetrievedItem`/`AgentContextItemViewModel` propagate it through to the
+  "Retrieved Context" panel in the Agent view. `AgentToolResult` gained an
+  optional `SourceReference? Source`, populated for tools with one clear
+  locator (`read_file`, `summarize_file`, `draft_patch`, `apply_draft_patch`,
+  and `mcp:*` calls), left null where there isn't one (`run_command`,
+  `list_files`). **Deferred, explicitly not done yet:** RAG's own citation
+  pipeline (`RagQueryTrace`/`RagTraceChunk`, the `__RAG_SOURCES__` stream
+  protocol) still uses its own shape rather than `SourceReference` — converging
+  it is a wire-format change to a working, user-facing feature and warrants
+  its own pass. Memory (`Memory.SourceConversationId`) still only records
+  which conversation a memory came from, not a structured source reference —
+  adding one needs a `MemoryStore` schema migration, not done here. Chat does
+  not yet consume RAG or memory citations at all (today it doesn't call RAG,
+  and memory injection into the prompt is wired but unused from
+  `ChatViewModel`) — a chat "Sources" panel is net-new UI, not part of this
+  slice.
 - Multi-machine sync of the data root via user-owned transport (file sync,
   no Aether cloud) — sovereignty preserved.
 - Agent workflow composition — only if 2.0's execution slice demonstrates

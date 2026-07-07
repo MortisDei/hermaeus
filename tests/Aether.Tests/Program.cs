@@ -6,6 +6,7 @@ using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using Aether.Agent.Models;
 using Aether.Agent.Services;
+using Aether.Core.Models;
 using Aether.Core.Services;
 using Aether.Rag;
 using Aether.Rag.Embeddings;
@@ -455,6 +456,26 @@ internal static class AgentTests
     True(pack.RetrievedFiles.Count <= 1, "context pack should honor context item bound");
     Equal(5, pack.ToolResults.Count, "context pack should keep latest five tool results");
     Equal("two", pack.ToolResults[0].Tool, "context pack should drop oldest tool results");
+    False(string.IsNullOrWhiteSpace(pack.RetrievedFiles[0].Locator), "retrieved workspace files should carry a locator back to the source path");
+    }
+
+    public static async Task AgentToolExecutorPopulatesSourceReferenceForFileTools()
+    {
+    using var temp = new TempDir();
+    var workspace = temp.PathFor("workspace");
+    Directory.CreateDirectory(workspace);
+    await File.WriteAllTextAsync(Path.Combine(workspace, "notes.md"), "hello from notes");
+
+    var executor = new AgentToolExecutor(new AgentWorkspaceTools());
+    var options = new AgentWorkspaceOptions(workspace);
+
+    var readResult = await executor.ExecuteAsync("read_file", new Dictionary<string, object?> { ["relative_path"] = "notes.md" }, options);
+    True(readResult.Source is not null, "read_file should populate a source reference");
+    Equal("notes.md", readResult.Source!.Locator, "read_file's source reference should point at the relative path");
+    Equal(ProvenanceKind.Workspace, readResult.Source.Kind, "read_file's source reference should be workspace-kind");
+
+    var listResult = await executor.ExecuteAsync("list_files", new Dictionary<string, object?>(), options);
+    True(listResult.Source is null, "list_files has no single source, so it should not fabricate one");
     }
 
     public static Task AgentToolPolicyGatesRiskyActions()
