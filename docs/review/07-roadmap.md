@@ -230,5 +230,5 @@ landed, including the default flip for voice convergence.
 
 Hosted services, accounts, telemetry, in-process plugin API, provider
 failover, vector databases, an ORM, a web UI. Each has a rationale in
-documents 02/03/08; write them down in CONTRIBUTING so the "no" survives
-contributor enthusiasm.
+documents 02/03/08; written down in CONTRIBUTING.md's "Explicit non-goals"
+section so the "no" survives contributor enthusiasm.

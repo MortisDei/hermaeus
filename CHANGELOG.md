@@ -11,6 +11,17 @@ limit.
 
 ## [Unreleased]
 
+## [0.9.27-alpha] - 2026-07-07
+
+Naming/vocabulary drift (docs/review/06-technical-debt.md item 7) closed as
+documentation, not renamed code: `ModelProfile`/`RuntimeProfile`/
+`WorkspaceProfile`/tune profiles are deliberately separate schemas sharing a
+word, and are stable public types by now, so a cosmetic rename was judged
+riskier than the naming friction it relieves.
+
+### Changed
+- `CONTRIBUTING.md` gained a "Vocabulary" section disambiguating "memory," "workspace," and "profile" for future contributors, and an "Explicit non-goals" section listing what Aether deliberately does not do (hosted services, accounts, telemetry, plugin API, provider failover, vector databases, an ORM, a web UI), per docs/review/07-roadmap.md's closing instruction to write these down so they survive contributor enthusiasm.
+
 ## [0.9.26-alpha] - 2026-07-07
 
 Project-level AI configuration (docs/review/03-architectural-opportunities.md

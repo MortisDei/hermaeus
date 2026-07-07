@@ -91,7 +91,7 @@ resources, and a `PythonHealthValidator` that exists to fight this fire.
 Every OS update, pip resolver change, and CUDA release is a support ticket.
 Documented remediation in Dependency Review (ONNX-first voice).
 
-## 7. Naming and vocabulary drift
+## 7. Naming and vocabulary drift — DONE, addressed via documentation
 
 - "Memory" means three things (see #2). "Workspace" means the agent's root
   *and* the app generally ("Agent workspace", "AI workspace").
@@ -101,8 +101,15 @@ Documented remediation in Dependency Review (ONNX-first voice).
   the folder containing GGUF files") — a smell standing in for a decision.
 - Settings sections vs. services don't map 1:1 (`LlmSettings` read by many).
 
-Fix vocabulary in docs and types at the same time as the unifications; naming
-debt compounds through every new contributor.
+Renaming the stable public types above (`ModelProfile`/`RuntimeProfile`/
+`WorkspaceProfile`/tune profiles) was judged disproportionate: these are four
+deliberately separate, already-shipped schemas, not an accidental collision,
+and a cosmetic rename now carries more churn/regression risk than the naming
+friction it relieves. `CONTRIBUTING.md` gained a "Vocabulary" section
+disambiguating each overloaded term for future contributors instead. The
+`Models/`/`models/` folder heuristic and the settings-section-to-service
+mapping are unchanged; neither has caused a reported bug, so they're left as
+documented, known quirks rather than a code change.
 
 ## 8. Custom test harness — coverage gap closed, harness itself unchanged
 
