@@ -91,7 +91,8 @@ public partial class SetupWizardViewModel : ObservableObject
         VoiceOptions.Clear();
         foreach (var provider in _voiceProviders.GetAvailableProviders())
             VoiceOptions.Add(provider);
-        SelectedVoiceProvider = VoiceOptions.FirstOrDefault(p => p.Name == s.Tts.VoiceProvider)
+        var activeProviderId = _voiceProviders.GetActiveProvider();
+        SelectedVoiceProvider = VoiceOptions.FirstOrDefault(p => p.Id == activeProviderId)
             ?? VoiceOptions.FirstOrDefault();
         UpdateVoiceOnboarding(SelectedVoiceProvider);
     }

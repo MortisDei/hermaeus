@@ -127,23 +127,21 @@ manage it. See Feature Audit: the long-term answer is fewer Python-based voice
 providers, favouring ONNX-runnable ones (Kokoro has ONNX exports) so voice
 rides the ONNX Runtime you already ship.
 
-**Status check (updated for the 2.0 pass):** the settings/UI half of "begin
-voice convergence" was already done before this pass: `VoiceProvider.Kokoro`
-is the settings default (`VoiceProviderRegistry.ParseProviderFromSettings`
-falls back to it), and `VoiceProviderCategory` already sorts Kokoro as
-`Recommended` and both Python-venv providers (XTTS v2, F5-TTS) as `Advanced`,
-surfaced in the Settings UI dropdown via `CategoryLabel`. **What this pass
-adds:** a new `Aether.Voice` project ships `NativeKokoroVoiceProvider`, a
-fully in-process Kokoro path: an English-only phonemizer (small dictionary
-plus letter-fallback rules, explicitly not misaki-equivalent), a static
-phoneme-to-id tokenizer matching Kokoro's real vocabulary, and ONNX Runtime
-inference against SHA256-pinned model/voice downloads, following the same
-lazy-load/explicit-install pattern as `OnnxCrossEncoderReranker`. It is
-registered as a new, separate provider (`VoiceProvider.KokoroNative`)
-alongside the existing Python-based `KokoroVoiceProvider`, not a replacement:
-the settings default stays Python-based Kokoro until native passes real-world
-parity testing, per the roadmap's "converge doesn't require delete same-day"
-framing.
+**Status check (updated post-2.0):** voice convergence is complete.
+`VoiceProvider.KokoroNative` is now `TtsSettings.VoiceProvider`'s default and
+`VoiceProviderRegistry.ParseProviderFromSettings`'s fallback; the Python-based
+`KokoroVoiceProvider` moved to `VoiceProviderCategory.Advanced` alongside XTTS
+v2/F5-TTS, all three still available as fallback paths. `NativeKokoroVoiceProvider`
+(in the new `Aether.Voice` project) is a fully in-process Kokoro path: an
+English-only phonemizer (small dictionary plus letter-fallback rules,
+explicitly not misaki-equivalent), a static phoneme-to-id tokenizer matching
+Kokoro's real vocabulary, and ONNX Runtime inference against SHA256-pinned
+model/voice downloads, following the same lazy-load/explicit-install pattern
+as `OnnxCrossEncoderReranker`. `LocalAiSetupService`'s readiness scan and the
+Setup Wizard's voice step no longer require or suggest a Python venv for
+native Kokoro (or OpenAI); the one remaining first-run step is the Doctor
+"Install Kokoro (native)" action, which downloads the model once and then
+runs fully offline.
 
 ## Staged dependency-reduction roadmap
 
@@ -156,11 +154,9 @@ framing.
    feature reimplementation, not a refactor). Move CommunityToolkit.Mvvm out
    of `Aether.Core` — **DONE**.
 3. **1.x-2.0:** Reduce Python surface: adopt ONNX-based Kokoro as the default
-   local voice path. **Settings default and "advanced" demotion for XTTS/F5
-   DONE; native ONNX Kokoro now exists as `NativeKokoroVoiceProvider`, opt-in
-   alongside the Python provider** (see status check above). Flipping the
-   default and demoting the Python path to `Advanced` is deferred until the
-   native path passes real-world listening/parity testing.
+   local voice path. **DONE** — `NativeKokoroVoiceProvider` is the settings
+   default; the Python-based Kokoro provider and XTTS v2/F5-TTS are all
+   `Advanced` fallback paths (see status check above).
 4. **2.0:** Evaluate shipping ONNX Runtime as a Doctor-installed component
    rather than a bundled package, shrinking base distribution size.
 5. **Ongoing:** hard rule — any new package needs a written justification in

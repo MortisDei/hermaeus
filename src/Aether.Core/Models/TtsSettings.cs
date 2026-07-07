@@ -17,9 +17,9 @@ public class TtsSettings
     public string ServiceUrl { get; set; } = "http://127.0.0.1:8020";
 
     /// <summary>
-    /// Active voice provider name (e.g., "Kokoro", "XTTS", "F5-TTS", "OpenAI").
+    /// Active voice provider name (e.g., "KokoroNative", "Kokoro", "XTTS", "F5-TTS", "OpenAI").
     /// </summary>
-    public string VoiceProvider { get; set; } = "Kokoro";
+    public string VoiceProvider { get; set; } = "KokoroNative";
 
     /// <summary>
     /// Selected speaker or voice identity.

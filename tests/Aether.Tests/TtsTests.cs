@@ -24,7 +24,7 @@ namespace Aether.Tests
             else
                 vm.SetActiveVoiceProviderCommand.Execute(limited);
 
-            Equal("Kokoro", vm.SelectedVoiceProvider, "provider without TTS should not become active");
+            Equal("Kokoro (native)", vm.SelectedVoiceProvider, "provider without TTS should not become active");
         }
 
         public static async Task VoiceProviderXttsV2RequiresLocalAndTts()

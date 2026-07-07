@@ -52,6 +52,7 @@ public sealed class LocalAiSetupService : ILocalAiSetupService
         var activeVoiceProvider = NormalizeVoiceProvider(settings.Tts.VoiceProvider);
         var voicePackages = VoicePackagesFor(activeVoiceProvider);
         var voiceProviderLabel = VoiceProviderLabel(activeVoiceProvider);
+        var voiceProviderNeedsPython = activeVoiceProvider is not (VoiceProvider.OpenAi or VoiceProvider.KokoroNative);
 
         var hasGgufModels = !string.IsNullOrWhiteSpace(layout.ModelsDirectory)
             && Directory.Exists(layout.ModelsDirectory)
@@ -63,33 +64,44 @@ public sealed class LocalAiSetupService : ILocalAiSetupService
             hasGgufModels ? "Found GGUF model files." : "No GGUF model files were found.",
             hasGgufModels ? "Found model files." : "Download Phi-4 mini reasoning or add your own GGUF model.",
             true));
-        AddItem(items, "venv", "Python venv", File.Exists(venvPython) ? venvPython : string.Empty,
-            "Found Python in a local venv.", "No local venv Python was found.", true);
-        if (File.Exists(venvPython))
-        {
-            var health = await _pythonValidator.ValidateAsync(venvPython, ct);
-            var status = health.IsHealthy ? LocalAiReadinessStatus.Found : LocalAiReadinessStatus.NeedsAction;
-            items.Add(new LocalAiReadinessItem(
-                "python-health",
-                "Python health",
-                status,
-                health.IsHealthy ? "Python is healthy." : "Python failed health checks.",
-                health.Detail,
-                true));
-        }
         var voicePackagesReady = false;
-        if (File.Exists(venvPython))
+        if (voiceProviderNeedsPython)
         {
-            voicePackagesReady = await HasPythonModulesAsync(venvPython, voicePackages, ct);
+            AddItem(items, "venv", "Python venv", File.Exists(venvPython) ? venvPython : string.Empty,
+                "Found Python in a local venv.", "No local venv Python was found.", true);
+            if (File.Exists(venvPython))
+            {
+                var health = await _pythonValidator.ValidateAsync(venvPython, ct);
+                var status = health.IsHealthy ? LocalAiReadinessStatus.Found : LocalAiReadinessStatus.NeedsAction;
+                items.Add(new LocalAiReadinessItem(
+                    "python-health",
+                    "Python health",
+                    status,
+                    health.IsHealthy ? "Python is healthy." : "Python failed health checks.",
+                    health.Detail,
+                    true));
+
+                voicePackagesReady = await HasPythonModulesAsync(venvPython, voicePackages, ct);
+                items.Add(new LocalAiReadinessItem(
+                    "voice-packages",
+                    $"{voiceProviderLabel} packages",
+                    voicePackagesReady ? LocalAiReadinessStatus.Found : LocalAiReadinessStatus.NeedsAction,
+                    voicePackagesReady
+                        ? $"Required {voiceProviderLabel} packages are importable."
+                        : $"Missing one or more {voiceProviderLabel} packages: {string.Join(", ", voicePackages)}.",
+                    voicePackagesReady ? venvPython : "Install only if this provider is selected and imports fail.",
+                    true));
+            }
+        }
+        else
+        {
             items.Add(new LocalAiReadinessItem(
-                "voice-packages",
-                $"{voiceProviderLabel} packages",
-                voicePackagesReady ? LocalAiReadinessStatus.Found : LocalAiReadinessStatus.NeedsAction,
-                voicePackagesReady
-                    ? $"Required {voiceProviderLabel} packages are importable."
-                    : $"Missing one or more {voiceProviderLabel} packages: {string.Join(", ", voicePackages)}.",
-                voicePackagesReady ? venvPython : "Install only if this provider is selected and imports fail.",
-                true));
+                "voice-native",
+                $"{voiceProviderLabel} assets",
+                LocalAiReadinessStatus.Found,
+                $"{voiceProviderLabel} needs no Python venv; use the Doctor page to install its model assets.",
+                "Handled by Doctor, not the local AI setup scan.",
+                false));
         }
 
         if (activeVoiceProvider == VoiceProvider.XttsV2)
@@ -106,15 +118,18 @@ public sealed class LocalAiSetupService : ILocalAiSetupService
         AddItem(items, "reranker", "RAG reranker", layout.RerankerDirectory,
             "Found reranker model folder.", "Reranker is optional for RAG quality.", false);
 
-        if (!File.Exists(venvPython))
-            actions.Add(CreateVenvAction(defaultVenv));
+        if (voiceProviderNeedsPython)
+        {
+            if (!File.Exists(venvPython))
+                actions.Add(CreateVenvAction(defaultVenv));
 
-        var installPythonReady = File.Exists(venvPython);
-        var installPython = installPythonReady
-            ? venvPython
-            : PythonPathForVenv(defaultVenv);
-        if (!voicePackagesReady)
-            actions.Add(InstallVoiceBackendAction(installPython, voicePackages, voiceProviderLabel, installPythonReady));
+            var installPythonReady = File.Exists(venvPython);
+            var installPython = installPythonReady
+                ? venvPython
+                : PythonPathForVenv(defaultVenv);
+            if (!voicePackagesReady)
+                actions.Add(InstallVoiceBackendAction(installPython, voicePackages, voiceProviderLabel, installPythonReady));
+        }
 
         if (activeVoiceProvider == VoiceProvider.XttsV2 && string.IsNullOrWhiteSpace(layout.TtsScriptPath))
             actions.Add(CreateScriptAction(defaultScript));
@@ -322,7 +337,8 @@ public sealed class LocalAiSetupService : ILocalAiSetupService
         "F5Tts" or "F5-TTS" => VoiceProvider.F5Tts,
         "XttsV2" or "XTTS" or "XTTS v2" => VoiceProvider.XttsV2,
         "OpenAi" or "OpenAI" => VoiceProvider.OpenAi,
-        _ => VoiceProvider.Kokoro
+        "KokoroNative" => VoiceProvider.KokoroNative,
+        _ => VoiceProvider.KokoroNative
     };
 
     private static string VoiceProviderLabel(VoiceProvider provider) => provider switch
@@ -330,6 +346,7 @@ public sealed class LocalAiSetupService : ILocalAiSetupService
         VoiceProvider.XttsV2 => "XTTS v2",
         VoiceProvider.F5Tts => "F5-TTS",
         VoiceProvider.OpenAi => "OpenAI",
+        VoiceProvider.KokoroNative => "Kokoro (native)",
         _ => "Kokoro"
     };
 
@@ -338,6 +355,7 @@ public sealed class LocalAiSetupService : ILocalAiSetupService
         VoiceProvider.XttsV2 => LocalAiSetupConstants.XttsPackages,
         VoiceProvider.F5Tts => ["f5-tts", "soundfile"],
         VoiceProvider.OpenAi => ["openai"],
+        VoiceProvider.KokoroNative => [],
         _ => LocalAiSetupConstants.KokoroPackages
     };
 

@@ -132,25 +132,24 @@ Built *on* the 1.x refactors, in dependency order:
    `ISecretStore`); the host fails closed with a 503 rather than allowing
    unauthenticated access when no token is configured yet, matching the same
    secret/consent posture as the rest of the app.
-5. **Voice convergence, native Kokoro-ONNX — DONE (opt-in, not yet the
-   default).** A new `Aether.Voice` project hosts `NativeKokoroVoiceProvider`:
-   an English-only phonemizer (dictionary plus letter-fallback rules, an
-   explicitly scoped stand-in for misaki, not a port of it), a static
-   phoneme-to-id tokenizer matching Kokoro's real ONNX vocabulary, and ONNX
-   Runtime inference. Model and voice assets follow the same
-   lazy-load/SHA256-pinned-download posture as the RAG reranker: never
-   downloaded on the synthesis path, only through an explicit Doctor install
-   action. Registered as a new provider (`VoiceProvider.KokoroNative`)
-   alongside the existing Python-based Kokoro provider, not a replacement for
-   it. Per the roadmap's own framing ("converge doesn't require delete
-   same-day"), flipping the settings default to native and demoting the
-   Python path to `Advanced` is deferred until native Kokoro passes
-   real-world listening/parity testing outside this pass.
+5. **Voice convergence, native Kokoro-ONNX — DONE, now the default.** A new
+   `Aether.Voice` project hosts `NativeKokoroVoiceProvider`: an English-only
+   phonemizer (dictionary plus letter-fallback rules, an explicitly scoped
+   stand-in for misaki, not a port of it), a static phoneme-to-id tokenizer
+   matching Kokoro's real ONNX vocabulary, and ONNX Runtime inference. Model
+   and voice assets follow the same lazy-load/SHA256-pinned-download posture
+   as the RAG reranker: never downloaded on the synthesis path, only through
+   an explicit Doctor install action (surfaced prominently since it's now the
+   default: the Doctor "Voice backend health" check reports a `Warning` on a
+   fresh install until the one-time download completes). Registered as
+   `VoiceProvider.KokoroNative`, now `TtsSettings.VoiceProvider`'s default and
+   `VoiceProviderRegistry`'s fallback; the Python-based Kokoro provider is
+   demoted to `Advanced` alongside XTTS v2/F5-TTS as a fallback path, not
+   removed. `LocalAiSetupService`'s readiness scan no longer asks for a Python
+   venv when the active provider needs none (native Kokoro, OpenAI).
 
-**2.0 roadmap status: no open items remain to *start*.** All five items above
-have landed; the one deliberately open thread is voice convergence's default
-flip, tracked as future work once native Kokoro is validated by ear, not by
-architecture.
+**2.0 roadmap status: no open items remain.** All five items above have
+landed, including the default flip for voice convergence.
 
 ## Long-term vision (2.x+)
 

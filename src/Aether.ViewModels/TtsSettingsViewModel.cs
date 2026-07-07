@@ -41,7 +41,7 @@ public partial class TtsSettingsViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string _ttsPreviewText = "Aether voice preview is ready.";
     [ObservableProperty] private string _ttsCloneDisplayName = string.Empty;
     [ObservableProperty] private string _ttsStatus = "Stopped";
-    [ObservableProperty] private string _selectedVoiceProvider = "Kokoro";
+    [ObservableProperty] private string _selectedVoiceProvider = "Kokoro (native)";
 
     public Func<Task>? RequestTtsVoiceSamplePicker { get; set; }
     public Action? RequestTtsPythonPicker { get; set; }
@@ -78,6 +78,15 @@ public partial class TtsSettingsViewModel : ObservableObject, IDisposable
         {
             var provider = VoiceProviders.FirstOrDefault(p => p.Name.Equals(SelectedVoiceProvider, StringComparison.OrdinalIgnoreCase));
             return provider is not null && provider.Id == VoiceProvider.Kokoro;
+        }
+    }
+
+    public bool IsKokoroNativeProvider
+    {
+        get
+        {
+            var provider = VoiceProviders.FirstOrDefault(p => p.Name.Equals(SelectedVoiceProvider, StringComparison.OrdinalIgnoreCase));
+            return provider is not null && provider.Id == VoiceProvider.KokoroNative;
         }
     }
 
@@ -168,7 +177,7 @@ public partial class TtsSettingsViewModel : ObservableObject, IDisposable
         foreach (var provider in _voiceProviderRegistry.GetAvailableProviders())
             VoiceProviders.Add(provider);
         SelectedVoiceProvider = NormalizeProviderName(settings.Tts.VoiceProvider);
-        TtsSpeaker = string.IsNullOrWhiteSpace(settings.Tts.Speaker) && IsKokoroProvider
+        TtsSpeaker = string.IsNullOrWhiteSpace(settings.Tts.Speaker) && (IsKokoroProvider || IsKokoroNativeProvider)
             ? "af_heart"
             : settings.Tts.Speaker;
         _isReloading = false;
@@ -374,7 +383,7 @@ public partial class TtsSettingsViewModel : ObservableObject, IDisposable
         try
         {
             await _voiceProviderRegistry.SetActiveProviderAsync(provider.Id);
-            if (provider.Id == VoiceProvider.Kokoro && string.IsNullOrWhiteSpace(TtsSpeaker))
+            if ((provider.Id == VoiceProvider.Kokoro || provider.Id == VoiceProvider.KokoroNative) && string.IsNullOrWhiteSpace(TtsSpeaker))
                 TtsSpeaker = "af_heart";
             await RefreshTtsVoicesAsync();
             NotifyProviderDependentProperties();
@@ -390,6 +399,7 @@ public partial class TtsSettingsViewModel : ObservableObject, IDisposable
     {
         OnPropertyChanged(nameof(IsXttsV2Provider));
         OnPropertyChanged(nameof(IsKokoroProvider));
+        OnPropertyChanged(nameof(IsKokoroNativeProvider));
         OnPropertyChanged(nameof(IsF5TtsProvider));
         OnPropertyChanged(nameof(IsOpenAiProvider));
         OnPropertyChanged(nameof(IsServerManagedProvider));
@@ -402,6 +412,6 @@ public partial class TtsSettingsViewModel : ObservableObject, IDisposable
         var match = VoiceProviders.FirstOrDefault(p =>
             p.Name.Equals(providerName, StringComparison.OrdinalIgnoreCase)
             || p.Id.ToString().Equals(providerName, StringComparison.OrdinalIgnoreCase));
-        return match?.Name ?? "Kokoro";
+        return match?.Name ?? "Kokoro (native)";
     }
 }

@@ -11,6 +11,18 @@ limit.
 
 ## [Unreleased]
 
+## [0.9.22-alpha] - 2026-07-07
+
+Flips the native Kokoro-ONNX voice path from opt-in to the default, closing
+the one deliberately open thread from the 0.9.21 v2.0 pass, and opens the
+3.0-horizon roadmap (docs/review/07-roadmap.md, "Long-term vision").
+
+### Changed
+- **Kokoro (native) is now the default voice provider.** `TtsSettings.VoiceProvider` defaults to `"KokoroNative"` and `VoiceProviderRegistry.ParseProviderFromSettings` falls back to it for unrecognised settings values. The Python-based `KokoroVoiceProvider` moves to `VoiceProviderCategory.Advanced` alongside XTTS v2 and F5-TTS, staying available as a fallback rather than being removed.
+- `LocalAiSetupService`'s readiness scan and setup actions no longer ask for a Python venv, Python health check, or voice packages when the active provider needs none (native Kokoro, OpenAI); it reports a plain "handled by Doctor" item for those instead. This removes a confusing "create a Python venv" prompt that would otherwise show up on a fresh install now that the default provider needs no Python at all.
+- `SetupWizardViewModel` now matches the active voice provider by its stable `VoiceProvider` id instead of matching the display name against the raw settings string, fixing a pre-existing mismatch that made the wizard's provider preselection fall back to the first list entry rather than the actual configured provider.
+- `NativeKokoroVoiceProvider` no longer reports the `Experimental` capability flag, reflecting its promotion to the default provider.
+
 ## [0.9.21-alpha] - 2026-07-07
 
 This release closes out the v2.0 architecture-review roadmap

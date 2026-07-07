@@ -6,9 +6,9 @@ namespace Aether.Voice;
 /// <summary>
 /// Native, in-process Kokoro text-to-speech: <see cref="KokoroPhonemizer"/> +
 /// <see cref="KokoroTokenizer"/> feed <see cref="KokoroOnnxModel"/> directly,
-/// with no Python subprocess and no HTTP round trip. Registered alongside the
-/// existing Python-based Kokoro provider (<c>KokoroVoiceProvider</c> in
-/// Aether.Services) rather than replacing it in this pass; see
+/// with no Python subprocess and no HTTP round trip. This is the default
+/// voice provider; the Python-based Kokoro provider (<c>KokoroVoiceProvider</c>
+/// in Aether.Services) remains available as an advanced/fallback path. See
 /// docs/review/07-roadmap.md item 5.
 /// </summary>
 public sealed class NativeKokoroVoiceProvider : ITtsService, IVoiceProvider, IDisposable
@@ -28,7 +28,7 @@ public sealed class NativeKokoroVoiceProvider : ITtsService, IVoiceProvider, IDi
 
     public VoiceProvider Id => VoiceProvider.KokoroNative;
     public string DisplayName => "Kokoro (native)";
-    public VoiceCapability Capabilities => VoiceCapability.TextToSpeech | VoiceCapability.Local | VoiceCapability.Experimental;
+    public VoiceCapability Capabilities => VoiceCapability.TextToSpeech | VoiceCapability.Local;
     public (int Major, int Minor)? RequiredPythonVersion => null;
 
     public NativeKokoroVoiceProvider(ISettingsService settings)

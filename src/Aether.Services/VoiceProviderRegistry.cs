@@ -60,9 +60,9 @@ public sealed class VoiceProviderRegistry : IVoiceProviderRegistry
         {
             new VoiceProviderInfo(
                 VoiceProvider.Kokoro,
-                "Kokoro",
-                "Fast local readback. Tiny, Apache-licensed, and low-drama.",
-                VoiceProviderCategory.Recommended,
+                "Kokoro (Python)",
+                "Fast local readback via a managed Python subprocess. Tiny, Apache-licensed, and low-drama. Kept as an advanced fallback now that Kokoro (native) is the default.",
+                VoiceProviderCategory.Advanced,
                 _providers[VoiceProvider.Kokoro].IsInstalled,
                 _providers[VoiceProvider.Kokoro].Capabilities),
             new VoiceProviderInfo(
@@ -89,7 +89,7 @@ public sealed class VoiceProviderRegistry : IVoiceProviderRegistry
             new VoiceProviderInfo(
                 VoiceProvider.KokoroNative,
                 "Kokoro (native)",
-                "Fully in-process Kokoro: no Python subprocess, ONNX inference runs directly in Aether. English voices only; still experimental alongside the Python-based Kokoro provider.",
+                "Default voice provider. Fully in-process Kokoro: no Python subprocess, ONNX inference runs directly in Aether. English voices only; downloads its model once via the Doctor install action, then runs fully offline.",
                 VoiceProviderCategory.Recommended,
                 _providers[VoiceProvider.KokoroNative].IsInstalled,
                 _providers[VoiceProvider.KokoroNative].Capabilities)
@@ -151,7 +151,7 @@ public sealed class VoiceProviderRegistry : IVoiceProviderRegistry
             "XttsV2" or "XTTS" or "XTTS v2" => VoiceProvider.XttsV2,
             "OpenAi" or "OpenAI" => VoiceProvider.OpenAi,
             "KokoroNative" => VoiceProvider.KokoroNative,
-            _ => VoiceProvider.Kokoro // Default to Kokoro (Python); native Kokoro is opt-in until it passes parity testing
+            _ => VoiceProvider.KokoroNative // Native Kokoro is the default; no Python subprocess required
         };
     }
 }
