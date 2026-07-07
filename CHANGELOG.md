@@ -11,6 +11,13 @@ limit.
 
 ## [Unreleased]
 
+## [0.9.36-alpha] - 2026-07-07
+
+ViewModel orchestration extraction, part 5.
+
+### Added
+- `Aether.Core.Services.ChatConversationBuilder.AutoTitleFrom`: derives a conversation title from its first user message, extracted from `ChatViewModel.PersistAsync`.
+
 ## [0.9.35-alpha] - 2026-07-07
 
 ViewModel orchestration extraction, part 4.

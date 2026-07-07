@@ -855,10 +855,7 @@ public partial class ChatViewModel : ObservableObject
         {
             var first = Messages.FirstOrDefault(m => m.IsUser);
             if (first is not null)
-            {
-                var t = first.Content.Replace('\n', ' ').Trim();
-                ConversationTitle = t.Length > 60 ? t[..57] + "..." : t;
-            }
+                ConversationTitle = ChatConversationBuilder.AutoTitleFrom(first.Content);
         }
         if (string.IsNullOrEmpty(CurrentConversationId))
             CurrentConversationId = Guid.NewGuid().ToString();
