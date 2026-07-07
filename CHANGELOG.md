@@ -11,6 +11,20 @@ limit.
 
 ## [Unreleased]
 
+## [0.9.37-alpha] - 2026-07-07
+
+ViewModel orchestration extraction, part 6: the three large orchestrators previously deliberately deferred (`ChatViewModel.SendAsync`, `ChatViewModel.CompareSelectedModelsAsync`, `RagViewModel.IngestAsync`).
+
+### Added
+- `Aether.Core.Services.ChatSendOrchestrator`: drives one streamed chat completion (usage/timing/cancellation/error classification), extracted from `ChatViewModel.SendAsync`. The ViewModel now only owns UI-facing message-state mutation; the streaming call itself is testable against a fake `ILlmService` with no UI plumbing.
+- `Aether.Core.Services.ChatStreamAccumulator`: the render-batching throttle (flush on a time/size threshold) previously a local closure inside `SendAsync`.
+- `Aether.ViewModels.ModelCompareOrchestrator`: target selection (explicit selection vs. fallback to the active model, capped at 4) and `EvalRun` to `ModelCompareResultViewModel` mapping, extracted from `ChatViewModel.CompareSelectedModelsAsync`.
+- `Aether.ViewModels.RagIngestServiceSuspension`: the suspend-competing-services/restore sequence (managed embedding server, XTTS, Kokoro) extracted from `RagViewModel.IngestAsync`.
+- `Aether.Rag.RagIngestRequestBuilder`: builds/updates the target `RagDataset` for an ingest run and renders the ingest health summary line, extracted from `RagViewModel.IngestAsync`.
+
+### Fixed
+- RAG ingest's service-restore failures (embedding server, XTTS, Kokoro) are now actually logged; previously the per-service error list built during restore was discarded without ever being surfaced.
+
 ## [0.9.36-alpha] - 2026-07-07
 
 ViewModel orchestration extraction, part 5.

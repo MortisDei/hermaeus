@@ -269,65 +269,26 @@ public partial class RagViewModel : ObservableObject
         IsError = false;
         StatusMessage = string.Empty;
         _ingestCts = new CancellationTokenSource();
-        
-        Func<Task>? restoreServices = null;
+
+        var suspension = new RagIngestServiceSuspension(_services, _xtts, _kokoro, _settings);
+        Func<Task<IReadOnlyList<string>>>? restoreServices = null;
 
         try
         {
-            // Suspend competing services if available
-            if (_services is not null)
-            {
-                var suspendedServerIds = await _services.PrepareEmbeddingServerForWorkAsync();
-                var xttsWasRunning = _xtts?.IsRunning == true;
-                var kokoroWasRunning = _kokoro?.IsRunning == true;
-                
-                if (_xtts?.IsRunning == true) _xtts.Stop();
-                if (_kokoro?.IsRunning == true) _kokoro.Stop();
-
-                restoreServices = async () =>
-                {
-                    var errors = new List<string>();
-                    try { await _services.RestartServersAsync(suspendedServerIds); }
-                    catch (Exception ex) { errors.Add($"LLM: {ex.Message}"); }
-                    try { if (xttsWasRunning && _xtts is not null) await _xtts.StartAsync(_settings.Settings, CancellationToken.None); }
-                    catch (Exception ex) { errors.Add($"XTTS: {ex.Message}"); }
-                    try { if (kokoroWasRunning && _kokoro is not null) await _kokoro.StartAsync(_settings.Settings, CancellationToken.None); }
-                    catch (Exception ex) { errors.Add($"Kokoro: {ex.Message}"); }
-                };
-            }
+            restoreServices = await suspension.SuspendAsync();
 
             _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Rag,
                 $"RAG ingest started for dataset {NewDatasetName}"));
-            
-            var ds = _targetDatasetForIngest ?? new RagDataset();
-            
-            if (_targetDatasetForIngest == null)
-            {
-                // Creating a new dataset
-                ds.Name = NewDatasetName.Trim();
-                ds.Description = EnableWebLoader
-                    ? "Ingested from explicitly configured web URLs"
-                    : $"Ingested from {IngestPath}";
-                ds.Config = new RagDatasetConfig
-                {
-                    UseParentChild = UseParentChild,
-                    EmbeddingModel = _settings.Settings.Rag.EmbeddingModel,
-                    EnableWebLoader = EnableWebLoader,
-                    WebUrlList = EnableWebLoader ? WebUrlList.Trim() : string.Empty,
-                    WebMaxPages = Math.Clamp(WebMaxPages <= 0 ? 5 : WebMaxPages, 1, 20),
-                    ExtractionMode = EnableWebLoader
-                        ? RagExtractionMode.WebUrl
-                        : RagExtractionMode.TextMarkdown
-                };
-            }
-            else
-            {
-                // Adding to existing dataset - update path and timestamp
-                ds.LastIngestPath = EnableWebLoader
-                    ? WebUrlList.Trim()
-                    : IngestPath;
-                ds.LastIngestUtc = DateTime.UtcNow;
-            }
+
+            var ds = RagIngestRequestBuilder.PrepareDataset(
+                _targetDatasetForIngest,
+                NewDatasetName,
+                EnableWebLoader,
+                IngestPath,
+                WebUrlList,
+                WebMaxPages,
+                UseParentChild,
+                _settings.Settings.Rag.EmbeddingModel);
 
             var progress = new Progress<IngestProgress>(p =>
             {
@@ -357,15 +318,7 @@ public partial class RagViewModel : ObservableObject
             // Prefer explicit health property on the report instead of sentinel documents.
             if (report.Health is not null)
             {
-                var health = report.Health;
-                var parts = new List<string> { $"Files: {health.FileCount}" };
-                if (health.DuplicateChunkCount > 0) parts.Add($"Duplicate chunks: {health.DuplicateChunkCount}");
-                if (health.EmptyChunkCount > 0) parts.Add($"Empty chunks: {health.EmptyChunkCount}");
-                if (health.OversizedFileCount > 0) parts.Add($"Oversized files: {health.OversizedFileCount}");
-                if (health.UnsupportedFileCount > 0) parts.Add($"Unsupported files: {health.UnsupportedFileCount}");
-                if (health.StaleSourceCount > 0) parts.Add($"Stale sources: {health.StaleSourceCount}");
-                if (health.Warnings?.Count > 0) parts.Add(string.Join("; ", health.Warnings));
-                var summary = string.Join("; ", parts);
+                var summary = RagIngestRequestBuilder.BuildHealthSummary(report.Health);
                 IngestReportItems.Insert(0, new RagIngestReportItemViewModel(new DocumentIngestReport { Path = "Health summary", Status = DocumentIngestStatus.ReportOnly, Message = summary }));
             }
 
@@ -406,15 +359,10 @@ public partial class RagViewModel : ObservableObject
             _ingestCts = null;
             if (restoreServices is not null)
             {
-                try
-                {
-                    await restoreServices();
-                }
-                catch (Exception ex)
-                {
+                var restoreErrors = await restoreServices();
+                foreach (var error in restoreErrors)
                     _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Rag,
-                        $"RAG service restore failed: {ex.Message}"));
-                }
+                        $"RAG service restore failed: {error}"));
             }
         }
     }

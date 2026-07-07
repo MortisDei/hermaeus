@@ -84,7 +84,7 @@ Keep interfaces where there genuinely are or will be multiple implementations
 (`ILlmService`, `IVoiceProvider`, `ISecretStore` backends) and collapse the
 rest to concrete classes. DI works fine with concrete registrations.
 
-### 5. ViewModel breadth = hidden orchestration layer (MEDIUM) — partially DONE
+### 5. ViewModel breadth = hidden orchestration layer (MEDIUM) — DONE
 
 `ChatViewModel`, `AgentViewModel`, and `RagViewModel` each orchestrate
 multi-service workflows (context packing, attachment reading, memory
@@ -114,16 +114,38 @@ and it currently lives inside a ViewModel.
 All seven are independently unit-tested without any UI plumbing, closing the
 "untestable without UI plumbing" complaint for the pieces moved so far.
 
-**Explicitly not done, and materially higher risk/effort than the above:**
-`ChatViewModel.SendAsync` (the live streaming send loop itself),
-`RagViewModel.IngestAsync` (the suspend-competing-services/ingest/restore
-sequence), and `ChatViewModel.CompareSelectedModelsAsync`. These are the
-largest remaining orchestration blobs, but extracting them safely needs
-either new integration-test coverage for streaming/cancellation behavior
-first (today's coverage is integration-style, not unit-level, for exactly
-this code) or accepting real regression risk on the three most-used
-surfaces in the app. Revisit as a deliberate, separately-scoped pass rather
-than folding into this one.
+**The three largest remaining orchestrators, done as a separately-scoped
+follow-up pass (2026-07):**
+- `ChatSendOrchestrator` (Core): drives one streamed chat completion
+  (usage/timing/first-token/cancellation/error classification), extracted
+  from `ChatViewModel.SendAsync`. Testable against a fake `ILlmService`,
+  including cancellation and exception paths, without any UI plumbing. The
+  ViewModel keeps only UI-facing message-state mutation (adding/streaming
+  `MessageViewModel`s, scrolling), which is exactly the part that genuinely
+  needs to live next to the UI.
+- `ChatStreamAccumulator` (Core): the token render-batching throttle, a
+  local closure inside the old `SendAsync`, now a standalone, unit-tested
+  type.
+- `ModelCompareOrchestrator` (ViewModels): target selection (explicit
+  selection vs. fallback to the active model) and `EvalRun` to
+  `ModelCompareResultViewModel` mapping, extracted from
+  `ChatViewModel.CompareSelectedModelsAsync`. Most of this method's actual
+  orchestration already lived in `EvalEngine` from an earlier pass; this
+  closed the remaining untested selection/mapping logic.
+- `RagIngestServiceSuspension` (ViewModels) and `RagIngestRequestBuilder`
+  (Rag): the suspend-competing-services/restore dance and the
+  dataset-preparation/health-summary logic, extracted from
+  `RagViewModel.IngestAsync`. Extracting the restore step also surfaced a
+  latent bug: the original inline closure built a per-service `errors` list
+  on restore failure but never read it back, so embedding-server/XTTS/Kokoro
+  restore failures were silently swallowed. The extracted version returns
+  the errors so the ViewModel can log them.
+
+This was intentionally sequenced after the first five pieces rather than
+folded into the same pass: it required first confirming the extraction
+pattern (plain, unit-tested type; ViewModel keeps only UI-adjacent state
+mutation) held up on lower-risk code before applying it to the app's most-
+used, most failure-sensitive surfaces.
 
 ### 6. Settings monolith (MEDIUM) — evaluated, REJECT full narrowing
 

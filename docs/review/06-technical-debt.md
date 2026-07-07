@@ -13,8 +13,10 @@ maintenance trap is that adding *any* feature means editing them, so they grow
 monotonically. Remediation: check/fix registry (Opportunities #5) — **DONE**,
 Doctor/Trust/Privacy Audit are now `IInspectionCheckProvider` contributors
 over one `IInspectionEngine`. The three big ViewModels' non-inspection
-orchestration is **partially DONE** (see Review §5 for the seven pieces
-extracted and the three large ones deliberately left for a separate pass).
+orchestration is **DONE** (see Review §5 for all ten extracted pieces,
+including the three large orchestrators — `ChatViewModel.SendAsync`,
+`ChatViewModel.CompareSelectedModelsAsync`, `RagViewModel.IngestAsync` —
+that were initially deferred to a separate pass and closed 2026-07).
 `BenchmarkService` itself remains unaddressed — it's a large service, not
 ViewModel-hidden orchestration, so it's a different shape of problem than
 this item's remediation targets; see Evaluation System, doc 10.

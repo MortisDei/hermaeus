@@ -1,7 +1,4 @@
 using System.Collections.ObjectModel;
-using System.Diagnostics;
-using System.Text;
-using System.Text.Json;
 using Aether.Agent.Models;
 using Aether.Agent.Services;
 using Aether.Core.Models;
@@ -305,12 +302,7 @@ public partial class ChatViewModel : ObservableObject
 
         IsGenerating = true;
         _cts = new CancellationTokenSource();
-        var streamBuffer = new StringBuilder();
-        var streamClock = Stopwatch.StartNew();
-        var responseClock = Stopwatch.StartNew();
-        long? firstTokenMs = null;
-        var renderBatches = 0;
-        ChatTokenUsage? reportedUsage = null;
+        var accumulator = new ChatStreamAccumulator();
         var traceError = string.Empty;
         try
         {
@@ -322,81 +314,68 @@ public partial class ChatViewModel : ObservableObject
             if (history.Count > 0 && history[^1].Role == "user")
                 history[^1] = history[^1] with { Content = promptText };
 
-            await foreach (var evt in _llm.StreamChatAsync(
-                selectedModelId, history,
+            var result = await ChatSendOrchestrator.StreamAsync(
+                _llm, selectedModelId, history,
                 new LlmChatOptions
                 {
                     SystemPrompt = string.IsNullOrWhiteSpace(SystemPrompt) ? null : SystemPrompt,
                     Temperature = Temperature
                 },
-                _cts.Token))
-            {
-                if (evt.Usage is not null)
+                onToken: token =>
                 {
-                    reportedUsage = evt.Usage;
-                    UpdateContextUsage(evt.Usage, "Reported by provider");
-                }
+                    if (accumulator.TryAppend(token, force: false, out var flushed))
+                    {
+                        asst.Content += flushed;
+                        ScrollToBottom?.Invoke(this, EventArgs.Empty);
+                    }
+                },
+                onUsage: usage => UpdateContextUsage(usage, "Reported by provider"),
+                _cts.Token);
 
-                if (!string.IsNullOrEmpty(evt.ContentDelta))
+            if (accumulator.TryAppend(string.Empty, force: true, out var remainder))
+            {
+                asst.Content += remainder;
+                ScrollToBottom?.Invoke(this, EventArgs.Empty);
+            }
+
+            asst.DurationMs = result.TotalLatencyMs;
+            PerformanceLog = result.Cancelled
+                ? $"cancelled after {result.TotalLatencyMs} ms"
+                : $"first token {result.FirstTokenMs} ms · full {result.TotalLatencyMs} ms · render batches {accumulator.RenderBatches}";
+            asst.IsStreaming = false;
+
+            if (result.Cancelled)
+            {
+                if (string.IsNullOrWhiteSpace(asst.Content))
                 {
-                    firstTokenMs ??= responseClock.ElapsedMilliseconds;
-                    AppendStreamToken(asst, evt.ContentDelta, force: false);
+                    Messages.Remove(asst);
+                }
+                else
+                {
+                    asst.IsError = true;
+                    asst.Content = $"{asst.Content.TrimEnd()}\n\n[Generation stopped before completion.]";
+                    await PersistAsync();
                 }
             }
-            AppendStreamToken(asst, string.Empty, force: true);
-            responseClock.Stop();
-            asst.DurationMs = responseClock.ElapsedMilliseconds;
-            PerformanceLog = $"first token {firstTokenMs ?? 0} ms · full {asst.DurationMs} ms · render batches {renderBatches}";
-            asst.IsStreaming = false;
-            if (reportedUsage is null)
-                RefreshEstimatedContextUsage();
-            await PersistAsync();
-            _ = Task.Run(() => RunConversationMemoryAsync(CurrentConversationId));
-        }
-        catch (OperationCanceledException)
-        {
-            asst.IsStreaming = false;
-            if (string.IsNullOrWhiteSpace(asst.Content))
+            else if (result.Error is not null)
             {
-                Messages.Remove(asst);
+                traceError = result.Error;
+                asst.Content = $"Error: {result.Error}";
+                asst.IsError = true;
             }
             else
             {
-                asst.IsError = true;
-                asst.Content = $"{asst.Content.TrimEnd()}\n\n[Generation stopped before completion.]";
+                if (result.Usage is null)
+                    RefreshEstimatedContextUsage();
                 await PersistAsync();
+                _ = Task.Run(() => RunConversationMemoryAsync(CurrentConversationId));
             }
-        }
-        catch (Exception ex)
-        {
-            traceError = ex.Message;
-            asst.Content = $"Error: {ex.Message}";
-            responseClock.Stop();
-            asst.DurationMs = responseClock.ElapsedMilliseconds;
-            PerformanceLog = $"error after {asst.DurationMs} ms";
-            asst.IsStreaming = false;
-            asst.IsError = true;
+
+            AddChatTrace(snapshot, selectedModelId, result.Usage, result.FirstTokenMs, result.TotalLatencyMs, traceError);
         }
         finally
         {
-            AddChatTrace(snapshot, selectedModelId, reportedUsage, firstTokenMs ?? 0, responseClock.ElapsedMilliseconds, traceError);
             IsGenerating = false; _cts?.Dispose(); _cts = null;
-        }
-
-        void AppendStreamToken(MessageViewModel message, string token, bool force)
-        {
-            streamBuffer.Append(token);
-            if (!force && streamClock.ElapsedMilliseconds < 50 && streamBuffer.Length < 256)
-                return;
-
-            if (streamBuffer.Length == 0)
-                return;
-
-            message.Content += streamBuffer.ToString();
-            renderBatches++;
-            streamBuffer.Clear();
-            streamClock.Restart();
-            ScrollToBottom?.Invoke(this, EventArgs.Empty);
         }
     }
 
@@ -633,23 +612,17 @@ public partial class ChatViewModel : ObservableObject
         if ((string.IsNullOrWhiteSpace(text) && !attachments.Any(a => a.IsReady)) || IsGenerating || IsComparingModels)
             return;
 
-        var selected = CompareModels.Where(model => model.IsSelected).Take(4).ToList();
-        if (selected.Count == 0 && SelectedModel is not null)
-        {
-            selected.Add(new CompareModelOptionViewModel(SelectedModel) { IsSelected = true });
-        }
-
-        if (selected.Count == 0)
+        var targets = ModelCompareOrchestrator.ResolveTargets(CompareModels, SelectedModel);
+        if (targets.Count == 0)
             return;
 
         var snapshot = BuildContextSnapshot(text, attachments);
         var history = BuildHistory(snapshot.PromptText);
         var caseId = Guid.NewGuid().ToString("n");
-        var targets = selected.Select(o => new EvalTarget(o.Model.Id, Label: o.Model.DisplayName)).ToList();
 
         CompareResults.Clear();
         IsComparingModels = true;
-        CompareStatus = $"Comparing {selected.Count} model(s)...";
+        CompareStatus = $"Comparing {targets.Count} model(s)...";
         try
         {
             var runs = await _evalEngine.RunQuickCompareAsync(
@@ -663,21 +636,7 @@ public partial class ChatViewModel : ObservableObject
                 });
 
             foreach (var run in runs)
-            {
-                var result = run.CaseResults[0];
-                CompareResults.Add(new ModelCompareResultViewModel
-                {
-                    ModelId = run.Target.ModelId,
-                    DisplayName = run.Target.Label ?? run.Target.ModelId,
-                    Answer = result.Output,
-                    FirstTokenMs = result.FirstTokenMs ?? 0,
-                    TotalLatencyMs = result.LatencyMs,
-                    Usage = result.PromptTokens is { } pt
-                        ? new ChatTokenUsage(pt, result.CompletionTokens ?? 0, pt + (result.CompletionTokens ?? 0))
-                        : null,
-                    Error = result.Error ?? string.Empty
-                });
-            }
+                CompareResults.Add(ModelCompareOrchestrator.ToResult(run));
 
             CompareStatus = $"Compared {CompareResults.Count} model(s).";
         }
