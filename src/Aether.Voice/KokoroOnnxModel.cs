@@ -64,6 +64,7 @@ internal sealed class KokoroOnnxModel : IDisposable
                 return false;
             }
 
+            LogPreflight("about to load InferenceSession from EnsureLoadedAsync");
             _session = new InferenceSession(modelPath);
             return true;
         }
@@ -111,6 +112,12 @@ internal sealed class KokoroOnnxModel : IDisposable
             }
 
             _session?.Dispose();
+            _session = null;
+            // A native ONNX Runtime fault here (corrupt/incompatible model) bypasses
+            // managed exception handling and kills the process; this line is flushed
+            // to disk immediately before the risky call so a crash still leaves a
+            // record of exactly where it happened.
+            LogPreflight("about to load InferenceSession after install");
             _session = new InferenceSession(ModelPath(_assetsRoot));
             _unavailable = false;
             progress?.Report("Kokoro native voice assets installed.");
@@ -210,6 +217,23 @@ internal sealed class KokoroOnnxModel : IDisposable
         var hash = await SHA256.HashDataAsync(stream, ct);
         var actual = Convert.ToHexString(hash).ToLowerInvariant();
         return string.Equals(actual, expectedSha256, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void LogPreflight(string message)
+    {
+        try
+        {
+            File.AppendAllText(
+                Path.Combine(_assetsRoot, "kokoro_native_install.log"),
+                $"{DateTime.UtcNow:O} {message} (model size: {SafeFileLength(ModelPath(_assetsRoot))} bytes)\n");
+        }
+        catch { }
+    }
+
+    private static long SafeFileLength(string path)
+    {
+        try { return new FileInfo(path).Length; }
+        catch { return -1; }
     }
 
     public void Dispose()

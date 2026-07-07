@@ -12,6 +12,7 @@ public partial class SettingsViewModel : ObservableObject
     private readonly ISettingsService _svc;
     private readonly IToastService _toasts;
     private readonly XttsProcessManager _xttsProcess;
+    private readonly KokoroProcessManager _kokoroProcess;
     private readonly ServicesViewModel? _servicesView;
 
     [ObservableProperty] private bool _isSaved;
@@ -134,6 +135,7 @@ public partial class SettingsViewModel : ObservableObject
         _svc = svc;
         _toasts = toasts;
         _xttsProcess = xttsProcess;
+        _kokoroProcess = kokoroProcess;
         _servicesView = services;
 
         Llm = new LlmDefaultsSettingsViewModel(secrets);
@@ -243,6 +245,7 @@ public partial class SettingsViewModel : ObservableObject
     {
         Tts.Dispose();
         _xttsProcess.Stop();
+        _kokoroProcess.Stop();
     }
 
     private void ApplyTtsTo(AppSettings settings)

@@ -11,6 +11,14 @@ limit.
 
 ## [Unreleased]
 
+## [0.9.38-alpha] - 2026-07-07
+
+### Fixed
+- `SettingsViewModel.Shutdown()` stopped `XttsProcessManager` but never `KokoroProcessManager`, so the Python Kokoro process could outlive an app shutdown that didn't go through DI container disposal.
+
+### Added
+- `KokoroOnnxModel` now writes a `kokoro_native_install.log` line (with the on-disk model file size) immediately before each `InferenceSession` load, both during install and lazy-load. A native ONNX Runtime fault during session creation bypasses managed exception handling and kills the process with no other trace; this at least pins down whether a crash happens at session load versus during download/verification.
+
 ## [0.9.37-alpha] - 2026-07-07
 
 ViewModel orchestration extraction, part 6: the three large orchestrators previously deliberately deferred (`ChatViewModel.SendAsync`, `ChatViewModel.CompareSelectedModelsAsync`, `RagViewModel.IngestAsync`).
