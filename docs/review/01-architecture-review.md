@@ -95,13 +95,32 @@ the orchestration into plain services (`ChatSessionService` /
 matters strategically: the context-pack builder is the heart of the product
 and it currently lives inside a ViewModel.
 
-### 6. Settings monolith (MEDIUM)
+### 6. Settings monolith (MEDIUM) — evaluated, REJECT full narrowing
 
 `AppSettings` aggregates 8+ domain sections with one save flow. The sectioning
 is good; the risk is that every service takes `ISettingsService` and reads
 whatever it wants, creating invisible coupling ("who reads
 `Llm.OpenAiEnabled`?" is unanswerable without grep). Consider handing each
 service only its section. Not urgent, but stop the drift now.
+
+**Evaluated as part of the 2026-07 pass.** `ISettingsService` is referenced
+from 93 files in `Aether.Services`/`Rag`/`Agent`/`Voice`/`LocalApi` and 30
+more in `Aether.ViewModels`. Narrowing every one of those to a per-section
+type would touch well over 100 files, and the underlying storage model works
+against a clean split: settings persist as one atomic `settings.json` write
+(`SaveAsync`), data-root migration reasons about the whole tree, and
+`SettingsChanged` fires once for the whole object, so any per-section
+wrapper would still need to hold a reference to the full `AppSettings` for
+save/migrate/notify purposes, making the "narrowing" partly cosmetic at the
+call sites that matter most. No bug or reported confusion traces back to
+this; it is a hypothetical discoverability concern, not an active one. Given
+that, and that the interface-collapse pass (docs/review/06-technical-debt.md
+item 3) already reduced indirection elsewhere this release, a mechanical
+rewrite of 100+ call sites for a "not urgent" item is disproportionate.
+**Going forward:** new services should still take only the settings section
+they need as a constructor parameter where the type shape allows it (several
+already do, e.g. `RedactionService` needs no settings at all); this is a
+code-review guideline, not a retrofit of existing services.
 
 ### 7. Test harness is custom and thin (MEDIUM)
 

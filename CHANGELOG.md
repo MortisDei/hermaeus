@@ -11,6 +11,14 @@ limit.
 
 ## [Unreleased]
 
+## [0.9.30-alpha] - 2026-07-07
+
+Closes docs/review/01-architecture-review.md item 6 (settings monolith) with
+a reasoned reject rather than a mass rewrite.
+
+### Changed
+- Docs only: evaluated giving each service only its own settings section instead of full `ISettingsService` access. Rejected as a retrofit: `ISettingsService` is referenced from 123 files, and settings persist as one atomic file/save/migrate/change-notification, so a per-section wrapper would still need the whole object for the operations that matter, making a mechanical rewrite mostly cosmetic. No bug traces back to this. New services should still prefer taking only the section they need going forward.
+
 ## [0.9.29-alpha] - 2026-07-07
 
 Interface ceremony cleanup (docs/review/06-technical-debt.md item 3):
