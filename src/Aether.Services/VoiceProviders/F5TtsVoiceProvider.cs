@@ -17,7 +17,7 @@ public sealed class F5TtsVoiceProvider : ITtsService, IVoiceProvider
     public VoiceProvider Id => VoiceProvider.F5Tts;
     public string DisplayName => "F5-TTS";
     public VoiceCapability Capabilities => VoiceCapability.TextToSpeech | VoiceCapability.VoiceCloning | VoiceCapability.Local | VoiceCapability.Experimental;
-    public (int Major, int Minor) RequiredPythonVersion => (3, 11);
+    public (int Major, int Minor)? RequiredPythonVersion => (3, 11);
 
     public F5TtsVoiceProvider(ISettingsService settings)
     {

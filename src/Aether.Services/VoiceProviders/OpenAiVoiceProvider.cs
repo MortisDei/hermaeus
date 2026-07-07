@@ -17,7 +17,7 @@ public sealed class OpenAiVoiceProvider : ITtsService, IVoiceProvider, IDisposab
     public VoiceProvider Id => VoiceProvider.OpenAi;
     public string DisplayName => "OpenAI";
     public VoiceCapability Capabilities => VoiceCapability.TextToSpeech | VoiceCapability.Remote | VoiceCapability.RequiresApiKey;
-    public (int Major, int Minor) RequiredPythonVersion => (0, 0); // Remote API, no Python required
+    public (int Major, int Minor)? RequiredPythonVersion => null; // Remote API, no Python required
 
     public OpenAiVoiceProvider(ISettingsService settings, ISecretStore secrets, HttpClient? http = null)
     {

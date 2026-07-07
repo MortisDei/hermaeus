@@ -9,6 +9,7 @@ using Aether.Rag.Retrieval;
 using Aether.Rag.Storage;
 using Aether.Services;
 using Aether.Services.ProcessManagement;
+using Aether.Voice;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Aether.Composition;
@@ -61,6 +62,7 @@ public static class AetherServiceRegistration
         s.AddSingleton<KokoroVoiceProvider>();
         s.AddSingleton<F5TtsVoiceProvider>();
         s.AddSingleton<OpenAiVoiceProvider>();
+        s.AddSingleton<NativeKokoroVoiceProvider>();
         s.AddSingleton<IVoiceProviderRegistry, VoiceProviderRegistry>();
         s.AddSingleton<ITtsService, VoiceRoutingTtsService>();
         s.AddSingleton<XttsProcessManager>();

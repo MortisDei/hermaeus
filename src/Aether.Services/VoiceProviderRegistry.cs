@@ -1,5 +1,6 @@
 using Aether.Core.Models;
 using Aether.Core.Services;
+using Aether.Voice;
 
 namespace Aether.Services;
 
@@ -16,6 +17,7 @@ public sealed class VoiceProviderRegistry : IVoiceProviderRegistry
         KokoroVoiceProvider kokoro,
         F5TtsVoiceProvider f5Tts,
         OpenAiVoiceProvider openAi,
+        NativeKokoroVoiceProvider kokoroNative,
         IRuntimeLogService runtimeLogs)
     {
         _settingsService = settingsService;
@@ -25,7 +27,8 @@ public sealed class VoiceProviderRegistry : IVoiceProviderRegistry
             { VoiceProvider.XttsV2, xttsV2 },
             { VoiceProvider.Kokoro, kokoro },
             { VoiceProvider.F5Tts, f5Tts },
-            { VoiceProvider.OpenAi, openAi }
+            { VoiceProvider.OpenAi, openAi },
+            { VoiceProvider.KokoroNative, kokoroNative }
         };
 
         var configured = settingsService.Settings.Tts.VoiceProvider;
@@ -47,6 +50,7 @@ public sealed class VoiceProviderRegistry : IVoiceProviderRegistry
         "XTTS v2" => true,
         "OpenAi" => true,
         "OpenAI" => true,
+        "KokoroNative" => true,
         _ => false
     };
 
@@ -81,7 +85,14 @@ public sealed class VoiceProviderRegistry : IVoiceProviderRegistry
                 "Remote voice synthesis via OpenAI API.",
                 VoiceProviderCategory.Advanced,
                 _providers[VoiceProvider.OpenAi].IsInstalled,
-                _providers[VoiceProvider.OpenAi].Capabilities)
+                _providers[VoiceProvider.OpenAi].Capabilities),
+            new VoiceProviderInfo(
+                VoiceProvider.KokoroNative,
+                "Kokoro (native)",
+                "Fully in-process Kokoro: no Python subprocess, ONNX inference runs directly in Aether. English voices only; still experimental alongside the Python-based Kokoro provider.",
+                VoiceProviderCategory.Recommended,
+                _providers[VoiceProvider.KokoroNative].IsInstalled,
+                _providers[VoiceProvider.KokoroNative].Capabilities)
         }
             .OrderBy(p => (int)p.Category)
             .ThenBy(p => p.Name)
@@ -139,7 +150,8 @@ public sealed class VoiceProviderRegistry : IVoiceProviderRegistry
             "F5Tts" or "F5-TTS" => VoiceProvider.F5Tts,
             "XttsV2" or "XTTS" or "XTTS v2" => VoiceProvider.XttsV2,
             "OpenAi" or "OpenAI" => VoiceProvider.OpenAi,
-            _ => VoiceProvider.Kokoro // Default to Kokoro
+            "KokoroNative" => VoiceProvider.KokoroNative,
+            _ => VoiceProvider.Kokoro // Default to Kokoro (Python); native Kokoro is opt-in until it passes parity testing
         };
     }
 }

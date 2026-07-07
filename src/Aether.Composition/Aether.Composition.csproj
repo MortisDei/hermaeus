@@ -14,5 +14,6 @@
     <ProjectReference Include="../Aether.Agent/Aether.Agent.csproj" />
     <ProjectReference Include="../Aether.Rag/Aether.Rag.csproj" />
     <ProjectReference Include="../Aether.Mcp/Aether.Mcp.csproj" />
+    <ProjectReference Include="../Aether.Voice/Aether.Voice.csproj" />
   </ItemGroup>
 </Project>

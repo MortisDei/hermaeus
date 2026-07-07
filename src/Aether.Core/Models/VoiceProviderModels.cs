@@ -8,7 +8,8 @@ public enum VoiceProvider
     Kokoro,
     F5Tts,
     XttsV2,
-    OpenAi
+    OpenAi,
+    KokoroNative
 }
 
 public enum VoiceProviderCategory

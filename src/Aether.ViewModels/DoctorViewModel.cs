@@ -25,6 +25,8 @@ public partial class DoctorViewModel : ObservableObject
     [ObservableProperty] private string _embeddingModelProgress = string.Empty;
     [ObservableProperty] private double _embeddingModelProgressPercent;
     [ObservableProperty] private bool _embeddingModelProgressIsIndeterminate = true;
+    [ObservableProperty] private bool _isInstallingNativeKokoro;
+    [ObservableProperty] private string _nativeKokoroProgress = string.Empty;
 
     private readonly System.Text.StringBuilder _embeddingLogBuffer = new();
 
@@ -217,6 +219,42 @@ public partial class DoctorViewModel : ObservableObject
                 }
                 IsInstallingReranker = false;
                 RerankerProgress = string.Empty;
+                _installCts = null;
+                return;
+            }
+        }
+
+        if (check.Key == "kokoro-native")
+        {
+            try
+            {
+                if (IsInstallingNativeKokoro) return;
+                IsInstallingNativeKokoro = true;
+                _installCts = new CancellationTokenSource();
+                var progress = new Progress<string>(s => NativeKokoroProgress = s);
+                var ok = await _doctor.InstallNativeKokoroAssetsAsync(progress, _installCts.Token);
+                _toasts.Show(ok ? "Kokoro (native) installed" : "Kokoro (native) install failed",
+                    ok ? "Kokoro native ONNX model and voices installed." : "See diagnostics for details.",
+                    ok ? ToastKind.Success : ToastKind.Error,
+                    7000);
+                await ScanAsync();
+                NativeKokoroProgress = string.Empty;
+                IsInstallingNativeKokoro = false;
+                _installCts = null;
+                return;
+            }
+            catch (Exception ex)
+            {
+                if (ex is OperationCanceledException)
+                {
+                    _toasts.Show("Kokoro (native) install cancelled", "Installation was cancelled.", ToastKind.Info, 4000);
+                }
+                else
+                {
+                    _toasts.Show("Kokoro (native) install failed", ex.Message, ToastKind.Error, 7000);
+                }
+                IsInstallingNativeKokoro = false;
+                NativeKokoroProgress = string.Empty;
                 _installCts = null;
                 return;
             }

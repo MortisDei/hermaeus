@@ -214,7 +214,7 @@ namespace Aether.Tests
         public VoiceProvider Id => VoiceProvider.Kokoro;
         public string DisplayName => "Fake Voice";
         public VoiceCapability Capabilities => VoiceCapability.TextToSpeech | VoiceCapability.Local;
-        public (int Major, int Minor) RequiredPythonVersion => (3, 12);
+        public (int Major, int Minor)? RequiredPythonVersion => (3, 12);
         public bool IsInstalled => true;
 
         public VoiceProviderDetection Detect() => new VoiceProviderDetection(true, "Available", "Fake provider available", null);
@@ -514,6 +514,10 @@ namespace Aether.Tests
         public Task<bool> InstallLlamaServerUpdateAsync(CancellationToken ct = default) => Task.FromResult(true);
 
         public Task<bool> InstallLlamaServerUpdateAsync(IProgress<string> progress, CancellationToken ct = default) => Task.FromResult(true);
+
+        public Task<bool> InstallNativeKokoroAssetsAsync(CancellationToken ct = default) => Task.FromResult(true);
+
+        public Task<bool> InstallNativeKokoroAssetsAsync(IProgress<string> progress, CancellationToken ct = default) => Task.FromResult(true);
     }
 
     internal static class PdfHelpers

@@ -51,7 +51,7 @@ public sealed class KokoroVoiceProvider : ITtsService, IVoiceProvider
     public VoiceProvider Id => VoiceProvider.Kokoro;
     public string DisplayName => "Kokoro";
     public VoiceCapability Capabilities => VoiceCapability.TextToSpeech | VoiceCapability.Local;
-    public (int Major, int Minor) RequiredPythonVersion => (3, 12);
+    public (int Major, int Minor)? RequiredPythonVersion => (3, 12);
 
     public KokoroVoiceProvider(ISettingsService settings, KokoroProcessManager? processManager = null)
     {

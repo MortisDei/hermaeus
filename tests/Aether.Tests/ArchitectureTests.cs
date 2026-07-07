@@ -13,6 +13,7 @@ public sealed class ArchitectureTests
     private static Assembly Core => typeof(Aether.Core.Services.ILlmService).Assembly;
     private static Assembly Services => typeof(Aether.Services.RedactionService).Assembly;
     private static Assembly AgentAsm => typeof(Aether.Agent.Services.AgentService).Assembly;
+    private static Assembly VoiceAsm => typeof(Aether.Voice.NativeKokoroVoiceProvider).Assembly;
 
     private static string[] RefNames(Assembly asm) =>
         asm.GetReferencedAssemblies().Select(a => a.Name ?? string.Empty).ToArray();
@@ -28,8 +29,10 @@ public sealed class ArchitectureTests
     }
 
     [Fact]
-    public void OnnxRuntime_is_confined_to_the_Rag_project()
+    public void OnnxRuntime_is_confined_to_the_Rag_and_Voice_projects()
     {
+        // Services references Aether.Voice for provider wiring (VoiceProviderRegistry),
+        // but must not reach past that thin surface to use ONNX Runtime types directly.
         foreach (var asm in new[] { Core, Services, AgentAsm, ViewModels })
         {
             var offenders = RefNames(asm)
@@ -38,6 +41,12 @@ public sealed class ArchitectureTests
             Assert.True(offenders.Count == 0,
                 $"{asm.GetName().Name} must not reference ONNX Runtime; found: {string.Join(", ", offenders)}");
         }
+
+        var voiceOffenders = RefNames(VoiceAsm)
+            .Where(n => n.StartsWith("Microsoft.ML.OnnxRuntime", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        Assert.True(voiceOffenders.Count > 0,
+            "Aether.Voice is expected to reference ONNX Runtime directly for native Kokoro inference.");
     }
 
     [Fact]

@@ -3,6 +3,7 @@ using Aether.Core.Services;
 using Aether.Rag.Embeddings;
 using Aether.Rag.Storage;
 using Aether.Rag.Retrieval;
+using Aether.Voice;
 using System.Diagnostics;
 using System.Linq;
 using System.Net.Http.Json;
@@ -109,6 +110,7 @@ public sealed class DoctorService : IDoctorService, IInspectionCheckProvider
                 ? await CheckEmbeddingBackendAsync(ct)
                 : CheckEmbeddingBackendSkipped(embeddingModelCheck),
             CheckRerankerAssets(),
+            CheckNativeKokoroAssets(),
             await CheckGpuAsync(ct),
             await CheckSecretsAsync(ct),
             CheckTraySupport()
@@ -426,6 +428,20 @@ public sealed class DoctorService : IDoctorService, IInspectionCheckProvider
     private async Task<DoctorCheck> CheckPythonAsync(CancellationToken ct)
     {
         var provider = _voice.GetActiveVoiceProvider();
+        if (provider.RequiredPythonVersion is null)
+        {
+            return BuildCheck(
+                "python",
+                $"Python for {provider.DisplayName}",
+                DoctorCheckStatus.Ready,
+                "No Python interpreter required",
+                $"{provider.DisplayName} does not use a Python subprocess.",
+                "Open Settings",
+                false,
+                string.Empty,
+                "Voice");
+        }
+
         var python = _settings.Settings.Tts.PythonPath.Trim();
         var validator = PythonHealthValidator.ForProvider(provider);
         var report = await validator.ValidateAsync(python, ct);
@@ -433,10 +449,8 @@ public sealed class DoctorService : IDoctorService, IInspectionCheckProvider
         if (!report.IsHealthy && report.Issues.Any(i => i.Code == "version"))
             status = DoctorCheckStatus.Warning;
 
-        var required = provider.RequiredPythonVersion;
-        var title = required.Major > 0
-            ? $"Python {required.Major}.{required.Minor} for {provider.DisplayName}"
-            : $"Python for {provider.DisplayName}";
+        var required = provider.RequiredPythonVersion.Value;
+        var title = $"Python {required.Major}.{required.Minor} for {provider.DisplayName}";
 
         return BuildCheck(
             "python",
@@ -636,6 +650,58 @@ public sealed class DoctorService : IDoctorService, IInspectionCheckProvider
             modelDir,
             "RAG");
     }
+
+    private DoctorCheck CheckNativeKokoroAssets()
+    {
+        var provider = GetNativeKokoroProvider();
+        var ok = provider?.IsInstalled ?? false;
+        return BuildCheck(
+            "kokoro-native",
+            "Kokoro (native) assets",
+            ok ? DoctorCheckStatus.Ready : DoctorCheckStatus.Info,
+            ok ? "Kokoro native ONNX assets present" : "Kokoro native ONNX assets not installed",
+            ok
+                ? "The native Kokoro model and voice files are downloaded and verified."
+                : "Install to synthesize speech fully in-process, with no Python subprocess.",
+            ok ? "Open Settings" : "Install Kokoro (native)",
+            true,
+            string.Empty,
+            "Voice");
+    }
+
+    public async Task<bool> InstallNativeKokoroAssetsAsync(CancellationToken ct = default)
+    {
+        var provider = GetNativeKokoroProvider();
+        if (provider is null)
+            return false;
+
+        return await provider.InstallAssetsAsync(null, ct);
+    }
+
+    public async Task<bool> InstallNativeKokoroAssetsAsync(IProgress<string> progress, CancellationToken ct = default)
+    {
+        var provider = GetNativeKokoroProvider();
+        if (provider is null)
+        {
+            _runtimeLogs?.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Warning,
+                RuntimeLogCategory.Service,
+                "Kokoro native installation skipped: provider not available"));
+            return false;
+        }
+
+        var result = await provider.InstallAssetsAsync(progress, ct);
+        _runtimeLogs?.Add(new RuntimeLogEntry(
+            DateTime.UtcNow,
+            result ? RuntimeLogLevel.Info : RuntimeLogLevel.Error,
+            RuntimeLogCategory.Service,
+            result ? "Kokoro native assets installed successfully" : "Kokoro native asset installation failed"));
+        return result;
+    }
+
+    private NativeKokoroVoiceProvider? GetNativeKokoroProvider() =>
+        _voice.GetVoiceProvider(VoiceProvider.KokoroNative) as NativeKokoroVoiceProvider;
 
     public async Task<bool> InstallRerankerAssetsAsync(CancellationToken ct = default)
     {

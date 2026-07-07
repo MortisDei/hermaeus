@@ -12,4 +12,6 @@ public interface IDoctorService
     Task<bool> InstallEmbeddingModelAsync(IProgress<string> progress, CancellationToken ct = default);
     Task<bool> InstallLlamaServerUpdateAsync(CancellationToken ct = default);
     Task<bool> InstallLlamaServerUpdateAsync(IProgress<string> progress, CancellationToken ct = default);
+    Task<bool> InstallNativeKokoroAssetsAsync(CancellationToken ct = default);
+    Task<bool> InstallNativeKokoroAssetsAsync(IProgress<string> progress, CancellationToken ct = default);
 }

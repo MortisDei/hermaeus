@@ -95,6 +95,20 @@
             </StackPanel>
         </Border>
         </Grid>
+        <!-- Kokoro (native) install modal overlay -->
+        <Grid IsVisible="{Binding IsInstallingNativeKokoro}" Background="#80000000">
+        <Border HorizontalAlignment="Center" VerticalAlignment="Center" Background="{DynamicResource BackgroundBrush}" Padding="20" CornerRadius="8">
+            <StackPanel Spacing="12" Width="520">
+                <TextBlock Text="Installing Kokoro (native)" FontSize="16" FontWeight="SemiBold" />
+                <TextBlock Text="This will download and verify the Kokoro ONNX model and built-in voice files. You can cancel at any time." Opacity="0.7" TextWrapping="Wrap" />
+                <ProgressBar IsIndeterminate="True" Height="12" />
+                <TextBlock Text="{Binding NativeKokoroProgress}" Opacity="0.9" />
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+                    <Button Content="Cancel" Command="{Binding CancelInstallCommand}" Padding="10,6" />
+                </StackPanel>
+            </StackPanel>
+        </Border>
+        </Grid>
         <!-- llama.cpp install modal overlay -->
         <Grid IsVisible="{Binding IsInstallingLlamaServer}" Background="#80000000">
         <Border HorizontalAlignment="Center" VerticalAlignment="Center" Background="{DynamicResource BackgroundBrush}" Padding="20" CornerRadius="8">

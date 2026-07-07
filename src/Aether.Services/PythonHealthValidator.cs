@@ -21,8 +21,8 @@ public sealed class PythonHealthValidator
 
     public static PythonHealthValidator ForProvider(IVoiceProvider provider)
     {
-        var (major, minor) = provider.RequiredPythonVersion;
-        return major > 0 ? new PythonHealthValidator(major, minor) : new PythonHealthValidator();
+        var required = provider.RequiredPythonVersion;
+        return required is { } version ? new PythonHealthValidator(version.Major, version.Minor) : new PythonHealthValidator();
     }
 
     public async Task<PythonHealthReport> ValidateAsync(string pythonPath, CancellationToken ct = default)

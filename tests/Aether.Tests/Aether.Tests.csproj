@@ -33,5 +33,6 @@
     <ProjectReference Include="../../src/Aether.Mcp/Aether.Mcp.csproj" />
     <ProjectReference Include="../../src/Aether.Composition/Aether.Composition.csproj" />
     <ProjectReference Include="../../src/Aether.LocalApi/Aether.LocalApi.csproj" />
+    <ProjectReference Include="../../src/Aether.Voice/Aether.Voice.csproj" />
   </ItemGroup>
 </Project>

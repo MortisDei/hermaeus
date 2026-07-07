@@ -7,7 +7,8 @@ public interface IVoiceProvider
     VoiceProvider Id { get; }
     string DisplayName { get; }
     VoiceCapability Capabilities { get; }
-    (int Major, int Minor) RequiredPythonVersion { get; }
+    /// <summary>Null when the provider needs no Python interpreter (e.g. native ONNX or a remote API).</summary>
+    (int Major, int Minor)? RequiredPythonVersion { get; }
     bool IsInstalled { get; }
 
     VoiceProviderDetection Detect();

@@ -160,6 +160,20 @@ public static class HarnessCases
         [new HarnessCase("RAG query endpoint refuses when dataset has no context", LocalApiTests.RagQueryEndpointRefusesWhenDatasetHasNoContext)],
         [new HarnessCase("chat completion rejects missing fields", LocalApiTests.ChatCompletionRejectsMissingFields)]
     ];
+
+    public static IEnumerable<object[]> Voice =>
+    [
+        [new HarnessCase("phonemizer dictionary words produce only vocab symbols", VoiceTests.PhonemizerDictionaryWordsProduceOnlyVocabSymbols)],
+        [new HarnessCase("phonemizer fallback handles out-of-dictionary words", VoiceTests.PhonemizerFallbackHandlesOutOfDictionaryWords)],
+        [new HarnessCase("phonemizer is deterministic", VoiceTests.PhonemizerIsDeterministic)],
+        [new HarnessCase("tokenizer wraps each chunk with pad tokens", VoiceTests.TokenizerWrapsEachChunkWithPadTokens)],
+        [new HarnessCase("tokenizer splits long input into multiple chunks", VoiceTests.TokenizerSplitsLongInputIntoMultipleChunks)],
+        [new HarnessCase("tokenizer returns empty for blank input", VoiceTests.TokenizerReturnsEmptyForBlankInput)],
+        [new HarnessCase("onnx model refuses to load when assets are missing", VoiceTests.OnnxModelRefusesToLoadWhenAssetsAreMissing)],
+        [new HarnessCase("onnx model hash verification rejects tampered file", VoiceTests.OnnxModelHashVerificationRejectsTamperedFile)],
+        [new HarnessCase("native provider reports not installed without assets", VoiceTests.NativeProviderReportsNotInstalledWithoutAssets)],
+        [new HarnessCase("native provider requires no python version", VoiceTests.NativeProviderRequiresNoPythonVersion)]
+    ];
 }
 
 public sealed class BackupHarnessTests
@@ -227,6 +241,16 @@ public sealed class LocalApiHarnessTests
     [Theory]
     [MemberData(nameof(HarnessCases.LocalApi), MemberType = typeof(HarnessCases))]
     public async Task Runs_LocalApi_Cases(HarnessCase testCase)
+    {
+        await testCase.Run();
+    }
+}
+
+public sealed class VoiceHarnessTests
+{
+    [Theory]
+    [MemberData(nameof(HarnessCases.Voice), MemberType = typeof(HarnessCases))]
+    public async Task Runs_Voice_Cases(HarnessCase testCase)
     {
         await testCase.Run();
     }

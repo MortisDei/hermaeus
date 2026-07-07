@@ -19,7 +19,7 @@ public sealed class XttsV2VoiceProvider : ITtsService, IVoiceProvider, IDisposab
     public VoiceProvider Id => VoiceProvider.XttsV2;
     public string DisplayName => "XTTS v2";
     public VoiceCapability Capabilities => VoiceCapability.TextToSpeech | VoiceCapability.VoiceCloning | VoiceCapability.Local;
-    public (int Major, int Minor) RequiredPythonVersion => (3, 11);
+    public (int Major, int Minor)? RequiredPythonVersion => (3, 11);
 
     public bool IsInstalled => File.Exists(_settings.Settings.Tts.ScriptPath);
 

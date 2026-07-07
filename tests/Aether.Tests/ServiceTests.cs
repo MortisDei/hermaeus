@@ -1692,6 +1692,8 @@ namespace Aether.Tests
             public Task<bool> InstallEmbeddingModelAsync(IProgress<string> progress, System.Threading.CancellationToken ct = default) => Task.FromResult(true);
             public Task<bool> InstallLlamaServerUpdateAsync(System.Threading.CancellationToken ct = default) => Task.FromResult(true);
             public Task<bool> InstallLlamaServerUpdateAsync(IProgress<string> progress, System.Threading.CancellationToken ct = default) => Task.FromResult(true);
+            public Task<bool> InstallNativeKokoroAssetsAsync(System.Threading.CancellationToken ct = default) => Task.FromResult(true);
+            public Task<bool> InstallNativeKokoroAssetsAsync(IProgress<string> progress, System.Threading.CancellationToken ct = default) => Task.FromResult(true);
         }
 
         private sealed class ThrowingEmbeddingService : IEmbeddingService
