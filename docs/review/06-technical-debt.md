@@ -91,14 +91,19 @@ adding a provider means adding one dictionary entry, not a new switch arm.
 `ServicesViewModel.RuntimeProfileViewModel.KindLabel` duplicated the same
 three display strings in its own switch on the unrelated `RuntimeKind` enum;
 it now reads `CompositeLlmService.DescriptorFor(kind).DisplayName`, one
-source of truth for the label. Still open, deliberately: `PrivacyAuditService.IsChatProviderEnabled`'s
-tag switch and `CompositeLlmService.GetModelsAsync`/`IsConfigured`'s
-per-provider `if`s bridge to a flat, per-provider settings shape
-(`Llm.LlamaCppEnabled`, `Llm.OpenAiEnabled`, `RuntimeProfiles`) that isn't
-keyed by tag. Collapsing that means changing the settings schema (and
-migrating existing `settings.json` files), which is a materially bigger and
-riskier change than a routing-table extraction — left for a dedicated
-settings-migration effort, not bundled into this cleanup.
+source of truth for the label. `PrivacyAuditService.IsChatProviderEnabled`'s
+tag switch and `CompositeLlmService.GetModelsAsync`'s per-provider `if`s
+independently matched a provider tag to the same two settings flags
+(`Llm.LlamaCppEnabled`, `Llm.OpenAiEnabled`) plus the `RuntimeProfiles` Ollama
+check; both now call one new `CompositeLlmService.IsProviderEnabled(tag,
+settings)`, so there is one place that knows the mapping instead of two.
+**Deliberately not done:** replacing the two named boolean settings fields
+themselves with a `Dictionary<string, bool>` keyed by tag. That would need a
+`settings.json` schema migration for a benefit (adding a provider without
+touching two named fields plus a switch arm) that hasn't materialized as a
+concrete near-term need, and would work against the "no speculative
+flexibility" principle documents 02/03 apply elsewhere. Revisit only when a
+fourth chat provider is actually being added.
 
 ## 5. Leaky abstractions on `ILlmService` — DONE
 

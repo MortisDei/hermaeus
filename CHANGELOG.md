@@ -11,6 +11,15 @@ limit.
 
 ## [Unreleased]
 
+## [0.9.31-alpha] - 2026-07-07
+
+Closes the remaining half of docs/review/06-technical-debt.md item 4
+(provider knowledge smeared across layers) without a settings schema
+migration.
+
+### Changed
+- `PrivacyAuditService.IsChatProviderEnabled` and `CompositeLlmService.GetModelsAsync` independently matched a provider tag to the same `Llm.LlamaCppEnabled`/`Llm.OpenAiEnabled`/`RuntimeProfiles` flags; both now call one new `CompositeLlmService.IsProviderEnabled(tag, settings)`. Deliberately not done: replacing the two named boolean fields with a tag-keyed dictionary, which would need a `settings.json` migration for a benefit (adding a 4th provider) that hasn't materialized yet.
+
 ## [0.9.30-alpha] - 2026-07-07
 
 Closes docs/review/01-architecture-review.md item 6 (settings monolith) with

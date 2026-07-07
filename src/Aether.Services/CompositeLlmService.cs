@@ -41,6 +41,19 @@ public sealed class CompositeLlmService : ILlmService, IDisposable
         _ => OpenAiService.Descriptor
     };
 
+    /// <summary>
+    /// The single source of truth for "is this provider enabled," so the
+    /// per-provider settings flags aren't matched against a provider tag in
+    /// more than one place (docs/review/06-technical-debt.md item 4).
+    /// </summary>
+    public static bool IsProviderEnabled(string tag, AppSettings settings) => tag switch
+    {
+        "openai" => settings.Llm.OpenAiEnabled,
+        "llama.cpp" => settings.Llm.LlamaCppEnabled,
+        "ollama" => settings.RuntimeProfiles.Any(p => p.Enabled && p.Kind == RuntimeKind.Ollama),
+        _ => false
+    };
+
     /// <summary>Describes the provider a model id routes to.</summary>
     public ProviderDescriptor DescribeModel(string modelId)
     {
@@ -82,9 +95,9 @@ public sealed class CompositeLlmService : ILlmService, IDisposable
 
         var all = new List<LlmModel>();
         var loads = new List<Task<List<LlmModel>>>();
-        if (_settings.Settings.Llm.LlamaCppEnabled)
+        if (IsProviderEnabled(LlamaCppService.Descriptor.Tag, _settings.Settings))
             loads.Add(GetWithTimeoutAsync(_llamaCpp.GetModelsAsync, ct));
-        if (_settings.Settings.Llm.OpenAiEnabled && _openAi.IsConfigured)
+        if (IsProviderEnabled(OpenAiService.Descriptor.Tag, _settings.Settings) && _openAi.IsConfigured)
             loads.Add(GetWithTimeoutAsync(_openAi.GetModelsAsync, ct));
         loads.Add(GetWithTimeoutAsync(_ollama.GetModelsAsync, ct));
 

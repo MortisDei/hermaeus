@@ -132,13 +132,8 @@ public sealed class PrivacyAuditService : IInspectionCheckProvider
             $"{recent.Count} recent call(s) from {byClient.Count} distinct app(s) (self-reported, not access-controlled): {string.Join("; ", byClient)}");
     }
 
-    private static bool IsChatProviderEnabled(ProviderDescriptor descriptor, AppSettings settings) => descriptor.Tag switch
-    {
-        "openai" => settings.Llm.OpenAiEnabled,
-        "llama.cpp" => settings.Llm.LlamaCppEnabled,
-        "ollama" => settings.RuntimeProfiles.Any(p => p.Enabled && p.Kind == RuntimeKind.Ollama),
-        _ => false
-    };
+    private static bool IsChatProviderEnabled(ProviderDescriptor descriptor, AppSettings settings) =>
+        CompositeLlmService.IsProviderEnabled(descriptor.Tag, settings);
 
     public async Task<IReadOnlyList<InspectionCheck>> GetChecksAsync(CancellationToken ct = default)
     {

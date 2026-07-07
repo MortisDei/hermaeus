@@ -43,4 +43,19 @@ public sealed class ProviderDescriptorTests
     {
         Assert.Equal(expectedTag, CompositeLlmService.DescriptorFor(kind).Tag);
     }
+
+    [Fact]
+    public void IsProviderEnabled_reads_the_matching_settings_flag_per_tag()
+    {
+        var settings = new AppSettings
+        {
+            Llm = new LlmSettings { LlamaCppEnabled = true, OpenAiEnabled = false },
+            RuntimeProfiles = [new RuntimeProfile { Kind = RuntimeKind.Ollama, Enabled = true }]
+        };
+
+        Assert.True(CompositeLlmService.IsProviderEnabled("llama.cpp", settings));
+        Assert.False(CompositeLlmService.IsProviderEnabled("openai", settings));
+        Assert.True(CompositeLlmService.IsProviderEnabled("ollama", settings));
+        Assert.False(CompositeLlmService.IsProviderEnabled("unknown-provider", settings));
+    }
 }
