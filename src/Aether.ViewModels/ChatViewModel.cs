@@ -84,11 +84,11 @@ public partial class ChatViewModel : ObservableObject
     private readonly IToastService _toasts;
     private readonly IMemoryStore _memoryStore;
     private readonly IRuntimeLogService _runtimeLogs;
-    private readonly IModelProfileService _profiles;
+    private readonly ModelProfileService _profiles;
     private readonly IConversationMemoryService _conversationMemory;
-    private readonly IConversationExportService _exports;
+    private readonly ConversationExportService _exports;
     private readonly ITraceStore? _traceStore;
-    private readonly IEvalEngine _evalEngine;
+    private readonly EvalEngine _evalEngine;
     private readonly IWorkspaceActivationService? _workspaceActivation;
     private CancellationTokenSource? _cts;
     private CancellationTokenSource? _ttsCts;
@@ -147,13 +147,13 @@ public partial class ChatViewModel : ObservableObject
         IMemoryStore memoryStore,
         ISettingsService settings,
         ITtsService tts,
-        IModelProfileService profiles,
+        ModelProfileService profiles,
         IToastService toasts,
         IConversationMemoryService conversationMemory,
         IRuntimeLogService runtimeLogs,
-        IConversationExportService exports,
+        ConversationExportService exports,
         ITraceStore? traceStore = null,
-        IEvalEngine? evalEngine = null,
+        EvalEngine? evalEngine = null,
         IWorkspaceActivationService? workspaceActivation = null)
     {
         _llm = llm; _store = store; _settings = settings; _tts = tts; _profiles = profiles; _toasts = toasts;

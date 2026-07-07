@@ -3,7 +3,7 @@ using Aether.Core.Services;
 
 namespace Aether.Services;
 
-public sealed class BackupService : IBackupService
+public sealed class BackupService
 {
     private readonly ISettingsService _settings;
 

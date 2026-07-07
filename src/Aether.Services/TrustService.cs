@@ -7,7 +7,7 @@ using Aether.Services.ProcessManagement;
 
 namespace Aether.Services;
 
-public sealed class TrustService : ITrustService, IInspectionCheckProvider
+public sealed class TrustService : IInspectionCheckProvider
 {
     private static readonly string[] UnsafeHostFlags = ["--host", "-host", "--listen-host"];
 

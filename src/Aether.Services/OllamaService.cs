@@ -12,7 +12,7 @@ public sealed class OllamaService : IDisposable
     private const string ProviderTagValue = "ollama";
     private static readonly HttpClient SharedHttp = new() { Timeout = TimeSpan.FromMinutes(10) };
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> _contextLengthCache = new();
-    private readonly IRuntimeProfileService _profiles;
+    private readonly RuntimeProfileService _profiles;
     private readonly HttpClient _http;
 
     public static readonly ProviderDescriptor Descriptor = new(
@@ -20,7 +20,7 @@ public sealed class OllamaService : IDisposable
         ProviderCapabilities.Streaming | ProviderCapabilities.UsageReporting
         | ProviderCapabilities.ModelPull | ProviderCapabilities.ModelDelete);
 
-    public OllamaService(IRuntimeProfileService profiles)
+    public OllamaService(RuntimeProfileService profiles)
     {
         _profiles = profiles;
         _http = SharedHttp;

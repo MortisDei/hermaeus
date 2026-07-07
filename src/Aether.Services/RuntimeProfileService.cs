@@ -3,7 +3,7 @@ using Aether.Core.Services;
 
 namespace Aether.Services;
 
-public sealed class RuntimeProfileService : IRuntimeProfileService, IDisposable
+public sealed class RuntimeProfileService : IDisposable
 {
     private static readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(3) };
     private readonly ISettingsService _settings;

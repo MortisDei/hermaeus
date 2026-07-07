@@ -11,6 +11,18 @@ limit.
 
 ## [Unreleased]
 
+## [0.9.29-alpha] - 2026-07-07
+
+Interface ceremony cleanup (docs/review/06-technical-debt.md item 3):
+collapses single-implementation interfaces that had no test double and no
+cross-project seam requirement to concrete classes. Internal refactor, no
+behavior change.
+
+### Changed
+- 13 interfaces collapsed to concrete classes: `IBackupService`, `IBenchmarkService`, `IConversationExportService`, `IEvalEngine`, `IInspectionEngine`, `ILocalAiSetupService`, `IMemoryExtractionService`, `IMemoryInjectionService`, `IModelProfileService`, `IPrivacyAuditService`, `IRedactionService`, `IRuntimeProfileService`, `ITrustService`. Consumers now depend on the class directly; DI registers the concrete type instead of an interface mapping.
+- Small data types that lived alongside a deleted interface file (`BackupResult`, `ConversationExportFormat`, `RuntimeHealth`) moved to their own file in `Aether.Core.Services`.
+- The remaining single-implementation interfaces were audited and kept deliberately: about a dozen have real test-double implementations in the test suite (a genuine seam), and `ITraceStore`/`IAgentRetrievalService`/`IMcpToolBridge` are cross-project boundaries `Aether.Agent`/`Aether.Rag` are architecturally forbidden from crossing directly.
+
 ## [0.9.28-alpha] - 2026-07-07
 
 Closes docs/review/02-dependency-review.md's staged item 4 (evaluate an

@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using Aether.Core.Models;
 using System.Threading;
 using Aether.Core.Services;
+using Aether.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -10,7 +11,7 @@ namespace Aether.ViewModels;
 public partial class ModelManagementViewModel : ObservableObject
 {
     private readonly ILlmService _llm;
-    private readonly IModelProfileService _profiles;
+    private readonly ModelProfileService _profiles;
     private readonly IToastService _toasts;
     private long _lastRefreshUtcTicks = DateTime.MinValue.Ticks;
     private readonly List<LlmModel> _modelCache = [];
@@ -23,7 +24,7 @@ public partial class ModelManagementViewModel : ObservableObject
     [ObservableProperty] private bool   _isError;
     [ObservableProperty] private bool   _forceRefresh;
 
-    public ModelManagementViewModel(ILlmService llm, IModelProfileService profiles, IToastService toasts)
+    public ModelManagementViewModel(ILlmService llm, ModelProfileService profiles, IToastService toasts)
     {
         _llm = llm;
         _profiles = profiles;

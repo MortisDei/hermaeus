@@ -5,7 +5,7 @@ using Aether.Core.Services;
 
 namespace Aether.Services;
 
-public sealed class EvalEngine : IEvalEngine
+public sealed class EvalEngine
 {
     private readonly ILlmService _llm;
 

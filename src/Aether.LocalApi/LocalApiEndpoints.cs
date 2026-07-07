@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using Aether.Core.Models;
 using Aether.Core.Services;
 using Aether.Rag;
+using Aether.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 
@@ -109,7 +110,7 @@ public static class LocalApiEndpoints
             return Results.Ok(new RagQueryResponse(answer.ToString(), sources));
         });
 
-        app.MapGet("/v1/models", async (ILlmService llm, IModelProfileService profiles, ITraceStore traces, HttpContext http, CancellationToken ct) =>
+        app.MapGet("/v1/models", async (ILlmService llm, ModelProfileService profiles, ITraceStore traces, HttpContext http, CancellationToken ct) =>
         {
             var client = CallerName(http);
             var sw = Stopwatch.StartNew();

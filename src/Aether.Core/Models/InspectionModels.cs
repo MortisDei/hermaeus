@@ -17,7 +17,7 @@ public enum CheckSeverity
 
 /// <summary>
 /// One inspection finding, contributed by a subsystem-specific
-/// IInspectionCheckProvider and aggregated by the shared IInspectionEngine.
+/// IInspectionCheckProvider and aggregated by the shared InspectionEngine.
 /// View-specific detail that doesn't fit the common shape (e.g. Trust's risk
 /// level and resolved path) travels in DetailJson.
 /// </summary>

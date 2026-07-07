@@ -45,7 +45,7 @@ public sealed class DoctorService : IDoctorService, IInspectionCheckProvider
         "d4e388894e09cf3816e8b0896d81d265b55e7a9fff9ab03fe8bf4ef5e11295ac");
 
     private readonly ISettingsService _settings;
-    private readonly IRuntimeProfileService _runtimes;
+    private readonly RuntimeProfileService _runtimes;
     private readonly IVoiceProviderRegistry _voice;
     private readonly ISecretStore _secrets;
     private readonly SqliteRagStore _ragStore;
@@ -60,7 +60,7 @@ public sealed class DoctorService : IDoctorService, IInspectionCheckProvider
 
     public DoctorService(
         ISettingsService settings,
-        IRuntimeProfileService runtimes,
+        RuntimeProfileService runtimes,
         IVoiceProviderRegistry voice,
         ISecretStore secrets,
         SqliteRagStore ragStore,

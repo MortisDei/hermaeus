@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using Aether.Core.Models;
 using Aether.Core.Services;
+using Aether.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -10,7 +11,7 @@ public partial class SystemOverviewViewModel : ObservableObject
 {
     private readonly ISystemInfoService _system;
     private readonly IToastService _toasts;
-    private readonly IPrivacyAuditService _privacyAudit;
+    private readonly PrivacyAuditService _privacyAudit;
 
     public ObservableCollection<SystemMetricViewModel> Metrics { get; } = [];
     public ObservableCollection<GpuInfoViewModel> Gpus { get; } = [];
@@ -21,7 +22,7 @@ public partial class SystemOverviewViewModel : ObservableObject
     [ObservableProperty] private bool _isRefreshing;
     [ObservableProperty] private SystemSnapshot? _snapshot;
 
-    public SystemOverviewViewModel(ISystemInfoService system, IToastService toasts, IPrivacyAuditService privacyAudit)
+    public SystemOverviewViewModel(ISystemInfoService system, IToastService toasts, PrivacyAuditService privacyAudit)
     {
         _system = system;
         _toasts = toasts;

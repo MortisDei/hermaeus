@@ -9,7 +9,7 @@ namespace Aether.Services;
 /// local machine. Extracted from SystemOverviewViewModel so the checks are
 /// testable and can feed the shared inspection engine.
 /// </summary>
-public sealed class PrivacyAuditService : IPrivacyAuditService, IInspectionCheckProvider
+public sealed class PrivacyAuditService : IInspectionCheckProvider
 {
     private readonly ISettingsService _settings;
     private readonly ISecretStore _secrets;

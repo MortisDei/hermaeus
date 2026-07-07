@@ -146,7 +146,7 @@ public partial class RagSettingsViewModel : ObservableObject
 public partial class DataManagementSettingsViewModel : ObservableObject
 {
     private readonly ISettingsService _settings;
-    private readonly IBackupService _backups;
+    private readonly BackupService _backups;
     private readonly IToastService _toasts;
     private readonly Func<string> _resolveDataRoot;
 
@@ -167,7 +167,7 @@ public partial class DataManagementSettingsViewModel : ObservableObject
 
     public DataManagementSettingsViewModel(
         ISettingsService settings,
-        IBackupService backups,
+        BackupService backups,
         IToastService toasts,
         Func<string> resolveDataRoot)
     {
@@ -380,7 +380,7 @@ public partial class McpSettingsViewModel : ObservableObject
 public partial class LocalAiSetupSettingsViewModel : ObservableObject
 {
     private readonly ISettingsService _settings;
-    private readonly ILocalAiSetupService _localAiSetup;
+    private readonly LocalAiSetupService _localAiSetup;
     private readonly IToastService _toasts;
     private readonly TtsSettingsViewModel _tts;
     private readonly DataManagementSettingsViewModel _data;
@@ -407,7 +407,7 @@ public partial class LocalAiSetupSettingsViewModel : ObservableObject
 
     public LocalAiSetupSettingsViewModel(
         ISettingsService settings,
-        ILocalAiSetupService localAiSetup,
+        LocalAiSetupService localAiSetup,
         IToastService toasts,
         TtsSettingsViewModel tts,
         DataManagementSettingsViewModel data,
@@ -684,7 +684,7 @@ public partial class LocalApiSettingsViewModel : ObservableObject
 public partial class TrustSettingsViewModel : ObservableObject
 {
     private readonly ISettingsService _settings;
-    private readonly ITrustService _trust;
+    private readonly TrustService _trust;
     private readonly IToastService _toasts;
     private readonly TtsSettingsViewModel _tts;
     private readonly DataManagementSettingsViewModel _data;
@@ -699,7 +699,7 @@ public partial class TrustSettingsViewModel : ObservableObject
 
     public TrustSettingsViewModel(
         ISettingsService settings,
-        ITrustService trust,
+        TrustService trust,
         IToastService toasts,
         TtsSettingsViewModel tts,
         DataManagementSettingsViewModel data,

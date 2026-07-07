@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using Aether.Core.Models;
 using Aether.Core.Services;
+using Aether.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -8,9 +9,9 @@ namespace Aether.ViewModels;
 
 public partial class BenchmarkViewModel : ObservableObject
 {
-    private readonly IBenchmarkService _benchmarks;
+    private readonly BenchmarkService _benchmarks;
     private readonly ILlmService _llm;
-    private readonly IModelProfileService _profiles;
+    private readonly ModelProfileService _profiles;
     private readonly ISettingsService _settings;
     private readonly IToastService _toasts;
     private readonly ServicesViewModel? _services;
@@ -41,9 +42,9 @@ public partial class BenchmarkViewModel : ObservableObject
     [ObservableProperty] private bool _runAllSuites = true;
 
     public BenchmarkViewModel(
-        IBenchmarkService benchmarks,
+        BenchmarkService benchmarks,
         ILlmService llm,
-        IModelProfileService profiles,
+        ModelProfileService profiles,
         ISettingsService settings,
         IToastService toasts,
         ServicesViewModel? services = null)

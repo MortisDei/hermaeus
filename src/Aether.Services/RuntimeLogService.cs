@@ -11,12 +11,12 @@ public sealed class RuntimeLogService : IRuntimeLogService
     private const long MaxLogFileBytes = 10 * 1024 * 1024; // 10 MB
     private readonly ConcurrentQueue<RuntimeLogEntry> _entries = new();
     private readonly ISettingsService _settings;
-    private readonly IRedactionService? _redactor;
+    private readonly RedactionService? _redactor;
     private readonly object _fileLock = new();
 
     public event Action<RuntimeLogEntry>? LogAdded;
 
-    public RuntimeLogService(ISettingsService settings, IRedactionService? redactor = null)
+    public RuntimeLogService(ISettingsService settings, RedactionService? redactor = null)
     {
         _settings = settings;
         _redactor = redactor;

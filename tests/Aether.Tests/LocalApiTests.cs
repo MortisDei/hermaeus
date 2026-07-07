@@ -77,7 +77,7 @@ internal static class LocalApiTests
                     services.AddSingleton<IMemoryStore>(memories);
                     services.AddSingleton(rag);
                     services.AddSingleton<ITraceStore>(new SqliteTraceStore(settingsService));
-                    services.AddSingleton<IModelProfileService>(new ModelProfileService(settingsService));
+                    services.AddSingleton<ModelProfileService>(new ModelProfileService(settingsService));
                 });
                 webBuilder.Configure(app =>
                 {
@@ -221,7 +221,7 @@ internal static class LocalApiTests
                     services.AddSingleton<IMemoryStore>(memories);
                     services.AddSingleton(rag);
                     services.AddSingleton<ITraceStore>(traces);
-                    services.AddSingleton<IModelProfileService>(new ModelProfileService(settingsService));
+                    services.AddSingleton<ModelProfileService>(new ModelProfileService(settingsService));
                 });
                 webBuilder.Configure(app =>
                 {

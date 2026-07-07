@@ -5,7 +5,7 @@ using Aether.Core.Services;
 
 namespace Aether.Services;
 
-public sealed class ConversationExportService : IConversationExportService
+public sealed class ConversationExportService
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 

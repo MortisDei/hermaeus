@@ -3,7 +3,7 @@ using Aether.Core.Services;
 
 namespace Aether.Services;
 
-public sealed class ModelProfileService : IModelProfileService
+public sealed class ModelProfileService
 {
     private readonly ISettingsService _settings;
 

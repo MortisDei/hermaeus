@@ -3,7 +3,7 @@ using Aether.Core.Services;
 
 namespace Aether.Services;
 
-public sealed class RedactionService : IRedactionService
+public sealed class RedactionService
 {
     private static readonly Regex ApiKeyRegex = new(
         @"(?i)AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|sk-[a-z0-9_\-]{12,}|gh[pousr]_[a-z0-9_]{20,}|anthropic[_-]?key[=:]\s*[a-z0-9_\-\.]{8,}|bearer\s+[a-z0-9_\-\.]{12,}|((?:api[_-]?key|password|azure[_-]?key)[=:]\s*)[a-z0-9_\-\.]{8,}|([?&](?:key|token|api_key|password)=)[^&\s]+",

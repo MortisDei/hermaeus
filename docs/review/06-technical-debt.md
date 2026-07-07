@@ -40,13 +40,40 @@ another). This is the debt to pay down before 2.0, and most of it *reduces*
 code. All five collisions here are resolved to the extent a refactor safely
 can; the Evaluation System's remaining gap is a reader UI, not duplication.
 
-## 3. Interface ceremony without seams
+## 3. Interface ceremony without seams — DONE
 
 ~25 single-implementation interfaces in `Aether.Core/Services`. Cost: every
 change is two edits; readers must chase indirection; the interfaces imply a
 pluggability that doesn't exist. Keep genuinely polymorphic ones
 (`ILlmService`, `IVoiceProvider`, secret-store backends, doctor checks once
 they exist); collapse the rest. Low urgency, high cumulative friction.
+
+**Audited and collapsed 13 of the ~25:** `IBackupService`, `IBenchmarkService`,
+`IConversationExportService`, `IEvalEngine`, `IInspectionEngine`,
+`ILocalAiSetupService`, `IMemoryExtractionService`, `IMemoryInjectionService`,
+`IModelProfileService`, `IPrivacyAuditService`, `IRedactionService`,
+`IRuntimeProfileService`, `ITrustService` are now concrete classes; consumers
+depend on the class directly (`Aether.ViewModels` already had a project
+reference to `Aether.Services`, so this introduced no new layering).
+`ITrustService`/`IPrivacyAuditService` kept their second interface,
+`IInspectionCheckProvider` (genuinely polymorphic, three contributors),
+unaffected. Small data types that lived alongside a deleted interface
+(`BackupResult`, `ConversationExportFormat`, `RuntimeHealth`) moved to their
+own file in `Aether.Core.Services` rather than being deleted with it.
+
+**Kept, not ceremony:** the other ~12 (`ISettingsService`, `IMemoryStore`,
+`IConversationStore`, `IDoctorService`, `IEvalStore`, `IToastService`,
+`ISystemInfoService`, `IRuntimeLogService`, `IVoiceProviderRegistry`,
+`IConversationMemoryService`) each have a real test-double implementation in
+`tests/Aether.Tests` providing test isolation, which is exactly the "genuine
+seam" criterion this item asks to preserve, just not enumerated in the
+original list. `ITraceStore`, `IAgentRetrievalService`, and `IMcpToolBridge`
+are a different kind of genuine seam: each is implemented in a project
+(`Aether.Services`, `Aether.Rag`, `Aether.Mcp` respectively) that `Aether.Agent`
+or `Aether.Rag` is architecturally forbidden from referencing directly
+(enforced by `ArchitectureTests.cs`), so collapsing them would force a new,
+disallowed project reference just to remove an interface. `ILlmService`/
+`IVoiceProvider` remain multi-implementation as originally noted.
 
 ## 4. Provider knowledge smeared across layers
 

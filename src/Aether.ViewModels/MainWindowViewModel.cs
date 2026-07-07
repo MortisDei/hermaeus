@@ -12,7 +12,7 @@ public partial class MainWindowViewModel : ObservableObject
     private readonly IConversationStore _store;
     private readonly IToastService _toasts;
     private readonly IRuntimeLogService _logs;
-    private readonly IConversationExportService _exports;
+    private readonly ConversationExportService _exports;
     private readonly SynchronizationContext? _sync;
     private CancellationTokenSource? _searchCts;
     private readonly ISettingsService _settingsService;
@@ -96,7 +96,7 @@ public partial class MainWindowViewModel : ObservableObject
         ISettingsService settingsService,
         IToastService toasts,
         IRuntimeLogService runtimeLogs,
-        IConversationExportService exports)
+        ConversationExportService exports)
     {
         _sync = SynchronizationContext.Current;
         _toasts = toasts;

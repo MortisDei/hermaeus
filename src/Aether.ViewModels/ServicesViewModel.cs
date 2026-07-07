@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using Aether.Core.Models;
 using Aether.Core.Services;
+using Aether.Services;
 using Aether.Services.ProcessManagement;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -13,7 +14,7 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
 {
     private readonly ServerProcessManager  _mgr;
     private readonly ISettingsService      _settings;
-    private readonly ITrustService         _trust;
+    private readonly TrustService         _trust;
     private readonly IToastService         _toasts;
     private readonly IRuntimeLogService    _runtimeLogs;
     private readonly ServerConfig          _config;
@@ -75,8 +76,8 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
     public ServerProcessViewModel(
         ServerConfig config,
         ISettingsService settings,
-        IRedactionService redactor,
-        ITrustService trust,
+        RedactionService redactor,
+        TrustService trust,
         IToastService toasts,
         IRuntimeLogService runtimeLogs)
     {
@@ -486,10 +487,10 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
 public partial class ServicesViewModel : ObservableObject
 {
     private readonly ISettingsService _settings;
-    private readonly IRuntimeProfileService _runtimeProfiles;
+    private readonly RuntimeProfileService _runtimeProfiles;
     private readonly IToastService _toasts;
-    private readonly IRedactionService _redactor;
-    private readonly ITrustService _trust;
+    private readonly RedactionService _redactor;
+    private readonly TrustService _trust;
     private readonly IRuntimeLogService _runtimeLogs;
 
     public ObservableCollection<ServerProcessViewModel> Servers { get; } = [];
@@ -505,10 +506,10 @@ public partial class ServicesViewModel : ObservableObject
 
     public ServicesViewModel(
         ISettingsService settings,
-        IRuntimeProfileService runtimeProfiles,
+        RuntimeProfileService runtimeProfiles,
         IToastService toasts,
-        IRedactionService redactor,
-        ITrustService trust,
+        RedactionService redactor,
+        TrustService trust,
         IRuntimeLogService runtimeLogs)
     {
         _settings = settings;

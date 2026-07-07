@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using Aether.Core.Models;
 using Aether.Core.Services;
+using Aether.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -9,7 +10,7 @@ namespace Aether.ViewModels;
 public partial class SetupWizardViewModel : ObservableObject
 {
     private readonly ISettingsService _settings;
-    private readonly IRuntimeProfileService _runtimeProfiles;
+    private readonly RuntimeProfileService _runtimeProfiles;
     private readonly IVoiceProviderRegistry _voiceProviders;
     private readonly IDoctorService _doctor;
     private readonly IToastService _toasts;
@@ -61,7 +62,7 @@ public partial class SetupWizardViewModel : ObservableObject
 
     public SetupWizardViewModel(
         ISettingsService settings,
-        IRuntimeProfileService runtimeProfiles,
+        RuntimeProfileService runtimeProfiles,
         IVoiceProviderRegistry voiceProviders,
         IDoctorService doctor,
         IToastService toasts)

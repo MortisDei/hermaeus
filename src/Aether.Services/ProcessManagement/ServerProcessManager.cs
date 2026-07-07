@@ -17,7 +17,7 @@ public sealed class ServerProcessManager : IDisposable
     private Process? _process;
     private CancellationTokenSource? _monitorCts;
     private readonly ConcurrentQueue<string> _logRing = new();
-    private readonly IRedactionService? _redactor;
+    private readonly RedactionService? _redactor;
     private const int MaxLogLines = 300;
 
     public ServerStatus Status { get; private set; } = ServerStatus.Stopped;
@@ -32,7 +32,7 @@ public sealed class ServerProcessManager : IDisposable
     private static readonly Regex FitLayersRegex =
         new(@"Vulkan\d+.*:\s+(?<used>\d+)\s+layers", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-    public ServerProcessManager(IRedactionService? redactor = null)
+    public ServerProcessManager(RedactionService? redactor = null)
     {
         _redactor = redactor;
     }

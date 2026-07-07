@@ -16,7 +16,7 @@ public sealed class ConversationMemoryService : IConversationMemoryService
     private readonly ISettingsService _settings;
     private readonly IConversationStore _conversations;
     private readonly IMemoryStore _memories;
-    private readonly IMemoryExtractionService _extractor;
+    private readonly MemoryExtractionService _extractor;
     private readonly ILlmService _llm;
     private readonly IRuntimeLogService _logs;
     private readonly object _summaryCacheLock = new();
@@ -27,7 +27,7 @@ public sealed class ConversationMemoryService : IConversationMemoryService
         ISettingsService settings,
         IConversationStore conversations,
         IMemoryStore memories,
-        IMemoryExtractionService extractor,
+        MemoryExtractionService extractor,
         ILlmService llm,
         IRuntimeLogService logs)
     {

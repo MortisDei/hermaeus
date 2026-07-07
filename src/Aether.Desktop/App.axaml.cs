@@ -63,7 +63,7 @@ public partial class App : Application
                 sp.GetRequiredService<IMemoryStore>().InitializeAsync(),
                 sp.GetRequiredService<SqliteRagStore>().InitializeAsync(),
                 sp.GetRequiredService<IAgentTaskStateStore>().InitializeAsync(),
-                sp.GetRequiredService<IBenchmarkService>().InitializeAsync(),
+                sp.GetRequiredService<BenchmarkService>().InitializeAsync(),
                 sp.GetRequiredService<IEvalStore>().InitializeAsync());
             // Probe active voice provider health at startup to detect externally-running services
             try

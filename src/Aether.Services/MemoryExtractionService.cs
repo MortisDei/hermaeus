@@ -7,7 +7,7 @@ namespace Aether.Services;
 /// <summary>
 /// Extracts and categorizes memories from model output.
 /// </summary>
-public sealed class MemoryExtractionService : IMemoryExtractionService
+public sealed class MemoryExtractionService
 {
     // Pattern to match [MEMORY: content] markers (case-insensitive)
     private static readonly Regex MemoryMarkerRegex = new(

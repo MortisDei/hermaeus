@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Linq;
 using Aether.Core.Models;
 using Aether.Core.Services;
+using Aether.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -22,7 +23,7 @@ public class LogEntryDisplayViewModel
 public partial class LogsViewModel : ObservableObject
 {
     private readonly IRuntimeLogService _logs;
-    private readonly IRedactionService _redactor;
+    private readonly RedactionService _redactor;
 
     [ObservableProperty] private string _selectedFilter = "All";
     [ObservableProperty] private string _statusText = "";
@@ -46,7 +47,7 @@ public partial class LogsViewModel : ObservableObject
     public Action<string>? RequestCopyToClipboard { get; set; }
     public Action<string>? RequestOpenFolder { get; set; }
 
-    public LogsViewModel(IRuntimeLogService logs, IRedactionService redactor)
+    public LogsViewModel(IRuntimeLogService logs, RedactionService redactor)
     {
         _logs = logs;
         _redactor = redactor;

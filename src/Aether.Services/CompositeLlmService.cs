@@ -10,7 +10,7 @@ public sealed class CompositeLlmService : ILlmService, IDisposable
     private readonly OpenAiService _openAi;
     private readonly OllamaService _ollama;
     private readonly ISettingsService _settings;
-    private readonly IRuntimeProfileService _runtimeProfiles;
+    private readonly RuntimeProfileService _runtimeProfiles;
     private delegate IAsyncEnumerable<LlmStreamEvent> StreamChatDelegate(
         string modelId, IReadOnlyList<ChatMessage> messages, LlmChatOptions? options, CancellationToken ct);
 
@@ -56,7 +56,7 @@ public sealed class CompositeLlmService : ILlmService, IDisposable
         OpenAiService openAi,
         OllamaService ollama,
         ISettingsService settings,
-        IRuntimeProfileService runtimeProfiles)
+        RuntimeProfileService runtimeProfiles)
     {
         _llamaCpp = llamaCpp; _openAi = openAi; _ollama = ollama; _settings = settings; _runtimeProfiles = runtimeProfiles;
         _streamByTag = new(StringComparer.OrdinalIgnoreCase)

@@ -4,7 +4,7 @@ using Aether.Core.Services;
 
 namespace Aether.Services;
 
-public sealed class InspectionEngine : IInspectionEngine
+public sealed class InspectionEngine
 {
     private readonly IEnumerable<IInspectionCheckProvider> _providers;
 

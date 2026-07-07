@@ -123,12 +123,12 @@ public partial class SettingsViewModel : ObservableObject
         ITtsService tts,
         IVoiceProviderRegistry voiceProviderRegistry,
         IToastService toasts,
-        IBackupService backups,
+        BackupService backups,
         ISecretStore secrets,
         XttsProcessManager xttsProcess,
         KokoroProcessManager kokoroProcess,
-        ILocalAiSetupService localAiSetup,
-        ITrustService trust,
+        LocalAiSetupService localAiSetup,
+        TrustService trust,
         ServicesViewModel? services = null)
     {
         _svc = svc;

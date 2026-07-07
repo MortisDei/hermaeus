@@ -7,7 +7,7 @@ using Aether.Core.Services;
 
 namespace Aether.Services;
 
-public sealed class LocalAiSetupService : ILocalAiSetupService
+public sealed class LocalAiSetupService
 {
     private static readonly Version MinSupportedXttsPython = new(3, 9);
     private static readonly Version MaxSupportedXttsPythonExclusive = new(3, 12);

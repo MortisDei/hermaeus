@@ -155,7 +155,7 @@ landed, including the default flip for voice convergence.
 
 - **Aether as the machine's AI substrate — phase 1 DONE.** `Aether.LocalApi`
   gained a fourth endpoint, `GET /v1/models` (wraps `ILlmService.GetModelsAsync`
-  + `IModelProfileService.ApplyProfiles`, visible models only), so a calling
+  + `ModelProfileService.ApplyProfiles`, visible models only), so a calling
   app can discover what's available before picking a `modelId` for
   `/v1/chat/completions` instead of hardcoding one. Every local API call
   (all four endpoints) is now logged to the shared `ITraceStore` as a new

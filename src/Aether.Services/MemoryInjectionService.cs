@@ -7,7 +7,7 @@ namespace Aether.Services;
 /// <summary>
 /// Injects memories into chat context and generates memory instructions for models.
 /// </summary>
-public sealed class MemoryInjectionService : IMemoryInjectionService
+public sealed class MemoryInjectionService
 {
     public string BuildMemoryContext(List<Memory> memories)
     {

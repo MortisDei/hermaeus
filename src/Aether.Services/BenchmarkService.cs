@@ -9,7 +9,7 @@ using Microsoft.Data.Sqlite;
 
 namespace Aether.Services;
 
-public sealed class BenchmarkService : IBenchmarkService
+public sealed class BenchmarkService
 {
     private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true };
     private readonly ISettingsService _settings;
