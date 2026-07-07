@@ -46,6 +46,12 @@ public sealed class ModelProfileService
                 model.DefaultTemperature = profile.DefaultTemperature;
                 model.DefaultContextSize = profile.DefaultContextSize;
                 model.DefaultMaxTokens = profile.DefaultMaxTokens;
+                model.DefaultTopP = profile.DefaultTopP;
+                model.DefaultTopK = profile.DefaultTopK;
+                model.DefaultMinP = profile.DefaultMinP;
+                model.DefaultRepeatPenalty = profile.DefaultRepeatPenalty;
+                model.DefaultFrequencyPenalty = profile.DefaultFrequencyPenalty;
+                model.DefaultPresencePenalty = profile.DefaultPresencePenalty;
                 model.IsVisible = profile.IsVisible;
                 model.Avatar = profile.Avatar;
             }
@@ -72,6 +78,12 @@ public sealed class ModelProfileService
             existing.DefaultTemperature = normalized.DefaultTemperature;
             existing.DefaultContextSize = normalized.DefaultContextSize;
             existing.DefaultMaxTokens = normalized.DefaultMaxTokens;
+            existing.DefaultTopP = normalized.DefaultTopP;
+            existing.DefaultTopK = normalized.DefaultTopK;
+            existing.DefaultMinP = normalized.DefaultMinP;
+            existing.DefaultRepeatPenalty = normalized.DefaultRepeatPenalty;
+            existing.DefaultFrequencyPenalty = normalized.DefaultFrequencyPenalty;
+            existing.DefaultPresencePenalty = normalized.DefaultPresencePenalty;
             existing.Backend = normalized.Backend;
             existing.IsVisible = normalized.IsVisible;
             existing.Avatar = normalized.Avatar;
@@ -96,6 +108,12 @@ public sealed class ModelProfileService
         DefaultTemperature = profile.DefaultTemperature,
         DefaultContextSize = profile.DefaultContextSize,
         DefaultMaxTokens = profile.DefaultMaxTokens,
+        DefaultTopP = profile.DefaultTopP,
+        DefaultTopK = profile.DefaultTopK,
+        DefaultMinP = profile.DefaultMinP,
+        DefaultRepeatPenalty = profile.DefaultRepeatPenalty,
+        DefaultFrequencyPenalty = profile.DefaultFrequencyPenalty,
+        DefaultPresencePenalty = profile.DefaultPresencePenalty,
         Backend = profile.Backend.Trim(),
         IsVisible = profile.IsVisible,
         Avatar = profile.Avatar.Trim()

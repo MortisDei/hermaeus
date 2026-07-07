@@ -109,6 +109,12 @@ public partial class ChatViewModel : ObservableObject
     [ObservableProperty] private string    _conversationTitle = "New Conversation";
     [ObservableProperty] private bool      _showSystemPrompt;
     [ObservableProperty] private double    _temperature = 0.7;
+    [ObservableProperty] private double?   _topP;
+    [ObservableProperty] private int?      _topK;
+    [ObservableProperty] private double?   _minP;
+    [ObservableProperty] private double?   _repeatPenalty;
+    [ObservableProperty] private double?   _frequencyPenalty;
+    [ObservableProperty] private double?   _presencePenalty;
     [ObservableProperty] private bool      _hasMessages;
     [ObservableProperty] private string    _performanceLog = string.Empty;
     [ObservableProperty] private string    _attachmentStatus = string.Empty;
@@ -163,6 +169,12 @@ public partial class ChatViewModel : ObservableObject
         _evalEngine = evalEngine ?? new EvalEngine(llm);
         _workspaceActivation = workspaceActivation;
         _temperature  = settings.Settings.Llm.Temperature;
+        _topP = settings.Settings.Llm.TopP;
+        _topK = settings.Settings.Llm.TopK;
+        _minP = settings.Settings.Llm.MinP;
+        _repeatPenalty = settings.Settings.Llm.RepeatPenalty;
+        _frequencyPenalty = settings.Settings.Llm.FrequencyPenalty;
+        _presencePenalty = settings.Settings.Llm.PresencePenalty;
         _systemPrompt = settings.Settings.Llm.DefaultSystemPrompt;
         Messages.CollectionChanged += (_, _) =>
         {
@@ -316,11 +328,7 @@ public partial class ChatViewModel : ObservableObject
 
             var result = await ChatSendOrchestrator.StreamAsync(
                 _llm, selectedModelId, history,
-                new LlmChatOptions
-                {
-                    SystemPrompt = string.IsNullOrWhiteSpace(SystemPrompt) ? null : SystemPrompt,
-                    Temperature = Temperature
-                },
+                BuildChatOptions(),
                 onToken: token =>
                 {
                     if (accumulator.TryAppend(token, force: false, out var flushed))
@@ -629,11 +637,7 @@ public partial class ChatViewModel : ObservableObject
                 caseId,
                 history,
                 targets,
-                new LlmChatOptions
-                {
-                    SystemPrompt = string.IsNullOrWhiteSpace(SystemPrompt) ? null : SystemPrompt,
-                    Temperature = Temperature
-                });
+                BuildChatOptions());
 
             foreach (var run in runs)
                 CompareResults.Add(ModelCompareOrchestrator.ToResult(run));
@@ -650,6 +654,18 @@ public partial class ChatViewModel : ObservableObject
         !IsGenerating
         && SelectedModel is not null
         && (!string.IsNullOrWhiteSpace(InputText) || ContextAttachments.Any(a => a.IsReady));
+
+    private LlmChatOptions BuildChatOptions() => new()
+    {
+        SystemPrompt = string.IsNullOrWhiteSpace(SystemPrompt) ? null : SystemPrompt,
+        Temperature = Temperature,
+        TopP = TopP,
+        TopK = TopK,
+        MinP = MinP,
+        RepeatPenalty = RepeatPenalty,
+        FrequencyPenalty = FrequencyPenalty,
+        PresencePenalty = PresencePenalty
+    };
 
     public static int EstimateTokens(string text) => ContextPackBuilder.EstimateTokens(text);
 
@@ -906,6 +922,18 @@ public partial class ChatViewModel : ObservableObject
             Temperature = temp;
         if (value?.DefaultMaxTokens is { } max && max > 0)
             _settings.Settings.Llm.MaxTokens = max;
+        if (value?.DefaultTopP is { } topP)
+            TopP = topP;
+        if (value?.DefaultTopK is { } topK)
+            TopK = topK;
+        if (value?.DefaultMinP is { } minP)
+            MinP = minP;
+        if (value?.DefaultRepeatPenalty is { } repeatPenalty)
+            RepeatPenalty = repeatPenalty;
+        if (value?.DefaultFrequencyPenalty is { } frequencyPenalty)
+            FrequencyPenalty = frequencyPenalty;
+        if (value?.DefaultPresencePenalty is { } presencePenalty)
+            PresencePenalty = presencePenalty;
         SendCommand.NotifyCanExecuteChanged();
         ScheduleContextUsageRefresh();
     }

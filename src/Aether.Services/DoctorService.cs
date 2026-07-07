@@ -691,6 +691,12 @@ public sealed class DoctorService : IDoctorService, IInspectionCheckProvider
             return false;
         }
 
+        _runtimeLogs?.Add(new RuntimeLogEntry(
+            DateTime.UtcNow,
+            RuntimeLogLevel.Info,
+            RuntimeLogCategory.Service,
+            $"Kokoro native installation starting; assets root: {NativeKokoroVoiceProvider.ResolveAssetsDirectory(_settings.Settings)}"));
+
         var result = await provider.InstallAssetsAsync(progress, ct);
         _runtimeLogs?.Add(new RuntimeLogEntry(
             DateTime.UtcNow,

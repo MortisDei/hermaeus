@@ -51,9 +51,9 @@
                 <TextBlock Grid.Row="3" Grid.Column="2" Text="{Binding TtsSpeed, StringFormat={}{0:F1}x}" VerticalAlignment="Center" Opacity="0.6" FontSize="12" />
                 <TextBlock Grid.Row="4" Grid.Column="0" Text="XTTS version" VerticalAlignment="Center" Opacity="0.6" FontSize="13" IsVisible="{Binding ShowsXttsFields}" />
                 <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding TtsModelVersion}" Watermark="2.0.3" FontSize="13" CornerRadius="6" Padding="10,6" IsVisible="{Binding ShowsXttsFields}" />
-                <TextBlock Grid.Row="5" Grid.Column="0" Text="Python" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
-                <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding TtsPythonPath, UpdateSourceTrigger=PropertyChanged}" Watermark="/path/to/venv/bin/python" FontSize="13" CornerRadius="6" Padding="10,6" />
-                <Button Grid.Row="5" Grid.Column="2" Classes="icon-btn" Command="{Binding BrowseTtsPythonCommand}" ToolTip.Tip="Choose venv Python">
+                <TextBlock Grid.Row="5" Grid.Column="0" Text="Python" VerticalAlignment="Center" Opacity="0.6" FontSize="13" IsVisible="{Binding ShowsPythonFields}" />
+                <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding TtsPythonPath, UpdateSourceTrigger=PropertyChanged}" Watermark="/path/to/venv/bin/python" FontSize="13" CornerRadius="6" Padding="10,6" IsVisible="{Binding ShowsPythonFields}" />
+                <Button Grid.Row="5" Grid.Column="2" Classes="icon-btn" Command="{Binding BrowseTtsPythonCommand}" ToolTip.Tip="Choose venv Python" IsVisible="{Binding ShowsPythonFields}">
                     <PathIcon Data="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z" Width="15" Height="15" />
                 </Button>
                 <TextBlock Grid.Row="6" Grid.Column="0" Text="XTTS script" VerticalAlignment="Center" Opacity="0.6" FontSize="13" IsVisible="{Binding ShowsXttsFields}" />

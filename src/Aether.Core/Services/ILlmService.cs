@@ -22,6 +22,18 @@ public sealed record LlmChatOptions
     public double Temperature { get; init; } = 0.7;
     /// <summary>Provider default (or configured LLM setting) when null.</summary>
     public int? MaxTokens { get; init; }
+    /// <summary>Nucleus sampling cutoff. Provider default when null.</summary>
+    public double? TopP { get; init; }
+    /// <summary>Top-k sampling cutoff. Provider default when null.</summary>
+    public int? TopK { get; init; }
+    /// <summary>Minimum token probability relative to the most likely token. Provider default when null.</summary>
+    public double? MinP { get; init; }
+    /// <summary>Repetition penalty (llama.cpp/Ollama naming). Provider default when null.</summary>
+    public double? RepeatPenalty { get; init; }
+    /// <summary>OpenAI-style frequency penalty. Provider default when null.</summary>
+    public double? FrequencyPenalty { get; init; }
+    /// <summary>OpenAI-style presence penalty. Provider default when null.</summary>
+    public double? PresencePenalty { get; init; }
 
     public static readonly LlmChatOptions Default = new();
 }

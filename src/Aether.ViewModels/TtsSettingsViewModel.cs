@@ -110,6 +110,7 @@ public partial class TtsSettingsViewModel : ObservableObject, IDisposable
 
     public bool ShowsXttsFields => IsXttsV2Provider;
     public bool ShowsVoiceSampleFields => IsXttsV2Provider || IsF5TtsProvider;
+    public bool ShowsPythonFields => IsServerManagedProvider;
 
     public TtsSettingsViewModel(
         ITtsService tts,
@@ -405,6 +406,7 @@ public partial class TtsSettingsViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(IsServerManagedProvider));
         OnPropertyChanged(nameof(ShowsXttsFields));
         OnPropertyChanged(nameof(ShowsVoiceSampleFields));
+        OnPropertyChanged(nameof(ShowsPythonFields));
     }
 
     private string NormalizeProviderName(string providerName)

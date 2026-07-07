@@ -110,7 +110,7 @@ public sealed class OpenAiService : IDisposable
         {
             await AuthAsync(ct);
             var payload = BuildChatPayload(
-                modelId, messages, options.SystemPrompt, options.Temperature,
+                modelId, messages, options,
                 options.MaxTokens ?? _settings.Settings.Llm.MaxTokens);
             var req = new HttpRequestMessage(HttpMethod.Post, $"{Base}/v1/chat/completions")
                 { Content = JsonContent.Create(payload, options: JsonOpts) };
@@ -124,16 +124,22 @@ public sealed class OpenAiService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Only forwards the sampling parameters the real OpenAI chat completions
+    /// API actually accepts (top_p, frequency_penalty, presence_penalty);
+    /// top_k/min_p/repeat_penalty are llama.cpp-only extensions and are
+    /// intentionally not sent here, since a strict OpenAI-compatible backend
+    /// may reject unknown fields.
+    /// </summary>
     public static object BuildChatPayload(
         string modelId,
         IReadOnlyList<ChatMessage> messages,
-        string? systemPrompt,
-        double temperature,
+        LlmChatOptions options,
         int maxTokens)
     {
         var msgs = messages.Select(m => new { role = m.Role, content = m.Content }).ToList<object>();
-        if (!string.IsNullOrWhiteSpace(systemPrompt))
-            msgs.Insert(0, new { role = "system", content = systemPrompt });
+        if (!string.IsNullOrWhiteSpace(options.SystemPrompt))
+            msgs.Insert(0, new { role = "system", content = options.SystemPrompt });
 
         return new
         {
@@ -141,8 +147,11 @@ public sealed class OpenAiService : IDisposable
             messages = msgs,
             stream = true,
             stream_options = new { include_usage = true },
-            temperature,
-            max_tokens = maxTokens
+            temperature = options.Temperature,
+            max_tokens = maxTokens,
+            top_p = options.TopP,
+            frequency_penalty = options.FrequencyPenalty,
+            presence_penalty = options.PresencePenalty
         };
     }
 

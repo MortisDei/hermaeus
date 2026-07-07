@@ -93,9 +93,11 @@ internal sealed class KokoroOnnxModel : IDisposable
         {
             Directory.CreateDirectory(_assetsRoot);
             Directory.CreateDirectory(Path.Combine(_assetsRoot, "voices"));
+            LogPreflight("install starting");
 
             progress?.Report("Downloading Kokoro ONNX model...");
             await DownloadIfMissingAsync(ModelPath(_assetsRoot), ModelUrl, ModelSha256, progress, ct);
+            LogPreflight("model download+verify complete");
 
             foreach (var voice in voices)
             {
@@ -109,6 +111,7 @@ internal sealed class KokoroOnnxModel : IDisposable
                     expectedHash,
                     progress,
                     ct);
+                LogPreflight($"voice download+verify complete: {voice}");
             }
 
             _session?.Dispose();

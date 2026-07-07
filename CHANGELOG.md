@@ -11,6 +11,15 @@ limit.
 
 ## [Unreleased]
 
+## [0.9.39-alpha] - 2026-07-07
+
+### Added
+- Full LLM sampling parameters: top P, top K, min P, repeat penalty, frequency penalty, and presence penalty, alongside the existing temperature. Available as global defaults (Settings > LLM), per-model overrides (Model Management), and live per-conversation editing (`ChatViewModel`), mirroring the existing temperature pattern throughout. Each is optional; leaving a field blank sends nothing for it and the provider uses its own default. llama.cpp and Ollama receive all six; OpenAI-compatible endpoints only receive the three the real OpenAI API supports (top_p, frequency_penalty, presence_penalty), since top_k/min_p/repeat_penalty are llama.cpp/Ollama-only extensions.
+- Services panel: the Stopped status now reads "Stopped, click Start to launch" instead of just "Stopped", plus a tooltip on the status dot explaining that it's independent of Doctor's "found on disk" check.
+
+### Fixed
+- Settings > Voice: Python-path/venv fields no longer stay enabled when a non-Python-backed voice provider (Kokoro Native, F5-TTS, OpenAI) is selected; they're now gated the same way the existing XTTS-only fields already were.
+
 ## [0.9.38-alpha] - 2026-07-07
 
 ### Fixed

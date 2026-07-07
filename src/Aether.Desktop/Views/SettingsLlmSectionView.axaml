@@ -38,14 +38,34 @@
         <Border Classes="settings-card">
             <StackPanel Spacing="12">
                 <TextBlock Text="Defaults" FontSize="14" FontWeight="SemiBold" />
-                <Grid ColumnDefinitions="110,*" RowDefinitions="Auto,Auto" RowSpacing="10" ColumnSpacing="12">
+                <Grid ColumnDefinitions="110,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="10" ColumnSpacing="12">
                     <TextBlock Grid.Row="0" Grid.Column="0" Text="Temperature" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
                     <NumericUpDown Grid.Row="0" Grid.Column="1" Value="{Binding Temperature}" Minimum="0" Maximum="2"
                                    Increment="0.1" FormatString="F1" FontSize="13" />
                     <TextBlock Grid.Row="1" Grid.Column="0" Text="Max tokens" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
                     <NumericUpDown Grid.Row="1" Grid.Column="1" Value="{Binding MaxTokens}" Minimum="256" Maximum="128000"
                                    Increment="256" FontSize="13" />
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Top P" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
+                    <NumericUpDown Grid.Row="2" Grid.Column="1" Value="{Binding TopP}" Minimum="0" Maximum="1"
+                                   Increment="0.05" FormatString="F2" FontSize="13" Watermark="Provider default" />
+                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Top K" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
+                    <NumericUpDown Grid.Row="3" Grid.Column="1" Value="{Binding TopK}" Minimum="0" Maximum="500"
+                                   Increment="1" FontSize="13" Watermark="Provider default" />
+                    <TextBlock Grid.Row="4" Grid.Column="0" Text="Min P" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
+                    <NumericUpDown Grid.Row="4" Grid.Column="1" Value="{Binding MinP}" Minimum="0" Maximum="1"
+                                   Increment="0.01" FormatString="F2" FontSize="13" Watermark="Provider default" />
+                    <TextBlock Grid.Row="5" Grid.Column="0" Text="Repeat penalty" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
+                    <NumericUpDown Grid.Row="5" Grid.Column="1" Value="{Binding RepeatPenalty}" Minimum="0.5" Maximum="2"
+                                   Increment="0.05" FormatString="F2" FontSize="13" Watermark="Provider default" />
+                    <TextBlock Grid.Row="6" Grid.Column="0" Text="Frequency penalty" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
+                    <NumericUpDown Grid.Row="6" Grid.Column="1" Value="{Binding FrequencyPenalty}" Minimum="-2" Maximum="2"
+                                   Increment="0.1" FormatString="F1" FontSize="13" Watermark="Provider default" />
+                    <TextBlock Grid.Row="7" Grid.Column="0" Text="Presence penalty" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
+                    <NumericUpDown Grid.Row="7" Grid.Column="1" Value="{Binding PresencePenalty}" Minimum="-2" Maximum="2"
+                                   Increment="0.1" FormatString="F1" FontSize="13" Watermark="Provider default" />
                 </Grid>
+                <TextBlock Text="Top K/Min P/repeat penalty are llama.cpp and Ollama only; OpenAI-compatible endpoints only receive Top P and the two penalties. Leave a field blank to use the provider's own default."
+                           Opacity="0.5" FontSize="11" TextWrapping="Wrap" />
                 <StackPanel Spacing="4">
                     <TextBlock Text="Default system prompt" Opacity="0.6" FontSize="13" />
                     <TextBox Text="{Binding DefaultSystemPrompt}" Watermark="You are a helpful assistant..."

@@ -11,6 +11,10 @@ public sealed class OllamaService : IDisposable
 {
     private const string ProviderTagValue = "ollama";
     private static readonly HttpClient SharedHttp = new() { Timeout = TimeSpan.FromMinutes(10) };
+    private static readonly JsonSerializerOptions JsonOpts = new()
+    {
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+    };
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> _contextLengthCache = new();
     private readonly RuntimeProfileService _profiles;
     private readonly HttpClient _http;
@@ -109,7 +113,6 @@ public sealed class OllamaService : IDisposable
     {
         options ??= LlmChatOptions.Default;
         var systemPrompt = options.SystemPrompt;
-        var temperature = options.Temperature;
         var (profileId, modelName) = ParseId(modelId);
         var profile = _profiles.Profiles.FirstOrDefault(p => p.Id == profileId);
         if (profile is null)
@@ -127,10 +130,19 @@ public sealed class OllamaService : IDisposable
             model = modelName,
             messages = msgs,
             stream = true,
-            options = new { temperature }
+            options = new
+            {
+                temperature = options.Temperature,
+                top_p = options.TopP,
+                top_k = options.TopK,
+                min_p = options.MinP,
+                repeat_penalty = options.RepeatPenalty,
+                frequency_penalty = options.FrequencyPenalty,
+                presence_penalty = options.PresencePenalty
+            }
         };
 
-        using var resp = await _http.PostAsJsonAsync($"{profile.BaseUrl.TrimEnd('/')}/api/chat", req, ct);
+        using var resp = await _http.PostAsJsonAsync($"{profile.BaseUrl.TrimEnd('/')}/api/chat", req, JsonOpts, ct);
         resp.EnsureSuccessStatusCode();
         await using var stream = await resp.Content.ReadAsStreamAsync(ct);
         using var reader = new StreamReader(stream);

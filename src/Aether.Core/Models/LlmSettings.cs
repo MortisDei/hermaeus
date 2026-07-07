@@ -55,4 +55,22 @@ public class LlmSettings
     /// Stream responses as they are generated.
     /// </summary>
     public bool StreamResponses { get; set; } = true;
+
+    /// <summary>Nucleus sampling cutoff (0-1). Provider default when unset.</summary>
+    public double? TopP { get; set; }
+
+    /// <summary>Top-k sampling cutoff. Provider default when unset.</summary>
+    public int? TopK { get; set; }
+
+    /// <summary>Minimum token probability relative to the most likely token (0-1). Provider default when unset.</summary>
+    public double? MinP { get; set; }
+
+    /// <summary>Repetition penalty (llama.cpp/Ollama naming). Provider default when unset.</summary>
+    public double? RepeatPenalty { get; set; }
+
+    /// <summary>OpenAI-style frequency penalty. Provider default when unset.</summary>
+    public double? FrequencyPenalty { get; set; }
+
+    /// <summary>OpenAI-style presence penalty. Provider default when unset.</summary>
+    public double? PresencePenalty { get; set; }
 }

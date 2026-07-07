@@ -66,7 +66,15 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
         ServerStatus.Running  => "Running",
         ServerStatus.Starting => "Starting…",
         ServerStatus.Error    => "Error",
-        _                     => "Stopped"
+        _                     => "Stopped, click Start to launch"
+    };
+
+    public string StatusTooltip => Status switch
+    {
+        ServerStatus.Running  => "The server process is running and passed its health check.",
+        ServerStatus.Starting => "Launching the server process and waiting for it to become healthy.",
+        ServerStatus.Error    => "The server process failed to start or exited unexpectedly. See the log below.",
+        _                     => "The executable is configured but the server process has not been started. This is separate from Doctor's \"found on disk\" check."
     };
 
     public Action<string>? RequestFilePicker  { get; set; }

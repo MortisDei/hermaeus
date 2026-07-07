@@ -135,10 +135,12 @@
                                             Width="10" Height="10"
                                             CornerRadius="5"
                                             VerticalAlignment="Center"
+                                            ToolTip.Tip="{Binding StatusTooltip}"
                                             Background="{Binding Status,
                                                 Converter={x:Static views:ServicesView.StatusColor}}" />
 
-                                    <StackPanel Grid.Column="1" Spacing="1">
+                                    <StackPanel Grid.Column="1" Spacing="1"
+                                                ToolTip.Tip="{Binding StatusTooltip}">
                                         <TextBlock Text="{Binding Name}"
                                                    FontSize="15" FontWeight="SemiBold" />
                                         <TextBlock Text="{Binding StatusLabel}"

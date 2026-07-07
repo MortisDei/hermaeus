@@ -14,6 +14,12 @@ public class LlmModel
     public double? DefaultTemperature { get; set; }
     public int? DefaultContextSize { get; set; }
     public int? DefaultMaxTokens { get; set; }
+    public double? DefaultTopP { get; set; }
+    public int? DefaultTopK { get; set; }
+    public double? DefaultMinP { get; set; }
+    public double? DefaultRepeatPenalty { get; set; }
+    public double? DefaultFrequencyPenalty { get; set; }
+    public double? DefaultPresencePenalty { get; set; }
     /// <summary>Context length read live from the provider (llama.cpp /props, Ollama /api/show), if available.</summary>
     public int? ProbedContextLength { get; set; }
     public bool IsVisible { get; set; } = true;

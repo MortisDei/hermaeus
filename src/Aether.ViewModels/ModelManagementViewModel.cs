@@ -110,6 +110,12 @@ public partial class ModelProfileItemViewModel : ObservableObject
     private readonly double? _originalTemperature;
     private readonly int? _originalContextSize;
     private readonly int? _originalMaxTokens;
+    private readonly double? _originalTopP;
+    private readonly int? _originalTopK;
+    private readonly double? _originalMinP;
+    private readonly double? _originalRepeatPenalty;
+    private readonly double? _originalFrequencyPenalty;
+    private readonly double? _originalPresencePenalty;
     private readonly bool _originalIsVisible;
     private readonly string _originalAvatar;
 
@@ -127,6 +133,12 @@ public partial class ModelProfileItemViewModel : ObservableObject
     [ObservableProperty] private double? _defaultTemperature;
     [ObservableProperty] private int? _defaultContextSize;
     [ObservableProperty] private int? _defaultMaxTokens;
+    [ObservableProperty] private double? _defaultTopP;
+    [ObservableProperty] private int? _defaultTopK;
+    [ObservableProperty] private double? _defaultMinP;
+    [ObservableProperty] private double? _defaultRepeatPenalty;
+    [ObservableProperty] private double? _defaultFrequencyPenalty;
+    [ObservableProperty] private double? _defaultPresencePenalty;
     [ObservableProperty] private bool _isVisible;
     [ObservableProperty] private string _avatar;
 
@@ -144,6 +156,12 @@ public partial class ModelProfileItemViewModel : ObservableObject
         _defaultTemperature = profile.DefaultTemperature;
         _defaultContextSize = profile.DefaultContextSize;
         _defaultMaxTokens = profile.DefaultMaxTokens;
+        _defaultTopP = profile.DefaultTopP;
+        _defaultTopK = profile.DefaultTopK;
+        _defaultMinP = profile.DefaultMinP;
+        _defaultRepeatPenalty = profile.DefaultRepeatPenalty;
+        _defaultFrequencyPenalty = profile.DefaultFrequencyPenalty;
+        _defaultPresencePenalty = profile.DefaultPresencePenalty;
         _isVisible = profile.IsVisible;
         _avatar = profile.Avatar;
 
@@ -153,6 +171,12 @@ public partial class ModelProfileItemViewModel : ObservableObject
         _originalTemperature = DefaultTemperature;
         _originalContextSize = DefaultContextSize;
         _originalMaxTokens = DefaultMaxTokens;
+        _originalTopP = DefaultTopP;
+        _originalTopK = DefaultTopK;
+        _originalMinP = DefaultMinP;
+        _originalRepeatPenalty = DefaultRepeatPenalty;
+        _originalFrequencyPenalty = DefaultFrequencyPenalty;
+        _originalPresencePenalty = DefaultPresencePenalty;
         _originalIsVisible = IsVisible;
         _originalAvatar = Avatar;
     }
@@ -169,6 +193,12 @@ public partial class ModelProfileItemViewModel : ObservableObject
         DefaultTemperature = DefaultTemperature,
         DefaultContextSize = DefaultContextSize,
         DefaultMaxTokens = DefaultMaxTokens,
+        DefaultTopP = DefaultTopP,
+        DefaultTopK = DefaultTopK,
+        DefaultMinP = DefaultMinP,
+        DefaultRepeatPenalty = DefaultRepeatPenalty,
+        DefaultFrequencyPenalty = DefaultFrequencyPenalty,
+        DefaultPresencePenalty = DefaultPresencePenalty,
         Backend = Provider,
         IsVisible = IsVisible,
         Avatar = Avatar
@@ -188,6 +218,12 @@ public partial class ModelProfileItemViewModel : ObservableObject
         DefaultTemperature = null;
         DefaultContextSize = null;
         DefaultMaxTokens = null;
+        DefaultTopP = null;
+        DefaultTopK = null;
+        DefaultMinP = null;
+        DefaultRepeatPenalty = null;
+        DefaultFrequencyPenalty = null;
+        DefaultPresencePenalty = null;
         IsVisible = true;
         Avatar = string.Empty;
         ApplySavedState();
@@ -201,6 +237,12 @@ public partial class ModelProfileItemViewModel : ObservableObject
         DefaultTemperature = _originalTemperature;
         DefaultContextSize = _originalContextSize;
         DefaultMaxTokens = _originalMaxTokens;
+        DefaultTopP = _originalTopP;
+        DefaultTopK = _originalTopK;
+        DefaultMinP = _originalMinP;
+        DefaultRepeatPenalty = _originalRepeatPenalty;
+        DefaultFrequencyPenalty = _originalFrequencyPenalty;
+        DefaultPresencePenalty = _originalPresencePenalty;
         IsVisible = _originalIsVisible;
         Avatar = _originalAvatar;
         ApplySavedState();

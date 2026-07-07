@@ -20,6 +20,12 @@ public partial class LlmDefaultsSettingsViewModel : ObservableObject
     [ObservableProperty] private string _defaultSystemPrompt = string.Empty;
     [ObservableProperty] private double _temperature = 0.7;
     [ObservableProperty] private int _maxTokens = 4096;
+    [ObservableProperty] private double? _topP;
+    [ObservableProperty] private int? _topK;
+    [ObservableProperty] private double? _minP;
+    [ObservableProperty] private double? _repeatPenalty;
+    [ObservableProperty] private double? _frequencyPenalty;
+    [ObservableProperty] private double? _presencePenalty;
 
     public LlmDefaultsSettingsViewModel(ISecretStore secrets) => _secrets = secrets;
 
@@ -33,6 +39,12 @@ public partial class LlmDefaultsSettingsViewModel : ObservableObject
         DefaultSystemPrompt = settings.Llm.DefaultSystemPrompt;
         Temperature = settings.Llm.Temperature;
         MaxTokens = settings.Llm.MaxTokens;
+        TopP = settings.Llm.TopP;
+        TopK = settings.Llm.TopK;
+        MinP = settings.Llm.MinP;
+        RepeatPenalty = settings.Llm.RepeatPenalty;
+        FrequencyPenalty = settings.Llm.FrequencyPenalty;
+        PresencePenalty = settings.Llm.PresencePenalty;
     }
 
     public async Task ApplyToAsync(AppSettings settings)
@@ -46,6 +58,12 @@ public partial class LlmDefaultsSettingsViewModel : ObservableObject
         settings.Llm.DefaultSystemPrompt = DefaultSystemPrompt;
         settings.Llm.Temperature = Temperature;
         settings.Llm.MaxTokens = MaxTokens;
+        settings.Llm.TopP = TopP;
+        settings.Llm.TopK = TopK;
+        settings.Llm.MinP = MinP;
+        settings.Llm.RepeatPenalty = RepeatPenalty;
+        settings.Llm.FrequencyPenalty = FrequencyPenalty;
+        settings.Llm.PresencePenalty = PresencePenalty;
     }
 }
 

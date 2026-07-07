@@ -162,6 +162,12 @@ public sealed class CompositeLlmService : ILlmService, IDisposable
         DefaultTemperature = model.DefaultTemperature,
         DefaultContextSize = model.DefaultContextSize,
         DefaultMaxTokens = model.DefaultMaxTokens,
+        DefaultTopP = model.DefaultTopP,
+        DefaultTopK = model.DefaultTopK,
+        DefaultMinP = model.DefaultMinP,
+        DefaultRepeatPenalty = model.DefaultRepeatPenalty,
+        DefaultFrequencyPenalty = model.DefaultFrequencyPenalty,
+        DefaultPresencePenalty = model.DefaultPresencePenalty,
         ProbedContextLength = model.ProbedContextLength,
         IsVisible = model.IsVisible,
         Avatar = model.Avatar
