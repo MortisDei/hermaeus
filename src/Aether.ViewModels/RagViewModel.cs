@@ -597,31 +597,11 @@ public partial class RagViewModel : ObservableObject
             try
             {
                 var chunks = await _query.GetChunksForDatasetAsync(dataset.Id, includeEmbeddings: false);
-                var sources = chunks.GroupBy(c => c.SourcePath, StringComparer.OrdinalIgnoreCase).ToList();
-                item.SourceCount = sources.Count;
-                item.DuplicateSources = chunks
-                    .GroupBy(c => $"{c.SourcePath}::{c.ChunkIndex}", StringComparer.OrdinalIgnoreCase)
-                    .Count(g => g.Count() > 1);
-
-                foreach (var source in sources)
-                {
-                    var path = source.Key;
-                    if (string.IsNullOrWhiteSpace(path) || path.StartsWith("http", StringComparison.OrdinalIgnoreCase))
-                        continue;
-                    if (!File.Exists(path))
-                    {
-                        item.MissingFiles++;
-                        continue;
-                    }
-
-                    var sourceModified = source
-                        .Select(c => c.SourceModifiedUtc)
-                        .Where(x => x.HasValue)
-                        .OrderByDescending(x => x!.Value)
-                        .FirstOrDefault();
-                    if (sourceModified.HasValue && File.GetLastWriteTimeUtc(path) > sourceModified.Value.AddSeconds(1))
-                        item.StaleFiles++;
-                }
+                var health = RagDatasetHealthService.Compute(chunks);
+                item.SourceCount = health.SourceCount;
+                item.DuplicateSources = health.DuplicateSources;
+                item.MissingFiles = health.MissingFiles;
+                item.StaleFiles = health.StaleFiles;
             }
             catch
             {

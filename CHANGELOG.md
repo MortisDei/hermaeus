@@ -11,6 +11,13 @@ limit.
 
 ## [Unreleased]
 
+## [0.9.33-alpha] - 2026-07-07
+
+ViewModel orchestration extraction, part 2.
+
+### Added
+- `Aether.Rag.RagDatasetHealthService`: computes a dataset's source/duplicate/missing/stale-file counts from its chunks, extracted from `RagViewModel.RefreshDatasetManagerAsync`. Testable against a temp directory instead of only through the full ViewModel.
+
 ## [0.9.32-alpha] - 2026-07-07
 
 ViewModel orchestration extraction, part 1 (docs/review/01-architecture-review.md
