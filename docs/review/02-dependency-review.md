@@ -159,6 +159,21 @@ runs fully offline.
    `Advanced` fallback paths (see status check above).
 4. **2.0:** Evaluate shipping ONNX Runtime as a Doctor-installed component
    rather than a bundled package, shrinking base distribution size.
+   **Evaluated, REJECT for now.** The premise this item was written under
+   (ONNX Runtime serves only the optional RAG reranker) no longer holds:
+   `Aether.Voice`'s `NativeKokoroVoiceProvider` is now the default voice
+   provider and also references `Microsoft.ML.OnnxRuntime` directly, so most
+   installs need the runtime regardless of whether reranking or RAG is ever
+   used. Un-bundling would only shrink distribution size for the shrinking
+   slice of users who use neither RAG nor voice, at the cost of a real new
+   risk: today's Doctor-installed assets (reranker cross-encoder weights,
+   Kokoro model/voice weights) are inert data files loaded by an
+   already-linked native runtime; making ORT itself a post-install download
+   means dynamically loading a downloaded, platform-and-architecture-specific
+   native binary at runtime (a materially different and riskier operation
+   than downloading data). Revisit only if a future measurement shows base
+   install size is an actual user complaint, since the size cost is now
+   mostly unavoidable for the default configuration anyway.
 5. **Ongoing:** hard rule — any new package needs a written justification in
    the PR against the philosophy list. The cheapest dependency to remove is
    the one never added.

@@ -11,6 +11,15 @@ limit.
 
 ## [Unreleased]
 
+## [0.9.28-alpha] - 2026-07-07
+
+Closes docs/review/02-dependency-review.md's staged item 4 (evaluate an
+out-of-band ONNX Runtime download) with a reasoned reject rather than an
+implementation.
+
+### Changed
+- Docs only: evaluated shipping ONNX Runtime as a Doctor-installed component instead of a bundled package. Rejected: `Aether.Voice`'s native Kokoro provider (now the default voice provider) also depends on ONNX Runtime, so most installs need it regardless of RAG/reranker use, and dynamically loading a downloaded native runtime is a materially riskier operation than today's data-only Doctor downloads (model weights). Revisit only if base install size becomes an actual reported problem.
+
 ## [0.9.27-alpha] - 2026-07-07
 
 Naming/vocabulary drift (docs/review/06-technical-debt.md item 7) closed as
