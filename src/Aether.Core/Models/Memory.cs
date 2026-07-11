@@ -116,4 +116,24 @@ public class Memory
     /// Whether this memory content is encrypted at rest.
     /// </summary>
     public bool IsEncrypted { get; set; }
+
+    /// <summary>
+    /// How many times this memory has actually been selected for injection
+    /// into a prompt (not just retrieved by a search). Used to decay
+    /// effective importance for memories nobody has used in a long time.
+    /// </summary>
+    public int RecallCount { get; set; }
+
+    /// <summary>
+    /// When this memory was last selected for injection, if ever.
+    /// </summary>
+    public DateTime? LastRecalledAt { get; set; }
+
+    /// <summary>
+    /// Query-time relevance score from <see cref="Aether.Core.Services.IMemoryStore.SearchAsync"/>
+    /// (hybrid FTS+embedding when an embedding model is configured, a plain
+    /// rank-based score otherwise). Not persisted; only meaningful on
+    /// objects returned from a search.
+    /// </summary>
+    public double? RelevanceScore { get; set; }
 }

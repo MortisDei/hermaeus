@@ -74,13 +74,14 @@ public sealed class OpenAiService : IDisposable
         [EnumeratorCancellation] CancellationToken ct)
     {
         var (success, resp, error) = await GetStreamResponseAsync(modelId, messages, options, ct);
-        
+
         if (!success)
         {
             yield return LlmStreamEvent.Error(error);
             yield break;
         }
 
+        var toolCalls = new OpenAiCompatibleToolWire.ToolCallAccumulator();
         using (resp!)
         using (var stream = await resp!.Content.ReadAsStreamAsync(ct))
         using (var reader = new StreamReader(stream))
@@ -93,9 +94,10 @@ public sealed class OpenAiService : IDisposable
                 var json = line[6..];
                 if (json == "[DONE]") break;
 
+                OpenAiCompatibleToolWire.AccumulateFromChunk(json, toolCalls);
                 var evt = ParseStreamEvent(json);
-                if (evt is not null)
-                    yield return evt;
+                if (evt is null) continue;
+                yield return evt.IsFinal && toolCalls.HasCalls ? evt with { ToolCalls = toolCalls.Complete() } : evt;
             }
         }
     }
@@ -137,9 +139,8 @@ public sealed class OpenAiService : IDisposable
         LlmChatOptions options,
         int maxTokens)
     {
-        var msgs = messages.Select(m => new { role = m.Role, content = m.Content }).ToList<object>();
-        if (!string.IsNullOrWhiteSpace(options.SystemPrompt))
-            msgs.Insert(0, new { role = "system", content = options.SystemPrompt });
+        var msgs = OpenAiCompatibleToolWire.BuildMessages(messages, options.SystemPrompt);
+        var tools = OpenAiCompatibleToolWire.BuildTools(options.Tools);
 
         return new
         {
@@ -151,7 +152,9 @@ public sealed class OpenAiService : IDisposable
             max_tokens = maxTokens,
             top_p = options.TopP,
             frequency_penalty = options.FrequencyPenalty,
-            presence_penalty = options.PresencePenalty
+            presence_penalty = options.PresencePenalty,
+            tools,
+            tool_choice = tools is null ? null : "auto"
         };
     }
 

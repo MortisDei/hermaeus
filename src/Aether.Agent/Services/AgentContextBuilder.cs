@@ -1,4 +1,5 @@
 using Aether.Agent.Models;
+using Aether.Core.Models;
 using Aether.Core.Services;
 
 namespace Aether.Agent.Services;
@@ -11,22 +12,32 @@ public sealed class AgentContextBuilder : IAgentContextBuilder
     private const int MemoryTokenBudget = 4000;
     private const int RagTokenBudget = 4000;
     private const int InstructionsTokenBudget = 3000;
+    private const int LessonsTokenBudget = 1500;
 
     private readonly IAgentWorkspaceTools _workspaceTools;
     private readonly IAgentRetrievalService _retrieval;
     private readonly IAgentWorkspaceMemoryStore _workspaceMemory;
     private readonly IWorkspaceActivationService _activation;
+    private readonly IAgentTaskStateStore _taskStateStore;
+    private readonly ISettingsService _settings;
+    private readonly ILessonStore? _lessons;
 
     public AgentContextBuilder(
         IAgentWorkspaceTools workspaceTools,
         IAgentRetrievalService retrieval,
         IAgentWorkspaceMemoryStore workspaceMemory,
-        IWorkspaceActivationService activation)
+        IWorkspaceActivationService activation,
+        IAgentTaskStateStore taskStateStore,
+        ISettingsService settings,
+        ILessonStore? lessons = null)
     {
         _workspaceTools = workspaceTools;
         _retrieval = retrieval;
         _workspaceMemory = workspaceMemory;
         _activation = activation;
+        _taskStateStore = taskStateStore;
+        _settings = settings;
+        _lessons = lessons;
     }
 
     public async Task<AgentContextPack> BuildAsync(
@@ -52,7 +63,92 @@ public sealed class AgentContextBuilder : IAgentContextBuilder
         await AddWorkspaceMemoryAsync(pack, options, ct);
         await AddRagContextAsync(pack, state, options, ct);
         await AddProjectInstructionsAsync(pack, options, ct);
+        await AddTranscriptHistoryAsync(pack, state, ct);
+        await AddLessonsAsync(pack, options, ct);
         return pack;
+    }
+
+    private async Task AddLessonsAsync(AgentContextPack pack, AgentWorkspaceOptions options, CancellationToken ct)
+    {
+        if (_lessons is null) return;
+
+        try
+        {
+            var scopeId = string.IsNullOrWhiteSpace(options.WorkspaceRoot) ? null : Path.GetFullPath(options.WorkspaceRoot);
+            var lessons = await _lessons.ListRelevantAsync(scopeId, includeRetired: false, limit: 50, ct);
+            if (lessons.Count == 0) return;
+
+            var candidates = lessons
+                .Select(l => new ContextPart(
+                    "lesson",
+                    l.Signature,
+                    $"[{l.Outcome}, confidence {l.Confidence:F2}, seen {l.EvidenceCount}x] {l.Claim}"
+                        + (string.IsNullOrWhiteSpace(l.Guidance) ? string.Empty : $" -> {l.Guidance}"),
+                    Data: l))
+                .ToList();
+            var packed = ContextPackBuilder.Pack(candidates, LessonsTokenBudget, maxParts: options.MaxContextItems * 2);
+            foreach (var part in packed.Parts)
+            {
+                var lesson = (AgentLesson)part.Data!;
+                pack.Lessons.Add(new AgentRetrievedItem(
+                    "lesson",
+                    lesson.Id,
+                    part.Content,
+                    lesson.Confidence,
+                    lesson.UpdatedAt,
+                    Locator: lesson.Id));
+            }
+        }
+        catch (Exception ex)
+        {
+            pack.KnownRisks.Add($"Lessons unavailable: {ex.Message}");
+        }
+    }
+
+    private async Task AddTranscriptHistoryAsync(AgentContextPack pack, AgentTaskState state, CancellationToken ct)
+    {
+        try
+        {
+            var entries = await _taskStateStore.LoadTranscriptAsync(state.TaskId, ct);
+            if (entries.Count == 0) return;
+
+            var budget = Math.Max(_settings.Settings.Agent.TranscriptTokenBudget, 512);
+            // Pack from most-recent backward so the budget favors recency, then
+            // restore chronological order for the model to read. Two entries
+            // can share the same Step (an assistant thought and its tool
+            // result), so the original read order is carried alongside the
+            // entry to break ties deterministically instead of relying on
+            // OrderBy(Step) alone, which would only preserve stability within
+            // a single pass and not across the earlier Reverse().
+            var candidates = entries
+                .Select((e, index) => new ContextPart(
+                    e.Role == "tool" ? "transcript-tool" : "transcript-assistant",
+                    e.Role == "tool" ? $"step {e.Step}: {e.ToolName}" : $"step {e.Step}",
+                    e.Content,
+                    Data: (e, index)))
+                .Reverse()
+                .ToList();
+            var packed = ContextPackBuilder.Pack(candidates, budget, maxParts: entries.Count);
+            var ordered = packed.Parts
+                .Select(p => (((AgentTranscriptEntry Entry, int Index))p.Data!, p.Content))
+                .OrderBy(t => t.Item1.Index)
+                .Select(t => (t.Item1.Entry, t.Content));
+
+            foreach (var (entry, content) in ordered)
+            {
+                pack.TranscriptHistory.Add(new AgentRetrievedItem(
+                    entry.Role == "tool" ? "transcript-tool" : "transcript-assistant",
+                    entry.ToolName ?? $"step {entry.Step}",
+                    content,
+                    1.0,
+                    entry.Timestamp,
+                    Locator: $"step-{entry.Step}"));
+            }
+        }
+        catch (Exception ex)
+        {
+            pack.KnownRisks.Add($"Transcript history unavailable: {ex.Message}");
+        }
     }
 
     private async Task AddProjectInstructionsAsync(AgentContextPack pack, AgentWorkspaceOptions options, CancellationToken ct)

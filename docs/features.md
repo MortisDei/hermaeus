@@ -33,8 +33,29 @@
 
 - Persistent chat memories with categories (`facts`, `preferences`,
   `learned_behaviors`, `interests`) stored in a local SQLite database.
+- Hybrid recall: memory search blends full-text search with cosine similarity
+  against an embedding model when one is configured, so a paraphrase with no
+  lexical overlap can still surface; falls back to pure FTS/LIKE ranking when
+  no embedding model is available. Existing rows are backfilled with
+  embeddings lazily on first hybrid search.
+- Relevance-aware injection: memories selected for chat context are ranked by
+  the search's own relevance score blended with importance, not recency-first
+  as before; recency is now only the final tiebreaker.
+- Lifecycle: each memory tracks how many times and when it was actually
+  recalled (injected), not just retrieved. Effective importance decays for
+  memories that go unused; ones that decay below a floor and stay unrecalled
+  long enough are auto-archived (never hard-deleted) the next time the
+  Memories panel opens. Pinned memories never decay.
+- The model can correct or retire a memory it was shown this turn with
+  `[MEMORY_UPDATE: <id> | <content>]` / `[MEMORY_FORGET: <id>]` markers; only
+  ids actually injected into that turn are honored, everything else is
+  ignored and logged.
+- Auto-summary now asks for structured JSON (content, category, importance,
+  tags) instead of parsing `[MEMORY: ...]` markers with keyword heuristics,
+  giving model-supplied metadata directly; the marker format remains the
+  fallback if a model doesn't follow the JSON instruction.
 - Dedicated Memories panel to review, search, pin, archive, and delete
-  memories.
+  memories, sorted by effective importance and showing recall stats.
 - Session Usage panel: view per-conversation memory counts and recent activity
   to help triage which conversations have stored memories.
 - Configurable memory controls in Settings: global enable, context injection,
@@ -48,19 +69,51 @@
 
 ## Agent Workbench
 
-- Read-first local task workbench with explicit task state, compact context
-  packs, local logs/traces, and review queue controls.
+- Local task workbench with explicit task state, a persisted step transcript,
+  compact context packs, local logs/traces, and review queue controls.
+- Autonomous runs: Start (or resuming after an approval) runs steps back to
+  back without a click per step, stopping at a final answer, a question for
+  the user, a gated action needing approval, a blocked task, or a configurable
+  step cap (`Agent.MaxAutoSteps`, default 20). Live progress and Stop remain
+  available; a manual single-step advance is still available too.
+- Native tool calling: when the configured model/provider supports it
+  (OpenAI-compatible endpoints, llama.cpp, Ollama), the agent declares its
+  tool set natively and consumes structured tool calls directly instead of
+  parsing JSON out of prose; automatically falls back to the JSON protocol for
+  models/providers without tool-calling support.
+- Surgical file edits: `edit_file` (unique old_string/new_string replace) and
+  `create_file` (new files only) alongside the existing whole-file
+  `draft_patch`/`apply_draft_patch`; both approval-gated with the same
+  workspace path containment as every other tool.
+- Navigation tools: `glob_files` (`*`/`**` patterns), `search_files` with
+  optional regex and context lines, `read_file` with an optional line range,
+  and `list_files` with an optional subdirectory/depth.
+- `set_plan`: a visible, agent-maintained plan checklist for multi-step goals;
+  executes immediately since it only touches task state.
+- `run_command` accepts template families with optional path/script arguments
+  (`dotnet build`/`test [project]`, `npm test`, `npm run <script>` limited to
+  scripts the workspace's own `package.json` declares, `cargo build`/`test`,
+  `pytest [path]`), still gated by the workspace's own declared-safe recipes
+  and always requiring approval. An identical repeat of an already-approved
+  command string may auto-execute for the rest of that task.
+- Agent self-learning: a per-machine lesson store records deterministic,
+  evidence-backed observations from command results, patch outcomes, and
+  approval decisions (plus model-stated `[LESSON: ...]` observations),
+  reinforcing repeated evidence and retiring contradicted lessons
+  automatically. Relevant lessons are injected into every step's context, and
+  a Lessons panel supports manual edit/pin/retire/delete. Lessons only ever
+  inform the model; they never change what the safety gate allows.
 - Recent task and review queue lists are backed by a SQLite task index so large
   Agent workspaces do not need to scan every `task_state.json` file to render
   the queue.
-- The agent panel surfaces a compact summary strip with task state, goal,
-  summary, recent task history, review queue counts, workspace memory counts,
-  and retrieved context counts for quick scanning.
+- The agent panel surfaces a compact summary strip with task state, step
+  count, goal, summary, recent task history, review queue counts, workspace
+  memory counts, and retrieved context counts for quick scanning.
 - The agent panel also shows a capability disclosure callout so users can see
-  the current slice: read-first workspace inspection, approval-gated patch
-  drafting, and no shell or network execution.
+  the current scope: local workspace inspection, approval-gated writes and
+  commands, and no shell or network execution outside the fixed set.
 - The agent panel also includes a workspace file browser with query, list,
-  preview, and summary behaviour for faster read-first inspection.
+  preview, and summary behaviour for faster inspection.
 - Draft patch proposal UI: users can draft file edits with a rationale, propose
   content, and generate a side-by-side diff preview before queueing. The preview
   shows line-by-line changes with colour highlights (green for additions, red

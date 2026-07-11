@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 using Aether.Agent.Models;
 
 namespace Aether.Agent.Services;
@@ -20,51 +21,90 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
         ".css", ".html", ".js", ".ts", ".sql", ".toml", ".ini", ".gitignore"
     };
 
-    public IReadOnlyList<string> ListFiles(AgentWorkspaceOptions options)
+    public IReadOnlyList<string> ListFiles(AgentWorkspaceOptions options, string? subdirectory = null, int? maxDepth = null)
     {
         var root = ResolveWorkspaceRoot(options.WorkspaceRoot);
-        return EnumerateSafeFiles(root, options.MaxFileBytes)
+        var scope = string.IsNullOrWhiteSpace(subdirectory) ? root : ResolveSafePath(root, subdirectory);
+        var depth = maxDepth is > 0 ? maxDepth.Value : int.MaxValue;
+        return EnumerateSafeFiles(scope, options.MaxFileBytes)
+            .Where(path => PathDepthBelow(scope, path) <= depth)
             .Take(options.MaxSearchResults)
             .Select(path => ToRelative(root, path))
             .ToList();
     }
 
-    public IReadOnlyList<AgentFileSearchResult> SearchFiles(AgentWorkspaceOptions options, string query)
+    public IReadOnlyList<AgentFileSearchResult> SearchFiles(AgentWorkspaceOptions options, string query, bool regex = false, int contextLines = 0)
     {
         if (string.IsNullOrWhiteSpace(query)) return [];
         var root = ResolveWorkspaceRoot(options.WorkspaceRoot);
+        Regex? pattern = null;
+        if (regex)
+        {
+            try { pattern = new Regex(query, RegexOptions.None, TimeSpan.FromMilliseconds(500)); }
+            catch (ArgumentException ex) { throw new InvalidOperationException($"Invalid search regex: {ex.Message}"); }
+        }
+
+        var boundedContext = Math.Clamp(contextLines, 0, 10);
         var results = new List<AgentFileSearchResult>();
         foreach (var file in EnumerateSafeFiles(root, options.MaxFileBytes))
         {
             if (results.Count >= options.MaxSearchResults) break;
             var relative = ToRelative(root, file);
-            var nameMatch = relative.Contains(query, StringComparison.OrdinalIgnoreCase);
+            var nameMatch = !regex && relative.Contains(query, StringComparison.OrdinalIgnoreCase);
             var snippet = string.Empty;
             if (!nameMatch)
             {
-                try
+                string[] lines;
+                try { lines = File.ReadAllLines(file); }
+                catch { continue; }
+
+                var matchIndex = -1;
+                for (var i = 0; i < lines.Length; i++)
                 {
-                    snippet = File.ReadLines(file)
-                        .FirstOrDefault(line => line.Contains(query, StringComparison.OrdinalIgnoreCase)) ?? string.Empty;
-                }
-                catch
-                {
-                    continue;
+                    var isMatch = pattern is not null
+                        ? pattern.IsMatch(lines[i])
+                        : lines[i].Contains(query, StringComparison.OrdinalIgnoreCase);
+                    if (!isMatch) continue;
+                    matchIndex = i;
+                    break;
                 }
 
-                if (string.IsNullOrWhiteSpace(snippet)) continue;
+                if (matchIndex < 0) continue;
+
+                if (boundedContext == 0)
+                {
+                    snippet = lines[matchIndex];
+                }
+                else
+                {
+                    var start = Math.Max(0, matchIndex - boundedContext);
+                    var end = Math.Min(lines.Length - 1, matchIndex + boundedContext);
+                    snippet = string.Join('\n', lines[start..(end + 1)]);
+                }
             }
 
             results.Add(new AgentFileSearchResult(
                 relative,
-                CompactSnippet(string.IsNullOrWhiteSpace(snippet) ? relative : snippet),
+                boundedContext == 0 ? CompactSnippet(string.IsNullOrWhiteSpace(snippet) ? relative : snippet) : snippet,
                 File.GetLastWriteTimeUtc(file)));
         }
 
         return results;
     }
 
-    public AgentFileReadResult ReadFile(AgentWorkspaceOptions options, string relativePath)
+    public IReadOnlyList<string> GlobFiles(AgentWorkspaceOptions options, string pattern)
+    {
+        if (string.IsNullOrWhiteSpace(pattern)) return [];
+        var root = ResolveWorkspaceRoot(options.WorkspaceRoot);
+        var regex = GlobToRegex(pattern);
+        return EnumerateSafeFiles(root, options.MaxFileBytes)
+            .Select(path => ToRelative(root, path))
+            .Where(relative => regex.IsMatch(relative))
+            .Take(options.MaxSearchResults)
+            .ToList();
+    }
+
+    public AgentFileReadResult ReadFile(AgentWorkspaceOptions options, string relativePath, int? lineOffset = null, int? lineLimit = null)
     {
         var root = ResolveWorkspaceRoot(options.WorkspaceRoot);
         var full = ResolveSafePath(root, relativePath);
@@ -74,6 +114,9 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
         var info = new FileInfo(full);
         if (!IsSafeTextFile(info, options.MaxFileBytes))
             throw new InvalidOperationException("Agent file read target is ignored, too large, or not a supported text file.");
+
+        if (lineOffset is not null || lineLimit is not null)
+            return ReadFileByLines(root, full, Math.Max(lineOffset ?? 0, 0), lineLimit is > 0 ? lineLimit.Value : int.MaxValue);
 
         using var fs = File.OpenRead(full);
         var max = Math.Max(1024, options.MaxFileBytes);
@@ -85,6 +128,17 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
             throw new InvalidOperationException("Agent file read target appears to be binary.");
 
         return new AgentFileReadResult(ToRelative(root, full), content, truncated);
+    }
+
+    private static AgentFileReadResult ReadFileByLines(string root, string full, int lineOffset, int lineLimit)
+    {
+        var allLines = File.ReadAllLines(full);
+        if (allLines.Any(l => l.Contains('\0')))
+            throw new InvalidOperationException("Agent file read target appears to be binary.");
+
+        var slice = allLines.Skip(lineOffset).Take(lineLimit).ToList();
+        var truncated = lineOffset + slice.Count < allLines.Length;
+        return new AgentFileReadResult(ToRelative(root, full), string.Join('\n', slice), truncated);
     }
 
     public AgentFileSummaryResult SummarizeFile(AgentWorkspaceOptions options, string relativePath)
@@ -120,6 +174,107 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
     {
         var path = relativePath.Replace('\\', '/').Trim();
         return $"Draft patch for {path}\n\nRationale:\n{rationale.Trim()}\n\nProposed content:\n{proposedContent.Trim()}\n";
+    }
+
+    public async Task<AgentFileReadResult> EditFileAsync(AgentWorkspaceOptions options, string relativePath, string oldString, string newString, CancellationToken ct = default)
+    {
+        var root = ResolveWorkspaceRoot(options.WorkspaceRoot);
+        var full = ResolveSafePath(root, relativePath);
+        if (!File.Exists(full))
+            throw new FileNotFoundException("Agent edit target does not exist; use create_file for new files.", relativePath);
+        if (string.IsNullOrEmpty(oldString))
+            throw new InvalidOperationException("edit_file requires a non-empty old_string to match against the file's current content.");
+
+        var content = await File.ReadAllTextAsync(full, ct);
+        var occurrences = CountOccurrences(content, oldString);
+        if (occurrences == 0)
+            throw new InvalidOperationException("edit_file's old_string was not found in the target file; it may be stale, re-read the file first.");
+        if (occurrences > 1)
+            throw new InvalidOperationException($"edit_file's old_string matched {occurrences} times; it must match exactly once. Include more surrounding context to disambiguate.");
+
+        var index = content.IndexOf(oldString, StringComparison.Ordinal);
+        var updated = string.Concat(content.AsSpan(0, index), newString, content.AsSpan(index + oldString.Length));
+        await AtomicFileWriter.WriteAllTextAsync(full, updated, ct);
+        return new AgentFileReadResult(ToRelative(root, full), updated, false);
+    }
+
+    public async Task<AgentFileReadResult> CreateFileAsync(AgentWorkspaceOptions options, string relativePath, string content, CancellationToken ct = default)
+    {
+        var root = ResolveWorkspaceRoot(options.WorkspaceRoot);
+        var full = ResolveSafePath(root, relativePath);
+        if (File.Exists(full))
+            throw new InvalidOperationException("create_file refuses to overwrite an existing file; use edit_file instead.");
+
+        var directory = Path.GetDirectoryName(full);
+        if (!string.IsNullOrEmpty(directory))
+            Directory.CreateDirectory(directory);
+
+        await AtomicFileWriter.WriteAllTextAsync(full, content, ct);
+        return new AgentFileReadResult(ToRelative(root, full), content, false);
+    }
+
+    private static int CountOccurrences(string content, string needle)
+    {
+        var count = 0;
+        var index = 0;
+        while ((index = content.IndexOf(needle, index, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            index += needle.Length;
+        }
+
+        return count;
+    }
+
+    private static Regex GlobToRegex(string pattern)
+    {
+        var sb = new StringBuilder("^");
+        var normalized = pattern.Replace('\\', '/');
+        for (var i = 0; i < normalized.Length; i++)
+        {
+            var c = normalized[i];
+            if (c == '*')
+            {
+                if (i + 1 < normalized.Length && normalized[i + 1] == '*')
+                {
+                    // "**/" matches zero or more whole path segments (so
+                    // "src/**/*.cs" also matches "src/Foo.cs" directly, not
+                    // just files at least one directory deeper); a bare "**"
+                    // with no following separator matches anything.
+                    if (i + 2 < normalized.Length && normalized[i + 2] == '/')
+                    {
+                        sb.Append("(?:.*/)?");
+                        i += 2;
+                    }
+                    else
+                    {
+                        sb.Append(".*");
+                        i++;
+                    }
+                }
+                else
+                {
+                    sb.Append("[^/]*");
+                }
+            }
+            else if (c == '?')
+            {
+                sb.Append("[^/]");
+            }
+            else
+            {
+                sb.Append(Regex.Escape(c.ToString()));
+            }
+        }
+
+        sb.Append('$');
+        return new Regex(sb.ToString(), RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(500));
+    }
+
+    private static int PathDepthBelow(string scope, string fullPath)
+    {
+        var relative = Path.GetRelativePath(scope, fullPath).Replace('\\', '/');
+        return relative.Count(c => c == '/') + 1;
     }
 
     public static string ResolveWorkspaceRoot(string workspaceRoot)

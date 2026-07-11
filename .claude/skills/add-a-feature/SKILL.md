@@ -38,7 +38,7 @@ Follow the dependency flow: Desktop → ViewModels → (Services/Agent/Rag) → 
    migrations. Never edit an existing migration.
 8. **Docs and changelog**: update `docs/features.md`, the relevant workflow
    doc, and `CHANGELOG.md`. Describe only what is actually implemented.
-9. **Tests**: add cases to the harness in `tests/Aether.Tests` (see
+9. **Tests**: add cases to the harness in `src/Aether.Tests` (see
    build-and-verify skill for how to run it).
 
 ## Anti-patterns to avoid

@@ -79,6 +79,51 @@ public sealed class AgentWorkspaceMemoryEntryViewModel
     public DateTime UpdatedAt { get; }
 }
 
+/// <summary>
+/// UI-editable view of one <see cref="AgentLesson"/>: the self-learning
+/// panel's row. Claim/Guidance are mutable here so a manual edit can be
+/// staged before <c>UpdateLessonCommand</c> persists it.
+/// </summary>
+public sealed partial class AgentLessonViewModel : ObservableObject
+{
+    public AgentLessonViewModel(AgentLesson lesson)
+    {
+        Id = lesson.Id;
+        Scope = lesson.Scope;
+        ScopeId = lesson.ScopeId;
+        Kind = lesson.Kind;
+        Signature = lesson.Signature;
+        Outcome = lesson.Outcome;
+        Confidence = lesson.Confidence;
+        EvidenceCount = lesson.EvidenceCount;
+        UpdatedAt = lesson.UpdatedAt;
+        Status = lesson.Status;
+        _isPinned = lesson.IsPinned;
+        _claim = lesson.Claim;
+        _guidance = lesson.Guidance;
+    }
+
+    public string Id { get; }
+    public AgentLessonScope Scope { get; }
+    public string ScopeId { get; }
+    public AgentLessonKind Kind { get; }
+    public string Signature { get; }
+    public AgentLessonOutcome Outcome { get; }
+    public double Confidence { get; }
+    public int EvidenceCount { get; }
+    public DateTime UpdatedAt { get; }
+    public AgentLessonStatus Status { get; }
+
+    [ObservableProperty] private bool _isPinned;
+    [ObservableProperty] private string _claim;
+    [ObservableProperty] private string _guidance;
+
+    public bool IsRetired => Status == AgentLessonStatus.Retired;
+    public string ScopeLabel => Scope == AgentLessonScope.Global ? "Global" : "This workspace";
+    public string ConfidenceLabel => $"{Confidence:P0} confidence, seen {EvidenceCount}x";
+    public string StatusLabel => IsRetired ? "Retired" : "Active";
+}
+
 public sealed class AgentWorkspaceFileViewModel
 {
     public AgentWorkspaceFileViewModel(string relativePath, string snippet, DateTime modifiedUtc)
@@ -186,6 +231,8 @@ public partial class AgentViewModel : ObservableObject
     private readonly IWorkspaceActivationService _workspaceActivation;
     private readonly IWorkspaceManifestStore _workspaceManifests;
     private readonly AgentPatchReviewService _patchReview;
+    private readonly ISettingsService? _settings;
+    private readonly ILessonStore? _lessons;
     private CancellationTokenSource? _cts;
 
     public ObservableCollection<LlmModel> AvailableModels { get; } = [];
@@ -193,6 +240,7 @@ public partial class AgentViewModel : ObservableObject
     public ObservableCollection<AgentTaskListItem> RecentTasks { get; } = [];
     public ObservableCollection<AgentReviewQueueItemViewModel> ReviewQueue { get; } = [];
     public ObservableCollection<AgentWorkspaceMemoryEntryViewModel> WorkspaceMemory { get; } = [];
+    public ObservableCollection<AgentLessonViewModel> Lessons { get; } = [];
     public ObservableCollection<AgentWorkspaceFileViewModel> WorkspaceFiles { get; } = [];
     public ObservableCollection<AgentContextItemViewModel> RetrievedContext { get; } = [];
     public ObservableCollection<AgentDraftPatchViewModel> QueuedPatches { get; } = [];
@@ -243,6 +291,9 @@ public partial class AgentViewModel : ObservableObject
     [ObservableProperty] private string _suggestedAgentsMd = string.Empty;
 
     public string CurrentTaskStatusLabel => CurrentTask is null ? "No active task" : CurrentTask.Status.ToString();
+    public string CurrentStepCountLabel => CurrentTask is null
+        ? string.Empty
+        : $"step {CurrentTask.StepCount}/{Math.Max(_settings?.Settings.Agent.MaxAutoSteps ?? 20, 1)}";
     public string CurrentTaskGoalLabel => CurrentTask is null || string.IsNullOrWhiteSpace(CurrentTask.Goal) ? "No goal loaded" : CurrentTask.Goal;
     public string CurrentTaskSummaryLabel => CurrentTask is null || string.IsNullOrWhiteSpace(CurrentTask.Summary) ? "No summary yet" : CurrentTask.Summary;
     public int RecentTaskCount => RecentTasks.Count;
@@ -266,7 +317,9 @@ public partial class AgentViewModel : ObservableObject
         IRuntimeLogService logs,
         IWorkspaceAnalysisService workspaceAnalysis,
         IWorkspaceActivationService workspaceActivation,
-        IWorkspaceManifestStore workspaceManifests)
+        IWorkspaceManifestStore workspaceManifests,
+        ISettingsService? settings = null,
+        ILessonStore? lessons = null)
     {
         _agent = agent;
         _store = store;
@@ -278,6 +331,8 @@ public partial class AgentViewModel : ObservableObject
         _workspaceAnalysis = workspaceAnalysis;
         _workspaceActivation = workspaceActivation;
         _workspaceManifests = workspaceManifests;
+        _settings = settings;
+        _lessons = lessons;
         _patchReview = new AgentPatchReviewService(workspaceTools, store, agent);
         WorkspaceRoot = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
@@ -353,6 +408,7 @@ public partial class AgentViewModel : ObservableObject
             await RefreshRecentAsync();
             await RefreshReviewQueueAsync();
             await RefreshWorkspaceMemoryAsync();
+            await RefreshLessonsAsync();
             await RefreshWorkspaceFilesAsync();
             await ExplainWorkspaceAsync();
         }
@@ -374,7 +430,7 @@ public partial class AgentViewModel : ObservableObject
             _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Agent,
                 $"Agent started: {GoalText}"));
             CurrentTask = await _agent.CreateTaskAsync(GoalText, BuildOptions(), _cts.Token);
-            await RunCurrentStepAsync();
+            await RunAgentLoopAsync();
             await RefreshRecentAsync();
         }
         catch (OperationCanceledException) { StatusMessage = "Agent stopped."; }
@@ -442,6 +498,33 @@ public partial class AgentViewModel : ObservableObject
         await _agent.AppendApprovalAsync(item.TaskId, "review_queue", approved: true, BuildOptions());
         await RefreshReviewQueueAsync();
         await LoadTaskIfOpenAsync(item.TaskId);
+
+        // Approve-and-continue: a single approval both unblocks the gated
+        // action and resumes the autonomous loop, instead of leaving the
+        // user to click Run Step repeatedly. The approval itself already
+        // happened above; this only continues a task that approval just
+        // returned to Running, it never bypasses a gate on its own.
+        if (!IsRunning && CurrentTask?.TaskId == item.TaskId && CurrentTask.Status == AgentTaskStatus.Running)
+        {
+            IsRunning = true;
+            IsError = false;
+            _cts = new CancellationTokenSource();
+            try
+            {
+                await RunAgentLoopAsync();
+                await RefreshRecentAsync();
+            }
+            catch (OperationCanceledException) { StatusMessage = "Agent stopped."; }
+            catch (Exception ex) { SetError(ex.Message); }
+            finally
+            {
+                IsRunning = false;
+                _cts?.Dispose();
+                _cts = null;
+                StartCommand.NotifyCanExecuteChanged();
+                RunStepCommand.NotifyCanExecuteChanged();
+            }
+        }
     }
 
     [RelayCommand]
@@ -462,6 +545,57 @@ public partial class AgentViewModel : ObservableObject
 
         foreach (var item in await _workspaceMemory.ListAsync(WorkspaceRoot))
             WorkspaceMemory.Add(new AgentWorkspaceMemoryEntryViewModel(item));
+    }
+
+    [RelayCommand]
+    private async Task RefreshLessonsAsync()
+    {
+        Lessons.Clear();
+        if (_lessons is null) return;
+
+        var scopeId = string.IsNullOrWhiteSpace(WorkspaceRoot) ? null : WorkspaceRoot;
+        foreach (var lesson in await _lessons.ListRelevantAsync(scopeId, includeRetired: true, limit: 200))
+            Lessons.Add(new AgentLessonViewModel(lesson));
+    }
+
+    [RelayCommand]
+    private async Task PinLessonAsync(AgentLessonViewModel? item)
+    {
+        if (item is null || _lessons is null) return;
+        await _lessons.SetPinnedAsync(item.Id, !item.IsPinned);
+        await RefreshLessonsAsync();
+    }
+
+    [RelayCommand]
+    private async Task RetireLessonAsync(AgentLessonViewModel? item)
+    {
+        if (item is null || _lessons is null) return;
+        await _lessons.SetStatusAsync(item.Id, AgentLessonStatus.Retired);
+        await RefreshLessonsAsync();
+    }
+
+    [RelayCommand]
+    private async Task ReactivateLessonAsync(AgentLessonViewModel? item)
+    {
+        if (item is null || _lessons is null) return;
+        await _lessons.SetStatusAsync(item.Id, AgentLessonStatus.Active);
+        await RefreshLessonsAsync();
+    }
+
+    [RelayCommand]
+    private async Task DeleteLessonAsync(AgentLessonViewModel? item)
+    {
+        if (item is null || _lessons is null) return;
+        await _lessons.DeleteAsync(item.Id);
+        Lessons.Remove(item);
+    }
+
+    [RelayCommand]
+    private async Task UpdateLessonAsync(AgentLessonViewModel? item)
+    {
+        if (item is null || _lessons is null) return;
+        await _lessons.UpdateAsync(item.Id, item.Claim, item.Guidance);
+        await RefreshLessonsAsync();
     }
 
     [RelayCommand]
@@ -796,6 +930,42 @@ public partial class AgentViewModel : ObservableObject
         if (CurrentTask is null) return;
         StatusMessage = "Building context and asking the agent...";
         var result = await _agent.RunStepAsync(CurrentTask.TaskId, BuildOptions(), _cts?.Token ?? CancellationToken.None);
+        ApplyStepResult(result);
+        await RefreshLogAsync();
+        await RefreshLessonsAsync();
+        _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Agent,
+            $"Agent step complete: {result.State.ActiveStep}"));
+    }
+
+    /// <summary>
+    /// Runs the task's autonomous loop (Start, or resuming after an
+    /// approval) instead of a single manual step. Each intermediate step
+    /// still updates the visible task/context state via <see cref="ApplyStepResult"/>
+    /// so the workbench shows live progress, not just the final result.
+    /// </summary>
+    private async Task RunAgentLoopAsync()
+    {
+        if (CurrentTask is null) return;
+        StatusMessage = "Running agent...";
+        var result = await _agent.RunAsync(
+            CurrentTask.TaskId,
+            BuildOptions(),
+            onStep: ApplyStepResult,
+            ct: _cts?.Token ?? CancellationToken.None);
+        await RefreshLogAsync();
+        await RefreshLessonsAsync();
+        _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Agent,
+            $"Agent run paused: {result.State.ActiveStep} (status {result.State.Status})"));
+    }
+
+    /// <summary>
+    /// The per-step UI update shared by a single manual step and every step
+    /// of an autonomous run, called synchronously on the UI thread (async
+    /// continuations here resume on the same context that awaited the
+    /// agent call, as with the rest of this ViewModel).
+    /// </summary>
+    private void ApplyStepResult(AgentStepResult result)
+    {
         CurrentTask = result.State;
         CurrentStep = result.State.ActiveStep;
         StatusMessage = result.LogEntry;
@@ -814,9 +984,6 @@ public partial class AgentViewModel : ObservableObject
         }
 
         RefreshTaskPreview();
-        await RefreshLogAsync();
-        _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Agent,
-            $"Agent step complete: {result.State.ActiveStep}"));
     }
 
     private AgentWorkspaceOptions BuildOptions() => new(
@@ -849,6 +1016,7 @@ public partial class AgentViewModel : ObservableObject
     private void RefreshTaskPreview()
     {
         OnPropertyChanged(nameof(CurrentTaskStatusLabel));
+        OnPropertyChanged(nameof(CurrentStepCountLabel));
         OnPropertyChanged(nameof(CurrentTaskGoalLabel));
         OnPropertyChanged(nameof(CurrentTaskSummaryLabel));
         OnPropertyChanged(nameof(QueuedPatchCount));

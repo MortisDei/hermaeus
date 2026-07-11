@@ -11,6 +11,8 @@ public interface IAgentTaskStateStore
     Task<IReadOnlyList<AgentReviewQueueItem>> ListReviewQueueAsync(int limit = 25, CancellationToken ct = default);
     Task AppendLogAsync(string taskId, string line, CancellationToken ct = default);
     Task AppendTraceAsync(string taskId, object trace, CancellationToken ct = default);
+    Task AppendTranscriptEntryAsync(string taskId, AgentTranscriptEntry entry, CancellationToken ct = default);
+    Task<IReadOnlyList<AgentTranscriptEntry>> LoadTranscriptAsync(string taskId, CancellationToken ct = default);
     string GetTaskDirectory(string taskId);
 }
 
@@ -25,12 +27,40 @@ public interface IAgentWorkspaceMemoryStore
 
 public interface IAgentWorkspaceTools
 {
-    IReadOnlyList<string> ListFiles(AgentWorkspaceOptions options);
-    IReadOnlyList<AgentFileSearchResult> SearchFiles(AgentWorkspaceOptions options, string query);
-    AgentFileReadResult ReadFile(AgentWorkspaceOptions options, string relativePath);
+    /// <summary>
+    /// <paramref name="subdirectory"/> scopes the listing to one folder
+    /// (workspace-relative); <paramref name="maxDepth"/> bounds how many
+    /// path segments deep it recurses. Both optional so this can act as a
+    /// flat listing (default) or a bounded tree view.
+    /// </summary>
+    IReadOnlyList<string> ListFiles(AgentWorkspaceOptions options, string? subdirectory = null, int? maxDepth = null);
+    /// <summary>
+    /// <paramref name="regex"/> switches <paramref name="query"/> from a
+    /// literal substring match to a regular expression; <paramref name="contextLines"/>
+    /// includes that many lines of surrounding context per match.
+    /// </summary>
+    IReadOnlyList<AgentFileSearchResult> SearchFiles(AgentWorkspaceOptions options, string query, bool regex = false, int contextLines = 0);
+    /// <summary>Bounded glob match (`*`, `**`, `?`) over the workspace's safe file list.</summary>
+    IReadOnlyList<string> GlobFiles(AgentWorkspaceOptions options, string pattern);
+    /// <summary>
+    /// <paramref name="lineOffset"/>/<paramref name="lineLimit"/> page a
+    /// large file by line instead of relying on the byte-size truncation
+    /// that applies when they are left null.
+    /// </summary>
+    AgentFileReadResult ReadFile(AgentWorkspaceOptions options, string relativePath, int? lineOffset = null, int? lineLimit = null);
     AgentFileSummaryResult SummarizeFile(AgentWorkspaceOptions options, string relativePath);
     Task<AgentFileReadResult> ApplyDraftPatchAsync(AgentWorkspaceOptions options, string relativePath, string proposedContent, CancellationToken ct = default);
     string DraftPatch(string relativePath, string rationale, string proposedContent);
+    /// <summary>
+    /// Applies a surgical text edit: <paramref name="oldString"/> must match
+    /// the target file's content exactly once, or the edit is refused (0
+    /// matches: nothing to replace; more than 1: ambiguous, needs more
+    /// surrounding context). This is the primary write tool for touching one
+    /// part of a file without rewriting it whole.
+    /// </summary>
+    Task<AgentFileReadResult> EditFileAsync(AgentWorkspaceOptions options, string relativePath, string oldString, string newString, CancellationToken ct = default);
+    /// <summary>Creates a new file; refuses to overwrite an existing one (use edit_file for that).</summary>
+    Task<AgentFileReadResult> CreateFileAsync(AgentWorkspaceOptions options, string relativePath, string content, CancellationToken ct = default);
 }
 
 public interface IAgentSafetyGate
@@ -54,6 +84,15 @@ public interface IAgentService
 {
     Task<AgentTaskState> CreateTaskAsync(string goal, AgentWorkspaceOptions options, CancellationToken ct = default);
     Task<AgentStepResult> RunStepAsync(string taskId, AgentWorkspaceOptions options, CancellationToken ct = default);
+    /// <summary>
+    /// Runs steps back to back without waiting for a manual "run step" click,
+    /// stopping when the model reaches a final answer, asks the user a
+    /// question, needs approval for a gated action, gets blocked, or hits
+    /// <see cref="Aether.Core.Models.AgentSettings.MaxAutoSteps"/>. Never
+    /// auto-approves a gated action; it only avoids making the user drive
+    /// every intermediate read-only step by hand.
+    /// </summary>
+    Task<AgentStepResult> RunAsync(string taskId, AgentWorkspaceOptions options, Action<AgentStepResult>? onStep = null, CancellationToken ct = default);
     Task<IReadOnlyList<AgentTaskListItem>> LoadRecentTasksAsync(CancellationToken ct = default);
     Task AppendApprovalAsync(string taskId, string action, bool approved, AgentWorkspaceOptions? options = null, CancellationToken ct = default);
 }
@@ -78,4 +117,37 @@ public interface IWorkspaceManifestStore
 public interface IWorkspaceActivationService
 {
     Task<WorkspaceActivation> ActivateAsync(string workspaceRoot, CancellationToken ct = default);
+}
+
+/// <summary>
+/// The agent self-learning store: deterministic, evidence-backed lessons
+/// about what works or fails, keyed by a dedupe signature so repeated
+/// evidence reinforces one row instead of creating duplicates, and
+/// contradicting evidence decays confidence toward automatic retirement.
+/// </summary>
+public interface ILessonStore
+{
+    Task InitializeAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Records one piece of evidence. If a lesson with the same signature
+    /// (scope-qualified) already exists: matching outcome reinforces it
+    /// (evidence count up, confidence up, never re-inserted); a different
+    /// outcome for the same signature is treated as a contradiction
+    /// (confidence down, retiring the lesson below a floor). Otherwise
+    /// creates a new lesson.
+    /// </summary>
+    Task<AgentLesson> RecordEvidenceAsync(AgentLessonEvidence evidence, CancellationToken ct = default);
+
+    /// <summary>Active lessons in scope (Global lessons plus, if scopeId is given, that workspace's), most confident first.</summary>
+    Task<IReadOnlyList<AgentLesson>> ListRelevantAsync(string? workspaceScopeId, bool includeRetired, int limit, CancellationToken ct = default);
+
+    Task<IReadOnlyList<AgentLesson>> ListAllAsync(bool includeRetired, CancellationToken ct = default);
+    Task<AgentLesson?> GetByIdAsync(string id, CancellationToken ct = default);
+
+    /// <summary>Manual edit: overwrites claim/guidance and locks confidence at its current value (pinning also locks it).</summary>
+    Task UpdateAsync(string id, string claim, string guidance, CancellationToken ct = default);
+    Task SetPinnedAsync(string id, bool pinned, CancellationToken ct = default);
+    Task SetStatusAsync(string id, AgentLessonStatus status, CancellationToken ct = default);
+    Task DeleteAsync(string id, CancellationToken ct = default);
 }

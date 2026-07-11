@@ -125,11 +125,13 @@ public sealed class OllamaService : IDisposable
         if (!string.IsNullOrWhiteSpace(systemPrompt))
             msgs.Insert(0, new { role = "system", content = systemPrompt });
 
+        var tools = OpenAiCompatibleToolWire.BuildTools(options.Tools);
         var req = new
         {
             model = modelName,
             messages = msgs,
             stream = true,
+            tools,
             options = new
             {
                 temperature = options.Temperature,
@@ -164,17 +166,35 @@ public sealed class OllamaService : IDisposable
                 yield return new LlmStreamEvent(chunk.Message.Content);
             if (chunk?.Done == true)
             {
-                if (ToUsage(chunk) is { } usage)
-                    yield return new LlmStreamEvent(Usage: usage, IsFinal: true);
-                else
-                    yield return new LlmStreamEvent(IsFinal: true);
+                // Ollama returns tool calls whole in the terminal chunk
+                // rather than fragmenting them across the stream the way
+                // OpenAI-compatible servers do, so no accumulator is needed.
+                var toolCalls = ToToolCalls(chunk);
+                var usage = ToUsage(chunk);
+                yield return new LlmStreamEvent(Usage: usage, IsFinal: true, ToolCalls: toolCalls);
                 yield break;
             }
         }
     }
 
+    private static IReadOnlyList<LlmToolCallRequest>? ToToolCalls(ChatChunk? chunk)
+    {
+        var calls = chunk?.Message?.ToolCalls;
+        if (calls is null || calls.Count == 0) return null;
+        return calls
+            .Where(c => !string.IsNullOrEmpty(c.Function?.Name))
+            .Select(c => new LlmToolCallRequest(
+                Guid.NewGuid().ToString("N"),
+                c.Function!.Name,
+                c.Function.Arguments.ValueKind == JsonValueKind.Undefined ? "{}" : c.Function.Arguments.GetRawText()))
+            .ToList();
+    }
+
     public static ChatTokenUsage? ParseUsageForTest(string json) =>
         ToUsage(JsonSerializer.Deserialize<ChatChunk>(json));
+
+    public static IReadOnlyList<LlmToolCallRequest>? ParseToolCallsForTest(string json) =>
+        ToToolCalls(JsonSerializer.Deserialize<ChatChunk>(json));
 
     private static ChatTokenUsage? ToUsage(ChatChunk? chunk)
     {
@@ -214,5 +234,11 @@ public sealed class OllamaService : IDisposable
         [property: JsonPropertyName("done")] bool Done,
         [property: JsonPropertyName("prompt_eval_count")] int? PromptEvalCount,
         [property: JsonPropertyName("eval_count")] int? EvalCount);
-    private sealed record ChatMessageChunk([property: JsonPropertyName("content")] string Content);
+    private sealed record ChatMessageChunk(
+        [property: JsonPropertyName("content")] string Content,
+        [property: JsonPropertyName("tool_calls")] List<OllamaToolCallChunk>? ToolCalls);
+    private sealed record OllamaToolCallChunk([property: JsonPropertyName("function")] OllamaFunctionCallChunk? Function);
+    private sealed record OllamaFunctionCallChunk(
+        [property: JsonPropertyName("name")] string Name,
+        [property: JsonPropertyName("arguments")] JsonElement Arguments);
 }

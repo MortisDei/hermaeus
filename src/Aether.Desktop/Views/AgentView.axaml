@@ -38,6 +38,7 @@
                         <StackPanel Spacing="2">
                             <TextBlock Text="Task state" FontSize="11" Opacity="0.55" />
                             <TextBlock Text="{Binding CurrentTaskStatusLabel}" FontSize="13" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding CurrentStepCountLabel}" FontSize="11" Opacity="0.6" />
                             <TextBlock Text="{Binding CurrentTaskGoalLabel}" FontSize="11" Opacity="0.7" TextTrimming="CharacterEllipsis" />
                         </StackPanel>
                     </Border>
@@ -75,6 +76,22 @@
                                     <StackPanel Orientation="Horizontal" Spacing="8">
                                         <TextBlock Text="•" Opacity="0.55" />
                                         <TextBlock Text="{Binding}" TextWrapping="Wrap" FontSize="11" Opacity="0.78" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+
+                <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="10">
+                    <StackPanel Spacing="6">
+                        <TextBlock Text="Plan" FontSize="11" Opacity="0.55" />
+                        <ItemsControl ItemsSource="{Binding CurrentTask.Plan}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <TextBlock Text="{Binding Status}" FontSize="11" Opacity="0.55" Width="80" />
+                                        <TextBlock Text="{Binding Description}" TextWrapping="Wrap" FontSize="12" />
                                     </StackPanel>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
@@ -590,6 +607,69 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
+                </Expander>
+
+                <Expander Header="Lessons (self-learning)" HorizontalAlignment="Stretch">
+                    <StackPanel Margin="0,8,0,0" Spacing="6">
+                        <TextBlock Text="Deterministic, evidence-backed observations about what works or fails in this workspace. They inform the agent; they never authorize anything on their own."
+                                   FontSize="11" Opacity="0.55" TextWrapping="Wrap" />
+                        <Button Content="Refresh"
+                                HorizontalAlignment="Left"
+                                Command="{Binding RefreshLessonsCommand}" />
+                        <ItemsControl ItemsSource="{Binding Lessons}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="6"
+                                            Padding="10"
+                                            Margin="0,0,0,6">
+                                        <StackPanel Spacing="3">
+                                            <Grid ColumnDefinitions="*,Auto">
+                                                <TextBlock Grid.Column="0"
+                                                           Text="{Binding ScopeLabel}"
+                                                           FontWeight="SemiBold"
+                                                           FontSize="12" />
+                                                <TextBlock Grid.Column="1"
+                                                           Text="{Binding StatusLabel}"
+                                                           FontSize="11"
+                                                           Opacity="0.5" />
+                                            </Grid>
+                                            <TextBox Text="{Binding Claim}"
+                                                     FontSize="12"
+                                                     TextWrapping="Wrap"
+                                                     AcceptsReturn="True" />
+                                            <TextBox Text="{Binding Guidance}"
+                                                     FontSize="11"
+                                                     Opacity="0.75"
+                                                     TextWrapping="Wrap"
+                                                     Watermark="Guidance (optional)" />
+                                            <TextBlock Text="{Binding ConfidenceLabel}"
+                                                       FontSize="11"
+                                                       Opacity="0.5" />
+                                            <StackPanel Orientation="Horizontal" Spacing="8" x:CompileBindings="False">
+                                                <Button Content="Save"
+                                                        Command="{Binding DataContext.UpdateLessonCommand, ElementName=Root}"
+                                                        CommandParameter="{Binding}" />
+                                                <Button Content="Pin/Unpin"
+                                                        Command="{Binding DataContext.PinLessonCommand, ElementName=Root}"
+                                                        CommandParameter="{Binding}" />
+                                                <Button Content="Retire"
+                                                        Command="{Binding DataContext.RetireLessonCommand, ElementName=Root}"
+                                                        CommandParameter="{Binding}" />
+                                                <Button Content="Reactivate"
+                                                        Command="{Binding DataContext.ReactivateLessonCommand, ElementName=Root}"
+                                                        CommandParameter="{Binding}" />
+                                                <Button Content="Delete"
+                                                        Command="{Binding DataContext.DeleteLessonCommand, ElementName=Root}"
+                                                        CommandParameter="{Binding}" />
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
                 </Expander>
 
                 <Expander Header="Agent Log" HorizontalAlignment="Stretch">

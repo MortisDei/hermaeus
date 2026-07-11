@@ -469,6 +469,69 @@ namespace Aether.Tests
         }
     }
 
+    /// <summary>Returns a fixed sequence of planner responses, one per call, for testing multi-step loops.</summary>
+    sealed class FakeSequencedAgentLlm : ILlmService
+    {
+        private readonly Queue<string> _responses;
+
+        public FakeSequencedAgentLlm(IEnumerable<string> responses) => _responses = new Queue<string>(responses);
+
+        public string ProviderName => "FakeSequencedAgent";
+        public bool IsConfigured => true;
+        public Task<List<LlmModel>> GetModelsAsync(CancellationToken ct = default) =>
+            Task.FromResult(new List<LlmModel> { new() { Id = "fake-sequenced-agent", Name = "Fake Sequenced Agent", Provider = "Test" } });
+
+        public async IAsyncEnumerable<LlmStreamEvent> StreamChatAsync(
+            string modelId,
+            IReadOnlyList<ChatMessage> messages,
+            LlmChatOptions? options = null,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+        {
+            await Task.Delay(1, ct);
+            yield return new LlmStreamEvent(_responses.Count > 0 ? _responses.Dequeue() : _finalResponse);
+        }
+
+        private const string _finalResponse = """
+            {
+              "thought_summary": "Nothing left to do.",
+              "current_step": "Done.",
+              "next_action": { "type": "final", "requires_approval": false, "risk_level": "none" },
+              "state_update": { "completed": [], "pending": [], "new_facts": [], "blockers": [] },
+              "user_message": "Finished."
+            }
+            """;
+    }
+
+    /// <summary>Simulates a provider with native tool-calling support: no JSON text, just a structured tool call.</summary>
+    sealed class FakeToolCallingAgentLlm : ILlmService
+    {
+        private readonly string _toolName;
+        private readonly string _argumentsJson;
+
+        public FakeToolCallingAgentLlm(string toolName, string argumentsJson)
+        {
+            _toolName = toolName;
+            _argumentsJson = argumentsJson;
+        }
+
+        public string ProviderName => "FakeToolCallingAgent";
+        public bool IsConfigured => true;
+        public Task<List<LlmModel>> GetModelsAsync(CancellationToken ct = default) =>
+            Task.FromResult(new List<LlmModel> { new() { Id = "fake-tool-calling-agent", Name = "Fake Tool Calling Agent", Provider = "Test" } });
+
+        public async IAsyncEnumerable<LlmStreamEvent> StreamChatAsync(
+            string modelId,
+            IReadOnlyList<ChatMessage> messages,
+            LlmChatOptions? options = null,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+        {
+            await Task.Delay(1, ct);
+            yield return new LlmStreamEvent(
+                IsFinal: true,
+                ToolCalls: [new LlmToolCallRequest("call_1", _toolName, _argumentsJson)]);
+        }
+    }
+
     sealed class FakeSystemInfo : ISystemInfoService
     {
         public Task<SystemSnapshot> CaptureAsync(CancellationToken ct = default) => Task.FromResult(new SystemSnapshot

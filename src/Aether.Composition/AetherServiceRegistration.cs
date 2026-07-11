@@ -77,6 +77,7 @@ public static class AetherServiceRegistration
         s.AddSingleton<IAgentRetrievalService, AgentRetrievalService>();
         s.AddSingleton<RagEvalService>();
         s.AddSingleton<IAgentTaskStateStore, FileAgentTaskStateStore>();
+        s.AddSingleton<ILessonStore, SqliteLessonStore>();
         s.AddSingleton<IAgentWorkspaceMemoryStore, WorkspaceMemoryStore>();
         s.AddSingleton<IAgentWorkspaceTools, AgentWorkspaceTools>();
         s.AddSingleton<IWorkspaceProfileStore, FileWorkspaceProfileStore>();

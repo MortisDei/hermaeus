@@ -8,10 +8,12 @@ public sealed class AgentSafetyGate : IAgentSafetyGate
     {
         "list_files",
         "search_files",
+        "glob_files",
         "read_file",
         "summarize_file",
         "draft_patch",
-        "inspect_git_diff"
+        "inspect_git_diff",
+        "set_plan"
     };
 
     private static readonly HashSet<string> HighRiskTools = new(StringComparer.OrdinalIgnoreCase)
@@ -49,7 +51,8 @@ public sealed class AgentSafetyGate : IAgentSafetyGate
             || toolName.Contains("apply", StringComparison.OrdinalIgnoreCase)
             || toolName.Contains("create", StringComparison.OrdinalIgnoreCase)
             || toolName.Contains("update", StringComparison.OrdinalIgnoreCase)
-            || toolName.Contains("rename", StringComparison.OrdinalIgnoreCase))
+            || toolName.Contains("rename", StringComparison.OrdinalIgnoreCase)
+            || toolName.Contains("edit", StringComparison.OrdinalIgnoreCase))
         {
             return new AgentToolPolicyDecision(AgentToolDisposition.RequiresApproval, AgentRiskLevel.Medium, "Potentially mutating tool requires approval.");
         }
@@ -63,12 +66,20 @@ public sealed class AgentSafetyGate : IAgentSafetyGate
         if (command.Length == 0)
             return new AgentToolPolicyDecision(AgentToolDisposition.Blocked, AgentRiskLevel.High, "No command specified.");
 
-        if (!WorkspaceCommandRecipes.Executable.ContainsKey(command))
-            return new AgentToolPolicyDecision(AgentToolDisposition.Blocked, AgentRiskLevel.High, "Command is not one of the fixed, safe executable recipes.");
+        var family = WorkspaceCommandRecipes.ExtractFamily(command);
+        if (family is null)
+            return new AgentToolPolicyDecision(AgentToolDisposition.Blocked, AgentRiskLevel.High, "Command is not one of the fixed, safe executable template families.");
 
-        if (!allowedCommands.Any(recipe => string.Equals(recipe.Command.Trim(), command, StringComparison.OrdinalIgnoreCase)))
-            return new AgentToolPolicyDecision(AgentToolDisposition.Blocked, AgentRiskLevel.High, "Command was not declared as a safe recipe for this workspace.");
+        // A declared recipe may itself carry an example argument (or none);
+        // what has to match is the family, not the exact string, so a
+        // workspace that declares bare "dotnet test" also covers "dotnet
+        // test tests/Foo.csproj" - the optional argument's safety is
+        // enforced separately when the command actually runs.
+        var declared = allowedCommands.Any(recipe =>
+            string.Equals(WorkspaceCommandRecipes.ExtractFamily(recipe.Command) ?? recipe.Command.Trim(), family, StringComparison.OrdinalIgnoreCase));
+        if (!declared)
+            return new AgentToolPolicyDecision(AgentToolDisposition.Blocked, AgentRiskLevel.High, "Command family was not declared as a safe recipe for this workspace.");
 
-        return new AgentToolPolicyDecision(AgentToolDisposition.RequiresApproval, AgentRiskLevel.Medium, "Recipe-scoped command execution always requires approval.");
+        return new AgentToolPolicyDecision(AgentToolDisposition.RequiresApproval, AgentRiskLevel.Medium, "Template-family command execution always requires approval.");
     }
 }

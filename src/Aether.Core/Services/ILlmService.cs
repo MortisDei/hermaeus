@@ -1,13 +1,30 @@
 using Aether.Core.Models;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 
 namespace Aether.Core.Services;
 
-public record ChatMessage(string Role, string Content);
+/// <summary>
+/// <paramref name="ToolCallId"/>/<paramref name="ToolCalls"/> only apply to
+/// tool round-tripping: an assistant turn that requested tool calls carries
+/// <see cref="ToolCalls"/>, and the corresponding tool-result turn (Role
+/// "tool") carries <see cref="ToolCallId"/>. Plain chat messages leave both null.
+/// </summary>
+public record ChatMessage(string Role, string Content, string? ToolCallId = null, IReadOnlyList<LlmToolCallRequest>? ToolCalls = null);
 
 public sealed record ChatTokenUsage(int PromptTokens, int CompletionTokens, int TotalTokens);
 
-public sealed record LlmStreamEvent(string ContentDelta = "", ChatTokenUsage? Usage = null, bool IsFinal = false)
+/// <summary>A tool/function the model may call, declared to the provider using the OpenAI function-calling schema shape.</summary>
+public sealed record LlmToolDefinition(string Name, string Description, JsonElement Parameters);
+
+/// <summary>A completed tool call the model asked for; <see cref="ArgumentsJson"/> is the raw JSON object the model produced.</summary>
+public sealed record LlmToolCallRequest(string Id, string Name, string ArgumentsJson);
+
+public sealed record LlmStreamEvent(
+    string ContentDelta = "",
+    ChatTokenUsage? Usage = null,
+    bool IsFinal = false,
+    IReadOnlyList<LlmToolCallRequest>? ToolCalls = null)
 {
     public static LlmStreamEvent Error(string message) => new(message, IsFinal: true);
 }
@@ -34,6 +51,14 @@ public sealed record LlmChatOptions
     public double? FrequencyPenalty { get; init; }
     /// <summary>OpenAI-style presence penalty. Provider default when null.</summary>
     public double? PresencePenalty { get; init; }
+    /// <summary>
+    /// Tools the model may call. When supported by the provider/model, a
+    /// response ends in <see cref="LlmStreamEvent.ToolCalls"/> instead of
+    /// (or alongside) text; providers/models without tool-calling support
+    /// simply ignore this and respond with text as before. Null or empty
+    /// means no tools are offered.
+    /// </summary>
+    public IReadOnlyList<LlmToolDefinition>? Tools { get; init; }
 
     public static readonly LlmChatOptions Default = new();
 }

@@ -178,7 +178,7 @@ internal static class AgentTests
     using var temp = new TempDir();
     var settings = NewSettings(temp);
     settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
-    var store = new FileAgentWorkspaceMemoryStore(settings);
+    var store = new WorkspaceMemoryStore(new MemoryStore(settings), settings);
     await store.InitializeAsync();
 
     var workspace = temp.PathFor("workspace");
@@ -215,7 +215,7 @@ internal static class AgentTests
     await File.WriteAllTextAsync(Path.Combine(workspace, "src", "App.cs"), "namespace Sample;");
     await File.WriteAllTextAsync(Path.Combine(workspace, "tests", "AppTests.cs"), "namespace Sample.Tests;");
 
-    var memory = new FileAgentWorkspaceMemoryStore(settings);
+    var memory = new WorkspaceMemoryStore(new MemoryStore(settings), settings);
     var profiles = new FileWorkspaceProfileStore(settings);
     var analysis = new WorkspaceAnalysisService(profiles, memory);
     var report = await analysis.AnalyzeAsync(new AgentWorkspaceOptions(workspace, ModelId: "local-model"));
@@ -332,6 +332,148 @@ internal static class AgentTests
     return Task.CompletedTask;
     }
 
+    public static async Task AgentEditFileRequiresUniqueMatch()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    var file = Path.Combine(root, "Program.cs");
+    await File.WriteAllTextAsync(file, "int a = 1;\nint b = 2;\nint a = 1;\n");
+
+    var tools = new AgentWorkspaceTools();
+    var options = new AgentWorkspaceOptions(root);
+
+    await ThrowsAsync<InvalidOperationException>(() => tools.EditFileAsync(options, "Program.cs", "int a = 1;", "int a = 99;"));
+    await ThrowsAsync<InvalidOperationException>(() => tools.EditFileAsync(options, "Program.cs", "int z = 9;", "int z = 10;"));
+
+    var edited = await tools.EditFileAsync(options, "Program.cs", "int b = 2;", "int b = 42;");
+    True(edited.Content.Contains("int b = 42;", StringComparison.Ordinal), "a unique old_string match should be replaced");
+    Equal(2, edited.Content.Split("int a = 1;").Length - 1, "edit_file should leave non-matched occurrences of the ambiguous text untouched");
+
+    await ThrowsAsync<FileNotFoundException>(() => tools.EditFileAsync(options, "missing.cs", "x", "y"));
+    Throws<InvalidOperationException>(() => AgentWorkspaceTools.ResolveSafePath(root, "../outside.cs"));
+    }
+
+    public static async Task AgentCreateFileRefusesToOverwriteExisting()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+
+    var tools = new AgentWorkspaceTools();
+    var options = new AgentWorkspaceOptions(root);
+
+    var created = await tools.CreateFileAsync(options, "src/New.cs", "namespace Sample;\n");
+    True(File.Exists(Path.Combine(root, "src", "New.cs")), "create_file should create the file, including its parent directory");
+    Equal("namespace Sample;\n", created.Content, "create_file should return the content it wrote");
+
+    await ThrowsAsync<InvalidOperationException>(() => tools.CreateFileAsync(options, "src/New.cs", "different content"));
+    }
+
+    public static Task AgentGlobFilesMatchesPatterns()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(Path.Combine(root, "src"));
+    Directory.CreateDirectory(Path.Combine(root, "src", "sub"));
+    File.WriteAllText(Path.Combine(root, "src", "Foo.cs"), "class Foo {}");
+    File.WriteAllText(Path.Combine(root, "src", "sub", "Bar.cs"), "class Bar {}");
+    File.WriteAllText(Path.Combine(root, "README.md"), "# readme");
+
+    var tools = new AgentWorkspaceTools();
+    var options = new AgentWorkspaceOptions(root);
+
+    var shallow = tools.GlobFiles(options, "src/*.cs");
+    True(shallow.Contains("src/Foo.cs"), "single-star glob should match direct children");
+    False(shallow.Contains("src/sub/Bar.cs"), "single-star glob should not match nested files");
+
+    var deep = tools.GlobFiles(options, "src/**/*.cs");
+    True(deep.Contains("src/Foo.cs") && deep.Contains("src/sub/Bar.cs"), "double-star glob should match at any depth");
+    False(deep.Contains("README.md"), "glob should not match files outside the pattern");
+    return Task.CompletedTask;
+    }
+
+    public static async Task AgentReadFilePagesByLine()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    var lines = Enumerable.Range(1, 10).Select(i => $"line {i}").ToArray();
+    await File.WriteAllTextAsync(Path.Combine(root, "big.txt"), string.Join('\n', lines));
+
+    var tools = new AgentWorkspaceTools();
+    var options = new AgentWorkspaceOptions(root);
+
+    var page = tools.ReadFile(options, "big.txt", lineOffset: 2, lineLimit: 3);
+    Equal("line 3\nline 4\nline 5", page.Content, "read_file should page by the requested line range");
+    True(page.Truncated, "a partial page should report truncation");
+
+    var last = tools.ReadFile(options, "big.txt", lineOffset: 9, lineLimit: 5);
+    Equal("line 10", last.Content, "read_file should stop at the end of the file without erroring");
+    False(last.Truncated, "reaching the end of the file should not report truncation");
+    }
+
+    public static Task AgentSearchFilesSupportsRegexAndContext()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    File.WriteAllText(Path.Combine(root, "notes.txt"), "alpha\nTODO: fix this\nbeta\ngamma");
+
+    var tools = new AgentWorkspaceTools();
+    var options = new AgentWorkspaceOptions(root);
+
+    var literal = tools.SearchFiles(options, "TODO");
+    Equal(1, literal.Count, "literal search should find the matching file");
+
+    var regexMiss = tools.SearchFiles(options, "^TODO$", regex: true);
+    Equal(0, regexMiss.Count, "an anchored regex should not match a line with a prefix");
+
+    var regexHit = tools.SearchFiles(options, "^TODO:", regex: true, contextLines: 1);
+    Equal(1, regexHit.Count, "regex search should match the TODO line");
+    True(regexHit[0].Snippet.Contains("alpha") && regexHit[0].Snippet.Contains("beta"), "context lines should surround the match");
+
+    Throws<InvalidOperationException>(() => tools.SearchFiles(options, "[", regex: true));
+    return Task.CompletedTask;
+    }
+
+    public static async Task AgentSetPlanUpdatesTaskStateWithoutApproval()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    var tools = new AgentWorkspaceTools();
+    var setPlanResponse = """
+        {
+          "thought_summary": "Planning the work.",
+          "current_step": "Draft a plan.",
+          "next_action": {
+            "type": "tool",
+            "tool_name": "set_plan",
+            "arguments": { "steps": [ { "description": "Read the docs", "status": "done" }, { "description": "Write the fix", "status": "in_progress" } ] },
+            "requires_approval": false,
+            "risk_level": "none"
+          },
+          "state_update": { "completed": [], "pending": [], "new_facts": [], "blockers": [] },
+          "user_message": "Plan updated."
+        }
+        """;
+    var llm = new FakeSequencedAgentLlm([setPlanResponse]);
+    var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), llm, settings: settings);
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-sequenced-agent");
+
+    var state = await service.CreateTaskAsync("Plan the work", options);
+    var step = await service.RunStepAsync(state.TaskId, options);
+
+    Equal(AgentTaskStatus.Running, step.State.Status, "set_plan should never require approval or pause the task");
+    Equal(2, step.State.Plan.Count, "set_plan should replace the task's plan");
+    Equal(AgentPlanStepStatus.Done, step.State.Plan[0].Status, "plan step status should round-trip");
+    Equal(AgentPlanStepStatus.InProgress, step.State.Plan[1].Status, "plan step status should round-trip");
+    }
+
     public static async Task AgentTaskStatePersistsQueuedDraftPatches()
     {
     using var temp = new TempDir();
@@ -434,7 +576,8 @@ internal static class AgentTests
     var rag = new RagQueryService(ragStore, new FakeEmbeddingService(), new FakeLlm(), settings, new NoOpReranker());
     var retrieval = new AgentRetrievalService(rag, ragStore);
     var activation = new WorkspaceActivationService(new WorkspaceManifestService(), new FileWorkspaceProfileStore(settings));
-    var builder = new AgentContextBuilder(new AgentWorkspaceTools(), retrieval, new FileAgentWorkspaceMemoryStore(settings), activation);
+    var taskStore = new FileAgentTaskStateStore(settings);
+    var builder = new AgentContextBuilder(new AgentWorkspaceTools(), retrieval, new WorkspaceMemoryStore(new MemoryStore(settings), settings), activation, taskStore, settings);
     var state = new AgentTaskState
     {
         Goal = "Find alpha",
@@ -496,7 +639,8 @@ internal static class AgentTests
     await manifests.SaveAsync(workspace, new WorkspaceManifest { InstructionPaths = ["AGENTS.md"] });
     var activation = new WorkspaceActivationService(manifests, new FileWorkspaceProfileStore(settings));
 
-    var builder = new AgentContextBuilder(new AgentWorkspaceTools(), retrieval, new FileAgentWorkspaceMemoryStore(settings), activation);
+    var taskStore = new FileAgentTaskStateStore(settings);
+    var builder = new AgentContextBuilder(new AgentWorkspaceTools(), retrieval, new WorkspaceMemoryStore(new MemoryStore(settings), settings), activation, taskStore, settings);
     var state = new AgentTaskState { Goal = "Ship a fix", ActiveStep = "Implement", Summary = "summary" };
 
     var pack = await builder.BuildAsync(state, new AgentWorkspaceOptions(workspace));
@@ -568,6 +712,158 @@ internal static class AgentTests
 
     await ThrowsAsync<InvalidOperationException>(() =>
         executor.ExecuteAsync("run_command", new Dictionary<string, object?> { ["command"] = "rm -rf /" }, options));
+    }
+
+    public static async Task RunCommandAcceptsAnOptionalPathWithinTheWorkspace()
+    {
+    using var temp = new TempDir();
+    var workspace = temp.PathFor("workspace");
+    Directory.CreateDirectory(Path.Combine(workspace, "src"));
+    await File.WriteAllTextAsync(Path.Combine(workspace, "src", "sample.csproj"), """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0</TargetFramework>
+          </PropertyGroup>
+        </Project>
+        """);
+    await File.WriteAllTextAsync(Path.Combine(workspace, "src", "Program.cs"), "System.Console.WriteLine(\"hi\");");
+
+    var executor = new AgentToolExecutor(new AgentWorkspaceTools());
+    var options = new AgentWorkspaceOptions(workspace);
+
+    var result = await executor.ExecuteAsync("run_command", new Dictionary<string, object?> { ["command"] = "dotnet build src/sample.csproj" }, options);
+    True(result.ResultSummary.Contains("Exit code", StringComparison.Ordinal), "dotnet build with a workspace-relative project path should run");
+
+    await ThrowsAsync<InvalidOperationException>(() =>
+        executor.ExecuteAsync("run_command", new Dictionary<string, object?> { ["command"] = "dotnet build ../outside.csproj" }, options));
+    await ThrowsAsync<InvalidOperationException>(() =>
+        executor.ExecuteAsync("run_command", new Dictionary<string, object?> { ["command"] = "dotnet build /etc/passwd" }, options));
+    }
+
+    public static async Task RunCommandNpmRunOnlyAllowsScriptsDeclaredInPackageJson()
+    {
+    using var temp = new TempDir();
+    var workspace = temp.PathFor("workspace");
+    Directory.CreateDirectory(workspace);
+    await File.WriteAllTextAsync(Path.Combine(workspace, "package.json"), """{"scripts": {"lint": "eslint ."}}""");
+
+    var gate = new AgentSafetyGate();
+    var declared = new List<WorkspaceCommandRecipe> { new("npm run", "Run a declared npm script.", AgentRiskLevel.Low) };
+
+    var allowedDecision = gate.EvaluateCommand("npm run lint", declared);
+    Equal(AgentToolDisposition.RequiresApproval, allowedDecision.Disposition, "an npm run family declared by the workspace should still require approval, never auto-allow");
+
+    // Not asserting a successful "npm run lint" execution here: the test
+    // machine (and CI) may not have npm installed. The safety-relevant
+    // behavior - refusing a script the workspace's own package.json never
+    // declared - fails validation before any process would ever start, so
+    // it's exercised without depending on npm actually being present.
+    var executor = new AgentToolExecutor(new AgentWorkspaceTools());
+    var options = new AgentWorkspaceOptions(workspace);
+    await ThrowsAsync<InvalidOperationException>(() =>
+        executor.ExecuteAsync("run_command", new Dictionary<string, object?> { ["command"] = "npm run undeclared-script" }, options));
+    }
+
+    public static Task AgentSafetyGateDeclaredFamilyCoversArgumentVariants()
+    {
+    var gate = new AgentSafetyGate();
+    var declared = new List<WorkspaceCommandRecipe> { new("dotnet test", "Run tests.", AgentRiskLevel.Low) };
+
+    var bare = gate.EvaluateCommand("dotnet test", declared);
+    Equal(AgentToolDisposition.RequiresApproval, bare.Disposition, "the bare declared family should be allowed-with-approval");
+
+    var withPath = gate.EvaluateCommand("dotnet test tests/Foo.Tests.csproj", declared);
+    Equal(AgentToolDisposition.RequiresApproval, withPath.Disposition, "a declared bare family should also cover the same family with a project argument");
+
+    var undeclaredFamily = gate.EvaluateCommand("cargo test", declared);
+    Equal(AgentToolDisposition.Blocked, undeclaredFamily.Disposition, "a fixed family the workspace never declared should stay blocked");
+
+    var unknownFamily = gate.EvaluateCommand("dotnet run --project x", declared);
+    Equal(AgentToolDisposition.Blocked, unknownFamily.Disposition, "a family outside the fixed set should always be blocked regardless of manifest declarations");
+    return Task.CompletedTask;
+    }
+
+    public static async Task AgentRememberedCommandApprovalOnlyAppliesToTheExactCommandInTheSameTask()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    await File.WriteAllTextAsync(Path.Combine(root, "sample.csproj"), """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0</TargetFramework>
+          </PropertyGroup>
+        </Project>
+        """);
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    var tools = new AgentWorkspaceTools();
+    var buildResponse = """
+        {
+          "thought_summary": "Building.",
+          "current_step": "Build the project.",
+          "next_action": { "type": "tool", "tool_name": "run_command", "arguments": { "command": "dotnet build" }, "requires_approval": true, "risk_level": "medium" },
+          "state_update": { "completed": [], "pending": [], "new_facts": [], "blockers": [] },
+          "user_message": "Building."
+        }
+        """;
+    var testResponse = """
+        {
+          "thought_summary": "Testing.",
+          "current_step": "Run tests.",
+          "next_action": { "type": "tool", "tool_name": "run_command", "arguments": { "command": "dotnet test" }, "requires_approval": true, "risk_level": "medium" },
+          "state_update": { "completed": [], "pending": [], "new_facts": [], "blockers": [] },
+          "user_message": "Testing."
+        }
+        """;
+    var llm = new FakeSequencedAgentLlm([buildResponse, buildResponse, testResponse]);
+    var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), llm, settings: settings);
+    var manifest = new WorkspaceManifestService();
+    await manifest.SaveAsync(root, new WorkspaceManifest
+    {
+        AllowedCommands = [new WorkspaceCommandRecipe("dotnet build", "Build.", AgentRiskLevel.Low), new WorkspaceCommandRecipe("dotnet test", "Test.", AgentRiskLevel.Low)]
+    });
+    var serviceWithManifest = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), llm, manifests: manifest, settings: settings);
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-sequenced-agent");
+
+    var state = await serviceWithManifest.CreateTaskAsync("Build and test", options);
+    var first = await serviceWithManifest.RunStepAsync(state.TaskId, options);
+    Equal(AgentTaskStatus.WaitingForUser, first.State.Status, "the first dotnet build should still require approval");
+
+    await serviceWithManifest.AppendApprovalAsync(state.TaskId, "run_command", approved: true, options);
+    var afterApproval = await store.LoadAsync(state.TaskId);
+    True(afterApproval!.RememberedCommandApprovals.Any(c => string.Equals(c, "dotnet build", StringComparison.OrdinalIgnoreCase)),
+        "approving a run_command should remember the exact command for the rest of the task");
+
+    var second = await serviceWithManifest.RunStepAsync(state.TaskId, options);
+    Equal(AgentTaskStatus.Running, second.State.Status, "an identical repeat of the remembered command should auto-execute without pausing");
+
+    var third = await serviceWithManifest.RunStepAsync(state.TaskId, options);
+    Equal(AgentTaskStatus.WaitingForUser, third.State.Status, "a different command, even in the same task, should still require its own approval");
+    }
+
+    public static async Task RunCommandOutputSurfacesCompilerErrorsForTheModelToSee()
+    {
+    using var temp = new TempDir();
+    var workspace = temp.PathFor("workspace");
+    Directory.CreateDirectory(workspace);
+    await File.WriteAllTextAsync(Path.Combine(workspace, "broken.csproj"), """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <OutputType>Exe</OutputType>
+            <TargetFramework>net10.0</TargetFramework>
+          </PropertyGroup>
+        </Project>
+        """);
+    await File.WriteAllTextAsync(Path.Combine(workspace, "Program.cs"), "this is not valid C#;;;");
+
+    var executor = new AgentToolExecutor(new AgentWorkspaceTools());
+    var options = new AgentWorkspaceOptions(workspace);
+    var result = await executor.ExecuteAsync("run_command", new Dictionary<string, object?> { ["command"] = "dotnet build broken.csproj" }, options);
+
+    False(result.ResultSummary.Contains("Exit code 0", StringComparison.Ordinal), "a deliberately broken project should not report success");
+    True(result.ResultSummary.Contains("error", StringComparison.OrdinalIgnoreCase), "the compiler error text should be visible in the tool result, not just an exit code");
     }
 
     public static async Task RunCommandRecipeCaseSensitivityMatchesBetweenGateAndExecutor()
@@ -663,9 +959,246 @@ internal static class AgentTests
     True(step.State.ToolResults.Any(t => t.Tool == "safety_gate"), "safety gate result should be recorded");
     True(File.Exists(Path.Combine(store.GetTaskDirectory(state.TaskId), "agent.log")), "agent log should be written");
     True(File.Exists(Path.Combine(store.GetTaskDirectory(state.TaskId), "agent.trace.jsonl")), "agent trace should be written");
+    True(File.Exists(Path.Combine(store.GetTaskDirectory(state.TaskId), "transcript.jsonl")), "agent step transcript should be written");
+    var transcript = await store.LoadTranscriptAsync(state.TaskId);
+    True(transcript.Any(e => e.Role == "assistant" && e.Step == 1), "transcript should record the assistant's first-step thought");
+    Equal(1, step.State.StepCount, "step count should advance once per RunStepAsync call");
 
     await service.AppendApprovalAsync(state.TaskId, "draft_patch", approved: false);
     var reloaded = await store.LoadAsync(state.TaskId);
     True(reloaded?.ApprovalHistory.Count == 1, "approval history should persist");
+    }
+
+    public static async Task AgentTranscriptFeedsFollowingStepContextPack()
+    {
+    using var temp = new TempDir();
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    await store.InitializeAsync();
+
+    var state = new AgentTaskState { TaskId = "transcript-task", Goal = "Investigate", Status = AgentTaskStatus.Running };
+    await store.SaveAsync(state);
+
+    await store.AppendTranscriptEntryAsync(state.TaskId, new AgentTranscriptEntry(1, "assistant", null, "Looked at README.md for context.", DateTime.UtcNow));
+    await store.AppendTranscriptEntryAsync(state.TaskId, new AgentTranscriptEntry(1, "tool", "read_file", "README contents: hello world", DateTime.UtcNow));
+    await store.AppendTranscriptEntryAsync(state.TaskId, new AgentTranscriptEntry(2, "assistant", null, "Now drafting a patch.", DateTime.UtcNow));
+
+    var loaded = await store.LoadTranscriptAsync(state.TaskId);
+    Equal(3, loaded.Count, "transcript should persist all appended entries");
+
+    var workspace = temp.PathFor("workspace");
+    Directory.CreateDirectory(workspace);
+    var ragStore = new SqliteRagStore(settings);
+    var rag = new RagQueryService(ragStore, new FakeEmbeddingService(), new FakeLlm(), settings, new NoOpReranker());
+    var retrieval = new AgentRetrievalService(rag, ragStore);
+    var activation = new WorkspaceActivationService(new WorkspaceManifestService(), new FileWorkspaceProfileStore(settings));
+    var builder = new AgentContextBuilder(new AgentWorkspaceTools(), retrieval, new WorkspaceMemoryStore(new MemoryStore(settings), settings), activation, store, settings);
+
+    var pack = await builder.BuildAsync(state, new AgentWorkspaceOptions(workspace));
+    Equal(3, pack.TranscriptHistory.Count, "context pack should replay the full persisted transcript when it fits the budget");
+    Equal("step-1", pack.TranscriptHistory[0].Locator, "transcript history should stay in chronological order");
+    True(pack.TranscriptHistory[1].Content.Contains("README contents", StringComparison.Ordinal), "tool transcript entries should carry their result content");
+    Equal("step-2", pack.TranscriptHistory[2].Locator, "the most recent step should be the last transcript entry");
+    }
+
+    private const string ListFilesToolResponse = """
+        {
+          "thought_summary": "Listing files.",
+          "current_step": "Inspect workspace.",
+          "next_action": { "type": "tool", "tool_name": "list_files", "arguments": {}, "requires_approval": false, "risk_level": "low" },
+          "state_update": { "completed": [], "pending": [], "new_facts": [], "blockers": [] },
+          "user_message": "Listed files."
+        }
+        """;
+
+    public static async Task AgentRunAsyncLoopsUntilFinalAnswer()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    File.WriteAllText(Path.Combine(root, "README.md"), "agent docs");
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    var tools = new AgentWorkspaceTools();
+    var llm = new FakeSequencedAgentLlm([ListFilesToolResponse, ListFilesToolResponse]);
+    var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), llm, settings: settings);
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-sequenced-agent");
+
+    var state = await service.CreateTaskAsync("Review docs", options);
+    var stepStatuses = new List<AgentTaskStatus>();
+    var result = await service.RunAsync(state.TaskId, options, onStep: r => stepStatuses.Add(r.State.Status));
+
+    Equal(AgentTaskStatus.Complete, result.State.Status, "the loop should run until the model returns a final answer");
+    Equal(3, stepStatuses.Count, "the loop should have run two auto-allowed tool steps plus the final step");
+    Equal(3, result.State.StepCount, "step count should reflect every step the loop ran");
+    }
+
+    public static async Task AgentRunAsyncStopsAtMaxAutoSteps()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    File.WriteAllText(Path.Combine(root, "README.md"), "agent docs");
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    settings.Settings.Agent.MaxAutoSteps = 1;
+    var store = new FileAgentTaskStateStore(settings);
+    var tools = new AgentWorkspaceTools();
+    var llm = new FakeSequencedAgentLlm([ListFilesToolResponse, ListFilesToolResponse, ListFilesToolResponse]);
+    var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), llm, settings: settings);
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-sequenced-agent");
+
+    var state = await service.CreateTaskAsync("Review docs", options);
+    var result = await service.RunAsync(state.TaskId, options);
+
+    Equal(AgentTaskStatus.Running, result.State.Status, "the loop should stop mid-run once the step cap is hit even though the task is not finished");
+    Equal(1, result.State.StepCount, "the loop should have executed exactly the capped number of steps");
+    }
+
+    public static async Task AgentRunAsyncStopsWhenApprovalIsRequired()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    File.WriteAllText(Path.Combine(root, "README.md"), "agent docs");
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    var tools = new AgentWorkspaceTools();
+    var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), new FakeAgentLlm(), settings: settings);
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-agent");
+
+    var state = await service.CreateTaskAsync("Review docs", options);
+    var result = await service.RunAsync(state.TaskId, options);
+
+    Equal(AgentTaskStatus.WaitingForUser, result.State.Status, "the loop should pause, not auto-approve, when a gated action needs review");
+    Equal(1, result.State.StepCount, "the loop should stop after the first step that required approval");
+    }
+
+    public static async Task AgentConsumesNativeToolCallsWithoutJsonTextParsing()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    File.WriteAllText(Path.Combine(root, "README.md"), "agent docs");
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    var tools = new AgentWorkspaceTools();
+    var llm = new FakeToolCallingAgentLlm("read_file", """{"relative_path":"README.md"}""");
+    var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), llm, settings: settings);
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-tool-calling-agent");
+
+    var state = await service.CreateTaskAsync("Review docs", options);
+    var step = await service.RunStepAsync(state.TaskId, options);
+
+    Equal("read_file", step.PlannerResponse.NextAction.ToolName, "a native tool call should populate next_action directly, bypassing JSON text parsing");
+    Equal(AgentTaskStatus.Running, step.State.Status, "read_file is read-only and should execute immediately without approval");
+    True(step.State.ToolResults.Any(t => t.Tool == "read_file" && t.ResultSummary.Contains("agent docs", StringComparison.Ordinal)),
+        "the tool call's arguments should have been parsed correctly and the tool actually executed");
+    }
+
+    public static async Task AgentCapturesCommandFailureLessonAndInjectsItNextStep()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var taskStore = new FileAgentTaskStateStore(settings);
+    var lessonStore = new SqliteLessonStore(settings);
+    var tools = new AgentWorkspaceTools();
+
+    var runCommandResponse = """
+        {
+          "thought_summary": "Testing.",
+          "current_step": "Run tests.",
+          "next_action": { "type": "tool", "tool_name": "run_command", "arguments": { "command": "dotnet test" }, "requires_approval": true, "risk_level": "medium" },
+          "state_update": { "completed": [], "pending": [], "new_facts": [], "blockers": [] },
+          "user_message": "Testing."
+        }
+        """;
+    var llm = new FakeSequencedAgentLlm([runCommandResponse]);
+    var manifest = new WorkspaceManifestService();
+    await manifest.SaveAsync(root, new WorkspaceManifest { AllowedCommands = [new WorkspaceCommandRecipe("dotnet test", "Test.", AgentRiskLevel.Low)] });
+    var serviceWithManifest = new AgentService(taskStore, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), llm, manifests: manifest, settings: settings, lessons: lessonStore);
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-sequenced-agent");
+
+    var state = await serviceWithManifest.CreateTaskAsync("Run tests", options);
+    var step = await serviceWithManifest.RunStepAsync(state.TaskId, options);
+    Equal(AgentTaskStatus.WaitingForUser, step.State.Status, "run_command should still require approval the first time");
+
+    await serviceWithManifest.AppendApprovalAsync(state.TaskId, "run_command", approved: true, options);
+
+    var lessons = await lessonStore.ListRelevantAsync(root, includeRetired: false, 50);
+    True(lessons.Any(l => l.Kind == AgentLessonKind.Command), "a command lesson should be captured after the approved run");
+
+    // Verify the context builder actually surfaces it (injection wiring).
+    var ragStore = new SqliteRagStore(settings);
+    var rag = new RagQueryService(ragStore, new FakeEmbeddingService(), new FakeLlm(), settings, new NoOpReranker());
+    var retrieval = new AgentRetrievalService(rag, ragStore);
+    var activation = new WorkspaceActivationService(manifest, new FileWorkspaceProfileStore(settings));
+    var builder = new AgentContextBuilder(tools, retrieval, new WorkspaceMemoryStore(new MemoryStore(settings), settings), activation, taskStore, settings, lessonStore);
+    var pack = await builder.BuildAsync(step.State, options);
+    True(pack.Lessons.Count > 0, "the context pack should include the captured lesson on the next build");
+    }
+
+    public static async Task AgentCapturesApprovalRejectionLesson()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    File.WriteAllText(Path.Combine(root, "README.md"), "docs");
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var taskStore = new FileAgentTaskStateStore(settings);
+    var lessonStore = new SqliteLessonStore(settings);
+    var tools = new AgentWorkspaceTools();
+    var service = new AgentService(taskStore, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), new FakeAgentLlm(), settings: settings, lessons: lessonStore);
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-agent");
+
+    var state = await service.CreateTaskAsync("Review docs", options);
+    await service.RunStepAsync(state.TaskId, options);
+    await service.AppendApprovalAsync(state.TaskId, "draft_patch", approved: false, options);
+
+    var lessons = await lessonStore.ListAllAsync(includeRetired: false);
+    True(lessons.Any(l => l.Kind == AgentLessonKind.Approval && l.Outcome == AgentLessonOutcome.UserRejected),
+        "a rejected approval should be captured as an approval lesson");
+    }
+
+    public static async Task AgentCapturesStatedLessonMarkerAndStripsItFromUserMessage()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var taskStore = new FileAgentTaskStateStore(settings);
+    var lessonStore = new SqliteLessonStore(settings);
+    var tools = new AgentWorkspaceTools();
+    var statedResponse = """
+        {
+          "thought_summary": "Noted a quirk.",
+          "current_step": "Continue.",
+          "next_action": { "type": "final", "requires_approval": false, "risk_level": "none" },
+          "state_update": { "completed": [], "pending": [], "new_facts": [], "blockers": [] },
+          "user_message": "Done. [LESSON: This workspace uses a non-standard build script.]"
+        }
+        """;
+    var llm = new FakeSequencedAgentLlm([statedResponse]);
+    var service = new AgentService(taskStore, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), llm, settings: settings, lessons: lessonStore);
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-sequenced-agent");
+
+    var state = await service.CreateTaskAsync("Investigate", options);
+    var step = await service.RunStepAsync(state.TaskId, options);
+
+    False(step.PlannerResponse.UserMessage.Contains("[LESSON:", StringComparison.Ordinal), "the marker should be stripped from the user-visible message");
+    True(step.PlannerResponse.UserMessage.Contains("Done.", StringComparison.Ordinal), "surrounding text should be preserved");
+
+    var lessons = await lessonStore.ListAllAsync(includeRetired: false);
+    True(lessons.Any(l => l.Kind == AgentLessonKind.Stated && l.Claim.Contains("non-standard build script", StringComparison.Ordinal)),
+        "the stated lesson should be recorded");
     }
 }

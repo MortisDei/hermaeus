@@ -105,6 +105,10 @@
                                             <!-- Tags -->
                                             <TextBlock Text="{Binding Tags}"
                                                        FontSize="10" Opacity="0.5" />
+
+                                            <!-- Recall stats -->
+                                            <TextBlock Text="{Binding RecallDisplay}"
+                                                       FontSize="10" Opacity="0.4" />
                                         </StackPanel>
 
                                         <!-- Action Buttons -->

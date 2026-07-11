@@ -95,4 +95,9 @@ public class AppSettings
     /// Optional headless local API host configuration (off by default).
     /// </summary>
     public LocalApiSettings LocalApi { get; set; } = new();
+
+    /// <summary>
+    /// Agent workbench configuration (transcript budget, autonomous run limits).
+    /// </summary>
+    public AgentSettings Agent { get; set; } = new();
 }

@@ -45,6 +45,13 @@ public partial class MemoriesViewModel : ObservableObject
     [RelayCommand]
     public async Task InitializeAsync()
     {
+        // Best-effort: sweep memories that have decayed below the floor and
+        // gone unrecalled long enough into the archive before loading the
+        // list, so the panel reflects lifecycle state without needing a
+        // separate background job.
+        try { await _store.ArchiveStaleMemoriesAsync(); }
+        catch { }
+
         await LoadMemoriesAsync();
         await RefreshConversationFiltersAsync();
     }
@@ -108,7 +115,7 @@ public partial class MemoriesViewModel : ObservableObject
                 results = results.Where(m => string.Equals(m.SourceConversationId, SelectedConversationFilter.ConversationId, StringComparison.Ordinal)).ToList();
 
             Memories.Clear();
-            foreach (var memory in results.OrderByDescending(m => m.IsPinned).ThenByDescending(m => m.ImportanceScore))
+            foreach (var memory in results.OrderByDescending(m => m.IsPinned).ThenByDescending(m => MemoryLifecycle.ComputeEffectiveImportance(m)))
             {
                 Memories.Add(ToViewModel(memory));
             }
@@ -218,7 +225,7 @@ public partial class MemoriesViewModel : ObservableObject
         {
             var memories = await _store.GetAllAsync(includeArchived: false);
             Memories.Clear();
-            foreach (var memory in memories.OrderByDescending(m => m.IsPinned).ThenByDescending(m => m.ImportanceScore))
+            foreach (var memory in memories.OrderByDescending(m => m.IsPinned).ThenByDescending(m => MemoryLifecycle.ComputeEffectiveImportance(m)))
             {
                 Memories.Add(ToViewModel(memory));
             }
@@ -256,6 +263,9 @@ public partial class MemoriesViewModel : ObservableObject
         IsPinned = memory.IsPinned,
         IsArchived = memory.IsArchived,
         ImportanceScore = memory.ImportanceScore,
+        EffectiveImportance = MemoryLifecycle.ComputeEffectiveImportance(memory),
+        RecallCount = memory.RecallCount,
+        LastRecalledAt = memory.LastRecalledAt,
         Tags = string.Join(", ", memory.Tags),
         FrequencyCount = memory.FrequencyCount
     };
@@ -272,6 +282,9 @@ public partial class MemoryItemViewModel : ObservableObject
     public required DateTime CreatedAt { get; init; }
     public required DateTime UpdatedAt { get; init; }
     public required double ImportanceScore { get; init; }
+    public double EffectiveImportance { get; init; }
+    public int RecallCount { get; init; }
+    public DateTime? LastRecalledAt { get; init; }
     public string Tags { get; init; } = string.Empty;
     public int FrequencyCount { get; init; } = 1;
 
@@ -300,6 +313,10 @@ public partial class MemoryItemViewModel : ObservableObject
                     : local.ToString("d MMM");
         }
     }
+
+    public string RecallDisplay => LastRecalledAt is null
+        ? "Never recalled"
+        : $"Recalled {RecallCount}x, last {LastRecalledAt.Value.ToLocalTime():d MMM}";
 
     public string ImportanceDisplay => ImportanceScore switch
     {

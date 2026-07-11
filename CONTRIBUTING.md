@@ -25,7 +25,7 @@ and noncommercial use but may also be commercially licensed.
 - Do not add hosted-service dependencies by default.
 - Prefer optional integrations over hard dependencies.
 - Run `dotnet build Aether.sln` before submitting changes.
-- Run `dotnet run --project tests/Aether.Tests/Aether.Tests.csproj` when changes
+- Run `dotnet run --project src/Aether.Tests/Aether.Tests.csproj` when changes
   affect storage, settings, security, RAG, backup, restore, or runtime launch.
 
 ## Vocabulary

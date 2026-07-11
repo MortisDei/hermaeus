@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Aether.Agent.Models;
 using Aether.Agent.Services;
 using Aether.Core.Models;
@@ -135,10 +136,16 @@ public sealed class MemoryScopeTests
         var store = new WorkspaceMemoryStore(memories, settings);
         var root = Path.GetFullPath(temp.PathFor("ws"));
 
-        // Write the legacy file through the old file-backed store so the format matches exactly.
-        var legacyStore = new FileAgentWorkspaceMemoryStore(settings);
-        await legacyStore.UpsertAsync(new AgentWorkspaceMemoryEntry { Id = "legacy1", WorkspaceRoot = root, Title = "Old note", Body = "kept" });
-        var legacyPath = Path.Combine(store.GetWorkspaceDirectory(root), "memory.json");
+        // Write a legacy memory.json directly in the pre-migration file
+        // format (snake_case, one JSON array per workspace) that the old
+        // file-backed store used to produce, without depending on that
+        // store's class (removed once WorkspaceMemoryStore replaced it).
+        var legacyDir = store.GetWorkspaceDirectory(root);
+        Directory.CreateDirectory(legacyDir);
+        var legacyPath = Path.Combine(legacyDir, "memory.json");
+        var legacyEntry = new AgentWorkspaceMemoryEntry { Id = "legacy1", WorkspaceRoot = root, Title = "Old note", Body = "kept" };
+        var legacyOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
+        await File.WriteAllTextAsync(legacyPath, JsonSerializer.Serialize(new List<AgentWorkspaceMemoryEntry> { legacyEntry }, legacyOptions));
         Assert.True(File.Exists(legacyPath));
 
         var listed = Assert.Single(await store.ListAsync(root));

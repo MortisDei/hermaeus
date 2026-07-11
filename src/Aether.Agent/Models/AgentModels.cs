@@ -44,6 +44,37 @@ public enum AgentDraftPatchStatus
     Blocked
 }
 
+/// <summary>Where a lesson applies: every task in every workspace, or one specific workspace.</summary>
+public enum AgentLessonScope
+{
+    Global,
+    Workspace
+}
+
+/// <summary>What kind of evidence produced this lesson.</summary>
+public enum AgentLessonKind
+{
+    Command,
+    Patch,
+    Approval,
+    Task,
+    Stated
+}
+
+public enum AgentLessonOutcome
+{
+    Worked,
+    Failed,
+    UserRejected,
+    Observation
+}
+
+public enum AgentLessonStatus
+{
+    Active,
+    Retired
+}
+
 public sealed class AgentTaskState
 {
     public string TaskId { get; set; } = Guid.NewGuid().ToString("N");
@@ -61,7 +92,77 @@ public sealed class AgentTaskState
     public List<AgentDraftPatch> DraftPatches { get; set; } = [];
     public AgentPendingToolAction? PendingToolAction { get; set; }
     public string Summary { get; set; } = string.Empty;
+    public int StepCount { get; set; }
+    /// <summary>
+    /// The model's current plan, replaced atomically by the set_plan tool.
+    /// Purely informational task-state, like <see cref="CompletedSteps"/>/
+    /// <see cref="PendingSteps"/>; it cannot authorize or bypass anything.
+    /// </summary>
+    public List<AgentPlanStep> Plan { get; set; } = [];
+    /// <summary>
+    /// Exact run_command strings the user has already approved once in this
+    /// task; a later request for the identical command may auto-execute
+    /// instead of pausing for approval again. Scoped to the task (never
+    /// persists beyond it) and to the exact command string (never a
+    /// different command, even in the same family). See AgentSafetyGate and
+    /// AgentService.AppendApprovalAsync.
+    /// </summary>
+    public List<string> RememberedCommandApprovals { get; set; } = [];
 }
+
+public enum AgentPlanStepStatus
+{
+    Pending,
+    InProgress,
+    Done
+}
+
+public sealed class AgentPlanStep
+{
+    public string Description { get; set; } = string.Empty;
+    public AgentPlanStepStatus Status { get; set; } = AgentPlanStepStatus.Pending;
+}
+
+/// <summary>
+/// A deterministic, evidence-backed observation about what works or fails on
+/// this machine/workspace: "dotnet test fails in this workspace with
+/// CS0246 unless X". Confidence grows with repeated matching evidence and
+/// falls (eventually retiring the lesson) when new evidence contradicts it.
+/// Never authorizes anything on its own - the safety gate never reads this.
+/// </summary>
+public sealed class AgentLesson
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public AgentLessonScope Scope { get; set; } = AgentLessonScope.Global;
+    /// <summary>Normalized workspace root for Workspace scope; empty for Global.</summary>
+    public string ScopeId { get; set; } = string.Empty;
+    public AgentLessonKind Kind { get; set; } = AgentLessonKind.Task;
+    /// <summary>Dedupe key, e.g. "command:dotnet test:exit!=0:CS0246".</summary>
+    public string Signature { get; set; } = string.Empty;
+    public string Claim { get; set; } = string.Empty;
+    public string Guidance { get; set; } = string.Empty;
+    public AgentLessonOutcome Outcome { get; set; } = AgentLessonOutcome.Observation;
+    public double Confidence { get; set; } = 0.3;
+    public int EvidenceCount { get; set; } = 1;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime LastConfirmedAt { get; set; } = DateTime.UtcNow;
+    public AgentLessonStatus Status { get; set; } = AgentLessonStatus.Active;
+    public bool IsPinned { get; set; }
+    /// <summary>Task id(s) this lesson's evidence came from, most recent first, bounded.</summary>
+    public List<string> SourceTaskIds { get; set; } = [];
+}
+
+/// <summary>One piece of evidence to record against a lesson, identified by its signature.</summary>
+public sealed record AgentLessonEvidence(
+    AgentLessonScope Scope,
+    string ScopeId,
+    AgentLessonKind Kind,
+    string Signature,
+    string Claim,
+    string Guidance,
+    AgentLessonOutcome Outcome,
+    string? SourceTaskId = null);
 
 public sealed record AgentReviewQueueItem(
     string TaskId,
@@ -122,6 +223,20 @@ public sealed class AgentContextPack
     public List<AgentRetrievedItem> RetrievedFiles { get; set; } = [];
     public List<AgentRetrievedItem> ProjectInstructions { get; set; } = [];
     public List<AgentToolResult> ToolResults { get; set; } = [];
+    /// <summary>
+    /// Budgeted replay of the task's persisted step transcript (assistant
+    /// thoughts and tool results across all prior steps, not just the last
+    /// five), most recent steps prioritized when the budget can't fit all of
+    /// it. See transcript.jsonl and AgentContextBuilder.
+    /// </summary>
+    public List<AgentRetrievedItem> TranscriptHistory { get; set; } = [];
+    /// <summary>
+    /// Deterministic, evidence-backed lessons relevant to this task's
+    /// workspace (plus any global ones), most confident first. Content
+    /// includes the confidence and evidence count so the model can weigh
+    /// them; see AgentService's system prompt and SqliteLessonStore.
+    /// </summary>
+    public List<AgentRetrievedItem> Lessons { get; set; } = [];
     public List<string> KnownRisks { get; set; } = [];
     public string RequiredOutputFormat { get; set; } =
         "Return JSON with thought_summary, current_step, next_action, state_update, and user_message.";
@@ -196,6 +311,18 @@ public sealed record AgentWorkspaceOptions(
     int MaxFileBytes = 128 * 1024,
     int MaxSearchResults = 20,
     int MaxContextItems = 6);
+
+/// <summary>
+/// One entry in a task's persisted step transcript (transcript.jsonl). Unlike
+/// the free-form agent.trace.jsonl audit log, this is what gets replayed back
+/// into the model's context on the next step, so its shape and size matter.
+/// </summary>
+public sealed record AgentTranscriptEntry(
+    int Step,
+    string Role, // "assistant" | "tool"
+    string? ToolName,
+    string Content,
+    DateTime Timestamp);
 
 public sealed record AgentStepResult(
     AgentTaskState State,

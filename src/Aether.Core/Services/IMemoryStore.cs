@@ -73,4 +73,20 @@ public interface IMemoryStore
     /// Get exact counts for multiple conversations in a single efficient query. Returns a mapping of conversationId -> count.
     /// </summary>
     Task<Dictionary<string,int>> GetCountsByConversationAsync(IEnumerable<string> conversationIds, bool includeArchived = false, CancellationToken ct = default);
+
+    /// <summary>
+    /// Records that these memories were actually injected into a prompt (not
+    /// just retrieved by a search): bumps RecallCount and sets LastRecalledAt
+    /// to now. Call after injection selection, not after every search.
+    /// </summary>
+    Task MarkRecalledAsync(IEnumerable<string> ids, CancellationToken ct = default);
+
+    /// <summary>
+    /// Archives (never hard-deletes) non-pinned memories whose effective
+    /// importance (<see cref="MemoryLifecycle.ComputeEffectiveImportance"/>)
+    /// has decayed below <paramref name="importanceFloor"/> and that have
+    /// gone unrecalled for at least <paramref name="unrecalledForDays"/>.
+    /// Returns how many were archived.
+    /// </summary>
+    Task<int> ArchiveStaleMemoriesAsync(double importanceFloor = 0.05, int unrecalledForDays = 180, CancellationToken ct = default);
 }

@@ -62,7 +62,7 @@ namespace Aether.Tests
 
             var store = new FileAgentTaskStateStore(settings);
             await store.InitializeAsync();
-            var memoryStore = new FileAgentWorkspaceMemoryStore(settings);
+            var memoryStore = new WorkspaceMemoryStore(new MemoryStore(settings), settings);
             await memoryStore.InitializeAsync();
             var workspace = temp.PathFor("workspace");
             Directory.CreateDirectory(workspace);
@@ -80,7 +80,7 @@ namespace Aether.Tests
             var manifests = new WorkspaceManifestService();
             var activation = new WorkspaceActivationService(manifests, profiles);
 
-            var vm = new AgentViewModel(agentService, store, memoryStore, tools, new FakeLlm(), rag, logs, analysis, activation, manifests);
+            var vm = new AgentViewModel(agentService, store, memoryStore, tools, new FakeLlm(), rag, logs, analysis, activation, manifests, settings);
             vm.WorkspaceRoot = workspace;
 
             // Create a task and set it as current

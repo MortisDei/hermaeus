@@ -2,19 +2,18 @@
 
 ## Overview
 
-The **Agent** workspace is an experimental local-first task runner. It works one goal at a time and keeps state
-outside the model instead of relying on whole-chat-history context.
-
-## Current Slice: Local Tool Execution
-
-The current Agent implementation executes a small local tool set with explicit
-safety gates:
+The **Agent** workspace is a local-first, approval-gated task runner. It works
+one goal at a time and keeps state outside the model (`task_state.json`, a
+persisted step transcript, and a per-machine lesson store) instead of relying
+on whole-chat-history context. It can run several steps in a row without a
+click for each one, but every write, command, or MCP call still requires
+explicit user approval before it executes.
 
 ### Task Management
 
 - Builds explicit task state and compact context packs.
-- Records `task_state.json`, `agent.log`, and `agent.trace.jsonl` under the
-  Aether data root.
+- Records `task_state.json`, `agent.log`, `agent.trace.jsonl`, and
+  `transcript.jsonl` under the Aether data root.
 - Maintains `agent/task_index.db` as a SQLite catalog for recent-task and review
   queue lists, with `task_state.json` remaining the source of truth for full
   task state. Initialization reconciles JSON task files back into the index.
@@ -25,41 +24,95 @@ safety gates:
 
 ### Context & Retrieval
 
-- Searches and reads bounded text files under a selected workspace root.
+- Searches and reads bounded text files under a selected workspace root, with
+  glob matching, optional regex search, and line-ranged reads for large files.
 - Can include relevant context from an optional RAG dataset.
+- Replays a budgeted tail of the task's own step transcript (see below).
+- Surfaces relevant lessons from the self-learning store (see below).
 - Classifies risky actions before execution.
 
-The agent panel now also surfaces a compact summary strip with current task
-state, goal, summary, recent task history, review queue counts, workspace
-memory counts, and retrieved context counts so the workbench is easier to scan
+The agent panel surfaces a compact summary strip with current task state, step
+count, goal, summary, recent task history, review queue counts, workspace
+memory counts, and retrieved context counts so the workbench is easy to scan
 at a glance.
 
-A compact capability disclosure now sits under the summary strip so the current
-slice is explicit: read-only tools run locally, patch application is approval-
-gated, and shell, network, and remote-control actions remain out of scope.
+A compact capability disclosure sits under the summary strip so the current
+scope is explicit: read-only tools run locally, writes and commands are
+approval-gated, and shell, network, and remote-control actions remain out of
+scope.
 
-The same panel now includes a workspace file browser with query, list,
-preview, and summary support so you can inspect local workspace files without
-leaving the workbench.
+The same panel includes a workspace file browser with query, list, preview,
+and summary support so you can inspect local workspace files without leaving
+the workbench.
 
 Draft patch proposals are also available from the workspace file browser. You
 can enter a rationale, review the generated patch preview, queue the patch for
 review, and then approve or reject queued patches from the dedicated panel.
 Approving a queued patch applies the proposed content to the selected workspace
-file immediately and refreshes the preview.
-Queued patches now expose explicit pending, applied, rejected, and blocked
-states so review decisions are visible at a glance.
+file immediately and refreshes the preview. Queued patches expose explicit
+pending, applied, rejected, and blocked states so review decisions are visible
+at a glance.
 
-### Tools
+## Autonomous Runs
 
-- Read-only file tools for workspace inspection: `list_files`, `search_files`,
-  `read_file`, `summarize_file`, `draft_patch`, and `inspect_git_diff`.
-- Approval-gated write tool: `apply_draft_patch`.
-- Approval-gated command execution (`run_command`): only a recipe the
-  workspace itself declared safe in `.aether/workspace.json`, and only if
-  that recipe also appears in a fixed, hardcoded allowlist (`dotnet build`,
-  `dotnet test`, `npm test`, `cargo test`, `pytest`); always requires
-  approval even though the recipe is "safe."
+Clicking Start (or approving a gated action while a run was in progress) does
+not stop after one model call. The agent keeps running steps on its own until
+one of the following happens:
+
+- the model reaches a final answer,
+- the model asks the user a question,
+- an action needs approval (a gated tool, an MCP call, or a command),
+- the task becomes blocked, or
+- the task hits `Agent.MaxAutoSteps` (Settings; default 20) - a safety valve
+  against runaway loops, not a normal stopping condition.
+
+The workbench shows live progress (current step, tool, status) as the run
+proceeds, and Stop cancels mid-run at any point. A manual "Run step" advance is
+still available for stepping through a task one model call at a time. Nothing
+about this changes what is allowed to execute without approval; the loop only
+removes the need to click through every read-only step by hand.
+
+## Transcript
+
+Each task keeps a persisted step transcript (`transcript.jsonl`, one line per
+assistant thought or tool result) that is replayed - budgeted, most recent
+steps prioritized - back into the model's context on every following step
+(`Agent.TranscriptTokenBudget`, default 12,000 tokens). This is what lets the
+agent still "remember" a file it read three steps ago instead of only ever
+seeing the last five, truncated tool results. `agent.trace.jsonl` remains the
+separate, schema-oriented audit log (full context pack on step one, a small
+delta per step after that); the transcript is what the model actually reads.
+
+## Tools
+
+- Read-only file tools for workspace inspection: `list_files` (optional
+  subdirectory and depth), `search_files` (optional regex and context lines),
+  `glob_files` (`*`/`**` patterns), `read_file` (optional line range),
+  `summarize_file`, `draft_patch`, and `inspect_git_diff`.
+- `set_plan`: replaces the task's visible plan checklist. Executes
+  immediately; it only touches task state, never files or commands, so it
+  never requires approval.
+- Approval-gated write tools:
+  - `edit_file` (relative_path, old_string, new_string) - the primary way to
+    change part of an existing file. `old_string` must match the file's
+    current content exactly once; zero or multiple matches refuse the edit
+    rather than guess.
+  - `create_file` (relative_path, content) - new files only; refuses to
+    overwrite an existing one.
+  - `apply_draft_patch` - whole-file rewrite, for the cases `edit_file` isn't
+    a fit.
+- Approval-gated command execution (`run_command`): a fixed set of template
+  families (`dotnet build`/`dotnet test` with an optional project path,
+  `npm test`, `npm run <script>` where the script must already exist in the
+  workspace's own `package.json`, `cargo build`, `cargo test`, `pytest` with
+  an optional path), and only when the workspace itself declared that family
+  safe in `.aether/workspace.json`. Optional path arguments go through the
+  same containment checks as every other workspace file path. Always requires
+  approval, even for a declared-safe family. After the user approves a given
+  command string once in a task, an identical repeat of that exact string may
+  auto-execute for the rest of that task; a different command - even in the
+  same family - still requires its own approval, and the memory never
+  survives past the task.
 - MCP tools (Settings > MCP Servers): each configured server's declared
   tools are exposed to the agent as `mcp:{serverId}:{toolName}`. A server can
   optionally be restricted to an explicit allowed-tools list (comma
@@ -73,11 +126,42 @@ states so review decisions are visible at a glance.
 - Approval-gated draft patch queue with approval metadata and task-state
   persistence.
 
-## Planned Features (Future)
+### Native tool calling
 
-Shell command execution, installs, network actions, commit, push, upload,
-download, and history rewrite actions are not executed by this alpha agent.
-They are blocked even if the model asks for them.
+When the configured model/provider supports OpenAI-style tool calling
+(OpenAI-compatible endpoints, llama.cpp's server, or Ollama), the agent
+declares its fixed tool set natively instead of asking the model to hand back
+JSON matching a schema, and consumes the returned tool call directly. A
+model or provider that ignores the declared tools (or doesn't support them)
+falls straight back to the existing "return JSON" text protocol automatically
+- the same request works either way, and local models without tool-calling
+support remain fully supported. MCP (`mcp:`) tools are not declared natively;
+they remain reachable only through the JSON protocol.
+
+## Lessons (self-learning)
+
+The agent keeps a per-machine lesson store (`agent/lessons.db`) of
+deterministic, evidence-backed observations about what works or fails:
+`run_command` exit status (with the compiler/test error token when it fails),
+`edit_file`/`create_file`/`apply_draft_patch` success or failure per file, and
+user approval rejections. Repeated matching evidence for the same signature
+reinforces one row (evidence count and confidence go up) instead of creating
+duplicates; a contradiction (a previously-failing command now succeeds, or
+vice versa) decays confidence and, if it drops far enough, retires the
+lesson - which new confirming evidence can later revive. A model can also add
+its own observation with a `[LESSON: ...]` marker in its response, recorded at
+low starting confidence and clearly distinguished (kind "stated") from the
+deterministic sources.
+
+Relevant lessons (global plus the current workspace's) are injected into every
+step's context pack, most confident first, each showing its outcome,
+confidence, and evidence count so the model can weigh them. Lessons only ever
+*inform* the model - the safety gate never reads the lesson store, so nothing
+here can widen what is allowed to execute without approval.
+
+The Lessons panel in the workbench lists active and retired lessons per
+workspace, with inline edit, pin (locks the lesson against further automatic
+changes), retire, reactivate, and delete actions.
 
 ## Workspace Memory
 
@@ -96,50 +180,50 @@ across task sessions.
 
 ## Current Non-Goals
 
-The alpha agent intentionally avoids functionality that would reduce user
-control or safety. The agent does not:
+The agent intentionally avoids functionality that would reduce user control or
+safety. The agent does not:
 
-- execute shell commands
+- execute arbitrary shell commands (only the fixed `run_command` template
+  families, and only ones the workspace itself declared safe)
 - install packages
 - access the network
 - modify files without explicit user approval
 - commit, push, or interact with remote repositories
 - operate outside the selected workspace root
 - assume whole-chat-history context for decision making
+- let a lesson (or anything in memory) change what the safety gate allows
 
 Making these non-goals explicit helps users trust that the workbench will not
 perform unexpected actions.
 
 ## Agent Loop
 
-For each task the agent follows a simple, auditable lifecycle:
+For each step the agent follows a simple, auditable lifecycle:
 
-1. Record the user goal.
-2. Create or update `task_state.json` with the current goal and progress.
-3. Retrieve bounded workspace context and optional RAG snippets.
+1. Record or continue the user goal.
+2. Update `task_state.json` with the current goal and progress.
+3. Retrieve bounded workspace context, optional RAG snippets, the task's own
+   transcript tail, and relevant lessons.
 4. Produce a compact context pack for the model (see below).
-5. Classify any proposed actions by risk level.
-6. Execute safe, read-only actions immediately.
-7. Queue write or risky actions for user review and approval.
-8. Record all decisions, actions, and outcomes in logs and JSONL traces.
+5. Classify the proposed action by risk level (native tool call or parsed
+   JSON `next_action`, whichever the model produced).
+6. Execute safe, read-only actions (and `set_plan`) immediately.
+7. Queue write, command, or MCP actions for user review and approval; a
+   previously-approved exact `run_command` string may auto-execute.
+8. Record all decisions, actions, and outcomes in logs, JSONL traces, the
+   transcript, and (for command/patch/approval outcomes) the lesson store.
+9. Repeat automatically (Autonomous Runs) until a stopping condition is hit.
 
-This explicit loop makes the workbench behaviour predictable and auditable.
-
-## Read-First Contract
-
-Read-first means the agent is permitted to inspect workspace files, summarise
-findings, search local context, and draft proposed changes. It must not mutate
-workspace files, run commands, access external services, or change repository
-state unless that behaviour is explicitly provided by the current slice and the
-user approves the change through the review queue.
+This explicit loop makes the workbench behaviour predictable and auditable
+even when it is running several steps unattended.
 
 ## Action Risk Levels
 
 | Level | Meaning | Examples | Behaviour |
 |---|---|---|---|
-| Safe | Read-only local inspection | list files, preview file, search text | execute directly |
-| Review | Local write proposed by the agent | patch file, update note | queue for approval |
-| Blocked | Out of scope for current slice | shell, network, install, commit, push | do not execute |
+| Safe | Read-only local inspection, or task-state-only | list files, search, glob, read, `set_plan` | execute directly |
+| Review | Local write, command, or MCP call proposed by the agent | edit_file, create_file, apply_draft_patch, run_command, mcp: calls | queue for approval |
+| Blocked | Out of scope | shell, network, install, commit, push | do not execute |
 | Dangerous | Destructive or broad operation | delete tree, overwrite many files | block by default |
 
 Risk classification is deterministic and recorded in traces so users can review
@@ -162,7 +246,9 @@ Approved patches are applied as text edits against the selected workspace file.
 If the file's current hash does not match `baseHash` the patch is blocked and
 must be refreshed or regenerated by the agent before it can be applied. The
 apply result, approving user, approval timestamp, and any failure reason are
-recorded in the task state and trace.
+recorded in the task state and trace. `edit_file`'s own staleness protection is
+its unique-match requirement: if `old_string` no longer matches (0 or more than
+1 occurrence), the edit is refused and the agent must re-read the file.
 
 ### Stale-file protection (recommended)
 
@@ -193,7 +279,7 @@ that resolve outside the workspace root. Examples that are blocked:
 - files under symlinked ancestor directories
 
 This containment rule prevents accidental or malicious access to unrelated
-files.
+files, including the workspace-relative path arguments `run_command` accepts.
 
 ## Context Packs
 
@@ -205,6 +291,8 @@ results. A typical context pack may include:
 - task summary
 - relevant file excerpts (bounded and trimmed)
 - retrieved RAG snippets
+- a budgeted tail of the task's own step transcript
+- relevant lessons (global plus this workspace), each with confidence and evidence count
 - recent task history
 - workspace memory notes (scoped to the workspace)
 - pending review items
@@ -240,7 +328,8 @@ When an action is blocked the UI should surface a concise reason and a safe,
 manual next step where appropriate. Example:
 
 ```
-Blocked: shell execution is not supported in the current read-first slice.
+Blocked: shell execution is not supported outside the fixed run_command
+template families.
 Suggested manual step: run `dotnet build` in the workspace terminal.
 ```
 
@@ -283,6 +372,9 @@ automated testing.
 
 ## Manual Verification
 
-Because the current slice is read-first, the agent will surface manual
-verification steps such as running builds, tests, or reviewing diffs. These are
-presented as next actions rather than executed automatically.
+The agent can now build and test its own work through the fixed `run_command`
+template families (still approval-gated), so it can read a compiler or test
+failure and fix it in the same task. For anything outside that fixed
+command set, the agent will surface manual verification steps such as
+reviewing diffs. These are presented as next actions rather than executed
+automatically.

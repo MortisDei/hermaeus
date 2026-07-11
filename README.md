@@ -102,7 +102,7 @@ Linux system-wide hotkeys remain unavailable pending a reliable compositor API.
 
 ```bash
 dotnet build Aether.sln
-dotnet test tests/Aether.Tests/Aether.Tests.csproj
+dotnet test src/Aether.Tests/Aether.Tests.csproj
 ./build.sh --skip-restore
 pwsh ./build.ps1 -SkipRestore
 ```
@@ -118,7 +118,7 @@ src/Aether.Services/    Runtime, storage, settings, backup, voice services
 src/Aether.Rag/         Ingest, retrieval, citations, traces, eval harness
 src/Aether.ViewModels/  MVVM state and commands
 src/Aether.Desktop/     Avalonia views, controls, styles, entry point
-tests/Aether.Tests/     Lightweight regression harness
+src/Aether.Tests/       Lightweight regression harness
 docs/                   Security notes, RAG/eval docs, internal planning
 ```
 

@@ -139,8 +139,41 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
     {
         var dir = GetTaskDirectory(taskId);
         Directory.CreateDirectory(dir);
-        var json = JsonSerializer.Serialize(trace, AgentJson.Options);
+        var json = JsonSerializer.Serialize(trace, AgentJson.CompactOptions);
         await File.AppendAllTextAsync(Path.Combine(dir, "agent.trace.jsonl"), json + Environment.NewLine, ct);
+    }
+
+    public async Task AppendTranscriptEntryAsync(string taskId, AgentTranscriptEntry entry, CancellationToken ct = default)
+    {
+        var dir = GetTaskDirectory(taskId);
+        Directory.CreateDirectory(dir);
+        var json = JsonSerializer.Serialize(entry, AgentJson.CompactOptions);
+        await File.AppendAllTextAsync(Path.Combine(dir, "transcript.jsonl"), json + Environment.NewLine, ct);
+    }
+
+    public async Task<IReadOnlyList<AgentTranscriptEntry>> LoadTranscriptAsync(string taskId, CancellationToken ct = default)
+    {
+        var path = Path.Combine(GetTaskDirectory(taskId), "transcript.jsonl");
+        if (!File.Exists(path))
+            return [];
+
+        var entries = new List<AgentTranscriptEntry>();
+        foreach (var line in await File.ReadAllLinesAsync(path, ct))
+        {
+            if (string.IsNullOrWhiteSpace(line)) continue;
+            try
+            {
+                var entry = JsonSerializer.Deserialize<AgentTranscriptEntry>(line, AgentJson.CompactOptions);
+                if (entry is not null)
+                    entries.Add(entry);
+            }
+            catch (JsonException)
+            {
+                // A malformed line should not break replay of the rest of the transcript.
+            }
+        }
+
+        return entries;
     }
 
     private static string NormalizeTaskId(string taskId)

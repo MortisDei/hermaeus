@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Aether.Core.Models;
 using Aether.Core.Services;
+using Aether.Rag.Embeddings;
 using Microsoft.Data.Sqlite;
 
 namespace Aether.Services;
@@ -10,8 +11,9 @@ namespace Aether.Services;
 /// </summary>
 public sealed class MemoryStore : IMemoryStore
 {
-    private const int SchemaVersion = 3;
+    private const int SchemaVersion = 4;
     private readonly ISettingsService _settings;
+    private readonly IEmbeddingService? _embeddings;
     private string _initializedPath = string.Empty;
     private readonly SemaphoreSlim _initGate = new(1, 1);
 
@@ -27,9 +29,10 @@ public sealed class MemoryStore : IMemoryStore
 
     private string Cs => $"Data Source={DbPath}";
 
-    public MemoryStore(ISettingsService settings)
+    public MemoryStore(ISettingsService settings, IEmbeddingService? embeddings = null)
     {
         _settings = settings;
+        _embeddings = embeddings;
     }
 
     public async Task InitializeAsync(CancellationToken ct = default)
@@ -94,7 +97,15 @@ public sealed class MemoryStore : IMemoryStore
                     changed |= await EnsureColumnAsync(db, "title", "TEXT NOT NULL DEFAULT ''", token);
                     return changed;
                 }),
-                new SqliteMigration(3, (db, token) => EnsureColumnAsync(db, "source_json", "TEXT", token))
+                new SqliteMigration(3, (db, token) => EnsureColumnAsync(db, "source_json", "TEXT", token)),
+                new SqliteMigration(4, async (db, token) =>
+                {
+                    var changed = false;
+                    changed |= await EnsureColumnAsync(db, "embedding", "BLOB", token);
+                    changed |= await EnsureColumnAsync(db, "recall_count", "INTEGER DEFAULT 0", token);
+                    changed |= await EnsureColumnAsync(db, "last_recalled_at", "TEXT", token);
+                    return changed;
+                })
             ], ct);
             if (!ftsExisted)
                 await RebuildFtsAsync(c, ct);
@@ -202,12 +213,24 @@ public sealed class MemoryStore : IMemoryStore
         var relationshipsJson = JsonSerializer.Serialize(memory.RelatedMemoryIds);
         var sourceJson = memory.Source is null ? null : JsonSerializer.Serialize(memory.Source);
 
+        // Embedding is a recall-quality enhancement, not a correctness
+        // requirement: if no embedding model is configured or the call
+        // fails, save proceeds with a null blob and COALESCE below keeps
+        // whatever embedding (if any) the row already had rather than
+        // clobbering it.
+        byte[]? embeddingBlob = null;
+        if (_embeddings is not null && !string.IsNullOrWhiteSpace(memory.Content))
+        {
+            try { embeddingBlob = ToBlob(await _embeddings.EmbedAsync(memory.Content, ct)); }
+            catch { }
+        }
+
         await using var c = new SqliteConnection(Cs);
         await c.OpenAsync(ct);
         var cmd = c.CreateCommand();
         cmd.CommandText = @"
-            INSERT INTO memories (id,category,content,created_at,updated_at,source_conversation_id,importance_score,tags_json,is_pinned,is_archived,frequency_count,last_merge_time,expiration_date,relationships_json,is_encrypted,scope,scope_id,title,source_json)
-            VALUES ($id,$cat,$content,$ca,$ua,$src,$imp,$tags,$pin,$arch,$freq,$merge,$exp,$rel,$enc,$scope,$scopeId,$title,$sourceJson)
+            INSERT INTO memories (id,category,content,created_at,updated_at,source_conversation_id,importance_score,tags_json,is_pinned,is_archived,frequency_count,last_merge_time,expiration_date,relationships_json,is_encrypted,scope,scope_id,title,source_json,embedding)
+            VALUES ($id,$cat,$content,$ca,$ua,$src,$imp,$tags,$pin,$arch,$freq,$merge,$exp,$rel,$enc,$scope,$scopeId,$title,$sourceJson,$embedding)
             ON CONFLICT(id) DO UPDATE SET
                 category=excluded.category,
                 content=excluded.content,
@@ -224,7 +247,8 @@ public sealed class MemoryStore : IMemoryStore
                 expiration_date=excluded.expiration_date,
                 relationships_json=excluded.relationships_json,
                 is_encrypted=excluded.is_encrypted,
-                source_json=excluded.source_json";
+                source_json=excluded.source_json,
+                embedding=COALESCE(excluded.embedding, memories.embedding)";
 
         cmd.Parameters.AddWithValue("$id", memory.Id);
         cmd.Parameters.AddWithValue("$cat", memory.Category);
@@ -245,6 +269,7 @@ public sealed class MemoryStore : IMemoryStore
         cmd.Parameters.AddWithValue("$scopeId", memory.ScopeId);
         cmd.Parameters.AddWithValue("$title", memory.Title);
         cmd.Parameters.AddWithValue("$sourceJson", sourceJson ?? (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("$embedding", (object?)embeddingBlob ?? DBNull.Value);
 
         await cmd.ExecuteNonQueryAsync(ct);
         await UpsertFtsAsync(c, memory, tagsJson, ct);
@@ -273,31 +298,208 @@ public sealed class MemoryStore : IMemoryStore
         await using var c = new SqliteConnection(Cs);
         await c.OpenAsync(ct);
 
+        List<Memory> ftsResults;
         var ftsQuery = BuildFtsQuery(q);
         if (string.IsNullOrWhiteSpace(ftsQuery))
-            return await SearchLikeAsync(c, q, ct);
+        {
+            ftsResults = await SearchLikeAsync(c, q, ct);
+        }
+        else
+        {
+            var cmd = c.CreateCommand();
+            cmd.CommandText = @"
+                SELECT m.*
+                FROM memories m
+                JOIN memories_fts f ON f.id = m.id
+                WHERE memories_fts MATCH $q
+                ORDER BY m.is_pinned DESC, m.importance_score DESC, m.updated_at DESC
+                LIMIT 100";
+            cmd.Parameters.AddWithValue("$q", ftsQuery);
 
-        var cmd = c.CreateCommand();
-        cmd.CommandText = @"
-            SELECT m.*
-            FROM memories m
-            JOIN memories_fts f ON f.id = m.id
-            WHERE memories_fts MATCH $q
-            ORDER BY m.is_pinned DESC, m.importance_score DESC, m.updated_at DESC
-            LIMIT 100";
-        cmd.Parameters.AddWithValue("$q", ftsQuery);
+            try
+            {
+                var r = new List<Memory>();
+                await using var rd = await cmd.ExecuteReaderAsync(ct);
+                while (await rd.ReadAsync(ct)) r.Add(Map(rd));
+                ftsResults = r;
+            }
+            catch (SqliteException)
+            {
+                ftsResults = await SearchLikeAsync(c, q, ct);
+            }
+        }
 
+        if (_embeddings is null || string.IsNullOrWhiteSpace(q))
+        {
+            // No embedding model configured: keep pure-FTS/LIKE ordering, but
+            // still attach a rank-based relevance score so downstream memory
+            // injection selection always has a real score to weigh, whether
+            // or not hybrid recall is available.
+            for (var i = 0; i < ftsResults.Count; i++)
+                ftsResults[i].RelevanceScore = 1.0 / (i + 1);
+            return ftsResults;
+        }
+
+        return await HybridRerankAsync(c, q, ftsResults, ct);
+    }
+
+    /// <summary>
+    /// Blends the FTS rank with cosine similarity against a query embedding
+    /// so a paraphrase with no lexical overlap can still surface. Small
+    /// memory counts (hundreds, not millions) make an in-process scan over
+    /// every embedded row cheap enough that no vector index is needed.
+    /// </summary>
+    private async Task<List<Memory>> HybridRerankAsync(SqliteConnection c, string q, List<Memory> ftsResults, CancellationToken ct)
+    {
+        await BackfillEmbeddingsAsync(c, ct);
+
+        float[] queryVector;
         try
         {
-            var r = new List<Memory>();
-            await using var rd = await cmd.ExecuteReaderAsync(ct);
-            while (await rd.ReadAsync(ct)) r.Add(Map(rd));
-            return r;
+            queryVector = await _embeddings!.EmbedAsync(q, ct);
         }
-        catch (SqliteException)
+        catch
         {
-            return await SearchLikeAsync(c, q, ct);
+            for (var i = 0; i < ftsResults.Count; i++)
+                ftsResults[i].RelevanceScore = 1.0 / (i + 1);
+            return ftsResults;
         }
+
+        var ftsRank = new Dictionary<string, double>(StringComparer.Ordinal);
+        for (var i = 0; i < ftsResults.Count; i++)
+            ftsRank[ftsResults[i].Id] = 1.0 / (i + 1);
+
+        var candidates = new Dictionary<string, Memory>(StringComparer.Ordinal);
+        foreach (var m in ftsResults) candidates[m.Id] = m;
+
+        var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT * FROM memories WHERE is_archived = 0 AND embedding IS NOT NULL";
+        await using (var rd = await cmd.ExecuteReaderAsync(ct))
+        {
+            while (await rd.ReadAsync(ct))
+            {
+                var ordinal = rd.GetOrdinal("embedding");
+                if (rd.IsDBNull(ordinal)) continue;
+
+                var m = Map(rd);
+                var vector = FromBlob((byte[])rd[ordinal]);
+                var cosine = Math.Max(0.0, CosineSimilarity(queryVector, vector));
+                var ftsScore = ftsRank.GetValueOrDefault(m.Id, 0.0);
+                m.RelevanceScore = (0.5 * ftsScore) + (0.5 * cosine);
+                candidates[m.Id] = m;
+            }
+        }
+
+        // An FTS hit whose row has no embedding yet (not backfilled, or the
+        // embed call failed) keeps its rank-only score instead of dropping out.
+        foreach (var m in candidates.Values.Where(m => m.RelevanceScore is null))
+            m.RelevanceScore = ftsRank.GetValueOrDefault(m.Id, 0.0);
+
+        return candidates.Values
+            .OrderByDescending(m => m.IsPinned)
+            .ThenByDescending(m => m.RelevanceScore)
+            .Take(100)
+            .ToList();
+    }
+
+    private async Task BackfillEmbeddingsAsync(SqliteConnection c, CancellationToken ct)
+    {
+        if (_embeddings is null) return;
+
+        var pending = new List<(string Id, string Content)>();
+        var select = c.CreateCommand();
+        select.CommandText = "SELECT id, content FROM memories WHERE embedding IS NULL AND is_archived = 0 AND length(content) > 0 LIMIT 200";
+        await using (var rd = await select.ExecuteReaderAsync(ct))
+        {
+            while (await rd.ReadAsync(ct))
+                pending.Add((rd.GetString(0), rd.GetString(1)));
+        }
+
+        foreach (var (id, content) in pending)
+        {
+            try
+            {
+                var vector = await _embeddings.EmbedAsync(content, ct);
+                var update = c.CreateCommand();
+                update.CommandText = "UPDATE memories SET embedding = $embedding WHERE id = $id";
+                update.Parameters.AddWithValue("$embedding", ToBlob(vector));
+                update.Parameters.AddWithValue("$id", id);
+                await update.ExecuteNonQueryAsync(ct);
+            }
+            catch
+            {
+                // Leave this row unembedded; it is retried on a later search.
+            }
+        }
+    }
+
+    public async Task MarkRecalledAsync(IEnumerable<string> ids, CancellationToken ct = default)
+    {
+        var idList = ids?.Where(i => !string.IsNullOrWhiteSpace(i)).Distinct(StringComparer.Ordinal).ToList() ?? [];
+        if (idList.Count == 0) return;
+
+        await EnsureInitializedAsync(ct);
+        await using var c = new SqliteConnection(Cs);
+        await c.OpenAsync(ct);
+        var now = DateTime.UtcNow.ToString("O");
+        foreach (var id in idList)
+        {
+            var cmd = c.CreateCommand();
+            cmd.CommandText = "UPDATE memories SET recall_count = recall_count + 1, last_recalled_at = $now WHERE id = $id";
+            cmd.Parameters.AddWithValue("$now", now);
+            cmd.Parameters.AddWithValue("$id", id);
+            await cmd.ExecuteNonQueryAsync(ct);
+        }
+    }
+
+    public async Task<int> ArchiveStaleMemoriesAsync(double importanceFloor = 0.05, int unrecalledForDays = 180, CancellationToken ct = default)
+    {
+        await EnsureInitializedAsync(ct);
+        var candidates = await GetAllAsync(includeArchived: false, ct);
+        var now = DateTime.UtcNow;
+        var archived = 0;
+
+        foreach (var memory in candidates)
+        {
+            if (memory.IsPinned) continue;
+            var reference = memory.LastRecalledAt ?? memory.UpdatedAt;
+            if ((now - reference).TotalDays < unrecalledForDays) continue;
+            if (MemoryLifecycle.ComputeEffectiveImportance(memory, now) >= importanceFloor) continue;
+
+            memory.IsArchived = true;
+            await SaveAsync(memory, ct);
+            archived++;
+        }
+
+        return archived;
+    }
+
+    private static byte[] ToBlob(float[] vector)
+    {
+        var bytes = new byte[vector.Length * sizeof(float)];
+        Buffer.BlockCopy(vector, 0, bytes, 0, bytes.Length);
+        return bytes;
+    }
+
+    private static float[] FromBlob(byte[] blob)
+    {
+        var vector = new float[blob.Length / sizeof(float)];
+        Buffer.BlockCopy(blob, 0, vector, 0, blob.Length);
+        return vector;
+    }
+
+    private static double CosineSimilarity(float[] a, float[] b)
+    {
+        if (a.Length != b.Length || a.Length == 0) return 0.0;
+        double dot = 0, na = 0, nb = 0;
+        for (var i = 0; i < a.Length; i++)
+        {
+            dot += a[i] * b[i];
+            na += a[i] * a[i];
+            nb += b[i] * b[i];
+        }
+
+        return na <= 0 || nb <= 0 ? 0.0 : dot / (Math.Sqrt(na) * Math.Sqrt(nb));
     }
 
     public async Task<List<Memory>> GetByImportanceAsync(double minScore, CancellationToken ct = default)
@@ -475,7 +677,9 @@ public sealed class MemoryStore : IMemoryStore
             IsEncrypted = GetInt(r, "is_encrypted") != 0,
             Scope = Enum.TryParse<MemoryScope>(GetString(r, "scope", "Global"), out var scope) ? scope : MemoryScope.Global,
             ScopeId = GetString(r, "scope_id"),
-            Title = GetString(r, "title")
+            Title = GetString(r, "title"),
+            RecallCount = GetInt(r, "recall_count"),
+            LastRecalledAt = GetDateTimeNullable(r, "last_recalled_at")
         };
     }
 

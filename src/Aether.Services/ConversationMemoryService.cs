@@ -39,6 +39,47 @@ public sealed class ConversationMemoryService : IConversationMemoryService
         _logs = logs;
     }
 
+    public async Task<string> ApplyInjectedMemoryMarkersAsync(string responseText, IReadOnlyList<string> injectedMemoryIds, CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(responseText))
+            return responseText;
+
+        var injected = new HashSet<string>(injectedMemoryIds, StringComparer.Ordinal);
+
+        foreach (var (id, newContent) in _extractor.ExtractUpdateMarkers(responseText))
+        {
+            if (!injected.Contains(id))
+            {
+                _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Service,
+                    $"Ignored MEMORY_UPDATE for id '{id}': not among this turn's injected memories."));
+                continue;
+            }
+
+            var memory = await _memories.GetByIdAsync(id, ct);
+            if (memory is null) continue;
+            memory.Content = newContent;
+            memory.UpdatedAt = DateTime.UtcNow;
+            await _memories.SaveAsync(memory, ct);
+        }
+
+        foreach (var id in _extractor.ExtractForgetMarkers(responseText))
+        {
+            if (!injected.Contains(id))
+            {
+                _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Service,
+                    $"Ignored MEMORY_FORGET for id '{id}': not among this turn's injected memories."));
+                continue;
+            }
+
+            var memory = await _memories.GetByIdAsync(id, ct);
+            if (memory is null || memory.IsPinned) continue;
+            memory.IsArchived = true;
+            await _memories.SaveAsync(memory, ct);
+        }
+
+        return _extractor.CleanMemoryMarkers(responseText);
+    }
+
     public async Task RunAutoSummaryAsync(string conversationId, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(conversationId))
@@ -67,7 +108,13 @@ public sealed class ConversationMemoryService : IConversationMemoryService
             return;
 
         var summaryOutput = await GenerateSummaryOutputAsync(modelId, conversation, ct);
-        var extracted = await _extractor.ExtractMemoriesAsync(summaryOutput, conversationId);
+        // Structured JSON gives the model-supplied category/importance/tags
+        // directly instead of MemoryExtractionService's keyword heuristics;
+        // the marker format remains the fallback for a model that doesn't
+        // follow the JSON instruction.
+        var extracted = await _extractor.ExtractStructuredMemoriesAsync(summaryOutput, conversationId);
+        if (extracted.Count == 0)
+            extracted = await _extractor.ExtractMemoriesAsync(summaryOutput, conversationId);
         if (extracted.Count == 0)
             return;
 
@@ -223,15 +270,19 @@ public sealed class ConversationMemoryService : IConversationMemoryService
 
     private static string BuildSummaryPrompt(string transcript)
     {
+        const string jsonShape = """{"memories": [{"content": "...", "category": "facts | preferences | learned_behaviors | interests", "importance": 0.0-1.0, "tags": ["..."]}]}""";
+        const string emptyShape = """{"memories": []}""";
         return $"""
                 Summarise durable user memory from this conversation.
 
                 Output requirements:
-                - Output only memory markers in this exact format: [MEMORY: <content>]
+                - Return only a single JSON object, no prose, matching:
+                  {jsonShape}
                 - Maximum 5 memories
                 - Include only durable details: preferences, stable goals, recurring constraints, long-lived facts, learned behaviour patterns
                 - Do not include temporary one-off tasks or transient status
-                - If nothing durable exists, return nothing
+                - importance reflects how significant this fact is to remember long-term (0.0 low, 1.0 critical)
+                - If nothing durable exists, return {emptyShape}
 
                 Conversation transcript:
                 {transcript}

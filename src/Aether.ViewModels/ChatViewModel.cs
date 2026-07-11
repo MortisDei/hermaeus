@@ -321,7 +321,7 @@ public partial class ChatViewModel : ObservableObject
         var traceError = string.Empty;
         try
         {
-            var (memoryContext, memorySources) = await BuildMemoryInjectionAsync(text, _cts.Token);
+            var (memoryContext, memorySources, injectedMemoryIds) = await BuildMemoryInjectionAsync(text, _cts.Token);
             foreach (var source in memorySources)
                 asst.Sources.Add(source);
 
@@ -381,6 +381,19 @@ public partial class ChatViewModel : ObservableObject
             }
             else
             {
+                if (injectedMemoryIds.Count > 0)
+                {
+                    try
+                    {
+                        asst.Content = await _conversationMemory.ApplyInjectedMemoryMarkersAsync(asst.Content, injectedMemoryIds, _cts.Token);
+                    }
+                    catch (Exception ex)
+                    {
+                        _runtimeLogs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Service,
+                            $"Applying memory update/forget markers failed: {ex.Message}"));
+                    }
+                }
+
                 if (result.Usage is null)
                     RefreshEstimatedContextUsage();
                 await PersistAsync();
@@ -692,30 +705,32 @@ public partial class ChatViewModel : ObservableObject
     /// status line already respects; best-effort (a failure here should never
     /// block sending a chat message).
     /// </summary>
-    private async Task<(string ContextText, List<SourceReference> Sources)> BuildMemoryInjectionAsync(string question, CancellationToken ct)
+    private async Task<(string ContextText, List<SourceReference> Sources, List<string> InjectedMemoryIds)> BuildMemoryInjectionAsync(string question, CancellationToken ct)
     {
         if (_memoryInjection is null || !_settings.Settings.Memory.Enabled || string.IsNullOrWhiteSpace(question))
-            return (string.Empty, []);
+            return (string.Empty, [], []);
 
         try
         {
             var candidates = await _memoryStore.SearchAsync(question, ct);
             if (candidates.Count == 0)
-                return (string.Empty, []);
+                return (string.Empty, [], []);
 
-            var selected = await _memoryInjection.SelectMemoriesForInjectionAsync(candidates);
+            var selected = await _memoryInjection.SelectMemoriesForInjectionAsync(candidates, _settings.Settings.Memory.InjectionTokenBudget);
             if (selected.Count == 0)
-                return (string.Empty, []);
+                return (string.Empty, [], []);
 
             var contextText = _memoryInjection.BuildMemoryContext(selected);
             var sources = selected.Where(m => m.Source is not null).Select(m => m.Source!).ToList();
-            return (contextText, sources);
+            var injectedIds = selected.Select(m => m.Id).ToList();
+            await _memoryStore.MarkRecalledAsync(injectedIds, ct);
+            return (contextText, sources, injectedIds);
         }
         catch (Exception ex)
         {
             _runtimeLogs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Service,
                 $"Memory injection failed: {ex.Message}"));
-            return (string.Empty, []);
+            return (string.Empty, [], []);
         }
     }
 

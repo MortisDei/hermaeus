@@ -9,7 +9,7 @@ description: How to build, test, and run Aether correctly, including the custom 
 
 ```bash
 dotnet build Aether.sln
-dotnet test tests/Aether.Tests/Aether.Tests.csproj
+dotnet test src/Aether.Tests/Aether.Tests.csproj
 dotnet run --project src/Aether.Desktop        # manual/visual verification
 ```
 

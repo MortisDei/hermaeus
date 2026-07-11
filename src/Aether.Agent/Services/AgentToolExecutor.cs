@@ -24,7 +24,8 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
             return _mcpBridge?.CanExecute(trimmed) == true;
 
         return Normalize(toolName) is
-            "list_files" or "search_files" or "read_file" or "summarize_file" or "draft_patch" or "inspect_git_diff" or "apply_draft_patch" or "run_command";
+            "list_files" or "search_files" or "read_file" or "summarize_file" or "draft_patch" or "inspect_git_diff"
+            or "apply_draft_patch" or "run_command" or "edit_file" or "create_file" or "glob_files";
     }
 
     public async Task<AgentToolResult> ExecuteAsync(
@@ -45,7 +46,7 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
             {
                 Tool = trimmedToolName,
                 Arguments = new Dictionary<string, object?>(arguments, StringComparer.OrdinalIgnoreCase),
-                ResultSummary = Summarize(mcpOutput),
+                ResultSummary = Summarize(mcpOutput, trimmedToolName),
                 Source = new SourceReference(ProvenanceKind.AgentTool, trimmedToolName, Locator: trimmedToolName)
             };
         }
@@ -53,9 +54,18 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
         var normalized = Normalize(toolName);
         object result = normalized switch
         {
-            "list_files" => _workspaceTools.ListFiles(options),
-            "search_files" => _workspaceTools.SearchFiles(options, Arg(arguments, "query")),
-            "read_file" => _workspaceTools.ReadFile(options, Arg(arguments, "relative_path", "path")),
+            "list_files" => _workspaceTools.ListFiles(options, ArgOrNull(arguments, "subdirectory"), ArgIntOrNull(arguments, "max_depth")),
+            "search_files" => _workspaceTools.SearchFiles(
+                options,
+                Arg(arguments, "query"),
+                ArgBool(arguments, "regex"),
+                ArgInt(arguments, "context_lines")),
+            "glob_files" => _workspaceTools.GlobFiles(options, Arg(arguments, "pattern")),
+            "read_file" => _workspaceTools.ReadFile(
+                options,
+                Arg(arguments, "relative_path", "path"),
+                ArgIntOrNull(arguments, "line_offset"),
+                ArgIntOrNull(arguments, "line_limit")),
             "summarize_file" => _workspaceTools.SummarizeFile(options, Arg(arguments, "relative_path", "path")),
             "draft_patch" => _workspaceTools.DraftPatch(
                 Arg(arguments, "relative_path", "path"),
@@ -67,6 +77,17 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
                 Arg(arguments, "relative_path", "path"),
                 Arg(arguments, "proposed_content", "content"),
                 ct),
+            "edit_file" => await _workspaceTools.EditFileAsync(
+                options,
+                Arg(arguments, "relative_path", "path"),
+                Arg(arguments, "old_string"),
+                Arg(arguments, "new_string"),
+                ct),
+            "create_file" => await _workspaceTools.CreateFileAsync(
+                options,
+                Arg(arguments, "relative_path", "path"),
+                Arg(arguments, "content"),
+                ct),
             "run_command" => await RunCommandAsync(options, Arg(arguments, "command"), ct),
             _ => throw new InvalidOperationException($"Unsupported agent tool: {toolName}")
         };
@@ -75,7 +96,7 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
         {
             Tool = normalized,
             Arguments = new Dictionary<string, object?>(arguments, StringComparer.OrdinalIgnoreCase),
-            ResultSummary = Summarize(result),
+            ResultSummary = Summarize(result, normalized),
             Source = BuildSource(normalized, arguments)
         };
     }
@@ -85,7 +106,8 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
         var relativePath = Arg(arguments, "relative_path", "path");
         return normalizedTool switch
         {
-            "read_file" or "summarize_file" or "draft_patch" or "apply_draft_patch" when !string.IsNullOrWhiteSpace(relativePath) =>
+            "read_file" or "summarize_file" or "draft_patch" or "apply_draft_patch" or "edit_file" or "create_file"
+                when !string.IsNullOrWhiteSpace(relativePath) =>
                 new SourceReference(ProvenanceKind.Workspace, relativePath, Locator: relativePath),
             _ => null
         };
@@ -94,9 +116,8 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
     private static async Task<string> RunCommandAsync(AgentWorkspaceOptions options, string command, CancellationToken ct)
     {
         var root = AgentWorkspaceTools.ResolveWorkspaceRoot(options.WorkspaceRoot);
-        var trimmed = command.Trim();
-        if (!WorkspaceCommandRecipes.Executable.TryGetValue(trimmed, out var recipe))
-            throw new InvalidOperationException($"'{command}' is not one of the fixed, safe executable recipes.");
+        var recipe = WorkspaceCommandRecipes.TryMatch(command, root)
+            ?? throw new InvalidOperationException($"'{command}' is not one of the fixed, safe executable template families, or its argument failed validation.");
 
         var psi = new ProcessStartInfo
         {
@@ -128,7 +149,22 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
 
         var stdout = await stdoutTask;
         var stderr = await stderrTask;
-        return $"Exit code {process.ExitCode}\n\nstdout:\n{stdout.Trim()}\n\nstderr:\n{stderr.Trim()}";
+        // The model needs to see the actual compiler/test error to fix it,
+        // so keep a generous tail instead of the old unbounded dump (which
+        // then just got hard-truncated mid-line by Summarize downstream).
+        return $"Exit code {process.ExitCode}\n\nstdout:\n{LastLines(stdout, 200)}\n\nstderr:\n{LastLines(stderr, 200)}";
+    }
+
+    private static string LastLines(string text, int maxLines)
+    {
+        var trimmed = text.Trim();
+        if (trimmed.Length == 0) return trimmed;
+
+        var lines = trimmed.Split('\n');
+        if (lines.Length <= maxLines) return trimmed;
+
+        var omitted = lines.Length - maxLines;
+        return $"[{omitted} earlier line(s) omitted]\n" + string.Join('\n', lines[^maxLines..]);
     }
 
     private static async Task<string> InspectGitDiffAsync(AgentWorkspaceOptions options, CancellationToken ct)
@@ -196,10 +232,66 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
         return string.Empty;
     }
 
-    private static string Summarize(object result)
+    private static string? ArgOrNull(Dictionary<string, object?> args, params string[] names)
+    {
+        var value = Arg(args, names);
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
+    private static int ArgInt(Dictionary<string, object?> args, params string[] names) =>
+        ArgIntOrNull(args, names) ?? 0;
+
+    private static int? ArgIntOrNull(Dictionary<string, object?> args, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (!args.TryGetValue(name, out var value) || value is null)
+                continue;
+            if (value is JsonElement { ValueKind: JsonValueKind.Number } element && element.TryGetInt32(out var i))
+                return i;
+            if (value is int direct)
+                return direct;
+            if (value is string text && int.TryParse(text, out var parsed))
+                return parsed;
+        }
+
+        return null;
+    }
+
+    private static bool ArgBool(Dictionary<string, object?> args, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (!args.TryGetValue(name, out var value) || value is null)
+                continue;
+            if (value is JsonElement { ValueKind: JsonValueKind.True or JsonValueKind.False } element)
+                return element.GetBoolean();
+            if (value is bool direct)
+                return direct;
+            if (value is string text && bool.TryParse(text, out var parsed))
+                return parsed;
+        }
+
+        return false;
+    }
+
+    // Content-heavy read tools deserve a much larger budget than a directory
+    // listing or a run_command exit summary; a blanket 4000-char JSON slice
+    // used to cut read_file results off mid-content after only a few dozen
+    // lines.
+    private static readonly HashSet<string> ContentHeavyTools = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "read_file", "summarize_file", "search_files", "inspect_git_diff", "run_command"
+    };
+
+    private static string Summarize(object result, string normalizedTool)
     {
         var json = JsonSerializer.Serialize(result, AgentJson.Options);
-        return json.Length > 4000 ? json[..4000] + "\n[truncated]" : json;
+        var cap = ContentHeavyTools.Contains(normalizedTool) ? 12000 : 4000;
+        if (json.Length <= cap)
+            return json;
+
+        return json[..cap] + $"\n[truncated: {json.Length - cap} of {json.Length} chars omitted]";
     }
 
     private static string Normalize(string toolName) => toolName.Trim().Replace('-', '_').ToLowerInvariant();

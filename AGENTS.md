@@ -20,7 +20,7 @@ Aether is a native, local-first AI workstation: Avalonia UI + .NET 10, Windows a
 | `src/Aether.Agent` | Task state, context packs, risk gates, patch queue | `task_state.json` is source of truth; `agent/task_index.db` is a rebuildable index. Risk classification is deterministic; never bypass it. |
 | `src/Aether.ViewModels` | MVVM state/commands (CommunityToolkit.Mvvm) | Must never reference `Avalonia.*`. |
 | `src/Aether.Desktop` | Avalonia views, styles, entry point, DI root | Views bind to ViewModels; no business logic in code-behind. |
-| `tests/Aether.Tests` | xunit regression suite (`dotnet test`) | Tests run sequentially (shared temp data roots and SQLite pools); do not re-enable parallelization. |
+| `src/Aether.Tests` | xunit regression suite (`dotnet test`) | Tests run sequentially (shared temp data roots and SQLite pools); do not re-enable parallelization. |
 
 Dependency direction: Desktop → ViewModels → (Services, Agent, Rag) → Core.
 Never add a reference against that flow.
@@ -29,9 +29,10 @@ Never add a reference against that flow.
 
 ```bash
 dotnet build Aether.sln                                  # zero warnings enforced (TreatWarningsAsErrors)
-dotnet test tests/Aether.Tests/Aether.Tests.csproj       # standard xunit; all tests must pass
+dotnet test src/Aether.Tests/Aether.Tests.csproj         # standard xunit; all tests must pass
 dotnet run --project src/Aether.Desktop                  # launch the app
 ./build.sh --skip-restore    # or: pwsh ./build.ps1 -SkipRestore   # packaging
+./scripts/coverage.sh        # or: pwsh ./scripts/coverage.ps1     # line-coverage ratchet (floor: 43%)
 ```
 
 Any compiler warning fails the build. Fix the warning; do not suppress it without a comment explaining the constraint.

@@ -25,13 +25,22 @@ public sealed class MemoryInjectionService
             sb.AppendLine($"### {FormatCategoryName(group.Key)}");
             foreach (var memory in group.OrderByDescending(m => m.IsPinned).ThenByDescending(m => m.ImportanceScore))
             {
-                if (memory.IsPinned)
-                    sb.AppendLine($"- ⭐ {memory.Content}");
-                else
-                    sb.AppendLine($"- {memory.Content}");
+                // The id lets the model reference this exact memory in a
+                // [MEMORY_UPDATE: id | ...] or [MEMORY_FORGET: id] marker;
+                // only ids printed here are ever honored (see
+                // ConversationMemoryService.ApplyInjectedMemoryMarkersAsync).
+                var idTag = $"[id:{memory.Id}]";
+                sb.AppendLine(memory.IsPinned
+                    ? $"- ⭐ {idTag} {memory.Content}"
+                    : $"- {idTag} {memory.Content}");
             }
             sb.AppendLine();
         }
+
+        sb.AppendLine(
+            "If any memory above (by its [id:...]) is stale or wrong, correct or " +
+            "retire it: [MEMORY_UPDATE: <id> | <corrected content>] or " +
+            "[MEMORY_FORGET: <id>]. Only ids shown above are honored.");
 
         return sb.ToString();
     }
@@ -58,46 +67,62 @@ Guidelines for memories:
 - One memory per bracket pair
 
 You can include multiple [MEMORY: ...] blocks if needed.
+
+If a memory shown to you above (marked with an [id:...] tag) is stale or
+wrong, correct or retire it instead of just ignoring it:
+[MEMORY_UPDATE: <id> | <corrected content>]
+[MEMORY_FORGET: <id>]
+
+Only use ids that were actually shown to you in the Stored Memories section
+above; an id you made up or recall from earlier in the conversation will be
+ignored.
 ";
     }
 
-    public async Task<List<Memory>> SelectMemoriesForInjectionAsync(List<Memory> memories, int tokenBudget = 500)
+    public Task<List<Memory>> SelectMemoriesForInjectionAsync(List<Memory> memories, int tokenBudget = 500)
     {
-        return await Task.Run(() =>
+        if (memories.Count == 0)
+            return Task.FromResult(new List<Memory>());
+
+        // Rough estimation: ~4 chars per token
+        var charBudget = tokenBudget * 4;
+        var selected = new List<Memory>();
+        var usedChars = 0;
+
+        // Prioritize: pinned first, then how relevant this memory actually
+        // was to the query (the RelevanceScore IMemoryStore.SearchAsync
+        // computes - hybrid FTS+embedding when available, rank-based
+        // otherwise) blended with the memory's own importance; recency is
+        // only the final tiebreaker, not the primary driver it used to be.
+        var sorted = memories
+            .OrderByDescending(m => m.IsPinned)
+            .ThenByDescending(EffectiveScore)
+            .ThenByDescending(m => m.UpdatedAt)
+            .ToList();
+
+        foreach (var memory in sorted)
         {
-            if (memories.Count == 0)
-                return [];
+            // Rough size: category + content + formatting
+            var memorySize = memory.Category.Length + memory.Content.Length + 50;
 
-            // Rough estimation: ~4 chars per token
-            var charBudget = tokenBudget * 4;
-            var selected = new List<Memory>();
-            var usedChars = 0;
-
-            // Prioritize: pinned first, then by importance score, then by recency
-            var sorted = memories
-                .OrderByDescending(m => m.IsPinned)
-                .ThenByDescending(m => m.ImportanceScore)
-                .ThenByDescending(m => m.UpdatedAt)
-                .ToList();
-
-            foreach (var memory in sorted)
+            if (usedChars + memorySize <= charBudget)
             {
-                // Rough size: category + content + formatting
-                var memorySize = memory.Category.Length + memory.Content.Length + 50;
-
-                if (usedChars + memorySize <= charBudget)
-                {
-                    selected.Add(memory);
-                    usedChars += memorySize;
-                }
-
-                if (usedChars >= charBudget)
-                    break;
+                selected.Add(memory);
+                usedChars += memorySize;
             }
 
-            return selected;
-        });
+            if (usedChars >= charBudget)
+                break;
+        }
+
+        return Task.FromResult(selected);
     }
+
+    /// <summary>Blends search relevance with the memory's own importance; falls back to importance alone for memories not retrieved via search.</summary>
+    private static double EffectiveScore(Memory memory) =>
+        memory.RelevanceScore is { } relevance
+            ? (0.7 * relevance) + (0.3 * memory.ImportanceScore)
+            : memory.ImportanceScore;
 
     private static string FormatCategoryName(string category) =>
         category switch

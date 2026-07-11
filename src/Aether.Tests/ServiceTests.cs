@@ -1719,6 +1719,89 @@ namespace Aether.Tests
             Equal(0, batch["conv-missing"], "missing conversations should count as zero");
         }
 
+        public static async Task MemoryLifecycleDecaysUnrecalledMemoriesAndArchivesBelowFloor()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var store = new MemoryStore(settings);
+            await store.InitializeAsync();
+
+            var stale = new Memory { Id = "stale", Content = "Old unused note.", ImportanceScore = 0.1 };
+            await store.SaveAsync(stale);
+            var pinned = new Memory { Id = "pinned", Content = "Pinned note.", ImportanceScore = 0.1, IsPinned = true };
+            await store.SaveAsync(pinned);
+            var fresh = new Memory { Id = "fresh", Content = "Recently used note.", ImportanceScore = 0.9 };
+            await store.SaveAsync(fresh);
+            await store.MarkRecalledAsync(["fresh"]);
+
+            // Backdate the stale memory's updated_at so decay has something to act on
+            // (SaveAsync always stamps UpdatedAt to now, so reach past the public API).
+            await using (var c = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={Path.Combine(temp.PathFor("data"), "memories.db")}"))
+            {
+                await c.OpenAsync();
+                var cmd = c.CreateCommand();
+                cmd.CommandText = "UPDATE memories SET updated_at = $old WHERE id = 'stale'";
+                cmd.Parameters.AddWithValue("$old", DateTime.UtcNow.AddDays(-400).ToString("O"));
+                await cmd.ExecuteNonQueryAsync();
+            }
+
+            var reloadedStale = await store.GetByIdAsync("stale");
+            True(Aether.Core.Services.MemoryLifecycle.ComputeEffectiveImportance(reloadedStale!) < 0.01,
+                "a low-importance memory unrecalled for over a year should have decayed close to zero");
+
+            var archivedCount = await store.ArchiveStaleMemoriesAsync(importanceFloor: 0.05, unrecalledForDays: 180);
+            Equal(1, archivedCount, "only the stale, low-importance, unrecalled memory should be archived");
+
+            var all = await store.GetAllAsync(includeArchived: false);
+            False(all.Any(m => m.Id == "stale"), "the stale memory should no longer appear in the non-archived list");
+            True(all.Any(m => m.Id == "pinned"), "a pinned memory should never be auto-archived even if its importance is low");
+            True(all.Any(m => m.Id == "fresh"), "a recently recalled memory should not be archived");
+        }
+
+        public static async Task ConversationMemoryAppliesUpdateAndForgetMarkersOnlyForInjectedIds()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var store = new MemoryStore(settings);
+            await store.InitializeAsync();
+
+            var injected = new Memory { Id = "injected-1", Content = "Old content." };
+            await store.SaveAsync(injected);
+            var notInjected = new Memory { Id = "not-injected", Content = "Should not change." };
+            await store.SaveAsync(notInjected);
+            var pinnedInjected = new Memory { Id = "pinned-injected", Content = "Pinned, should survive forget.", IsPinned = true };
+            await store.SaveAsync(pinnedInjected);
+
+            var logs = new RuntimeLogService(settings);
+            var conversations = new ConversationStore(settings);
+            await conversations.InitializeAsync();
+            var extractor = new MemoryExtractionService();
+            var service = new ConversationMemoryService(settings, conversations, store, extractor, new FakeLlm(), logs);
+
+            var response = """
+                Here is the answer. [MEMORY_UPDATE: injected-1 | New corrected content.]
+                [MEMORY_UPDATE: not-injected | This should be ignored.]
+                [MEMORY_FORGET: pinned-injected]
+                """;
+
+            var cleaned = await service.ApplyInjectedMemoryMarkersAsync(response, ["injected-1", "pinned-injected"]);
+
+            False(cleaned.Contains("MEMORY_UPDATE", StringComparison.Ordinal), "all markers should be stripped from the response shown to the user");
+            False(cleaned.Contains("MEMORY_FORGET", StringComparison.Ordinal), "all markers should be stripped from the response shown to the user");
+            True(cleaned.Contains("Here is the answer.", StringComparison.Ordinal), "surrounding response text should be preserved");
+
+            var updated = await store.GetByIdAsync("injected-1");
+            Equal("New corrected content.", updated!.Content, "an update marker for an injected id should apply");
+
+            var untouched = await store.GetByIdAsync("not-injected");
+            Equal("Should not change.", untouched!.Content, "an update marker for an id that was not injected this turn should be ignored");
+
+            var pinnedAfter = await store.GetByIdAsync("pinned-injected");
+            False(pinnedAfter!.IsArchived, "a pinned memory should never be archived even by a valid forget marker");
+        }
+
         public static async Task MemoryExtractionParsesAndCleansMarkers()
         {
             var service = new MemoryExtractionService();
@@ -1733,6 +1816,44 @@ namespace Aether.Tests
 
             var cleaned = service.CleanMemoryMarkers(output);
             False(cleaned.Contains("[MEMORY:", StringComparison.Ordinal), "cleaned output should remove marker syntax");
+        }
+
+        public static async Task MemoryExtractionParsesStructuredJsonWithModelSuppliedMetadata()
+        {
+            var service = new MemoryExtractionService();
+            var output = """
+                Sure, here you go:
+                ```json
+                {"memories": [
+                    {"content": "User prefers dark mode.", "category": "preferences", "importance": 0.7, "tags": ["ui", "preference"]},
+                    {"content": "User is building a compiler in Rust.", "category": "facts", "importance": 0.9, "tags": []}
+                ]}
+                ```
+                """;
+
+            var memories = await service.ExtractStructuredMemoriesAsync(output, "conv-structured");
+            Equal(2, memories.Count, "structured extraction should parse both memory objects");
+            True(memories.Any(m => m.Category == "preferences" && Math.Abs(m.ImportanceScore - 0.7) < 0.001),
+                "model-supplied category and importance should be used directly, not re-derived from keywords");
+            True(memories.Single(m => m.Category == "preferences").Tags.Contains("ui"),
+                "model-supplied tags should be used directly");
+            True(memories.All(m => m.SourceConversationId == "conv-structured"), "structured memories should carry the source conversation id");
+        }
+
+        public static async Task MemoryExtractionStructuredParsingFallsBackGracefullyOnGarbage()
+        {
+            var service = new MemoryExtractionService();
+            var memories = await service.ExtractStructuredMemoriesAsync("not json at all, just prose.", "conv-x");
+            Equal(0, memories.Count, "unparsable output should return an empty list rather than throwing");
+
+            var emptyShape = await service.ExtractStructuredMemoriesAsync("""{"memories": []}""", "conv-x");
+            Equal(0, emptyShape.Count, "an explicit empty memories array should also return an empty list");
+
+            var unknownCategory = await service.ExtractStructuredMemoriesAsync(
+                """{"memories": [{"content": "Something notable.", "category": "nonsense", "importance": 5}]}""", "conv-x");
+            Equal(1, unknownCategory.Count, "one memory object should parse despite the invalid category");
+            Equal("facts", unknownCategory[0].Category, "an unrecognized category should default to facts");
+            Equal(0.5, unknownCategory[0].ImportanceScore, "an out-of-range importance should fall back to the neutral default");
         }
 
         public static async Task MemoryInjectionRespectsTokenBudgetAndPriority()
@@ -1769,6 +1890,29 @@ namespace Aether.Tests
 
             var selected = await service.SelectMemoriesForInjectionAsync(memories, tokenBudget: 100);
             True(selected.Count > memories.Count / 2, "selection should not stop at half the candidate count");
+        }
+
+        public static async Task MemoryInjectionPrefersSearchRelevanceOverRawImportance()
+        {
+            var service = new MemoryInjectionService();
+            var memories = new List<Memory>
+            {
+                // Higher importance but the search barely thought it relevant to this query.
+                new() { Id = "stale-important", Category = "facts", Content = "General note.", ImportanceScore = 0.9, RelevanceScore = 0.05, UpdatedAt = DateTime.UtcNow.AddDays(-10) },
+                // Lower importance but the search found it highly relevant.
+                new() { Id = "relevant-match", Category = "facts", Content = "Directly answers the question.", ImportanceScore = 0.4, RelevanceScore = 0.95, UpdatedAt = DateTime.UtcNow.AddDays(-30) }
+            };
+
+            var selected = await service.SelectMemoriesForInjectionAsync(memories, tokenBudget: 500);
+            Equal("relevant-match", selected[0].Id, "a memory the search found highly relevant should outrank one that is merely old and generically important");
+
+            var noScore = new List<Memory>
+            {
+                new() { Id = "a", Category = "facts", Content = "Low importance note.", ImportanceScore = 0.2, UpdatedAt = DateTime.UtcNow },
+                new() { Id = "b", Category = "facts", Content = "High importance note.", ImportanceScore = 0.8, UpdatedAt = DateTime.UtcNow.AddDays(-5) }
+            };
+            var selectedNoScore = await service.SelectMemoriesForInjectionAsync(noScore, tokenBudget: 500);
+            Equal("b", selectedNoScore[0].Id, "without a relevance score, selection should still fall back to importance exactly as before");
         }
 
         public static Task XttsApiTemplateDelegatesToGenerator()
