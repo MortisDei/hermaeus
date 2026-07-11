@@ -59,6 +59,73 @@ public sealed class ChatWorkbenchTests
     }
 
     [Fact]
+    public async Task SendAsyncInjectsRelevantMemoriesAndPopulatesSourcesWhenMemoryEnabled()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.Memory.Enabled = true;
+        var capturing = new CapturingLlm();
+        var memorySource = new SourceReference(ProvenanceKind.Memory, "User prefers concise summaries", Locator: "conv-1");
+        var memories = new SearchableMemoryStore([
+            new Memory { Id = "m1", Category = "preferences", Content = "User prefers concise summaries.", Source = memorySource }
+        ]);
+        var vm = new ChatViewModel(
+            capturing,
+            new InMemoryConversationStore(),
+            memories,
+            settings,
+            new FakeTts(),
+            new ModelProfileService(settings),
+            new FakeToasts(),
+            new NoOpConversationMemoryService(),
+            new RuntimeLogService(settings),
+            new ConversationExportService(),
+            memoryInjection: new MemoryInjectionService());
+
+        await vm.LoadModelsAsync(force: true);
+        vm.InputText = "How should I phrase this?";
+        await vm.SendCommand.ExecuteAsync(null);
+
+        var assistantMessage = vm.Messages.Last(m => m.IsAssistant);
+        Assert.Contains(assistantMessage.Sources, s => s.Locator == "conv-1");
+        Assert.NotNull(capturing.LastOptions?.SystemPrompt);
+        Assert.Contains("concise summaries", capturing.LastOptions!.SystemPrompt, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task SendAsyncSkipsMemoryInjectionWhenMemoryDisabled()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.Memory.Enabled = false;
+        var capturing = new CapturingLlm();
+        var memories = new SearchableMemoryStore([
+            new Memory { Id = "m1", Category = "preferences", Content = "User prefers concise summaries.", Source = new SourceReference(ProvenanceKind.Memory, "x", Locator: "conv-1") }
+        ]);
+        var vm = new ChatViewModel(
+            capturing,
+            new InMemoryConversationStore(),
+            memories,
+            settings,
+            new FakeTts(),
+            new ModelProfileService(settings),
+            new FakeToasts(),
+            new NoOpConversationMemoryService(),
+            new RuntimeLogService(settings),
+            new ConversationExportService(),
+            memoryInjection: new MemoryInjectionService());
+
+        await vm.LoadModelsAsync(force: true);
+        vm.InputText = "How should I phrase this?";
+        await vm.SendCommand.ExecuteAsync(null);
+
+        var assistantMessage = vm.Messages.Last(m => m.IsAssistant);
+        Assert.Empty(assistantMessage.Sources);
+        False(capturing.LastOptions?.SystemPrompt?.Contains("concise summaries", StringComparison.OrdinalIgnoreCase) ?? false,
+            "memory context should not be injected when Memory.Enabled is false");
+    }
+
+    [Fact]
     public async Task SpeakMessageSkipsBlankContent()
     {
         using var temp = new TempDir();
@@ -119,6 +186,24 @@ public sealed class ChatWorkbenchTests
         public Task<int> GetCountByConversationAsync(string conversationId, bool includeArchived = false, CancellationToken ct = default) => Task.FromResult(0);
         public Task<Dictionary<string, int>> GetCountsByConversationAsync(IEnumerable<string> conversationIds, bool includeArchived = false, CancellationToken ct = default) =>
             Task.FromResult(conversationIds.ToDictionary(id => id, _ => 0));
+    }
+
+    private sealed class SearchableMemoryStore(List<Memory> memories) : IMemoryStore
+    {
+        public Task InitializeAsync(CancellationToken ct = default) => Task.CompletedTask;
+        public Task<List<Memory>> GetAllAsync(bool includeArchived = false, CancellationToken ct = default) => Task.FromResult(memories);
+        public Task<Memory?> GetByIdAsync(string id, CancellationToken ct = default) => Task.FromResult(memories.FirstOrDefault(m => m.Id == id));
+        public Task<List<Memory>> GetByCategoryAsync(string category, CancellationToken ct = default) => Task.FromResult(memories.Where(m => m.Category == category).ToList());
+        public Task<List<Memory>> GetByScopeAsync(MemoryScope scope, string? scopeId = null, bool includeArchived = false, CancellationToken ct = default) => Task.FromResult(memories);
+        public Task SaveAsync(Memory memory, CancellationToken ct = default) => Task.CompletedTask;
+        public Task DeleteAsync(string id, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<List<Memory>> SearchAsync(string query, CancellationToken ct = default) => Task.FromResult(memories);
+        public Task<List<Memory>> GetByImportanceAsync(double minScore, CancellationToken ct = default) => Task.FromResult(memories);
+        public Task<List<Memory>> GetRecentAsync(int limit = 10, CancellationToken ct = default) => Task.FromResult(memories);
+        public Task<List<Memory>> GetRecentByConversationAsync(string conversationId, int limit = 10, CancellationToken ct = default) => Task.FromResult(memories);
+        public Task<int> GetCountByConversationAsync(string conversationId, bool includeArchived = false, CancellationToken ct = default) => Task.FromResult(memories.Count);
+        public Task<Dictionary<string, int>> GetCountsByConversationAsync(IEnumerable<string> conversationIds, bool includeArchived = false, CancellationToken ct = default) =>
+            Task.FromResult(conversationIds.ToDictionary(id => id, _ => memories.Count));
     }
 
     private sealed class NoOpConversationMemoryService : IConversationMemoryService

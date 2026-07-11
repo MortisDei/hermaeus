@@ -148,6 +148,7 @@ public partial class MainWindowViewModel : ObservableObject
             await Agent.LoadAsync();
             await Benchmarks.LoadAsync();
             await Services.AutoStartAllAsync();
+            await Settings.EnsureLocalApiRunningStateAsync();
             await Chat.LoadModelsAsync();
             RunBackgroundTaskAsync("run startup doctor scan", () => Doctor.RunStartupScanAsync());
         }

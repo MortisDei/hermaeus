@@ -4,6 +4,7 @@ using Aether.Core.Models;
 using Aether.Core.Services;
 using Aether.LocalApi;
 using Aether.Rag;
+using Aether.Rag.Embeddings;
 using Aether.Rag.Retrieval;
 using Aether.Rag.Storage;
 using Aether.Services;
@@ -50,11 +51,19 @@ internal static class LocalApiTests
             Task.FromResult(conversationIds.ToDictionary(id => id, _ => 0));
     }
 
-    private static async Task<(IHost Host, HttpClient Client)> StartTestHostAsync(TempDir temp, bool configureToken = true)
+    private static async Task<(IHost Host, HttpClient Client)> StartTestHostAsync(TempDir temp, bool configureToken = true, IReadOnlyList<(string Name, string Token)>? tokens = null)
     {
         var settingsService = NewSettings(temp);
         await settingsService.LoadAsync();
-        settingsService.Settings.LocalApi.ApiToken = configureToken ? TestToken : string.Empty;
+        if (tokens is not null)
+        {
+            foreach (var (name, token) in tokens)
+                settingsService.Settings.LocalApi.Tokens.Add(new LocalApiTokenEntry { Name = name, SecretRef = token });
+        }
+        else if (configureToken)
+        {
+            settingsService.Settings.LocalApi.Tokens.Add(new LocalApiTokenEntry { Name = "test", SecretRef = TestToken });
+        }
 
         var memories = new FakeMemoryStore([
             new Memory { Id = "m1", Category = "facts", Content = "The user's favorite language is C#.", ImportanceScore = 0.8 }
@@ -78,6 +87,7 @@ internal static class LocalApiTests
                     services.AddSingleton(rag);
                     services.AddSingleton<ITraceStore>(new SqliteTraceStore(settingsService));
                     services.AddSingleton<ModelProfileService>(new ModelProfileService(settingsService));
+                    services.AddSingleton<IEmbeddingService, FakeEmbeddingService>();
                 });
                 webBuilder.Configure(app =>
                 {
@@ -109,6 +119,29 @@ internal static class LocalApiTests
         }
     }
 
+    public static async Task ChatCompletionStreamsServerSentEventsWhenRequested()
+    {
+        using var temp = new TempDir();
+        var (host, client) = await StartTestHostAsync(temp);
+        using (host)
+        {
+            client.DefaultRequestHeaders.Add(LocalApiTokenAuth.TokenHeaderName, TestToken);
+            var response = await client.PostAsJsonAsync("/v1/chat/completions",
+                new ChatCompletionRequest("fake", [new ChatMessageDto("user", "hi")], null, null, Stream: true));
+
+            True(response.IsSuccessStatusCode, "streaming chat completion request should succeed with a valid token.");
+            Equal("text/event-stream", response.Content.Headers.ContentType?.MediaType ?? string.Empty,
+                "streaming responses should use the text/event-stream content type.");
+
+            var body = await response.Content.ReadAsStringAsync();
+            True(body.Contains("\"object\":\"chat.completion.chunk\"", StringComparison.Ordinal),
+                "each SSE event should use the OpenAI chat.completion.chunk shape");
+            True(body.Contains("\"content\":\"local "), "the first content delta should appear in an SSE data line");
+            True(body.TrimEnd().EndsWith("data: [DONE]", StringComparison.Ordinal),
+                "the SSE stream should terminate with a [DONE] sentinel");
+        }
+    }
+
     public static async Task RequestsWithoutTokenAreRejected()
     {
         using var temp = new TempDir();
@@ -133,6 +166,85 @@ internal static class LocalApiTests
             Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode,
                 "The local API must fail closed when no token has been configured, never allow unauthenticated access.");
         }
+    }
+
+    public static async Task DistinctNamedTokensAuthenticateIndependentlyAndIdentifyTheirCaller()
+    {
+        using var temp = new TempDir();
+        var (host, client) = await StartTestHostAsync(temp, tokens: [("alice-app", "token-alice-0000000000"), ("bob-app", "token-bob-11111111111")]);
+        using (host)
+        {
+            client.DefaultRequestHeaders.Add(LocalApiTokenAuth.TokenHeaderName, "token-alice-0000000000");
+            var aliceResponse = await client.GetAsync("/v1/models");
+            True(aliceResponse.IsSuccessStatusCode, "alice-app's own token should authenticate.");
+
+            client.DefaultRequestHeaders.Remove(LocalApiTokenAuth.TokenHeaderName);
+            client.DefaultRequestHeaders.Add(LocalApiTokenAuth.TokenHeaderName, "token-bob-11111111111");
+            var bobResponse = await client.GetAsync("/v1/models");
+            True(bobResponse.IsSuccessStatusCode, "bob-app's own distinct token should also authenticate.");
+
+            client.DefaultRequestHeaders.Remove(LocalApiTokenAuth.TokenHeaderName);
+            client.DefaultRequestHeaders.Add(LocalApiTokenAuth.TokenHeaderName, "not-a-real-token");
+            var badResponse = await client.GetAsync("/v1/models");
+            Equal(HttpStatusCode.Unauthorized, badResponse.StatusCode, "a token matching neither entry should still be rejected.");
+        }
+    }
+
+    public static async Task RevokedTokenStopsAuthenticatingWhileOthersStillWork()
+    {
+        using var temp = new TempDir();
+        var settingsService = NewSettings(temp);
+        await settingsService.LoadAsync();
+        var keepEntry = new LocalApiTokenEntry { Name = "keep", SecretRef = "token-keep-0000000000" };
+        var revokedEntry = new LocalApiTokenEntry { Name = "revoked", SecretRef = "token-revoked-1111111" };
+        settingsService.Settings.LocalApi.Tokens.Add(keepEntry);
+        settingsService.Settings.LocalApi.Tokens.Add(revokedEntry);
+
+        var memories = new FakeMemoryStore([]);
+        var ragStore = new SqliteRagStore(settingsService);
+        await ragStore.InitializeAsync();
+        var rag = new RagQueryService(ragStore, new FakeEmbeddingService(), new FakeLlm(), settingsService, new NoOpReranker());
+
+        var hostBuilder = new HostBuilder()
+            .ConfigureWebHost(webBuilder =>
+            {
+                webBuilder.UseTestServer();
+                webBuilder.ConfigureServices(services =>
+                {
+                    services.AddRouting();
+                    services.AddSingleton<ISettingsService>(settingsService);
+                    services.AddSingleton<ISecretStore, FakeSecretStore>();
+                    services.AddSingleton<ILlmService>(new FakeLlm());
+                    services.AddSingleton<IMemoryStore>(memories);
+                    services.AddSingleton(rag);
+                    services.AddSingleton<ITraceStore>(new SqliteTraceStore(settingsService));
+                    services.AddSingleton<ModelProfileService>(new ModelProfileService(settingsService));
+                    services.AddSingleton<IEmbeddingService, FakeEmbeddingService>();
+                });
+                webBuilder.Configure(app =>
+                {
+                    app.UseRouting();
+                    app.UseLocalApiTokenAuth();
+                    app.UseEndpoints(endpoints => endpoints.MapLocalApiEndpoints());
+                });
+            });
+
+        using var host = await hostBuilder.StartAsync();
+        var client = host.GetTestClient();
+
+        client.DefaultRequestHeaders.Add(LocalApiTokenAuth.TokenHeaderName, "token-revoked-1111111");
+        var beforeRevoke = await client.GetAsync("/v1/models");
+        True(beforeRevoke.IsSuccessStatusCode, "the token should authenticate before it is revoked.");
+
+        settingsService.Settings.LocalApi.Tokens.RemoveAll(t => t.Id == revokedEntry.Id);
+
+        var afterRevoke = await client.GetAsync("/v1/models");
+        Equal(HttpStatusCode.Unauthorized, afterRevoke.StatusCode, "a revoked token should stop authenticating immediately.");
+
+        client.DefaultRequestHeaders.Remove(LocalApiTokenAuth.TokenHeaderName);
+        client.DefaultRequestHeaders.Add(LocalApiTokenAuth.TokenHeaderName, "token-keep-0000000000");
+        var otherToken = await client.GetAsync("/v1/models");
+        True(otherToken.IsSuccessStatusCode, "revoking one token should not affect a different, still-configured token.");
     }
 
     public static async Task MemoryQueryEndpointReturnsMatchingMemories()
@@ -179,6 +291,37 @@ internal static class LocalApiTests
         }
     }
 
+    public static async Task EmbeddingsEndpointReturnsVectorsForEachInput()
+    {
+        using var temp = new TempDir();
+        var (host, client) = await StartTestHostAsync(temp);
+        using (host)
+        {
+            client.DefaultRequestHeaders.Add(LocalApiTokenAuth.TokenHeaderName, TestToken);
+            var response = await client.PostAsJsonAsync("/v1/embeddings", new EmbeddingsRequest(["hello", "a longer phrase"]));
+
+            True(response.IsSuccessStatusCode, "embeddings request should succeed with a valid token.");
+            var body = await response.Content.ReadFromJsonAsync<EmbeddingsResponse>();
+            True(body is not null && body.Data.Count == 2, "embeddings response should include one vector per input string");
+            Equal(4, body!.Dimensions, "embeddings response should report the provider's vector dimensionality");
+            Equal(0, body.Data[0].Index, "vectors should be returned in input order with their index");
+            Equal(1, body.Data[1].Index, "vectors should be returned in input order with their index");
+            Equal(4, body.Data[0].Embedding.Length, "each returned vector should have the reported dimensionality");
+        }
+    }
+
+    public static async Task EmbeddingsEndpointRejectsEmptyInput()
+    {
+        using var temp = new TempDir();
+        var (host, client) = await StartTestHostAsync(temp);
+        using (host)
+        {
+            client.DefaultRequestHeaders.Add(LocalApiTokenAuth.TokenHeaderName, TestToken);
+            var response = await client.PostAsJsonAsync("/v1/embeddings", new EmbeddingsRequest([]));
+            Equal(HttpStatusCode.BadRequest, response.StatusCode, "an empty input array should be rejected.");
+        }
+    }
+
     public static async Task ModelsEndpointReturnsVisibleModels()
     {
         using var temp = new TempDir();
@@ -199,7 +342,7 @@ internal static class LocalApiTests
         using var temp = new TempDir();
         var settingsService = NewSettings(temp);
         await settingsService.LoadAsync();
-        settingsService.Settings.LocalApi.ApiToken = TestToken;
+        settingsService.Settings.LocalApi.Tokens.Add(new LocalApiTokenEntry { Name = "test", SecretRef = TestToken });
         settingsService.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
         var traces = new SqliteTraceStore(settingsService);
 
@@ -222,6 +365,7 @@ internal static class LocalApiTests
                     services.AddSingleton(rag);
                     services.AddSingleton<ITraceStore>(traces);
                     services.AddSingleton<ModelProfileService>(new ModelProfileService(settingsService));
+                    services.AddSingleton<IEmbeddingService, FakeEmbeddingService>();
                 });
                 webBuilder.Configure(app =>
                 {
@@ -242,7 +386,76 @@ internal static class LocalApiTests
 
         var recent = await traces.GetRecentAsync(TraceKind.LocalApi, 10);
         True(recent.Count == 1, "Exactly one local API call should have been traced.");
-        Equal("my-test-app", recent[0].SourceId, "the trace should record the caller's self-reported client name");
+        Equal("test", recent[0].SourceId, "the trace should record the verified per-app token name, not the self-reported header");
+        True(recent[0].DetailJson.Contains("\"selfReportedClient\":\"my-test-app\"", StringComparison.Ordinal),
+            "the self-reported X-Aether-Client header should still be recorded as an unverified hint in the trace detail");
         Equal("chat.completions", recent[0].Operation, "the trace should record which endpoint was called");
+    }
+
+    public static async Task ChatCompletionAppliesModelProfileSamplingDefaultsAndHonorsExplicitOverrides()
+    {
+        using var temp = new TempDir();
+        var settingsService = NewSettings(temp);
+        await settingsService.LoadAsync();
+        settingsService.Settings.LocalApi.Tokens.Add(new LocalApiTokenEntry { Name = "test", SecretRef = TestToken });
+        settingsService.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        settingsService.Settings.Llm.TopP = 0.5;
+
+        var profiles = new ModelProfileService(settingsService);
+        await profiles.SaveAsync(new ModelProfile { ModelId = "capture", DefaultTopP = 0.9, DefaultTopK = 40 });
+
+        var capturing = new CapturingLlm();
+        var memories = new FakeMemoryStore([]);
+        var ragStore = new SqliteRagStore(settingsService);
+        await ragStore.InitializeAsync();
+        var rag = new RagQueryService(ragStore, new FakeEmbeddingService(), new FakeLlm(), settingsService, new NoOpReranker());
+
+        var hostBuilder = new HostBuilder()
+            .ConfigureWebHost(webBuilder =>
+            {
+                webBuilder.UseTestServer();
+                webBuilder.ConfigureServices(services =>
+                {
+                    services.AddRouting();
+                    services.AddSingleton<ISettingsService>(settingsService);
+                    services.AddSingleton<ISecretStore, FakeSecretStore>();
+                    services.AddSingleton<ILlmService>(capturing);
+                    services.AddSingleton<IMemoryStore>(memories);
+                    services.AddSingleton(rag);
+                    services.AddSingleton<ITraceStore>(new SqliteTraceStore(settingsService));
+                    services.AddSingleton(profiles);
+                    services.AddSingleton<IEmbeddingService, FakeEmbeddingService>();
+                });
+                webBuilder.Configure(app =>
+                {
+                    app.UseRouting();
+                    app.UseLocalApiTokenAuth();
+                    app.UseEndpoints(endpoints => endpoints.MapLocalApiEndpoints());
+                });
+            });
+
+        using var host = await hostBuilder.StartAsync();
+        var client = host.GetTestClient();
+        client.DefaultRequestHeaders.Add(LocalApiTokenAuth.TokenHeaderName, TestToken);
+
+        // No sampling params supplied: the model's saved profile default
+        // should win over the global setting.
+        var response = await client.PostAsJsonAsync("/v1/chat/completions",
+            new ChatCompletionRequest("capture", [new ChatMessageDto("user", "hi")], null, null));
+        True(response.IsSuccessStatusCode, "chat completion should succeed");
+        Equal(0.9, capturing.LastOptions?.TopP, "with no explicit TopP, the model profile default should be used over the global setting");
+        Equal(40, capturing.LastOptions?.TopK, "with no explicit TopK, the model profile default should be used");
+
+        // Explicit param supplied: it should win over both the profile and the global default.
+        response = await client.PostAsJsonAsync("/v1/chat/completions",
+            new ChatCompletionRequest("capture", [new ChatMessageDto("user", "hi")], null, null, TopP: 0.2));
+        True(response.IsSuccessStatusCode, "chat completion should succeed");
+        Equal(0.2, capturing.LastOptions?.TopP, "an explicit TopP in the request should override the model profile default");
+
+        // A model with no profile falls back to the global setting.
+        response = await client.PostAsJsonAsync("/v1/chat/completions",
+            new ChatCompletionRequest("no-profile-model", [new ChatMessageDto("user", "hi")], null, null));
+        True(response.IsSuccessStatusCode, "chat completion should succeed");
+        Equal(0.5, capturing.LastOptions?.TopP, "with no profile and no explicit value, the global LLM setting should be used");
     }
 }

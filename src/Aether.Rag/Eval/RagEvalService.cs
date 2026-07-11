@@ -125,16 +125,17 @@ public sealed class RagEvalService
         var answer = new StringBuilder();
         var retrieved = new List<RagTraceChunk>();
 
-        await foreach (var token in _query.StreamQueryAsync(datasetId, test.Question, new RagQueryOptions(TopK: 5), ct))
+        await foreach (var evt in _query.StreamQueryAsync(datasetId, test.Question, new RagQueryOptions(TopK: 5), ct))
         {
-            if (token.StartsWith("__RAG_SOURCES__"))
+            switch (evt.Kind)
             {
-                retrieved = RagStreamProtocol.ParseSources(token);
-                continue;
+                case RagStreamEventKind.Sources:
+                    retrieved = evt.Sources!.ToList();
+                    break;
+                case RagStreamEventKind.Token:
+                    answer.Append(evt.Text);
+                    break;
             }
-            if (token.StartsWith("__RAG_TRACE__"))
-                continue;
-            answer.Append(token);
         }
 
         sw.Stop();

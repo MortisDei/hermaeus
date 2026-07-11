@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
+using Aether.Core.Models;
 using Aether.Core.Services;
 
 namespace Aether.Services;
@@ -11,16 +12,18 @@ public sealed class SecretStore : ISecretStore
 {
     private readonly ISettingsService _settings;
     private readonly ISecretBackend _osBackend;
+    private readonly IRuntimeLogService? _log;
     private const string Prefix = "secret:";
     private const string EncryptedPrefix = "v2:";
     private const int SaltBytes = 16;
     private const int AesIvBytes = 16;
     private const int KeyIterations = 100_000;
 
-    public SecretStore(ISettingsService settings)
+    public SecretStore(ISettingsService settings, IRuntimeLogService? log = null)
     {
         _settings = settings;
         _osBackend = CreateOsBackend();
+        _log = log;
     }
 
     public bool IsReference(string value) => value.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase);
@@ -168,8 +171,29 @@ public sealed class SecretStore : ISecretStore
 
         var key = RandomNumberGenerator.GetBytes(32);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, Convert.ToBase64String(key));
-        TryRestrictPermissions(path);
+
+        // The most sensitive file in the data root: the AES key protecting
+        // every fallback-stored secret. Written temp-then-move with
+        // permissions restricted on the temp file *before* it is moved into
+        // place, so there is no window where the key sits world-readable, and
+        // a crash mid-write can never leave a truncated key that silently
+        // breaks every stored secret (docs/review/01-code-audit.md P2-8).
+        // Kept synchronous (this whole method is synchronous, called from
+        // encrypt/decrypt helpers) rather than awaiting the async atomic
+        // writer, to avoid sync-over-async deadlock risk on a UI thread with
+        // a captured SynchronizationContext.
+        var temp = $"{path}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            File.WriteAllText(temp, Convert.ToBase64String(key));
+            TryRestrictPermissions(temp);
+            File.Move(temp, path, overwrite: true);
+        }
+        finally
+        {
+            TryDelete(temp);
+        }
+
         return key;
     }
 
@@ -204,6 +228,16 @@ public sealed class SecretStore : ISecretStore
             }
             catch
             {
+                // Both the encrypted and legacy-plaintext decode paths failed:
+                // most likely a corrupt/replaced secrets.local.key. Silently
+                // returning empty here used to surface only as a downstream
+                // provider auth failure with no diagnostic trail
+                // (docs/review/01-code-audit.md P3-7).
+                _log?.Add(new RuntimeLogEntry(
+                    DateTime.UtcNow,
+                    RuntimeLogLevel.Warning,
+                    RuntimeLogCategory.Service,
+                    "A stored secret could not be decrypted (the local secret key file may be corrupt or the payload is invalid). The provider using it will behave as if no credential is configured."));
                 return string.Empty;
             }
         }
@@ -325,6 +359,17 @@ public sealed class SecretStore : ISecretStore
         }
     }
 
+    /// <summary>
+    /// Latent: Aether's shipped scope is Windows and Linux only (AGENTS.md).
+    /// Unlike <see cref="LinuxSecretServiceBackend"/>, the macOS <c>security</c>
+    /// CLI has no stdin form for <c>add-generic-password -w</c>, so the secret
+    /// is necessarily passed as a process argument here and is visible to any
+    /// other local process listing arguments (e.g. `ps`) for the call's
+    /// duration. If macOS ever becomes a supported target, prefer the
+    /// encrypted local-file fallback over this backend, or shell out to a
+    /// short-lived helper that reads the secret from stdin instead
+    /// (docs/review/01-code-audit.md P3-6).
+    /// </summary>
     private sealed class MacOsKeychainBackend : CommandSecretBackend
     {
         public override string Label => "macOS Keychain";

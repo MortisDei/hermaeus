@@ -1,4 +1,6 @@
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
+using Aether.Core.Models;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace Aether.ViewModels;
@@ -11,18 +13,32 @@ public partial class MessageViewModel : ObservableObject
     [ObservableProperty] private bool   _isError;
     [ObservableProperty] private string _modelId = string.Empty;
     [ObservableProperty] private long   _durationMs;
+    [ObservableProperty] private bool   _hasSources;
 
     public required string Role { get; init; }
     public bool IsUser      => Role == "user";
     public bool IsAssistant => Role == "assistant";
     public string Id { get; init; } = Guid.NewGuid().ToString();
     public DateTime CreatedAt { get; init; } = DateTime.UtcNow;
-    
+
     /// <summary>
     /// Stores attachment file paths when this is a user message with context attachments.
     /// Populated when attachments are added; used during regeneration to recover attachments.
     /// </summary>
     public ObservableCollection<string> AttachedFilePaths { get; } = [];
+
+    /// <summary>
+    /// Memories (and, in future, RAG/agent citations) actually injected into
+    /// this turn's context, for the chat Sources panel
+    /// (docs/review/03-next-level-roadmap.md Phase 1). Only ever populated
+    /// for the turn just generated; reloaded history has no source
+    /// association recorded, so it stays empty.
+    /// </summary>
+    public ObservableCollection<SourceReference> Sources { get; } = [];
+
+    public MessageViewModel() => Sources.CollectionChanged += OnSourcesChanged;
+
+    private void OnSourcesChanged(object? sender, NotifyCollectionChangedEventArgs e) => HasSources = Sources.Count > 0;
 
     public string MetaDisplay
     {

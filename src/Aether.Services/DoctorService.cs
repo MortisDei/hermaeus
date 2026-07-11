@@ -57,6 +57,7 @@ public sealed class DoctorService : IDoctorService, IInspectionCheckProvider
     private readonly EmbeddingModelDownloadSpec _embeddingDownload;
     private readonly LlamaServerSetupService _llamaSetup;
     private readonly IRuntimeLogService? _runtimeLogs;
+    private readonly AppLifecycleJournalService? _lifecycleJournal;
 
     public DoctorService(
         ISettingsService settings,
@@ -71,7 +72,8 @@ public sealed class DoctorService : IDoctorService, IInspectionCheckProvider
         ModelDownloadService? downloads = null,
         EmbeddingModelDownloadSpec? embeddingDownload = null,
         LlamaServerSetupService? llamaSetup = null,
-        IRuntimeLogService? runtimeLogs = null)
+        IRuntimeLogService? runtimeLogs = null,
+        AppLifecycleJournalService? lifecycleJournal = null)
     {
         _settings = settings;
         _runtimes = runtimes;
@@ -86,6 +88,7 @@ public sealed class DoctorService : IDoctorService, IInspectionCheckProvider
         _embeddingDownload = embeddingDownload ?? DefaultEmbeddingDownload;
         _llamaSetup = llamaSetup ?? new LlamaServerSetupService(_downloads);
         _runtimeLogs = runtimeLogs;
+        _lifecycleJournal = lifecycleJournal;
     }
 
     public async Task<DoctorReport> ScanAsync(CancellationToken ct = default)
@@ -94,6 +97,7 @@ public sealed class DoctorService : IDoctorService, IInspectionCheckProvider
 
         var checks = new List<DoctorCheck>
         {
+            CheckCleanShutdown(),
             await CheckDataRootAsync(ct),
             await CheckAiAssetsRootAsync(ct),
             CheckLlamaServerBinary(),
@@ -126,6 +130,59 @@ public sealed class DoctorService : IDoctorService, IInspectionCheckProvider
             : $"Doctor scan found {errorCount} error(s) and {warningCount} warning(s).";
 
         return new DoctorReport(checks, DateTime.UtcNow, summary);
+    }
+
+    /// <summary>
+    /// Reports on the previous session's exit, using
+    /// <see cref="AppLifecycleJournalService.PreviousSession"/> captured once
+    /// at this session's startup (docs/review/03-next-level-roadmap.md
+    /// Phase 4). A native fault (the kind the 0.9.38-0.9.40 Kokoro ONNX crash
+    /// was) bypasses managed exception handling entirely and leaves no other
+    /// trace; naming the last recorded operation turns "the app just
+    /// vanished" into an actionable starting point.
+    /// </summary>
+    private DoctorCheck CheckCleanShutdown()
+    {
+        var previous = _lifecycleJournal?.PreviousSession;
+        if (previous is null)
+        {
+            return BuildCheck(
+                "clean-shutdown",
+                "Previous session exited cleanly",
+                DoctorCheckStatus.Ready,
+                "No previous session recorded",
+                "This looks like the first run, or the lifecycle journal is unavailable.",
+                string.Empty,
+                false,
+                string.Empty,
+                "Startup");
+        }
+
+        if (previous.CleanExit)
+        {
+            return BuildCheck(
+                "clean-shutdown",
+                "Previous session exited cleanly",
+                DoctorCheckStatus.Ready,
+                "Previous session exited cleanly",
+                $"Last started {previous.StartedAtUtc:u}.",
+                string.Empty,
+                false,
+                string.Empty,
+                "Startup");
+        }
+
+        return BuildCheck(
+            "clean-shutdown",
+            "Previous session exited cleanly",
+            DoctorCheckStatus.Warning,
+            "Aether did not shut down cleanly last time",
+            $"The last recorded operation was \"{previous.LastOperation}\" at {previous.LastOperationAtUtc:u}. " +
+            "If Aether crashed or was force-closed around then, that operation is where to start looking.",
+            string.Empty,
+            false,
+            $"StartedAtUtc={previous.StartedAtUtc:O}; LastOperation={previous.LastOperation}; LastOperationAtUtc={previous.LastOperationAtUtc:O}",
+            "Startup");
     }
 
     private async Task<DoctorCheck> CheckDataRootAsync(CancellationToken ct)

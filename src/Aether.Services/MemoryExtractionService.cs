@@ -45,6 +45,9 @@ public sealed class MemoryExtractionService
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow,
                     SourceConversationId = sourceConversationId,
+                    Source = sourceConversationId is null
+                        ? null
+                        : new SourceReference(ProvenanceKind.Memory, TitleFrom(content), Locator: sourceConversationId, Snippet: content, Timestamp: DateTime.UtcNow),
                     ImportanceScore = importance,
                     Tags = ExtractTags(content)
                 };
@@ -118,5 +121,12 @@ public sealed class MemoryExtractionService
             tags.Add("performance");
 
         return tags;
+    }
+
+    /// <summary>Short, scannable label for a memory's source reference chip.</summary>
+    internal static string TitleFrom(string content)
+    {
+        var flat = content.Trim();
+        return flat.Length > 48 ? flat[..45] + "..." : flat;
     }
 }

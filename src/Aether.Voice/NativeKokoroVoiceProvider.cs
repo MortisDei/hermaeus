@@ -9,7 +9,7 @@ namespace Aether.Voice;
 /// with no Python subprocess and no HTTP round trip. This is the default
 /// voice provider; the Python-based Kokoro provider (<c>KokoroVoiceProvider</c>
 /// in Aether.Services) remains available as an advanced/fallback path. See
-/// docs/review/07-roadmap.md item 5.
+/// docs/review/archived/r1/07-roadmap.md item 5.
 /// </summary>
 public sealed class NativeKokoroVoiceProvider : ITtsService, IVoiceProvider, IDisposable
 {
@@ -31,10 +31,10 @@ public sealed class NativeKokoroVoiceProvider : ITtsService, IVoiceProvider, IDi
     public VoiceCapability Capabilities => VoiceCapability.TextToSpeech | VoiceCapability.Local;
     public (int Major, int Minor)? RequiredPythonVersion => null;
 
-    public NativeKokoroVoiceProvider(ISettingsService settings)
+    public NativeKokoroVoiceProvider(ISettingsService settings, AppLifecycleJournalService? journal = null)
     {
         _settings = settings;
-        _model = new KokoroOnnxModel(() => ResolveAssetsDirectory(_settings.Settings));
+        _model = new KokoroOnnxModel(() => ResolveAssetsDirectory(_settings.Settings), journal);
     }
 
     public static string ResolveAssetsDirectory(AppSettings settings)
@@ -175,23 +175,33 @@ public sealed class NativeKokoroVoiceProvider : ITtsService, IVoiceProvider, IDi
             if (!await _model.EnsureLoadedAsync(voice, ct))
                 throw new InvalidOperationException("Kokoro native model is not installed. Run the install action in Settings first.");
 
-            var phonemes = KokoroPhonemizer.ToPhonemes(text);
-            var chunks = KokoroTokenizer.Encode(phonemes);
-            if (chunks.Count == 0)
-                throw new InvalidOperationException("Input text produced no phonemes to synthesize.");
-
             var speed = Math.Clamp(_settings.Settings.Tts.Speed, 0.5, 2.0);
-            var samples = new List<float>();
-            foreach (var chunk in chunks)
-            {
-                ct.ThrowIfCancellationRequested();
-                samples.AddRange(_model.Synthesize(chunk, voice, speed));
-            }
-
             var output = string.IsNullOrWhiteSpace(outputPath)
                 ? Path.Combine(Path.GetTempPath(), $"aether-kokoro-native-{Guid.NewGuid():N}.wav")
                 : outputPath;
-            WavFile.Write(output, samples.ToArray(), KokoroOnnxModel.SampleRate);
+
+            // Phonemize/tokenize/inference runs single-threaded ONNX inference
+            // (see KokoroOnnxModel's conservative SessionOptions) and can take
+            // several seconds for a paragraph; offload it so a caller on the
+            // UI thread (SpeakAsync is invoked from ViewModel commands) does
+            // not freeze for the duration (docs/review/01-code-audit.md P2-7).
+            await Task.Run(() =>
+            {
+                var phonemes = KokoroPhonemizer.ToPhonemes(text);
+                var chunks = KokoroTokenizer.Encode(phonemes);
+                if (chunks.Count == 0)
+                    throw new InvalidOperationException("Input text produced no phonemes to synthesize.");
+
+                var samples = new List<float>();
+                foreach (var chunk in chunks)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    samples.AddRange(_model.Synthesize(chunk, voice, speed));
+                }
+
+                WavFile.Write(output, samples.ToArray(), KokoroOnnxModel.SampleRate);
+            }, ct);
+
             return output;
         }
         finally

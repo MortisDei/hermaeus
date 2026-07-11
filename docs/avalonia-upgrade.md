@@ -2,8 +2,8 @@
 
 Avalonia is the load-bearing dependency of the whole product thesis (native,
 non-WebView desktop UI). Version bumps are deliberate, tested events, not
-routine package updates. See docs/review/02-dependency-review.md for the
-containment rationale.
+routine package updates. See docs/review/archived/r1/02-dependency-review.md
+for the containment rationale.
 
 ## Current pin
 

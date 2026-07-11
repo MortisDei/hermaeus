@@ -570,6 +570,78 @@ internal static class AgentTests
         executor.ExecuteAsync("run_command", new Dictionary<string, object?> { ["command"] = "rm -rf /" }, options));
     }
 
+    public static async Task RunCommandRecipeCaseSensitivityMatchesBetweenGateAndExecutor()
+    {
+    // docs/review/01-code-audit.md P3-3 flagged the gate and executor as
+    // potentially disagreeing on case for a declared recipe; on inspection
+    // WorkspaceCommandRecipes.Executable already uses an OrdinalIgnoreCase
+    // comparer, so both layers already agree. This locks that invariant in.
+    using var temp = new TempDir();
+    var workspace = temp.PathFor("workspace");
+    Directory.CreateDirectory(workspace);
+    await File.WriteAllTextAsync(Path.Combine(workspace, "sample.csproj"), """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net10.0</TargetFramework>
+          </PropertyGroup>
+        </Project>
+        """);
+
+    var gate = new AgentSafetyGate();
+    var declared = new List<WorkspaceCommandRecipe> { new("dotnet build", "Build the project.", AgentRiskLevel.Low) };
+    var mixedCase = "DOTNET Build";
+
+    var decision = gate.EvaluateCommand(mixedCase, declared);
+    Equal(AgentToolDisposition.RequiresApproval, decision.Disposition,
+        "the gate should recognize a declared recipe regardless of case");
+
+    var executor = new AgentToolExecutor(new AgentWorkspaceTools());
+    var options = new AgentWorkspaceOptions(workspace);
+    var result = await executor.ExecuteAsync("run_command", new Dictionary<string, object?> { ["command"] = mixedCase }, options);
+    True(result.ResultSummary.Contains("Exit code", StringComparison.Ordinal),
+        "the executor should run the same mixed-case command the gate just approved, not throw on a case mismatch");
+    }
+
+    public static async Task AgentToolExecutorInspectGitDiffHandlesLargeStatusOutput()
+    {
+    using var temp = new TempDir();
+    var workspace = temp.PathFor("workspace");
+    Directory.CreateDirectory(workspace);
+    await RunGitAsync(workspace, "init", "-q");
+
+    // Enough untracked files that `git status --short` output exceeds a
+    // typical OS pipe buffer, so reading stdout only after WaitForExit would
+    // deadlock (docs/review/01-code-audit.md P2-4).
+    for (var i = 0; i < 3000; i++)
+        await File.WriteAllTextAsync(Path.Combine(workspace, $"file-{i}.txt"), "x");
+
+    var executor = new AgentToolExecutor(new AgentWorkspaceTools());
+    var options = new AgentWorkspaceOptions(workspace);
+    var result = await executor.ExecuteAsync("inspect_git_diff", new Dictionary<string, object?>(), options)
+        .WaitAsync(TimeSpan.FromSeconds(20));
+
+    True(result.ResultSummary.Contains("file-0.txt", StringComparison.Ordinal),
+        "large git status output should be read fully instead of deadlocking or timing out");
+    }
+
+    private static async Task RunGitAsync(string workingDirectory, params string[] args)
+    {
+    var psi = new System.Diagnostics.ProcessStartInfo
+    {
+        FileName = "git",
+        WorkingDirectory = workingDirectory,
+        UseShellExecute = false,
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+        CreateNoWindow = true
+    };
+    foreach (var arg in args)
+        psi.ArgumentList.Add(arg);
+
+    using var process = System.Diagnostics.Process.Start(psi)!;
+    await process.WaitForExitAsync();
+    }
+
     public static async Task AgentLoopWritesStateLogAndTrace()
     {
     using var temp = new TempDir();

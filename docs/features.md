@@ -155,6 +155,12 @@
 - Doctor embedding model install downloads the default model from a pinned
   Hugging Face commit, verifies SHA256, removes failed downloads, and points the
   embedding server at the verified file.
+- Doctor reports whether the previous session exited cleanly, using a small
+  local-only lifecycle journal (no telemetry, nothing leaves the machine).
+  If Aether did not shut down cleanly last time (a crash or force-close), the
+  warning names the last recorded operation, so a native-level crash that
+  bypasses all managed error handling still leaves a starting point for
+  diagnosis instead of no trace at all.
 
 ## System Integration
 
@@ -255,6 +261,13 @@ conversation metadata, the system prompt when present, role-separated messages,
 model IDs, error or incomplete markers, and attached file paths. JSON preserves
 the stored conversation shape for local migration or inspection.
 
+Chat now injects relevant stored memories into each turn's system prompt when
+Memory is enabled (Settings > Memory), and shows which memories were actually
+used as a small Sources panel under the assistant's reply, each with the
+memory's content as a tooltip. This closes a gap from the original memory
+feature: memory injection existed as a service but nothing in chat ever
+called it.
+
 ### Model and Dataset Lifecycle
 
 Compare Models sends the same prompt to one to four selected models and shows
@@ -273,5 +286,32 @@ providers, features that may send data remotely, exposed local servers, secret
 health, log redaction status, and data-root backup status.
 
 Planned work such as a Doctor Fixes queue and safe command recipe cards is
-tracked in [docs/review/07-roadmap.md](review/07-roadmap.md), not documented
-here as existing behaviour.
+tracked in [docs/review/03-next-level-roadmap.md](review/03-next-level-roadmap.md),
+not documented here as existing behaviour.
+
+### Local API
+
+An optional, off-by-default loopback HTTP host (`Aether.LocalApi`) that lets
+other local processes (editor extensions, scripts) reuse Aether's chat,
+memory, and RAG query surface without the desktop UI. Enabled and configured
+from Settings > Local API: a checkbox, a port (127.0.0.1 only), and any
+number of named per-app bearer tokens (add one, name it, copy the generated
+value; revoke any one individually without affecting the others). The host
+refuses every request with a 503 until at least one token exists. Settings
+shows a live host status label (Running/Stopped/etc.) next to the checkbox.
+Every call is logged to the shared trace store keyed by the verified token
+name that authenticated it (the caller-supplied `X-Aether-Client` header is
+also recorded, but only as an unverified display hint), and Privacy Audit's
+"Local API activity" item shows which per-app tokens have been calling in.
+
+Endpoints:
+- `POST /v1/chat/completions` - buffered JSON by default; pass `"stream": true`
+  for Server-Sent Events in the OpenAI `chat.completion.chunk` wire shape
+  (compatibility with existing SSE clients, not a dependency on OpenAI).
+  Accepts the same sampling parameters as the desktop app (temperature, top P,
+  top K, min P, repeat/frequency/presence penalty), applying the same
+  precedence the desktop Chat panel uses: explicit request value, then the
+  model's saved profile default, then the global LLM setting.
+- `POST /v1/embeddings` - one vector per input string, using the app's
+  configured embedding provider.
+- `GET /v1/memory/query`, `POST /v1/rag/query`, `GET /v1/models`.

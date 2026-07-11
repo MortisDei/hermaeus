@@ -1,6 +1,8 @@
 # Aether Security Review And Threat Model
 
-Last refreshed for `0.9.14-alpha`.
+Last refreshed for `0.9.41-alpha` (Local API and MCP rows only; the rest of
+this document has not been re-verified against every release since
+`0.9.14-alpha` and may describe earlier behavior for untouched areas).
 
 Aether is a local-first desktop application. The primary security goal is to
 keep user data, model paths, API keys, local runtimes, and generated voice audio
@@ -64,11 +66,12 @@ penetration-test report.
 | RAG ingest | Local `.txt`/`.md` ingest is the default. Optional web URL ingest is off by default, accepts only explicit HTTP(S) URLs, caps pages, strips script/style blocks from HTML, validates prompt templates, and verifies pinned embedding model and ONNX reranker assets with SHA256. | Large local files are warned, not refused. Web text extraction is intentionally simple and should not be treated as a browser sandbox or crawler. |
 | Voice backends | Kokoro (native) is the default voice provider and needs no Python subprocess; its ONNX model and voice files are never downloaded on the synthesis path, only through an explicit Doctor install action that verifies each file against a pinned SHA256 hash before it is ever loaded, matching the RAG reranker's asset posture. Generated voice preview audio is handled in memory by the app workflow. Managed Python-based Kokoro and XTTS processes (now `Advanced` fallback providers) are killed on stop/exit. Local AI setup no longer asks for a Python venv when the active provider needs none (native Kokoro, OpenAI). | Configured XTTS output directory exists for server operation and could contain files created by the external XTTS server. First run needs one explicit Doctor install click before native Kokoro can synthesize speech. |
 | Agent workspace tools | Agent file tools are constrained to the selected workspace, reject symlink ancestors, skip symlinked entries, use case-sensitive path checks on case-sensitive platforms, validate task IDs with a safe allowlist, and block unsupported shell/network/install/commit/push actions. | Approved draft patch application can still overwrite intended workspace files, so review remains mandatory. |
+| MCP tool bridge | Each configured MCP server can optionally be restricted to an explicit allowed-tools list (Settings > MCP Servers); an empty list permits every tool the server declares, matching prior behavior. The bridge independently refuses to forward a tool name the server did not actually declare via `tools/list`, even if a stale allowlist entry names it, so a compromised server cannot expand its own callable surface by simply declaring more tools. Every `mcp:` call always requires approval regardless of what the allowlist or the server claims about itself. The client drains a spawned server's stderr continuously and faults outstanding calls immediately if the server process closes its connection, rather than hanging for the full per-call timeout. | A configured server's declared tool descriptions are still visible to the model verbatim and are prompt-injection surface; the allowlist restricts which tools can execute, not what a malicious description can say to influence the model's next step. |
 | Local state files | Settings, Agent task/profile/memory state, toast history, exports, generated setup scripts, and local fallback secrets use temp-file replacement for writes. Agent task list metadata is indexed in SQLite and reconciled from JSON task state during initialization. Unreadable settings are copied aside before defaults are loaded. | Sudden power loss can still lose the latest write, but should be less likely to leave a half-written primary JSON file. |
 | SQLite schemas | Conversation, memory, RAG, and Agent task-index databases record schema versions in `aether_schema_versions` before running additive migrations. | Existing migrations are additive. Destructive migrations still need bespoke backup and verification steps before public release. |
 | Tray and hotkeys | Close exits and stops managed services. Minimize-to-tray is explicit. Tray menu includes Stop Services and Quit. Local hotkeys only work while focused. Windows global hotkeys are opt-in and registered through the OS hotkey API. | Linux global hotkeys remain deferred because Wayland/X11 compositor behavior varies. |
 | Packaging | Linux/Windows archives include README, license, notice, commercial terms, and checksums. Linux desktop install is user-local. | Archives are unsigned; users must verify checksums from a trusted channel. |
-| Local API host | `Aether.LocalApi` is off by default and only started when a user explicitly enables it in Settings. It binds `127.0.0.1` only, never `0.0.0.0`. Every request must present a matching `X-Aether-Token` header; the host fails closed (503) when no token has been generated yet, rather than allowing unauthenticated access. The surface is deliberately minimal: chat completion, memory query, RAG query, and a read-only models list, no agent/benchmark/settings endpoints. Every call is logged to the shared trace store (`TraceKind.LocalApi`) keyed by the caller's self-reported `X-Aether-Client` header, and Privacy Audit's "Local API activity" item shows which apps have been calling in, and how often. | Any other local process on a shared machine that learns the token can call the API for as long as it stays running; there is no token rotation UI beyond regenerate-and-save. The `X-Aether-Client` name is self-reported and not verified, so it is a visibility aid, not an access-control or attribution guarantee. |
+| Local API host | `Aether.LocalApi` is off by default; `LocalApiProcessManager` only launches the child process when a user explicitly enables it in Settings and at least one named token exists, and the host itself independently refuses to serve if launched directly with the setting off. It binds `127.0.0.1` only, never `0.0.0.0`. Each configured caller gets its own named token; every request must present a matching `X-Aether-Token` header, and the host fails closed (503) when no token exists, rather than allowing unauthenticated access. A token can be revoked individually without affecting the others. The surface is deliberately minimal: chat completion (buffered or SSE-streamed), embeddings, memory query, RAG query, and a read-only models list, no agent/benchmark/settings endpoints. Every call is logged to the shared trace store (`TraceKind.LocalApi`) keyed by the verified token name that authenticated it, and Privacy Audit's "Local API activity" item shows which per-app tokens have been calling in, and how often. | Any other local process on a shared machine that learns a token can call the API for as long as that token stays valid. The `X-Aether-Client` header is still recorded alongside the verified token name, but only as a self-reported, unverified display hint, not an access-control or attribution guarantee (a caller can claim to be anyone). |
 
 ## Threat Scenarios
 
@@ -177,24 +180,30 @@ optional `Aether.LocalApi` host and reads chat, memory, or RAG data.
 Current mitigations:
 
 - The host is off by default; the desktop app only launches it when the user
-  explicitly enables it in Settings.
+  explicitly enables it in Settings and a token exists, and the host itself
+  refuses to serve if launched directly with the setting off.
 - Binds `127.0.0.1` only, never a LAN-reachable interface.
-- Every request requires a token in `X-Aether-Token`, compared with a
-  constant-time check; the host refuses all requests with 503 until a token has
-  been generated and saved, rather than defaulting to open access.
-- The surface is intentionally minimal (chat completion, memory query, RAG
-  query, models list) so a compromised token exposes less than the full
-  desktop app would.
-- Every call is logged (caller name, endpoint, timing) to the shared trace
-  store and surfaced in Privacy Audit, so unexpected activity is at least
-  visible after the fact, even though the self-reported caller name cannot
-  be verified.
+- Every request requires a token in `X-Aether-Token`, compared against every
+  configured entry with a constant-time check; the host refuses all requests
+  with 503 until at least one token exists, rather than defaulting to open
+  access.
+- Tokens are per-app and named: each caller gets its own credential, and any
+  one can be revoked individually (Settings > Local API) without affecting
+  the others.
+- The surface is intentionally minimal (chat completion, embeddings, memory
+  query, RAG query, models list) so a compromised token exposes less than the
+  full desktop app would.
+- Every call is logged (verified token name, self-reported client hint,
+  endpoint, timing) to the shared trace store and surfaced in Privacy Audit,
+  keyed by the verified token identity rather than the unverifiable
+  self-reported name.
 
 Required follow-up:
 
-- Add a token rotation/revocation affordance beyond regenerate-and-save.
-- Move from a single shared token to per-app tokens so caller identity is
-  verified rather than self-reported.
+- None outstanding at this pass. A further hardening step (not yet done) is
+  per-server tool-level scoping for the local API itself, analogous to the
+  MCP per-server allowed-tools list, if the surface grows beyond its current
+  five endpoints.
 
 ## Release Gate Status
 

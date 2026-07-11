@@ -10,7 +10,7 @@ namespace Aether.Services;
 /// </summary>
 public sealed class MemoryStore : IMemoryStore
 {
-    private const int SchemaVersion = 2;
+    private const int SchemaVersion = 3;
     private readonly ISettingsService _settings;
     private string _initializedPath = string.Empty;
     private readonly SemaphoreSlim _initGate = new(1, 1);
@@ -93,7 +93,8 @@ public sealed class MemoryStore : IMemoryStore
                     changed |= await EnsureColumnAsync(db, "scope_id", "TEXT NOT NULL DEFAULT ''", token);
                     changed |= await EnsureColumnAsync(db, "title", "TEXT NOT NULL DEFAULT ''", token);
                     return changed;
-                })
+                }),
+                new SqliteMigration(3, (db, token) => EnsureColumnAsync(db, "source_json", "TEXT", token))
             ], ct);
             if (!ftsExisted)
                 await RebuildFtsAsync(c, ct);
@@ -199,13 +200,14 @@ public sealed class MemoryStore : IMemoryStore
         memory.UpdatedAt = DateTime.UtcNow;
         var tagsJson = JsonSerializer.Serialize(NormalizeTags(memory.Tags));
         var relationshipsJson = JsonSerializer.Serialize(memory.RelatedMemoryIds);
+        var sourceJson = memory.Source is null ? null : JsonSerializer.Serialize(memory.Source);
 
         await using var c = new SqliteConnection(Cs);
         await c.OpenAsync(ct);
         var cmd = c.CreateCommand();
         cmd.CommandText = @"
-            INSERT INTO memories (id,category,content,created_at,updated_at,source_conversation_id,importance_score,tags_json,is_pinned,is_archived,frequency_count,last_merge_time,expiration_date,relationships_json,is_encrypted,scope,scope_id,title)
-            VALUES ($id,$cat,$content,$ca,$ua,$src,$imp,$tags,$pin,$arch,$freq,$merge,$exp,$rel,$enc,$scope,$scopeId,$title)
+            INSERT INTO memories (id,category,content,created_at,updated_at,source_conversation_id,importance_score,tags_json,is_pinned,is_archived,frequency_count,last_merge_time,expiration_date,relationships_json,is_encrypted,scope,scope_id,title,source_json)
+            VALUES ($id,$cat,$content,$ca,$ua,$src,$imp,$tags,$pin,$arch,$freq,$merge,$exp,$rel,$enc,$scope,$scopeId,$title,$sourceJson)
             ON CONFLICT(id) DO UPDATE SET
                 category=excluded.category,
                 content=excluded.content,
@@ -221,7 +223,8 @@ public sealed class MemoryStore : IMemoryStore
                 last_merge_time=excluded.last_merge_time,
                 expiration_date=excluded.expiration_date,
                 relationships_json=excluded.relationships_json,
-                is_encrypted=excluded.is_encrypted";
+                is_encrypted=excluded.is_encrypted,
+                source_json=excluded.source_json";
 
         cmd.Parameters.AddWithValue("$id", memory.Id);
         cmd.Parameters.AddWithValue("$cat", memory.Category);
@@ -241,6 +244,7 @@ public sealed class MemoryStore : IMemoryStore
         cmd.Parameters.AddWithValue("$scope", memory.Scope.ToString());
         cmd.Parameters.AddWithValue("$scopeId", memory.ScopeId);
         cmd.Parameters.AddWithValue("$title", memory.Title);
+        cmd.Parameters.AddWithValue("$sourceJson", sourceJson ?? (object)DBNull.Value);
 
         await cmd.ExecuteNonQueryAsync(ct);
         await UpsertFtsAsync(c, memory, tagsJson, ct);
@@ -448,27 +452,57 @@ public sealed class MemoryStore : IMemoryStore
         return string.Join(" AND ", terms.Select(t => $"\"{t}\"*"));
     }
 
-    private static Memory Map(SqliteDataReader r) => new()
+    private static Memory Map(SqliteDataReader r)
     {
-        Id = GetString(r, "id"),
-        Category = GetString(r, "category", "facts"),
-        Content = GetString(r, "content"),
-        CreatedAt = DateTime.Parse(GetString(r, "created_at")),
-        UpdatedAt = DateTime.Parse(GetString(r, "updated_at")),
-        SourceConversationId = GetStringNullable(r, "source_conversation_id"),
-        ImportanceScore = GetDouble(r, "importance_score", 0.5),
-        Tags = JsonSerializer.Deserialize<List<string>>(GetString(r, "tags_json", "[]")) ?? [],
-        IsPinned = GetInt(r, "is_pinned") != 0,
-        IsArchived = GetInt(r, "is_archived") != 0,
-        FrequencyCount = GetInt(r, "frequency_count", 1),
-        LastMergeTime = GetDateTimeNullable(r, "last_merge_time"),
-        ExpirationDate = GetDateTimeNullable(r, "expiration_date"),
-        RelatedMemoryIds = JsonSerializer.Deserialize<List<string>>(GetString(r, "relationships_json", "[]")) ?? [],
-        IsEncrypted = GetInt(r, "is_encrypted") != 0,
-        Scope = Enum.TryParse<MemoryScope>(GetString(r, "scope", "Global"), out var scope) ? scope : MemoryScope.Global,
-        ScopeId = GetString(r, "scope_id"),
-        Title = GetString(r, "title")
-    };
+        var sourceConversationId = GetStringNullable(r, "source_conversation_id");
+        return new Memory
+        {
+            Id = GetString(r, "id"),
+            Category = GetString(r, "category", "facts"),
+            Content = GetString(r, "content"),
+            CreatedAt = DateTime.Parse(GetString(r, "created_at")),
+            UpdatedAt = DateTime.Parse(GetString(r, "updated_at")),
+            SourceConversationId = sourceConversationId,
+            Source = ResolveSource(GetStringNullable(r, "source_json"), sourceConversationId),
+            ImportanceScore = GetDouble(r, "importance_score", 0.5),
+            Tags = JsonSerializer.Deserialize<List<string>>(GetString(r, "tags_json", "[]")) ?? [],
+            IsPinned = GetInt(r, "is_pinned") != 0,
+            IsArchived = GetInt(r, "is_archived") != 0,
+            FrequencyCount = GetInt(r, "frequency_count", 1),
+            LastMergeTime = GetDateTimeNullable(r, "last_merge_time"),
+            ExpirationDate = GetDateTimeNullable(r, "expiration_date"),
+            RelatedMemoryIds = JsonSerializer.Deserialize<List<string>>(GetString(r, "relationships_json", "[]")) ?? [],
+            IsEncrypted = GetInt(r, "is_encrypted") != 0,
+            Scope = Enum.TryParse<MemoryScope>(GetString(r, "scope", "Global"), out var scope) ? scope : MemoryScope.Global,
+            ScopeId = GetString(r, "scope_id"),
+            Title = GetString(r, "title")
+        };
+    }
+
+    /// <summary>
+    /// Rows written before <c>source_json</c> existed (or written by a path
+    /// that only ever set <c>SourceConversationId</c>) backfill a
+    /// <see cref="SourceReference"/> from that conversation id at read time
+    /// instead of a data rewrite migration (docs/review/03-next-level-roadmap.md
+    /// Phase 1).
+    /// </summary>
+    private static SourceReference? ResolveSource(string? sourceJson, string? sourceConversationId)
+    {
+        if (!string.IsNullOrWhiteSpace(sourceJson))
+        {
+            try
+            {
+                var deserialized = JsonSerializer.Deserialize<SourceReference>(sourceJson);
+                if (deserialized is not null)
+                    return deserialized;
+            }
+            catch (JsonException) { }
+        }
+
+        return string.IsNullOrWhiteSpace(sourceConversationId)
+            ? null
+            : new SourceReference(ProvenanceKind.Memory, "Conversation", Locator: sourceConversationId);
+    }
 
     private static string GetString(SqliteDataReader r, string name, string fallback = "")
     {

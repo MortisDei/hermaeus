@@ -2,7 +2,7 @@ namespace Aether.Core.Models;
 
 /// <summary>
 /// What kind of thing a <see cref="SourceReference"/> points back to. The
-/// long-term goal (docs/review/07-roadmap.md, "provenance everywhere") is for
+/// long-term goal (docs/review/archived/r1/07-roadmap.md, "provenance everywhere") is for
 /// any answer to be traceable to memories, chunks, files, and tool output
 /// through this one shared shape rather than each surface inventing its own.
 /// </summary>

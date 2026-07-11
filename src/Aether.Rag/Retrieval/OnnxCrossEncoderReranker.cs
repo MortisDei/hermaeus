@@ -20,14 +20,16 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
 
     private static readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(10) };
     private readonly ISettingsService _settings;
+    private readonly AppLifecycleJournalService? _journal;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private InferenceSession? _session;
     private BertTokenizer? _tokenizer;
     private bool _unavailable;
 
-    public OnnxCrossEncoderReranker(ISettingsService settings)
+    public OnnxCrossEncoderReranker(ISettingsService settings, AppLifecycleJournalService? journal = null)
     {
         _settings = settings;
+        _journal = journal;
     }
 
     public async Task<List<ScoredChunk>> RerankAsync(
@@ -96,6 +98,7 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
 
             // assets present - load tokenizer and session
             _tokenizer = BertTokenizer.Create(vocabPath);
+            _journal?.RecordOperation("loading reranker ONNX session (EnsureLoadedAsync)");
             _session = new InferenceSession(modelPath);
             return true;
         }
@@ -132,6 +135,7 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
             // load after download
             _tokenizer = BertTokenizer.Create(vocabPath);
             _session?.Dispose();
+            _journal?.RecordOperation("loading reranker ONNX session (InstallAssetsAsync)");
             _session = new InferenceSession(modelPath);
             _unavailable = false;
             progress?.Report("Reranker installed");

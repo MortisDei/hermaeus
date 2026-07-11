@@ -349,6 +349,7 @@ public sealed partial class McpServerConfigViewModel : ObservableObject
         _argumentsText = string.Join(' ', config.Arguments);
         _workingDirectory = config.WorkingDirectory;
         _enabled = config.Enabled;
+        _allowedToolsText = string.Join(", ", config.AllowedTools);
     }
 
     public string Id { get; }
@@ -358,6 +359,13 @@ public sealed partial class McpServerConfigViewModel : ObservableObject
     [ObservableProperty] private string _workingDirectory;
     [ObservableProperty] private bool _enabled;
 
+    /// <summary>
+    /// Comma-separated tool names; empty means no restriction (every tool the
+    /// server declares is callable), matching prior behavior
+    /// (docs/review/03-next-level-roadmap.md Phase 3).
+    /// </summary>
+    [ObservableProperty] private string _allowedToolsText;
+
     public McpServerConfig ToConfig() => new()
     {
         Id = Id,
@@ -365,7 +373,8 @@ public sealed partial class McpServerConfigViewModel : ObservableObject
         Command = Command,
         Arguments = ArgumentsText.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList(),
         WorkingDirectory = WorkingDirectory,
-        Enabled = Enabled
+        Enabled = Enabled,
+        AllowedTools = AllowedToolsText.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList()
     };
 }
 
@@ -662,40 +671,101 @@ public partial class LocalAiSetupSettingsViewModel : ObservableObject
     }
 }
 
+public sealed class LocalApiTokenRowViewModel
+{
+    public string Id { get; init; } = string.Empty;
+    public string Name { get; init; } = string.Empty;
+    public string CreatedAtDisplay { get; init; } = string.Empty;
+}
+
+/// <summary>
+/// Manages named per-app tokens (docs/review/03-next-level-roadmap.md Phase 2)
+/// instead of one shared token. Add/revoke apply and save immediately,
+/// independent of the page's main Save button: a pending revocation that
+/// silently reverted if the user navigated away without saving would be a
+/// real security footgun for a credential list.
+/// </summary>
 public partial class LocalApiSettingsViewModel : ObservableObject
 {
     private readonly ISecretStore _secrets;
+    private readonly ISettingsService? _settings;
 
     [ObservableProperty] private bool _enabled;
     [ObservableProperty] private int _port = 39300;
-    [ObservableProperty] private string _apiToken = string.Empty;
-    [ObservableProperty] private string _apiTokenStatus = "No token generated yet.";
+    [ObservableProperty] private string _newTokenName = string.Empty;
+    [ObservableProperty] private string _newTokenValue = string.Empty;
+    [ObservableProperty] private string _tokenStatus = "No tokens generated yet. The local API refuses every request until one is saved.";
+    [ObservableProperty] private string _processStatusLabel = "Stopped";
 
-    public LocalApiSettingsViewModel(ISecretStore secrets) => _secrets = secrets;
+    public ObservableCollection<LocalApiTokenRowViewModel> Tokens { get; } = [];
+
+    public LocalApiSettingsViewModel(ISecretStore secrets, ISettingsService? settings = null)
+    {
+        _secrets = secrets;
+        _settings = settings;
+    }
 
     public void ReloadFrom(AppSettings settings)
     {
         Enabled = settings.LocalApi.Enabled;
         Port = settings.LocalApi.Port;
-        ApiToken = string.Empty;
-        ApiTokenStatus = string.IsNullOrWhiteSpace(settings.LocalApi.ApiToken)
-            ? "No token generated yet. The local API refuses every request until one is saved."
-            : "A token is stored. Generate and save a new one to replace it.";
+        NewTokenName = string.Empty;
+        NewTokenValue = string.Empty;
+        Tokens.Clear();
+        foreach (var t in settings.LocalApi.Tokens)
+            Tokens.Add(new LocalApiTokenRowViewModel { Id = t.Id, Name = t.Name, CreatedAtDisplay = t.CreatedAt.ToLocalTime().ToString("g") });
+        TokenStatus = Tokens.Count == 0
+            ? "No tokens generated yet. The local API refuses every request until one is saved."
+            : $"{Tokens.Count} token(s) configured.";
     }
 
-    public async Task ApplyToAsync(AppSettings settings)
+    public Task ApplyToAsync(AppSettings settings)
     {
         settings.LocalApi.Enabled = Enabled;
         settings.LocalApi.Port = Port;
-        if (!string.IsNullOrWhiteSpace(ApiToken))
-            settings.LocalApi.ApiToken = await _secrets.StoreAsync("local-api-token", ApiToken.Trim());
+        return Task.CompletedTask;
     }
 
     [RelayCommand]
     private void GenerateToken()
     {
-        ApiToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
-        ApiTokenStatus = "New token generated below. Copy it now and click Save; it will not be shown again.";
+        NewTokenValue = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
+        TokenStatus = "New token generated below. Copy it now and click Add; it will not be shown again.";
+    }
+
+    [RelayCommand]
+    private async Task AddTokenAsync()
+    {
+        if (_settings is null || string.IsNullOrWhiteSpace(NewTokenName) || string.IsNullOrWhiteSpace(NewTokenValue))
+            return;
+
+        var name = NewTokenName.Trim();
+        var secretRef = await _secrets.StoreAsync($"local-api-token-{Guid.NewGuid():N}", NewTokenValue.Trim());
+        var entry = new LocalApiTokenEntry { Name = name, SecretRef = secretRef };
+        _settings.Settings.LocalApi.Tokens.Add(entry);
+        await _settings.SaveAsync();
+
+        Tokens.Add(new LocalApiTokenRowViewModel { Id = entry.Id, Name = entry.Name, CreatedAtDisplay = entry.CreatedAt.ToLocalTime().ToString("g") });
+        NewTokenName = string.Empty;
+        NewTokenValue = string.Empty;
+        TokenStatus = $"{Tokens.Count} token(s) configured.";
+    }
+
+    [RelayCommand]
+    private async Task RevokeTokenAsync(LocalApiTokenRowViewModel? row)
+    {
+        if (_settings is null || row is null)
+            return;
+
+        _settings.Settings.LocalApi.Tokens.RemoveAll(t => t.Id == row.Id);
+        await _settings.SaveAsync();
+
+        var existing = Tokens.FirstOrDefault(t => t.Id == row.Id);
+        if (existing is not null)
+            Tokens.Remove(existing);
+        TokenStatus = Tokens.Count == 0
+            ? "No tokens configured. The local API refuses every request until one is saved."
+            : $"{Tokens.Count} token(s) configured.";
     }
 }
 

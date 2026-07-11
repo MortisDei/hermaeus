@@ -29,7 +29,7 @@ public interface IAgentWorkspaceTools
     IReadOnlyList<AgentFileSearchResult> SearchFiles(AgentWorkspaceOptions options, string query);
     AgentFileReadResult ReadFile(AgentWorkspaceOptions options, string relativePath);
     AgentFileSummaryResult SummarizeFile(AgentWorkspaceOptions options, string relativePath);
-    AgentFileReadResult ApplyDraftPatch(AgentWorkspaceOptions options, string relativePath, string proposedContent);
+    Task<AgentFileReadResult> ApplyDraftPatchAsync(AgentWorkspaceOptions options, string relativePath, string proposedContent, CancellationToken ct = default);
     string DraftPatch(string relativePath, string rationale, string proposedContent);
 }
 

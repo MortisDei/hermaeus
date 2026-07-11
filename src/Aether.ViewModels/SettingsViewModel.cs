@@ -13,6 +13,7 @@ public partial class SettingsViewModel : ObservableObject
     private readonly IToastService _toasts;
     private readonly XttsProcessManager _xttsProcess;
     private readonly KokoroProcessManager _kokoroProcess;
+    private readonly LocalApiProcessManager _localApiProcess;
     private readonly ServicesViewModel? _servicesView;
 
     [ObservableProperty] private bool _isSaved;
@@ -128,6 +129,7 @@ public partial class SettingsViewModel : ObservableObject
         ISecretStore secrets,
         XttsProcessManager xttsProcess,
         KokoroProcessManager kokoroProcess,
+        LocalApiProcessManager localApiProcess,
         LocalAiSetupService localAiSetup,
         TrustService trust,
         ServicesViewModel? services = null)
@@ -136,6 +138,7 @@ public partial class SettingsViewModel : ObservableObject
         _toasts = toasts;
         _xttsProcess = xttsProcess;
         _kokoroProcess = kokoroProcess;
+        _localApiProcess = localApiProcess;
         _servicesView = services;
 
         Llm = new LlmDefaultsSettingsViewModel(secrets);
@@ -144,7 +147,9 @@ public partial class SettingsViewModel : ObservableObject
         Ui = new UiSettingsViewModel();
         Memory = new MemorySettingsViewModel();
         Mcp = new McpSettingsViewModel();
-        LocalApi = new LocalApiSettingsViewModel(secrets);
+        LocalApi = new LocalApiSettingsViewModel(secrets, _svc);
+        LocalApi.ProcessStatusLabel = _localApiProcess.StatusLabel;
+        _localApiProcess.StatusChanged += () => LocalApi.ProcessStatusLabel = _localApiProcess.StatusLabel;
         Tts = new TtsSettingsViewModel(tts, voiceProviderRegistry, _toasts, xttsProcess, kokoroProcess, secrets, _svc);
         LocalAiSetup = new LocalAiSetupSettingsViewModel(_svc, localAiSetup, _toasts, Tts, Data, Rag, SaveAsync);
         Trust = new TrustSettingsViewModel(_svc, trust, _toasts, Tts, Data, Rag);
@@ -234,6 +239,7 @@ public partial class SettingsViewModel : ObservableObject
         IsSaved = true;
         _toasts.Show("Settings saved", "Aether settings were updated.", ToastKind.Success);
         await ApplyEmbeddingModelChangeAsync(previousEmbedding);
+        await EnsureLocalApiRunningStateAsync();
         await Task.Delay(2000);
         IsSaved = false;
     }
@@ -246,6 +252,32 @@ public partial class SettingsViewModel : ObservableObject
         Tts.Dispose();
         _xttsProcess.Stop();
         _kokoroProcess.Stop();
+        _localApiProcess.Stop();
+    }
+
+    /// <summary>
+    /// Starts or stops the Aether.LocalApi child process to match
+    /// <c>LocalApi.Enabled</c>. Called after every settings save (so toggling
+    /// the checkbox takes effect immediately) and once at app startup.
+    /// </summary>
+    public async Task EnsureLocalApiRunningStateAsync()
+    {
+        try
+        {
+            if (_svc.Settings.LocalApi.Enabled)
+            {
+                if (!_localApiProcess.IsRunning)
+                    await _localApiProcess.StartAsync(_svc.Settings);
+            }
+            else
+            {
+                _localApiProcess.Stop();
+            }
+        }
+        catch (Exception ex)
+        {
+            _toasts.Show("Local API did not start", ex.Message, ToastKind.Warning);
+        }
     }
 
     private void ApplyTtsTo(AppSettings settings)

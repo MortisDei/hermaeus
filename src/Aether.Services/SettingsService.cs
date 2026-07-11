@@ -84,6 +84,7 @@ public sealed class SettingsService : ISettingsService
             var json = await File.ReadAllTextAsync(_path);
             Settings = JsonSerializer.Deserialize<AppSettings>(json, Opts) ?? new();
             needsPersist = MigrateLegacyLocalEndpoints(Settings);
+            needsPersist |= MigrateLegacyLocalApiToken(Settings);
             notify = true;
         }
         catch
@@ -264,6 +265,21 @@ public sealed class SettingsService : ISettingsService
         }
 
         return changed;
+    }
+
+    /// <summary>
+    /// Converts a pre-per-app-tokens single shared ApiToken into a "Default"
+    /// named token so an existing user's working integrations keep working
+    /// after upgrading (docs/review/03-next-level-roadmap.md Phase 2).
+    /// </summary>
+    private static bool MigrateLegacyLocalApiToken(AppSettings settings)
+    {
+        if (settings.LocalApi.Tokens.Count > 0 || string.IsNullOrWhiteSpace(settings.LocalApi.ApiToken))
+            return false;
+
+        settings.LocalApi.Tokens.Add(new LocalApiTokenEntry { Name = "Default", SecretRef = settings.LocalApi.ApiToken });
+        settings.LocalApi.ApiToken = string.Empty;
+        return true;
     }
 
     private static ServerConfig CreateDefaultServer(bool embeddingsMode) => new()

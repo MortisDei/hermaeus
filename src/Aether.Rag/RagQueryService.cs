@@ -214,7 +214,7 @@ public sealed class RagQueryService
         return new RagRetrievalResult(question, plan.PrimaryQuery, plan.QueryVariants, plan.PlannerNotes, semantic, bm25, fused, sw.ElapsedMilliseconds, ds?.Config);
     }
 
-    public async IAsyncEnumerable<string> StreamQueryAsync(
+    public async IAsyncEnumerable<RagStreamEvent> StreamQueryAsync(
         string datasetId,
         string question,
         RagQueryOptions? opts = null,
@@ -242,7 +242,7 @@ public sealed class RagQueryService
         if (preflightGrounding < opts.RefusalThreshold)
         {
             var refusal = "I do not have enough grounded context to answer that reliably.";
-            yield return refusal;
+            yield return RagStreamEvent.ForToken(refusal);
 
             totalSw.Stop();
             var refusalTrace = new RagQueryTrace
@@ -265,21 +265,25 @@ public sealed class RagQueryService
                 SelectedContext = fused.Select((r, i) => ToTraceChunk(r, i + 1)).ToList()
             };
             await PersistTraceAsync(refusalTrace, ct);
-            yield return $"__RAG_TRACE__{JsonSerializer.Serialize(new { refusalTrace.Id, refusalTrace.RetrievalLatencyMs, refusalTrace.TotalLatencyMs, refusalTrace.GroundingScore, refusalTrace.Refused, refusalTrace.RefusalReason, mode = refusalTrace.GroundingMode.ToString() })}__END_TRACE__";
+            yield return RagStreamEvent.ForTrace(new RagTraceSummary(
+                refusalTrace.Id,
+                refusalTrace.RetrievalLatencyMs,
+                refusalTrace.TotalLatencyMs,
+                refusalTrace.GroundingScore,
+                refusalTrace.GroundingMode.ToString(),
+                ExpandedQuery: refusalTrace.ExpandedQuestion,
+                QueryVariants: string.Join("\n", refusalTrace.QueryVariants),
+                PlannerNotes: refusalTrace.PlannerNotes,
+                ContextPackingSummary: refusalTrace.ContextPackingSummary,
+                Refused: refusalTrace.Refused,
+                RefusalReason: refusalTrace.RefusalReason));
             yield break;
         }
 
-        // Yield a structured header so the UI can parse sources
-        var sourcesJson = JsonSerializer.Serialize(fused.Select((r, i) => new
-        {
-            rank  = i + 1,
-            title = r.Chunk.SourceTitle,
-            file  = r.Chunk.SourceFile,
-            path  = r.Chunk.SourcePath,
-            score = MathF.Round(r.Score, 4),
-            content = r.Chunk.Content
-        }));
-        yield return $"__RAG_SOURCES__{sourcesJson}__END_SOURCES__";
+        // Yield a structured event so consumers can bind sources without
+        // parsing the answer stream themselves.
+        var sourceChunks = fused.Select((r, i) => ToTraceChunk(r, i + 1)).ToList();
+        yield return RagStreamEvent.ForSources(sourceChunks);
 
         // ── 9. Stream LLM answer ─────────────────────────────────────────
         var answer = new StringBuilder();
@@ -289,7 +293,7 @@ public sealed class RagQueryService
             ct: ct))
         {
             answer.Append(token);
-            yield return token;
+            yield return RagStreamEvent.ForToken(token);
         }
 
         totalSw.Stop();
@@ -314,7 +318,16 @@ public sealed class RagQueryService
             SelectedContext = fused.Select((r, i) => ToTraceChunk(r, i + 1)).ToList()
         };
         await PersistTraceAsync(trace, ct);
-        yield return $"__RAG_TRACE__{JsonSerializer.Serialize(new { trace.Id, trace.RetrievalLatencyMs, trace.TotalLatencyMs, trace.GroundingScore, mode = trace.GroundingMode.ToString() })}__END_TRACE__";
+        yield return RagStreamEvent.ForTrace(new RagTraceSummary(
+            trace.Id,
+            trace.RetrievalLatencyMs,
+            trace.TotalLatencyMs,
+            trace.GroundingScore,
+            trace.GroundingMode.ToString(),
+            ExpandedQuery: trace.ExpandedQuestion,
+            QueryVariants: string.Join("\n", trace.QueryVariants),
+            PlannerNotes: trace.PlannerNotes,
+            ContextPackingSummary: trace.ContextPackingSummary));
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────

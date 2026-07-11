@@ -75,17 +75,17 @@ namespace Aether.Tests
             var retrieval = await query.RetrieveAsync(dataset.Id, "apple", new RagQueryOptions(TopK: 3));
             True(retrieval.Selected.Count > 0, "RetrieveAsync should return at least one selected context");
 
-            // StreamQueryAsync should yield sources header and then a trace
+            // StreamQueryAsync should yield a Sources event and then a Trace event
             var sawSources = false;
             var sawTrace = false;
-            await foreach (var token in query.StreamQueryAsync(dataset.Id, "apple", new RagQueryOptions(TopK: 3)))
+            await foreach (var evt in query.StreamQueryAsync(dataset.Id, "apple", new RagQueryOptions(TopK: 3)))
             {
-                if (token.StartsWith("__RAG_SOURCES__")) sawSources = true;
-                if (token.StartsWith("__RAG_TRACE__")) sawTrace = true;
+                if (evt.Kind == RagStreamEventKind.Sources) sawSources = true;
+                if (evt.Kind == RagStreamEventKind.Trace) sawTrace = true;
             }
 
-            True(sawSources, "StreamQueryAsync should yield a sources header");
-            True(sawTrace, "StreamQueryAsync should yield a trace token at the end");
+            True(sawSources, "StreamQueryAsync should yield a Sources event");
+            True(sawTrace, "StreamQueryAsync should yield a Trace event at the end");
         }
 
         // Minimal runtime log implementation for tests

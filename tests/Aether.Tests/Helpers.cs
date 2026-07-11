@@ -24,7 +24,7 @@ namespace Aether.Tests
         public static SettingsService NewSettings(TempDir temp) => new(temp.PathFor("settings/settings.json"));
 
         public static SettingsViewModel NewSettingsViewModel(ISettingsService settings, ISecretStore secrets) =>
-            new(settings, new FakeTts(), new FakeVoiceProviderRegistry(settings), new FakeToasts(), new BackupService(settings), secrets, new XttsProcessManager(), new KokoroProcessManager(), new LocalAiSetupService(new PythonHealthValidator()), new TrustService());
+            new(settings, new FakeTts(), new FakeVoiceProviderRegistry(settings), new FakeToasts(), new BackupService(settings), secrets, new XttsProcessManager(), new KokoroProcessManager(), new LocalApiProcessManager(), new LocalAiSetupService(new PythonHealthValidator()), new TrustService());
 
         public static async Task ThrowsAsync<T>(Func<Task> action) where T : Exception
         {
@@ -138,6 +138,7 @@ namespace Aether.Tests
         public string ProviderName => "Capture";
         public bool IsConfigured => true;
         public IReadOnlyList<ChatMessage> LastMessages { get; private set; } = Array.Empty<ChatMessage>();
+        public LlmChatOptions? LastOptions { get; private set; }
 
         public Task<List<LlmModel>> GetModelsAsync(CancellationToken ct = default) =>
             Task.FromResult(new List<LlmModel> { new() { Id = "capture", Name = "Capture", Provider = "Test" } });
@@ -149,6 +150,7 @@ namespace Aether.Tests
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
         {
             LastMessages = messages.ToList();
+            LastOptions = options;
             await Task.Delay(1, ct);
             yield return new LlmStreamEvent("captured");
         }

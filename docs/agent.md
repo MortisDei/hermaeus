@@ -55,6 +55,19 @@ states so review decisions are visible at a glance.
 - Read-only file tools for workspace inspection: `list_files`, `search_files`,
   `read_file`, `summarize_file`, `draft_patch`, and `inspect_git_diff`.
 - Approval-gated write tool: `apply_draft_patch`.
+- Approval-gated command execution (`run_command`): only a recipe the
+  workspace itself declared safe in `.aether/workspace.json`, and only if
+  that recipe also appears in a fixed, hardcoded allowlist (`dotnet build`,
+  `dotnet test`, `npm test`, `cargo test`, `pytest`); always requires
+  approval even though the recipe is "safe."
+- MCP tools (Settings > MCP Servers): each configured server's declared
+  tools are exposed to the agent as `mcp:{serverId}:{toolName}`. A server can
+  optionally be restricted to an explicit allowed-tools list (comma
+  separated); leaving it empty permits every tool the server declares,
+  matching the original behavior. Every `mcp:` call always requires approval
+  regardless of what the server or the allowlist says, and the bridge also
+  refuses to forward a tool name the server did not actually declare via
+  `tools/list`, even if it happens to appear in a stale allowlist entry.
 - Proposed next actions with safety gates.
 - Local logs and JSONL traces for debugging.
 - Approval-gated draft patch queue with approval metadata and task-state

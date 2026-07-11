@@ -402,6 +402,66 @@ namespace Aether.Tests
             return Task.CompletedTask;
         }
 
+        public static async Task AppLifecycleJournalTracksCleanAndUncleanExits()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+
+            var firstRun = new AppLifecycleJournalService(settings);
+            var previousBeforeAnyRun = firstRun.RecordStartup();
+            Equal<AppLifecycleRecord?>(null, previousBeforeAnyRun, "the very first run should have no previous session recorded");
+
+            firstRun.RecordOperation("loading reranker ONNX session (EnsureLoadedAsync)");
+            // Simulate the process ending without RecordCleanExit ever running (a crash).
+
+            var secondRun = new AppLifecycleJournalService(settings);
+            var previousAfterCrash = secondRun.RecordStartup();
+            True(previousAfterCrash is not null, "a new journal instance should read back the prior session's record");
+            False(previousAfterCrash!.CleanExit, "a session that never recorded a clean exit should be reported as unclean");
+            Equal("loading reranker ONNX session (EnsureLoadedAsync)", previousAfterCrash.LastOperation,
+                "the last recorded operation before the simulated crash should be preserved");
+
+            secondRun.RecordCleanExit();
+            var thirdRun = new AppLifecycleJournalService(settings);
+            var previousAfterCleanExit = thirdRun.RecordStartup();
+            True(previousAfterCleanExit is not null, "a third journal instance should still read back a record");
+            True(previousAfterCleanExit!.CleanExit, "a session that called RecordCleanExit should be reported as clean");
+        }
+
+        public static async Task DoctorWarnsWhenPreviousSessionDidNotExitCleanly()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+
+            var crashedRun = new AppLifecycleJournalService(settings);
+            crashedRun.RecordStartup();
+            crashedRun.RecordOperation("loading Kokoro native ONNX session (EnsureLoadedAsync)");
+            // No RecordCleanExit(): simulates the process dying mid-operation.
+
+            var currentRun = new AppLifecycleJournalService(settings);
+            currentRun.RecordStartup();
+
+            var doctor = new DoctorService(
+                settings,
+                new RuntimeProfileService(settings),
+                new FakeVoiceProviderRegistry(settings),
+                new FakeSecretStore(),
+                new SqliteRagStore(settings),
+                new ThrowingEmbeddingService(),
+                new FakeSystemInfo(),
+                new PythonHealthValidator(),
+                new NoOpReranker(),
+                lifecycleJournal: currentRun);
+
+            var report = await doctor.ScanAsync();
+            var check = report.Checks.Single(c => c.Key == "clean-shutdown");
+            Equal(DoctorCheckStatus.Warning, check.Status, "Doctor should warn when the previous session did not exit cleanly");
+            True(check.Detail.Contains("loading Kokoro native ONNX session (EnsureLoadedAsync)", StringComparison.Ordinal),
+                "the warning detail should name the last recorded operation");
+        }
+
         public static async Task DoctorDoesNotTreatChatGgufAsEmbeddingModel()
         {
             using var temp = new TempDir();
@@ -917,7 +977,7 @@ namespace Aether.Tests
 
             var tools = new Aether.Agent.Services.AgentWorkspaceTools();
             var options = new Aether.Agent.Models.AgentWorkspaceOptions(root);
-            var result = tools.ApplyDraftPatch(options, "Program.cs", "new content\nsecond line\n");
+            var result = await tools.ApplyDraftPatchAsync(options, "Program.cs", "new content\nsecond line\n");
 
             Equal("Program.cs", result.RelativePath, "applied patch should report the relative path");
             Equal("new content\nsecond line\n", await File.ReadAllTextAsync(Path.Combine(root, "Program.cs")), "applied patch should write the new file content");
@@ -1108,6 +1168,66 @@ namespace Aether.Tests
             }
         }
 
+        public static async Task SecretStoreKeyFileIsWrittenAtomicallyWithRestrictedPermissions()
+        {
+            using var temp = new TempDir();
+            var previous = Environment.GetEnvironmentVariable("AETHER_DISABLE_OS_KEYCHAIN");
+            Environment.SetEnvironmentVariable("AETHER_DISABLE_OS_KEYCHAIN", "1");
+            try
+            {
+                var settings = NewSettings(temp);
+                var dataRoot = temp.PathFor("data");
+                settings.Settings.DataManagement.DataRootDirectory = dataRoot;
+                var store = new SecretStore(settings);
+
+                await store.StoreAsync("openai-api-key", "sk-test-secret");
+
+                var localKey = Path.Combine(dataRoot, "secrets.local.key");
+                True(File.Exists(localKey), "fallback key file should be created");
+                var leftoverTemp = Directory.GetFiles(dataRoot, "secrets.local.key.*.tmp");
+                Equal(0, leftoverTemp.Length, "the key file's temp-write artifact should not survive a successful write");
+
+                if (!OperatingSystem.IsWindows())
+                {
+                    var mode = File.GetUnixFileMode(localKey);
+                    Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, mode, "the key file should be restricted to the owner");
+                }
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("AETHER_DISABLE_OS_KEYCHAIN", previous);
+            }
+        }
+
+        public static async Task SecretStoreLogsWarningWhenStoredSecretCannotBeDecrypted()
+        {
+            using var temp = new TempDir();
+            var previous = Environment.GetEnvironmentVariable("AETHER_DISABLE_OS_KEYCHAIN");
+            Environment.SetEnvironmentVariable("AETHER_DISABLE_OS_KEYCHAIN", "1");
+            try
+            {
+                var settings = NewSettings(temp);
+                var dataRoot = temp.PathFor("data");
+                settings.Settings.DataManagement.DataRootDirectory = dataRoot;
+                var log = new RuntimeLogService(settings);
+                var store = new SecretStore(settings, log);
+
+                var reference = await store.StoreAsync("openai-api-key", "sk-test-secret");
+
+                var localKey = Path.Combine(dataRoot, "secrets.local.key");
+                await File.WriteAllTextAsync(localKey, Convert.ToBase64String(new byte[32]));
+
+                var resolved = await store.ResolveAsync(reference);
+                Equal(string.Empty, resolved, "a secret that fails to decrypt under a replaced key should resolve empty rather than throw");
+                True(log.GetEntries().Any(e => e.Level == RuntimeLogLevel.Warning && e.Message.Contains("could not be decrypted", StringComparison.OrdinalIgnoreCase)),
+                    "a total decrypt failure should be logged instead of silently swallowed");
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("AETHER_DISABLE_OS_KEYCHAIN", previous);
+            }
+        }
+
         public static async Task SettingsSavePrunesPerConversationMemoryOverrides()
         {
             using var temp = new TempDir();
@@ -1239,6 +1359,29 @@ namespace Aether.Tests
             {
                 Environment.SetEnvironmentVariable("AETHER_DISABLE_OS_KEYCHAIN", previous);
             }
+        }
+
+        public static async Task SettingsLoadMigratesLegacySharedLocalApiTokenToNamedEntry()
+        {
+            using var temp = new TempDir();
+            var path = temp.PathFor("settings/settings.json");
+
+            var writer = new SettingsService(path);
+            writer.Settings.LocalApi.ApiToken = "secret:local-api-token-legacy";
+            await writer.SaveAsync();
+
+            var reader = new SettingsService(path);
+            await reader.LoadAsync();
+
+            Equal(1, reader.Settings.LocalApi.Tokens.Count, "the legacy shared token should migrate into exactly one named entry");
+            Equal("Default", reader.Settings.LocalApi.Tokens[0].Name, "the migrated entry should be named Default");
+            Equal("secret:local-api-token-legacy", reader.Settings.LocalApi.Tokens[0].SecretRef, "the migrated entry should carry the original secret reference");
+            Equal(string.Empty, reader.Settings.LocalApi.ApiToken, "the legacy field should be cleared once migrated");
+
+            // Migration should be idempotent: loading again must not duplicate the entry.
+            var reloaded = new SettingsService(path);
+            await reloaded.LoadAsync();
+            Equal(1, reloaded.Settings.LocalApi.Tokens.Count, "re-loading already-migrated settings should not duplicate the token entry");
         }
 
         public static async Task SettingsLoadBacksUpUnreadableJson()
@@ -1502,6 +1645,53 @@ namespace Aether.Tests
             Equal<Memory?>(null, deleted, "deleted memory should not exist");
         }
 
+        public static async Task MemoryStoreRoundTripsExplicitSourceAndBackfillsLegacyRows()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var store = new MemoryStore(settings);
+            await store.InitializeAsync();
+
+            var withSource = new Memory
+            {
+                Id = "mem-with-source",
+                Category = "facts",
+                Content = "Explicit source memory.",
+                SourceConversationId = "conv-1",
+                Source = new SourceReference(ProvenanceKind.Memory, "Conversation", Locator: "conv-1", Snippet: "hi")
+            };
+            await store.SaveAsync(withSource);
+            var reloaded = await store.GetByIdAsync("mem-with-source");
+            True(reloaded?.Source is not null, "an explicitly set source should round-trip");
+            Equal(ProvenanceKind.Memory, reloaded!.Source!.Kind, "round-tripped source should keep its kind");
+            Equal("conv-1", reloaded.Source!.Locator, "round-tripped source should keep its locator");
+            Equal("hi", reloaded.Source!.Snippet, "round-tripped source should keep its snippet");
+
+            // A memory saved without an explicit Source (only the legacy
+            // SourceConversationId field) should still get a source_json of
+            // null on disk, and backfill a SourceReference purely at read
+            // time from the conversation id (docs/review/03-next-level-roadmap.md
+            // Phase 1: "no data rewrite").
+            var legacy = new Memory
+            {
+                Id = "mem-legacy",
+                Category = "facts",
+                Content = "Legacy memory with no structured source.",
+                SourceConversationId = "conv-2"
+            };
+            await store.SaveAsync(legacy);
+            var reloadedLegacy = await store.GetByIdAsync("mem-legacy");
+            True(reloadedLegacy?.Source is not null, "a legacy row should backfill a source reference at read time");
+            Equal(ProvenanceKind.Memory, reloadedLegacy!.Source!.Kind, "backfilled source should be memory-kind");
+            Equal("conv-2", reloadedLegacy.Source!.Locator, "backfilled source should point at the source conversation id");
+
+            var noSourceAtAll = new Memory { Id = "mem-none", Category = "facts", Content = "No conversation link." };
+            await store.SaveAsync(noSourceAtAll);
+            var reloadedNone = await store.GetByIdAsync("mem-none");
+            Equal<SourceReference?>(null, reloadedNone!.Source, "a memory with no conversation id and no explicit source should stay null");
+        }
+
         public static async Task MemoryStoreCountsByConversationWork()
         {
             using var temp = new TempDir();
@@ -1538,6 +1728,8 @@ namespace Aether.Tests
             Equal(2, memories.Count, "extractor should parse two markers");
             True(memories.All(m => m.SourceConversationId == "conv-extract"), "extracted memories should preserve source conversation id");
             True(memories.Any(m => m.Category == "preferences"), "preference-like text should be categorised as preferences");
+            True(memories.All(m => m.Source is { Kind: ProvenanceKind.Memory, Locator: "conv-extract" }),
+                "extracted memories should carry a structured source reference pointing at the conversation");
 
             var cleaned = service.CleanMemoryMarkers(output);
             False(cleaned.Contains("[MEMORY:", StringComparison.Ordinal), "cleaned output should remove marker syntax");
@@ -1598,6 +1790,54 @@ namespace Aether.Tests
             Equal("--arg", args[0], "first arg should be flag");
             Equal("value with \"inner\" quotes", args[1], "escaped quotes should be preserved");
             Equal("--flag", args[2], "trailing arg should parse");
+            return Task.CompletedTask;
+        }
+
+        public static Task LocalApiProcessManagerResolvesPackagedExecutableFirst()
+        {
+            using var temp = new TempDir();
+            var baseDir = temp.PathFor("desktop-out") + Path.DirectorySeparatorChar;
+            Directory.CreateDirectory(baseDir);
+            var localApiDir = Path.Combine(baseDir, "LocalApi");
+            Directory.CreateDirectory(localApiDir);
+            var exeName = OperatingSystem.IsWindows() ? "Aether.LocalApi.exe" : "Aether.LocalApi";
+            File.WriteAllText(Path.Combine(localApiDir, exeName), "stub");
+
+            var (fileName, args) = LocalApiProcessManager.ResolveLaunchTarget(baseDir);
+            True(fileName is not null && fileName.EndsWith(exeName, StringComparison.Ordinal),
+                "a packaged sibling LocalApi executable should be preferred");
+            Equal(0, args.Count, "the packaged executable needs no launch arguments");
+            return Task.CompletedTask;
+        }
+
+        public static Task LocalApiProcessManagerFallsBackToDevBuildOutput()
+        {
+            using var temp = new TempDir();
+            var repoRoot = temp.PathFor("repo");
+            File.WriteAllText(Path.Combine(Directory.CreateDirectory(repoRoot).FullName, "Aether.sln"), "");
+            var desktopBin = Path.Combine(repoRoot, "src", "Aether.Desktop", "bin", "Debug", "net10.0");
+            Directory.CreateDirectory(desktopBin);
+            var localApiBin = Path.Combine(repoRoot, "src", "Aether.LocalApi", "bin", "Debug", "net10.0");
+            Directory.CreateDirectory(localApiBin);
+            File.WriteAllText(Path.Combine(localApiBin, "Aether.LocalApi.dll"), "stub");
+
+            var dll = LocalApiProcessManager.ResolveDevBuildDll(desktopBin);
+            True(dll is not null && File.Exists(dll), "dev fallback should locate the sibling project's own build output");
+
+            var (fileName, args) = LocalApiProcessManager.ResolveLaunchTarget(desktopBin);
+            Equal("dotnet", fileName, "dev fallback should launch through the dotnet muxer");
+            Equal(1, args.Count, "dev fallback should pass exactly the resolved dll path");
+            return Task.CompletedTask;
+        }
+
+        public static Task LocalApiProcessManagerReturnsNullWhenNothingIsBuilt()
+        {
+            using var temp = new TempDir();
+            var baseDir = temp.PathFor("nowhere");
+            Directory.CreateDirectory(baseDir);
+
+            var (fileName, _) = LocalApiProcessManager.ResolveLaunchTarget(baseDir);
+            True(fileName is null, "with no packaged install and no dev build output, there is nothing to launch");
             return Task.CompletedTask;
         }
 

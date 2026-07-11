@@ -17,6 +17,13 @@ await app.Services.GetRequiredService<IMemoryStore>().InitializeAsync();
 await app.Services.GetRequiredService<SqliteRagStore>().InitializeAsync();
 
 var localApiSettings = settingsService.Settings.LocalApi;
+if (!localApiSettings.Enabled)
+{
+    Console.Error.WriteLine("Aether.LocalApi: LocalApi.Enabled is false in settings. Refusing to serve. Enable it in Settings > Local API first.");
+    Environment.Exit(1);
+    return;
+}
+
 var port = localApiSettings.Port is > 0 and <= 65535 ? localApiSettings.Port : 39300;
 app.Urls.Clear();
 app.Urls.Add($"http://127.0.0.1:{port}");

@@ -1,20 +1,39 @@
-# Architecture & Strategy Review — July 2026
+# Review Round 2 (r2) - July 2026
 
-Principal-engineer review of Aether pre-1.0, covering the next several years
-of evolution. Read in order; later documents reference earlier ones.
+Second principal-engineer review, following the fully actioned r1
+(now in `archived/r1/`). r1's roadmap has no open items at any horizon;
+this round audits the code that landed since (v2.0 and v3.0 waves:
+Aether.LocalApi, Aether.Mcp, Aether.Voice, agent command execution,
+Aether.Composition, the ViewModel orchestrator extractions) and defines
+what "next level" means from here.
 
-1. [Architecture Review](01-architecture-review.md) — strengths, weaknesses, ranked risks
-2. [Dependency Review](02-dependency-review.md) — every package audited; containment strategy and reduction roadmap
-3. [Architectural Opportunities](03-architectural-opportunities.md) — twelve candidates, each adopted, deferred, or rejected with reasons
-4. [Vision](04-vision.md) — what Aether 2.0 is, who it serves, why it wins
-5. [Feature Audit](05-feature-audit.md) — every feature rated Essential/Refine/Over-engineered/Merge/Deprecate
-6. [Technical Debt](06-technical-debt.md) — ranked debt register
-7. [Roadmap](07-roadmap.md) — 1.0 / 1.x / 2.0 / long-term, architecture-first
-8. [Brutal Critique](08-brutal-critique.md) — the unvarnished pre-release assessment
-9. [System Map](09-system-map.md) — spine/capabilities/tools buckets, the Context and Evaluation System unifications, and the dual-ownership register
-10. [Evaluation System](10-evaluation-system.md) — design for folding Benchmarks, Compare Models, and the RAG eval harness into one engine with three projections
+Read in order:
 
-The recurring conclusion: Aether's foundations are strong; its risk is
-parallel vertical features. Four unifications (memory scopes, check/fix
-registry, context-pack builder, provider capability model) resolve most of
-the audit findings and make the 2.0 vision mostly wiring.
+1. [Code Audit](01-code-audit.md) - concrete defects and risks found in the
+   post-r1 code, ranked by severity, each with file references and
+   acceptance criteria. Written to be actionable by an implementing agent.
+2. [Architecture Assessment](02-architecture-assessment.md) - the structural
+   state of the codebase after the v3.0 extraction pass: what worked, what
+   residue remains, what to leave alone.
+3. [Next-Level Roadmap](03-next-level-roadmap.md) - the r2 roadmap: hardening
+   first, then the deferred provenance/API/agent work in dependency order,
+   with explicit rejections.
+
+Headline verdict: the r1 conclusions held. The four unifications did their
+job; the v2.0 features (workspace manifest, gated command execution, MCP,
+local API, native voice) landed with the security posture intact and with
+tests. The defects found this round are seam-level, not architectural:
+one phantom setting, a handful of process/stream handling bugs in the new
+MCP and agent code, and JSON hygiene in the local API trace path. Nothing
+requires a redesign. The next level is: fix the audit list, then ship the
+deferred provenance and per-app-token work that turns the local API from
+a demo into infrastructure other apps can trust.
+
+**Status: fully actioned as of `0.9.42-alpha`.** Every item in docs 01 and
+03 is DONE; see 03's per-item notes for the handful of places where
+implementation surfaced a real gap beyond what was originally scoped
+(memory injection existed but nothing called it; the MCP bridge never
+checked a tool was actually declared before forwarding it) and the two
+Phase 4 items that are manual/CI practice rather than code
+(first-run VM walk, suite-time watch). r3 should be run against real usage
+traces, not code alone.

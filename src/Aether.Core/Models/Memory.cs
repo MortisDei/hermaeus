@@ -64,6 +64,15 @@ public class Memory
     public string? SourceConversationId { get; set; }
 
     /// <summary>
+    /// Structured provenance for this memory (docs/review/03-next-level-roadmap.md
+    /// Phase 1, "provenance everywhere"). New memories get one populated at
+    /// extraction time; memories saved before this field existed backfill one
+    /// from <see cref="SourceConversationId"/> at read time instead of a data
+    /// rewrite (see <c>MemoryStore.Map</c>).
+    /// </summary>
+    public SourceReference? Source { get; set; }
+
+    /// <summary>
     /// Importance score from 0-1, used for ranking which memories to inject into context.
     /// </summary>
     public double ImportanceScore { get; set; } = 0.5;

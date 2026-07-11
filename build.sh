@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT="$ROOT_DIR/src/Aether.Desktop/Aether.Desktop.csproj"
+LOCALAPI_PROJECT="$ROOT_DIR/src/Aether.LocalApi/Aether.LocalApi.csproj"
 DIST_DIR="$ROOT_DIR/dist"
 RUNTIME="linux-x64"
 CONFIGURATION="Release"
@@ -68,18 +69,21 @@ fi
 PACKAGE_NAME="aether-$VERSION-$RUNTIME"
 PACKAGE_DIR="$DIST_DIR/$PACKAGE_NAME"
 PUBLISH_DIR="$DIST_DIR/.publish-$RUNTIME"
+LOCALAPI_PUBLISH_DIR="$DIST_DIR/.publish-localapi-$RUNTIME"
 ARCHIVE="$DIST_DIR/$PACKAGE_NAME.tar.gz"
 CHECKSUM="$ARCHIVE.sha256"
 DOC_DIR="$PACKAGE_DIR/docs"
+LOCALAPI_DIR="$PACKAGE_DIR/LocalApi"
 
 if [[ "$SKIP_RESTORE" == "false" ]]; then
   echo "Restoring..."
   dotnet restore "$PROJECT" -r "$RUNTIME"
+  dotnet restore "$LOCALAPI_PROJECT" -r "$RUNTIME"
 fi
 
 echo "Publishing $RUNTIME ($CONFIGURATION, self-contained=$SELF_CONTAINED)..."
-rm -rf "$PACKAGE_DIR" "$PUBLISH_DIR" "$ARCHIVE" "$CHECKSUM"
-mkdir -p "$PACKAGE_DIR" "$PUBLISH_DIR" "$DOC_DIR"
+rm -rf "$PACKAGE_DIR" "$PUBLISH_DIR" "$LOCALAPI_PUBLISH_DIR" "$ARCHIVE" "$CHECKSUM"
+mkdir -p "$PACKAGE_DIR" "$PUBLISH_DIR" "$LOCALAPI_PUBLISH_DIR" "$DOC_DIR" "$LOCALAPI_DIR"
 
 publish_args=(
   "$PROJECT"
@@ -94,7 +98,21 @@ publish_args=(
 
 dotnet publish "${publish_args[@]}"
 
+localapi_publish_args=(
+  "$LOCALAPI_PROJECT"
+  -c "$CONFIGURATION"
+  -r "$RUNTIME"
+  --self-contained "$SELF_CONTAINED"
+  -o "$LOCALAPI_PUBLISH_DIR"
+  --no-restore
+  -p:UseSharedCompilation=false
+  -m:1
+)
+
+dotnet publish "${localapi_publish_args[@]}"
+
 cp -a "$PUBLISH_DIR"/. "$PACKAGE_DIR"/
+cp -a "$LOCALAPI_PUBLISH_DIR"/. "$LOCALAPI_DIR"/
 cp "$ROOT_DIR/README.md" "$DOC_DIR/README.md"
 cp "$ROOT_DIR/LICENSE.md" "$DOC_DIR/LICENSE.md"
 cp "$ROOT_DIR/NOTICE.md" "$DOC_DIR/NOTICE.md"
@@ -213,7 +231,7 @@ echo "Removed Aether desktop launcher and installed package."
 UNINSTALL
 
 chmod +x "$PACKAGE_DIR/install-desktop.sh" "$PACKAGE_DIR/uninstall-desktop.sh"
-rm -rf "$PUBLISH_DIR"
+rm -rf "$PUBLISH_DIR" "$LOCALAPI_PUBLISH_DIR"
 
 echo "Creating $ARCHIVE..."
 tar -C "$DIST_DIR" -czf "$ARCHIVE" "$PACKAGE_NAME"

@@ -44,7 +44,7 @@ public sealed class CompositeLlmService : ILlmService, IDisposable
     /// <summary>
     /// The single source of truth for "is this provider enabled," so the
     /// per-provider settings flags aren't matched against a provider tag in
-    /// more than one place (docs/review/06-technical-debt.md item 4).
+    /// more than one place (docs/review/archived/r1/06-technical-debt.md item 4).
     /// </summary>
     public static bool IsProviderEnabled(string tag, AppSettings settings) => tag switch
     {

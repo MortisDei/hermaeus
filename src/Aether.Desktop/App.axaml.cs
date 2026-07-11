@@ -44,6 +44,7 @@ public partial class App : Application
             window.Opened += async (_, _) => await InitializeAppAsync(sp, vm);
             desktop.Exit += (_, _) =>
             {
+                sp.GetRequiredService<AppLifecycleJournalService>().RecordCleanExit();
                 _desktopIntegration?.Dispose();
                 vm.Shutdown();
                 sp.Dispose();
@@ -58,6 +59,7 @@ public partial class App : Application
         try
         {
             await sp.GetRequiredService<ISettingsService>().LoadAsync();
+            sp.GetRequiredService<AppLifecycleJournalService>().RecordStartup();
             await Task.WhenAll(
                 sp.GetRequiredService<IConversationStore>().InitializeAsync(),
                 sp.GetRequiredService<IMemoryStore>().InitializeAsync(),

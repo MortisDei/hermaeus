@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -18,16 +19,55 @@ public sealed class McpClient : IAsyncDisposable
     private readonly TextWriter _output;
     private readonly ConcurrentDictionary<long, TaskCompletionSource<JsonElement>> _pending = new();
     private readonly Task _readLoop;
+    private readonly Task? _stderrDrain;
     private readonly CancellationTokenSource _readLoopCts = new();
+    private readonly StringBuilder _stderrTail = new();
+    private readonly object _stderrLock = new();
+    private const int MaxStderrTailChars = 4096;
     private long _nextId;
     private bool _disposed;
+    private volatile bool _serverClosed;
 
-    private McpClient(TextReader input, TextWriter output, Process? process)
+    private McpClient(TextReader input, TextWriter output, Process? process, TextReader? stderr = null)
     {
         _input = input;
         _output = output;
         _process = process;
         _readLoop = Task.Run(ReadLoopAsync);
+        var stderrReader = stderr ?? process?.StandardError;
+        _stderrDrain = stderrReader is null ? null : Task.Run(() => DrainStderrAsync(stderrReader, _readLoopCts.Token));
+    }
+
+    /// <summary>
+    /// Last few KB the server wrote to stderr. Chatty MCP servers (common for
+    /// Node/Python implementations) can otherwise block on an unread stderr
+    /// pipe once the OS buffer fills, hanging every in-flight call; draining
+    /// it continuously avoids that deadlock and gives failures useful context
+    /// (docs/review/01-code-audit.md P2-2).
+    /// </summary>
+    public string StderrTail
+    {
+        get { lock (_stderrLock) return _stderrTail.ToString(); }
+    }
+
+    private async Task DrainStderrAsync(TextReader stderr, CancellationToken ct)
+    {
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                var line = await stderr.ReadLineAsync(ct);
+                if (line is null) break;
+
+                lock (_stderrLock)
+                {
+                    _stderrTail.AppendLine(line);
+                    if (_stderrTail.Length > MaxStderrTailChars)
+                        _stderrTail.Remove(0, _stderrTail.Length - MaxStderrTailChars);
+                }
+            }
+        }
+        catch { }
     }
 
     public static McpClient Start(string command, IReadOnlyList<string> arguments, string? workingDirectory)
@@ -53,9 +93,11 @@ public sealed class McpClient : IAsyncDisposable
     /// <summary>
     /// Wires the client directly to a pair of streams instead of spawning a
     /// process. Exists so tests can exercise the JSON-RPC framing and
-    /// handshake logic against an in-memory fake server.
+    /// handshake logic against an in-memory fake server. An optional stderr
+    /// reader lets tests simulate a chatty server to exercise the stderr
+    /// drain (docs/review/01-code-audit.md P2-2).
     /// </summary>
-    public static McpClient FromStreams(TextReader input, TextWriter output) => new(input, output, process: null);
+    public static McpClient FromStreams(TextReader input, TextWriter output, TextReader? stderr = null) => new(input, output, process: null, stderr);
 
     public async Task InitializeAsync(CancellationToken ct = default)
     {
@@ -91,7 +133,7 @@ public sealed class McpClient : IAsyncDisposable
     {
         var argsNode = new JsonObject();
         foreach (var (key, value) in arguments)
-            argsNode[key] = value is null ? null : JsonValue.Create(value.ToString());
+            argsNode[key] = ToJsonNode(value);
 
         var callParams = new JsonObject
         {
@@ -111,8 +153,32 @@ public sealed class McpClient : IAsyncDisposable
         return result.GetRawText();
     }
 
+    /// <summary>
+    /// Maps a tool argument by its runtime CLR type instead of always calling
+    /// <c>ToString()</c>, so a server's declared JSON schema (integer,
+    /// boolean, object) receives the matching JSON type rather than a string
+    /// (docs/review/01-code-audit.md P2-1).
+    /// </summary>
+    private static JsonNode? ToJsonNode(object? value) => value switch
+    {
+        null => null,
+        JsonNode node => node.DeepClone(),
+        JsonElement element => element.ValueKind == JsonValueKind.Null ? null : JsonNode.Parse(element.GetRawText()),
+        string s => JsonValue.Create(s),
+        bool b => JsonValue.Create(b),
+        int i => JsonValue.Create(i),
+        long l => JsonValue.Create(l),
+        double d => JsonValue.Create(d),
+        float f => JsonValue.Create(f),
+        decimal m => JsonValue.Create(m),
+        _ => JsonSerializer.SerializeToNode(value, McpJson.Options)
+    };
+
     private async Task<JsonElement> SendRequestAsync(string method, JsonNode paramsNode, CancellationToken ct)
     {
+        if (_serverClosed)
+            throw new InvalidOperationException(BuildClosedMessage());
+
         var id = Interlocked.Increment(ref _nextId);
         var tcs = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
         _pending[id] = tcs;
@@ -198,6 +264,28 @@ public sealed class McpClient : IAsyncDisposable
         }
         catch (OperationCanceledException) { }
         catch { }
+        finally
+        {
+            // The server closed stdout (exited or crashed): fault every
+            // outstanding and future call immediately instead of leaving
+            // them to hang for the full 30-second timeout
+            // (docs/review/01-code-audit.md P2-3).
+            _serverClosed = true;
+            var message = BuildClosedMessage();
+            foreach (var id in _pending.Keys.ToList())
+            {
+                if (_pending.TryRemove(id, out var tcs))
+                    tcs.TrySetException(new InvalidOperationException(message));
+            }
+        }
+    }
+
+    private string BuildClosedMessage()
+    {
+        var tail = StderrTail;
+        return string.IsNullOrWhiteSpace(tail)
+            ? "MCP server closed the connection."
+            : $"MCP server closed the connection. Last stderr output:\n{tail}";
     }
 
     public async ValueTask DisposeAsync()
@@ -217,6 +305,12 @@ public sealed class McpClient : IAsyncDisposable
 
         try { await _readLoop.WaitAsync(TimeSpan.FromSeconds(2)); }
         catch { }
+
+        if (_stderrDrain is not null)
+        {
+            try { await _stderrDrain.WaitAsync(TimeSpan.FromSeconds(2)); }
+            catch { }
+        }
 
         _readLoopCts.Dispose();
         _process?.Dispose();

@@ -88,6 +88,7 @@ public partial class ChatViewModel : ObservableObject
     private readonly ChatTraceService? _chatTraces;
     private readonly EvalEngine _evalEngine;
     private readonly IWorkspaceActivationService? _workspaceActivation;
+    private readonly MemoryInjectionService? _memoryInjection;
     private CancellationTokenSource? _cts;
     private CancellationTokenSource? _ttsCts;
     private CancellationTokenSource? _contextUsageCts;
@@ -158,7 +159,8 @@ public partial class ChatViewModel : ObservableObject
         ConversationExportService exports,
         ChatTraceService? chatTraces = null,
         EvalEngine? evalEngine = null,
-        IWorkspaceActivationService? workspaceActivation = null)
+        IWorkspaceActivationService? workspaceActivation = null,
+        MemoryInjectionService? memoryInjection = null)
     {
         _llm = llm; _store = store; _settings = settings; _tts = tts; _profiles = profiles; _toasts = toasts;
         _memoryStore = memoryStore;
@@ -166,6 +168,7 @@ public partial class ChatViewModel : ObservableObject
         _runtimeLogs = runtimeLogs;
         _exports = exports;
         _chatTraces = chatTraces;
+        _memoryInjection = memoryInjection;
         _evalEngine = evalEngine ?? new EvalEngine(llm);
         _workspaceActivation = workspaceActivation;
         _temperature  = settings.Settings.Llm.Temperature;
@@ -318,17 +321,22 @@ public partial class ChatViewModel : ObservableObject
         var traceError = string.Empty;
         try
         {
+            var (memoryContext, memorySources) = await BuildMemoryInjectionAsync(text, _cts.Token);
+            foreach (var source in memorySources)
+                asst.Sources.Add(source);
+
+            var systemPromptTokens = EstimateTokens(SystemPrompt) + EstimateTokens(memoryContext);
             var history = TruncateHistoryToContextWindow(
                 Messages.Where(m => !m.IsStreaming).ToList(),
                 ResolveContextWindowLimit(),
-                EstimateTokens(SystemPrompt),
-                Math.Max(0, snapshot.EstimatedTokens - snapshot.HistoryTokens - EstimateTokens(SystemPrompt)));
+                systemPromptTokens,
+                Math.Max(0, snapshot.EstimatedTokens - snapshot.HistoryTokens - systemPromptTokens));
             if (history.Count > 0 && history[^1].Role == "user")
                 history[^1] = history[^1] with { Content = promptText };
 
             var result = await ChatSendOrchestrator.StreamAsync(
                 _llm, selectedModelId, history,
-                BuildChatOptions(),
+                BuildChatOptions(memoryContext),
                 onToken: token =>
                 {
                     if (accumulator.TryAppend(token, force: false, out var flushed))
@@ -655,9 +663,9 @@ public partial class ChatViewModel : ObservableObject
         && SelectedModel is not null
         && (!string.IsNullOrWhiteSpace(InputText) || ContextAttachments.Any(a => a.IsReady));
 
-    private LlmChatOptions BuildChatOptions() => new()
+    private LlmChatOptions BuildChatOptions(string memoryContext = "") => new()
     {
-        SystemPrompt = string.IsNullOrWhiteSpace(SystemPrompt) ? null : SystemPrompt,
+        SystemPrompt = ComposeSystemPrompt(memoryContext),
         Temperature = Temperature,
         TopP = TopP,
         TopK = TopK,
@@ -666,6 +674,50 @@ public partial class ChatViewModel : ObservableObject
         FrequencyPenalty = FrequencyPenalty,
         PresencePenalty = PresencePenalty
     };
+
+    private string? ComposeSystemPrompt(string memoryContext)
+    {
+        var combined = string.IsNullOrWhiteSpace(memoryContext) ? SystemPrompt : $"{SystemPrompt}{memoryContext}";
+        return string.IsNullOrWhiteSpace(combined) ? null : combined;
+    }
+
+    /// <summary>
+    /// Selects relevant global memories for the user's new message and builds
+    /// the markdown block to append to the system prompt, plus the
+    /// <see cref="SourceReference"/>s to show in that turn's Sources panel.
+    /// Closes the gap r1 flagged: memory injection existed
+    /// (<see cref="MemoryInjectionService"/>) but nothing in chat ever called
+    /// it (docs/review/03-next-level-roadmap.md Phase 1, "Chat consumes
+    /// citations"). Gated by the same Memory.Enabled setting the memory
+    /// status line already respects; best-effort (a failure here should never
+    /// block sending a chat message).
+    /// </summary>
+    private async Task<(string ContextText, List<SourceReference> Sources)> BuildMemoryInjectionAsync(string question, CancellationToken ct)
+    {
+        if (_memoryInjection is null || !_settings.Settings.Memory.Enabled || string.IsNullOrWhiteSpace(question))
+            return (string.Empty, []);
+
+        try
+        {
+            var candidates = await _memoryStore.SearchAsync(question, ct);
+            if (candidates.Count == 0)
+                return (string.Empty, []);
+
+            var selected = await _memoryInjection.SelectMemoriesForInjectionAsync(candidates);
+            if (selected.Count == 0)
+                return (string.Empty, []);
+
+            var contextText = _memoryInjection.BuildMemoryContext(selected);
+            var sources = selected.Where(m => m.Source is not null).Select(m => m.Source!).ToList();
+            return (contextText, sources);
+        }
+        catch (Exception ex)
+        {
+            _runtimeLogs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Service,
+                $"Memory injection failed: {ex.Message}"));
+            return (string.Empty, []);
+        }
+    }
 
     public static int EstimateTokens(string text) => ContextPackBuilder.EstimateTokens(text);
 

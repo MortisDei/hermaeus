@@ -6,7 +6,7 @@ namespace Aether.Agent.Services;
 /// The status-transition, persist, and audit sequence shared by approving,
 /// rejecting, and blocking a queued draft patch. Extracted from
 /// AgentViewModel's ApprovePatchAsync/RejectPatchAsync/BlockPatchAsync group
-/// (docs/review/01-architecture-review.md item 5); the ViewModel still owns
+/// (docs/review/archived/r1/01-architecture-review.md item 5); the ViewModel still owns
 /// the approval-preview UI flow, this owns what happens once a decision is
 /// made.
 /// </summary>
@@ -25,7 +25,7 @@ public sealed class AgentPatchReviewService
 
     public async Task ApplyAsync(AgentTaskState task, AgentDraftPatch patch, AgentWorkspaceOptions options, CancellationToken ct = default)
     {
-        _workspaceTools.ApplyDraftPatch(options, patch.RelativePath, patch.ProposedContent);
+        await _workspaceTools.ApplyDraftPatchAsync(options, patch.RelativePath, patch.ProposedContent, ct);
         patch.Status = AgentDraftPatchStatus.Applied;
         patch.ApprovedAt = DateTime.UtcNow;
         patch.ApprovedBy = "User";

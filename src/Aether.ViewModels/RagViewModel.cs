@@ -1,7 +1,5 @@
 using System.Collections.ObjectModel;
 using System.Text;
-using System.Text.Json;
-using System.Text.RegularExpressions;
 using Aether.Rag;
 using Aether.Rag.Eval;
 using Aether.Rag.Models;
@@ -222,25 +220,24 @@ public partial class RagViewModel : ObservableObject
                 ModelId: string.Empty);
 
             var answerBuilder = new StringBuilder();
-            var sourcesHeaderParsed = false;
 
-            await foreach (var token in _query.StreamQueryAsync(
+            await foreach (var evt in _query.StreamQueryAsync(
                 SelectedDataset.Id, QuestionText, opts, _cts.Token))
             {
-                if (!sourcesHeaderParsed && token.StartsWith("__RAG_SOURCES__"))
+                switch (evt.Kind)
                 {
-                    ParseSources(token);
-                    sourcesHeaderParsed = true;
-                    continue;
+                    case RagStreamEventKind.Sources:
+                        ApplySources(evt.Sources!);
+                        break;
+                    case RagStreamEventKind.Trace:
+                        ApplyTrace(evt.Trace!);
+                        break;
+                    default:
+                        answerBuilder.Append(evt.Text);
+                        AnswerText = answerBuilder.ToString();
+                        ScrollToBottom?.Invoke(this, EventArgs.Empty);
+                        break;
                 }
-                if (token.StartsWith("__RAG_TRACE__"))
-                {
-                    ParseTrace(token);
-                    continue;
-                }
-                answerBuilder.Append(token);
-                AnswerText = answerBuilder.ToString();
-                ScrollToBottom?.Invoke(this, EventArgs.Empty);
             }
 
             HasAnswer = !string.IsNullOrWhiteSpace(AnswerText);
@@ -564,63 +561,45 @@ public partial class RagViewModel : ObservableObject
             ?? DatasetManagerItems.FirstOrDefault();
     }
 
-    private void ParseSources(string header)
+    private void ApplySources(IReadOnlyList<RagTraceChunk> chunks)
     {
-        try
-        {
-            var chunks = RagStreamProtocol.ParseSources(header);
-            Sources.Clear();
-            SelectedSource = null;
-            ShowSourceInspector = false;
-            foreach (var chunk in chunks)
-                Sources.Add(new RagSourceViewModel
-                {
-                    Rank = chunk.Rank,
-                    Title = chunk.Title,
-                    File = chunk.File,
-                    Path = chunk.Path,
-                    Score = chunk.Score,
-                    Content = chunk.Content
-                });
-            SelectedSource = Sources.FirstOrDefault();
-            if (SelectedSource is not null)
-                SelectedSource.IsSelected = true;
-            RefreshCitationOverflow();
-        }
-        catch (Exception ex) when (ex is JsonException or InvalidOperationException or KeyNotFoundException)
-        {
-            _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Rag,
-                $"Could not parse RAG source metadata: {ex.Message}"));
-        }
+        Sources.Clear();
+        SelectedSource = null;
+        ShowSourceInspector = false;
+        foreach (var chunk in chunks)
+            Sources.Add(new RagSourceViewModel
+            {
+                Rank = chunk.Rank,
+                Title = chunk.Title,
+                File = chunk.File,
+                Path = chunk.Path,
+                Score = chunk.Score,
+                Content = chunk.Content
+            });
+        SelectedSource = Sources.FirstOrDefault();
+        if (SelectedSource is not null)
+            SelectedSource.IsSelected = true;
+        RefreshCitationOverflow();
     }
 
-    private void ParseTrace(string token)
+    private void ApplyTrace(RagTraceSummary trace)
     {
-        try
-        {
-            var update = RagStreamProtocol.ParseTrace(token);
-            LastTraceId = update.Id;
-            LastRetrievalLatencyMs = update.RetrievalLatencyMs;
-            LastTotalLatencyMs = update.TotalLatencyMs;
-            GroundingScore = update.GroundingScore;
-            if (update.ExpandedQuery is not null)
-                ExpandedQuery = update.ExpandedQuery;
-            if (update.QueryVariants is not null)
-                QueryVariants = update.QueryVariants;
-            if (update.PlannerNotes is not null)
-                PlannerNotes = update.PlannerNotes;
-            if (update.ContextPackingSummary is not null)
-                ContextPackingSummary = update.ContextPackingSummary;
-            if (update.Refused is not null)
-                TraceRefused = update.Refused.Value;
-            if (update.RefusalReason is not null)
-                RefusalReason = update.RefusalReason;
-        }
-        catch (Exception ex) when (ex is JsonException or InvalidOperationException or KeyNotFoundException)
-        {
-            _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Rag,
-                $"Could not parse RAG trace metadata: {ex.Message}"));
-        }
+        LastTraceId = trace.Id;
+        LastRetrievalLatencyMs = trace.RetrievalLatencyMs;
+        LastTotalLatencyMs = trace.TotalLatencyMs;
+        GroundingScore = trace.GroundingScore;
+        if (trace.ExpandedQuery is not null)
+            ExpandedQuery = trace.ExpandedQuery;
+        if (trace.QueryVariants is not null)
+            QueryVariants = trace.QueryVariants;
+        if (trace.PlannerNotes is not null)
+            PlannerNotes = trace.PlannerNotes;
+        if (trace.ContextPackingSummary is not null)
+            ContextPackingSummary = trace.ContextPackingSummary;
+        if (trace.Refused is not null)
+            TraceRefused = trace.Refused.Value;
+        if (trace.RefusalReason is not null)
+            RefusalReason = trace.RefusalReason;
     }
 
     private void SetError(string msg) { StatusMessage = msg; IsError = true; }

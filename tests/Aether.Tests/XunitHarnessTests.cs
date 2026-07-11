@@ -42,6 +42,8 @@ public static class HarnessCases
         [new HarnessCase("local ai assets list discovered reranker directories", ServiceTests.LocalAiAssetsListsDiscoveredRerankerDirectories)],
         [new HarnessCase("RAG settings preserve configured embedding model option", ServiceTests.RagSettingsPreservesConfiguredEmbeddingModelOption)],
         [new HarnessCase("RAG settings discover and select installed reranker", ServiceTests.RagSettingsDiscoversAndSelectsInstalledReranker)],
+        [new HarnessCase("app lifecycle journal tracks clean and unclean exits", ServiceTests.AppLifecycleJournalTracksCleanAndUncleanExits)],
+        [new HarnessCase("Doctor warns when previous session did not exit cleanly", ServiceTests.DoctorWarnsWhenPreviousSessionDidNotExitCleanly)],
         [new HarnessCase("Doctor does not treat chat GGUF as embedding model", ServiceTests.DoctorDoesNotTreatChatGgufAsEmbeddingModel)],
         [new HarnessCase("Doctor warns for untuned local GGUF models", ServiceTests.DoctorWarnsForUntunedLocalGgufModels)],
         [new HarnessCase("Doctor startup scan raises problem toast", ServiceTests.DoctorStartupScanRaisesProblemToast)],
@@ -68,9 +70,12 @@ public static class HarnessCases
         [new HarnessCase("trust scan detects network-facing extra args", ServiceTests.TrustScanDetectsNetworkExtraArgs)],
         [new HarnessCase("source strings avoid long dashes", ServiceTests.SourceStringsAvoidLongDashes)],
         [new HarnessCase("secret store falls back without plaintext", ServiceTests.SecretStoreFallbackWithoutPlaintext)],
+        [new HarnessCase("secret store key file is written atomically with restricted permissions", ServiceTests.SecretStoreKeyFileIsWrittenAtomicallyWithRestrictedPermissions)],
+        [new HarnessCase("secret store logs a warning when a stored secret cannot be decrypted", ServiceTests.SecretStoreLogsWarningWhenStoredSecretCannotBeDecrypted)],
         [new HarnessCase("runtime profile normalization and unsafe host validation", ServiceTests.RuntimeProfileValidation)],
         [new HarnessCase("runtime profile defaults are deduplicated", ServiceTests.RuntimeProfilesAreDeduplicated)],
         [new HarnessCase("settings save migrates OpenAI key to secret reference", ServiceTests.SettingsSaveMigratesOpenAiKey)],
+        [new HarnessCase("settings load migrates legacy shared local API token to named entry", ServiceTests.SettingsLoadMigratesLegacySharedLocalApiTokenToNamedEntry)],
         [new HarnessCase("settings load backs up unreadable JSON", ServiceTests.SettingsLoadBacksUpUnreadableJson)],
         [new HarnessCase("settings save prunes per-conversation memory overrides", ServiceTests.SettingsSavePrunesPerConversationMemoryOverrides)],
         [new HarnessCase("settings save deduplicates default managed servers", ServiceTests.SettingsSaveDeduplicatesDefaultManagedServers)],
@@ -84,6 +89,7 @@ public static class HarnessCases
         [new HarnessCase("embedding client surfaces pooling compatibility hints", ServiceTests.EmbeddingClientSurfacesPoolingHintWhenServerRejectsNonePooling)],
         [new HarnessCase("conversation auto-summary stores memories when important", ServiceTests.ConversationAutoSummaryStoresMemoriesWhenImportant)],
         [new HarnessCase("memory store CRUD and search works", ServiceTests.MemoryStoreCrudAndSearchWorks)],
+        [new HarnessCase("memory store round trips explicit source and backfills legacy rows", ServiceTests.MemoryStoreRoundTripsExplicitSourceAndBackfillsLegacyRows)],
         [new HarnessCase("memory extraction parses and cleans markers", ServiceTests.MemoryExtractionParsesAndCleansMarkers)],
         [new HarnessCase("memory injection respects token budget and priority", ServiceTests.MemoryInjectionRespectsTokenBudgetAndPriority)],
         [new HarnessCase("memory injection uses full budget", ServiceTests.MemoryInjectionUsesFullBudget)],
@@ -97,7 +103,10 @@ public static class HarnessCases
         [new HarnessCase("agent draft patch queue and approval round-trips", ServiceTests.AgentDraftPatchQueueAndApproval)],
         [new HarnessCase("inspection engine filters providers by view", ServiceTests.InspectionEngineFiltersProvidersByView)],
         [new HarnessCase("inspection engine turns a provider failure into an error check", ServiceTests.InspectionEngineReportsProviderFailureAsErrorCheck)],
-        [new HarnessCase("Doctor and Trust and Privacy contribute checks to their own view", ServiceTests.DoctorTrustPrivacyContributeChecksToOwnView)]
+        [new HarnessCase("Doctor and Trust and Privacy contribute checks to their own view", ServiceTests.DoctorTrustPrivacyContributeChecksToOwnView)],
+        [new HarnessCase("local API process manager resolves packaged executable first", ServiceTests.LocalApiProcessManagerResolvesPackagedExecutableFirst)],
+        [new HarnessCase("local API process manager falls back to dev build output", ServiceTests.LocalApiProcessManagerFallsBackToDevBuildOutput)],
+        [new HarnessCase("local API process manager returns null when nothing is built", ServiceTests.LocalApiProcessManagerReturnsNullWhenNothingIsBuilt)]
     ];
 
     public static IEnumerable<object[]> Rag =>
@@ -140,6 +149,8 @@ public static class HarnessCases
         [new HarnessCase("agent safety gate evaluate command only allows declared safe recipes", AgentTests.AgentSafetyGateEvaluateCommandOnlyAllowsDeclaredSafeRecipes)],
         [new HarnessCase("agent safety gate always requires approval for mcp tools", AgentTests.AgentSafetyGateAlwaysRequiresApprovalForMcpTools)],
         [new HarnessCase("agent tool executor runs declared command recipe", AgentTests.AgentToolExecutorRunsDeclaredCommandRecipe)],
+        [new HarnessCase("run_command recipe case sensitivity matches between gate and executor", AgentTests.RunCommandRecipeCaseSensitivityMatchesBetweenGateAndExecutor)],
+        [new HarnessCase("agent tool executor inspect git diff handles large status output", AgentTests.AgentToolExecutorInspectGitDiffHandlesLargeStatusOutput)],
         [new HarnessCase("agent tool executor populates source reference for file tools", AgentTests.AgentToolExecutorPopulatesSourceReferenceForFileTools)],
         [new HarnessCase("agent loop writes state log and trace", AgentTests.AgentLoopWritesStateLogAndTrace)],
         [new HarnessCase("workspace manifest round trips through in-repo file", AgentTests.WorkspaceManifestRoundTripsThroughInRepoFile)],
@@ -151,19 +162,30 @@ public static class HarnessCases
     [
         [new HarnessCase("MCP client completes handshake and lists tools", McpTests.McpClientCompletesHandshakeAndListsTools)],
         [new HarnessCase("MCP client calls tool and returns text content", McpTests.McpClientCallsToolAndReturnsTextContent)],
-        [new HarnessCase("MCP bridge parses namespaced tool names", McpTests.McpBridgeParsesNamespacedToolNames)]
+        [new HarnessCase("MCP bridge parses namespaced tool names", McpTests.McpBridgeParsesNamespacedToolNames)],
+        [new HarnessCase("MCP bridge allowlist restricts which declared tools can execute", McpTests.McpBridgeAllowlistRestrictsWhichDeclaredToolsCanExecute)],
+        [new HarnessCase("MCP bridge execute rejects tools not declared by the server even if allowlisted", McpTests.McpBridgeExecuteRejectsToolsNotDeclaredByTheServerEvenIfAllowlisted)],
+        [new HarnessCase("MCP client preserves argument JSON types", McpTests.McpClientPreservesArgumentJsonTypes)],
+        [new HarnessCase("MCP client fails fast when server closes connection", McpTests.McpClientFailsFastWhenServerClosesConnection)],
+        [new HarnessCase("MCP client drains stderr without blocking calls", McpTests.McpClientDrainsStderrWithoutBlockingCalls)]
     ];
 
     public static IEnumerable<object[]> LocalApi =>
     [
         [new HarnessCase("chat completion endpoint returns aggregated content", LocalApiTests.ChatCompletionEndpointReturnsAggregatedContent)],
+        [new HarnessCase("chat completion streams server sent events when requested", LocalApiTests.ChatCompletionStreamsServerSentEventsWhenRequested)],
         [new HarnessCase("requests without a token are rejected", LocalApiTests.RequestsWithoutTokenAreRejected)],
         [new HarnessCase("requests are rejected when no token is configured", LocalApiTests.RequestsAreRejectedWhenNoTokenIsConfigured)],
+        [new HarnessCase("distinct named tokens authenticate independently and identify their caller", LocalApiTests.DistinctNamedTokensAuthenticateIndependentlyAndIdentifyTheirCaller)],
+        [new HarnessCase("revoked token stops authenticating while others still work", LocalApiTests.RevokedTokenStopsAuthenticatingWhileOthersStillWork)],
         [new HarnessCase("memory query endpoint returns matching memories", LocalApiTests.MemoryQueryEndpointReturnsMatchingMemories)],
         [new HarnessCase("RAG query endpoint refuses when dataset has no context", LocalApiTests.RagQueryEndpointRefusesWhenDatasetHasNoContext)],
         [new HarnessCase("chat completion rejects missing fields", LocalApiTests.ChatCompletionRejectsMissingFields)],
         [new HarnessCase("models endpoint returns visible models", LocalApiTests.ModelsEndpointReturnsVisibleModels)],
-        [new HarnessCase("calls are logged to trace store with caller name", LocalApiTests.CallsAreLoggedToTraceStoreWithCallerName)]
+        [new HarnessCase("embeddings endpoint returns vectors for each input", LocalApiTests.EmbeddingsEndpointReturnsVectorsForEachInput)],
+        [new HarnessCase("embeddings endpoint rejects empty input", LocalApiTests.EmbeddingsEndpointRejectsEmptyInput)],
+        [new HarnessCase("calls are logged to trace store with caller name", LocalApiTests.CallsAreLoggedToTraceStoreWithCallerName)],
+        [new HarnessCase("chat completion applies model profile sampling defaults and honors explicit overrides", LocalApiTests.ChatCompletionAppliesModelProfileSamplingDefaultsAndHonorsExplicitOverrides)]
     ];
 
     public static IEnumerable<object[]> Voice =>

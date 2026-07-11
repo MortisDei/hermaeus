@@ -13,7 +13,7 @@ public sealed record RetrievedChunk(
 
 /// <summary>The minimal retrieval seam the agent depends on. Implemented by
 /// Aether.Rag so Aether.Agent never references the retrieval implementation
-/// project directly (docs/review/06-technical-debt.md item 11).</summary>
+/// project directly (docs/review/archived/r1/06-technical-debt.md item 11).</summary>
 public interface IAgentRetrievalService
 {
     Task<bool> DatasetExistsAsync(string datasetId, CancellationToken ct = default);

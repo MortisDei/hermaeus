@@ -245,6 +245,7 @@ public sealed class ConversationMemoryService : IConversationMemoryService
         foreach (var memory in memories)
         {
             memory.SourceConversationId ??= conversationId;
+            memory.Source ??= new SourceReference(ProvenanceKind.Memory, MemoryExtractionService.TitleFrom(memory.Content), Locator: conversationId, Snippet: memory.Content, Timestamp: DateTime.UtcNow);
             var duplicate = existing.FirstOrDefault(m =>
                 string.Equals(m.Category, memory.Category, StringComparison.OrdinalIgnoreCase)
                 && string.Equals(Normalize(m.Content), Normalize(memory.Content), StringComparison.Ordinal));
@@ -265,6 +266,7 @@ public sealed class ConversationMemoryService : IConversationMemoryService
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
             duplicate.SourceConversationId ??= conversationId;
+            duplicate.Source ??= new SourceReference(ProvenanceKind.Memory, MemoryExtractionService.TitleFrom(duplicate.Content), Locator: conversationId, Snippet: duplicate.Content, Timestamp: DateTime.UtcNow);
             await _memories.SaveAsync(duplicate, ct);
         }
     }

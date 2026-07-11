@@ -25,7 +25,7 @@ public sealed record ChatTraceEntry(
 /// <summary>
 /// Persists and reloads chat traces through the shared <see cref="ITraceStore"/>.
 /// Extracted from ChatViewModel's AddChatTrace/PersistChatTraceAsync/
-/// LoadPersistedChatTracesAsync group (docs/review/01-architecture-review.md
+/// LoadPersistedChatTracesAsync group (docs/review/archived/r1/01-architecture-review.md
 /// item 5). The trace store is optional (mirrors the ViewModel's existing
 /// best-effort posture: no trace store configured means tracing is a no-op,
 /// never a hard failure).

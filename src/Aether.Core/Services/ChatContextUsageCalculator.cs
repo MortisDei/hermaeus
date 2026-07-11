@@ -3,7 +3,7 @@ namespace Aether.Core.Services;
 /// <summary>
 /// Display-ready result of comparing a token usage figure against a context
 /// window limit: the label/percent/warning-level math Chat used to compute
-/// inline (docs/review/01-architecture-review.md item 5).
+/// inline (docs/review/archived/r1/01-architecture-review.md item 5).
 /// </summary>
 public sealed record ChatContextUsageResult(
     string Label,

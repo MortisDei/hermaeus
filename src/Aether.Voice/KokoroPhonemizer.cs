@@ -7,7 +7,7 @@ namespace Aether.Voice;
 /// a port of misaki (Kokoro's real G2P dependency, which needs espeak-ng and
 /// full linguistic rule sets); it is a dictionary of common words plus a
 /// letter-by-letter fallback for everything else, scoped exactly as
-/// docs/review/07-roadmap.md item 5 describes: "focused, English-first ...
+/// docs/review/archived/r1/07-roadmap.md item 5 describes: "focused, English-first ...
 /// not attempting full multi-language phonemization." Pronunciation accuracy
 /// on out-of-dictionary words is approximate by design.
 /// </summary>

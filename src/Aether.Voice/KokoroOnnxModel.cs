@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using Aether.Core.Services;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 
@@ -27,6 +28,7 @@ internal sealed class KokoroOnnxModel : IDisposable
     private static readonly IReadOnlyDictionary<string, string> VoiceSha256 = KokoroVoiceAssets.Sha256ByVoice;
 
     private readonly Func<string> _assetsRootProvider;
+    private readonly AppLifecycleJournalService? _journal;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private InferenceSession? _session;
     private string? _loadedAssetsRoot;
@@ -41,9 +43,10 @@ internal sealed class KokoroOnnxModel : IDisposable
     /// </summary>
     private string AssetsRoot => _assetsRootProvider();
 
-    public KokoroOnnxModel(Func<string> assetsRootProvider)
+    public KokoroOnnxModel(Func<string> assetsRootProvider, AppLifecycleJournalService? journal = null)
     {
         _assetsRootProvider = assetsRootProvider;
+        _journal = journal;
     }
 
     public static string ModelPath(string assetsRoot) => Path.Combine(assetsRoot, ModelFileName);
@@ -73,6 +76,7 @@ internal sealed class KokoroOnnxModel : IDisposable
             }
 
             LogPreflight("about to load InferenceSession from EnsureLoadedAsync");
+            _journal?.RecordOperation("loading Kokoro native ONNX session (EnsureLoadedAsync)");
             _session = new InferenceSession(modelPath, BuildSessionOptions());
             _loadedAssetsRoot = AssetsRoot;
             return true;
@@ -132,6 +136,7 @@ internal sealed class KokoroOnnxModel : IDisposable
             // to disk immediately before the risky call so a crash still leaves a
             // record of exactly where it happened.
             LogPreflight("about to load InferenceSession after install");
+            _journal?.RecordOperation("loading Kokoro native ONNX session (InstallAssetsAsync)");
             _session = new InferenceSession(ModelPath(AssetsRoot), BuildSessionOptions());
             _loadedAssetsRoot = AssetsRoot;
             _unavailable = false;
@@ -207,7 +212,10 @@ internal sealed class KokoroOnnxModel : IDisposable
             return;
 
         var temp = $"{path}.download";
-        using var response = await _http.GetAsync(url, ct);
+        // ResponseHeadersRead avoids buffering the whole response (a few
+        // hundred MB for the model) into memory before streaming it to disk,
+        // which could OOM low-RAM machines (docs/review/01-code-audit.md P2-6).
+        using var response = await _http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
         response.EnsureSuccessStatusCode();
         await using (var source = await response.Content.ReadAsStreamAsync(ct))
         await using (var target = File.Create(temp))

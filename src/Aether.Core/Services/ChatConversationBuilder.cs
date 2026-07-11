@@ -2,7 +2,7 @@ namespace Aether.Core.Services;
 
 /// <summary>
 /// Pure formatting helpers extracted from <c>ChatViewModel.PersistAsync</c>
-/// (docs/review/01-architecture-review.md item 5).
+/// (docs/review/archived/r1/01-architecture-review.md item 5).
 /// </summary>
 public static class ChatConversationBuilder
 {

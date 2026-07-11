@@ -101,16 +101,18 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
         return new AgentFileSummaryResult(read.RelativePath, summary, read.Truncated);
     }
 
-    public AgentFileReadResult ApplyDraftPatch(AgentWorkspaceOptions options, string relativePath, string proposedContent)
+    public async Task<AgentFileReadResult> ApplyDraftPatchAsync(AgentWorkspaceOptions options, string relativePath, string proposedContent, CancellationToken ct = default)
     {
         var root = ResolveWorkspaceRoot(options.WorkspaceRoot);
         var full = ResolveSafePath(root, relativePath);
-        var directory = Path.GetDirectoryName(full);
-        if (!string.IsNullOrWhiteSpace(directory))
-            Directory.CreateDirectory(directory);
-
         var content = proposedContent.Replace("\r\n", "\n").Replace('\r', '\n');
-        File.WriteAllText(full, content, Encoding.UTF8);
+
+        // This is the one write path that touches files the user did not ask
+        // Aether to back up (their own source code), so it gets the same
+        // temp-plus-move discipline as settings/secrets writes rather than a
+        // plain WriteAllText that a crash mid-write could truncate
+        // (docs/review/01-code-audit.md P2-5).
+        await AtomicFileWriter.WriteAllTextAsync(full, content, ct);
         return new AgentFileReadResult(ToRelative(root, full), content, false);
     }
 

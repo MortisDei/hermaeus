@@ -129,7 +129,7 @@ public sealed class PrivacyAuditService : IInspectionCheckProvider
         return new PrivacyAuditItem(
             "Local API activity",
             "Review",
-            $"{recent.Count} recent call(s) from {byClient.Count} distinct app(s) (self-reported, not access-controlled): {string.Join("; ", byClient)}");
+            $"{recent.Count} recent call(s) from {byClient.Count} distinct token(s) (each identifies a verified per-app token, not just a self-reported name): {string.Join("; ", byClient)}");
     }
 
     private static bool IsChatProviderEnabled(ProviderDescriptor descriptor, AppSettings settings) =>

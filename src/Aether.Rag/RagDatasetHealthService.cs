@@ -13,7 +13,7 @@ public sealed record RagDatasetHealth(int SourceCount, int DuplicateSources, int
 /// <summary>
 /// Computes dataset health from already-loaded chunks plus a file-system
 /// check against each distinct source path. Extracted from
-/// <c>RagViewModel.RefreshDatasetManagerAsync</c> (docs/review/01-architecture-review.md
+/// <c>RagViewModel.RefreshDatasetManagerAsync</c> (docs/review/archived/r1/01-architecture-review.md
 /// item 5) so it's testable without a live dataset store.
 /// </summary>
 public static class RagDatasetHealthService

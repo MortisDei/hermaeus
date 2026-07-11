@@ -28,6 +28,7 @@ public static class AetherServiceRegistration
         s.AddSingleton<ISecretStore, SecretStore>();
         s.AddSingleton<RedactionService>();
         s.AddSingleton<IRuntimeLogService, RuntimeLogService>();
+        s.AddSingleton<AppLifecycleJournalService>();
         s.AddSingleton<PythonHealthValidator>();
         s.AddSingleton<BackupService>();
         s.AddSingleton<LocalAiSetupService>();
@@ -66,6 +67,7 @@ public static class AetherServiceRegistration
         s.AddSingleton<ITtsService, VoiceRoutingTtsService>();
         s.AddSingleton<XttsProcessManager>();
         s.AddSingleton<KokoroProcessManager>();
+        s.AddSingleton<LocalApiProcessManager>();
         s.AddSingleton<IToastService, ToastService>();
         s.AddSingleton<SqliteRagStore>();
         s.AddSingleton<IEmbeddingService, LlamaCppEmbeddingService>();

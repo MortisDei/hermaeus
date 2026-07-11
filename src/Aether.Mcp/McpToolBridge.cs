@@ -14,16 +14,40 @@ public sealed class McpToolBridge : IMcpToolBridge, IAsyncDisposable
         _settings = settings;
     }
 
-    public bool CanExecute(string toolName) => TryParse(toolName, out _, out _);
+    public bool CanExecute(string toolName)
+    {
+        if (!TryParse(toolName, out var serverId, out var remoteToolName))
+            return false;
+
+        var config = _settings.Settings.Mcp.Servers.FirstOrDefault(s => s.Id == serverId && s.Enabled);
+        return config is not null && IsToolAllowed(config, remoteToolName);
+    }
 
     public async Task<string> ExecuteAsync(string toolName, Dictionary<string, object?> arguments, CancellationToken ct = default)
     {
         if (!TryParse(toolName, out var serverId, out var remoteToolName))
             throw new InvalidOperationException($"'{toolName}' is not a recognized mcp: tool reference.");
 
+        var config = _settings.Settings.Mcp.Servers.FirstOrDefault(s => s.Id == serverId && s.Enabled)
+            ?? throw new InvalidOperationException($"No enabled MCP server is configured with id '{serverId}'.");
+
+        if (!IsToolAllowed(config, remoteToolName))
+            throw new InvalidOperationException($"'{remoteToolName}' is not in the allowed-tools list configured for MCP server '{config.Name}'.");
+
         var session = await GetOrStartSessionAsync(serverId, ct);
+
+        // Defense in depth beyond the configured allowlist: never forward a
+        // tool name the server itself never declared via tools/list, even if
+        // it happens to match the allowlist (a stale allowlist entry should
+        // not turn into an arbitrary remote call).
+        if (!session.Tools.Any(t => string.Equals(t.Name, remoteToolName, StringComparison.Ordinal)))
+            throw new InvalidOperationException($"MCP server '{config.Name}' does not declare a tool named '{remoteToolName}'.");
+
         return await session.Client.CallToolAsync(remoteToolName, arguments, ct);
     }
+
+    private static bool IsToolAllowed(McpServerConfig config, string toolName) =>
+        config.AllowedTools.Count == 0 || config.AllowedTools.Any(t => string.Equals(t, toolName, StringComparison.Ordinal));
 
     private static bool TryParse(string toolName, out string serverId, out string remoteToolName)
     {

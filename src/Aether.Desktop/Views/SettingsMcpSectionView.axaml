@@ -18,7 +18,7 @@
                                 Padding="12"
                                 Margin="0,0,0,8">
                             <Grid ColumnDefinitions="1.2*,1.4*,1.4*,Auto"
-                                  RowDefinitions="Auto,Auto"
+                                  RowDefinitions="Auto,Auto,Auto"
                                   ColumnSpacing="8"
                                   RowSpacing="8">
                                 <TextBox Grid.Row="0" Grid.Column="0"
@@ -51,6 +51,12 @@
                                 <TextBox Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3"
                                          Text="{Binding WorkingDirectory}"
                                          Watermark="Working directory (optional)"
+                                         CornerRadius="6"
+                                         Padding="10,6" />
+
+                                <TextBox Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="4"
+                                         Text="{Binding AllowedToolsText}"
+                                         Watermark="Allowed tools, comma separated (empty = allow every tool the server declares)"
                                          CornerRadius="6"
                                          Padding="10,6" />
                             </Grid>

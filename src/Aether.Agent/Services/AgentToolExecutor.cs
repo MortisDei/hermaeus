@@ -61,11 +61,12 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
                 Arg(arguments, "relative_path", "path"),
                 Arg(arguments, "rationale"),
                 Arg(arguments, "proposed_content", "content")),
-            "inspect_git_diff" => InspectGitDiff(options),
-            "apply_draft_patch" => _workspaceTools.ApplyDraftPatch(
+            "inspect_git_diff" => await InspectGitDiffAsync(options, ct),
+            "apply_draft_patch" => await _workspaceTools.ApplyDraftPatchAsync(
                 options,
                 Arg(arguments, "relative_path", "path"),
-                Arg(arguments, "proposed_content", "content")),
+                Arg(arguments, "proposed_content", "content"),
+                ct),
             "run_command" => await RunCommandAsync(options, Arg(arguments, "command"), ct),
             _ => throw new InvalidOperationException($"Unsupported agent tool: {toolName}")
         };
@@ -130,7 +131,7 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
         return $"Exit code {process.ExitCode}\n\nstdout:\n{stdout.Trim()}\n\nstderr:\n{stderr.Trim()}";
     }
 
-    private static string InspectGitDiff(AgentWorkspaceOptions options)
+    private static async Task<string> InspectGitDiffAsync(AgentWorkspaceOptions options, CancellationToken ct)
     {
         var root = AgentWorkspaceTools.ResolveWorkspaceRoot(options.WorkspaceRoot);
         var git = Path.Combine(root, ".git");
@@ -143,7 +144,8 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
             WorkingDirectory = root,
             UseShellExecute = false,
             RedirectStandardOutput = true,
-            RedirectStandardError = true
+            RedirectStandardError = true,
+            CreateNoWindow = true
         };
         psi.ArgumentList.Add("status");
         psi.ArgumentList.Add("--short");
@@ -151,15 +153,28 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
         if (process is null)
             return "Could not start git status.";
 
-        if (!process.WaitForExit(3000))
+        // Read stdout/stderr concurrently with waiting: a large working tree
+        // can produce more output than the OS pipe buffer holds, and reading
+        // only after WaitForExit deadlocks against git blocking on a full
+        // pipe, which used to surface as a false "timed out" result
+        // (docs/review/01-code-audit.md P2-4).
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(TimeSpan.FromSeconds(3));
+        var stdoutTask = process.StandardOutput.ReadToEndAsync(timeoutCts.Token);
+        var stderrTask = process.StandardError.ReadToEndAsync(timeoutCts.Token);
+        try
+        {
+            await process.WaitForExitAsync(timeoutCts.Token);
+        }
+        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !ct.IsCancellationRequested)
         {
             try { process.Kill(entireProcessTree: true); }
             catch { }
             return "git status timed out.";
         }
 
-        var output = process.StandardOutput.ReadToEnd();
-        var error = process.StandardError.ReadToEnd();
+        var output = await stdoutTask;
+        var error = await stderrTask;
         if (process.ExitCode != 0)
             return string.IsNullOrWhiteSpace(error) ? "git status failed." : error.Trim();
         return string.IsNullOrWhiteSpace(output) ? "No working tree changes." : output.Trim();

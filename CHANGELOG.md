@@ -11,6 +11,178 @@ limit.
 
 ## [Unreleased]
 
+## [0.9.42-alpha] - 2026-07-11
+
+Implements docs/review/03-next-level-roadmap.md Phases 1 through 4 in full
+(r2 review). Each phase is independently shippable; landed together here.
+
+### Phase 1 - Provenance convergence
+
+- **RAG citations are now a typed stream event, not a sentinel string.**
+  `RagQueryService.StreamQueryAsync` used to interleave plain answer tokens
+  with magic-prefixed `"__RAG_SOURCES__...__END_SOURCES__"` and
+  `"__RAG_TRACE__...__END_TRACE__"` strings that every consumer had to
+  independently detect and strip. It now yields a closed `RagStreamEvent`
+  (`Token`/`Sources`/`Trace`) with a typed `RagTraceSummary` payload.
+  `RagStreamProtocol` (the shared sentinel parser) is deleted; `RagViewModel`,
+  `RagEvalService`, and `Aether.LocalApi` all switch on `Kind` instead. Fixed
+  a real bug in passing: the trace event now actually carries
+  `ExpandedQuery`/`QueryVariants`/`PlannerNotes`/`ContextPackingSummary`,
+  which the persisted trace always computed but the old sentinel JSON never
+  included, so `RagViewModel`'s Context Transparency fields for those were
+  silently always empty.
+- **Memory gained a structured `Source` (`SourceReference`)** alongside the
+  existing `SourceConversationId`. Additive `MemoryStore` schema migration
+  (v3, `source_json` column). Rows written before this migration backfill a
+  `SourceReference` from `SourceConversationId` at read time; no data
+  rewrite. `MemoryExtractionService` and `ConversationMemoryService` now
+  populate it with a short content-derived title, the conversation locator,
+  and a snippet.
+- **Chat now actually injects memory, and shows a Sources panel.** Memory
+  injection (`MemoryInjectionService`) existed since early memory work but
+  nothing in `ChatViewModel` ever called it. `SendAsync` now searches
+  relevant global memories (gated by the existing `Memory.Enabled` setting),
+  builds a memory-context block appended to that turn's system prompt, and
+  populates a new `MessageViewModel.Sources` collection with the
+  `SourceReference`s actually used, rendered as a small chip row under the
+  assistant's reply (tooltip shows the memory content).
+
+### Phase 2 - Local API: from demo to substrate
+
+- **Streaming.** `POST /v1/chat/completions` accepts `"stream": true` and
+  responds with Server-Sent Events in the OpenAI `chat.completion.chunk`
+  wire shape (deliberate wire compatibility with existing SSE clients, not a
+  dependency on OpenAI). Buffered JSON stays the default.
+- **Per-app tokens, replacing the single shared token.**
+  `LocalApiSettings.Tokens` is now a list of named entries
+  (`LocalApiTokenEntry`: Id, Name, secret-store reference, created-at);
+  Settings > Local API manages the list (add-with-name, revoke individually,
+  each action applies and saves immediately rather than waiting for the
+  page's main Save button, since a pending revocation that silently reverted
+  would be a real footgun for a credential list). `LocalApiTokenAuth`
+  authenticates against every configured entry and records which one
+  matched; `LocalApiEndpoints` now traces calls under that verified token
+  name, with the caller-supplied `X-Aether-Client` header kept alongside it
+  only as an unverified display hint. A load-time settings migration
+  converts an existing single `ApiToken` into a "Default" named entry so
+  upgrading users keep a working integration.
+- **Embeddings endpoint.** `POST /v1/embeddings` wraps `IEmbeddingService`,
+  returning one vector per input string plus the provider's dimensionality.
+
+### Phase 3 - MCP hardening
+
+- **Per-server tool allowlists.** `McpServerConfig.AllowedTools` restricts
+  which of a server's declared tools are actually callable (empty means no
+  restriction, matching prior behavior); configurable per server in
+  Settings > MCP Servers. Also closes a real gap found while implementing
+  this: `McpToolBridge.ExecuteAsync` previously forwarded any
+  `mcp:{server}:{tool}` reference to the server without checking it was
+  ever declared via `tools/list`; it now verifies the tool is both
+  allowlisted and actually declared before calling it.
+
+### Phase 4 - Local-only crash/lifecycle journal
+
+- **`AppLifecycleJournalService`** (`Aether.Core.Services`, so Aether.Rag and
+  Aether.Voice can both use it without a reference against the established
+  Desktop/ViewModels to Services/Agent/Rag to Core dependency direction):
+  one small atomic-write JSON file in the data root recording session start
+  time, whether the session exited cleanly, and the last notable operation
+  it was performing. Generalizes the ad-hoc preflight logging added for the
+  0.9.38-0.9.40 native Kokoro ONNX crash into a reusable mechanism, now also
+  wired into the RAG cross-encoder reranker's ONNX session loads. Doctor
+  reports a new "Previous session exited cleanly" check, warning and naming
+  the last recorded operation when the prior session never recorded a clean
+  exit, purely local diagnosis with no telemetry or upload.
+
+### Docs
+
+- docs/features.md, docs/agent.md, and docs/security-review.md updated for
+  all of the above (Local API endpoints/tokens, chat Sources panel, MCP
+  allowlists, Doctor's clean-shutdown check). docs/security-review.md's
+  Local API and MCP rows are refreshed for `0.9.42-alpha`; the rest of that
+  document is unchanged from its `0.9.14-alpha` baseline and is flagged as
+  such rather than implicitly re-certified.
+
+## [0.9.41-alpha] - 2026-07-11
+
+Second architecture/security review pass (docs/review/, r2). Closes every
+Phase 0 item in docs/review/01-code-audit.md: two P1s, eight P2s, and the
+resolvable P3s.
+
+### Fixed
+- **`LocalApi.Enabled` was a phantom toggle**: nothing ever launched the
+  `Aether.LocalApi` host process, so the Settings checkbox did nothing, and
+  a manually-launched host ignored the setting entirely. `LocalApiProcessManager`
+  now actually starts/stops the host (packaged sibling install, or the
+  dev build output when running via `dotnet run`/F5), wired into app startup,
+  settings save, and shutdown; `Aether.LocalApi/Program.cs` refuses to serve
+  (exit 1) when `Enabled` is false even if launched directly. `build.ps1`/`build.sh`
+  now also publish `Aether.LocalApi` into a `LocalApi/` subfolder of the
+  release package. A new unauthenticated `/health` endpoint backs the
+  process manager's startup health-poll.
+- Local API call tracing built `DetailJson` by string-interpolating the
+  caller-controlled `X-Aether-Client` header, so a crafted header could
+  inject malformed/extra JSON into stored trace records; it's now built
+  with `JsonSerializer.Serialize`, and the caller name is stripped of
+  control characters and capped at 64 characters.
+- `McpClient.CallToolAsync` stringified every tool argument via `ToString()`,
+  so a server expecting a JSON number/boolean/object for a declared
+  parameter received a string instead; arguments now map by runtime type.
+- `McpClient` never drained a spawned server's stderr; a server that logged
+  more than the OS pipe buffer would block on its next stderr write, hanging
+  every in-flight call until the 30-second timeout with no diagnostic. Stderr
+  is now drained continuously into a bounded tail, included in failure
+  messages.
+- `McpClient` requests made after the server process closed its stdout used
+  to hang for the full 30-second per-call timeout; the client now faults all
+  outstanding and future calls immediately when the connection closes.
+- The agent's `inspect_git_diff` tool read stdout/stderr only after
+  `WaitForExit`, which deadlocks against git blocking on a full pipe for a
+  large working tree, previously surfacing as a false "git status timed
+  out." Streams are now read concurrently with the wait, matching the
+  pattern `run_command` already used.
+- `apply_draft_patch` wrote the user's approved file changes with a plain
+  `File.WriteAllText`; a crash mid-write could truncate their source file.
+  It now goes through the same temp-plus-move `AtomicFileWriter` already
+  used for state files (`IAgentWorkspaceTools.ApplyDraftPatch` is now
+  `ApplyDraftPatchAsync`).
+- The native Kokoro model download buffered the full response (a few
+  hundred MB) into memory before writing to disk; it now streams via
+  `HttpCompletionOption.ResponseHeadersRead`.
+- Native Kokoro speech synthesis (phonemize/tokenize/ONNX inference) ran on
+  the caller's thread, which is the UI thread for `SpeakAsync`/`PreviewVoiceAsync`,
+  freezing the app for the duration; it's now offloaded to a background thread.
+- `secrets.local.key` (the AES key protecting every fallback-stored secret)
+  was written with a bare `File.WriteAllText`, restricting permissions only
+  after the file was already visible, and non-atomically. It's now written
+  temp-then-move with permissions restricted before the move, matching
+  `secrets.local.json`'s own write path.
+- A secret that fails to decrypt under both the current and legacy format
+  (e.g. a corrupted or replaced `secrets.local.key`) used to silently
+  resolve to an empty string; `SecretStore` now logs a warning through
+  `IRuntimeLogService` so the failure is diagnosable instead of surfacing
+  only as a downstream provider auth failure.
+- The local API's chat completion endpoint only forwarded
+  Temperature/MaxTokens, ignoring the five other sampling parameters added
+  in 0.9.39 and any saved per-model profile defaults, so API callers got
+  different output than the desktop app for the same model. It now applies
+  the same explicit-value / model-profile-default / global-setting
+  precedence the desktop `ChatViewModel` uses.
+- The local API's RAG source parsing kept a third private copy of the
+  `__RAG_SOURCES__` sentinel regex/JSON-shape logic; it now calls the
+  shared `RagStreamProtocol.ParseSources` like every other consumer.
+
+### Added
+- `LocalApiSettingsViewModel.ProcessStatusLabel`, shown in Settings > Local
+  API, so the Enable checkbox has a visible, honest status ("Running",
+  "Stopped", "Stopped (no token configured)", etc.) instead of an assumed
+  effect.
+
+### Docs
+- docs/review/ now holds a second review round (r2): a code audit, an
+  architecture assessment of the post-r1 v2.0/v3.0 code, and a next-level
+  roadmap. r1 moved to docs/review/archived/r1/.
+
 ## [0.9.40-alpha] - 2026-07-07
 
 ### Fixed
