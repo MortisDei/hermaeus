@@ -289,6 +289,7 @@ public partial class AgentViewModel : ObservableObject
     [ObservableProperty] private string _workspaceImportantFiles = string.Empty;
     [ObservableProperty] private string _workspaceRagIngestPlan = string.Empty;
     [ObservableProperty] private string _suggestedAgentsMd = string.Empty;
+    [ObservableProperty] private string _replyText = string.Empty;
 
     public string CurrentTaskStatusLabel => CurrentTask is null ? "No active task" : CurrentTask.Status.ToString();
     public string CurrentStepCountLabel => CurrentTask is null
@@ -296,6 +297,8 @@ public partial class AgentViewModel : ObservableObject
         : $"step {CurrentTask.StepCount}/{Math.Max(_settings?.Settings.Agent.MaxAutoSteps ?? 20, 1)}";
     public string CurrentTaskGoalLabel => CurrentTask is null || string.IsNullOrWhiteSpace(CurrentTask.Goal) ? "No goal loaded" : CurrentTask.Goal;
     public string CurrentTaskSummaryLabel => CurrentTask is null || string.IsNullOrWhiteSpace(CurrentTask.Summary) ? "No summary yet" : CurrentTask.Summary;
+    /// <summary>True when the task is asking a question, not waiting on a tool approval; only then does the reply box apply.</summary>
+    public bool IsWaitingForReply => CurrentTask is { Status: AgentTaskStatus.WaitingForUser, PendingToolAction: null };
     public int RecentTaskCount => RecentTasks.Count;
     public int ReviewQueueCount => ReviewQueue.Count;
     public int WorkspaceMemoryCount => WorkspaceMemory.Count;
@@ -442,6 +445,7 @@ public partial class AgentViewModel : ObservableObject
             _cts = null;
             StartCommand.NotifyCanExecuteChanged();
             RunStepCommand.NotifyCanExecuteChanged();
+            SendReplyCommand.NotifyCanExecuteChanged();
         }
     }
 
@@ -467,6 +471,7 @@ public partial class AgentViewModel : ObservableObject
             _cts = null;
             StartCommand.NotifyCanExecuteChanged();
             RunStepCommand.NotifyCanExecuteChanged();
+            SendReplyCommand.NotifyCanExecuteChanged();
         }
     }
 
@@ -504,26 +509,62 @@ public partial class AgentViewModel : ObservableObject
         // user to click Run Step repeatedly. The approval itself already
         // happened above; this only continues a task that approval just
         // returned to Running, it never bypasses a gate on its own.
-        if (!IsRunning && CurrentTask?.TaskId == item.TaskId && CurrentTask.Status == AgentTaskStatus.Running)
+        await ResumeAgentLoopIfRunnableAsync(item.TaskId);
+    }
+
+    [RelayCommand(CanExecute = nameof(CanSendReply))]
+    private async Task SendReplyAsync()
+    {
+        if (CurrentTask is null || string.IsNullOrWhiteSpace(ReplyText)) return;
+        var taskId = CurrentTask.TaskId;
+        try
         {
-            IsRunning = true;
-            IsError = false;
-            _cts = new CancellationTokenSource();
-            try
-            {
-                await RunAgentLoopAsync();
-                await RefreshRecentAsync();
-            }
-            catch (OperationCanceledException) { StatusMessage = "Agent stopped."; }
-            catch (Exception ex) { SetError(ex.Message); }
-            finally
-            {
-                IsRunning = false;
-                _cts?.Dispose();
-                _cts = null;
-                StartCommand.NotifyCanExecuteChanged();
-                RunStepCommand.NotifyCanExecuteChanged();
-            }
+            await _agent.AppendUserReplyAsync(taskId, ReplyText);
+            ReplyText = string.Empty;
+            await LoadTaskIfOpenAsync(taskId);
+            // Same approve-and-continue shape as ApproveReviewAsync: a
+            // reply that unblocked the task should resume the loop instead
+            // of requiring a separate manual step.
+            await ResumeAgentLoopIfRunnableAsync(taskId);
+        }
+        catch (Exception ex)
+        {
+            SetError(ex.Message);
+        }
+    }
+
+    private bool CanSendReply() => !IsRunning && IsWaitingForReply && !string.IsNullOrWhiteSpace(ReplyText);
+
+    /// <summary>
+    /// Shared by <see cref="ApproveReviewAsync"/> and <see cref="SendReplyAsync"/>:
+    /// resumes the autonomous loop for a task that some other action (an
+    /// approval, a reply) already returned to <see cref="AgentTaskStatus.Running"/>.
+    /// A no-op if the loop is already running, a different task is open, or
+    /// the task is not actually Running.
+    /// </summary>
+    private async Task ResumeAgentLoopIfRunnableAsync(string taskId)
+    {
+        if (IsRunning || CurrentTask?.TaskId != taskId || CurrentTask.Status != AgentTaskStatus.Running)
+            return;
+
+        IsRunning = true;
+        IsError = false;
+        _cts = new CancellationTokenSource();
+        try
+        {
+            await RunAgentLoopAsync();
+            await RefreshRecentAsync();
+        }
+        catch (OperationCanceledException) { StatusMessage = "Agent stopped."; }
+        catch (Exception ex) { SetError(ex.Message); }
+        finally
+        {
+            IsRunning = false;
+            _cts?.Dispose();
+            _cts = null;
+            StartCommand.NotifyCanExecuteChanged();
+            RunStepCommand.NotifyCanExecuteChanged();
+            SendReplyCommand.NotifyCanExecuteChanged();
         }
     }
 
@@ -1062,6 +1103,9 @@ public partial class AgentViewModel : ObservableObject
     partial void OnCurrentTaskChanged(AgentTaskState? value)
     {
         RunStepCommand.NotifyCanExecuteChanged();
+        SendReplyCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(IsWaitingForReply));
         _ = RefreshQueuedPatchesAsync();
     }
+    partial void OnReplyTextChanged(string value) => SendReplyCommand.NotifyCanExecuteChanged();
 }

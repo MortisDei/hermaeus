@@ -32,7 +32,7 @@ dotnet build Aether.sln                                  # zero warnings enforce
 dotnet test src/Aether.Tests/Aether.Tests.csproj         # standard xunit; all tests must pass
 dotnet run --project src/Aether.Desktop                  # launch the app
 ./build.sh --skip-restore    # or: pwsh ./build.ps1 -SkipRestore   # packaging
-./scripts/coverage.sh        # or: pwsh ./scripts/coverage.ps1     # line-coverage ratchet (floor: 43%)
+./scripts/coverage.sh        # or: pwsh ./scripts/coverage.ps1     # line-coverage ratchet (floor: 45%)
 ```
 
 Any compiler warning fails the build. Fix the warning; do not suppress it without a comment explaining the constraint.

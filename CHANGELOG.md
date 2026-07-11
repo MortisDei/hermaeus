@@ -11,6 +11,96 @@ limit.
 
 ## [Unreleased]
 
+## [0.9.44-alpha] - 2026-07-12
+
+Implements docs/review r4 in full: an audit of the r3 agent loop and lesson
+store found the loop's feedback channels were half-wired and the lesson
+store's contradiction mechanic was structurally unreachable. r4 fixes both,
+then lands r3's deferred item (automatic lesson capture from task-terminal
+states) on top.
+
+### Interaction and failure semantics
+
+- **User-reply channel.** `IAgentService.AppendUserReplyAsync` answers a
+  task's `ask_user` question: appends the reply to the transcript (new
+  `"user"` role) and resumes the task. Refuses when a tool approval is
+  pending - a reply is never a substitute for an approval decision. The
+  workbench shows a reply box that resumes the autonomous loop after
+  sending, the same approve-and-continue shape as a gated-action approval
+  (both now share `AgentViewModel.ResumeAgentLoopIfRunnableAsync`).
+- **Real failure semantics.** `AgentTaskState.ConsecutiveStepErrors` tracks
+  unparseable model responses; three in a row fails the task (recorded on
+  `Decisions`, every bad step still kept in the transcript) instead of
+  looping forever in `WaitingForUser`. Any step that parses successfully
+  resets the counter. An unhandled model-call or tool-execution error now
+  hands the task to `WaitingForUser` before rethrowing, instead of leaving
+  it stranded in `Running`. Hitting `Agent.MaxAutoSteps` while still
+  `Running` now also lands in `WaitingForUser` with a logged/transcripted
+  note, rather than stopping silently.
+- **Approved-tool transcript entries.** A gated action's result now reaches
+  the transcript once approved, not just `ToolResults`' last-five window -
+  previously the results of the most consequential actions could age out of
+  the model's view. Removed the unused, transcript-and-lesson-bypassing
+  `AgentService.ExecuteApprovedToolAsync`.
+- **Native tool-call fidelity.** A tool-calling model's own prose now becomes
+  the recorded thought summary instead of a synthetic "Calling X."
+  placeholder; a turn requesting more than one tool call notes the dropped
+  ones so the model sees next step that only the first ran.
+- Small hygiene: `AgentContextBuilder`'s one-word workspace search heuristic
+  now only runs on a task's first step (later steps have transcript history
+  and navigation tools); `PendingSteps` drops entries once they appear in
+  `CompletedSteps`; stale `KnownRisks` text about commands being blocked
+  fixed to match actual policy.
+
+### Lessons v2
+
+- **Signature redesign.** Command/patch/approval dedupe signatures no longer
+  bake in the outcome (was `command:{cmd}:{ok|fail}:{token}`, now
+  `command:{cmd}`) - previously a command that failed then succeeded created
+  two permanently-separate rows and the store's contradiction logic was
+  unreachable for these kinds. Schema bumped to v2 with a migration that
+  collapses existing outcome-suffixed rows (keeping the one with the most
+  evidence) on next start.
+- **Approval counter-evidence.** Approving a gated action now records
+  counter-evidence against a prior rejection lesson for the same tool (via
+  new `AgentLessonEvidence.CounterOnly`, which only ever weakens an
+  existing lesson, never originates one), so a single early rejection can no
+  longer become a standing lesson the user's own later approvals can't
+  soften.
+- **Structured command outcomes.** `AgentToolResult` gained `ExitCode` and
+  `TimedOut`; lesson capture uses the real exit code instead of string-
+  sniffing `"Exit code 0"` from the summary text, and skips capture entirely
+  on a timeout (which says nothing about whether the command itself works).
+- **Task-terminal capture** (the item r3 deferred). On `Complete` or
+  `Failed`, a lesson keyed by a deterministic goal fingerprint
+  (`AgentLessonText`: tokenize, sort, hash - no LLM) records whether goals
+  like it tend to work out here; an uneventful success records nothing.
+  Separately, every lesson actually shown to the model during a task that
+  completes successfully gets its evidence confirmed via new
+  `ILessonStore.ConfirmAsync` - the compounding half of the self-learning
+  loop.
+- **Relevance-aware injection.** Lesson candidates are now ranked by pinned
+  status, confidence, and shared terms with the current goal/recent tools
+  before packing, instead of confidence alone, so an unrelated
+  high-confidence lesson can no longer crowd out one that actually bears on
+  the current step.
+- Polish: `SqliteLessonStore` timestamps now round-trip with
+  `DateTimeStyles.RoundtripKind` instead of applying local-time conversion;
+  the lesson error-token regex is now static/compiled.
+
+### Chat-side lesson consumption (optional)
+
+- New `Memory.ConsumeAgentLessonsInChat` setting (Settings > Memory; off by
+  default). When on, `ChatViewModel` folds Global-scope agent lessons into
+  the system prompt as their own read-only markdown block, alongside stored
+  memories. Deliberately kept out of `BuildMemoryInjectionAsync`'s
+  `InjectedMemoryIds` list, so a `[MEMORY_UPDATE]`/`[MEMORY_FORGET]` marker
+  can never target a lesson - the Agent workbench's Lessons panel remains
+  the only write path.
+
+23 new tests (327 total), zero warnings. Full details in
+docs/review/archived/r4/.
+
 ## [0.9.43-alpha] - 2026-07-12
 
 Implements docs/review r3 (agent capability, memory, self-learning) in full.

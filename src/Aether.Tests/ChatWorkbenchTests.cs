@@ -1,3 +1,5 @@
+using Aether.Agent.Models;
+using Aether.Agent.Services;
 using Aether.Core.Models;
 using Aether.Core.Services;
 using Aether.Services;
@@ -123,6 +125,73 @@ public sealed class ChatWorkbenchTests
         Assert.Empty(assistantMessage.Sources);
         False(capturing.LastOptions?.SystemPrompt?.Contains("concise summaries", StringComparison.OrdinalIgnoreCase) ?? false,
             "memory context should not be injected when Memory.Enabled is false");
+    }
+
+    [Fact]
+    public async Task SendAsyncInjectsGlobalAgentLessonsWhenToggleEnabled()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.Memory.Enabled = true;
+        settings.Settings.Memory.ConsumeAgentLessonsInChat = true;
+        var lessons = new SqliteLessonStore(settings);
+        await lessons.RecordEvidenceAsync(new AgentLessonEvidence(
+            AgentLessonScope.Global, "", AgentLessonKind.Stated, "stated:commit-style",
+            "The user prefers terse commit messages.", "", AgentLessonOutcome.Observation));
+
+        var capturing = new CapturingLlm();
+        var vm = new ChatViewModel(
+            capturing,
+            new InMemoryConversationStore(),
+            new EmptyMemoryStore(),
+            settings,
+            new FakeTts(),
+            new ModelProfileService(settings),
+            new FakeToasts(),
+            new NoOpConversationMemoryService(),
+            new RuntimeLogService(settings),
+            new ConversationExportService(),
+            lessons: lessons);
+
+        await vm.LoadModelsAsync(force: true);
+        vm.InputText = "How should I write this commit?";
+        await vm.SendCommand.ExecuteAsync(null);
+
+        Assert.Contains("terse commit messages", capturing.LastOptions!.SystemPrompt, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task SendAsyncSkipsGlobalAgentLessonsWhenToggleDisabled()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.Memory.Enabled = true;
+        settings.Settings.Memory.ConsumeAgentLessonsInChat = false;
+        var lessons = new SqliteLessonStore(settings);
+        await lessons.RecordEvidenceAsync(new AgentLessonEvidence(
+            AgentLessonScope.Global, "", AgentLessonKind.Stated, "stated:commit-style",
+            "The user prefers terse commit messages.", "", AgentLessonOutcome.Observation));
+
+        var capturing = new CapturingLlm();
+        var vm = new ChatViewModel(
+            capturing,
+            new InMemoryConversationStore(),
+            new EmptyMemoryStore(),
+            settings,
+            new FakeTts(),
+            new ModelProfileService(settings),
+            new FakeToasts(),
+            new NoOpConversationMemoryService(),
+            new RuntimeLogService(settings),
+            new ConversationExportService(),
+            lessons: lessons);
+
+        await vm.LoadModelsAsync(force: true);
+        vm.InputText = "How should I write this commit?";
+        await vm.SendCommand.ExecuteAsync(null);
+
+        False(capturing.LastOptions?.SystemPrompt?.Contains("terse commit messages", StringComparison.OrdinalIgnoreCase) ?? false,
+            "agent lessons should not be injected into chat when the toggle is off");
     }
 
     [Fact]

@@ -94,6 +94,27 @@ public sealed class AgentTaskState
     public string Summary { get; set; } = string.Empty;
     public int StepCount { get; set; }
     /// <summary>
+    /// Consecutive steps in a row whose model response could not be parsed
+    /// as valid JSON. Reset to 0 on any step that parses successfully; at 3
+    /// the task moves to <see cref="AgentTaskStatus.Failed"/> instead of
+    /// looping forever in <see cref="AgentTaskStatus.WaitingForUser"/>.
+    /// </summary>
+    public int ConsecutiveStepErrors { get; set; }
+    /// <summary>
+    /// Total parse failures across the task's whole lifetime; unlike
+    /// <see cref="ConsecutiveStepErrors"/> this never resets, so a
+    /// terminal-state lesson can tell an uneventful success apart from one
+    /// that recovered from trouble along the way.
+    /// </summary>
+    public int TotalStepErrors { get; set; }
+    /// <summary>
+    /// Ids of every lesson that has appeared in this task's context pack
+    /// across all steps. On a successful completion, each is confirmed
+    /// (evidence bumped) via <see cref="Aether.Agent.Services.ILessonStore"/> -
+    /// the compounding half of the self-learning loop.
+    /// </summary>
+    public List<string> InjectedLessonIds { get; set; } = [];
+    /// <summary>
     /// The model's current plan, replaced atomically by the set_plan tool.
     /// Purely informational task-state, like <see cref="CompletedSteps"/>/
     /// <see cref="PendingSteps"/>; it cannot authorize or bypass anything.
@@ -162,7 +183,14 @@ public sealed record AgentLessonEvidence(
     string Claim,
     string Guidance,
     AgentLessonOutcome Outcome,
-    string? SourceTaskId = null);
+    string? SourceTaskId = null,
+    /// <summary>
+    /// When true and no lesson with this signature exists yet, the store
+    /// writes nothing instead of creating one. For evidence that should
+    /// only ever counter an existing claim (e.g. an approval confirming a
+    /// tool the user previously rejected), never originate one on its own.
+    /// </summary>
+    bool CounterOnly = false);
 
 public sealed record AgentReviewQueueItem(
     string TaskId,
@@ -263,6 +291,11 @@ public sealed class AgentToolResult
     /// locator. Left null for tools with no single source (e.g. run_command).
     /// </summary>
     public SourceReference? Source { get; set; }
+
+    /// <summary>run_command's process exit code; null for every other tool and for a timed-out command.</summary>
+    public int? ExitCode { get; set; }
+    /// <summary>True only when run_command hit its 5-minute timeout and was killed; ExitCode is meaningless then.</summary>
+    public bool TimedOut { get; set; }
 }
 
 public sealed class AgentPendingToolAction
@@ -319,7 +352,7 @@ public sealed record AgentWorkspaceOptions(
 /// </summary>
 public sealed record AgentTranscriptEntry(
     int Step,
-    string Role, // "assistant" | "tool"
+    string Role, // "assistant" | "tool" | "user"
     string? ToolName,
     string Content,
     DateTime Timestamp);

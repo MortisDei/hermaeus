@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Aether.Agent.Models;
 using Aether.Core.Services;
@@ -12,7 +13,7 @@ namespace Aether.Agent.Services;
 /// </summary>
 public sealed class SqliteLessonStore : ILessonStore
 {
-    private const int SchemaVersion = 1;
+    private const int SchemaVersion = 2;
     private const double ConfidenceFloor = 0.2;
     private const double MaxConfidence = 0.95;
     private const double MaxStatedConfidence = 0.5;
@@ -83,7 +84,8 @@ public sealed class SqliteLessonStore : ILessonStore
 
             await SqliteMigrationRunner.ApplyAsync(c, "agent_lessons", SchemaVersion,
             [
-                new SqliteMigration(1, (_, _) => Task.FromResult(false))
+                new SqliteMigration(1, (_, _) => Task.FromResult(false)),
+                new SqliteMigration(2, MigrateOutcomeOutOfSignatureAsync)
             ], ct);
 
             _initializedPath = path;
@@ -93,6 +95,77 @@ public sealed class SqliteLessonStore : ILessonStore
             _initGate.Release();
         }
     }
+
+    /// <summary>
+    /// v1 baked the outcome into Command/Patch/Approval signatures (e.g.
+    /// "command:dotnet test:fail:CS0246"), which made the store's
+    /// contradiction logic unreachable: a command that failed then
+    /// succeeded created two permanently-separate rows instead of one row
+    /// that could reinforce or contradict itself (docs/review/02-lessons-v2.md L1).
+    /// This strips the outcome suffix back out; on a dedupe-key collision
+    /// (both an "ok" and a "fail" row existed for the same subject) it keeps
+    /// the row with the most evidence (ties: most recently updated) and
+    /// drops the rest, since this is a rebuildable index store where a
+    /// lossy collapse is acceptable.
+    /// </summary>
+    private static async Task<bool> MigrateOutcomeOutOfSignatureAsync(SqliteConnection c, CancellationToken ct)
+    {
+        var rows = new List<(string Id, string Scope, string ScopeId, string Kind, string Signature, int EvidenceCount, string UpdatedAt)>();
+        await using (var cmd = c.CreateCommand())
+        {
+            cmd.CommandText = "SELECT id, scope, scope_id, kind, signature, evidence_count, updated_at FROM agent_lessons";
+            await using var rd = await cmd.ExecuteReaderAsync(ct);
+            while (await rd.ReadAsync(ct))
+                rows.Add((rd.GetString(0), rd.GetString(1), rd.GetString(2), rd.GetString(3), rd.GetString(4), rd.GetInt32(5), rd.GetString(6)));
+        }
+
+        var changed = false;
+        var groups = rows
+            .Select(r => (Row: r, NewSignature: StripOutcomeSuffix(r.Kind, r.Signature)))
+            .Where(x => x.NewSignature is not null)
+            .GroupBy(x => (x.Row.Scope, x.Row.ScopeId, x.Row.Kind, NewSignature: x.NewSignature!));
+
+        foreach (var group in groups)
+        {
+            var ordered = group.OrderByDescending(x => x.Row.EvidenceCount).ThenByDescending(x => x.Row.UpdatedAt).ToList();
+            var keep = ordered[0].Row;
+
+            foreach (var drop in ordered.Skip(1))
+            {
+                await using var del = c.CreateCommand();
+                del.CommandText = "DELETE FROM agent_lessons WHERE id = $id";
+                del.Parameters.AddWithValue("$id", drop.Row.Id);
+                await del.ExecuteNonQueryAsync(ct);
+                changed = true;
+            }
+
+            if (!string.Equals(keep.Signature, group.Key.NewSignature, StringComparison.Ordinal))
+            {
+                await using var upd = c.CreateCommand();
+                upd.CommandText = "UPDATE agent_lessons SET signature = $sig WHERE id = $id";
+                upd.Parameters.AddWithValue("$sig", group.Key.NewSignature);
+                upd.Parameters.AddWithValue("$id", keep.Id);
+                await upd.ExecuteNonQueryAsync(ct);
+                changed = true;
+            }
+        }
+
+        return changed;
+    }
+
+    private static string? StripOutcomeSuffix(string kind, string signature) => kind switch
+    {
+        "Command" => System.Text.RegularExpressions.Regex.Match(signature, "^command:(.*):(ok|fail):[^:]*$") is { Success: true } m
+            ? $"command:{m.Groups[1].Value}"
+            : null,
+        "Patch" => System.Text.RegularExpressions.Regex.Match(signature, "^patch:(apply_draft_patch|edit_file|create_file):(.*):(ok|fail)$") is { Success: true } m
+            ? $"patch:{m.Groups[1].Value}:{m.Groups[2].Value}"
+            : null,
+        "Approval" => System.Text.RegularExpressions.Regex.Match(signature, "^approval:(.*):rejected$") is { Success: true } m
+            ? $"approval:{m.Groups[1].Value}"
+            : null,
+        _ => null
+    };
 
     public async Task<AgentLesson> RecordEvidenceAsync(AgentLessonEvidence evidence, CancellationToken ct = default)
     {
@@ -105,6 +178,23 @@ public sealed class SqliteLessonStore : ILessonStore
 
         if (existing is null)
         {
+            if (evidence.CounterOnly)
+            {
+                // Nothing yet to counter; counter-only evidence never
+                // originates a lesson on its own (see AgentLessonEvidence.CounterOnly).
+                return new AgentLesson
+                {
+                    Scope = evidence.Scope,
+                    ScopeId = evidence.ScopeId,
+                    Kind = evidence.Kind,
+                    Signature = evidence.Signature,
+                    Claim = evidence.Claim,
+                    Guidance = evidence.Guidance,
+                    Outcome = evidence.Outcome,
+                    EvidenceCount = 0
+                };
+            }
+
             var lesson = new AgentLesson
             {
                 Scope = evidence.Scope,
@@ -171,6 +261,36 @@ public sealed class SqliteLessonStore : ILessonStore
 
         await UpdateRowAsync(c, existing, ct);
         return existing;
+    }
+
+    public async Task ConfirmAsync(IReadOnlyList<string> lessonIds, string sourceTaskId, CancellationToken ct = default)
+    {
+        if (lessonIds.Count == 0) return;
+        await InitializeAsync(ct);
+
+        foreach (var id in lessonIds.Distinct(StringComparer.Ordinal))
+        {
+            var lesson = await GetByIdAsync(id, ct);
+            if (lesson is null || lesson.IsPinned || lesson.Status != AgentLessonStatus.Active)
+                continue;
+
+            lesson.EvidenceCount++;
+            lesson.Confidence = ConfidenceCurve(lesson.EvidenceCount, lesson.Kind);
+            var now = DateTime.UtcNow;
+            lesson.UpdatedAt = now;
+            lesson.LastConfirmedAt = now;
+            if (!string.IsNullOrEmpty(sourceTaskId))
+            {
+                lesson.SourceTaskIds.Remove(sourceTaskId);
+                lesson.SourceTaskIds.Insert(0, sourceTaskId);
+                if (lesson.SourceTaskIds.Count > MaxSourceTaskIds)
+                    lesson.SourceTaskIds = lesson.SourceTaskIds[..MaxSourceTaskIds];
+            }
+
+            await using var c = new SqliteConnection(Cs);
+            await c.OpenAsync(ct);
+            await UpdateRowAsync(c, lesson, ct);
+        }
     }
 
     private static double InitialConfidence(AgentLessonKind kind) => kind == AgentLessonKind.Stated ? 0.25 : 0.3;
@@ -353,11 +473,22 @@ public sealed class SqliteLessonStore : ILessonStore
         Outcome = Enum.TryParse<AgentLessonOutcome>(r.GetString(r.GetOrdinal("outcome")), out var outcome) ? outcome : AgentLessonOutcome.Observation,
         Confidence = r.GetDouble(r.GetOrdinal("confidence")),
         EvidenceCount = r.GetInt32(r.GetOrdinal("evidence_count")),
-        CreatedAt = DateTime.Parse(r.GetString(r.GetOrdinal("created_at"))),
-        UpdatedAt = DateTime.Parse(r.GetString(r.GetOrdinal("updated_at"))),
-        LastConfirmedAt = DateTime.Parse(r.GetString(r.GetOrdinal("last_confirmed_at"))),
+        CreatedAt = ParseTimestamp(r.GetString(r.GetOrdinal("created_at"))),
+        UpdatedAt = ParseTimestamp(r.GetString(r.GetOrdinal("updated_at"))),
+        LastConfirmedAt = ParseTimestamp(r.GetString(r.GetOrdinal("last_confirmed_at"))),
         Status = Enum.TryParse<AgentLessonStatus>(r.GetString(r.GetOrdinal("status")), out var status) ? status : AgentLessonStatus.Active,
         IsPinned = r.GetInt32(r.GetOrdinal("is_pinned")) != 0,
         SourceTaskIds = JsonSerializer.Deserialize<List<string>>(r.GetString(r.GetOrdinal("source_task_ids_json"))) ?? []
     };
+
+    /// <summary>
+    /// Round-trips the "O"-format UTC strings <see cref="BindParameters"/>
+    /// writes without applying local-time conversion, which bare
+    /// <see cref="DateTime.Parse(string)"/> does for a string carrying a "Z"
+    /// or offset.
+    /// </summary>
+    private static DateTime ParseTimestamp(string value) =>
+        DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var parsed)
+            ? parsed
+            : DateTime.UtcNow;
 }

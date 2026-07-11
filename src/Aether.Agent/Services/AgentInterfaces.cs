@@ -95,6 +95,14 @@ public interface IAgentService
     Task<AgentStepResult> RunAsync(string taskId, AgentWorkspaceOptions options, Action<AgentStepResult>? onStep = null, CancellationToken ct = default);
     Task<IReadOnlyList<AgentTaskListItem>> LoadRecentTasksAsync(CancellationToken ct = default);
     Task AppendApprovalAsync(string taskId, string action, bool approved, AgentWorkspaceOptions? options = null, CancellationToken ct = default);
+    /// <summary>
+    /// Answers a task's <c>ask_user</c> question: appends the reply to the
+    /// task's transcript so the next step sees it, and resumes the task to
+    /// <see cref="Aether.Agent.Models.AgentTaskStatus.Running"/>. Refuses
+    /// (no state change) when a tool approval is pending - a reply is never
+    /// a substitute for an explicit approval decision.
+    /// </summary>
+    Task AppendUserReplyAsync(string taskId, string reply, CancellationToken ct = default);
 }
 
 public interface IWorkspaceProfileStore
@@ -144,6 +152,17 @@ public interface ILessonStore
 
     Task<IReadOnlyList<AgentLesson>> ListAllAsync(bool includeRetired, CancellationToken ct = default);
     Task<AgentLesson?> GetByIdAsync(string id, CancellationToken ct = default);
+
+    /// <summary>
+    /// Bumps evidence (and confidence, via the same curve as
+    /// <see cref="RecordEvidenceAsync"/>) on each Active, non-pinned lesson
+    /// in <paramref name="lessonIds"/> - the lessons that were actually
+    /// injected into a task that just completed successfully. This is the
+    /// compounding half of the self-learning loop: a lesson that helped
+    /// gets more confident, not just one that was independently re-observed.
+    /// Unknown, retired, or pinned ids are silently skipped.
+    /// </summary>
+    Task ConfirmAsync(IReadOnlyList<string> lessonIds, string sourceTaskId, CancellationToken ct = default);
 
     /// <summary>Manual edit: overwrites claim/guidance and locks confidence at its current value (pinning also locks it).</summary>
     Task UpdateAsync(string id, string claim, string guidance, CancellationToken ct = default);

@@ -532,6 +532,32 @@ namespace Aether.Tests
         }
     }
 
+    /// <summary>Simulates a tool-calling provider that also streams prose alongside two tool calls in one turn.</summary>
+    sealed class FakeMultiToolCallingAgentLlm : ILlmService
+    {
+        public string ProviderName => "FakeMultiToolCallingAgent";
+        public bool IsConfigured => true;
+        public Task<List<LlmModel>> GetModelsAsync(CancellationToken ct = default) =>
+            Task.FromResult(new List<LlmModel> { new() { Id = "fake-multi-tool-calling-agent", Name = "Fake Multi Tool Calling Agent", Provider = "Test" } });
+
+        public async IAsyncEnumerable<LlmStreamEvent> StreamChatAsync(
+            string modelId,
+            IReadOnlyList<ChatMessage> messages,
+            LlmChatOptions? options = null,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+        {
+            await Task.Delay(1, ct);
+            yield return new LlmStreamEvent("I will list files, then read the readme.");
+            yield return new LlmStreamEvent(
+                IsFinal: true,
+                ToolCalls:
+                [
+                    new LlmToolCallRequest("call_1", "list_files", "{}"),
+                    new LlmToolCallRequest("call_2", "read_file", """{"relative_path":"README.md"}""")
+                ]);
+        }
+    }
+
     sealed class FakeSystemInfo : ISystemInfoService
     {
         public Task<SystemSnapshot> CaptureAsync(CancellationToken ct = default) => Task.FromResult(new SystemSnapshot

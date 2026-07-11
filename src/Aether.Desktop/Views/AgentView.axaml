@@ -201,6 +201,31 @@
                                TextTrimming="CharacterEllipsis" />
                 </StackPanel>
 
+                <Border IsVisible="{Binding IsWaitingForReply}"
+                        Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                        CornerRadius="8"
+                        Padding="12">
+                    <StackPanel Spacing="8">
+                        <TextBlock Text="The agent is waiting for your reply"
+                                   FontWeight="SemiBold"
+                                   FontSize="12" />
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                            <TextBox Grid.Column="0"
+                                     Text="{Binding ReplyText}"
+                                     Watermark="Answer the agent's question..."
+                                     AcceptsReturn="True"
+                                     MinHeight="56"
+                                     TextWrapping="Wrap" />
+                            <Button Grid.Column="1"
+                                    Command="{Binding SendReplyCommand}"
+                                    Content="Send"
+                                    VerticalAlignment="Bottom"
+                                    Padding="14,8"
+                                    CornerRadius="6" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
                 <Expander Header="Workspace Profile" HorizontalAlignment="Stretch" IsExpanded="True">
                     <StackPanel Margin="0,8,0,0" Spacing="10">
                         <Grid ColumnDefinitions="*,*,*" ColumnSpacing="8">

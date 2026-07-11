@@ -27,6 +27,9 @@ public sealed class AgentPatchReviewServiceTests
             Actions.Add($"{action}:{approved}");
             return Task.CompletedTask;
         }
+
+        public Task AppendUserReplyAsync(string taskId, string reply, CancellationToken ct = default) =>
+            throw new NotSupportedException();
     }
 
     private static (AgentPatchReviewService Service, RecordingAgentService Agent, FileAgentTaskStateStore Store, string Workspace) Build(TempDir temp)

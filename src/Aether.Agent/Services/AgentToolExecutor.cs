@@ -52,6 +52,20 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
         }
 
         var normalized = Normalize(toolName);
+        if (normalized == "run_command")
+        {
+            var commandResult = await RunCommandAsync(options, Arg(arguments, "command"), ct);
+            return new AgentToolResult
+            {
+                Tool = normalized,
+                Arguments = new Dictionary<string, object?>(arguments, StringComparer.OrdinalIgnoreCase),
+                ResultSummary = Summarize(commandResult.Summary, normalized),
+                ExitCode = commandResult.ExitCode,
+                TimedOut = commandResult.TimedOut,
+                Source = BuildSource(normalized, arguments)
+            };
+        }
+
         object result = normalized switch
         {
             "list_files" => _workspaceTools.ListFiles(options, ArgOrNull(arguments, "subdirectory"), ArgIntOrNull(arguments, "max_depth")),
@@ -88,7 +102,6 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
                 Arg(arguments, "relative_path", "path"),
                 Arg(arguments, "content"),
                 ct),
-            "run_command" => await RunCommandAsync(options, Arg(arguments, "command"), ct),
             _ => throw new InvalidOperationException($"Unsupported agent tool: {toolName}")
         };
 
@@ -113,7 +126,10 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
         };
     }
 
-    private static async Task<string> RunCommandAsync(AgentWorkspaceOptions options, string command, CancellationToken ct)
+    /// <summary>Structured outcome of a run_command execution, used both for the model-visible summary text and for lesson-store capture (see AgentService.RecordLessonEvidenceForToolAsync).</summary>
+    private sealed record CommandExecutionResult(string Summary, int? ExitCode, bool TimedOut);
+
+    private static async Task<CommandExecutionResult> RunCommandAsync(AgentWorkspaceOptions options, string command, CancellationToken ct)
     {
         var root = AgentWorkspaceTools.ResolveWorkspaceRoot(options.WorkspaceRoot);
         var recipe = WorkspaceCommandRecipes.TryMatch(command, root)
@@ -144,7 +160,8 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
         {
             try { process.Kill(entireProcessTree: true); }
             catch { }
-            return $"Command '{command}' timed out after 5 minutes and was terminated.";
+            return new CommandExecutionResult(
+                $"Command '{command}' timed out after 5 minutes and was terminated.", ExitCode: null, TimedOut: true);
         }
 
         var stdout = await stdoutTask;
@@ -152,7 +169,8 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
         // The model needs to see the actual compiler/test error to fix it,
         // so keep a generous tail instead of the old unbounded dump (which
         // then just got hard-truncated mid-line by Summarize downstream).
-        return $"Exit code {process.ExitCode}\n\nstdout:\n{LastLines(stdout, 200)}\n\nstderr:\n{LastLines(stderr, 200)}";
+        var summary = $"Exit code {process.ExitCode}\n\nstdout:\n{LastLines(stdout, 200)}\n\nstderr:\n{LastLines(stderr, 200)}";
+        return new CommandExecutionResult(summary, process.ExitCode, TimedOut: false);
     }
 
     private static string LastLines(string text, int maxLines)

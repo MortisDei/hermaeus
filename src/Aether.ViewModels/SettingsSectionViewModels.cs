@@ -319,6 +319,7 @@ public partial class MemorySettingsViewModel : ObservableObject
     [ObservableProperty] private double _memoryImportanceThreshold = 0.6;
     [ObservableProperty] private int _memoryInjectionTokenBudget = 500;
     [ObservableProperty] private int _memoryAutoArchiveDays = 90;
+    [ObservableProperty] private bool _consumeAgentLessonsInChat;
 
     public void ReloadFrom(AppSettings settings)
     {
@@ -327,6 +328,7 @@ public partial class MemorySettingsViewModel : ObservableObject
         MemoryImportanceThreshold = settings.Memory.AutoSummarizeImportanceThreshold;
         MemoryInjectionTokenBudget = settings.Memory.InjectionTokenBudget;
         MemoryAutoArchiveDays = settings.Memory.AutoArchiveAfterDays;
+        ConsumeAgentLessonsInChat = settings.Memory.ConsumeAgentLessonsInChat;
     }
 
     public void ApplyTo(AppSettings settings)
@@ -336,6 +338,7 @@ public partial class MemorySettingsViewModel : ObservableObject
         settings.Memory.AutoSummarizeImportanceThreshold = MemoryImportanceThreshold;
         settings.Memory.InjectionTokenBudget = MemoryInjectionTokenBudget;
         settings.Memory.AutoArchiveAfterDays = MemoryAutoArchiveDays;
+        settings.Memory.ConsumeAgentLessonsInChat = ConsumeAgentLessonsInChat;
     }
 }
 

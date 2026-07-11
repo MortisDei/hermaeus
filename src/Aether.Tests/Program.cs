@@ -1053,8 +1053,10 @@ internal static class AgentTests
     var state = await service.CreateTaskAsync("Review docs", options);
     var result = await service.RunAsync(state.TaskId, options);
 
-    Equal(AgentTaskStatus.Running, result.State.Status, "the loop should stop mid-run once the step cap is hit even though the task is not finished");
+    Equal(AgentTaskStatus.WaitingForUser, result.State.Status, "hitting the step cap must hand the task back to the user, not leave it looking silently active");
     Equal(1, result.State.StepCount, "the loop should have executed exactly the capped number of steps");
+    var transcript = await store.LoadTranscriptAsync(state.TaskId);
+    True(transcript.Any(e => e.Content.Contains("step budget exhausted", StringComparison.Ordinal)), "the budget-exhausted note should be visible in the transcript");
     }
 
     public static async Task AgentRunAsyncStopsWhenApprovalIsRequired()
@@ -1200,5 +1202,392 @@ internal static class AgentTests
     var lessons = await lessonStore.ListAllAsync(includeRetired: false);
     True(lessons.Any(l => l.Kind == AgentLessonKind.Stated && l.Claim.Contains("non-standard build script", StringComparison.Ordinal)),
         "the stated lesson should be recorded");
+    }
+
+    private const string AskUserResponse = """
+        {
+          "thought_summary": "Need clarification.",
+          "current_step": "Ask user.",
+          "next_action": { "type": "ask_user", "requires_approval": false, "risk_level": "none" },
+          "state_update": { "completed": [], "pending": [], "new_facts": [], "blockers": [] },
+          "user_message": "Which file should I look at?"
+        }
+        """;
+
+    private const string FinalResponse = """
+        {
+          "thought_summary": "Done.",
+          "current_step": "Done.",
+          "next_action": { "type": "final", "requires_approval": false, "risk_level": "none" },
+          "state_update": { "completed": [], "pending": [], "new_facts": [], "blockers": [] },
+          "user_message": "Finished."
+        }
+        """;
+
+    public static async Task AgentUserReplyRecordsTranscriptEntryAndResumesTheTask()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    var tools = new AgentWorkspaceTools();
+    var llm = new FakeSequencedAgentLlm([AskUserResponse]);
+    var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), llm, settings: settings);
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-sequenced-agent");
+
+    var state = await service.CreateTaskAsync("Investigate", options);
+    var step = await service.RunStepAsync(state.TaskId, options);
+    Equal(AgentTaskStatus.WaitingForUser, step.State.Status, "an ask_user action should pause the task");
+
+    await service.AppendUserReplyAsync(state.TaskId, "Look at README.md");
+    var afterReply = await store.LoadAsync(state.TaskId);
+    Equal(AgentTaskStatus.Running, afterReply!.Status, "a reply should resume the task");
+
+    var transcript = await store.LoadTranscriptAsync(state.TaskId);
+    True(transcript.Any(e => e.Role == "user" && e.Content == "Look at README.md"), "the reply should be recorded in the transcript");
+
+    await ThrowsAsync<InvalidOperationException>(() => service.AppendUserReplyAsync(state.TaskId, "second reply"));
+    }
+
+    public static async Task AgentUserReplyIsRefusedWhenAToolApprovalIsPending()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    File.WriteAllText(Path.Combine(root, "README.md"), "docs");
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    var tools = new AgentWorkspaceTools();
+    var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), new FakeAgentLlm(), settings: settings);
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-agent");
+
+    var state = await service.CreateTaskAsync("Review docs", options);
+    var step = await service.RunStepAsync(state.TaskId, options);
+    Equal(AgentTaskStatus.WaitingForUser, step.State.Status, "a gated tool call should pause the task with a pending approval");
+
+    await ThrowsAsync<InvalidOperationException>(() => service.AppendUserReplyAsync(state.TaskId, "approve it"));
+    }
+
+    public static async Task AgentApprovedToolExecutionReachesTheTranscript()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    File.WriteAllText(Path.Combine(root, "README.md"), "docs");
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    var tools = new AgentWorkspaceTools();
+    var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), new FakeAgentLlm(), settings: settings);
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-agent");
+
+    var state = await service.CreateTaskAsync("Review docs", options);
+    await service.RunStepAsync(state.TaskId, options);
+    await service.AppendApprovalAsync(state.TaskId, "draft_patch", approved: true, options);
+
+    var transcript = await store.LoadTranscriptAsync(state.TaskId);
+    True(transcript.Any(e => e.Role == "tool" && e.ToolName == "draft_patch"),
+        "the approved tool's result should reach the transcript, not just ToolResults' last-five window");
+    }
+
+    public static async Task AgentFailsAfterThreeConsecutiveUnparseableResponses()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    var tools = new AgentWorkspaceTools();
+    var llm = new FakeSequencedAgentLlm(["not json", "still not json", "nope"]);
+    var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), llm, settings: settings);
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-sequenced-agent");
+
+    var state = await service.CreateTaskAsync("Investigate", options);
+    AgentStepResult step = null!;
+    for (var i = 0; i < 3; i++)
+        step = await service.RunStepAsync(state.TaskId, options);
+
+    Equal(AgentTaskStatus.Failed, step.State.Status, "three consecutive unparseable responses should fail the task");
+    True(step.State.Decisions.Any(d => d.Decision == "Task failed"), "the failure should be recorded on the task state");
+    var transcript = await store.LoadTranscriptAsync(state.TaskId);
+    Equal(3, transcript.Count(e => e.Role == "assistant"), "every bad step should still be recorded in the transcript, not lost");
+    }
+
+    public static async Task AgentConsecutiveStepErrorCounterResetsOnAValidResponse()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    File.WriteAllText(Path.Combine(root, "README.md"), "docs");
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    var tools = new AgentWorkspaceTools();
+    var llm = new FakeSequencedAgentLlm(["garbage", "garbage", ListFilesToolResponse, "garbage", "garbage"]);
+    var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), llm, settings: settings);
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-sequenced-agent");
+
+    var state = await service.CreateTaskAsync("Investigate", options);
+    AgentStepResult step = null!;
+    for (var i = 0; i < 5; i++)
+        step = await service.RunStepAsync(state.TaskId, options);
+
+    True(step.State.Status != AgentTaskStatus.Failed,
+        "the error counter should reset after the valid response in the middle, so two more spread-apart errors should not fail the task");
+    }
+
+    public static async Task AgentNativeToolCallPreservesProseAndListsDroppedCalls()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    File.WriteAllText(Path.Combine(root, "README.md"), "agent docs");
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    var tools = new AgentWorkspaceTools();
+    var llm = new FakeMultiToolCallingAgentLlm();
+    var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), llm, settings: settings);
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-multi-tool-calling-agent");
+
+    var state = await service.CreateTaskAsync("Review docs", options);
+    var step = await service.RunStepAsync(state.TaskId, options);
+
+    True(step.PlannerResponse.ThoughtSummary.Contains("list files", StringComparison.OrdinalIgnoreCase),
+        "the model's own prose should become the thought summary instead of a synthetic 'Calling X.' placeholder");
+    True(step.PlannerResponse.ThoughtSummary.Contains("read_file", StringComparison.Ordinal),
+        "the dropped second tool call should be noted so the model sees next step that it did not run");
+    Equal("list_files", step.PlannerResponse.NextAction.ToolName, "only the first tool call should execute");
+    }
+
+    public static async Task AgentCommandLessonSignatureExcludesOutcomeSoContradictionCanReachIt()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var taskStore = new FileAgentTaskStateStore(settings);
+    var lessonStore = new SqliteLessonStore(settings);
+    var tools = new AgentWorkspaceTools();
+
+    var runCommandResponse = """
+        {
+          "thought_summary": "Testing.",
+          "current_step": "Run tests.",
+          "next_action": { "type": "tool", "tool_name": "run_command", "arguments": { "command": "dotnet test" }, "requires_approval": true, "risk_level": "medium" },
+          "state_update": { "completed": [], "pending": [], "new_facts": [], "blockers": [] },
+          "user_message": "Testing."
+        }
+        """;
+    var llm = new FakeSequencedAgentLlm([runCommandResponse]);
+    var manifest = new WorkspaceManifestService();
+    await manifest.SaveAsync(root, new WorkspaceManifest { AllowedCommands = [new WorkspaceCommandRecipe("dotnet test", "Test.", AgentRiskLevel.Low)] });
+    var service = new AgentService(taskStore, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), llm, manifests: manifest, settings: settings, lessons: lessonStore);
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-sequenced-agent");
+
+    var state = await service.CreateTaskAsync("Run tests", options);
+    await service.RunStepAsync(state.TaskId, options);
+    await service.AppendApprovalAsync(state.TaskId, "run_command", approved: true, options);
+
+    var lessons = await lessonStore.ListAllAsync(includeRetired: false);
+    var lesson = lessons.Single(l => l.Kind == AgentLessonKind.Command);
+    Equal("command:dotnet test", lesson.Signature, "the command lesson signature must not bake in the outcome, or contradiction can never reach it");
+    }
+
+    public static async Task AgentApprovingAPreviouslyRejectedToolWeakensTheRejectionLesson()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    File.WriteAllText(Path.Combine(root, "README.md"), "docs");
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var taskStore = new FileAgentTaskStateStore(settings);
+    var lessonStore = new SqliteLessonStore(settings);
+    var tools = new AgentWorkspaceTools();
+    var service = new AgentService(taskStore, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), new FakeAgentLlm(), settings: settings, lessons: lessonStore);
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-agent");
+
+    // Reject the same gated action across several tasks first so the
+    // rejection lesson's confidence has actually built up (docs/review/02-lessons-v2.md L2);
+    // a single piece of evidence starts too close to the retirement floor
+    // for one contradiction to show a meaningful drop instead of just an
+    // immediate reset to the same initial confidence.
+    string? lessonId = null;
+    double confidenceAfterReject = 0;
+    for (var i = 0; i < 4; i++)
+    {
+        var rejectState = await service.CreateTaskAsync($"Review docs, round {i}", options);
+        await service.RunStepAsync(rejectState.TaskId, options);
+        await service.AppendApprovalAsync(rejectState.TaskId, "draft_patch", approved: false, options);
+
+        var current = (await lessonStore.ListAllAsync(includeRetired: true)).Single(l => l.Kind == AgentLessonKind.Approval);
+        lessonId = current.Id;
+        confidenceAfterReject = current.Confidence;
+    }
+    True(confidenceAfterReject > 0.5, "several confirming rejections should build meaningful confidence before the counter-evidence test");
+
+    var approveState = await service.CreateTaskAsync("Review docs, now approved", options);
+    await service.RunStepAsync(approveState.TaskId, options);
+    await service.AppendApprovalAsync(approveState.TaskId, "draft_patch", approved: true, options);
+
+    var afterApprove = await lessonStore.GetByIdAsync(lessonId!);
+    True(afterApprove!.Confidence < confidenceAfterReject, "approving the same tool afterwards should counter (weaken) the prior rejection lesson");
+    }
+
+    public static async Task AgentToolExecutorPopulatesStructuredExitCodeForRunCommand()
+    {
+    using var temp = new TempDir();
+    var workspace = temp.PathFor("workspace");
+    Directory.CreateDirectory(workspace);
+    await File.WriteAllTextAsync(Path.Combine(workspace, "sample.csproj"), """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <OutputType>Exe</OutputType>
+            <TargetFramework>net10.0</TargetFramework>
+          </PropertyGroup>
+        </Project>
+        """);
+    await File.WriteAllTextAsync(Path.Combine(workspace, "Program.cs"), "System.Console.WriteLine(\"hi\");");
+
+    var executor = new AgentToolExecutor(new AgentWorkspaceTools());
+    var options = new AgentWorkspaceOptions(workspace);
+    var result = await executor.ExecuteAsync("run_command", new Dictionary<string, object?> { ["command"] = "dotnet build" }, options);
+
+    Equal(0, result.ExitCode, "a successful build should report exit code 0 on the structured field, not just embedded in the summary text");
+    False(result.TimedOut, "a normal completion should never be flagged as timed out");
+    }
+
+    public static async Task AgentRecordsTaskCompletionLessonOnlyWhenPriorFailureOccurred()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    File.WriteAllText(Path.Combine(root, "README.md"), "docs");
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var taskStore = new FileAgentTaskStateStore(settings);
+    var lessonStore = new SqliteLessonStore(settings);
+    var tools = new AgentWorkspaceTools();
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-sequenced-agent");
+
+    var uneventfulLlm = new FakeSequencedAgentLlm([FinalResponse]);
+    var uneventfulService = new AgentService(taskStore, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), uneventfulLlm, settings: settings, lessons: lessonStore);
+    var uneventfulState = await uneventfulService.CreateTaskAsync("Say hello", options);
+    await uneventfulService.RunStepAsync(uneventfulState.TaskId, options);
+
+    var afterUneventful = await lessonStore.ListAllAsync(includeRetired: false);
+    False(afterUneventful.Any(l => l.Kind == AgentLessonKind.Task), "an uneventful success should not record a task lesson - it teaches nothing");
+
+    var eventfulLlm = new FakeSequencedAgentLlm(["garbage", FinalResponse]);
+    var eventfulService = new AgentService(taskStore, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), eventfulLlm, settings: settings, lessons: lessonStore);
+    var eventfulState = await eventfulService.CreateTaskAsync("Say hello with trouble", options);
+    await eventfulService.RunStepAsync(eventfulState.TaskId, options);
+    await eventfulService.RunStepAsync(eventfulState.TaskId, options);
+
+    var afterEventful = await lessonStore.ListAllAsync(includeRetired: false);
+    True(afterEventful.Any(l => l.Kind == AgentLessonKind.Task && l.Outcome == AgentLessonOutcome.Worked),
+        "a completion that recovered from a prior failure should record a Worked task lesson");
+    }
+
+    public static async Task AgentRecordsTaskFailureLessonWithBlockerWhenTaskFails()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var taskStore = new FileAgentTaskStateStore(settings);
+    var lessonStore = new SqliteLessonStore(settings);
+    var tools = new AgentWorkspaceTools();
+    var llm = new FakeSequencedAgentLlm(["not json", "still not json", "nope"]);
+    var service = new AgentService(taskStore, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), llm, settings: settings, lessons: lessonStore);
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-sequenced-agent");
+
+    var state = await service.CreateTaskAsync("Investigate deeply", options);
+    for (var i = 0; i < 3; i++)
+        await service.RunStepAsync(state.TaskId, options);
+
+    var lessons = await lessonStore.ListAllAsync(includeRetired: false);
+    True(lessons.Any(l => l.Kind == AgentLessonKind.Task && l.Outcome == AgentLessonOutcome.Failed
+        && l.Claim.Contains("unparseable", StringComparison.OrdinalIgnoreCase)),
+        "a task that failed via the parse-error path should record a Failed task lesson naming the blocker");
+    }
+
+    public static async Task AgentConfirmsInjectedLessonsOnSuccessfulTaskCompletion()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    File.WriteAllText(Path.Combine(root, "README.md"), "docs");
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var taskStore = new FileAgentTaskStateStore(settings);
+    var lessonStore = new SqliteLessonStore(settings);
+    var tools = new AgentWorkspaceTools();
+    var ragStore = new SqliteRagStore(settings);
+    var rag = new RagQueryService(ragStore, new FakeEmbeddingService(), new FakeLlm(), settings, new NoOpReranker());
+    var retrieval = new AgentRetrievalService(rag, ragStore);
+    var activation = new WorkspaceActivationService(new WorkspaceManifestService(), new FileWorkspaceProfileStore(settings));
+    var contextBuilder = new AgentContextBuilder(tools, retrieval, new WorkspaceMemoryStore(new MemoryStore(settings), settings), activation, taskStore, settings, lessonStore);
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-sequenced-agent");
+
+    var seeded = await lessonStore.RecordEvidenceAsync(new AgentLessonEvidence(
+        AgentLessonScope.Global, "", AgentLessonKind.Stated, "stated:preseed",
+        "Prefer small, focused commits in this environment.", "", AgentLessonOutcome.Observation));
+
+    var llm = new FakeSequencedAgentLlm([FinalResponse]);
+    var service = new AgentService(taskStore, contextBuilder, new AgentSafetyGate(), new AgentToolExecutor(tools), llm, settings: settings, lessons: lessonStore);
+    var state = await service.CreateTaskAsync("Investigate readme", options);
+    await service.RunStepAsync(state.TaskId, options);
+
+    var confirmed = await lessonStore.GetByIdAsync(seeded.Id);
+    True(confirmed!.EvidenceCount > seeded.EvidenceCount, "a lesson injected into a task that completed successfully should have its evidence confirmed");
+    }
+
+    public static async Task AgentContextBuilderRanksLessonsByGoalRelevanceOverRawConfidence()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var taskStore = new FileAgentTaskStateStore(settings);
+    await taskStore.InitializeAsync();
+    var lessonStore = new SqliteLessonStore(settings);
+    var tools = new AgentWorkspaceTools();
+    var ragStore = new SqliteRagStore(settings);
+    var rag = new RagQueryService(ragStore, new FakeEmbeddingService(), new FakeLlm(), settings, new NoOpReranker());
+    var retrieval = new AgentRetrievalService(rag, ragStore);
+    var activation = new WorkspaceActivationService(new WorkspaceManifestService(), new FileWorkspaceProfileStore(settings));
+    var builder = new AgentContextBuilder(tools, retrieval, new WorkspaceMemoryStore(new MemoryStore(settings), settings), activation, taskStore, settings, lessonStore);
+
+    var unrelated = await lessonStore.RecordEvidenceAsync(new AgentLessonEvidence(
+        AgentLessonScope.Global, "", AgentLessonKind.Stated, "stated:unrelated",
+        "The user prefers dark mode in the desktop UI.", "", AgentLessonOutcome.Observation));
+    for (var i = 0; i < 6; i++)
+        unrelated = await lessonStore.RecordEvidenceAsync(new AgentLessonEvidence(
+            AgentLessonScope.Global, "", AgentLessonKind.Stated, "stated:unrelated",
+            "The user prefers dark mode in the desktop UI.", "", AgentLessonOutcome.Observation));
+
+    var relevant = await lessonStore.RecordEvidenceAsync(new AgentLessonEvidence(
+        AgentLessonScope.Global, "", AgentLessonKind.Command, "command:npm audit",
+        "'npm audit' reports vulnerabilities in this workspace.", "Review the audit output before continuing.", AgentLessonOutcome.Failed));
+
+    True(unrelated.Confidence > relevant.Confidence, "sanity check: the unrelated lesson should have higher raw confidence after several reinforcements");
+
+    var state = new AgentTaskState { TaskId = "relevance-task", Goal = "Run npm audit and fix vulnerabilities", Status = AgentTaskStatus.Running };
+    await taskStore.SaveAsync(state);
+    var options = new AgentWorkspaceOptions(root);
+
+    var pack = await builder.BuildAsync(state, options);
+
+    True(pack.Lessons.Count >= 2, "both lessons should fit comfortably within the lessons token budget");
+    Equal(relevant.Id, pack.Lessons[0].Locator, "the lesson sharing terms with the current goal should rank ahead of an unrelated, higher-confidence lesson");
     }
 }

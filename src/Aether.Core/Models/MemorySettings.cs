@@ -49,4 +49,13 @@ public class MemorySettings
     /// Number of days before a memory is auto-archived (only if RetentionPolicy includes archival).
     /// </summary>
     public int AutoArchiveAfterDays { get; set; } = 30;
+
+    /// <summary>
+    /// Whether chat also injects Global-scope agent lessons (the per-machine
+    /// self-learning store, normally Agent-only) alongside stored memories.
+    /// Off by default: the lesson store is workspace/agent-focused and this
+    /// is opt-in until it has more mileage. Lessons still only ever inform;
+    /// they are read-only in chat, never editable via memory markers.
+    /// </summary>
+    public bool ConsumeAgentLessonsInChat { get; set; } = false;
 }

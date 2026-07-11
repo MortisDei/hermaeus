@@ -1,5 +1,6 @@
 using Aether.Agent.Models;
 using Aether.Agent.Services;
+using Microsoft.Data.Sqlite;
 using Xunit;
 using static Aether.Tests.Helpers;
 
@@ -165,5 +166,142 @@ public sealed class LessonStoreTests
 
         await store.DeleteAsync(lesson.Id);
         Assert.Null(await store.GetByIdAsync(lesson.Id));
+    }
+
+    [Fact]
+    public async Task CounterOnly_evidence_does_not_originate_a_new_lesson()
+    {
+        using var temp = new TempDir();
+        var store = NewStore(temp);
+        await store.InitializeAsync();
+
+        var lesson = await store.RecordEvidenceAsync(new AgentLessonEvidence(
+            AgentLessonScope.Workspace, "C:/ws", AgentLessonKind.Approval, "approval:edit_file",
+            "The user approves edit_file requests in this context.", "", AgentLessonOutcome.Worked, CounterOnly: true));
+
+        Assert.Equal(0, lesson.EvidenceCount);
+        var all = await store.ListAllAsync(includeRetired: true);
+        Assert.Empty(all);
+    }
+
+    [Fact]
+    public async Task CounterOnly_evidence_contradicts_an_existing_lesson()
+    {
+        using var temp = new TempDir();
+        var store = NewStore(temp);
+        await store.InitializeAsync();
+
+        // Reinforce first so confidence is well above the retirement floor;
+        // a single piece of evidence starts too close to it for one
+        // contradiction to show a meaningful drop instead of an immediate
+        // reset back to the same initial confidence.
+        var rejectionEvidence = new AgentLessonEvidence(
+            AgentLessonScope.Workspace, "C:/ws", AgentLessonKind.Approval, "approval:edit_file",
+            "The user rejects edit_file requests in this context.", "", AgentLessonOutcome.UserRejected);
+        AgentLesson rejected = await store.RecordEvidenceAsync(rejectionEvidence);
+        for (var i = 0; i < 3; i++)
+            rejected = await store.RecordEvidenceAsync(rejectionEvidence);
+        Assert.True(rejected.Confidence > 0.5, "several confirming rejections should build meaningful confidence");
+
+        var countered = await store.RecordEvidenceAsync(new AgentLessonEvidence(
+            AgentLessonScope.Workspace, "C:/ws", AgentLessonKind.Approval, "approval:edit_file",
+            "The user approves edit_file requests in this context.", "", AgentLessonOutcome.Worked, CounterOnly: true));
+
+        Assert.True(countered.Confidence < rejected.Confidence, "counter-evidence against an existing lesson should weaken it like any other contradiction");
+    }
+
+    [Fact]
+    public async Task ConfirmAsync_bumps_evidence_on_active_unpinned_lessons_only()
+    {
+        using var temp = new TempDir();
+        var store = NewStore(temp);
+        await store.InitializeAsync();
+
+        var active = await store.RecordEvidenceAsync(CommandEvidence(AgentLessonOutcome.Worked, "task-1"));
+        var pinned = await store.RecordEvidenceAsync(new AgentLessonEvidence(
+            AgentLessonScope.Workspace, "C:/ws", AgentLessonKind.Stated, "stated:pinned",
+            "Pinned claim.", "", AgentLessonOutcome.Observation));
+        await store.SetPinnedAsync(pinned.Id, true);
+
+        await store.ConfirmAsync([active.Id, pinned.Id, "unknown-id"], "task-confirm");
+
+        var confirmedActive = await store.GetByIdAsync(active.Id);
+        Assert.Equal(2, confirmedActive!.EvidenceCount);
+        var confirmedPinned = await store.GetByIdAsync(pinned.Id);
+        Assert.Equal(1, confirmedPinned!.EvidenceCount);
+    }
+
+    [Fact]
+    public async Task Migration_to_v2_collapses_outcome_suffixed_signatures_and_strips_the_suffix()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var dataRoot = temp.PathFor("data");
+        settings.Settings.DataManagement.DataRootDirectory = dataRoot;
+        var agentRoot = Path.Combine(dataRoot, "agent");
+        Directory.CreateDirectory(agentRoot);
+        var dbPath = Path.Combine(agentRoot, "lessons.db");
+
+        await using (var c = new SqliteConnection($"Data Source={dbPath}"))
+        {
+            await c.OpenAsync();
+            await using (var cmd = c.CreateCommand())
+            {
+                cmd.CommandText = @"
+                    CREATE TABLE agent_lessons (
+                        id TEXT PRIMARY KEY,
+                        scope TEXT NOT NULL,
+                        scope_id TEXT NOT NULL DEFAULT '',
+                        kind TEXT NOT NULL,
+                        signature TEXT NOT NULL,
+                        claim TEXT NOT NULL,
+                        guidance TEXT NOT NULL,
+                        outcome TEXT NOT NULL,
+                        confidence REAL NOT NULL DEFAULT 0.3,
+                        evidence_count INTEGER NOT NULL DEFAULT 1,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        last_confirmed_at TEXT NOT NULL,
+                        status TEXT NOT NULL DEFAULT 'Active',
+                        is_pinned INTEGER NOT NULL DEFAULT 0,
+                        source_task_ids_json TEXT NOT NULL DEFAULT '[]'
+                    );
+                    CREATE UNIQUE INDEX idx_agent_lessons_dedupe ON agent_lessons(scope, scope_id, signature);
+                    CREATE TABLE aether_schema_versions (
+                        scope TEXT PRIMARY KEY,
+                        version INTEGER NOT NULL,
+                        updated_at TEXT NOT NULL
+                    );
+                    INSERT INTO aether_schema_versions (scope, version, updated_at) VALUES ('agent_lessons', 1, '2026-01-01T00:00:00Z');";
+                await cmd.ExecuteNonQueryAsync();
+            }
+
+            InsertV1Row(c, "row-ok", "command:dotnet test:ok:generic", "Worked", 2, "2026-01-01T00:00:00Z");
+            InsertV1Row(c, "row-fail", "command:dotnet test:fail:CS1002", "Failed", 5, "2026-01-02T00:00:00Z");
+        }
+
+        var store = new SqliteLessonStore(settings);
+        await store.InitializeAsync();
+
+        var all = await store.ListAllAsync(includeRetired: true);
+        var survivors = all.Where(l => l.Signature.StartsWith("command:dotnet test", StringComparison.Ordinal)).ToList();
+        Assert.Single(survivors);
+        Assert.Equal("command:dotnet test", survivors[0].Signature);
+        Assert.Equal(5, survivors[0].EvidenceCount);
+        Assert.Equal("row-fail", survivors[0].Id);
+    }
+
+    private static void InsertV1Row(SqliteConnection c, string id, string signature, string outcome, int evidenceCount, string updatedAt)
+    {
+        using var insert = c.CreateCommand();
+        insert.CommandText = @"
+            INSERT INTO agent_lessons (id, scope, scope_id, kind, signature, claim, guidance, outcome, confidence, evidence_count, created_at, updated_at, last_confirmed_at, status, is_pinned, source_task_ids_json)
+            VALUES ($id, 'Workspace', 'C:/ws', 'Command', $sig, 'claim', '', $outcome, 0.5, $count, $updatedAt, $updatedAt, $updatedAt, 'Active', 0, '[]')";
+        insert.Parameters.AddWithValue("$id", id);
+        insert.Parameters.AddWithValue("$sig", signature);
+        insert.Parameters.AddWithValue("$outcome", outcome);
+        insert.Parameters.AddWithValue("$count", evidenceCount);
+        insert.Parameters.AddWithValue("$updatedAt", updatedAt);
+        insert.ExecuteNonQuery();
     }
 }

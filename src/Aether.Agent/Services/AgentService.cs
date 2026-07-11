@@ -182,20 +182,40 @@ public sealed class AgentService : IAgentService
         await _store.SaveAsync(state, ct);
 
         var context = await _contextBuilder.BuildAsync(state, options, ct);
+        // Tracked across the whole task so a successful completion can
+        // confirm (bump evidence on) every lesson that actually informed
+        // it, not just the ones from the final step.
+        foreach (var lesson in context.Lessons)
+        {
+            if (lesson.Locator is { Length: > 0 } id && !state.InjectedLessonIds.Contains(id))
+                state.InjectedLessonIds.Add(id);
+        }
         var prompt = BuildPrompt(context);
         var modelId = options.ModelId;
         var raw = new StringBuilder();
         IReadOnlyList<LlmToolCallRequest>? nativeToolCalls = null;
-        await foreach (var evt in _llm.StreamChatAsync(
-            modelId,
-            [new ChatMessage("user", prompt)],
-            new LlmChatOptions { SystemPrompt = AgentSystemPrompt, Temperature = 0.2, Tools = FixedToolDefinitions },
-            ct))
+        try
         {
-            if (!string.IsNullOrEmpty(evt.ContentDelta))
-                raw.Append(evt.ContentDelta);
-            if (evt.ToolCalls is { Count: > 0 })
-                nativeToolCalls = evt.ToolCalls;
+            await foreach (var evt in _llm.StreamChatAsync(
+                modelId,
+                [new ChatMessage("user", prompt)],
+                new LlmChatOptions { SystemPrompt = AgentSystemPrompt, Temperature = 0.2, Tools = FixedToolDefinitions },
+                ct))
+            {
+                if (!string.IsNullOrEmpty(evt.ContentDelta))
+                    raw.Append(evt.ContentDelta);
+                if (evt.ToolCalls is { Count: > 0 })
+                    nativeToolCalls = evt.ToolCalls;
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // The model call itself failed (provider unreachable, etc.), not
+            // just an unparseable reply; state was already saved as Running
+            // above, so this exception path must not leave it there.
+            state.Status = AgentTaskStatus.WaitingForUser;
+            await _store.SaveAsync(state, ct);
+            throw;
         }
 
         // A model/provider that supports native tool calling ends the
@@ -204,9 +224,33 @@ public sealed class AgentService : IAgentService
         // Anything else (no tool calls, or a provider/model that ignores the
         // declared tools) falls straight back to parsing raw as JSON exactly
         // as before, so non-tool-calling local models keep working unchanged.
-        var response = nativeToolCalls is { Count: > 0 }
-            ? BuildResponseFromToolCall(nativeToolCalls[0])
-            : ParseResponse(raw.ToString());
+        AgentPlannerResponse response;
+        var parseFailed = false;
+        try
+        {
+            response = nativeToolCalls is { Count: > 0 }
+                ? BuildResponseFromToolCall(nativeToolCalls, raw.ToString())
+                : ParseResponse(raw.ToString());
+            state.ConsecutiveStepErrors = 0;
+        }
+        catch (JsonException)
+        {
+            parseFailed = true;
+            state.ConsecutiveStepErrors++;
+            state.TotalStepErrors++;
+            response = new AgentPlannerResponse
+            {
+                ThoughtSummary = "The model's response could not be parsed as valid JSON.",
+                CurrentStep = state.ActiveStep,
+                NextAction = new AgentNextAction
+                {
+                    Type = AgentActionKind.AskUser,
+                    RequiresApproval = false,
+                    RiskLevel = AgentRiskLevel.None
+                },
+                UserMessage = "The agent could not parse the model's response."
+            };
+        }
         ApplyResponse(state, response);
         await RecordStatedLessonsAsync(state, options, response, ct);
         var nextTool = response.NextAction.ToolName ?? string.Empty;
@@ -284,6 +328,11 @@ public sealed class AgentService : IAgentService
                     catch (Exception ex) when (ex is not OperationCanceledException)
                     {
                         await RecordLessonEvidenceForToolAsync(state, options, nextTool, response.NextAction.Arguments, ex.Message, success: false, ct);
+                        // State was already saved as Running at the top of
+                        // this step; an unhandled tool exception must not
+                        // leave the task stranded there with no path back.
+                        state.Status = AgentTaskStatus.WaitingForUser;
+                        await _store.SaveAsync(state, ct);
                         throw;
                     }
 
@@ -291,7 +340,7 @@ public sealed class AgentService : IAgentService
                     executedToolResult = toolResult;
                     state.Status = AgentTaskStatus.Running;
                     response.UserMessage = $"Executed {nextTool}.";
-                    await RecordLessonEvidenceForToolAsync(state, options, nextTool, response.NextAction.Arguments, toolResult.ResultSummary, success: true, ct);
+                    await RecordLessonEvidenceForToolAsync(state, options, nextTool, response.NextAction.Arguments, toolResult.ResultSummary, success: true, ct, toolResult.ExitCode, toolResult.TimedOut);
                 }
                 else
                 {
@@ -310,6 +359,14 @@ public sealed class AgentService : IAgentService
             state.Status = AgentTaskStatus.WaitingForUser;
         if (response.NextAction.Type == AgentActionKind.Final)
             state.Status = AgentTaskStatus.Complete;
+
+        if (parseFailed && state.ConsecutiveStepErrors >= 3)
+        {
+            state.Status = AgentTaskStatus.Failed;
+            state.Decisions.Add(new AgentDecision(
+                "Task failed", "model responses unparseable 3 times in a row", DateTime.UtcNow));
+            response.UserMessage = "The agent could not parse the model's response 3 times in a row and has stopped.";
+        }
 
         state.ActiveStep = string.IsNullOrWhiteSpace(response.CurrentStep)
             ? state.ActiveStep
@@ -399,6 +456,8 @@ public sealed class AgentService : IAgentService
             }
         }
 
+        await RecordTaskTerminalLessonAsync(state, options, ct);
+
         return new AgentStepResult(state, context, response, logEntry);
     }
 
@@ -423,6 +482,19 @@ public sealed class AgentService : IAgentService
         // needs a human decision; the loop only continues while the model
         // is still working through allowed, read-only tool calls on its own.
         while (steps < maxSteps && result.State.Status == AgentTaskStatus.Running);
+
+        if (steps >= maxSteps && result.State.Status == AgentTaskStatus.Running)
+        {
+            // Hitting the step cap while still Running must not look like an
+            // active task to the workbench; hand it back to the user
+            // explicitly instead of leaving it silently stalled.
+            var note = $"step budget exhausted after {steps} step(s)";
+            result.State.Status = AgentTaskStatus.WaitingForUser;
+            await _store.AppendLogAsync(taskId, note, ct);
+            await _store.AppendTranscriptEntryAsync(taskId, new AgentTranscriptEntry(
+                result.State.StepCount, "assistant", null, note, DateTime.UtcNow), ct);
+            await _store.SaveAsync(result.State, ct);
+        }
 
         return result;
     }
@@ -451,7 +523,14 @@ public sealed class AgentService : IAgentService
 
             state.ToolResults.Add(result);
             RememberCommandApprovalIfApplicable(state, pending);
-            await RecordLessonEvidenceForToolAsync(state, options, pending.ToolName, pending.Arguments, result.ResultSummary, success: true, ct);
+            await RecordLessonEvidenceForToolAsync(state, options, pending.ToolName, pending.Arguments, result.ResultSummary, success: true, ct, result.ExitCode, result.TimedOut);
+            await RecordApprovalApprovedCounterEvidenceAsync(state, options, pending.ToolName, ct);
+            // The approved tool's result is what the model most needs to see
+            // next (it is why the step paused), so it belongs in the
+            // transcript alongside every other executed tool result, not
+            // just in ToolResults' last-five window.
+            await _store.AppendTranscriptEntryAsync(taskId, new AgentTranscriptEntry(
+                state.StepCount, "tool", result.Tool, result.ResultSummary, DateTime.UtcNow), ct);
             state.PendingToolAction = null;
             state.Status = AgentTaskStatus.Running;
         }
@@ -468,13 +547,39 @@ public sealed class AgentService : IAgentService
         await _store.AppendLogAsync(taskId, $"approval recorded: {action} approved={approved}", ct);
     }
 
+    public async Task AppendUserReplyAsync(string taskId, string reply, CancellationToken ct = default)
+    {
+        var trimmed = reply?.Trim() ?? string.Empty;
+        if (trimmed.Length == 0)
+            throw new InvalidOperationException("A reply cannot be empty.");
+
+        var state = await _store.LoadAsync(taskId, ct)
+            ?? throw new InvalidOperationException("Agent task was not found.");
+        if (state.Status != AgentTaskStatus.WaitingForUser)
+            throw new InvalidOperationException("This task is not waiting for a reply.");
+        if (state.PendingToolAction is not null)
+            throw new InvalidOperationException("A tool approval is pending; approve or reject it instead of replying.");
+
+        await _store.AppendTranscriptEntryAsync(taskId, new AgentTranscriptEntry(
+            state.StepCount, "user", null, trimmed, DateTime.UtcNow), ct);
+        state.Status = AgentTaskStatus.Running;
+        await _store.SaveAsync(state, ct);
+        await _store.AppendLogAsync(taskId, "user reply recorded", ct);
+    }
+
     /// <summary>
     /// Deterministic, evidence-backed capture for the lesson store: a
     /// command's exit status, or a patch/edit/create tool's success or
     /// failure. Best-effort - a lesson-capture failure must never break the
-    /// agent step or the approval flow. Task-terminal-state and stated
-    /// ([LESSON: ...]) evidence are intentionally out of scope for this
-    /// pass; only these three deterministic sources are wired.
+    /// agent step or the approval flow. Approval-rejection evidence is
+    /// recorded separately by <see cref="RecordApprovalRejectionLessonAsync"/>,
+    /// stated evidence by <see cref="RecordStatedLessonsAsync"/>, and
+    /// task-terminal evidence by <see cref="RecordTaskTerminalLessonAsync"/>.
+    /// The signature identifies only the subject (command text, or
+    /// tool+path); the outcome lives in <see cref="AgentLessonEvidence.Outcome"/>
+    /// so that the store's contradiction/reinforcement logic actually has
+    /// something to compare against instead of every outcome creating its
+    /// own permanently-separate row.
     /// </summary>
     private async Task RecordLessonEvidenceForToolAsync(
         AgentTaskState state,
@@ -483,7 +588,9 @@ public sealed class AgentService : IAgentService
         Dictionary<string, object?> arguments,
         string resultText,
         bool success,
-        CancellationToken ct)
+        CancellationToken ct,
+        int? exitCode = null,
+        bool timedOut = false)
     {
         if (_lessons is null) return;
         try
@@ -493,14 +600,18 @@ public sealed class AgentService : IAgentService
 
             if (normalized == "run_command")
             {
+                // A timeout says nothing about whether the command itself
+                // works; capturing it as a failure would teach the wrong
+                // lesson (docs/review/02-lessons-v2.md L3).
+                if (timedOut) return;
                 var command = AgentToolExecutor.Arg(arguments, "command").Trim();
                 if (command.Length == 0) return;
-                var ok = resultText.Contains("Exit code 0", StringComparison.Ordinal);
-                var errorToken = ExtractLessonErrorToken(resultText);
-                var signature = $"command:{command.ToLowerInvariant()}:{(ok ? "ok" : "fail")}:{errorToken}";
+                var ok = exitCode == 0;
+                var errorToken = ok ? string.Empty : ExtractLessonErrorToken(resultText);
+                var signature = $"command:{command.ToLowerInvariant()}";
                 var claim = ok
                     ? $"'{command}' succeeds in this workspace."
-                    : errorToken == "generic"
+                    : errorToken.Length == 0 || errorToken == "generic"
                         ? $"'{command}' fails in this workspace."
                         : $"'{command}' fails in this workspace with {errorToken}.";
                 var guidance = ok
@@ -514,7 +625,7 @@ public sealed class AgentService : IAgentService
             {
                 var path = AgentToolExecutor.Arg(arguments, "relative_path", "path").Trim();
                 if (path.Length == 0) return;
-                var signature = $"patch:{normalized}:{path.ToLowerInvariant()}:{(success ? "ok" : "fail")}";
+                var signature = $"patch:{normalized}:{path.ToLowerInvariant()}";
                 var claim = success
                     ? $"{normalized} on {path} applies cleanly."
                     : $"{normalized} on {path} keeps failing: {TruncateForLesson(resultText, 120)}";
@@ -539,7 +650,7 @@ public sealed class AgentService : IAgentService
             if (normalized.Length == 0) return;
             var scopeId = options is null ? string.Empty : NormalizeWorkspaceScopeId(options.WorkspaceRoot);
             var scope = string.IsNullOrEmpty(scopeId) ? AgentLessonScope.Global : AgentLessonScope.Workspace;
-            var signature = $"approval:{normalized}:rejected";
+            var signature = $"approval:{normalized}";
             await _lessons.RecordEvidenceAsync(new AgentLessonEvidence(
                 scope, scopeId, AgentLessonKind.Approval, signature,
                 $"The user rejects {normalized} requests in this context.",
@@ -551,6 +662,90 @@ public sealed class AgentService : IAgentService
             // Lesson capture is best-effort; it must never break the approval flow.
         }
     }
+
+    /// <summary>
+    /// Counter-evidence for a prior rejection lesson: approving a gated
+    /// action on the same signature as an earlier rejection contradicts it,
+    /// letting the store's normal contradiction/reinforcement logic weaken
+    /// or eventually flip that lesson. Routine approvals must not spawn new
+    /// "user approves X" rows on their own, so this only ever writes when a
+    /// lesson with the signature already exists (see AgentLessonEvidence.CounterOnly).
+    /// </summary>
+    private async Task RecordApprovalApprovedCounterEvidenceAsync(AgentTaskState state, AgentWorkspaceOptions? options, string toolName, CancellationToken ct)
+    {
+        if (_lessons is null) return;
+        try
+        {
+            var normalized = toolName.Trim().ToLowerInvariant();
+            if (normalized.Length == 0) return;
+            var scopeId = options is null ? string.Empty : NormalizeWorkspaceScopeId(options.WorkspaceRoot);
+            var scope = string.IsNullOrEmpty(scopeId) ? AgentLessonScope.Global : AgentLessonScope.Workspace;
+            var signature = $"approval:{normalized}";
+            await _lessons.RecordEvidenceAsync(new AgentLessonEvidence(
+                scope, scopeId, AgentLessonKind.Approval, signature,
+                $"The user approves {normalized} requests in this context.",
+                string.Empty,
+                AgentLessonOutcome.Worked, state.TaskId, CounterOnly: true), ct);
+        }
+        catch
+        {
+            // Lesson capture is best-effort; it must never break the approval flow.
+        }
+    }
+
+    /// <summary>
+    /// The deterministic task-terminal capture deferred from r3
+    /// (docs/review/archived/r3/README.md) and specified in
+    /// docs/review/02-lessons-v2.md L4. Two signals, both goal-fingerprint
+    /// keyed (no LLM): a Worked/Failed lesson on the goal itself, and - the
+    /// compounding half of the loop - confirming every lesson that was
+    /// actually injected into a task that completed successfully.
+    /// </summary>
+    private async Task RecordTaskTerminalLessonAsync(AgentTaskState state, AgentWorkspaceOptions options, CancellationToken ct)
+    {
+        if (_lessons is null) return;
+        if (state.Status is not (AgentTaskStatus.Complete or AgentTaskStatus.Failed)) return;
+        try
+        {
+            var scopeId = NormalizeWorkspaceScopeId(options.WorkspaceRoot);
+            if (state.Status == AgentTaskStatus.Complete)
+            {
+                // An uneventful success teaches nothing; only worth a
+                // lesson if the task actually recovered from trouble.
+                if (TaskHadPriorFailure(state))
+                {
+                    var signature = $"task:{AgentLessonText.Fingerprint(state.Goal)}";
+                    await _lessons.RecordEvidenceAsync(new AgentLessonEvidence(
+                        AgentLessonScope.Workspace, scopeId, AgentLessonKind.Task, signature,
+                        $"Goals like '{TruncateForLesson(state.Goal, 80)}' complete in this workspace.",
+                        string.Empty, AgentLessonOutcome.Worked, state.TaskId), ct);
+                }
+
+                if (state.InjectedLessonIds.Count > 0)
+                    await _lessons.ConfirmAsync(state.InjectedLessonIds, state.TaskId, ct);
+            }
+            else
+            {
+                var blocker = state.Decisions.LastOrDefault(d => d.Decision == "Task failed")?.Reason
+                    ?? "no specific blocker was recorded.";
+                var signature = $"task:{AgentLessonText.Fingerprint(state.Goal)}";
+                await _lessons.RecordEvidenceAsync(new AgentLessonEvidence(
+                    AgentLessonScope.Workspace, scopeId, AgentLessonKind.Task, signature,
+                    $"Goals like '{TruncateForLesson(state.Goal, 80)}' have failed in this workspace: {blocker}",
+                    "Check the blockers from the failed task before retrying this goal.",
+                    AgentLessonOutcome.Failed, state.TaskId), ct);
+            }
+        }
+        catch
+        {
+            // Lesson capture is best-effort; it must never break the agent step.
+        }
+    }
+
+    private static bool TaskHadPriorFailure(AgentTaskState state) =>
+        state.TotalStepErrors > 0
+        || state.ToolResults.Any(t => string.Equals(t.Tool, "run_command", StringComparison.OrdinalIgnoreCase)
+            && (t.TimedOut || (t.ExitCode.HasValue && t.ExitCode != 0)));
 
     private static readonly System.Text.RegularExpressions.Regex StatedLessonMarkerRegex = new(
         @"\[LESSON:\s*(.+?)\]",
@@ -599,9 +794,14 @@ public sealed class AgentService : IAgentService
         response.UserMessage = StatedLessonMarkerRegex.Replace(response.UserMessage ?? string.Empty, string.Empty).Trim();
     }
 
+    private static readonly System.Text.RegularExpressions.Regex LessonErrorTokenRegex = new(
+        @"\b([A-Z]{1,3}\d{3,5})\b",
+        System.Text.RegularExpressions.RegexOptions.Compiled,
+        TimeSpan.FromMilliseconds(500));
+
     private static string ExtractLessonErrorToken(string text)
     {
-        var match = System.Text.RegularExpressions.Regex.Match(text, @"\b([A-Z]{1,3}\d{3,5})\b");
+        var match = LessonErrorTokenRegex.Match(text);
         return match.Success ? match.Value : "generic";
     }
 
@@ -626,24 +826,6 @@ public sealed class AgentService : IAgentService
         if (command.Length == 0) return;
         if (!state.RememberedCommandApprovals.Any(c => string.Equals(c, command, StringComparison.OrdinalIgnoreCase)))
             state.RememberedCommandApprovals.Add(command);
-    }
-
-    public async Task<AgentToolResult?> ExecuteApprovedToolAsync(string taskId, AgentWorkspaceOptions options, CancellationToken ct = default)
-    {
-        var state = await _store.LoadAsync(taskId, ct)
-            ?? throw new InvalidOperationException("Agent task was not found.");
-        if (state.PendingToolAction is null)
-            return null;
-
-        var action = state.PendingToolAction;
-        var result = await _toolExecutor.ExecuteAsync(action.ToolName, action.Arguments, options, ct);
-        state.ToolResults.Add(result);
-        RememberCommandApprovalIfApplicable(state, action);
-        state.PendingToolAction = null;
-        state.Status = AgentTaskStatus.Running;
-        await _store.SaveAsync(state, ct);
-        await _store.AppendLogAsync(taskId, $"approved tool executed: {action.ToolName}", ct);
-        return result;
     }
 
     private static string BuildPrompt(AgentContextPack context)
@@ -672,14 +854,19 @@ public sealed class AgentService : IAgentService
 
     /// <summary>
     /// Builds the same <see cref="AgentPlannerResponse"/> shape the JSON
-    /// protocol produces, but from a native tool call instead of parsing
-    /// prose. Only the first tool call is used; a model that requests
+    /// protocol produces, but from native tool call(s) instead of parsing
+    /// prose. Only the first tool call executes; a model that requests
     /// several tools in one turn gets the rest re-offered next step, which
     /// keeps this on the same one-action-per-step model as the JSON
     /// protocol rather than introducing a second, parallel execution path.
+    /// Any prose the model streamed alongside the call(s) becomes the
+    /// thought summary instead of a synthetic "Calling X." placeholder, so
+    /// tool-calling providers get transcripts as informative as the JSON
+    /// fallback's.
     /// </summary>
-    private static AgentPlannerResponse BuildResponseFromToolCall(LlmToolCallRequest call)
+    private static AgentPlannerResponse BuildResponseFromToolCall(IReadOnlyList<LlmToolCallRequest> calls, string raw)
     {
+        var call = calls[0];
         Dictionary<string, object?> arguments;
         try
         {
@@ -690,9 +877,16 @@ public sealed class AgentService : IAgentService
             arguments = [];
         }
 
+        var thought = string.IsNullOrWhiteSpace(raw) ? $"Calling {call.Name}." : raw.Trim();
+        if (calls.Count > 1)
+        {
+            var dropped = string.Join(", ", calls.Skip(1).Select(c => c.Name));
+            thought += $" (also requested: {dropped}; one action per step, requesting the rest next.)";
+        }
+
         return new AgentPlannerResponse
         {
-            ThoughtSummary = $"Calling {call.Name}.",
+            ThoughtSummary = thought,
             CurrentStep = $"Run {call.Name}.",
             NextAction = new AgentNextAction
             {
@@ -807,6 +1001,13 @@ public sealed class AgentService : IAgentService
 
         foreach (var fact in response.StateUpdate.NewFacts.Where(s => !string.IsNullOrWhiteSpace(s)))
             state.Decisions.Add(new AgentDecision(fact, "model state update", DateTime.UtcNow));
+
+        // A step reported as completed should stop showing up as pending;
+        // otherwise long tasks accumulate a PendingSteps list that
+        // contradicts CompletedSteps and confuses the model about what is
+        // actually left to do.
+        state.PendingSteps.RemoveAll(p => state.CompletedSteps.Any(c =>
+            string.Equals(c.Trim(), p.Trim(), StringComparison.OrdinalIgnoreCase)));
 
         if (response.StateUpdate.Blockers.Count > 0)
             state.Status = AgentTaskStatus.Blocked;

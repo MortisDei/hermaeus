@@ -61,6 +61,13 @@
 - Configurable memory controls in Settings: global enable, context injection,
   auto-summary threshold, token budget, encryption toggle, and auto-archive
   days.
+- Optional chat-side consumption of the Agent's Global-scope self-learning
+  lessons (Settings > Memory; off by default): when enabled, chat's system
+  prompt gets a read-only "Learned Behaviors (Agent Lessons)" block alongside
+  stored memories. Unlike memories, lessons are never editable from chat -
+  they carry no id tag, so a model's `[MEMORY_UPDATE]`/`[MEMORY_FORGET]`
+  cannot target one; the Agent workbench's Lessons panel remains the only
+  place to edit, pin, retire, or delete them.
 - Post-response auto-summary pipeline: important conversations are analysed in
   the background and durable memories are extracted and merged with
   deduplication safeguards.
@@ -71,11 +78,22 @@
 
 - Local task workbench with explicit task state, a persisted step transcript,
   compact context packs, local logs/traces, and review queue controls.
-- Autonomous runs: Start (or resuming after an approval) runs steps back to
-  back without a click per step, stopping at a final answer, a question for
-  the user, a gated action needing approval, a blocked task, or a configurable
-  step cap (`Agent.MaxAutoSteps`, default 20). Live progress and Stop remain
+- Autonomous runs: Start (or resuming after an approval or a reply) runs
+  steps back to back without a click per step, stopping at a final answer, a
+  question for the user, a gated action needing approval, a blocked or
+  failed task, or a configurable step cap (`Agent.MaxAutoSteps`, default
+  20) - which now hands the task back for review with a note instead of
+  leaving it looking silently active. Live progress and Stop remain
   available; a manual single-step advance is still available too.
+- Reply channel: a task waiting on `ask_user` shows a reply box; answering it
+  appends the reply to the transcript and resumes the run. A reply is
+  refused while a tool approval is also pending on that task - approvals and
+  replies stay on separate, explicit paths.
+- Real failure semantics: three consecutive model responses that fail to
+  parse as valid JSON fail the task (with the reason recorded and every bad
+  step kept in the transcript); a response that parses successfully resets
+  the counter. Any unhandled step error hands the task back for review
+  instead of leaving it stuck in a `running` state nothing can act on.
 - Native tool calling: when the configured model/provider supports it
   (OpenAI-compatible endpoints, llama.cpp, Ollama), the agent declares its
   tool set natively and consumes structured tool calls directly instead of
@@ -97,12 +115,21 @@
   and always requiring approval. An identical repeat of an already-approved
   command string may auto-execute for the rest of that task.
 - Agent self-learning: a per-machine lesson store records deterministic,
-  evidence-backed observations from command results, patch outcomes, and
-  approval decisions (plus model-stated `[LESSON: ...]` observations),
-  reinforcing repeated evidence and retiring contradicted lessons
-  automatically. Relevant lessons are injected into every step's context, and
-  a Lessons panel supports manual edit/pin/retire/delete. Lessons only ever
-  inform the model; they never change what the safety gate allows.
+  evidence-backed observations from command results (structured exit codes;
+  a timeout records nothing), patch outcomes, approval decisions (an
+  approval of a previously-rejected action counters the rejection instead of
+  being ignored), and task outcomes (a goal-fingerprint-keyed lesson on
+  completion or failure, skipped for an uneventful success) - plus
+  model-stated `[LESSON: ...]` observations. Dedupe signatures identify only
+  the subject, never the outcome, so contradicting evidence actually lands
+  on the same row instead of creating a permanently separate one; repeated
+  evidence reinforces, contradiction decays and can retire/flip a lesson,
+  and a task that completes successfully confirms every lesson that was
+  actually shown to the model during it. Relevant lessons are injected into
+  every step's context ranked by goal/tool-activity relevance (not raw
+  confidence alone), and a Lessons panel supports manual edit/pin/retire/
+  delete. Lessons only ever inform the model; they never change what the
+  safety gate allows.
 - Recent task and review queue lists are backed by a SQLite task index so large
   Agent workspaces do not need to scan every `task_state.json` file to render
   the queue.

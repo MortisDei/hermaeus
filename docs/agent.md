@@ -62,9 +62,11 @@ one of the following happens:
 - the model reaches a final answer,
 - the model asks the user a question,
 - an action needs approval (a gated tool, an MCP call, or a command),
-- the task becomes blocked, or
+- the task becomes blocked or fails, or
 - the task hits `Agent.MaxAutoSteps` (Settings; default 20) - a safety valve
-  against runaway loops, not a normal stopping condition.
+  against runaway loops, not a normal stopping condition. Hitting it hands
+  the task to `waiting_for_review` with a note in the log and transcript
+  rather than leaving it looking silently active.
 
 The workbench shows live progress (current step, tool, status) as the run
 proceeds, and Stop cancels mid-run at any point. A manual "Run step" advance is
@@ -72,16 +74,31 @@ still available for stepping through a task one model call at a time. Nothing
 about this changes what is allowed to execute without approval; the loop only
 removes the need to click through every read-only step by hand.
 
+A task waiting on `ask_user` shows a reply box in the workbench; answering it
+appends the reply to the transcript and resumes the run, the same
+approve-and-continue shape as a gated-action approval. A reply is never
+accepted while a tool approval is also pending on the same task - those are
+answered separately, on their own explicit approve/reject path.
+
 ## Transcript
 
 Each task keeps a persisted step transcript (`transcript.jsonl`, one line per
-assistant thought or tool result) that is replayed - budgeted, most recent
-steps prioritized - back into the model's context on every following step
-(`Agent.TranscriptTokenBudget`, default 12,000 tokens). This is what lets the
-agent still "remember" a file it read three steps ago instead of only ever
-seeing the last five, truncated tool results. `agent.trace.jsonl` remains the
-separate, schema-oriented audit log (full context pack on step one, a small
-delta per step after that); the transcript is what the model actually reads.
+assistant thought, tool result, or user reply) that is replayed - budgeted,
+most recent steps prioritized - back into the model's context on every
+following step (`Agent.TranscriptTokenBudget`, default 12,000 tokens). This is
+what lets the agent still "remember" a file it read three steps ago instead of
+only ever seeing the last five, truncated tool results. Every executed tool
+result reaches the transcript this way, including a gated action's result
+once it is approved - not just the ones read-only steps ran on their own.
+`agent.trace.jsonl` remains the separate, schema-oriented audit log (full
+context pack on step one, a small delta per step after that); the transcript
+is what the model actually reads.
+
+A model that supports native tool calling gets a transcript as informative as
+the JSON-protocol fallback's: any prose it streamed alongside a tool call
+becomes the recorded thought instead of a synthetic placeholder, and if it
+requested more than one tool in the same turn, the dropped calls are named so
+the model sees next step that only the first one ran.
 
 ## Tools
 
@@ -141,27 +158,61 @@ they remain reachable only through the JSON protocol.
 ## Lessons (self-learning)
 
 The agent keeps a per-machine lesson store (`agent/lessons.db`) of
-deterministic, evidence-backed observations about what works or fails:
-`run_command` exit status (with the compiler/test error token when it fails),
-`edit_file`/`create_file`/`apply_draft_patch` success or failure per file, and
-user approval rejections. Repeated matching evidence for the same signature
-reinforces one row (evidence count and confidence go up) instead of creating
-duplicates; a contradiction (a previously-failing command now succeeds, or
-vice versa) decays confidence and, if it drops far enough, retires the
-lesson - which new confirming evidence can later revive. A model can also add
-its own observation with a `[LESSON: ...]` marker in its response, recorded at
-low starting confidence and clearly distinguished (kind "stated") from the
-deterministic sources.
+deterministic, evidence-backed observations about what works or fails, from
+five sources:
+
+- **Commands.** `run_command`'s structured exit code (not string-sniffed from
+  the output), with the compiler/test error token in the claim when it
+  fails. A timeout records nothing - it says nothing about the command
+  itself.
+- **Patches.** `edit_file`/`create_file`/`apply_draft_patch` success or
+  failure per file.
+- **Approvals.** A rejection records "the user rejects X here"; a later
+  approval of that same gated action counters it instead of being ignored,
+  so a one-off rejection cannot become a standing lesson that the user's own
+  subsequent approvals can never soften. Approving a tool that was never
+  rejected records nothing on its own.
+- **Task outcomes.** When a task completes or fails, a lesson keyed by a
+  deterministic fingerprint of the goal (tokenized, sorted, hashed - no LLM
+  involved) records whether goals like it tend to work out in this
+  workspace. An uneventful success records nothing (it teaches nothing); a
+  success that recovered from trouble along the way records a positive
+  lesson, and a failed task records the blocker.
+- **Stated.** A model can add its own observation with a `[LESSON: ...]`
+  marker in its response, recorded at low starting confidence and clearly
+  distinguished (kind "stated") from the four deterministic sources above.
+
+The dedupe key (signature) identifies only the subject - the command text, or
+the tool+path, or the approval's tool - never the outcome, so a command that
+used to fail and now succeeds lands on the *same* row instead of spawning a
+permanently separate one. Repeated matching evidence reinforces that row
+(evidence count and confidence go up); a contradiction (the same signature,
+a different outcome) decays confidence and, if it drops far enough, retires
+the lesson and flips it to the new outcome - which further confirming
+evidence can then build back up. Successfully completing a task also
+confirms (bumps evidence on) every lesson that was actually shown to the
+model during that task, so a lesson that helped compounds, not just one that
+happened to be independently re-observed.
 
 Relevant lessons (global plus the current workspace's) are injected into every
-step's context pack, most confident first, each showing its outcome,
-confidence, and evidence count so the model can weigh them. Lessons only ever
-*inform* the model - the safety gate never reads the lesson store, so nothing
-here can widen what is allowed to execute without approval.
+step's context pack, ranked by a mix of term overlap with the current goal
+and recent tool activity, pinned status, and confidence - not confidence
+alone, so an accumulated high-confidence lesson about something unrelated
+cannot crowd out one that actually bears on what the model is doing right
+now. Each entry shows its outcome, confidence, and evidence count so the
+model can weigh them. Lessons only ever *inform* the model - the safety gate
+never reads the lesson store, so nothing here can widen what is allowed to
+execute without approval.
 
 The Lessons panel in the workbench lists active and retired lessons per
 workspace, with inline edit, pin (locks the lesson against further automatic
 changes), retire, reactivate, and delete actions.
+
+Chat can optionally consume Global-scope lessons too (Settings > Memory >
+"Agent lessons in chat", off by default): they appear as a read-only block in
+the system prompt alongside stored memories, but only this panel can ever
+edit, pin, retire, or delete them - chat has no write path into the lesson
+store.
 
 ## Workspace Memory
 
@@ -357,6 +408,15 @@ Tasks are tracked with explicit states to make automation predictable:
 - `completed`
 - `failed`
 - `cancelled`
+
+`failed` is a real, reachable terminal state, not just a nominal one: a model
+whose response fails to parse as valid JSON three steps in a row fails the
+task, with the reason recorded on the task state and every bad step still
+visible in the transcript. A step that parses successfully resets the
+counter, so occasional trouble spread across a long task does not add up to
+a failure. Any unhandled error mid-step (the model call itself failing, or a
+tool throwing) hands the task back to `waiting_for_review` rather than
+leaving it stuck showing as `running` with nothing left able to act on it.
 
 Review items (patches) use these states:
 

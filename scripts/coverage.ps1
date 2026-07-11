@@ -1,5 +1,5 @@
 param(
-    [double]$Threshold = 43
+    [double]$Threshold = 45
 )
 
 $ErrorActionPreference = "Stop"

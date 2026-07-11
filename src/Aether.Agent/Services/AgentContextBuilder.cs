@@ -55,11 +55,16 @@ public sealed class AgentContextBuilder : IAgentContextBuilder
             KnownRisks =
             [
                 "Read-only tools may inspect local files under the selected workspace root.",
-                "Only approved draft patch application may write files; command execution, network access, commit, and push are blocked."
+                "Writes (edit_file, create_file, apply_draft_patch) and commands (run_command, workspace recipes only) require approval; network access, installs, commits, pushes, and history rewrites remain blocked."
             ]
         };
 
-        AddWorkspaceContext(pack, options);
+        // The one-word goal heuristic is only useful before the model has
+        // any transcript history of its own; from step 2 onward it can (and
+        // should) drive search_files/glob_files itself, so spending pack
+        // budget on this every step would be wasted context.
+        if (state.StepCount == 0)
+            AddWorkspaceContext(pack, options);
         await AddWorkspaceMemoryAsync(pack, options, ct);
         await AddRagContextAsync(pack, state, options, ct);
         await AddProjectInstructionsAsync(pack, options, ct);
@@ -78,7 +83,16 @@ public sealed class AgentContextBuilder : IAgentContextBuilder
             var lessons = await _lessons.ListRelevantAsync(scopeId, includeRetired: false, limit: 50, ct);
             if (lessons.Count == 0) return;
 
+            // Scope + confidence ordering alone lets an accumulated,
+            // unrelated high-confidence lesson crowd out one that actually
+            // shares terms with the current goal; rank by relevance before
+            // packing (docs/review/02-lessons-v2.md L5).
+            var queryTerms = AgentLessonText.Tokenize(pack.CurrentGoal)
+                .Concat(pack.ToolResults.TakeLast(3).SelectMany(t => AgentLessonText.Tokenize(t.Tool)))
+                .ToHashSet(StringComparer.Ordinal);
+
             var candidates = lessons
+                .OrderByDescending(l => LessonRelevanceScore(l, queryTerms))
                 .Select(l => new ContextPart(
                     "lesson",
                     l.Signature,
@@ -105,6 +119,13 @@ public sealed class AgentContextBuilder : IAgentContextBuilder
         }
     }
 
+    /// <summary>Pinned lessons always sort first; otherwise shared terms with the current goal/recent tools outweigh raw confidence.</summary>
+    private static double LessonRelevanceScore(AgentLesson lesson, HashSet<string> queryTerms)
+    {
+        var overlap = AgentLessonText.Tokenize($"{lesson.Claim} {lesson.Signature}").Count(queryTerms.Contains);
+        return (lesson.IsPinned ? 10 : 0) + (overlap * 2) + lesson.Confidence;
+    }
+
     private async Task AddTranscriptHistoryAsync(AgentContextPack pack, AgentTaskState state, CancellationToken ct)
     {
         try
@@ -122,7 +143,7 @@ public sealed class AgentContextBuilder : IAgentContextBuilder
             // a single pass and not across the earlier Reverse().
             var candidates = entries
                 .Select((e, index) => new ContextPart(
-                    e.Role == "tool" ? "transcript-tool" : "transcript-assistant",
+                    TranscriptSource(e.Role),
                     e.Role == "tool" ? $"step {e.Step}: {e.ToolName}" : $"step {e.Step}",
                     e.Content,
                     Data: (e, index)))
@@ -137,7 +158,7 @@ public sealed class AgentContextBuilder : IAgentContextBuilder
             foreach (var (entry, content) in ordered)
             {
                 pack.TranscriptHistory.Add(new AgentRetrievedItem(
-                    entry.Role == "tool" ? "transcript-tool" : "transcript-assistant",
+                    TranscriptSource(entry.Role),
                     entry.ToolName ?? $"step {entry.Step}",
                     content,
                     1.0,
@@ -150,6 +171,13 @@ public sealed class AgentContextBuilder : IAgentContextBuilder
             pack.KnownRisks.Add($"Transcript history unavailable: {ex.Message}");
         }
     }
+
+    private static string TranscriptSource(string role) => role switch
+    {
+        "tool" => "transcript-tool",
+        "user" => "transcript-user",
+        _ => "transcript-assistant"
+    };
 
     private async Task AddProjectInstructionsAsync(AgentContextPack pack, AgentWorkspaceOptions options, CancellationToken ct)
     {

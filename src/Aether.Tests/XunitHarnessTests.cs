@@ -179,7 +179,20 @@ public static class HarnessCases
         [new HarnessCase("agent captures stated lesson marker and strips it from user message", AgentTests.AgentCapturesStatedLessonMarkerAndStripsItFromUserMessage)],
         [new HarnessCase("workspace manifest round trips through in-repo file", AgentTests.WorkspaceManifestRoundTripsThroughInRepoFile)],
         [new HarnessCase("workspace activation prefers manifest over profile", AgentTests.WorkspaceActivationPrefersManifestOverProfile)],
-        [new HarnessCase("workspace manifest requires an existing workspace root", AgentTests.WorkspaceManifestRequiresAnExistingWorkspaceRoot)]
+        [new HarnessCase("workspace manifest requires an existing workspace root", AgentTests.WorkspaceManifestRequiresAnExistingWorkspaceRoot)],
+        [new HarnessCase("agent user reply records transcript entry and resumes the task", AgentTests.AgentUserReplyRecordsTranscriptEntryAndResumesTheTask)],
+        [new HarnessCase("agent user reply is refused when a tool approval is pending", AgentTests.AgentUserReplyIsRefusedWhenAToolApprovalIsPending)],
+        [new HarnessCase("agent approved tool execution reaches the transcript", AgentTests.AgentApprovedToolExecutionReachesTheTranscript)],
+        [new HarnessCase("agent fails after three consecutive unparseable responses", AgentTests.AgentFailsAfterThreeConsecutiveUnparseableResponses)],
+        [new HarnessCase("agent consecutive step error counter resets on a valid response", AgentTests.AgentConsecutiveStepErrorCounterResetsOnAValidResponse)],
+        [new HarnessCase("agent native tool call preserves prose and lists dropped calls", AgentTests.AgentNativeToolCallPreservesProseAndListsDroppedCalls)],
+        [new HarnessCase("agent command lesson signature excludes outcome so contradiction can reach it", AgentTests.AgentCommandLessonSignatureExcludesOutcomeSoContradictionCanReachIt)],
+        [new HarnessCase("agent approving a previously rejected tool weakens the rejection lesson", AgentTests.AgentApprovingAPreviouslyRejectedToolWeakensTheRejectionLesson)],
+        [new HarnessCase("agent tool executor populates structured exit code for run_command", AgentTests.AgentToolExecutorPopulatesStructuredExitCodeForRunCommand)],
+        [new HarnessCase("agent records task completion lesson only when prior failure occurred", AgentTests.AgentRecordsTaskCompletionLessonOnlyWhenPriorFailureOccurred)],
+        [new HarnessCase("agent records task failure lesson with blocker when task fails", AgentTests.AgentRecordsTaskFailureLessonWithBlockerWhenTaskFails)],
+        [new HarnessCase("agent confirms injected lessons on successful task completion", AgentTests.AgentConfirmsInjectedLessonsOnSuccessfulTaskCompletion)],
+        [new HarnessCase("agent context builder ranks lessons by goal relevance over raw confidence", AgentTests.AgentContextBuilderRanksLessonsByGoalRelevanceOverRawConfidence)]
     ];
 
     public static IEnumerable<object[]> Mcp =>

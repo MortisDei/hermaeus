@@ -89,6 +89,7 @@ public partial class ChatViewModel : ObservableObject
     private readonly EvalEngine _evalEngine;
     private readonly IWorkspaceActivationService? _workspaceActivation;
     private readonly MemoryInjectionService? _memoryInjection;
+    private readonly ILessonStore? _lessons;
     private CancellationTokenSource? _cts;
     private CancellationTokenSource? _ttsCts;
     private CancellationTokenSource? _contextUsageCts;
@@ -160,7 +161,8 @@ public partial class ChatViewModel : ObservableObject
         ChatTraceService? chatTraces = null,
         EvalEngine? evalEngine = null,
         IWorkspaceActivationService? workspaceActivation = null,
-        MemoryInjectionService? memoryInjection = null)
+        MemoryInjectionService? memoryInjection = null,
+        ILessonStore? lessons = null)
     {
         _llm = llm; _store = store; _settings = settings; _tts = tts; _profiles = profiles; _toasts = toasts;
         _memoryStore = memoryStore;
@@ -169,6 +171,7 @@ public partial class ChatViewModel : ObservableObject
         _exports = exports;
         _chatTraces = chatTraces;
         _memoryInjection = memoryInjection;
+        _lessons = lessons;
         _evalEngine = evalEngine ?? new EvalEngine(llm);
         _workspaceActivation = workspaceActivation;
         _temperature  = settings.Settings.Llm.Temperature;
@@ -703,34 +706,84 @@ public partial class ChatViewModel : ObservableObject
     /// it (docs/review/03-next-level-roadmap.md Phase 1, "Chat consumes
     /// citations"). Gated by the same Memory.Enabled setting the memory
     /// status line already respects; best-effort (a failure here should never
-    /// block sending a chat message).
+    /// block sending a chat message). When <see cref="MemorySettings.ConsumeAgentLessonsInChat"/>
+    /// is on, also folds in Global-scope agent lessons (docs/review/archived/r4/03-roadmap.md
+    /// Phase 4) as a separate, read-only block - they are never added to
+    /// <c>InjectedMemoryIds</c>, so a model's [MEMORY_UPDATE]/[MEMORY_FORGET]
+    /// marker can never target a lesson.
     /// </summary>
     private async Task<(string ContextText, List<SourceReference> Sources, List<string> InjectedMemoryIds)> BuildMemoryInjectionAsync(string question, CancellationToken ct)
     {
-        if (_memoryInjection is null || !_settings.Settings.Memory.Enabled || string.IsNullOrWhiteSpace(question))
+        if (!_settings.Settings.Memory.Enabled)
             return (string.Empty, [], []);
+
+        var contextText = string.Empty;
+        var sources = new List<SourceReference>();
+        var injectedIds = new List<string>();
+
+        if (_memoryInjection is not null && !string.IsNullOrWhiteSpace(question))
+        {
+            try
+            {
+                var candidates = await _memoryStore.SearchAsync(question, ct);
+                var selected = candidates.Count == 0
+                    ? []
+                    : await _memoryInjection.SelectMemoriesForInjectionAsync(candidates, _settings.Settings.Memory.InjectionTokenBudget);
+                if (selected.Count > 0)
+                {
+                    contextText = _memoryInjection.BuildMemoryContext(selected);
+                    sources.AddRange(selected.Where(m => m.Source is not null).Select(m => m.Source!));
+                    injectedIds.AddRange(selected.Select(m => m.Id));
+                    await _memoryStore.MarkRecalledAsync(injectedIds, ct);
+                }
+            }
+            catch (Exception ex)
+            {
+                _runtimeLogs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Service,
+                    $"Memory injection failed: {ex.Message}"));
+            }
+        }
+
+        if (_settings.Settings.Memory.ConsumeAgentLessonsInChat)
+            contextText += await BuildLessonContextAsync(ct);
+
+        return (contextText, sources, injectedIds);
+    }
+
+    /// <summary>
+    /// Global-scope agent lessons formatted as their own markdown block, in
+    /// the same style as <see cref="MemoryInjectionService.BuildMemoryContext"/>
+    /// but deliberately without an editable id tag: lessons keep their own
+    /// pin/retire/delete lifecycle in the Agent workbench, and chat never
+    /// mutates the lesson store.
+    /// </summary>
+    private async Task<string> BuildLessonContextAsync(CancellationToken ct)
+    {
+        if (_lessons is null) return string.Empty;
 
         try
         {
-            var candidates = await _memoryStore.SearchAsync(question, ct);
-            if (candidates.Count == 0)
-                return (string.Empty, [], []);
+            var lessons = await _lessons.ListRelevantAsync(null, includeRetired: false, limit: 10, ct);
+            if (lessons.Count == 0) return string.Empty;
 
-            var selected = await _memoryInjection.SelectMemoriesForInjectionAsync(candidates, _settings.Settings.Memory.InjectionTokenBudget);
-            if (selected.Count == 0)
-                return (string.Empty, [], []);
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine("\n---\n## 🧠 Learned Behaviors (Agent Lessons)\n");
+            foreach (var lesson in lessons)
+            {
+                sb.Append("- [").Append(lesson.Outcome).Append(", confidence ").Append(lesson.Confidence.ToString("F2"))
+                    .Append(", seen ").Append(lesson.EvidenceCount).Append("x] ").Append(lesson.Claim);
+                if (!string.IsNullOrWhiteSpace(lesson.Guidance))
+                    sb.Append(" -> ").Append(lesson.Guidance);
+                sb.AppendLine();
+            }
 
-            var contextText = _memoryInjection.BuildMemoryContext(selected);
-            var sources = selected.Where(m => m.Source is not null).Select(m => m.Source!).ToList();
-            var injectedIds = selected.Select(m => m.Id).ToList();
-            await _memoryStore.MarkRecalledAsync(injectedIds, ct);
-            return (contextText, sources, injectedIds);
+            return sb.ToString();
         }
         catch (Exception ex)
         {
             _runtimeLogs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Service,
-                $"Memory injection failed: {ex.Message}"));
-            return (string.Empty, [], []);
+                $"Agent lesson injection failed: {ex.Message}"));
+            return string.Empty;
         }
     }
 
