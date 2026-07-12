@@ -1,21 +1,124 @@
 # Aether
 
-A native, local-first Avalonia desktop AI workspace for `llama.cpp`, Ollama, OpenAI-compatible APIs, local RAG, agentic task work, and pluggable voice providers.
+Aether is a native, local-first AI workspace for developers and power users.
 
-> Built with Avalonia UI + .NET 10. Linux Wayland/X11 and Windows.
+Rather than being another chat client, Aether combines conversations, long-term memory, local retrieval, supervised agents, model management, benchmarking, diagnostics, and pluggable voice services into a single desktop application where every action is transparent, reviewable, and under the user's control.
 
-## Why Aether
+Built with **Avalonia UI** and **.NET 10** for Linux (Wayland/X11) and Windows.
 
-- Native desktop UI, not a WebView shell.
-- Local-first data and runtime control.
-- Direct `llama.cpp` / `llama-server` management.
-- Ollama and OpenAI-compatible runtime profiles.
-- Native markdown rendering with virtualized long chats and syntax-highlighted fenced code blocks.
-- Local RAG with structure-aware chunking, multi-variant query planning, hybrid retrieval, ONNX reranking, budget-aware context packing, citations, traces, and evals.
-- Aether Agent: read-first task workbench with explicit state, compact context, retrieval, safety gates, and local logs.
-- Pluggable local voice providers for readback and cloning workflows.
+---
 
-## Quick Start
+## Why Aether?
+
+Most AI desktop applications focus on chat.
+
+Aether treats chat as just one part of a larger local AI workspace.
+
+Core design principles:
+
+- **Local-first**. Your models, data, and workflows stay on your machine whenever possible.
+- **Transparent**. Context, memory, citations, traces, and runtime behaviour are visible instead of hidden.
+- **User-controlled**. Destructive actions require explicit approval. Services are managed rather than assumed.
+- **Provider-agnostic**. Use `llama.cpp`, Ollama, OpenAI-compatible APIs, local RAG, and multiple voice providers through a consistent interface.
+- **Native desktop experience**. Built with Avalonia instead of embedding a browser.
+
+---
+
+## Major Features
+
+### Chat Workspace
+
+- Native markdown rendering
+- Virtualized conversations
+- Syntax-highlighted code blocks
+- File attachments
+- Context Inspector
+- Conversation search
+- Long-term memory integration
+- Token and context tracking
+
+### Local AI Runtime Management
+
+- Managed `llama.cpp` / `llama-server`
+- Ollama support
+- OpenAI-compatible providers
+- Model profiles
+- Runtime profiles
+- GPU auto-tuning
+- Runtime diagnostics
+- Local AI setup wizard
+
+### Local RAG
+
+- Structure-aware chunking
+- Markdown, code and PDF support
+- Hybrid retrieval
+- Multi-variant query planning
+- ONNX reranking
+- Budget-aware context packing
+- Source citations
+- Retrieval traces
+- Native evaluation harness
+
+### Agent Workbench
+
+A supervised local agent designed around explicit user control.
+
+Features include:
+
+- Read-first workflow
+- Workspace memory
+- Context packs
+- Safety gates
+- Tool approval
+- Local traces
+- Lessons
+- Task history
+- Workspace profiles
+
+### Voice
+
+Pluggable voice providers including:
+
+- Kokoro
+- F5-TTS
+- XTTS v2
+- OpenAI Voice
+
+Supports local playback, cloning workflows, provider-specific configuration, and managed runtime setup.
+
+### Benchmarking
+
+Evaluate models using practical local benchmark suites.
+
+Includes:
+
+- First-token latency
+- Throughput
+- Deterministic quality checks
+- Ranking profiles
+- Historical comparisons
+- CSV / JSON / Markdown export
+- Managed model switching
+- System overview
+
+### Diagnostics
+
+Built-in tooling for running local AI reliably.
+
+Includes:
+
+- Aether Doctor
+- Trust & Safety checks
+- Runtime health
+- GPU detection
+- Storage analysis
+- Backup and restore
+- Migration tools
+
+---
+
+# Quick Start
 
 ```bash
 git clone https://github.com/MortisDei/aether.git
@@ -23,118 +126,148 @@ cd Aether
 dotnet run --project src/Aether.Desktop
 ```
 
-Use **Services** to point Aether at `llama-server` and a `.gguf` model, then start the Chat service. For GPU acceleration, set GPU layers manually or use **Auto Tune**.
+Open **Services**, configure a runtime, select a model, then start the Chat service.
 
-## Features
+---
 
-See [docs/features.md](docs/features.md) for a comprehensive feature overview.
+# Supported Runtimes
 
-Quick links:
+## llama.cpp
 
-- **[Chat & Context](docs/features.md#chat)** - file attachments, context tracking, fast search
-- **[Model Management](docs/features.md#model-management)** - profiles, runtimes, auto-tune
-- **[Local AI Setup](docs/features.md#local-ai-setup)** - Wizard, GPU detection, model downloads
-- **[System Integration](docs/features.md#system-integration)** - tray, hotkeys, logs, tasks
+Managed locally through the Services workspace.
 
-## Core Workflows
+- OpenAI-compatible endpoints
+- Automatic localhost binding
+- GPU auto-tuning
+- Per-model launch profiles
 
-- **[RAG](docs/rag.md)** - Ingest, retrieve, cite, eval datasets
-- **[Agent Workbench](docs/agent.md)** - Read-first task runner, safety gates, workspace memory
-- **[Voice Providers](docs/voice.md)** - Kokoro, F5-TTS, XTTS v2, OpenAI
-- **[Benchmarks](docs/benchmarks.md)** - Performance suites, quality checks, system overview
+## Ollama
 
-## Runtimes
+- Runtime profiles
+- Local model discovery
+- `/api/chat`
+- `/api/tags`
 
-Aether supports three runtime integration patterns:
+## OpenAI-compatible APIs
 
-- **llama.cpp** - Uses OpenAI-compatible `/v1/chat/completions` and `/v1/models`. Managed through **Services** with executable/model pickers. Binds to `127.0.0.1`.
-- **Ollama** - Add or enable an Ollama runtime profile in **Services**. Uses `/api/tags` and `/api/chat`.
-- **OpenAI-Compatible APIs** - Configure base URL and API key in **Settings** or **Services**. API keys are stored as Aether secret references.
+Supports any provider exposing the standard OpenAI Chat Completions API.
 
-## Security & Data
+API keys are stored as secure Aether secret references.
 
-Default data root:
+---
 
-| Platform | Path |
-| --- | --- |
-| Linux | `~/.local/share/Aether/` |
-| Windows | `%LOCALAPPDATA%\Aether\` |
+# Security
 
-Key hardening features:
+Aether is designed around a local-first security model.
 
-- Localhost binding for managed services
-- Shell-free process launch via `ProcessStartInfo.ArgumentList`
-- AES-256-CBC encryption for fallback secrets with PBKDF2 and per-secret salts
-- Mandatory SHA256 hash verification for critical model downloads
-- Symlink rejection for path traversal hardening
-- OS credential-store integration with local fallback
-- Trust & Safety scan for executables, scripts, paths, and network exposure
-- Configurable data root with migration, backup, and restore
-- Versioned SQLite schema records for local stores
-- Data-safety tests for migration, backup/restore, and redaction
+Highlights include:
 
-See [docs/security-review.md](docs/security-review.md) for the full security review and threat model.
+- Localhost-only managed services
+- Shell-free process execution (`ProcessStartInfo.ArgumentList`)
+- OS credential-store integration
+- Encrypted local fallback secret vault
+- SHA256 verification for managed downloads
+- Trust & Safety scanning
+- Backup and restore safeguards
+- Versioned SQLite schema migrations
+- Data migration validation
+- Security review and documented threat model
 
-## Tray & Hotkeys
+See **docs/security-review.md** for the complete engineering review.
 
-Aether shows a tray icon with quick actions (show, Quick Chat, new chat, Services, stop services, quit). Minimize-to-tray is separate from close.
+---
 
-Local hotkeys (when focused):
+# Documentation
 
-| Hotkey | Action |
-| --- | --- |
-| `Ctrl+Space` | Toggle Quick Chat |
-| `Ctrl+N` | New chat |
-| `Ctrl+Shift+S` | Open Services |
-| `Esc` | Close Quick Chat |
+## User Features
 
-Windows system-wide hotkeys (opt-in):
+- Chat & Context
+- Model Management
+- Local AI Setup
+- System Integration
 
-| Hotkey | Action |
-| --- | --- |
-| `Ctrl+Alt+Space` | Toggle Quick Chat |
-| `Ctrl+Alt+N` | New chat |
-| `Ctrl+Alt+S` | Open Services |
+See:
 
-Linux system-wide hotkeys remain unavailable pending a reliable compositor API.
+`docs/features.md`
 
-## Build
+## Core Components
+
+- `docs/rag.md`
+- `docs/agent.md`
+- `docs/voice.md`
+- `docs/benchmarks.md`
+- `docs/security-review.md`
+
+---
+
+# Project Structure
+
+```
+src/
+├── Aether.Core/
+├── Aether.Agent/
+├── Aether.Rag/
+├── Aether.Services/
+├── Aether.ViewModels/
+├── Aether.Desktop/
+└── Aether.Tests/
+
+docs/
+```
+
+---
+
+# Building
 
 ```bash
 dotnet build Aether.sln
+
 dotnet test src/Aether.Tests/Aether.Tests.csproj
+
 ./build.sh --skip-restore
+
 pwsh ./build.ps1 -SkipRestore
 ```
 
-Packaging scripts create Linux `.tar.gz` and Windows `.zip` archives under `dist/`. See [docs/packaging.md](docs/packaging.md) for details on self-contained builds.
+Packaging scripts create Linux `.tar.gz` and Windows `.zip` archives under `dist/`.
 
-## Project Structure
+---
 
-```text
-src/Aether.Core/        Models and service interfaces
-src/Aether.Agent/       Agent task state, context packs, safety gates, tools
-src/Aether.Services/    Runtime, storage, settings, backup, voice services
-src/Aether.Rag/         Ingest, retrieval, citations, traces, eval harness
-src/Aether.ViewModels/  MVVM state and commands
-src/Aether.Desktop/     Avalonia views, controls, styles, entry point
-src/Aether.Tests/       Lightweight regression harness
-docs/                   Security notes, RAG/eval docs, internal planning
-```
+# License
 
-## License
+Aether is source-available.
 
-Aether is source-available and free for private/noncommercial use under the PolyForm Noncommercial License 1.0.0.
+Private and non-commercial use is licensed under the **PolyForm Noncommercial License 1.0.0**.
 
-Commercial use requires a separate paid commercial license. See
-[LICENSE.md](LICENSE.md), [COMMERCIAL.md](COMMERCIAL.md), and
-[NOTICE.md](NOTICE.md).
+Commercial use requires a separate commercial licence.
 
-This repository is not OSI open source. Public release terms should be reviewed by a qualified lawyer before Aether 1.0.
+See:
 
-## Public Release Gates
+- LICENSE.md
+- COMMERCIAL.md
+- NOTICE.md
 
-- Concrete local-first OCR loader.
-- Linux and Windows archive packaging; signed installers/update metadata deferred to public-release hardening.
-- Security review and threat model refresh complete; Trust & Safety warnings available with remaining items tracked in [docs/security-review.md](docs/security-review.md).
-- Windows system-wide hotkeys available; Linux deferred pending reliable compositor API.
+Aether is **not** an OSI-approved open source project.
+
+---
+
+# Current Status
+
+Current release target:
+
+**0.10.0-alpha**
+
+Major systems currently implemented include:
+
+- Native desktop chat
+- Managed local runtimes
+- Local RAG
+- Agent Workbench
+- Long-term memory
+- Voice providers
+- Benchmark suites
+- Local AI setup
+- Doctor diagnostics
+- Security review and threat model
+
+Public release hardening continues in the areas of installer signing, OCR support, additional security tightening, and Linux global hotkeys.

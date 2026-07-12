@@ -70,6 +70,7 @@ public partial class DoctorViewModel : ObservableObject
             if (showIssueToast)
                 ShowStartupIssueToast(report);
             NarrateCriticalIssues(report);
+            AlertOnNewUntunedModels(report);
         }
         catch (Exception ex)
         {
@@ -97,6 +98,39 @@ public partial class DoctorViewModel : ObservableObject
             ? $"Doctor found 1 critical issue: {first}."
             : $"Doctor found {report.ErrorCount} critical issues: {first} and others.";
         _ = _voice.EnqueueAsync(new VoiceUtterance(text, VoiceChannel.Doctor, VoicePriority.Critical, DedupeKey: $"doctor:{report.ScannedAt:O}"));
+    }
+
+    private readonly HashSet<string> _knownUntunedModels = new(StringComparer.OrdinalIgnoreCase);
+    private bool _hasScannedOnce;
+
+    /// <summary>
+    /// Seeds the known-untuned set on the first scan (so a fresh install with many
+    /// untuned models does not immediately fire a toast for all of them, which the
+    /// Warning summary already covers); every scan after that compares against the
+    /// known set and alerts only about models that newly showed up as untuned, e.g.
+    /// a GGUF file the user just dropped into the assets root.
+    /// </summary>
+    private void AlertOnNewUntunedModels(DoctorReport report)
+    {
+        var check = report.Checks.FirstOrDefault(c => c.Key == "llama-tune-profiles" && c.Status == DoctorCheckStatus.Warning);
+        var untuned = check?.Diagnostics
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToList() ?? [];
+
+        var newModels = untuned.Where(m => !_knownUntunedModels.Contains(m)).ToList();
+        foreach (var m in untuned)
+            _knownUntunedModels.Add(m);
+
+        if (_hasScannedOnce && newModels.Count > 0)
+        {
+            var name = Path.GetFileNameWithoutExtension(newModels[0]);
+            var text = newModels.Count == 1
+                ? $"{name} needs a tuned launch profile. Run auto-tune in Services before benchmarking or chatting."
+                : $"{newModels.Count} new models need tuned launch profiles. Run auto-tune in Services before benchmarking or chatting.";
+            _toasts.Show("New model detected", text, ToastKind.Info, 8000);
+        }
+
+        _hasScannedOnce = true;
     }
 
     private void ShowStartupIssueToast(DoctorReport report)
@@ -316,7 +350,8 @@ public partial class DoctorViewModel : ObservableObject
             }
         }
 
-        if (check.Key == "llama-server-update")
+        var wantsLlamaDownload = check.Key == "llama-server" && check.FixLabel.StartsWith("Download", StringComparison.OrdinalIgnoreCase);
+        if (check.Key == "llama-server-update" || wantsLlamaDownload)
         {
             try
             {

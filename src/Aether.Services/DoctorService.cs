@@ -7,6 +7,7 @@ using Aether.Voice;
 using System.Diagnostics;
 using System.Linq;
 using System.Net.Http.Json;
+using System.Runtime.InteropServices;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
@@ -227,8 +228,8 @@ public sealed class DoctorService : IDoctorService
                 "llama-server found",
                 DoctorCheckStatus.Error,
                 "llama-server not configured",
-                "Set the llama-server executable path in Services.",
-                "Open Services",
+                $"No llama-server executable is configured. Aether can download the latest release for {RuntimeInformation.OSDescription} ({RuntimeInformation.ProcessArchitecture}) here, or you can set the path manually in Services.",
+                "Download llama.cpp",
                 true,
                 "No managed server executable configured.",
                 "Runtime");
@@ -242,8 +243,8 @@ public sealed class DoctorService : IDoctorService
             "llama-server found",
             ok ? DoctorCheckStatus.Ready : DoctorCheckStatus.Error,
             ok ? "llama-server available" : "llama-server missing",
-            ok ? resolved : "Executable not found on disk or PATH.",
-            "Open Services",
+            ok ? resolved : $"Executable not found on disk or PATH: {resolved}. Aether can download the latest release for {RuntimeInformation.OSDescription} ({RuntimeInformation.ProcessArchitecture}) here.",
+            ok ? "Open Services" : "Download llama.cpp",
             true,
             resolved,
             "Runtime");
@@ -1001,7 +1002,24 @@ public sealed class DoctorService : IDoctorService
 
     private DoctorCheck CheckTraySupport()
     {
-        var supported = OperatingSystem.IsWindows() || OperatingSystem.IsLinux() || OperatingSystem.IsMacOS();
+        // Windows (Shell_NotifyIcon) and macOS (NSStatusItem) reliably support tray icons.
+        // Linux support depends on the desktop environment/app-indicator availability, so it
+        // stays advisory rather than a confirmed pass.
+        if (OperatingSystem.IsWindows() || OperatingSystem.IsMacOS())
+        {
+            return BuildCheck(
+                "tray",
+                "Tray support",
+                DoctorCheckStatus.Ready,
+                "Tray supported",
+                "Tray icons are supported on this OS.",
+                "Details",
+                false,
+                Environment.OSVersion.ToString(),
+                "System");
+        }
+
+        var supported = OperatingSystem.IsLinux();
         return BuildCheck(
             "tray",
             "Tray support",
@@ -1235,8 +1253,15 @@ public sealed class DoctorService : IDoctorService
         if (string.IsNullOrWhiteSpace(value))
             return null;
 
+        // GitHub release tags and older builds print "bNNNN" (e.g. "b4523").
         var match = Regex.Match(value, @"(?:^|[^a-zA-Z0-9])b(?<build>\d{3,6})(?:[^a-zA-Z0-9]|$)", RegexOptions.IgnoreCase);
-        return match.Success && int.TryParse(match.Groups["build"].Value, out var build) ? build : null;
+        if (match.Success && int.TryParse(match.Groups["build"].Value, out var build))
+            return build;
+
+        // Current llama-server --version output dropped the "b" prefix, e.g.
+        // "version: 5750 (abcdef1)" or "build: 5750 (abcdef1)".
+        match = Regex.Match(value, @"(?:version|build)\s*[:=]\s*(?<build>\d{3,6})", RegexOptions.IgnoreCase);
+        return match.Success && int.TryParse(match.Groups["build"].Value, out build) ? build : null;
     }
 
     private string ResolveRerankerDirectory()

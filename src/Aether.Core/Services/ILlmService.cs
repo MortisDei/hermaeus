@@ -73,6 +73,12 @@ public interface ILlmService
         IReadOnlyList<ChatMessage> messages,
         LlmChatOptions? options = null,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Drops any cached model listing so the next GetModelsAsync call re-queries
+    /// providers instead of returning stale data. No-op for services that don't cache.
+    /// </summary>
+    void InvalidateModelCache() { }
 }
 
 public static class LlmServiceExtensions

@@ -81,6 +81,21 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
     public Action<string>? RequestFolderPicker { get; set; }
     public Func<ServerProcessViewModel, Task>? BeforeStartAsync { get; set; }
 
+    public ObservableCollection<string> DetectedModelPaths { get; } = [];
+
+    public void RefreshDetectedModels()
+    {
+        var found = Aether.Services.LocalAiAssetLocator.FindGgufModels(_settings.Settings.DataManagement.LocalAiAssetsRoot);
+        var current = ModelPath;
+        DetectedModelPaths.Clear();
+        foreach (var path in found)
+            DetectedModelPaths.Add(path);
+        // Re-notify SelectedItem binding: ComboBox only highlights the match if the
+        // items collection already contains it by the time the binding evaluates.
+        if (!string.IsNullOrWhiteSpace(current))
+            OnPropertyChanged(nameof(ModelPath));
+    }
+
     public ServerProcessViewModel(
         ServerConfig config,
         ISettingsService settings,
@@ -127,6 +142,8 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
             if (!string.IsNullOrWhiteSpace(line))
                 _runtimeLogs.Add(MapLog(line));
         };
+
+        RefreshDetectedModels();
     }
 
     [RelayCommand]
@@ -414,6 +431,27 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
         _config.ExtraArgs      = ExtraArgs;
         OnPropertyChanged(nameof(HasUnsavedChanges));
         OnPropertyChanged(nameof(ExtraArgsTrustWarning));
+
+        // Managed servers are always local processes, so their configured port is the
+        // single source of truth. Without this, changing the port here left
+        // Llm.LlamaCppBaseUrl / Rag.EmbeddingBaseUrl (what chat/benchmark/RAG actually
+        // connect to) pointing at the old port, silently breaking model listing,
+        // generation, and embedding health checks.
+        if (EmbeddingsMode)
+            _settings.Settings.Rag.EmbeddingBaseUrl = $"http://localhost:{Port}";
+        else
+            SyncChatBaseUrlToPort();
+    }
+
+    private void SyncChatBaseUrlToPort()
+    {
+        var url = $"http://localhost:{Port}";
+        _settings.Settings.Llm.LlamaCppBaseUrl = url;
+
+        var linked = _settings.Settings.RuntimeProfiles
+            .FirstOrDefault(p => p.Kind == RuntimeKind.LlamaCpp && p.LinkedServerId == _config.Id);
+        if (linked is not null)
+            linked.BaseUrl = url;
     }
 
     private ServerConfig BuildConfig() => new()
@@ -557,6 +595,7 @@ public partial class ServicesViewModel : ObservableObject
 
             vm.BeforeStartAsync = StopSamePortPeersBeforeStartAsync;
             vm.PropertyChanged += OnServerPropertyChanged;
+            vm.RefreshDetectedModels();
             Servers.Add(vm);
         }
 

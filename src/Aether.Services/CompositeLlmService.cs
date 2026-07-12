@@ -80,6 +80,19 @@ public sealed class CompositeLlmService : ILlmService, IDisposable
         };
     }
 
+    public void InvalidateModelCache()
+    {
+        _cacheLock.EnterWriteLock();
+        try
+        {
+            _cacheUntilUtc = DateTime.MinValue;
+        }
+        finally
+        {
+            _cacheLock.ExitWriteLock();
+        }
+    }
+
     public async Task<List<LlmModel>> GetModelsAsync(CancellationToken ct = default)
     {
         _cacheLock.EnterReadLock();

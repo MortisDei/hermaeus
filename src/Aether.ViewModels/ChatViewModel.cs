@@ -222,6 +222,9 @@ public partial class ChatViewModel : ObservableObject
         if (!force && AvailableModels.Count > 0 && DateTime.UtcNow - _modelsLoadedAtUtc < TimeSpan.FromSeconds(30))
             return;
 
+        if (force)
+            _llm.InvalidateModelCache();
+
         var current = SelectedModel?.Id;
         var models = await _llm.GetModelsAsync();
         _profiles.ApplyProfiles(models);
