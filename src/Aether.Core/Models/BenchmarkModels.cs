@@ -125,6 +125,7 @@ public sealed class BenchmarkResult
     public List<string> ExpectedKeywords { get; set; } = [];
     public List<string> ExpectedRegexes { get; set; } = [];
     public bool ShouldRefuse { get; set; }
+    public List<string> Tags { get; set; } = [];
     public string Output { get; set; } = string.Empty;
     public long FirstTokenMs { get; set; }
     public long TotalMs { get; set; }

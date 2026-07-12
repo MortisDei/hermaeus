@@ -58,6 +58,7 @@ public sealed class DoctorService : IDoctorService, IInspectionCheckProvider
     private readonly LlamaServerSetupService _llamaSetup;
     private readonly IRuntimeLogService? _runtimeLogs;
     private readonly AppLifecycleJournalService? _lifecycleJournal;
+    private readonly IBenchmarkInsightsService? _benchmarkInsights;
 
     public DoctorService(
         ISettingsService settings,
@@ -73,7 +74,8 @@ public sealed class DoctorService : IDoctorService, IInspectionCheckProvider
         EmbeddingModelDownloadSpec? embeddingDownload = null,
         LlamaServerSetupService? llamaSetup = null,
         IRuntimeLogService? runtimeLogs = null,
-        AppLifecycleJournalService? lifecycleJournal = null)
+        AppLifecycleJournalService? lifecycleJournal = null,
+        IBenchmarkInsightsService? benchmarkInsights = null)
     {
         _settings = settings;
         _runtimes = runtimes;
@@ -89,6 +91,7 @@ public sealed class DoctorService : IDoctorService, IInspectionCheckProvider
         _llamaSetup = llamaSetup ?? new LlamaServerSetupService(_downloads);
         _runtimeLogs = runtimeLogs;
         _lifecycleJournal = lifecycleJournal;
+        _benchmarkInsights = benchmarkInsights;
     }
 
     public async Task<DoctorReport> ScanAsync(CancellationToken ct = default)
@@ -122,6 +125,10 @@ public sealed class DoctorService : IDoctorService, IInspectionCheckProvider
 
         if (!OperatingSystem.IsLinux())
             checks.Add(CheckHotkeySupport());
+
+        var benchmarkAdvisory = await CheckBenchmarkAdvisoryAsync(ct);
+        if (benchmarkAdvisory is not null)
+            checks.Add(benchmarkAdvisory);
 
         var errorCount = checks.Count(c => c.Status == DoctorCheckStatus.Error);
         var warningCount = checks.Count(c => c.Status == DoctorCheckStatus.Warning);
@@ -1029,6 +1036,56 @@ public sealed class DoctorService : IDoctorService, IInspectionCheckProvider
             false,
             Environment.OSVersion.ToString(),
             "System");
+    }
+
+    /// <summary>
+    /// Info-only: when benchmark data shows the currently selected chat
+    /// model ranking well behind the best comparable model on this
+    /// hardware, says so. Never Warning/Error, never switches anything -
+    /// recommendations inform, the user decides. Omitted entirely (not just
+    /// "no issue") when there is no comparable benchmark data, so a fresh
+    /// install's Doctor page is not cluttered with an always-present row.
+    /// docs/review/02-benchmark-insights.md ("2.4").
+    /// </summary>
+    private async Task<DoctorCheck?> CheckBenchmarkAdvisoryAsync(CancellationToken ct)
+    {
+        if (_benchmarkInsights is null)
+            return null;
+
+        const double rankingGapThreshold = 10;
+        try
+        {
+            var report = await _benchmarkInsights.LoadReportAsync(ct);
+            var best = report.BestOverall;
+            if (best is null)
+                return null;
+
+            var currentModelId = _settings.Settings.Llm.DefaultModel;
+            var current = report.Models.FirstOrDefault(m => m.ModelId == currentModelId);
+            if (current is null || current.ModelId == best.ModelId)
+                return null;
+
+            var gap = (best.RankingScore - current.RankingScore) * 100;
+            if (gap <= rankingGapThreshold)
+                return null;
+
+            return BuildCheck(
+                "benchmark-advisory",
+                "Benchmark data suggests a better default model",
+                DoctorCheckStatus.Info,
+                $"Benchmark data suggests {best.ModelName} may serve you better overall than {current.ModelName}.",
+                $"{best.ModelName} ranks {gap:F0} points higher (ranking score {best.RankingScore:P0} vs {current.RankingScore:P0}) " +
+                $"across {best.RunCount} comparable run(s). This is informational only; nothing switches automatically.",
+                "Open Benchmarks",
+                false,
+                string.Empty,
+                "Benchmarks");
+        }
+        catch
+        {
+            // Best-effort advisory; never let a benchmark aggregation failure break the Doctor scan.
+            return null;
+        }
     }
 
     private DoctorCheck CheckHotkeySupport()

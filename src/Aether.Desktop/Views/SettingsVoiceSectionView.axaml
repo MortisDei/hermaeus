@@ -4,6 +4,7 @@
              xmlns:vm="using:Aether.ViewModels"
              x:Class="Aether.Desktop.Views.SettingsVoiceSectionView"
              x:DataType="vm:TtsSettingsViewModel">
+    <StackPanel>
     <Border Classes="settings-card">
         <StackPanel Spacing="12">
             <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
@@ -88,4 +89,51 @@
                        FontSize="11" Opacity="0.45" TextWrapping="Wrap" />
         </StackPanel>
     </Border>
+    <Border Classes="settings-card" Margin="0,12,0,0">
+        <StackPanel Spacing="12">
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                <TextBlock Grid.Column="0" Text="Voice orchestration" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center" />
+                <CheckBox Grid.Column="1" IsChecked="{Binding IsVoiceMuted}" Content="Mute all voice" FontSize="12" />
+            </Grid>
+            <TextBlock Text="Aether's voice now has other consumers besides the chat speak button: agent narration, Doctor warnings, benchmark completion, and system notifications. Each channel below is opt-in."
+                       FontSize="11" Opacity="0.55" TextWrapping="Wrap" />
+            <CheckBox IsChecked="{Binding AutoSpeakChatReplies}" Content="Automatically speak chat replies" FontSize="13" />
+            <CheckBox IsChecked="{Binding StreamingChatSpeech}" IsEnabled="{Binding AutoSpeakChatReplies}"
+                      Content="Experimental: speak replies sentence-by-sentence while generating" FontSize="13" />
+
+            <TextBlock Text="Channels" FontSize="13" FontWeight="SemiBold" Opacity="0.8" Margin="0,4,0,0" />
+            <ItemsControl ItemsSource="{Binding VoiceChannels}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="vm:VoiceChannelSettingViewModel">
+                        <Grid ColumnDefinitions="140,Auto,*" ColumnSpacing="12" Margin="0,4">
+                            <CheckBox Grid.Column="0" IsChecked="{Binding Enabled}" Content="{Binding DisplayName}" FontSize="13" />
+                            <TextBlock Grid.Column="1" Text="Profile" VerticalAlignment="Center" Opacity="0.6" FontSize="12" />
+                            <TextBox Grid.Column="2" Text="{Binding ProfileName}" Watermark="Default voice" FontSize="12" CornerRadius="6" Padding="8,4" />
+                        </Grid>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8" Margin="0,4,0,0">
+                <TextBlock Grid.Column="0" Text="Voice profiles" FontSize="13" FontWeight="SemiBold" Opacity="0.8" VerticalAlignment="Center" />
+                <Button Grid.Column="1" Command="{Binding AddVoiceProfileCommand}" Content="Add profile" FontSize="12" Padding="10,5" CornerRadius="6" />
+            </Grid>
+            <ItemsControl ItemsSource="{Binding VoiceProfiles}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="vm:VoiceProfileEditViewModel">
+                        <Grid ColumnDefinitions="*,*,90,Auto" ColumnSpacing="8" Margin="0,4">
+                            <TextBox Grid.Column="0" Text="{Binding Name}" Watermark="Profile name" FontSize="12" CornerRadius="6" Padding="8,4" />
+                            <TextBox Grid.Column="1" Text="{Binding VoiceId}" Watermark="Provider voice id" FontSize="12" CornerRadius="6" Padding="8,4" />
+                            <NumericUpDown Grid.Column="2" Value="{Binding Speed}" Minimum="0.5" Maximum="2.0" Increment="0.1" FontSize="12" />
+                            <Button Grid.Column="3" Classes="icon-btn" Command="{Binding $parent[ItemsControl].DataContext.RemoveVoiceProfileCommand}"
+                                    CommandParameter="{Binding}" ToolTip.Tip="Remove profile">
+                                <PathIcon Data="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" Width="13" Height="13" />
+                            </Button>
+                        </Grid>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </StackPanel>
+    </Border>
+    </StackPanel>
 </UserControl>

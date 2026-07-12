@@ -23,7 +23,8 @@ public sealed class WorkspaceActivationService : IWorkspaceActivationService
                 string.IsNullOrWhiteSpace(manifest.PreferredEmbeddingModelId) ? null : manifest.PreferredEmbeddingModelId,
                 manifest.LinkedRagDatasetId,
                 manifest.InstructionPaths,
-                FromManifest: true);
+                FromManifest: true,
+                VoiceProfileName: string.IsNullOrWhiteSpace(manifest.VoiceProfileName) ? null : manifest.VoiceProfileName);
         }
 
         var profile = await _profiles.LoadAsync(workspaceRoot, ct);

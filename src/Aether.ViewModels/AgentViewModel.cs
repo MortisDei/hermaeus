@@ -233,7 +233,9 @@ public partial class AgentViewModel : ObservableObject
     private readonly AgentPatchReviewService _patchReview;
     private readonly ISettingsService? _settings;
     private readonly ILessonStore? _lessons;
+    private readonly IVoiceOrchestrator? _voice;
     private CancellationTokenSource? _cts;
+    private string _activeWorkspaceVoiceProfile = string.Empty;
 
     public ObservableCollection<LlmModel> AvailableModels { get; } = [];
     public ObservableCollection<RagDataset> Datasets { get; } = [];
@@ -290,6 +292,7 @@ public partial class AgentViewModel : ObservableObject
     [ObservableProperty] private string _workspaceRagIngestPlan = string.Empty;
     [ObservableProperty] private string _suggestedAgentsMd = string.Empty;
     [ObservableProperty] private string _replyText = string.Empty;
+    [ObservableProperty] private string _workspaceVoiceProfileName = string.Empty;
 
     public string CurrentTaskStatusLabel => CurrentTask is null ? "No active task" : CurrentTask.Status.ToString();
     public string CurrentStepCountLabel => CurrentTask is null
@@ -322,7 +325,8 @@ public partial class AgentViewModel : ObservableObject
         IWorkspaceActivationService workspaceActivation,
         IWorkspaceManifestStore workspaceManifests,
         ISettingsService? settings = null,
-        ILessonStore? lessons = null)
+        ILessonStore? lessons = null,
+        IVoiceOrchestrator? voice = null)
     {
         _agent = agent;
         _store = store;
@@ -336,6 +340,7 @@ public partial class AgentViewModel : ObservableObject
         _workspaceManifests = workspaceManifests;
         _settings = settings;
         _lessons = lessons;
+        _voice = voice;
         _patchReview = new AgentPatchReviewService(workspaceTools, store, agent);
         WorkspaceRoot = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
@@ -433,6 +438,7 @@ public partial class AgentViewModel : ObservableObject
             _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Agent,
                 $"Agent started: {GoalText}"));
             CurrentTask = await _agent.CreateTaskAsync(GoalText, BuildOptions(), _cts.Token);
+            Narrate("Agent task started.", VoicePriority.Normal, $"{CurrentTask.TaskId}:started");
             await RunAgentLoopAsync();
             await RefreshRecentAsync();
         }
@@ -937,6 +943,9 @@ public partial class AgentViewModel : ObservableObject
 
         var dataset = activation.ResolveLinkedDataset(Datasets, d => d.Id);
         if (dataset is not null) SelectedDataset = dataset;
+
+        _activeWorkspaceVoiceProfile = activation.VoiceProfileName ?? string.Empty;
+        WorkspaceVoiceProfileName = _activeWorkspaceVoiceProfile;
     }
 
     [RelayCommand]
@@ -952,7 +961,9 @@ public partial class AgentViewModel : ObservableObject
         manifest.AllowedCommands = CommandRecipes
             .Select(r => new WorkspaceCommandRecipe(r.Command, r.Why, r.RiskLevel))
             .ToList();
+        manifest.VoiceProfileName = WorkspaceVoiceProfileName.Trim();
         await _workspaceManifests.SaveAsync(WorkspaceRoot, manifest);
+        _activeWorkspaceVoiceProfile = manifest.VoiceProfileName;
         StatusMessage = "Saved workspace defaults to .aether/workspace.json.";
     }
 
@@ -1007,7 +1018,9 @@ public partial class AgentViewModel : ObservableObject
     /// </summary>
     private void ApplyStepResult(AgentStepResult result)
     {
+        var previousStatus = CurrentTask?.Status;
         CurrentTask = result.State;
+        NarrateStatusTransition(previousStatus, result.State);
         CurrentStep = result.State.ActiveStep;
         StatusMessage = result.LogEntry;
         NextActionPreview = JsonSerializer.Serialize(result.PlannerResponse.NextAction, new JsonSerializerOptions { WriteIndented = true });
@@ -1025,6 +1038,47 @@ public partial class AgentViewModel : ObservableObject
         }
 
         RefreshTaskPreview();
+    }
+
+    /// <summary>
+    /// Milestone-only agent narration (never per-step, never model text
+    /// verbatim): task started, waiting for approval/reply (Critical - the
+    /// run is blocked on the user), and terminal Complete/Failed states.
+    /// No-op when no orchestrator was wired in (e.g. plain unit tests).
+    /// </summary>
+    private void NarrateStatusTransition(AgentTaskStatus? previousStatus, AgentTaskState state)
+    {
+        if (_voice is null || previousStatus == state.Status)
+            return;
+
+        switch (state.Status)
+        {
+            case AgentTaskStatus.WaitingForUser:
+                var reason = state.PendingToolAction is not null ? "waiting for your approval" : "waiting for your reply";
+                Narrate($"Agent task {reason}.", VoicePriority.Critical, $"{state.TaskId}:waiting:{state.StepCount}");
+                break;
+            case AgentTaskStatus.Complete:
+                Narrate("Agent task completed.", VoicePriority.Normal, $"{state.TaskId}:complete");
+                break;
+            case AgentTaskStatus.Failed:
+                Narrate("Agent task failed.", VoicePriority.Critical, $"{state.TaskId}:failed");
+                break;
+        }
+    }
+
+    private void Narrate(string text, VoicePriority priority, string dedupeKey)
+    {
+        if (_voice is null) return;
+        _ = _voice.EnqueueAsync(new VoiceUtterance(text, VoiceChannel.Agent, priority, ResolveWorkspaceVoiceOverride(), dedupeKey));
+    }
+
+    private string? ResolveWorkspaceVoiceOverride()
+    {
+        if (_settings is null || string.IsNullOrWhiteSpace(_activeWorkspaceVoiceProfile))
+            return null;
+        var profile = _settings.Settings.Tts.Profiles.FirstOrDefault(p =>
+            string.Equals(p.Name, _activeWorkspaceVoiceProfile, StringComparison.OrdinalIgnoreCase));
+        return string.IsNullOrWhiteSpace(profile?.VoiceId) ? null : profile.VoiceId;
     }
 
     private AgentWorkspaceOptions BuildOptions() => new(

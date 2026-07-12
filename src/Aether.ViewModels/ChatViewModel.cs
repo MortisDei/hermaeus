@@ -90,6 +90,7 @@ public partial class ChatViewModel : ObservableObject
     private readonly IWorkspaceActivationService? _workspaceActivation;
     private readonly MemoryInjectionService? _memoryInjection;
     private readonly ILessonStore? _lessons;
+    private readonly IVoiceOrchestrator? _voice;
     private CancellationTokenSource? _cts;
     private CancellationTokenSource? _ttsCts;
     private CancellationTokenSource? _contextUsageCts;
@@ -162,7 +163,8 @@ public partial class ChatViewModel : ObservableObject
         EvalEngine? evalEngine = null,
         IWorkspaceActivationService? workspaceActivation = null,
         MemoryInjectionService? memoryInjection = null,
-        ILessonStore? lessons = null)
+        ILessonStore? lessons = null,
+        IVoiceOrchestrator? voice = null)
     {
         _llm = llm; _store = store; _settings = settings; _tts = tts; _profiles = profiles; _toasts = toasts;
         _memoryStore = memoryStore;
@@ -172,6 +174,7 @@ public partial class ChatViewModel : ObservableObject
         _chatTraces = chatTraces;
         _memoryInjection = memoryInjection;
         _lessons = lessons;
+        _voice = voice;
         _evalEngine = evalEngine ?? new EvalEngine(llm);
         _workspaceActivation = workspaceActivation;
         _temperature  = settings.Settings.Llm.Temperature;
@@ -322,6 +325,9 @@ public partial class ChatViewModel : ObservableObject
         _cts = new CancellationTokenSource();
         var accumulator = new ChatStreamAccumulator();
         var traceError = string.Empty;
+        var autoSpeak = _voice is not null && _settings.Settings.Tts.AutoSpeakChatReplies;
+        var streamingSpeech = autoSpeak && _settings.Settings.Tts.StreamingChatSpeech;
+        var chunker = streamingSpeech ? new SentenceChunker() : null;
         try
         {
             var (memoryContext, memorySources, injectedMemoryIds) = await BuildMemoryInjectionAsync(text, _cts.Token);
@@ -347,6 +353,10 @@ public partial class ChatViewModel : ObservableObject
                         asst.Content += flushed;
                         ScrollToBottom?.Invoke(this, EventArgs.Empty);
                     }
+
+                    if (chunker is not null)
+                        foreach (var chunk in chunker.Append(token))
+                            SpeakStreamingChunk(chunk);
                 },
                 onUsage: usage => UpdateContextUsage(usage, "Reported by provider"),
                 _cts.Token);
@@ -401,6 +411,11 @@ public partial class ChatViewModel : ObservableObject
                     RefreshEstimatedContextUsage();
                 await PersistAsync();
                 _ = Task.Run(() => RunConversationMemoryAsync(CurrentConversationId));
+
+                if (chunker is not null)
+                    SpeakStreamingChunk(chunker.Flush());
+                else if (autoSpeak)
+                    SpeakStreamingChunk(asst.Content);
             }
 
             AddChatTrace(snapshot, selectedModelId, result.Usage, result.FirstTokenMs, result.TotalLatencyMs, traceError);
@@ -411,8 +426,22 @@ public partial class ChatViewModel : ObservableObject
         }
     }
 
+    private void SpeakStreamingChunk(string? chunk)
+    {
+        if (_voice is null || string.IsNullOrWhiteSpace(chunk))
+            return;
+        var sanitized = ChatSpeechSanitizer.Sanitize(chunk);
+        if (string.IsNullOrWhiteSpace(sanitized))
+            return;
+        _ = _voice.EnqueueAsync(new VoiceUtterance(sanitized, VoiceChannel.Chat, VoicePriority.Normal));
+    }
+
     [RelayCommand]
-    private void Stop() => _cts?.Cancel();
+    private void Stop()
+    {
+        _cts?.Cancel();
+        _voice?.StopChannel(VoiceChannel.Chat);
+    }
 
     [RelayCommand]
     private void AttachContextFiles() => RequestContextFilePicker?.Invoke();
@@ -533,13 +562,21 @@ public partial class ChatViewModel : ObservableObject
             return;
         }
 
+        var sanitized = ChatSpeechSanitizer.Sanitize(text);
+        if (_voice is not null)
+        {
+            _voice.StopChannel(VoiceChannel.Chat);
+            await _voice.EnqueueAsync(new VoiceUtterance(sanitized, VoiceChannel.Chat, VoicePriority.Normal));
+            return;
+        }
+
         _ttsCts?.Cancel();
         _ttsCts?.Dispose();
         _ttsCts = new CancellationTokenSource();
 
         try
         {
-            await _tts.SpeakAsync(text, _ttsCts.Token);
+            await _tts.SpeakAsync(sanitized, _ttsCts.Token);
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)

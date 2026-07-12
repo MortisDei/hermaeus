@@ -132,7 +132,8 @@ public partial class SettingsViewModel : ObservableObject
         LocalApiProcessManager localApiProcess,
         LocalAiSetupService localAiSetup,
         TrustService trust,
-        ServicesViewModel? services = null)
+        ServicesViewModel? services = null,
+        IVoiceOrchestrator? voiceOrchestrator = null)
     {
         _svc = svc;
         _toasts = toasts;
@@ -150,7 +151,7 @@ public partial class SettingsViewModel : ObservableObject
         LocalApi = new LocalApiSettingsViewModel(secrets, _svc);
         LocalApi.ProcessStatusLabel = _localApiProcess.StatusLabel;
         _localApiProcess.StatusChanged += () => LocalApi.ProcessStatusLabel = _localApiProcess.StatusLabel;
-        Tts = new TtsSettingsViewModel(tts, voiceProviderRegistry, _toasts, xttsProcess, kokoroProcess, secrets, _svc);
+        Tts = new TtsSettingsViewModel(tts, voiceProviderRegistry, _toasts, xttsProcess, kokoroProcess, secrets, _svc, voiceOrchestrator);
         LocalAiSetup = new LocalAiSetupSettingsViewModel(_svc, localAiSetup, _toasts, Tts, Data, Rag, SaveAsync);
         Trust = new TrustSettingsViewModel(_svc, trust, _toasts, Tts, Data, Rag);
 
@@ -295,6 +296,7 @@ public partial class SettingsViewModel : ObservableObject
         settings.Tts.Speed = Tts.TtsSpeed;
         settings.Tts.Preload = Tts.TtsPreload;
         settings.Tts.VoiceProvider = Tts.SelectedVoiceProvider;
+        Tts.ApplyVoiceOrchestrationTo(settings.Tts);
     }
 
     private string ResolveDataRoot()

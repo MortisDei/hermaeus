@@ -15,6 +15,8 @@ public partial class BenchmarkViewModel : ObservableObject
     private readonly ISettingsService _settings;
     private readonly IToastService _toasts;
     private readonly ServicesViewModel? _services;
+    private readonly IBenchmarkInsightsService? _insights;
+    private readonly IVoiceOrchestrator? _voice;
     private CancellationTokenSource? _runCts;
     private bool _isLoading;
 
@@ -23,6 +25,13 @@ public partial class BenchmarkViewModel : ObservableObject
     public ObservableCollection<BenchmarkRunViewModel> RankedRuns { get; } = [];
     public ObservableCollection<LlmModel> Models { get; } = [];
     public ObservableCollection<BenchmarkResultViewModel> SelectedResults { get; } = [];
+    public ObservableCollection<TagLeaderboardViewModel> InsightsLeaderboards { get; } = [];
+    public ObservableCollection<string> InsightsCaveats { get; } = [];
+
+    [ObservableProperty] private bool _isLoadingInsights;
+    [ObservableProperty] private string _insightsHeader = string.Empty;
+    [ObservableProperty] private bool _insightsHasData;
+    [ObservableProperty] private ModelAggregateViewModel? _insightsBestOverall;
 
     public Func<Task<bool>>? RequestClearRunHistoryConfirmation { get; set; }
     public Func<BenchmarkResultViewModel, Task>? RequestShowCaseInfo { get; set; }
@@ -47,7 +56,9 @@ public partial class BenchmarkViewModel : ObservableObject
         ModelProfileService profiles,
         ISettingsService settings,
         IToastService toasts,
-        ServicesViewModel? services = null)
+        ServicesViewModel? services = null,
+        IBenchmarkInsightsService? insights = null,
+        IVoiceOrchestrator? voice = null)
     {
         _benchmarks = benchmarks;
         _llm = llm;
@@ -55,6 +66,8 @@ public partial class BenchmarkViewModel : ObservableObject
         _settings = settings;
         _toasts = toasts;
         _services = services;
+        _insights = insights;
+        _voice = voice;
     }
 
     [RelayCommand]
@@ -116,6 +129,7 @@ public partial class BenchmarkViewModel : ObservableObject
             if (run is not null)
                 SelectedRun = Runs.FirstOrDefault(r => r.Id == run.Id);
             _toasts.Show("Benchmark complete", $"{suites.Count} suite(s) on {SelectedModel.Name}", ToastKind.Success, 7000);
+            NarrateCompletion(run, SelectedModel.Name);
         }
         finally
         {
@@ -124,6 +138,17 @@ public partial class BenchmarkViewModel : ObservableObject
             _runCts = null;
             Status = "Ready.";
         }
+    }
+
+    private void NarrateCompletion(BenchmarkRun? run, string modelName)
+    {
+        if (_voice is null || run is null)
+            return;
+
+        var text = run.Status == "Cancelled"
+            ? $"Benchmark {run.SuiteName} on {modelName} cancelled."
+            : $"Benchmark {run.SuiteName} on {modelName} complete: {run.Passed} of {run.Total} passed.";
+        _ = _voice.EnqueueAsync(new VoiceUtterance(text, VoiceChannel.Benchmark, VoicePriority.Normal, DedupeKey: $"benchmark:{run.Id}"));
     }
 
     [RelayCommand]
@@ -222,6 +247,59 @@ public partial class BenchmarkViewModel : ObservableObject
 
     [RelayCommand]
     private async Task RefreshAsync() => await LoadAsync();
+
+    /// <summary>
+    /// Loaded on demand (button/tab), never on page open: deserializing every
+    /// stored run for aggregation should not tax normal page navigation.
+    /// </summary>
+    [RelayCommand]
+    public async Task LoadInsightsAsync()
+    {
+        if (_insights is null || IsLoadingInsights) return;
+        IsLoadingInsights = true;
+        try
+        {
+            var report = await _insights.LoadReportAsync();
+            InsightsHasData = report.HasData;
+            InsightsHeader = report.HasData
+                ? $"You've run {report.TotalRuns} benchmark(s) across {report.ModelCount} model(s) on this hardware."
+                : $"No comparable benchmark data yet ({report.TotalRuns} run(s) recorded). Run a starter suite to get recommendations.";
+            InsightsBestOverall = report.BestOverall is null ? null : new ModelAggregateViewModel(report.BestOverall);
+
+            InsightsLeaderboards.Clear();
+            foreach (var board in report.TagLeaderboards)
+                InsightsLeaderboards.Add(new TagLeaderboardViewModel(board, report.Comparisons));
+
+            InsightsCaveats.Clear();
+            foreach (var caveat in report.Caveats)
+                InsightsCaveats.Add(caveat);
+        }
+        catch (Exception ex)
+        {
+            _toasts.Show("Benchmark insights unavailable", ex.Message, ToastKind.Warning, 6000);
+        }
+        finally
+        {
+            IsLoadingInsights = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task RerunFromInsightsAsync(ModelAggregateViewModel? model)
+    {
+        if (model is null) return;
+        var suite = Suites.FirstOrDefault(s => s.Id == SelectedSuite?.Id) ?? Suites.FirstOrDefault();
+        var candidate = Models.FirstOrDefault(m => m.Id == model.ModelId);
+        if (suite is null || candidate is null)
+        {
+            _toasts.Show("Re-run unavailable", "Could not find a matching suite or model to re-run.", ToastKind.Info, 5000);
+            return;
+        }
+
+        SelectedSuite = suite;
+        SelectedModel = candidate;
+        await RunAsync();
+    }
 
     [RelayCommand]
     private async Task ShowCaseInfoAsync(BenchmarkResultViewModel? result)
@@ -434,4 +512,33 @@ public sealed class BenchmarkResultViewModel
     public string Error => Result.Error;
     public string Output => Result.Output;
     public BenchmarkResultViewModel(BenchmarkResult result) => Result = result;
+}
+
+public sealed class ModelAggregateViewModel
+{
+    public ModelAggregate Aggregate { get; }
+    public string ModelId => Aggregate.ModelId;
+    public string DisplayName => string.IsNullOrWhiteSpace(Aggregate.Quantization)
+        ? Aggregate.ModelName
+        : $"{Aggregate.ModelName} ({Aggregate.Quantization})";
+    public string QualityLabel => $"{Aggregate.QualityScore:P0}";
+    public string SpeedLabel => $"{Aggregate.TokensPerSecond:F1} tok/s";
+    public string EvidenceLabel => $"{Aggregate.RunCount} run(s), {Aggregate.CaseCount} case(s)";
+    public string StaleLabel => Aggregate.IsStale ? "Stale - consider re-running" : string.Empty;
+    public bool IsStale => Aggregate.IsStale;
+    public ModelAggregateViewModel(ModelAggregate aggregate) => Aggregate = aggregate;
+}
+
+public sealed class TagLeaderboardViewModel
+{
+    public string Tag { get; }
+    public IReadOnlyList<ModelAggregateViewModel> Ranked { get; }
+    public IReadOnlyList<string> ComparisonSentences { get; }
+
+    public TagLeaderboardViewModel(TagLeaderboard board, IReadOnlyList<ModelComparison> allComparisons)
+    {
+        Tag = board.Tag;
+        Ranked = board.Ranked.Select(a => new ModelAggregateViewModel(a)).ToList();
+        ComparisonSentences = allComparisons.Where(c => c.Tag == board.Tag).Select(c => c.Sentence).ToList();
+    }
 }

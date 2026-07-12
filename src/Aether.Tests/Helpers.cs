@@ -379,6 +379,24 @@ namespace Aether.Tests
             ToastRaised?.Invoke(new ToastMessage(title, message, kind, durationMs));
     }
 
+    sealed class FakeVoiceOrchestrator : IVoiceOrchestrator
+    {
+        public List<VoiceUtterance> Enqueued { get; } = [];
+        public List<VoiceChannel> StoppedChannels { get; } = [];
+        public bool IsMuted { get; set; }
+        public event Action<VoiceChannel, string>? UtteranceStarted;
+
+        public Task EnqueueAsync(VoiceUtterance utterance, CancellationToken ct = default)
+        {
+            Enqueued.Add(utterance);
+            UtteranceStarted?.Invoke(utterance.Channel, utterance.Text);
+            return Task.CompletedTask;
+        }
+
+        public void StopChannel(VoiceChannel channel) => StoppedChannels.Add(channel);
+        public void StopAll() { }
+    }
+
     sealed class FakeSecretStore : ISecretStore
     {
         public bool IsReference(string value) => value.StartsWith("secret:", StringComparison.OrdinalIgnoreCase);

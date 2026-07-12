@@ -305,6 +305,7 @@ public sealed class BenchmarkService
             ExpectedKeywords = test.ExpectedKeywords.ToList(),
             ExpectedRegexes = test.ExpectedRegexes.ToList(),
             ShouldRefuse = test.ShouldRefuse,
+            Tags = test.Tags.ToList(),
             Output = output,
             OutputChars = output.Length,
             KeywordHit = keywordHit,

@@ -44,6 +44,7 @@ public static class AetherServiceRegistration
         s.AddSingleton<IEvalStore, SqliteEvalStore>();
         s.AddSingleton<EvalEngine>();
         s.AddSingleton<BenchmarkService>();
+        s.AddSingleton<IBenchmarkInsightsService, BenchmarkInsightsService>();
         s.AddSingleton<ITraceStore, SqliteTraceStore>();
         s.AddSingleton<ChatTraceService>();
         s.AddSingleton<IConversationStore, ConversationStore>();
@@ -65,6 +66,8 @@ public static class AetherServiceRegistration
         s.AddSingleton<NativeKokoroVoiceProvider>();
         s.AddSingleton<IVoiceProviderRegistry, VoiceProviderRegistry>();
         s.AddSingleton<ITtsService, VoiceRoutingTtsService>();
+        s.AddSingleton<IVoiceOrchestrator, VoiceOrchestrator>();
+        s.AddSingleton<VoiceNotificationBridge>();
         s.AddSingleton<XttsProcessManager>();
         s.AddSingleton<KokoroProcessManager>();
         s.AddSingleton<LocalApiProcessManager>();

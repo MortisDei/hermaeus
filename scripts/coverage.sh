@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-THRESHOLD="${1:-45}"
+THRESHOLD="${1:-47}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT="$ROOT_DIR/src/Aether.Tests/Aether.Tests.csproj"
 RESULTS_DIR="$ROOT_DIR/dist/.coverage"

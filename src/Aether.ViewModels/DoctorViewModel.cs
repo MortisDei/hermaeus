@@ -12,6 +12,7 @@ public partial class DoctorViewModel : ObservableObject
     private readonly IDoctorService _doctor;
     private readonly IToastService _toasts;
     private readonly ISettingsService _settingsService;
+    private readonly IVoiceOrchestrator? _voice;
     private CancellationTokenSource? _installCts;
 
     [ObservableProperty] private bool _isScanning;
@@ -35,11 +36,12 @@ public partial class DoctorViewModel : ObservableObject
     public Action<string>? RequestCopyToClipboard { get; set; }
     public Action<string>? RequestNavigate { get; set; }
 
-    public DoctorViewModel(IDoctorService doctor, IToastService toasts, ISettingsService settings)
+    public DoctorViewModel(IDoctorService doctor, IToastService toasts, ISettingsService settings, IVoiceOrchestrator? voice = null)
     {
         _doctor = doctor;
         _toasts = toasts;
         _settingsService = settings;
+        _voice = voice;
     }
 
     [RelayCommand]
@@ -67,6 +69,7 @@ public partial class DoctorViewModel : ObservableObject
             LastScanned = $"Last scan: {report.ScannedAt:yyyy-MM-dd HH:mm} UTC";
             if (showIssueToast)
                 ShowStartupIssueToast(report);
+            NarrateCriticalIssues(report);
         }
         catch (Exception ex)
         {
@@ -77,6 +80,23 @@ public partial class DoctorViewModel : ObservableObject
         {
             IsScanning = false;
         }
+    }
+
+    /// <summary>
+    /// One utterance per scan, only when at least one check is an Error;
+    /// never per check. Off by default (Doctor channel disabled) so a clean
+    /// scan stays silent regardless.
+    /// </summary>
+    private void NarrateCriticalIssues(DoctorReport report)
+    {
+        if (_voice is null || report.ErrorCount == 0)
+            return;
+
+        var first = report.Checks.First(c => c.Status == DoctorCheckStatus.Error).Title;
+        var text = report.ErrorCount == 1
+            ? $"Doctor found 1 critical issue: {first}."
+            : $"Doctor found {report.ErrorCount} critical issues: {first} and others.";
+        _ = _voice.EnqueueAsync(new VoiceUtterance(text, VoiceChannel.Doctor, VoicePriority.Critical, DedupeKey: $"doctor:{report.ScannedAt:O}"));
     }
 
     private void ShowStartupIssueToast(DoctorReport report)

@@ -60,6 +60,9 @@ public partial class App : Application
         {
             await sp.GetRequiredService<ISettingsService>().LoadAsync();
             sp.GetRequiredService<AppLifecycleJournalService>().RecordStartup();
+            // Constructed purely for its side effect: subscribes to toasts and
+            // forwards Warning/Error ones onto the Notification voice channel.
+            sp.GetRequiredService<VoiceNotificationBridge>();
             await Task.WhenAll(
                 sp.GetRequiredService<IConversationStore>().InitializeAsync(),
                 sp.GetRequiredService<IMemoryStore>().InitializeAsync(),

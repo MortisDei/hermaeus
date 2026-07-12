@@ -418,6 +418,13 @@ public sealed class WorkspaceManifest
     public string? LinkedRagDatasetId { get; set; }
     public List<string> InstructionPaths { get; set; } = [];
     public List<WorkspaceCommandRecipe> AllowedCommands { get; set; } = [];
+    /// <summary>
+    /// Optional named <c>TtsSettings.Profiles</c> entry to narrate this
+    /// workspace's agent milestones with, letting different projects have a
+    /// recognizably different narrator. Unknown or blank falls back to the
+    /// Agent channel's configured profile.
+    /// </summary>
+    public string VoiceProfileName { get; set; } = string.Empty;
 }
 
 public sealed record WorkspaceActivation(
@@ -425,7 +432,8 @@ public sealed record WorkspaceActivation(
     string? PreferredEmbeddingModelId,
     string? LinkedRagDatasetId,
     IReadOnlyList<string> InstructionPaths,
-    bool FromManifest);
+    bool FromManifest,
+    string? VoiceProfileName = null);
 
 /// <summary>
 /// Resolves a <see cref="WorkspaceActivation"/>'s preferred-id fields against

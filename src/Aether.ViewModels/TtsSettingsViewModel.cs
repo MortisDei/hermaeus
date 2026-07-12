@@ -13,6 +13,30 @@ using CommunityToolkit.Mvvm.Input;
 
 namespace Aether.ViewModels;
 
+/// <summary>One row of the per-channel voice settings editor (Settings > Voice).</summary>
+public partial class VoiceChannelSettingViewModel : ObservableObject
+{
+    public VoiceChannel Channel { get; }
+    public string DisplayName { get; }
+
+    [ObservableProperty] private bool _enabled;
+    [ObservableProperty] private string _profileName = string.Empty;
+
+    public VoiceChannelSettingViewModel(VoiceChannel channel, string displayName)
+    {
+        Channel = channel;
+        DisplayName = displayName;
+    }
+}
+
+/// <summary>One editable named voice/speed combination (Settings > Voice > Profiles).</summary>
+public partial class VoiceProfileEditViewModel : ObservableObject
+{
+    [ObservableProperty] private string _name = string.Empty;
+    [ObservableProperty] private string _voiceId = string.Empty;
+    [ObservableProperty] private double? _speed;
+}
+
 public partial class TtsSettingsViewModel : ObservableObject, IDisposable
 {
     private readonly ITtsService _tts;
@@ -22,9 +46,27 @@ public partial class TtsSettingsViewModel : ObservableObject, IDisposable
     private readonly KokoroProcessManager _kokoroProcess;
     private readonly ISecretStore _secrets;
     private readonly ISettingsService _settings;
+    private readonly IVoiceOrchestrator? _voice;
     private readonly SynchronizationContext? _sync;
     private bool _externalServiceRunning;
     private bool _isReloading;
+
+    public ObservableCollection<VoiceChannelSettingViewModel> VoiceChannels { get; } = [];
+    public ObservableCollection<VoiceProfileEditViewModel> VoiceProfiles { get; } = [];
+
+    [ObservableProperty] private bool _autoSpeakChatReplies;
+    [ObservableProperty] private bool _streamingChatSpeech;
+
+    public bool IsVoiceMuted
+    {
+        get => _voice?.IsMuted ?? false;
+        set
+        {
+            if (_voice is null || _voice.IsMuted == value) return;
+            _voice.IsMuted = value;
+            OnPropertyChanged();
+        }
+    }
 
     [ObservableProperty] private bool   _ttsEnabled = true;
     [ObservableProperty] private string _ttsServiceUrl = "http://127.0.0.1:8020";
@@ -119,7 +161,8 @@ public partial class TtsSettingsViewModel : ObservableObject, IDisposable
         XttsProcessManager xttsProcess,
         KokoroProcessManager kokoroProcess,
         ISecretStore secrets,
-        ISettingsService settings)
+        ISettingsService settings,
+        IVoiceOrchestrator? voiceOrchestrator = null)
     {
         _tts = tts;
         _voiceProviderRegistry = voiceProviderRegistry;
@@ -128,9 +171,64 @@ public partial class TtsSettingsViewModel : ObservableObject, IDisposable
         _kokoroProcess = kokoroProcess;
         _secrets = secrets;
         _settings = settings;
+        _voice = voiceOrchestrator;
         _sync = SynchronizationContext.Current;
         _xttsProcess.StatusChanged += OnXttsStatusChanged;
         _kokoroProcess.StatusChanged += OnXttsStatusChanged;
+    }
+
+    private static readonly VoiceChannel[] AllChannels =
+    [
+        VoiceChannel.Chat, VoiceChannel.Agent, VoiceChannel.Doctor,
+        VoiceChannel.Benchmark, VoiceChannel.Notification, VoiceChannel.System
+    ];
+
+    [RelayCommand]
+    private void AddVoiceProfile() => VoiceProfiles.Add(new VoiceProfileEditViewModel { Name = "New profile" });
+
+    [RelayCommand]
+    private void RemoveVoiceProfile(VoiceProfileEditViewModel? profile)
+    {
+        if (profile is not null) VoiceProfiles.Remove(profile);
+    }
+
+    /// <summary>
+    /// Writes the channel/profile editor state back onto <paramref name="tts"/>.
+    /// Called from <c>SettingsViewModel.ApplyTtsTo</c> alongside the rest of
+    /// the TTS field mapping.
+    /// </summary>
+    public void ApplyVoiceOrchestrationTo(TtsSettings tts)
+    {
+        tts.AutoSpeakChatReplies = AutoSpeakChatReplies;
+        tts.StreamingChatSpeech = StreamingChatSpeech;
+        tts.Profiles = VoiceProfiles
+            .Where(p => !string.IsNullOrWhiteSpace(p.Name))
+            .Select(p => new VoiceProfile { Name = p.Name.Trim(), VoiceId = p.VoiceId.Trim(), Speed = p.Speed })
+            .ToList();
+        tts.Channels = VoiceChannels.ToDictionary(
+            c => c.Channel.ToString(),
+            c => new VoiceChannelConfig { Enabled = c.Enabled, ProfileName = c.ProfileName.Trim() });
+    }
+
+    private void ReloadVoiceOrchestration(TtsSettings tts)
+    {
+        VoiceProfiles.Clear();
+        foreach (var profile in tts.Profiles)
+            VoiceProfiles.Add(new VoiceProfileEditViewModel { Name = profile.Name, VoiceId = profile.VoiceId, Speed = profile.Speed });
+
+        VoiceChannels.Clear();
+        foreach (var channel in AllChannels)
+        {
+            var enabled = tts.Channels.TryGetValue(channel.ToString(), out var config)
+                ? config.Enabled
+                : channel == VoiceChannel.Chat;
+            var profileName = tts.Channels.TryGetValue(channel.ToString(), out var existing) ? existing.ProfileName : string.Empty;
+            VoiceChannels.Add(new VoiceChannelSettingViewModel(channel, channel.ToString()) { Enabled = enabled, ProfileName = profileName });
+        }
+
+        AutoSpeakChatReplies = tts.AutoSpeakChatReplies;
+        StreamingChatSpeech = tts.StreamingChatSpeech;
+        OnPropertyChanged(nameof(IsVoiceMuted));
     }
 
     private void OnXttsStatusChanged()
@@ -181,6 +279,7 @@ public partial class TtsSettingsViewModel : ObservableObject, IDisposable
         TtsSpeaker = string.IsNullOrWhiteSpace(settings.Tts.Speaker) && (IsKokoroProvider || IsKokoroNativeProvider)
             ? "af_heart"
             : settings.Tts.Speaker;
+        ReloadVoiceOrchestration(settings.Tts);
         _isReloading = false;
         NotifyProviderDependentProperties();
         ApplyXttsStatus();

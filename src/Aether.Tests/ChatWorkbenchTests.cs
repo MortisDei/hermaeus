@@ -217,6 +217,111 @@ public sealed class ChatWorkbenchTests
         False(tts.SpeakCalled, "blank message content should not be sent to TTS");
     }
 
+    [Fact]
+    public async Task SpeakMessageAsync_routes_through_the_voice_orchestrator_when_one_is_wired_in()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var voice = new FakeVoiceOrchestrator();
+        var vm = new ChatViewModel(
+            new FakeLlm(),
+            new InMemoryConversationStore(),
+            new EmptyMemoryStore(),
+            settings,
+            new FakeTts(),
+            new ModelProfileService(settings),
+            new FakeToasts(),
+            new NoOpConversationMemoryService(),
+            new RuntimeLogService(settings),
+            new ConversationExportService(),
+            voice: voice);
+
+        await vm.SpeakMessageCommand.ExecuteAsync(new MessageViewModel { Role = "assistant", Content = "Here is `code` to run." });
+
+        var utterance = Assert.Single(voice.Enqueued);
+        Assert.Equal(VoiceChannel.Chat, utterance.Channel);
+        Assert.DoesNotContain("`", utterance.Text);
+        Assert.Contains(VoiceChannel.Chat, voice.StoppedChannels);
+    }
+
+    [Fact]
+    public async Task SendAsync_auto_speaks_the_full_reply_when_the_setting_is_enabled()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.Tts.AutoSpeakChatReplies = true;
+        var voice = new FakeVoiceOrchestrator();
+        var vm = new ChatViewModel(
+            new FakeLlm(),
+            new InMemoryConversationStore(),
+            new EmptyMemoryStore(),
+            settings,
+            new FakeTts(),
+            new ModelProfileService(settings),
+            new FakeToasts(),
+            new NoOpConversationMemoryService(),
+            new RuntimeLogService(settings),
+            new ConversationExportService(),
+            voice: voice);
+
+        await vm.LoadModelsAsync(force: true);
+        vm.InputText = "Say something";
+        await vm.SendCommand.ExecuteAsync(null);
+
+        Assert.Contains(voice.Enqueued, u => u.Channel == VoiceChannel.Chat && u.Text.Contains("ready alpha beta 42"));
+    }
+
+    [Fact]
+    public async Task SendAsync_does_not_auto_speak_when_the_setting_is_disabled()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.Tts.AutoSpeakChatReplies = false;
+        var voice = new FakeVoiceOrchestrator();
+        var vm = new ChatViewModel(
+            new FakeLlm(),
+            new InMemoryConversationStore(),
+            new EmptyMemoryStore(),
+            settings,
+            new FakeTts(),
+            new ModelProfileService(settings),
+            new FakeToasts(),
+            new NoOpConversationMemoryService(),
+            new RuntimeLogService(settings),
+            new ConversationExportService(),
+            voice: voice);
+
+        await vm.LoadModelsAsync(force: true);
+        vm.InputText = "Say something";
+        await vm.SendCommand.ExecuteAsync(null);
+
+        Assert.Empty(voice.Enqueued);
+    }
+
+    [Fact]
+    public void Stop_stops_the_chat_voice_channel()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var voice = new FakeVoiceOrchestrator();
+        var vm = new ChatViewModel(
+            new FakeLlm(),
+            new InMemoryConversationStore(),
+            new EmptyMemoryStore(),
+            settings,
+            new FakeTts(),
+            new ModelProfileService(settings),
+            new FakeToasts(),
+            new NoOpConversationMemoryService(),
+            new RuntimeLogService(settings),
+            new ConversationExportService(),
+            voice: voice);
+
+        vm.StopCommand.Execute(null);
+
+        Assert.Contains(VoiceChannel.Chat, voice.StoppedChannels);
+    }
+
     private sealed class InMemoryConversationStore : IConversationStore
     {
         private readonly Dictionary<string, Conversation> _items = [];
