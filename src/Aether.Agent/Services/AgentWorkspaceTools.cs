@@ -213,6 +213,39 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
         return new AgentFileReadResult(ToRelative(root, full), content, false);
     }
 
+    public async Task<string?> ReadFileForRevertAsync(AgentWorkspaceOptions options, string relativePath, CancellationToken ct = default)
+    {
+        var root = ResolveWorkspaceRoot(options.WorkspaceRoot);
+        var full = ResolveSafePath(root, relativePath);
+        return File.Exists(full) ? await File.ReadAllTextAsync(full, ct) : null;
+    }
+
+    public async Task<AgentRevertResult> RevertAppliedPatchAsync(
+        AgentWorkspaceOptions options, string relativePath, string? preImageContent, string expectedCurrentContent, CancellationToken ct = default)
+    {
+        var root = ResolveWorkspaceRoot(options.WorkspaceRoot);
+        var full = ResolveSafePath(root, relativePath);
+        var currentContent = File.Exists(full) ? await File.ReadAllTextAsync(full, ct) : null;
+        if (currentContent != expectedCurrentContent)
+        {
+            return new AgentRevertResult(
+                Reverted: false,
+                "The file changed again after this patch was applied; revert refused to avoid overwriting the newer content.");
+        }
+
+        if (preImageContent is null)
+        {
+            if (File.Exists(full))
+                File.Delete(full);
+        }
+        else
+        {
+            await AtomicFileWriter.WriteAllTextAsync(full, preImageContent, ct);
+        }
+
+        return new AgentRevertResult(Reverted: true, Message: string.Empty);
+    }
+
     private static int CountOccurrences(string content, string needle)
     {
         var count = 0;

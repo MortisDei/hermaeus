@@ -44,7 +44,7 @@
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
 
-            <Expander Header="Privacy Audit" IsExpanded="True">
+            <Expander Header="Privacy audit - what can leave this machine" IsExpanded="True">
                 <StackPanel Spacing="10">
                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                         <TextBlock Grid.Column="0"
@@ -57,6 +57,7 @@
                                 Command="{Binding RefreshPrivacyAuditCommand}"
                                 IsEnabled="{Binding !IsRefreshing}" />
                     </Grid>
+                    <TextBlock Text="{Binding PrivacyAuditSummary}" FontSize="13" FontWeight="SemiBold" />
                     <ItemsControl ItemsSource="{Binding PrivacyAuditItems}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="vm:PrivacyAuditItemViewModel">

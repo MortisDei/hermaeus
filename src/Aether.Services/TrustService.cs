@@ -2,49 +2,13 @@ using System.Linq;
 using System.Net;
 using System.Security.Cryptography;
 using Aether.Core.Models;
-using Aether.Core.Services;
 using Aether.Services.ProcessManagement;
 
 namespace Aether.Services;
 
-public sealed class TrustService : IInspectionCheckProvider
+public sealed class TrustService
 {
     private static readonly string[] UnsafeHostFlags = ["--host", "-host", "--listen-host"];
-
-    private readonly ISettingsService? _settings;
-
-    public IReadOnlyList<string> Views { get; } = ["trust"];
-
-    public TrustService(ISettingsService? settings = null)
-    {
-        _settings = settings;
-    }
-
-    public async Task<IReadOnlyList<InspectionCheck>> GetChecksAsync(CancellationToken ct = default)
-    {
-        if (_settings is null)
-            return [];
-
-        var report = await ScanAsync(_settings.Settings, ct);
-        return report.Items.Select(i => new InspectionCheck(
-            Id: $"trust-{i.Category}-{i.Label}".ToLowerInvariant().Replace(' ', '-'),
-            View: "trust",
-            Category: i.Category,
-            Title: i.Label,
-            Severity: i.Status switch
-            {
-                TrustItemStatus.Ready => CheckSeverity.Ready,
-                TrustItemStatus.Warning => CheckSeverity.Warning,
-                TrustItemStatus.Missing => CheckSeverity.Warning,
-                _ => CheckSeverity.Info
-            },
-            Summary: i.Recommendation,
-            Detail: $"Target: {i.Target}\nResolved: {i.ResolvedTarget}\n{i.ScopeLabel}",
-            FixLabel: string.Empty,
-            CanFix: false,
-            Diagnostics: $"{i.Label} [{i.RiskLabel}] {i.ResolvedTarget} {i.ShaShort}",
-            DetailJson: $$"""{"riskLevel":"{{i.RiskLevel}}","sha256":"{{i.Sha256}}"}""")).ToList();
-    }
 
     public async Task<TrustScanReport> ScanAsync(AppSettings settings, CancellationToken ct = default)
     {

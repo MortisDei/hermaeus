@@ -41,7 +41,8 @@ public enum AgentDraftPatchStatus
     Applied,
     Approved,
     Rejected,
-    Blocked
+    Blocked,
+    Reverted
 }
 
 /// <summary>Where a lesson applies: every task in every workspace, or one specific workspace.</summary>
@@ -114,6 +115,13 @@ public sealed class AgentTaskState
     /// the compounding half of the self-learning loop.
     /// </summary>
     public List<string> InjectedLessonIds { get; set; } = [];
+    /// <summary>
+    /// Ids of lessons actually created (not merely reinforced or confirmed)
+    /// by this task, in creation order. Drives the "new lessons" review
+    /// strip so a freshly captured lesson is seen once by a human before it
+    /// can influence future prompts (r6 03-platform-cleanup.md 3.3).
+    /// </summary>
+    public List<string> NewLessonIds { get; set; } = [];
     /// <summary>
     /// The model's current plan, replaced atomically by the set_plan tool.
     /// Purely informational task-state, like <see cref="CompletedSteps"/>/
@@ -202,7 +210,14 @@ public sealed record AgentReviewQueueItem(
     int ApprovalCount,
     string? LastApprovalAction,
     bool? LastApprovalApproved,
-    DateTime? LastApprovalAt);
+    DateTime? LastApprovalAt,
+    /// <summary>
+    /// The gated action actually waiting on this task, if any - populated
+    /// from a full task load (the index table this queue is built from does
+    /// not carry it), so the queue can show risk and reason instead of a
+    /// bare status (r6 01-first-five-minutes.md 1.7).
+    /// </summary>
+    AgentPendingToolAction? PendingToolAction = null);
 
 public sealed class AgentWorkspaceMemoryEntry
 {
@@ -238,7 +253,29 @@ public sealed class AgentDraftPatch
     public DateTime? BlockedAt { get; set; }
     public string? BlockedBy { get; set; }
     public string BlockReason { get; set; } = string.Empty;
+
+    /// <summary>
+    /// File content immediately before this patch was applied, captured at
+    /// apply time; null means the file did not exist (revert deletes it).
+    /// JSON-additive, so pre-r6 applied patches simply have no revert
+    /// capability (r6 01-first-five-minutes.md 1.8).
+    /// </summary>
+    public string? PreImageContent { get; set; }
+    public bool PreImageExisted { get; set; }
+
+    /// <summary>
+    /// Exact file content on disk immediately after this patch was applied.
+    /// Revert compares the file's current content against this before
+    /// restoring the pre-image, so a later edit is never silently clobbered.
+    /// </summary>
+    public string AppliedContent { get; set; } = string.Empty;
+
+    public DateTime? RevertedAt { get; set; }
+    public string? RevertedBy { get; set; }
 }
+
+/// <summary>Outcome of attempting to revert an applied patch.</summary>
+public sealed record AgentRevertResult(bool Reverted, string Message);
 
 public sealed class AgentContextPack
 {
@@ -304,6 +341,13 @@ public sealed class AgentPendingToolAction
     public Dictionary<string, object?> Arguments { get; set; } = [];
     public AgentRiskLevel RiskLevel { get; set; } = AgentRiskLevel.Medium;
     public DateTime RequestedAt { get; set; } = DateTime.UtcNow;
+
+    /// <summary>
+    /// Why the safety gate gated this action, from
+    /// <see cref="AgentToolPolicyDecision"/>.Reason - shown in the approval
+    /// UI so risk is never a bare, unexplained label (r6 01-first-five-minutes.md 1.7).
+    /// </summary>
+    public string Reason { get; set; } = string.Empty;
 }
 
 public sealed class AgentNextAction

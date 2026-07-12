@@ -105,11 +105,16 @@
             <ItemsControl ItemsSource="{Binding VoiceChannels}">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate DataType="vm:VoiceChannelSettingViewModel">
-                        <Grid ColumnDefinitions="140,Auto,*" ColumnSpacing="12" Margin="0,4">
-                            <CheckBox Grid.Column="0" IsChecked="{Binding Enabled}" Content="{Binding DisplayName}" FontSize="13" />
-                            <TextBlock Grid.Column="1" Text="Profile" VerticalAlignment="Center" Opacity="0.6" FontSize="12" />
-                            <TextBox Grid.Column="2" Text="{Binding ProfileName}" Watermark="Default voice" FontSize="12" CornerRadius="6" Padding="8,4" />
-                        </Grid>
+                        <StackPanel Margin="0,4">
+                            <Grid ColumnDefinitions="140,Auto,*" ColumnSpacing="12">
+                                <CheckBox Grid.Column="0" IsChecked="{Binding Enabled}" Content="{Binding DisplayName}" FontSize="13" />
+                                <TextBlock Grid.Column="1" Text="Profile" VerticalAlignment="Center" Opacity="0.6" FontSize="12" />
+                                <TextBox Grid.Column="2" Text="{Binding ProfileName}" Watermark="Default voice" FontSize="12" CornerRadius="6" Padding="8,4" />
+                            </Grid>
+                            <TextBlock Text="Spoken text is sent to the remote voice provider."
+                                       FontSize="11" Opacity="0.55" Foreground="Orange" Margin="152,2,0,0"
+                                       IsVisible="{Binding ShowsRemoteNotice}" />
+                        </StackPanel>
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>

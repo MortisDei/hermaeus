@@ -107,6 +107,22 @@ public partial class ChatViewModel : ObservableObject
     [ObservableProperty] private string    _inputText = string.Empty;
     [ObservableProperty] private bool      _isGenerating;
     [ObservableProperty] private LlmModel? _selectedModel;
+
+    /// <summary>
+    /// Whether the active chat model's provider sends prompts off this
+    /// machine, from the shared <see cref="CompositeLlmService.Providers"/>
+    /// registry keyed by <see cref="LlmModel.ProviderTag"/> - one source of
+    /// truth shared with the Privacy Audit (r6 01-first-five-minutes.md 1.3).
+    /// </summary>
+    public bool HasSelectedModel => SelectedModel is not null;
+
+    public bool IsSelectedModelRemote =>
+        SelectedModel is not null
+        && CompositeLlmService.Providers.FirstOrDefault(p =>
+            string.Equals(p.Tag, SelectedModel.ProviderTag, StringComparison.OrdinalIgnoreCase))?.IsRemote == true;
+
+    public string SelectedModelLocalityLabel => SelectedModel is null ? string.Empty : IsSelectedModelRemote ? "Remote" : "Local";
+
     [ObservableProperty] private string    _systemPrompt = string.Empty;
     [ObservableProperty] private string    _currentConversationId = string.Empty;
     [ObservableProperty] private string    _conversationTitle = "New Conversation";
@@ -1093,6 +1109,9 @@ public partial class ChatViewModel : ObservableObject
             PresencePenalty = presencePenalty;
         SendCommand.NotifyCanExecuteChanged();
         ScheduleContextUsageRefresh();
+        OnPropertyChanged(nameof(HasSelectedModel));
+        OnPropertyChanged(nameof(IsSelectedModelRemote));
+        OnPropertyChanged(nameof(SelectedModelLocalityLabel));
     }
     partial void OnIsGeneratingChanged(bool value)       => SendCommand.NotifyCanExecuteChanged();
 

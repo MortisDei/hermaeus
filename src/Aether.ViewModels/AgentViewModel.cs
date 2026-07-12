@@ -21,9 +21,27 @@ public sealed class AgentContextItemViewModel
     public bool HasLocator => !string.IsNullOrWhiteSpace(Locator);
 }
 
+/// <summary>One row of the per-step context receipt: "why were these files selected" (r6 1.5).</summary>
+public sealed class AgentContextReceiptSectionViewModel
+{
+    public AgentContextReceiptSectionViewModel(AgentContextReceiptSection section)
+    {
+        SectionLabel = section.SectionLabel;
+        ItemCount = section.ItemCount;
+        EstimatedTokens = section.EstimatedTokens;
+        Identifiers = string.Join(", ", section.ItemIdentifiers);
+    }
+
+    public string SectionLabel { get; }
+    public int ItemCount { get; }
+    public int EstimatedTokens { get; }
+    public string Identifiers { get; }
+    public string Summary => $"{SectionLabel}: {ItemCount} item{(ItemCount == 1 ? "" : "s")}, ~{EstimatedTokens} tokens";
+}
+
 public sealed class AgentReviewQueueItemViewModel
 {
-    public AgentReviewQueueItemViewModel(AgentReviewQueueItem item)
+    public AgentReviewQueueItemViewModel(AgentReviewQueueItem item, string recipePreview = "")
     {
         TaskId = item.TaskId;
         Goal = item.Goal;
@@ -35,6 +53,10 @@ public sealed class AgentReviewQueueItemViewModel
         LastApprovalAction = item.LastApprovalAction ?? string.Empty;
         LastApprovalApproved = item.LastApprovalApproved;
         LastApprovalAt = item.LastApprovalAt;
+        PendingToolName = item.PendingToolAction?.ToolName ?? string.Empty;
+        PendingRiskLevel = item.PendingToolAction?.RiskLevel;
+        PendingReason = item.PendingToolAction?.Reason ?? string.Empty;
+        RecipePreview = recipePreview;
     }
 
     public string TaskId { get; }
@@ -55,6 +77,17 @@ public sealed class AgentReviewQueueItemViewModel
     public string LatestApprovalLabel => LastApprovalAt is null
         ? string.Empty
         : $"Last review {LastApprovalAt:yyyy-MM-dd HH:mm} UTC";
+
+    /// <summary>Name of the gated tool waiting on approval, e.g. "run_command"; empty if this queue entry has none (r6 1.7).</summary>
+    public string PendingToolName { get; }
+    public AgentRiskLevel? PendingRiskLevel { get; }
+    public string PendingRiskLabel => PendingRiskLevel?.ToString() ?? string.Empty;
+    /// <summary>Why the safety gate gated this action (AgentToolPolicyDecision.Reason).</summary>
+    public string PendingReason { get; }
+    public bool HasPendingAction => !string.IsNullOrEmpty(PendingToolName);
+    /// <summary>What a pending run_command approval will actually execute (r6 3.2); empty for non-command tools.</summary>
+    public string RecipePreview { get; }
+    public bool HasRecipePreview => !string.IsNullOrWhiteSpace(RecipePreview);
 }
 
 public sealed class AgentWorkspaceMemoryEntryViewModel
@@ -122,6 +155,7 @@ public sealed partial class AgentLessonViewModel : ObservableObject
     public string ScopeLabel => Scope == AgentLessonScope.Global ? "Global" : "This workspace";
     public string ConfidenceLabel => $"{Confidence:P0} confidence, seen {EvidenceCount}x";
     public string StatusLabel => IsRetired ? "Retired" : "Active";
+    public bool HasGuidance => !string.IsNullOrWhiteSpace(Guidance);
 }
 
 public sealed class AgentWorkspaceFileViewModel
@@ -169,6 +203,7 @@ public sealed class WorkspaceCommandRecipeViewModel
     public string Why { get; }
     public AgentRiskLevel RiskLevel { get; }
     public string RiskLabel => RiskLevel.ToString();
+    public bool IsElevatedRisk => RiskLevel is AgentRiskLevel.Medium or AgentRiskLevel.High;
 }
 
 public sealed class AgentDraftPatchViewModel
@@ -186,6 +221,8 @@ public sealed class AgentDraftPatchViewModel
         BlockedAt = patch.BlockedAt;
         BlockedBy = patch.BlockedBy;
         BlockReason = patch.BlockReason;
+        RevertedAt = patch.RevertedAt;
+        RevertedBy = patch.RevertedBy;
     }
 
     public string Id { get; }
@@ -199,9 +236,13 @@ public sealed class AgentDraftPatchViewModel
     public DateTime? BlockedAt { get; }
     public string? BlockedBy { get; }
     public string BlockReason { get; }
+    public DateTime? RevertedAt { get; }
+    public string? RevertedBy { get; }
     public string StatusLabel => Status.ToString();
     public string CreatedLabel => $"Created {CreatedAt:yyyy-MM-dd HH:mm} UTC";
-    public bool CanReview => Status != AgentDraftPatchStatus.Applied;
+    public bool CanReview => Status != AgentDraftPatchStatus.Applied && Status != AgentDraftPatchStatus.Reverted;
+    /// <summary>Only an applied patch that came with a captured pre-image can be reverted (r6 1.8); pre-r6 applied patches have none.</summary>
+    public bool CanRevert => Status == AgentDraftPatchStatus.Applied;
     public string OutcomeLabel => Status switch
     {
         AgentDraftPatchStatus.Pending => "Pending review",
@@ -211,6 +252,7 @@ public sealed class AgentDraftPatchViewModel
         AgentDraftPatchStatus.Blocked => string.IsNullOrWhiteSpace(BlockReason)
             ? $"Blocked {BlockedAt:yyyy-MM-dd HH:mm} by {BlockedBy}"
             : $"Blocked {BlockedAt:yyyy-MM-dd HH:mm} by {BlockedBy}: {BlockReason}",
+        AgentDraftPatchStatus.Reverted => $"Reverted {RevertedAt:yyyy-MM-dd HH:mm} by {RevertedBy}",
         _ => Status.ToString()
     };
 }
@@ -243,8 +285,12 @@ public partial class AgentViewModel : ObservableObject
     public ObservableCollection<AgentReviewQueueItemViewModel> ReviewQueue { get; } = [];
     public ObservableCollection<AgentWorkspaceMemoryEntryViewModel> WorkspaceMemory { get; } = [];
     public ObservableCollection<AgentLessonViewModel> Lessons { get; } = [];
+    /// <summary>Lessons newly created (not merely reinforced) by the open task, for the "new lessons" review strip (r6 3.3).</summary>
+    public ObservableCollection<AgentLessonViewModel> NewLessons { get; } = [];
     public ObservableCollection<AgentWorkspaceFileViewModel> WorkspaceFiles { get; } = [];
     public ObservableCollection<AgentContextItemViewModel> RetrievedContext { get; } = [];
+    /// <summary>Per-section counts/token estimates for the most recent step's context pack (r6 1.5).</summary>
+    public ObservableCollection<AgentContextReceiptSectionViewModel> ContextReceipt { get; } = [];
     public ObservableCollection<AgentDraftPatchViewModel> QueuedPatches { get; } = [];
     public ObservableCollection<ProjectInstructionFileViewModel> ProjectInstructions { get; } = [];
     public ObservableCollection<WorkspaceCommandRecipeViewModel> CommandRecipes { get; } = [];
@@ -387,10 +433,12 @@ public partial class AgentViewModel : ObservableObject
         ProjectInstructions.CollectionChanged += (_, _) => OnPropertyChanged(nameof(ProjectInstructionCount));
         CommandRecipes.CollectionChanged += (_, _) => OnPropertyChanged(nameof(CommandRecipeCount));
         WorkspaceRisks.CollectionChanged += (_, _) => OnPropertyChanged(nameof(WorkspaceRiskCount));
+        NewLessons.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasNewLessons));
     }
 
     public bool HasTaskHistory => RecentTaskCount > 0;
     public bool HasReviewQueue => ReviewQueueCount > 0;
+    public bool HasNewLessons => NewLessons.Count > 0;
     public bool HasWorkspaceMemory => WorkspaceMemoryCount > 0;
     public bool HasWorkspaceFiles => WorkspaceFileCount > 0;
     public bool HasRetrievedContext => RetrievedContextCount > 0;
@@ -491,6 +539,7 @@ public partial class AgentViewModel : ObservableObject
         CurrentTask = await _store.LoadAsync(item.TaskId);
         RefreshTaskPreview();
         await RefreshQueuedPatchesAsync();
+        await RefreshNewLessonsAsync();
         RunStepCommand.NotifyCanExecuteChanged();
     }
 
@@ -498,8 +547,12 @@ public partial class AgentViewModel : ObservableObject
     private async Task RefreshReviewQueueAsync()
     {
         ReviewQueue.Clear();
+        var options = BuildOptions();
         foreach (var item in await _store.ListReviewQueueAsync())
-            ReviewQueue.Add(new AgentReviewQueueItemViewModel(item));
+        {
+            var preview = item.PendingToolAction is null ? string.Empty : AgentApprovalPreview.Describe(item.PendingToolAction, options);
+            ReviewQueue.Add(new AgentReviewQueueItemViewModel(item, preview));
+        }
     }
 
     [RelayCommand]
@@ -613,12 +666,41 @@ public partial class AgentViewModel : ObservableObject
         await RefreshLessonsAsync();
     }
 
+    /// <summary>
+    /// Looks up the full lesson for each id in <see cref="AgentTaskState.NewLessonIds"/>
+    /// on the open task, so a lesson captured this task is seen once before
+    /// it can influence future prompts (r6 03-platform-cleanup.md 3.3).
+    /// Independent of <see cref="Lessons"/>'s workspace-scoped list: a
+    /// direct id lookup, not a scope filter.
+    /// </summary>
+    private async Task RefreshNewLessonsAsync()
+    {
+        NewLessons.Clear();
+        if (_lessons is null || CurrentTask is null) return;
+
+        foreach (var id in CurrentTask.NewLessonIds)
+        {
+            var lesson = await _lessons.GetByIdAsync(id);
+            if (lesson is not null && lesson.Status != AgentLessonStatus.Retired)
+                NewLessons.Add(new AgentLessonViewModel(lesson));
+        }
+    }
+
+    /// <summary>Acknowledges a newly captured lesson without changing it - the default action, kept active (r6 3.3).</summary>
+    [RelayCommand]
+    private void DismissNewLesson(AgentLessonViewModel? item)
+    {
+        if (item is not null)
+            NewLessons.Remove(item);
+    }
+
     [RelayCommand]
     private async Task RetireLessonAsync(AgentLessonViewModel? item)
     {
         if (item is null || _lessons is null) return;
         await _lessons.SetStatusAsync(item.Id, AgentLessonStatus.Retired);
         await RefreshLessonsAsync();
+        await RefreshNewLessonsAsync();
     }
 
     [RelayCommand]
@@ -851,6 +933,29 @@ public partial class AgentViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private async Task RevertPatchAsync(AgentDraftPatchViewModel? patch)
+    {
+        if (CurrentTask is null || patch is null) return;
+        try
+        {
+            var found = CurrentTask.DraftPatches.FirstOrDefault(p => p.Id == patch.Id);
+            if (found is not null)
+            {
+                var error = await _patchReview.RevertAsync(CurrentTask, found, BuildOptions());
+                StatusMessage = string.IsNullOrEmpty(error)
+                    ? $"Patch for {patch.RelativePath} reverted."
+                    : error;
+                await RefreshWorkspaceFilesAsync();
+                await LoadTaskIfOpenAsync(CurrentTask.TaskId);
+            }
+        }
+        catch (Exception ex)
+        {
+            SetError(ex.Message);
+        }
+    }
+
+    [RelayCommand]
     private async Task SaveWorkspaceMemoryAsync()
     {
         if (string.IsNullOrWhiteSpace(WorkspaceRoot) || string.IsNullOrWhiteSpace(GoalText))
@@ -975,6 +1080,7 @@ public partial class AgentViewModel : ObservableObject
         CurrentTask = await _store.LoadAsync(taskId);
         RefreshTaskPreview();
         await RefreshRecentAsync();
+        await RefreshNewLessonsAsync();
     }
 
     private async Task RunCurrentStepAsync()
@@ -985,6 +1091,7 @@ public partial class AgentViewModel : ObservableObject
         ApplyStepResult(result);
         await RefreshLogAsync();
         await RefreshLessonsAsync();
+        await RefreshNewLessonsAsync();
         _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Agent,
             $"Agent step complete: {result.State.ActiveStep}"));
     }
@@ -1006,6 +1113,7 @@ public partial class AgentViewModel : ObservableObject
             ct: _cts?.Token ?? CancellationToken.None);
         await RefreshLogAsync();
         await RefreshLessonsAsync();
+        await RefreshNewLessonsAsync();
         _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Agent,
             $"Agent run paused: {result.State.ActiveStep} (status {result.State.Status})"));
     }
@@ -1025,7 +1133,7 @@ public partial class AgentViewModel : ObservableObject
         StatusMessage = result.LogEntry;
         NextActionPreview = JsonSerializer.Serialize(result.PlannerResponse.NextAction, new JsonSerializerOptions { WriteIndented = true });
         RetrievedContext.Clear();
-        foreach (var item in result.ContextPack.RetrievedMemory.Concat(result.ContextPack.RetrievedFiles).Concat(result.ContextPack.ProjectInstructions))
+        foreach (var item in result.ContextPack.RetrievedMemory.Concat(result.ContextPack.RetrievedFiles).Concat(result.ContextPack.ProjectInstructions).Concat(result.ContextPack.Lessons))
         {
             RetrievedContext.Add(new AgentContextItemViewModel
             {
@@ -1036,6 +1144,10 @@ public partial class AgentViewModel : ObservableObject
                 Locator = item.Locator ?? string.Empty
             });
         }
+
+        ContextReceipt.Clear();
+        foreach (var section in AgentContextReceiptBuilder.Build(result.ContextPack))
+            ContextReceipt.Add(new AgentContextReceiptSectionViewModel(section));
 
         RefreshTaskPreview();
     }

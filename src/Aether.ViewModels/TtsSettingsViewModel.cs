@@ -22,11 +22,21 @@ public partial class VoiceChannelSettingViewModel : ObservableObject
     [ObservableProperty] private bool _enabled;
     [ObservableProperty] private string _profileName = string.Empty;
 
+    /// <summary>Set by the owning <see cref="TtsSettingsViewModel"/> whenever the active
+    /// voice provider changes; drives <see cref="ShowsRemoteNotice"/> (r6 03-platform-cleanup.md 3.4).</summary>
+    [ObservableProperty] private bool _remoteProviderActive;
+
+    /// <summary>True when this channel is enabled and the active provider sends spoken text off-machine.</summary>
+    public bool ShowsRemoteNotice => Enabled && RemoteProviderActive;
+
     public VoiceChannelSettingViewModel(VoiceChannel channel, string displayName)
     {
         Channel = channel;
         DisplayName = displayName;
     }
+
+    partial void OnEnabledChanged(bool value) => OnPropertyChanged(nameof(ShowsRemoteNotice));
+    partial void OnRemoteProviderActiveChanged(bool value) => OnPropertyChanged(nameof(ShowsRemoteNotice));
 }
 
 /// <summary>One editable named voice/speed combination (Settings > Voice > Profiles).</summary>
@@ -154,6 +164,16 @@ public partial class TtsSettingsViewModel : ObservableObject, IDisposable
     public bool ShowsVoiceSampleFields => IsXttsV2Provider || IsF5TtsProvider;
     public bool ShowsPythonFields => IsServerManagedProvider;
 
+    /// <summary>True when the active provider sends spoken text to a remote endpoint (r6 3.4).</summary>
+    public bool IsSelectedProviderRemote
+    {
+        get
+        {
+            var provider = VoiceProviders.FirstOrDefault(p => p.Name.Equals(SelectedVoiceProvider, StringComparison.OrdinalIgnoreCase));
+            return provider is not null && provider.Capabilities.HasFlag(VoiceCapability.Remote);
+        }
+    }
+
     public TtsSettingsViewModel(
         ITtsService tts,
         IVoiceProviderRegistry voiceProviderRegistry,
@@ -229,6 +249,10 @@ public partial class TtsSettingsViewModel : ObservableObject, IDisposable
         AutoSpeakChatReplies = tts.AutoSpeakChatReplies;
         StreamingChatSpeech = tts.StreamingChatSpeech;
         OnPropertyChanged(nameof(IsVoiceMuted));
+
+        var remote = IsSelectedProviderRemote;
+        foreach (var channel in VoiceChannels)
+            channel.RemoteProviderActive = remote;
     }
 
     private void OnXttsStatusChanged()
@@ -506,6 +530,11 @@ public partial class TtsSettingsViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(ShowsXttsFields));
         OnPropertyChanged(nameof(ShowsVoiceSampleFields));
         OnPropertyChanged(nameof(ShowsPythonFields));
+        OnPropertyChanged(nameof(IsSelectedProviderRemote));
+
+        var remote = IsSelectedProviderRemote;
+        foreach (var channel in VoiceChannels)
+            channel.RemoteProviderActive = remote;
     }
 
     private string NormalizeProviderName(string providerName)

@@ -67,6 +67,36 @@
                     </Border>
                 </Grid>
 
+                <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="10"
+                        IsVisible="{Binding HasNewLessons}">
+                    <StackPanel Spacing="6">
+                        <TextBlock Text="New lessons from this task" FontSize="12" FontWeight="SemiBold" />
+                        <ItemsControl ItemsSource="{Binding NewLessons}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="vm:AgentLessonViewModel">
+                                    <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                            BorderThickness="1" CornerRadius="6" Padding="8" Margin="0,0,0,6">
+                                        <StackPanel Spacing="4">
+                                            <TextBlock Text="{Binding Claim}" FontSize="12" TextWrapping="Wrap" />
+                                            <TextBlock Text="{Binding Guidance}" FontSize="11" Opacity="0.6" TextWrapping="Wrap"
+                                                       IsVisible="{Binding HasGuidance}" />
+                                            <TextBlock Text="{Binding ConfidenceLabel}" FontSize="10" Opacity="0.5" />
+                                            <StackPanel Orientation="Horizontal" Spacing="8" x:CompileBindings="False">
+                                                <Button Content="Keep"
+                                                        Command="{Binding DataContext.DismissNewLessonCommand, ElementName=Root}"
+                                                        CommandParameter="{Binding}" />
+                                                <Button Content="Retire"
+                                                        Command="{Binding DataContext.RetireLessonCommand, ElementName=Root}"
+                                                        CommandParameter="{Binding}" />
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+
                 <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="10">
                     <StackPanel Spacing="6">
                         <TextBlock Text="{Binding CapabilityLabel}" FontSize="11" Opacity="0.55" />
@@ -298,7 +328,13 @@
                                                 <StackPanel Spacing="3">
                                                     <Grid ColumnDefinitions="*,Auto">
                                                         <SelectableTextBlock Grid.Column="0" Text="{Binding Command}" FontFamily="Consolas,monospace" FontWeight="SemiBold" />
-                                                        <TextBlock Grid.Column="1" Text="{Binding RiskLabel}" FontSize="11" Opacity="0.55" />
+                                                        <Border Grid.Column="1" CornerRadius="4" Padding="6,2"
+                                                                IsVisible="{Binding IsElevatedRisk}"
+                                                                Background="#FF9800">
+                                                            <TextBlock Text="{Binding RiskLabel}" FontSize="10" FontWeight="SemiBold" Foreground="White" />
+                                                        </Border>
+                                                        <TextBlock Grid.Column="1" Text="{Binding RiskLabel}" FontSize="11" Opacity="0.55"
+                                                                   IsVisible="{Binding !IsElevatedRisk}" />
                                                     </Grid>
                                                     <TextBlock Text="{Binding Why}" FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
                                                 </StackPanel>
@@ -423,41 +459,53 @@
                 </Expander>
 
                 <Expander Header="Retrieved Context" IsExpanded="True" HorizontalAlignment="Stretch">
-                    <ItemsControl ItemsSource="{Binding RetrievedContext}" Margin="0,8,0,0">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate DataType="vm:AgentContextItemViewModel">
-                                <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
-                                        BorderThickness="1"
-                                        CornerRadius="6"
-                                        Padding="10"
-                                        Margin="0,0,0,6">
-                                    <StackPanel Spacing="3">
-                                        <Grid ColumnDefinitions="*,Auto">
-                                            <TextBlock Grid.Column="0"
-                                                       Text="{Binding Title}"
-                                                       FontWeight="SemiBold"
-                                                       FontSize="13" />
-                                            <TextBlock Grid.Column="1"
-                                                       Text="{Binding Source}"
-                                                       FontSize="11"
-                                                       Opacity="0.5" />
-                                        </Grid>
-                                        <TextBlock Text="{Binding Content}"
-                                                   TextWrapping="Wrap"
-                                                   FontSize="12"
-                                                   Opacity="0.65"
-                                                   MaxHeight="92" />
-                                        <TextBlock Text="{Binding Locator}"
-                                                   IsVisible="{Binding HasLocator}"
-                                                   TextTrimming="CharacterEllipsis"
-                                                   FontSize="10"
-                                                   FontFamily="Consolas,monospace"
-                                                   Opacity="0.5" />
+                    <StackPanel Spacing="8">
+                        <ItemsControl ItemsSource="{Binding ContextReceipt}" Margin="0,8,0,0">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="vm:AgentContextReceiptSectionViewModel">
+                                    <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,0,2">
+                                        <TextBlock Text="{Binding Summary}" FontSize="11" FontWeight="SemiBold" Opacity="0.75" />
+                                        <TextBlock Text="{Binding Identifiers}" FontSize="11" Opacity="0.5" TextTrimming="CharacterEllipsis" />
                                     </StackPanel>
-                                </Border>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <ItemsControl ItemsSource="{Binding RetrievedContext}" Margin="0,8,0,0">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="vm:AgentContextItemViewModel">
+                                    <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="6"
+                                            Padding="10"
+                                            Margin="0,0,0,6">
+                                        <StackPanel Spacing="3">
+                                            <Grid ColumnDefinitions="*,Auto">
+                                                <TextBlock Grid.Column="0"
+                                                           Text="{Binding Title}"
+                                                           FontWeight="SemiBold"
+                                                           FontSize="13" />
+                                                <TextBlock Grid.Column="1"
+                                                           Text="{Binding Source}"
+                                                           FontSize="11"
+                                                           Opacity="0.5" />
+                                            </Grid>
+                                            <TextBlock Text="{Binding Content}"
+                                                       TextWrapping="Wrap"
+                                                       FontSize="12"
+                                                       Opacity="0.65"
+                                                       MaxHeight="92" />
+                                            <TextBlock Text="{Binding Locator}"
+                                                       IsVisible="{Binding HasLocator}"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       FontSize="10"
+                                                       FontFamily="Consolas,monospace"
+                                                       Opacity="0.5" />
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
                 </Expander>
 
                 <Grid ColumnDefinitions="*,*" ColumnSpacing="12" HorizontalAlignment="Stretch">
@@ -537,6 +585,13 @@
                                                     Command="{Binding DataContext.BlockPatchCommand, ElementName=Root}"
                                                     CommandParameter="{Binding}" />
                                         </StackPanel>
+                                        <StackPanel Orientation="Horizontal" Spacing="8" x:CompileBindings="False"
+                                                    IsVisible="{Binding CanRevert}">
+                                            <Button Content="Revert"
+                                                    ToolTip.Tip="Restore the file to its content before this patch was applied. Refuses if the file changed again since."
+                                                    Command="{Binding DataContext.RevertPatchCommand, ElementName=Root}"
+                                                    CommandParameter="{Binding}" />
+                                        </StackPanel>
                                     </StackPanel>
                                 </Border>
                             </DataTemplate>
@@ -579,6 +634,19 @@
                                         <TextBlock Text="{Binding LatestApprovalLabel}"
                                                    FontSize="11"
                                                    Opacity="0.45" />
+                                        <StackPanel Spacing="2" IsVisible="{Binding HasPendingAction}">
+                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                <Border CornerRadius="4" Padding="6,1" Background="{DynamicResource SubtleFillColorSecondaryBrush}">
+                                                    <TextBlock Text="{Binding PendingToolName}" FontSize="10" FontFamily="Consolas,monospace" />
+                                                </Border>
+                                                <Border CornerRadius="4" Padding="6,1" Background="{DynamicResource SubtleFillColorSecondaryBrush}">
+                                                    <TextBlock Text="{Binding PendingRiskLabel}" FontSize="10" FontWeight="SemiBold" />
+                                                </Border>
+                                            </StackPanel>
+                                            <TextBlock Text="{Binding PendingReason}" FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
+                                            <TextBlock Text="{Binding RecipePreview}" FontSize="11" Opacity="0.75" TextWrapping="Wrap"
+                                                       FontFamily="Consolas,monospace" IsVisible="{Binding HasRecipePreview}" />
+                                        </StackPanel>
                                         <StackPanel Orientation="Horizontal" Spacing="8" x:CompileBindings="False">
                                             <Button Content="Approve"
                                                     Command="{Binding DataContext.ApproveReviewCommand, ElementName=Root}"

@@ -37,4 +37,46 @@ public sealed class RagTraceChunk
     public string Path { get; set; } = string.Empty;
     public float Score { get; set; }
     public string Content { get; set; } = string.Empty;
+
+    // Per-signal breakdown for "why did retrieval choose this chunk"
+    // (r6 01-first-five-minutes.md 1.6). Null/zero means that signal did not
+    // run for this query (e.g. reranker disabled) rather than "scored zero".
+    public int OutOfCount { get; set; }
+    public float? VectorScore { get; set; }
+    public float? KeywordScore { get; set; }
+    public float? RerankScore { get; set; }
+    public string MatchedTerm { get; set; } = string.Empty;
+    public int MatchedTermCount { get; set; }
+
+    /// <summary>
+    /// One deterministic sentence built from whichever components are
+    /// present, e.g. "Ranked 2nd of 8: strong semantic match, term
+    /// 'migration' matched 3 times, reranker confirmed this ranking."
+    /// </summary>
+    public string PlainLanguageSummary
+    {
+        get
+        {
+            var parts = new List<string>();
+            if (VectorScore is { } v)
+            {
+                parts.Add(v >= 0.75f ? "strong semantic match"
+                    : v >= 0.5f ? "moderate semantic match"
+                    : "weak semantic match");
+            }
+            if (MatchedTermCount > 0)
+                parts.Add($"term '{MatchedTerm}' matched {MatchedTermCount} time{(MatchedTermCount == 1 ? "" : "s")}");
+            if (RerankScore.HasValue)
+                parts.Add("reranker confirmed this ranking");
+
+            var prefix = $"Ranked {Rank}{OrdinalSuffix(Rank)} of {OutOfCount}";
+            return parts.Count == 0 ? $"{prefix}." : $"{prefix}: {string.Join(", ", parts)}.";
+        }
+    }
+
+    private static string OrdinalSuffix(int n)
+    {
+        if (n % 100 is >= 11 and <= 13) return "th";
+        return (n % 10) switch { 1 => "st", 2 => "nd", 3 => "rd", _ => "th" };
+    }
 }

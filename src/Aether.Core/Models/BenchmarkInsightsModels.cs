@@ -33,11 +33,30 @@ public sealed record BenchmarkInsightsReport(
     IReadOnlyList<ModelAggregate> Models,
     IReadOnlyList<TagLeaderboard> TagLeaderboards,
     IReadOnlyList<ModelComparison> Comparisons,
-    IReadOnlyList<string> Caveats)
+    IReadOnlyList<string> Caveats,
+    IReadOnlyList<UsageInsight>? UsageInsights = null)
 {
     public bool HasData => ComparableRuns > 0;
     public ModelAggregate? BestOverall => Models.Count == 0 ? null : Models[0];
+    public IReadOnlyList<UsageInsight> UsageInsightsOrEmpty => UsageInsights ?? [];
 }
+
+/// <summary>
+/// One activity kind's usage-aware insight (r6 02-usage-history-recommendations.md
+/// 2.3): which model the user actually reaches for, and, when benchmark
+/// data disagrees enough, a recommendation. Never a recommendation from
+/// usage alone - only when a real leaderboard entry outranks the dominant
+/// model by more than the same threshold as the r5 Doctor advisory.
+/// </summary>
+public sealed record UsageInsight(
+    TraceKind Kind,
+    string DominantModelId,
+    string DominantModelName,
+    double DominantShare,
+    long TotalCalls,
+    string? RecommendedModelName,
+    double? RankingGapPoints,
+    string Sentence);
 
 /// <summary>
 /// Deterministic aggregation of benchmark runs into leaderboards and
@@ -50,6 +69,23 @@ public static class BenchmarkInsightsMath
     private const int MinCasesForEvidence = 10;
     private const int StaleAfterDays = 60;
     private const double HardwareVramTolerance = 0.10;
+    private const int MinCallsForUsageInsight = 20;
+    private const double UsageRankingGapThreshold = 10;
+
+    /// <summary>
+    /// The one file of scoring truth for which tag leaderboard (or overall,
+    /// for empty string) a usage kind's recommendation compares against.
+    /// LocalApi is deliberately absent - it is not one of the three named
+    /// activities in r6 02-usage-history-recommendations.md 2.3 and has no
+    /// natural benchmark tag to compare against.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<TraceKind, (string Tag, string ActivityLabel)> UsageKindTags =
+        new Dictionary<TraceKind, (string, string)>
+        {
+            [TraceKind.Chat] = (string.Empty, "chat"),
+            [TraceKind.Rag] = ("rag", "RAG queries"),
+            [TraceKind.Agent] = ("coding", "agent tasks")
+        };
 
     public static double QualityPerSecond(double quality, double tokensPerSecond) =>
         quality * Math.Log2(1 + Math.Max(0, tokensPerSecond));
@@ -121,7 +157,8 @@ public static class BenchmarkInsightsMath
         IReadOnlyList<BenchmarkRun> allRuns,
         IReadOnlyList<BenchmarkRun> comparableRuns,
         string currentAppVersion,
-        DateTime? nowUtc = null)
+        DateTime? nowUtc = null,
+        IReadOnlyList<KindUsageSummary>? usage = null)
     {
         var now = nowUtc ?? DateTime.UtcNow;
         var caveats = new List<string>();
@@ -137,6 +174,8 @@ public static class BenchmarkInsightsMath
             .Concat(tagLeaderboards.SelectMany(t => BuildComparisons(t.Ranked, t.Tag)))
             .ToList();
 
+        var usageInsights = BuildUsageInsights(usage, overallRanked, tagLeaderboards);
+
         return new BenchmarkInsightsReport(
             allRuns.Count,
             comparableRuns.Count,
@@ -145,7 +184,60 @@ public static class BenchmarkInsightsMath
             overallRanked,
             tagLeaderboards,
             comparisons,
-            caveats);
+            caveats,
+            usageInsights);
+    }
+
+    private static List<UsageInsight> BuildUsageInsights(
+        IReadOnlyList<KindUsageSummary>? usage,
+        IReadOnlyList<ModelAggregate> overallRanked,
+        IReadOnlyList<TagLeaderboard> tagLeaderboards)
+    {
+        var insights = new List<UsageInsight>();
+        if (usage is null)
+            return insights;
+
+        foreach (var summary in usage)
+        {
+            if (summary.TotalCalls < MinCallsForUsageInsight)
+                continue;
+            if (!UsageKindTags.TryGetValue(summary.Kind, out var mapping))
+                continue;
+            var dominant = summary.Dominant;
+            if (dominant is null)
+                continue;
+
+            var leaderboardTop = string.IsNullOrEmpty(mapping.Tag)
+                ? overallRanked.FirstOrDefault()
+                : tagLeaderboards.FirstOrDefault(t => string.Equals(t.Tag, mapping.Tag, StringComparison.OrdinalIgnoreCase))?.Ranked.FirstOrDefault();
+
+            string? recommendedName = null;
+            double? gap = null;
+            var sentence = $"You mostly use {dominant.ModelId} for {mapping.ActivityLabel}.";
+
+            if (leaderboardTop is not null && !string.Equals(leaderboardTop.ModelId, dominant.ModelId, StringComparison.OrdinalIgnoreCase))
+            {
+                var dominantAggregate = overallRanked.FirstOrDefault(a => string.Equals(a.ModelId, dominant.ModelId, StringComparison.OrdinalIgnoreCase))
+                    ?? tagLeaderboards.SelectMany(t => t.Ranked).FirstOrDefault(a => string.Equals(a.ModelId, dominant.ModelId, StringComparison.OrdinalIgnoreCase));
+                if (dominantAggregate is not null)
+                {
+                    var points = (leaderboardTop.RankingScore - dominantAggregate.RankingScore) * 100;
+                    if (points > UsageRankingGapThreshold)
+                    {
+                        recommendedName = leaderboardTop.ModelName;
+                        gap = points;
+                        var tagLabel = string.IsNullOrEmpty(mapping.Tag) ? "overall" : $"{mapping.Tag}";
+                        sentence = $"You mostly use {dominant.ModelId} for {mapping.ActivityLabel}; your benchmarks rank {leaderboardTop.ModelName} higher for {tagLabel} tasks.";
+                    }
+                }
+            }
+
+            insights.Add(new UsageInsight(
+                summary.Kind, dominant.ModelId, dominant.ModelId, dominant.Share, summary.TotalCalls,
+                recommendedName, gap, sentence));
+        }
+
+        return insights;
     }
 
     private static List<ModelAggregate> BuildModelAggregates(

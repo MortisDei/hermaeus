@@ -18,6 +18,7 @@ public partial class SystemOverviewViewModel : ObservableObject
     public ObservableCollection<ComponentStatusViewModel> Components { get; } = [];
     public ObservableCollection<PrivacyAuditItemViewModel> PrivacyAuditItems { get; } = [];
 
+    [ObservableProperty] private string _privacyAuditSummary = string.Empty;
     [ObservableProperty] private string _status = "Ready.";
     [ObservableProperty] private bool _isRefreshing;
     [ObservableProperty] private SystemSnapshot? _snapshot;
@@ -76,6 +77,11 @@ public partial class SystemOverviewViewModel : ObservableObject
         PrivacyAuditItems.Clear();
         foreach (var item in items)
             PrivacyAuditItems.Add(new PrivacyAuditItemViewModel(item.Name, item.Status, item.Detail));
+
+        var count = await _privacyAudit.CountOutboundDestinationsAsync();
+        PrivacyAuditSummary = count == 0
+            ? "0 configured outbound destinations. Nothing is currently set up to leave this machine."
+            : $"{count} configured outbound destination{(count == 1 ? "" : "s")}.";
     }
 
     public static string FormatBytes(long bytes)

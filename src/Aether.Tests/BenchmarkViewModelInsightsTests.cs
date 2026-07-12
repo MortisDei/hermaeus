@@ -39,6 +39,27 @@ public sealed class BenchmarkViewModelInsightsTests
     }
 
     [Fact]
+    public async Task LoadInsightsAsync_populates_the_usage_card_when_the_report_has_usage_insights()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var benchmarks = new BenchmarkService(settings, new FakeLlm(), new FakeSystemInfo(), new FakeEvalStore());
+
+        var usage = new UsageInsight(TraceKind.Chat, "model-a", "model-a", 1.0, 25, null, null, "You mostly use model-a for chat.");
+        var report = new BenchmarkInsightsReport(3, 3, 1, DateTime.UtcNow, [], [], [], [], UsageInsights: [usage]);
+        var vm = new BenchmarkViewModel(benchmarks, new FakeLlm(), new ModelProfileService(settings), settings, new FakeToasts(),
+            insights: new FakeInsightsService(report));
+
+        Assert.False(vm.HasInsightsUsage, "the usage card should be hidden before insights load");
+        await vm.LoadInsightsCommand.ExecuteAsync(null);
+
+        Assert.True(vm.HasInsightsUsage);
+        Assert.Single(vm.InsightsUsage);
+        Assert.Equal("You mostly use model-a for chat.", vm.InsightsUsage[0].Sentence);
+        Assert.False(vm.InsightsUsage[0].HasRecommendation);
+    }
+
+    [Fact]
     public async Task LoadInsightsAsync_shows_empty_state_when_report_has_no_comparable_data()
     {
         using var temp = new TempDir();

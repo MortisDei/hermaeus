@@ -92,4 +92,76 @@ public sealed class AgentPatchReviewServiceTests
         Assert.Equal("custom reason", patch.BlockReason);
         Assert.Contains("draft_patch_block:False", agent.Actions);
     }
+
+    [Fact]
+    public async Task ApplyAsync_captures_the_pre_image_so_revert_can_restore_it()
+    {
+        using var temp = new TempDir();
+        var (service, agent, store, workspace) = Build(temp);
+        var task = new AgentTaskState { Goal = "test" };
+        var patch = new AgentDraftPatch { RelativePath = "notes.md", ProposedContent = "updated" };
+
+        await service.ApplyAsync(task, patch, new AgentWorkspaceOptions(workspace));
+        Assert.Equal("original", patch.PreImageContent);
+        Assert.True(patch.PreImageExisted);
+
+        var error = await service.RevertAsync(task, patch, new AgentWorkspaceOptions(workspace));
+
+        Assert.Equal(string.Empty, error);
+        Assert.Equal(AgentDraftPatchStatus.Reverted, patch.Status);
+        Assert.Equal("User", patch.RevertedBy);
+        Assert.Equal("original", await File.ReadAllTextAsync(Path.Combine(workspace, "notes.md")));
+        Assert.Contains("draft_patch_revert:True", agent.Actions);
+    }
+
+    [Fact]
+    public async Task RevertAsync_deletes_a_file_that_did_not_exist_before_the_patch()
+    {
+        using var temp = new TempDir();
+        var (service, agent, store, workspace) = Build(temp);
+        var task = new AgentTaskState { Goal = "test" };
+        var patch = new AgentDraftPatch { RelativePath = "new-file.md", ProposedContent = "brand new content" };
+
+        await service.ApplyAsync(task, patch, new AgentWorkspaceOptions(workspace));
+        Assert.Null(patch.PreImageContent);
+        Assert.False(patch.PreImageExisted);
+        Assert.True(File.Exists(Path.Combine(workspace, "new-file.md")));
+
+        var error = await service.RevertAsync(task, patch, new AgentWorkspaceOptions(workspace));
+
+        Assert.Equal(string.Empty, error);
+        Assert.False(File.Exists(Path.Combine(workspace, "new-file.md")));
+    }
+
+    [Fact]
+    public async Task RevertAsync_refuses_when_the_file_changed_again_after_the_patch()
+    {
+        using var temp = new TempDir();
+        var (service, agent, store, workspace) = Build(temp);
+        var task = new AgentTaskState { Goal = "test" };
+        var patch = new AgentDraftPatch { RelativePath = "notes.md", ProposedContent = "updated" };
+
+        await service.ApplyAsync(task, patch, new AgentWorkspaceOptions(workspace));
+        await File.WriteAllTextAsync(Path.Combine(workspace, "notes.md"), "someone edited this after the patch");
+
+        var error = await service.RevertAsync(task, patch, new AgentWorkspaceOptions(workspace));
+
+        Assert.NotEqual(string.Empty, error);
+        Assert.Equal(AgentDraftPatchStatus.Applied, patch.Status);
+        Assert.Equal("someone edited this after the patch", await File.ReadAllTextAsync(Path.Combine(workspace, "notes.md")));
+    }
+
+    [Fact]
+    public async Task RevertAsync_refuses_a_patch_that_is_not_currently_applied()
+    {
+        using var temp = new TempDir();
+        var (service, agent, store, workspace) = Build(temp);
+        var task = new AgentTaskState { Goal = "test" };
+        var patch = new AgentDraftPatch { RelativePath = "notes.md", ProposedContent = "updated" };
+
+        var error = await service.RevertAsync(task, patch, new AgentWorkspaceOptions(workspace));
+
+        Assert.NotEqual(string.Empty, error);
+        Assert.Equal(AgentDraftPatchStatus.Pending, patch.Status);
+    }
 }

@@ -226,9 +226,14 @@ public sealed class RagQueryService
 
         var retrieval = await RetrieveAsync(datasetId, question, opts, ct);
         var semantic = retrieval.SemanticCandidates;
+        var bm25 = retrieval.Bm25Candidates;
         var fused = retrieval.Selected;
         var expandedQuery = retrieval.ExpandedQuery;
         retrievalSw.Stop();
+
+        var semanticById = semantic.GroupBy(s => s.Chunk.Id).ToDictionary(g => g.Key, g => g.First());
+        var bm25ById = bm25.GroupBy(s => s.Chunk.Id).ToDictionary(g => g.Key, g => g.First());
+        var queryTerms = Bm25Scorer.Tokenize(retrieval.ExpandedQuery);
 
         // ── 8. Build context + prompt ────────────────────────────────────
         var contextPack = BuildContext(fused, opts);
@@ -261,8 +266,8 @@ public sealed class RagQueryService
                 RefusalReason = $"Preflight grounding {preflightGrounding:F3} below threshold {opts.RefusalThreshold:F3}",
                 ContextTokenBudget = opts.ContextTokenBudget,
                 ContextPackingSummary = contextPack.Summary,
-                RetrievedChunks = semantic.Select((r, i) => ToTraceChunk(r, i + 1)).ToList(),
-                SelectedContext = fused.Select((r, i) => ToTraceChunk(r, i + 1)).ToList()
+                RetrievedChunks = semantic.Select((r, i) => ToTraceChunk(r, i + 1, semantic.Count, semanticById, bm25ById, queryTerms)).ToList(),
+                SelectedContext = fused.Select((r, i) => ToTraceChunk(r, i + 1, fused.Count, semanticById, bm25ById, queryTerms)).ToList()
             };
             await PersistTraceAsync(refusalTrace, ct);
             yield return RagStreamEvent.ForTrace(new RagTraceSummary(
@@ -282,7 +287,7 @@ public sealed class RagQueryService
 
         // Yield a structured event so consumers can bind sources without
         // parsing the answer stream themselves.
-        var sourceChunks = fused.Select((r, i) => ToTraceChunk(r, i + 1)).ToList();
+        var sourceChunks = fused.Select((r, i) => ToTraceChunk(r, i + 1, fused.Count, semanticById, bm25ById, queryTerms)).ToList();
         yield return RagStreamEvent.ForSources(sourceChunks);
 
         // ── 9. Stream LLM answer ─────────────────────────────────────────
@@ -314,8 +319,8 @@ public sealed class RagQueryService
             RefusalReason = string.Empty,
             ContextTokenBudget = opts.ContextTokenBudget,
             ContextPackingSummary = contextPack.Summary,
-            RetrievedChunks = semantic.Select((r, i) => ToTraceChunk(r, i + 1)).ToList(),
-            SelectedContext = fused.Select((r, i) => ToTraceChunk(r, i + 1)).ToList()
+            RetrievedChunks = semantic.Select((r, i) => ToTraceChunk(r, i + 1, semantic.Count, semanticById, bm25ById, queryTerms)).ToList(),
+            SelectedContext = fused.Select((r, i) => ToTraceChunk(r, i + 1, fused.Count, semanticById, bm25ById, queryTerms)).ToList()
         };
         await PersistTraceAsync(trace, ct);
         yield return RagStreamEvent.ForTrace(new RagTraceSummary(
@@ -579,16 +584,75 @@ public sealed class RagQueryService
         return (float)answerTokens.Count(t => contextTokens.Contains(t)) / answerTokens.Count;
     }
 
-    private static RagTraceChunk ToTraceChunk(ScoredChunk scored, int rank) => new()
+    /// <summary>
+    /// Builds a trace chunk with the per-signal breakdown ("why did
+    /// retrieval choose this chunk", r6 01-first-five-minutes.md 1.6):
+    /// vector score from the semantic candidate list, keyword score from
+    /// the BM25 candidate list (both null if this chunk id is not present
+    /// there, e.g. a parent-upgraded chunk), and rerank score only when the
+    /// final scored chunk's source is actually <see cref="ScoreSource.Reranker"/>
+    /// (the reranker leaves the source untouched when it is disabled).
+    /// </summary>
+    private static RagTraceChunk ToTraceChunk(
+        ScoredChunk scored,
+        int rank,
+        int outOf,
+        IReadOnlyDictionary<string, ScoredChunk> semanticById,
+        IReadOnlyDictionary<string, ScoredChunk> bm25ById,
+        IReadOnlyCollection<string> queryTerms)
     {
-        Rank = rank,
-        ChunkId = scored.Chunk.Id,
-        Title = scored.Chunk.SourceTitle,
-        File = scored.Chunk.SourceFile,
-        Path = scored.Chunk.SourcePath,
-        Score = scored.Score,
-        Content = scored.Chunk.Content
-    };
+        var id = scored.Chunk.Id;
+        var (matchedTerm, matchedCount) = FindDominantMatchedTerm(scored.Chunk.Content, queryTerms);
+
+        return new RagTraceChunk
+        {
+            Rank = rank,
+            OutOfCount = outOf,
+            ChunkId = id,
+            Title = scored.Chunk.SourceTitle,
+            File = scored.Chunk.SourceFile,
+            Path = scored.Chunk.SourcePath,
+            Score = scored.Score,
+            Content = scored.Chunk.Content,
+            VectorScore = semanticById.TryGetValue(id, out var sem) ? sem.Score : null,
+            KeywordScore = bm25ById.TryGetValue(id, out var kw) ? kw.Score : null,
+            RerankScore = scored.Source == ScoreSource.Reranker ? scored.Score : null,
+            MatchedTerm = matchedTerm,
+            MatchedTermCount = matchedCount
+        };
+    }
+
+    /// <summary>The query term that appears most often in the chunk, for the "term 'x' matched N times" summary phrase.</summary>
+    private static (string Term, int Count) FindDominantMatchedTerm(string content, IReadOnlyCollection<string> queryTerms)
+    {
+        var bestTerm = string.Empty;
+        var bestCount = 0;
+        foreach (var term in queryTerms)
+        {
+            if (string.IsNullOrWhiteSpace(term) || term.Length < 2) continue;
+            var count = CountOccurrences(content, term);
+            if (count > bestCount)
+            {
+                bestCount = count;
+                bestTerm = term;
+            }
+        }
+
+        return (bestTerm, bestCount);
+    }
+
+    private static int CountOccurrences(string content, string term)
+    {
+        var count = 0;
+        var index = 0;
+        while ((index = content.IndexOf(term, index, StringComparison.OrdinalIgnoreCase)) >= 0)
+        {
+            count++;
+            index += term.Length;
+        }
+
+        return count;
+    }
 }
 
 public sealed record RagRetrievalResult(

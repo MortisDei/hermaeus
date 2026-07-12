@@ -61,6 +61,15 @@ public interface IAgentWorkspaceTools
     Task<AgentFileReadResult> EditFileAsync(AgentWorkspaceOptions options, string relativePath, string oldString, string newString, CancellationToken ct = default);
     /// <summary>Creates a new file; refuses to overwrite an existing one (use edit_file for that).</summary>
     Task<AgentFileReadResult> CreateFileAsync(AgentWorkspaceOptions options, string relativePath, string content, CancellationToken ct = default);
+    /// <summary>Raw content of a workspace file, or null if it does not exist. Used to capture pre-images before a mutating tool runs (r6 1.8).</summary>
+    Task<string?> ReadFileForRevertAsync(AgentWorkspaceOptions options, string relativePath, CancellationToken ct = default);
+    /// <summary>
+    /// Restores <paramref name="preImageContent"/> (or deletes the file when
+    /// null, meaning it did not exist before the patch), but only if the
+    /// file's current content still matches <paramref name="expectedCurrentContent"/>
+    /// exactly - a later edit is left alone rather than overwritten.
+    /// </summary>
+    Task<AgentRevertResult> RevertAppliedPatchAsync(AgentWorkspaceOptions options, string relativePath, string? preImageContent, string expectedCurrentContent, CancellationToken ct = default);
 }
 
 public interface IAgentSafetyGate

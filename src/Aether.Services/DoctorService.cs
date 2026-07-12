@@ -12,32 +12,8 @@ using System.Text.RegularExpressions;
 
 namespace Aether.Services;
 
-public sealed class DoctorService : IDoctorService, IInspectionCheckProvider
+public sealed class DoctorService : IDoctorService
 {
-    public IReadOnlyList<string> Views { get; } = ["doctor"];
-
-    public async Task<IReadOnlyList<InspectionCheck>> GetChecksAsync(CancellationToken ct = default)
-    {
-        var report = await ScanAsync(ct);
-        return report.Checks.Select(c => new InspectionCheck(
-            Id: c.Key,
-            View: "doctor",
-            Category: c.Category,
-            Title: c.Title,
-            Severity: c.Status switch
-            {
-                DoctorCheckStatus.Ready => CheckSeverity.Ready,
-                DoctorCheckStatus.Warning => CheckSeverity.Warning,
-                DoctorCheckStatus.Error => CheckSeverity.Error,
-                _ => CheckSeverity.Info
-            },
-            Summary: c.Summary,
-            Detail: c.Detail,
-            FixLabel: c.FixLabel,
-            CanFix: c.CanFix,
-            Diagnostics: c.Diagnostics)).ToList();
-    }
-
     private static readonly EmbeddingModelDownloadSpec DefaultEmbeddingDownload = new(
         "nomic-embed-text-v1.5",
         "nomic-embed-text-v1.5-Q4_K_M.gguf",
@@ -1056,30 +1032,55 @@ public sealed class DoctorService : IDoctorService, IInspectionCheckProvider
         try
         {
             var report = await _benchmarkInsights.LoadReportAsync(ct);
-            var best = report.BestOverall;
-            if (best is null)
-                return null;
-
             var currentModelId = _settings.Settings.Llm.DefaultModel;
-            var current = report.Models.FirstOrDefault(m => m.ModelId == currentModelId);
-            if (current is null || current.ModelId == best.ModelId)
-                return null;
 
-            var gap = (best.RankingScore - current.RankingScore) * 100;
-            if (gap <= rankingGapThreshold)
-                return null;
+            DoctorCheck? check = null;
+            var best = report.BestOverall;
+            var current = best is null ? null : report.Models.FirstOrDefault(m => m.ModelId == currentModelId);
+            if (best is not null && current is not null && current.ModelId != best.ModelId)
+            {
+                var gap = (best.RankingScore - current.RankingScore) * 100;
+                if (gap > rankingGapThreshold)
+                {
+                    check = BuildCheck(
+                        "benchmark-advisory",
+                        "Benchmark data suggests a better default model",
+                        DoctorCheckStatus.Info,
+                        $"Benchmark data suggests {best.ModelName} may serve you better overall than {current.ModelName}.",
+                        $"{best.ModelName} ranks {gap:F0} points higher (ranking score {best.RankingScore:P0} vs {current.RankingScore:P0}) " +
+                        $"across {best.RunCount} comparable run(s). This is informational only; nothing switches automatically.",
+                        "Open Benchmarks",
+                        false,
+                        string.Empty,
+                        "Benchmarks");
+                }
+            }
 
-            return BuildCheck(
-                "benchmark-advisory",
-                "Benchmark data suggests a better default model",
-                DoctorCheckStatus.Info,
-                $"Benchmark data suggests {best.ModelName} may serve you better overall than {current.ModelName}.",
-                $"{best.ModelName} ranks {gap:F0} points higher (ranking score {best.RankingScore:P0} vs {current.RankingScore:P0}) " +
-                $"across {best.RunCount} comparable run(s). This is informational only; nothing switches automatically.",
-                "Open Benchmarks",
-                false,
-                string.Empty,
-                "Benchmarks");
+            // Usage-aware extension (r6 02-usage-history-recommendations.md
+            // 2.3): at most one extra sentence, appended to the r5 advisory
+            // if it already fired, or standalone if usage alone recommends a
+            // switch the ranking-only check above did not catch. Same
+            // philosophy as r5: informational only, never auto-switches.
+            var usageInsight = report.UsageInsightsOrEmpty
+                .FirstOrDefault(u => u.Kind == TraceKind.Chat && u.RecommendedModelName is not null);
+            if (usageInsight is not null)
+            {
+                var usageSentence = $"Usage-aware: {usageInsight.Sentence}";
+                check = check is null
+                    ? BuildCheck(
+                        "benchmark-advisory",
+                        "Benchmark data suggests a better default model",
+                        DoctorCheckStatus.Info,
+                        usageInsight.Sentence,
+                        $"{usageSentence} This is informational only; nothing switches automatically.",
+                        "Open Benchmarks",
+                        false,
+                        string.Empty,
+                        "Benchmarks")
+                    : check with { Detail = $"{check.Detail} {usageSentence}" };
+            }
+
+            return check;
         }
         catch
         {

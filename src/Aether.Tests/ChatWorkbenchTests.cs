@@ -61,6 +61,39 @@ public sealed class ChatWorkbenchTests
     }
 
     [Fact]
+    public void SelectedModelLocalityReflectsTheProviderRegistry()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var vm = new ChatViewModel(
+            new UsageLlm(),
+            new InMemoryConversationStore(),
+            new EmptyMemoryStore(),
+            settings,
+            new FakeTts(),
+            new ModelProfileService(settings),
+            new FakeToasts(),
+            new NoOpConversationMemoryService(),
+            new RuntimeLogService(settings),
+            new ConversationExportService());
+
+        Assert.False(vm.HasSelectedModel);
+
+        vm.SelectedModel = new LlmModel { Id = "gpt", Name = "GPT", ProviderTag = "openai" };
+        Assert.True(vm.HasSelectedModel);
+        Assert.True(vm.IsSelectedModelRemote, "an openai-tagged model should be reported as remote");
+        Assert.Equal("Remote", vm.SelectedModelLocalityLabel);
+
+        vm.SelectedModel = new LlmModel { Id = "local-model", Name = "Local", ProviderTag = "llama.cpp" };
+        Assert.False(vm.IsSelectedModelRemote, "a llama.cpp-tagged model should be reported as local");
+        Assert.Equal("Local", vm.SelectedModelLocalityLabel);
+
+        vm.SelectedModel = null;
+        Assert.False(vm.HasSelectedModel);
+        Assert.Equal(string.Empty, vm.SelectedModelLocalityLabel);
+    }
+
+    [Fact]
     public async Task SendAsyncInjectsRelevantMemoriesAndPopulatesSourcesWhenMemoryEnabled()
     {
         using var temp = new TempDir();

@@ -114,6 +114,7 @@ public sealed class AgentService : IAgentService
     private readonly IWorkspaceManifestStore? _manifests;
     private readonly ISettingsService? _settings;
     private readonly ILessonStore? _lessons;
+    private readonly IAgentWorkspaceTools? _workspaceTools;
 
     public AgentService(
         IAgentTaskStateStore store,
@@ -124,7 +125,8 @@ public sealed class AgentService : IAgentService
         ITraceStore? traces = null,
         IWorkspaceManifestStore? manifests = null,
         ISettingsService? settings = null,
-        ILessonStore? lessons = null)
+        ILessonStore? lessons = null,
+        IAgentWorkspaceTools? workspaceTools = null)
     {
         _store = store;
         _contextBuilder = contextBuilder;
@@ -135,6 +137,7 @@ public sealed class AgentService : IAgentService
         _manifests = manifests;
         _lessons = lessons;
         _settings = settings;
+        _workspaceTools = workspaceTools;
     }
 
     public async Task<AgentTaskState> CreateTaskAsync(
@@ -289,7 +292,8 @@ public sealed class AgentService : IAgentService
                     {
                         ToolName = nextTool,
                         Arguments = response.NextAction.Arguments,
-                        RiskLevel = decision.RiskLevel
+                        RiskLevel = decision.RiskLevel,
+                        Reason = decision.Reason
                     };
                 }
             }
@@ -510,6 +514,26 @@ public sealed class AgentService : IAgentService
         if (approved && state.PendingToolAction is not null && options is not null)
         {
             var pending = state.PendingToolAction;
+
+            // Mutating tools get a pre-image captured before they run, so a
+            // later revert can restore exactly what was there
+            // (r6 01-first-five-minutes.md 1.8). apply_draft_patch's own
+            // manual review flow (AgentPatchReviewService.ApplyAsync)
+            // already does this for the draft-patch queue; this covers the
+            // direct-approval path for edit_file/create_file/apply_draft_patch.
+            var mutatesFile = pending.ToolName is "edit_file" or "create_file" or "apply_draft_patch";
+            var relativePath = mutatesFile ? AgentToolExecutor.Arg(pending.Arguments, "relative_path", "path") : string.Empty;
+            string? preImage = null;
+            if (mutatesFile && _workspaceTools is not null && !string.IsNullOrWhiteSpace(relativePath))
+            {
+                try { preImage = await _workspaceTools.ReadFileForRevertAsync(options, relativePath, ct); }
+                catch { mutatesFile = false; /* best effort; skip the revert record, still execute the tool */ }
+            }
+            else
+            {
+                mutatesFile = false;
+            }
+
             AgentToolResult result;
             try
             {
@@ -531,6 +555,24 @@ public sealed class AgentService : IAgentService
             // just in ToolResults' last-five window.
             await _store.AppendTranscriptEntryAsync(taskId, new AgentTranscriptEntry(
                 state.StepCount, "tool", result.Tool, result.ResultSummary, DateTime.UtcNow), ct);
+
+            if (mutatesFile && _workspaceTools is not null)
+            {
+                var postContent = await _workspaceTools.ReadFileForRevertAsync(options, relativePath, ct) ?? string.Empty;
+                state.DraftPatches.Add(new AgentDraftPatch
+                {
+                    RelativePath = relativePath,
+                    Rationale = $"Applied via {pending.ToolName}.",
+                    ProposedContent = postContent,
+                    Status = AgentDraftPatchStatus.Applied,
+                    ApprovedAt = DateTime.UtcNow,
+                    ApprovedBy = "User",
+                    PreImageContent = preImage,
+                    PreImageExisted = preImage is not null,
+                    AppliedContent = postContent
+                });
+            }
+
             state.PendingToolAction = null;
             state.Status = AgentTaskStatus.Running;
         }
@@ -617,7 +659,7 @@ public sealed class AgentService : IAgentService
                 var guidance = ok
                     ? "Safe to re-run; a prior run in this task succeeded."
                     : "Read the command output before retrying; the same failure recurred.";
-                await _lessons.RecordEvidenceAsync(new AgentLessonEvidence(
+                await RecordEvidenceTrackingNewAsync(_lessons, state, new AgentLessonEvidence(
                     AgentLessonScope.Workspace, scopeId, AgentLessonKind.Command, signature, claim, guidance,
                     ok ? AgentLessonOutcome.Worked : AgentLessonOutcome.Failed, state.TaskId), ct);
             }
@@ -630,7 +672,7 @@ public sealed class AgentService : IAgentService
                     ? $"{normalized} on {path} applies cleanly."
                     : $"{normalized} on {path} keeps failing: {TruncateForLesson(resultText, 120)}";
                 var guidance = success ? string.Empty : "Re-read the file before proposing another edit to this path.";
-                await _lessons.RecordEvidenceAsync(new AgentLessonEvidence(
+                await RecordEvidenceTrackingNewAsync(_lessons, state, new AgentLessonEvidence(
                     AgentLessonScope.Workspace, scopeId, AgentLessonKind.Patch, signature, claim, guidance,
                     success ? AgentLessonOutcome.Worked : AgentLessonOutcome.Failed, state.TaskId), ct);
             }
@@ -651,7 +693,7 @@ public sealed class AgentService : IAgentService
             var scopeId = options is null ? string.Empty : NormalizeWorkspaceScopeId(options.WorkspaceRoot);
             var scope = string.IsNullOrEmpty(scopeId) ? AgentLessonScope.Global : AgentLessonScope.Workspace;
             var signature = $"approval:{normalized}";
-            await _lessons.RecordEvidenceAsync(new AgentLessonEvidence(
+            await RecordEvidenceTrackingNewAsync(_lessons, state, new AgentLessonEvidence(
                 scope, scopeId, AgentLessonKind.Approval, signature,
                 $"The user rejects {normalized} requests in this context.",
                 "Avoid proposing this again without a materially different rationale.",
@@ -681,7 +723,7 @@ public sealed class AgentService : IAgentService
             var scopeId = options is null ? string.Empty : NormalizeWorkspaceScopeId(options.WorkspaceRoot);
             var scope = string.IsNullOrEmpty(scopeId) ? AgentLessonScope.Global : AgentLessonScope.Workspace;
             var signature = $"approval:{normalized}";
-            await _lessons.RecordEvidenceAsync(new AgentLessonEvidence(
+            await RecordEvidenceTrackingNewAsync(_lessons, state, new AgentLessonEvidence(
                 scope, scopeId, AgentLessonKind.Approval, signature,
                 $"The user approves {normalized} requests in this context.",
                 string.Empty,
@@ -715,7 +757,7 @@ public sealed class AgentService : IAgentService
                 if (TaskHadPriorFailure(state))
                 {
                     var signature = $"task:{AgentLessonText.Fingerprint(state.Goal)}";
-                    await _lessons.RecordEvidenceAsync(new AgentLessonEvidence(
+                    await RecordEvidenceTrackingNewAsync(_lessons, state, new AgentLessonEvidence(
                         AgentLessonScope.Workspace, scopeId, AgentLessonKind.Task, signature,
                         $"Goals like '{TruncateForLesson(state.Goal, 80)}' complete in this workspace.",
                         string.Empty, AgentLessonOutcome.Worked, state.TaskId), ct);
@@ -729,7 +771,7 @@ public sealed class AgentService : IAgentService
                 var blocker = state.Decisions.LastOrDefault(d => d.Decision == "Task failed")?.Reason
                     ?? "no specific blocker was recorded.";
                 var signature = $"task:{AgentLessonText.Fingerprint(state.Goal)}";
-                await _lessons.RecordEvidenceAsync(new AgentLessonEvidence(
+                await RecordEvidenceTrackingNewAsync(_lessons, state, new AgentLessonEvidence(
                     AgentLessonScope.Workspace, scopeId, AgentLessonKind.Task, signature,
                     $"Goals like '{TruncateForLesson(state.Goal, 80)}' have failed in this workspace: {blocker}",
                     "Check the blockers from the failed task before retrying this goal.",
@@ -740,6 +782,22 @@ public sealed class AgentService : IAgentService
         {
             // Lesson capture is best-effort; it must never break the agent step.
         }
+    }
+
+    /// <summary>
+    /// Wraps every <see cref="ILessonStore.RecordEvidenceAsync"/> call so a
+    /// genuinely new lesson (evidence count 1 right after the write - the
+    /// store only ever assigns that on insert or on a full contradiction
+    /// flip, never on reinforcement or a no-op counter) is tracked on the
+    /// task for the "new lessons" review strip (r6 3.3).
+    /// </summary>
+    private static async Task<AgentLesson> RecordEvidenceTrackingNewAsync(
+        ILessonStore lessons, AgentTaskState state, AgentLessonEvidence evidence, CancellationToken ct)
+    {
+        var lesson = await lessons.RecordEvidenceAsync(evidence, ct);
+        if (lesson.EvidenceCount == 1 && !state.NewLessonIds.Contains(lesson.Id))
+            state.NewLessonIds.Add(lesson.Id);
+        return lesson;
     }
 
     private static bool TaskHadPriorFailure(AgentTaskState state) =>
@@ -779,7 +837,7 @@ public sealed class AgentService : IAgentService
 
                     var signature = "stated:" + Convert.ToHexString(
                         System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(claim.ToLowerInvariant())))[..16];
-                    await _lessons.RecordEvidenceAsync(new AgentLessonEvidence(
+                    await RecordEvidenceTrackingNewAsync(_lessons, state, new AgentLessonEvidence(
                         AgentLessonScope.Workspace, scopeId, AgentLessonKind.Stated, signature,
                         claim, string.Empty, AgentLessonOutcome.Observation, state.TaskId), ct);
                 }

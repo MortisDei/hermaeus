@@ -31,25 +31,39 @@
                 <TextBlock Grid.Column="0" Text="Model"
                            VerticalAlignment="Center" Opacity="0.5" FontSize="12" />
 
-                <ComboBox Grid.Column="1"
-                          ItemsSource="{Binding AvailableModels}"
-                          SelectedItem="{Binding SelectedModel}"
-                          MaxWidth="300"
-                          HorizontalAlignment="Left"
-                          FontSize="13">
-                    <ComboBox.SelectionBoxItemTemplate>
-                        <DataTemplate>
-                            <TextBlock Text="{Binding DisplayName}"
-                                       TextTrimming="CharacterEllipsis" />
-                        </DataTemplate>
-                    </ComboBox.SelectionBoxItemTemplate>
-                    <ComboBox.ItemTemplate>
-                        <DataTemplate>
-                            <TextBlock Text="{Binding DisplayName}"
-                                       TextTrimming="CharacterEllipsis" />
-                        </DataTemplate>
-                    </ComboBox.ItemTemplate>
-                </ComboBox>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" HorizontalAlignment="Left">
+                    <ComboBox ItemsSource="{Binding AvailableModels}"
+                              SelectedItem="{Binding SelectedModel}"
+                              MaxWidth="300"
+                              FontSize="13">
+                        <ComboBox.SelectionBoxItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding DisplayName}"
+                                           TextTrimming="CharacterEllipsis" />
+                            </DataTemplate>
+                        </ComboBox.SelectionBoxItemTemplate>
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding DisplayName}"
+                                           TextTrimming="CharacterEllipsis" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                    <StackPanel Orientation="Horizontal" Spacing="6" IsVisible="{Binding HasSelectedModel}">
+                        <Border CornerRadius="4" Padding="6,2" VerticalAlignment="Center"
+                                IsVisible="{Binding !IsSelectedModelRemote}"
+                                Background="#4CAF50"
+                                ToolTip.Tip="This model runs on your machine; prompts do not leave it.">
+                            <TextBlock Text="Local" FontSize="10" FontWeight="SemiBold" Foreground="White" />
+                        </Border>
+                        <Border CornerRadius="4" Padding="6,2" VerticalAlignment="Center"
+                                IsVisible="{Binding IsSelectedModelRemote}"
+                                Background="#FF9800"
+                                ToolTip.Tip="This model calls a remote endpoint; prompts leave this machine.">
+                            <TextBlock Text="Remote" FontSize="10" FontWeight="SemiBold" Foreground="White" />
+                        </Border>
+                    </StackPanel>
+                </StackPanel>
 
                 <StackPanel Grid.Column="2"
                             Orientation="Horizontal" Spacing="6"

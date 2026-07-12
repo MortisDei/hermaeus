@@ -249,6 +249,24 @@
                                            FontFamily="Consolas,monospace" />
                             </Border>
                         </Grid>
+                        <TextBlock Text="{Binding SelectedSource.PlainLanguageSummary}"
+                                   FontSize="12"
+                                   Opacity="0.7"
+                                   TextWrapping="Wrap" />
+                        <StackPanel Orientation="Horizontal" Spacing="14">
+                            <StackPanel Orientation="Horizontal" Spacing="4" IsVisible="{Binding SelectedSource.HasVectorScore}">
+                                <TextBlock Text="Vector" FontSize="10" Opacity="0.5" />
+                                <TextBlock Text="{Binding SelectedSource.VectorScoreDisplay}" FontSize="10" FontFamily="Consolas,monospace" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Spacing="4" IsVisible="{Binding SelectedSource.HasKeywordScore}">
+                                <TextBlock Text="Keyword" FontSize="10" Opacity="0.5" />
+                                <TextBlock Text="{Binding SelectedSource.KeywordScoreDisplay}" FontSize="10" FontFamily="Consolas,monospace" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Spacing="4" IsVisible="{Binding SelectedSource.HasRerankScore}">
+                                <TextBlock Text="Reranker" FontSize="10" Opacity="0.5" />
+                                <TextBlock Text="{Binding SelectedSource.RerankScoreDisplay}" FontSize="10" FontFamily="Consolas,monospace" />
+                            </StackPanel>
+                        </StackPanel>
                         <SelectableTextBlock Text="{Binding SelectedSource.Content}"
                                              TextWrapping="Wrap"
                                              FontSize="13"

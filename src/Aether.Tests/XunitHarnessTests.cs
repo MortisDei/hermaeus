@@ -35,6 +35,14 @@ public static class HarnessCases
         [new HarnessCase("privacy audit reports remote providers and exposed servers", ServiceTests.PrivacyAuditReportsRemoteAndNetworkExposure)],
         [new HarnessCase("privacy audit flags a remote voice provider even with no chat provider enabled", ServiceTests.PrivacyAuditFlagsRemoteVoiceProviderWithNoChatProviderEnabled)],
         [new HarnessCase("privacy audit shows per-app local API activity", ServiceTests.PrivacyAuditShowsPerAppLocalApiActivity)],
+        [new HarnessCase("privacy audit counts outbound destinations across chat voice and mcp", ServiceTests.PrivacyAuditCountsOutboundDestinationsAcrossChatVoiceMcp)],
+        [new HarnessCase("model usage rollup upserts and skips empty model id", ServiceTests.ModelUsageRollupUpsertsAndSkipsEmptyModelId)],
+        [new HarnessCase("model usage rollup survives trace pruning", ServiceTests.ModelUsageRollupSurvivesTracePruning)],
+        [new HarnessCase("model usage service summarizes dominant model per kind", ServiceTests.ModelUsageServiceSummarizesDominantModelPerKind)],
+        [new HarnessCase("privacy audit discloses model usage counters", ServiceTests.PrivacyAuditDisclosesModelUsageCounters)],
+        [new HarnessCase("privacy audit flags enabled channels on remote voice provider", ServiceTests.PrivacyAuditFlagsEnabledChannelsOnRemoteVoiceProvider)],
+        [new HarnessCase("agent context receipt omits empty sections and counts populated ones", ServiceTests.AgentContextReceiptOmitsEmptySectionsAndCountsPopulatedOnes)],
+        [new HarnessCase("RAG trace chunk plain language summary is deterministic", ServiceTests.RagTraceChunkPlainLanguageSummaryIsDeterministic)],
         [new HarnessCase("local ai assets detect and apply paths", ServiceTests.LocalAiAssetsDetectAndApplyPaths)],
         [new HarnessCase("local ai assets prefer existing Models directory with GGUFs", ServiceTests.LocalAiAssetsPreferExistingModelsDirectoryWithGgufs)],
         [new HarnessCase("local ai assets list discovered GGUF models", ServiceTests.LocalAiAssetsListsDiscoveredGgufModels)],
@@ -83,10 +91,12 @@ public static class HarnessCases
         [new HarnessCase("draft patch preview decision completes", ServiceTests.DraftPatchPreviewDecisionCompletes)],
         [new HarnessCase("settings save preserves existing secret reference", ServiceTests.SettingsSavePreservesExistingSecretReference)],
         [new HarnessCase("settings save persists global hotkey preference", ServiceTests.SettingsSavePersistsGlobalHotkeyPreference)],
+        [new HarnessCase("settings save persists show-nav-labels preference", ServiceTests.SettingsSavePersistsShowNavLabelsPreference)],
         [new HarnessCase("server process arguments stay shell-free and ordered", ServiceTests.ServerProcessArgumentsAreSafe)],
         [new HarnessCase("server process keeps explicit embedding pooling", ServiceTests.ServerProcessArgumentsKeepExplicitPoolingChoice)],
         [new HarnessCase("server auto-tune plans descending GPU candidates", ServiceTests.ServerAutoTunePlansDescendingGpuCandidates)],
         [new HarnessCase("embedding client surfaces pooling compatibility hints", ServiceTests.EmbeddingClientSurfacesPoolingHintWhenServerRejectsNonePooling)],
+        [new HarnessCase("conversation store round-trips per-message model attribution", ServiceTests.ConversationStoreRoundTripsPerMessageModelAttribution)],
         [new HarnessCase("conversation auto-summary stores memories when important", ServiceTests.ConversationAutoSummaryStoresMemoriesWhenImportant)],
         [new HarnessCase("memory store CRUD and search works", ServiceTests.MemoryStoreCrudAndSearchWorks)],
         [new HarnessCase("memory store round trips explicit source and backfills legacy rows", ServiceTests.MemoryStoreRoundTripsExplicitSourceAndBackfillsLegacyRows)],
@@ -106,9 +116,8 @@ public static class HarnessCases
         [new HarnessCase("agent workspace draft patch formats preview", ServiceTests.AgentWorkspaceDraftPatch)],
         [new HarnessCase("agent workspace apply draft patch writes file", ServiceTests.AgentWorkspaceApplyDraftPatchWritesFile)],
         [new HarnessCase("agent draft patch queue and approval round-trips", ServiceTests.AgentDraftPatchQueueAndApproval)],
-        [new HarnessCase("inspection engine filters providers by view", ServiceTests.InspectionEngineFiltersProvidersByView)],
-        [new HarnessCase("inspection engine turns a provider failure into an error check", ServiceTests.InspectionEngineReportsProviderFailureAsErrorCheck)],
-        [new HarnessCase("Doctor and Trust and Privacy contribute checks to their own view", ServiceTests.DoctorTrustPrivacyContributeChecksToOwnView)],
+        [new HarnessCase("Doctor and Trust and Privacy each produce their own checks", ServiceTests.DoctorTrustPrivacyEachProduceOwnChecks)],
+        [new HarnessCase("Doctor benchmark advisory appends usage-aware sentence", ServiceTests.DoctorBenchmarkAdvisoryAppendsUsageAwareSentence)],
         [new HarnessCase("local API process manager resolves packaged executable first", ServiceTests.LocalApiProcessManagerResolvesPackagedExecutableFirst)],
         [new HarnessCase("local API process manager falls back to dev build output", ServiceTests.LocalApiProcessManagerFallsBackToDevBuildOutput)],
         [new HarnessCase("local API process manager returns null when nothing is built", ServiceTests.LocalApiProcessManagerReturnsNullWhenNothingIsBuilt)]
@@ -125,7 +134,10 @@ public static class HarnessCases
         [new HarnessCase("RAG empty PDF warns and continues", RagTests.RagEmptyPdfWarnsAndContinues)],
         [new HarnessCase("RAG ingest cancellation during embedding stops gracefully", RagTests.RagIngestCancellationDuringEmbedding)],
         [new HarnessCase("RAG ingest cancellation during storage stops gracefully", RagTests.RagIngestCancellationDuringStorage)],
-        [new HarnessCase("RAG ingest clamps oversized embedding inputs", RagTests.RagIngestClampsOversizedEmbeddingInputs)]
+        [new HarnessCase("RAG ingest clamps oversized embedding inputs", RagTests.RagIngestClampsOversizedEmbeddingInputs)],
+        [new HarnessCase("RAG view model parses trace bindings", TraceBindingTests.RagViewModel_ParsesTraceBindings)],
+        [new HarnessCase("RAG small dataset retrieval and trace integration", TraceBindingTests.RagIntegration_SmallDatasetRetrievalAndTrace)],
+        [new HarnessCase("RAG query stream trace chunks carry score breakdown", TraceBindingTests.RagQueryStreamTraceChunksCarryScoreBreakdown)]
     ];
 
     public static IEnumerable<object[]> Tts =>
@@ -140,6 +152,8 @@ public static class HarnessCases
         [new HarnessCase("agent task state serializes schema fields", AgentTests.AgentTaskStateSerializesSchemaFields)],
         [new HarnessCase("agent task state rejects unsafe task ids", AgentTests.AgentTaskStateRejectsUnsafeTaskIds)],
         [new HarnessCase("agent review queue reflects approval history", AgentTests.AgentReviewQueueReflectsApprovalHistory)],
+        [new HarnessCase("agent review queue includes pending tool action for waiting tasks", AgentTests.AgentReviewQueueIncludesPendingToolActionForWaitingTasks)],
+        [new HarnessCase("agent approval preview describes npm script body", AgentTests.AgentApprovalPreviewDescribesNpmScriptBody)],
         [new HarnessCase("agent task state uses SQLite index for lists", AgentTests.AgentTaskStateUsesSqliteIndexForLists)],
         [new HarnessCase("agent task index reconciles JSON source of truth", AgentTests.AgentTaskIndexReconcilesJsonSourceOfTruth)],
         [new HarnessCase("agent workspace memory persists notes per workspace", AgentTests.AgentWorkspaceMemoryPersistsNotesPerWorkspace)],
@@ -183,6 +197,7 @@ public static class HarnessCases
         [new HarnessCase("agent user reply records transcript entry and resumes the task", AgentTests.AgentUserReplyRecordsTranscriptEntryAndResumesTheTask)],
         [new HarnessCase("agent user reply is refused when a tool approval is pending", AgentTests.AgentUserReplyIsRefusedWhenAToolApprovalIsPending)],
         [new HarnessCase("agent approved tool execution reaches the transcript", AgentTests.AgentApprovedToolExecutionReachesTheTranscript)],
+        [new HarnessCase("agent approved create_file records a revertible draft patch", AgentTests.AgentApprovedCreateFileToolRecordsARevertibleDraftPatch)],
         [new HarnessCase("agent fails after three consecutive unparseable responses", AgentTests.AgentFailsAfterThreeConsecutiveUnparseableResponses)],
         [new HarnessCase("agent consecutive step error counter resets on a valid response", AgentTests.AgentConsecutiveStepErrorCounterResetsOnAValidResponse)],
         [new HarnessCase("agent native tool call preserves prose and lists dropped calls", AgentTests.AgentNativeToolCallPreservesProseAndListsDroppedCalls)],
@@ -191,6 +206,7 @@ public static class HarnessCases
         [new HarnessCase("agent tool executor populates structured exit code for run_command", AgentTests.AgentToolExecutorPopulatesStructuredExitCodeForRunCommand)],
         [new HarnessCase("agent records task completion lesson only when prior failure occurred", AgentTests.AgentRecordsTaskCompletionLessonOnlyWhenPriorFailureOccurred)],
         [new HarnessCase("agent records task failure lesson with blocker when task fails", AgentTests.AgentRecordsTaskFailureLessonWithBlockerWhenTaskFails)],
+        [new HarnessCase("agent tracks new lesson ids only for genuinely new lessons", AgentTests.AgentTracksNewLessonIdsOnlyForGenuinelyNewLessons)],
         [new HarnessCase("agent confirms injected lessons on successful task completion", AgentTests.AgentConfirmsInjectedLessonsOnSuccessfulTaskCompletion)],
         [new HarnessCase("agent context builder ranks lessons by goal relevance over raw confidence", AgentTests.AgentContextBuilderRanksLessonsByGoalRelevanceOverRawConfidence)]
     ];

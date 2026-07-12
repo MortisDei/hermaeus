@@ -15,11 +15,13 @@ public sealed class BenchmarkInsightsService : IBenchmarkInsightsService
 {
     private readonly BenchmarkService _benchmarks;
     private readonly ISystemInfoService _systemInfo;
+    private readonly IModelUsageService? _modelUsage;
 
-    public BenchmarkInsightsService(BenchmarkService benchmarks, ISystemInfoService systemInfo)
+    public BenchmarkInsightsService(BenchmarkService benchmarks, ISystemInfoService systemInfo, IModelUsageService? modelUsage = null)
     {
         _benchmarks = benchmarks;
         _systemInfo = systemInfo;
+        _modelUsage = modelUsage;
     }
 
     public async Task<BenchmarkInsightsReport> LoadReportAsync(CancellationToken ct = default)
@@ -38,7 +40,14 @@ public sealed class BenchmarkInsightsService : IBenchmarkInsightsService
             ?? Assembly.GetExecutingAssembly().GetName().Version?.ToString()
             ?? string.Empty;
 
-        return BenchmarkInsightsMath.BuildReport(runs, comparableRuns, currentAppVersion);
+        IReadOnlyList<KindUsageSummary>? usage = null;
+        if (_modelUsage is not null)
+        {
+            try { usage = await _modelUsage.GetKindSummariesAsync(30, ct); }
+            catch { /* usage insights are a best-effort addition; never break the benchmark report */ }
+        }
+
+        return BenchmarkInsightsMath.BuildReport(runs, comparableRuns, currentAppVersion, usage: usage);
     }
 
     /// <summary>

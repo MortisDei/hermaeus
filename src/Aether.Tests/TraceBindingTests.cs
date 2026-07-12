@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
@@ -86,6 +87,45 @@ namespace Aether.Tests
 
             True(sawSources, "StreamQueryAsync should yield a Sources event");
             True(sawTrace, "StreamQueryAsync should yield a Trace event at the end");
+        }
+
+        // r6 01-first-five-minutes.md 1.6: "why did retrieval choose this
+        // chunk" needs a per-signal breakdown on the trace chunk, not just
+        // the final fused score.
+        public static async Task RagQueryStreamTraceChunksCarryScoreBreakdown()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+
+            var store = new SqliteRagStore(settings);
+            await store.InitializeAsync();
+
+            var docs = temp.PathFor("docs");
+            Directory.CreateDirectory(docs);
+            await File.WriteAllTextAsync(Path.Combine(docs, "a.txt"), "apple banana carrot apple apple");
+            await File.WriteAllTextAsync(Path.Combine(docs, "b.txt"), "delta echo foxtrot");
+
+            var dataset = new Aether.Rag.Models.RagDataset { Name = "breakdown" };
+            var pipeline = new RagPipeline(store, new FakeEmbeddingService());
+            await pipeline.IngestDirectoryAsync(dataset, docs);
+
+            var query = new RagQueryService(store, new FakeEmbeddingService(), new FakeLlm(), settings, new NoOpReranker());
+
+            IReadOnlyList<Aether.Rag.Models.RagTraceChunk>? sourceChunks = null;
+            await foreach (var evt in query.StreamQueryAsync(dataset.Id, "apple", new RagQueryOptions(TopK: 3)))
+            {
+                if (evt.Kind == RagStreamEventKind.Sources)
+                    sourceChunks = evt.Sources;
+            }
+
+            True(sourceChunks is { Count: > 0 }, "sources event should carry at least one chunk");
+            var top = sourceChunks![0];
+            True(top.VectorScore.HasValue, "a chunk found via semantic search should carry a vector score");
+            Equal(sourceChunks.Count, top.OutOfCount, "OutOfCount should reflect how many candidates were selected");
+            True(top.PlainLanguageSummary.StartsWith("Ranked 1st of", StringComparison.Ordinal), "the top-ranked chunk's summary should say so");
+            // NoOpReranker never rescored anything, so no chunk should claim a rerank score.
+            True(sourceChunks.All(c => !c.RerankScore.HasValue), "reranker score should be absent when the reranker is a no-op");
         }
 
         // Minimal runtime log implementation for tests

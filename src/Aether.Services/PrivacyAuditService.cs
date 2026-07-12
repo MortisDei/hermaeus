@@ -1,6 +1,7 @@
 using System.Linq;
 using Aether.Core.Models;
 using Aether.Core.Services;
+using Aether.Rag.Storage;
 
 namespace Aether.Services;
 
@@ -9,28 +10,57 @@ namespace Aether.Services;
 /// local machine. Extracted from SystemOverviewViewModel so the checks are
 /// testable and can feed the shared inspection engine.
 /// </summary>
-public sealed class PrivacyAuditService : IInspectionCheckProvider
+public sealed class PrivacyAuditService
 {
     private readonly ISettingsService _settings;
     private readonly ISecretStore _secrets;
     private readonly IRuntimeLogService _logs;
     private readonly IVoiceProviderRegistry _voiceProviders;
     private readonly ITraceStore _traces;
-
-    public IReadOnlyList<string> Views { get; } = ["privacy"];
+    private readonly SqliteRagStore? _ragStore;
 
     public PrivacyAuditService(
         ISettingsService settings,
         ISecretStore secrets,
         IRuntimeLogService logs,
         IVoiceProviderRegistry voiceProviders,
-        ITraceStore traces)
+        ITraceStore traces,
+        SqliteRagStore? ragStore = null)
     {
         _settings = settings;
         _secrets = secrets;
         _logs = logs;
         _voiceProviders = voiceProviders;
         _traces = traces;
+        _ragStore = ragStore;
+    }
+
+    /// <summary>
+    /// One number for "can anything leave my machine": remote chat
+    /// endpoints, a remote voice provider, RAG datasets with web ingest
+    /// enabled, and configured MCP servers (r6 01-first-five-minutes.md
+    /// 1.3). Counts configuration, not activity - an entry counts once it
+    /// is configured, whether or not it has been used yet.
+    /// </summary>
+    public async Task<int> CountOutboundDestinationsAsync(CancellationToken ct = default)
+    {
+        var settings = _settings.Settings;
+        var count = CompositeLlmService.Providers.Count(p => p.IsRemote && IsChatProviderEnabled(p, settings));
+
+        var activeVoiceProvider = Enum.TryParse<VoiceProvider>(settings.Tts.VoiceProvider, ignoreCase: true, out var voiceId)
+            ? _voiceProviders.GetAvailableProviders().FirstOrDefault(p => p.Id == voiceId)
+            : null;
+        if (activeVoiceProvider?.Capabilities.HasFlag(VoiceCapability.Remote) == true)
+            count++;
+
+        if (_ragStore is not null)
+        {
+            var datasets = await _ragStore.GetDatasetsAsync(ct);
+            count += datasets.Count(d => d.Config.EnableWebLoader);
+        }
+
+        count += settings.Mcp.Servers.Count;
+        return count;
     }
 
     public async Task<IReadOnlyList<PrivacyAuditItem>> ScanAsync(CancellationToken ct = default)
@@ -93,12 +123,40 @@ public sealed class PrivacyAuditService : IInspectionCheckProvider
         items.Add(await BuildLocalApiActivityItemAsync(settings, ct));
 
         items.Add(new PrivacyAuditItem(
+            "Model usage counters",
+            "Local only",
+            "Per-feature daily call and token counts are stored locally in traces.db (model_usage table) to power usage-aware benchmark insights. Never transmitted."));
+
+        if (voiceRemote)
+        {
+            var enabledChannels = Enum.GetValues<VoiceChannel>()
+                .Where(c => IsVoiceChannelEnabled(settings.Tts, c))
+                .ToList();
+            if (enabledChannels.Count > 0)
+            {
+                items.Add(new PrivacyAuditItem(
+                    "Voice channels sending text remotely",
+                    "Review",
+                    $"{enabledChannels.Count} channel(s) ({string.Join(", ", enabledChannels)}) speak through {activeVoiceProvider!.Name}, which sends the spoken text to a remote voice provider."));
+            }
+        }
+
+        items.Add(new PrivacyAuditItem(
             "Features that may send data remotely",
             anyRemote ? "Review" : "Local",
             "Remote chat/voice providers can send prompt, document, or voice data outside the local machine when explicitly configured. RAG web ingest remains dataset-scoped and approval driven."));
 
         return items;
     }
+
+    /// <summary>
+    /// Mirrors <c>VoiceOrchestrator.IsChannelEnabled</c>: Chat defaults on,
+    /// every other channel defaults off unless explicitly enabled.
+    /// </summary>
+    private static bool IsVoiceChannelEnabled(TtsSettings tts, VoiceChannel channel) =>
+        tts.Channels.TryGetValue(channel.ToString(), out var config)
+            ? config.Enabled
+            : channel == VoiceChannel.Chat;
 
     /// <summary>
     /// Per-app data-flow visibility for the optional local API host: which
@@ -134,24 +192,6 @@ public sealed class PrivacyAuditService : IInspectionCheckProvider
 
     private static bool IsChatProviderEnabled(ProviderDescriptor descriptor, AppSettings settings) =>
         CompositeLlmService.IsProviderEnabled(descriptor.Tag, settings);
-
-    public async Task<IReadOnlyList<InspectionCheck>> GetChecksAsync(CancellationToken ct = default)
-    {
-        var scannedAt = DateTime.UtcNow;
-        var items = await ScanAsync(ct);
-        return items.Select(i => new InspectionCheck(
-            Id: $"privacy-{i.Name.ToLowerInvariant().Replace(' ', '-')}",
-            View: "privacy",
-            Category: "Privacy",
-            Title: i.Name,
-            Severity: i.Status is "Review" or "Warning" or "Fallback" or "Needs setup" ? CheckSeverity.Warning : CheckSeverity.Info,
-            Summary: i.Status,
-            Detail: i.Detail,
-            FixLabel: string.Empty,
-            CanFix: false,
-            Diagnostics: $"{i.Name}: {i.Status}\n{i.Detail}",
-            DetailJson: $$"""{"scannedAt":"{{scannedAt:O}}"}""")).ToList();
-    }
 
     private static bool HasNetworkExposureFlag(ServerConfig server)
     {

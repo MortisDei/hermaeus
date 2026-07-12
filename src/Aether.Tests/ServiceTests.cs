@@ -231,6 +231,25 @@ namespace Aether.Tests
             True(remote.Detail.Contains("F5-TTS", StringComparison.Ordinal), "detail should name the remote voice provider");
         }
 
+        public static async Task PrivacyAuditCountsOutboundDestinationsAcrossChatVoiceMcp()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var privacyAudit = new PrivacyAuditService(settings, new FakeSecretStore(), new RuntimeLogService(settings), new FakeVoiceProviderRegistry(settings), new SqliteTraceStore(settings));
+
+            Equal(0, await privacyAudit.CountOutboundDestinationsAsync(), "a fresh local-only settings file should count zero outbound destinations");
+
+            settings.Settings.Llm.OpenAiEnabled = true;
+            Equal(1, await privacyAudit.CountOutboundDestinationsAsync(), "an enabled remote chat provider should count once");
+
+            settings.Settings.Tts.VoiceProvider = "F5Tts"; // FakeVoiceProviderRegistry marks F5-TTS as VoiceCapability.Remote
+            Equal(2, await privacyAudit.CountOutboundDestinationsAsync(), "a remote voice provider should add one more");
+
+            settings.Settings.Mcp.Servers.Add(new McpServerConfig { Name = "example" });
+            Equal(3, await privacyAudit.CountOutboundDestinationsAsync(), "each configured MCP server should add one");
+        }
+
         public static async Task PrivacyAuditShowsPerAppLocalApiActivity()
         {
             using var temp = new TempDir();
@@ -256,6 +275,183 @@ namespace Aether.Tests
             Equal("Review", active.Status, "recorded local API calls should surface as review");
             True(active.Detail.Contains("my-app", StringComparison.Ordinal), "detail should name the calling app");
             True(active.Detail.Contains("other-app", StringComparison.Ordinal), "detail should name every distinct calling app");
+        }
+
+        public static async Task ModelUsageRollupUpsertsAndSkipsEmptyModelId()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var traces = new SqliteTraceStore(settings);
+
+            await traces.AppendAsync(new TraceRecord { Kind = TraceKind.Chat, ModelId = "model-a", TotalTokens = 10 });
+            await traces.AppendAsync(new TraceRecord { Kind = TraceKind.Chat, ModelId = "model-a", TotalTokens = 15 });
+            await traces.AppendAsync(new TraceRecord { Kind = TraceKind.Chat, ModelId = string.Empty, TotalTokens = 99 });
+
+            var usage = await traces.GetModelUsageAsync(TraceKind.Chat, 30);
+            var row = usage.Single(u => u.ModelId == "model-a");
+            Equal(2, row.CallCount, "two appends for the same kind/model/day should upsert into one row");
+            Equal(25, row.TotalTokens, "tokens should sum across upserted rows");
+            False(usage.Any(u => string.IsNullOrEmpty(u.ModelId)), "an empty model id should not create a usage row");
+        }
+
+        public static async Task ModelUsageRollupSurvivesTracePruning()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var traces = new SqliteTraceStore(settings);
+
+            for (var i = 0; i < SqliteTraceStore.MaxTracesPerKind + 20; i++)
+                await traces.AppendAsync(new TraceRecord { Kind = TraceKind.Chat, ModelId = "model-a", TotalTokens = 1 });
+
+            var recent = await traces.GetRecentAsync(TraceKind.Chat, 1000);
+            Equal(SqliteTraceStore.MaxTracesPerKind, recent.Count, "traces should still prune to the per-kind cap");
+
+            var usage = await traces.GetModelUsageAsync(TraceKind.Chat, 30);
+            Equal(SqliteTraceStore.MaxTracesPerKind + 20, usage.Single().CallCount, "model_usage rollup should not be pruned when traces are pruned");
+        }
+
+        public static async Task ModelUsageServiceSummarizesDominantModelPerKind()
+        {
+            IReadOnlyList<ModelUsageRow> rows =
+            [
+                new(TraceKind.Chat, "model-a", 8, 800),
+                new(TraceKind.Chat, "model-b", 2, 200),
+                new(TraceKind.Rag, "model-c", 5, 500)
+            ];
+
+            var summaries = ModelUsageService.Summarize(rows);
+
+            var chat = summaries.Single(s => s.Kind == TraceKind.Chat);
+            Equal(10, chat.TotalCalls, "chat total calls should sum across models");
+            Equal("model-a", chat.Dominant!.ModelId, "the model with the most calls should be dominant and first");
+            Equal(0.8, chat.Dominant.Share, "share should be call count over kind total");
+
+            var rag = summaries.Single(s => s.Kind == TraceKind.Rag);
+            Equal(1, rag.Models.Count, "a kind with a single model should still summarize");
+            await Task.CompletedTask;
+        }
+
+        public static async Task PrivacyAuditDisclosesModelUsageCounters()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var privacyAudit = new PrivacyAuditService(settings, new FakeSecretStore(), new RuntimeLogService(settings), new FakeVoiceProviderRegistry(settings), new SqliteTraceStore(settings));
+
+            var items = await privacyAudit.ScanAsync();
+
+            True(items.Any(i => i.Name == "Model usage counters" && i.Detail.Contains("Never transmitted", StringComparison.Ordinal)),
+                "privacy audit should always disclose the local model usage rollup");
+        }
+
+        public static async Task PrivacyAuditFlagsEnabledChannelsOnRemoteVoiceProvider()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.Tts.VoiceProvider = "F5Tts"; // FakeVoiceProviderRegistry marks F5-TTS as VoiceCapability.Remote
+            settings.Settings.Tts.Channels["Chat"] = new VoiceChannelConfig { Enabled = true };
+            var privacyAudit = new PrivacyAuditService(settings, new FakeSecretStore(), new RuntimeLogService(settings), new FakeVoiceProviderRegistry(settings), new SqliteTraceStore(settings));
+
+            var items = await privacyAudit.ScanAsync();
+            True(items.Any(i => i.Name == "Voice channels sending text remotely" && i.Detail.Contains("Chat", StringComparison.Ordinal)),
+                "an enabled channel on a remote voice provider should be flagged by name");
+
+            settings.Settings.Tts.VoiceProvider = "KokoroNative";
+            var localItems = await privacyAudit.ScanAsync();
+            False(localItems.Any(i => i.Name == "Voice channels sending text remotely"), "a local voice provider should not trigger the remote-channel item");
+        }
+
+        public static Task AgentContextReceiptOmitsEmptySectionsAndCountsPopulatedOnes()
+        {
+            var pack = new Aether.Agent.Models.AgentContextPack();
+            pack.RetrievedMemory.Add(new Aether.Agent.Models.AgentRetrievedItem("workspace-memory", "note-1", "remember this", 1.0));
+            pack.RetrievedMemory.Add(new Aether.Agent.Models.AgentRetrievedItem("workspace-memory", "note-2", "and this too", 1.0));
+            pack.Lessons.Add(new Aether.Agent.Models.AgentRetrievedItem("lesson", "lesson-1", "a captured lesson", 0.8));
+            // RetrievedFiles, ProjectInstructions, and RAG (Source == "rag" inside RetrievedMemory) are left empty.
+
+            var sections = Aether.Agent.Services.AgentContextReceiptBuilder.Build(pack);
+
+            Equal(2, sections.Count, "only the two sections that actually contributed items should appear");
+            var memory = sections.Single(s => s.SectionLabel == "Memory");
+            Equal(2, memory.ItemCount, "memory section should count both injected items");
+            True(memory.EstimatedTokens > 0, "a populated section should have a nonzero token estimate");
+            Equal("note-1, note-2", string.Join(", ", memory.ItemIdentifiers), "identifiers should list the item titles in order");
+
+            var lessons = sections.Single(s => s.SectionLabel == "Lessons");
+            Equal(1, lessons.ItemCount, "lessons section should count the one captured lesson");
+
+            False(sections.Any(s => s.SectionLabel == "RAG"), "RAG should be omitted, not shown empty");
+            False(sections.Any(s => s.SectionLabel == "Workspace files"), "workspace files should be omitted, not shown empty");
+            False(sections.Any(s => s.SectionLabel == "Project instructions"), "project instructions should be omitted, not shown empty");
+            return Task.CompletedTask;
+        }
+
+        public static Task RagTraceChunkPlainLanguageSummaryIsDeterministic()
+        {
+            var strong = new Aether.Rag.Models.RagTraceChunk
+            {
+                Rank = 2, OutOfCount = 8, VectorScore = 0.82f, MatchedTerm = "migration", MatchedTermCount = 3, RerankScore = 0.9f
+            };
+            Equal("Ranked 2nd of 8: strong semantic match, term 'migration' matched 3 times, reranker confirmed this ranking.",
+                strong.PlainLanguageSummary, "all three signals present should render in a fixed order");
+
+            var vectorOnly = new Aether.Rag.Models.RagTraceChunk { Rank = 1, OutOfCount = 5, VectorScore = 0.3f };
+            Equal("Ranked 1st of 5: weak semantic match.", vectorOnly.PlainLanguageSummary,
+                "a low vector score with no other signals should still render a valid sentence");
+
+            var moderate = new Aether.Rag.Models.RagTraceChunk { Rank = 3, OutOfCount = 3, VectorScore = 0.6f };
+            Equal("Ranked 3rd of 3: moderate semantic match.", moderate.PlainLanguageSummary, "0.5-0.75 should classify as moderate");
+
+            var noSignals = new Aether.Rag.Models.RagTraceChunk { Rank = 11, OutOfCount = 20 };
+            Equal("Ranked 11th of 20.", noSignals.PlainLanguageSummary, "with no scored signals the summary should still name rank and count");
+
+            var singleMatch = new Aether.Rag.Models.RagTraceChunk { Rank = 1, OutOfCount = 1, MatchedTerm = "apple", MatchedTermCount = 1 };
+            Equal("Ranked 1st of 1: term 'apple' matched 1 time.", singleMatch.PlainLanguageSummary, "a single match should not pluralize 'time'");
+
+            return Task.CompletedTask;
+        }
+
+        // r6 02-usage-history-recommendations.md 2.3: the Doctor benchmark
+        // advisory should append a usage-aware sentence when a Chat usage
+        // insight recommends a switch, even standalone (no ranking-only
+        // condition needed) so long as it clears the same gap threshold.
+        public static async Task DoctorBenchmarkAdvisoryAppendsUsageAwareSentence()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            settings.Settings.Llm.DefaultModel = "model-a";
+
+            var dominant = new ModelAggregate("model-a", "Dominant Model", "", "llama.cpp", 3, 30, 0.5, 10, 1, 0.4, 2.0, DateTime.UtcNow, false);
+            var better = new ModelAggregate("model-b", "Better Model", "", "llama.cpp", 3, 30, 0.95, 60, 1, 0.9, 5.5, DateTime.UtcNow, false);
+            var usageInsight = new UsageInsight(
+                TraceKind.Chat, "model-a", "model-a", 1.0, 25, "Better Model", 50.0,
+                "You mostly use model-a for chat; your benchmarks rank Better Model higher for overall tasks.");
+            var report = new BenchmarkInsightsReport(
+                TotalRuns: 6, ComparableRuns: 6, ModelCount: 2, OldestComparableRun: DateTime.UtcNow.AddDays(-5),
+                Models: [better, dominant], TagLeaderboards: [], Comparisons: [], Caveats: [],
+                UsageInsights: [usageInsight]);
+
+            var doctor = new DoctorService(
+                settings,
+                new RuntimeProfileService(settings),
+                new FakeVoiceProviderRegistry(settings),
+                new FakeSecretStore(),
+                new SqliteRagStore(settings),
+                new ThrowingEmbeddingService(),
+                new FakeSystemInfo(),
+                new PythonHealthValidator(),
+                new NoOpReranker(),
+                benchmarkInsights: new FakeBenchmarkInsightsService(report));
+
+            var scan = await doctor.ScanAsync();
+            var check = scan.Checks.SingleOrDefault(c => c.Key == "benchmark-advisory");
+            True(check is not null, "a usage insight with a recommendation should produce a benchmark-advisory check");
+            Equal(DoctorCheckStatus.Info, check!.Status, "the usage-aware advisory should stay Info severity, never Warning/Error");
+            True(check.Detail.Contains("Usage-aware:", StringComparison.Ordinal), "the usage-aware sentence should be appended to the check detail");
+            True(check.Detail.Contains("Better Model", StringComparison.Ordinal), "the detail should name the recommended model");
         }
 
         public static Task LocalAiAssetsDetectAndApplyPaths()
@@ -1031,48 +1227,12 @@ namespace Aether.Tests
             return Task.CompletedTask;
         }
 
-        private sealed class FakeCheckProvider : IInspectionCheckProvider
-        {
-            private readonly Func<Task<IReadOnlyList<InspectionCheck>>> _factory;
-            public IReadOnlyList<string> Views { get; }
-
-            public FakeCheckProvider(IReadOnlyList<string> views, Func<Task<IReadOnlyList<InspectionCheck>>> factory)
-            {
-                Views = views;
-                _factory = factory;
-            }
-
-            public Task<IReadOnlyList<InspectionCheck>> GetChecksAsync(CancellationToken ct = default) => _factory();
-        }
-
-        private static InspectionCheck Check(string id, string view, CheckSeverity severity = CheckSeverity.Ready) =>
-            new(id, view, "Test", id, severity, "summary", "detail", string.Empty, false, string.Empty);
-
-        public static async Task InspectionEngineFiltersProvidersByView()
-        {
-            var doctorProvider = new FakeCheckProvider(["doctor"], () => Task.FromResult<IReadOnlyList<InspectionCheck>>([Check("d1", "doctor")]));
-            var trustProvider = new FakeCheckProvider(["trust"], () => Task.FromResult<IReadOnlyList<InspectionCheck>>([Check("t1", "trust")]));
-            var engine = new InspectionEngine([doctorProvider, trustProvider]);
-
-            var doctorReport = await engine.RunAsync("doctor");
-            True(doctorReport.Checks.Select(c => c.Id).SequenceEqual(["d1"]), "doctor view should only include doctor checks");
-
-            var allReport = await engine.RunAsync();
-            Equal(2, allReport.Checks.Count, "null view should run every provider");
-        }
-
-        public static async Task InspectionEngineReportsProviderFailureAsErrorCheck()
-        {
-            var failing = new FakeCheckProvider(["doctor"], () => throw new InvalidOperationException("boom"));
-            var engine = new InspectionEngine([failing]);
-
-            var report = await engine.RunAsync("doctor");
-            var check = report.Checks.Single();
-            Equal(CheckSeverity.Error, check.Severity, "a throwing provider should surface as an error check, not crash the scan");
-            True(check.Diagnostics.Contains("boom", StringComparison.Ordinal), "diagnostics should include the exception detail");
-        }
-
-        public static async Task DoctorTrustPrivacyContributeChecksToOwnView()
+        // r6 3.1: InspectionEngine/IInspectionCheckProvider were a dead
+        // aggregation path (nothing consumed InspectionEngine.RunAsync); each
+        // of Doctor/Trust/PrivacyAuditService owns its checks and its own
+        // view already, so this test now verifies that directly instead of
+        // through the removed engine.
+        public static async Task DoctorTrustPrivacyEachProduceOwnChecks()
         {
             using var temp = new TempDir();
             var settings = NewSettings(temp);
@@ -1088,19 +1248,17 @@ namespace Aether.Tests
                 new FakeSystemInfo(),
                 new PythonHealthValidator(),
                 new NoOpReranker());
-            var trust = new TrustService(settings);
+            var trust = new TrustService();
             var privacy = new PrivacyAuditService(settings, new FakeSecretStore(), new RuntimeLogService(settings), new FakeVoiceProviderRegistry(settings), new SqliteTraceStore(settings));
-            var engine = new InspectionEngine([doctor, trust, privacy]);
 
-            var doctorReport = await engine.RunAsync("doctor");
-            True(doctorReport.Checks.Count > 0, "doctor view should include Doctor's own checks");
-            True(doctorReport.Checks.All(c => c.View == "doctor"), "doctor view should not leak trust or privacy checks");
+            var doctorReport = await doctor.ScanAsync();
+            True(doctorReport.Checks.Count > 0, "doctor should produce its own checks");
 
-            var trustReport = await engine.RunAsync("trust");
-            True(trustReport.Checks.All(c => c.View == "trust"), "trust view should only contain trust checks");
+            var trustReport = await trust.ScanAsync(settings.Settings);
+            True(trustReport.Items.Count > 0, "trust should produce its own items");
 
-            var privacyReport = await engine.RunAsync("privacy");
-            True(privacyReport.Checks.Count > 0, "privacy view should include Privacy Audit's checks");
+            var privacyItems = await privacy.ScanAsync();
+            True(privacyItems.Count > 0, "privacy audit should produce its own items");
         }
 
         public static Task SourceStringsAvoidLongDashes()
@@ -1486,6 +1644,23 @@ namespace Aether.Tests
             False(settings.Settings.Ui.EnableGlobalHotkeys, "global hotkey setting should save when disabled");
         }
 
+        public static async Task SettingsSavePersistsShowNavLabelsPreference()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var vm = NewSettingsViewModel(settings, new FakeSecretStore());
+            False(vm.Ui.ShowNavLabels, "toolbar labels should default off, matching the pre-r6 icon-only layout");
+
+            vm.Ui.ShowNavLabels = true;
+            await vm.SaveCommand.ExecuteAsync(null);
+            True(settings.Settings.Ui.ShowNavLabels, "toolbar label preference should persist when enabled");
+
+            vm.Ui.ShowNavLabels = false;
+            await vm.SaveCommand.ExecuteAsync(null);
+            False(settings.Settings.Ui.ShowNavLabels, "toolbar label preference should persist when disabled");
+        }
+
         public static Task ServerProcessArgumentsAreSafe()
         {
             var args = ServerProcessManager.BuildLaunchArguments(new ServerConfig
@@ -1558,6 +1733,51 @@ namespace Aether.Tests
                 True(ex.Message.Contains("--pooling mean", StringComparison.Ordinal), "error should suggest an OAI-compatible pooling mode");
                 True(ex.Message.Contains("embedding model", StringComparison.OrdinalIgnoreCase), "error should suggest using an embedding model");
             }
+        }
+
+        public static async Task ConversationStoreRoundTripsPerMessageModelAttribution()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var store = new ConversationStore(settings);
+            await store.InitializeAsync();
+
+            var conversation = new Conversation
+            {
+                Id = "conv-model-attribution",
+                Title = "Model switch mid-chat",
+                Messages =
+                [
+                    new Message { Role = "user", Content = "First question" },
+                    new Message { Role = "assistant", Content = "First answer", ModelId = "model-a", DurationMs = 1200 },
+                    new Message { Role = "user", Content = "Second question" },
+                    new Message { Role = "assistant", Content = "Second answer", ModelId = "model-b", DurationMs = 800 }
+                ]
+            };
+            await store.SaveAsync(conversation);
+
+            var reloaded = await store.GetByIdAsync("conv-model-attribution");
+            True(reloaded is not null, "conversation should reload");
+            var answers = reloaded!.Messages.Where(m => m.Role == "assistant").ToList();
+            Equal("model-a", answers[0].ModelId, "each message should keep the model that actually produced it, not the conversation's current model");
+            Equal("model-b", answers[1].ModelId, "a mid-conversation model switch should not overwrite earlier messages' attribution");
+            Equal(1200, answers[0].DurationMs, "duration should round-trip alongside model id");
+
+            // Pre-r6 rows have no modelId in their messages_json; simulate by
+            // writing a legacy blob directly and confirming it still loads.
+            await using var c = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={Path.Combine(temp.PathFor("data"), "conversations.db")}");
+            await c.OpenAsync();
+            var legacyJson = """[{"Id":"legacy-1","Role":"user","Content":"Hi"},{"Id":"legacy-2","Role":"assistant","Content":"Hello"}]""";
+            var update = c.CreateCommand();
+            update.CommandText = "UPDATE conversations SET messages_json = $mj WHERE id = $id";
+            update.Parameters.AddWithValue("$mj", legacyJson);
+            update.Parameters.AddWithValue("$id", "conv-model-attribution");
+            await update.ExecuteNonQueryAsync();
+
+            var legacyReloaded = await store.GetByIdAsync("conv-model-attribution");
+            True(legacyReloaded is not null, "legacy messages_json without modelId should still load");
+            True(legacyReloaded!.Messages.All(m => m.ModelId == string.Empty), "legacy messages should default to an empty model id, not throw");
         }
 
         public static async Task ConversationAutoSummaryStoresMemoriesWhenImportant()
@@ -2114,6 +2334,13 @@ namespace Aether.Tests
             public Task<bool> InstallLlamaServerUpdateAsync(IProgress<string> progress, System.Threading.CancellationToken ct = default) => Task.FromResult(true);
             public Task<bool> InstallNativeKokoroAssetsAsync(System.Threading.CancellationToken ct = default) => Task.FromResult(true);
             public Task<bool> InstallNativeKokoroAssetsAsync(IProgress<string> progress, System.Threading.CancellationToken ct = default) => Task.FromResult(true);
+        }
+
+        private sealed class FakeBenchmarkInsightsService : IBenchmarkInsightsService
+        {
+            private readonly BenchmarkInsightsReport _report;
+            public FakeBenchmarkInsightsService(BenchmarkInsightsReport report) => _report = report;
+            public Task<BenchmarkInsightsReport> LoadReportAsync(System.Threading.CancellationToken ct = default) => Task.FromResult(_report);
         }
 
         private sealed class ThrowingEmbeddingService : IEmbeddingService

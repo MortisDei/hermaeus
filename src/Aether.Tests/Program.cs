@@ -96,6 +96,71 @@ internal static class AgentTests
     False(item.LastApprovalApproved ?? true, "review queue should surface the latest approval decision");
     }
 
+    // r6 01-first-five-minutes.md 1.7: the review queue is built from a
+    // lightweight SQLite index that never stored PendingToolAction; a
+    // WaitingForUser entry now gets it filled in from a full task load so
+    // the queue can show risk and reason, not just status.
+    public static async Task AgentReviewQueueIncludesPendingToolActionForWaitingTasks()
+    {
+    using var temp = new TempDir();
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    await store.InitializeAsync();
+
+    var state = new AgentTaskState
+    {
+        Goal = "Run a gated command",
+        Status = AgentTaskStatus.WaitingForUser,
+        ActiveStep = "Wait for approval",
+        Summary = "Needs review",
+        PendingToolAction = new AgentPendingToolAction
+        {
+            ToolName = "run_command",
+            RiskLevel = AgentRiskLevel.Medium,
+            Reason = "Template-family command execution always requires approval.",
+            Arguments = new Dictionary<string, object?> { ["command"] = "npm test" }
+        }
+    };
+    await store.SaveAsync(state);
+
+    var queue = await store.ListReviewQueueAsync();
+    var item = queue.Single(entry => entry.TaskId == state.TaskId);
+    True(item.PendingToolAction is not null, "a waiting task should have its pending tool action populated");
+    Equal("run_command", item.PendingToolAction!.ToolName, "pending tool name should carry through to the queue");
+    Equal(AgentRiskLevel.Medium, item.PendingToolAction.RiskLevel, "pending risk level should carry through");
+    Equal("Template-family command execution always requires approval.", item.PendingToolAction.Reason,
+        "the safety gate's reason should carry through so approval is never a bare status label");
+    }
+
+    public static Task AgentApprovalPreviewDescribesNpmScriptBody()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    File.WriteAllText(Path.Combine(root, "package.json"), """{"scripts": {"test": "vitest run --coverage"}}""");
+
+    var pending = new AgentPendingToolAction
+    {
+        ToolName = "run_command",
+        Arguments = new Dictionary<string, object?> { ["command"] = "npm run test" }
+    };
+    var preview = AgentApprovalPreview.Describe(pending, new AgentWorkspaceOptions(root));
+    Equal("Runs: vitest run --coverage", preview, "an npm run approval should show the exact script body from package.json");
+
+    var dotnetPending = new AgentPendingToolAction
+    {
+        ToolName = "run_command",
+        Arguments = new Dictionary<string, object?> { ["command"] = "dotnet test" }
+    };
+    var dotnetPreview = AgentApprovalPreview.Describe(dotnetPending, new AgentWorkspaceOptions(root));
+    True(dotnetPreview.Contains("workspace-defined", StringComparison.Ordinal), "dotnet test should show the fixed provenance note");
+
+    var editPending = new AgentPendingToolAction { ToolName = "edit_file" };
+    Equal(string.Empty, AgentApprovalPreview.Describe(editPending, new AgentWorkspaceOptions(root)), "non-command tools should have no recipe preview");
+    return Task.CompletedTask;
+    }
+
     public static async Task AgentTaskStateUsesSqliteIndexForLists()
     {
     using var temp = new TempDir();
@@ -1293,6 +1358,56 @@ internal static class AgentTests
         "the approved tool's result should reach the transcript, not just ToolResults' last-five window");
     }
 
+    private const string CreateFileToolResponse = """
+        {
+          "thought_summary": "Adding a new file.",
+          "current_step": "Wait for approval before any write.",
+          "next_action": {
+            "type": "tool",
+            "tool_name": "create_file",
+            "arguments": { "relative_path": "notes.md", "content": "brand new" },
+            "requires_approval": true,
+            "risk_level": "medium"
+          },
+          "state_update": { "completed": [], "pending": [], "new_facts": [], "blockers": [] },
+          "user_message": "Ready to create notes.md."
+        }
+        """;
+
+    // r6 01-first-five-minutes.md 1.8: edit_file/create_file/apply_draft_patch
+    // approved directly through AppendApprovalAsync's PendingToolAction path
+    // (as opposed to the manual draft_patch review queue) should still end up
+    // as a revertible entry in DraftPatches, so the same Revert affordance
+    // covers both approval paths.
+    public static async Task AgentApprovedCreateFileToolRecordsARevertibleDraftPatch()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    var tools = new AgentWorkspaceTools();
+    var llm = new FakeSequencedAgentLlm([CreateFileToolResponse]);
+    var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), llm, settings: settings, workspaceTools: tools);
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-sequenced-agent");
+
+    var state = await service.CreateTaskAsync("Add notes", options);
+    await service.RunStepAsync(state.TaskId, options);
+    await service.AppendApprovalAsync(state.TaskId, "create_file", approved: true, options);
+
+    var reloaded = await store.LoadAsync(state.TaskId);
+    var recorded = reloaded!.DraftPatches.Single(p => p.RelativePath == "notes.md");
+    Equal(AgentDraftPatchStatus.Applied, recorded.Status, "an approved create_file should be recorded as an applied, revertible patch");
+    False(recorded.PreImageExisted, "notes.md did not exist before create_file ran");
+    Equal("brand new", await File.ReadAllTextAsync(Path.Combine(root, "notes.md")), "create_file should have written the approved content");
+
+    var patchReview = new AgentPatchReviewService(tools, store, service);
+    var error = await patchReview.RevertAsync(reloaded, recorded, options);
+    Equal(string.Empty, error, "reverting an approved create_file's recorded patch should succeed");
+    False(File.Exists(Path.Combine(root, "notes.md")), "reverting a create_file-originated patch should delete the file it created");
+    }
+
     public static async Task AgentFailsAfterThreeConsecutiveUnparseableResponses()
     {
     using var temp = new TempDir();
@@ -1517,6 +1632,46 @@ internal static class AgentTests
     True(lessons.Any(l => l.Kind == AgentLessonKind.Task && l.Outcome == AgentLessonOutcome.Failed
         && l.Claim.Contains("unparseable", StringComparison.OrdinalIgnoreCase)),
         "a task that failed via the parse-error path should record a Failed task lesson naming the blocker");
+    }
+
+    // r6 03-platform-cleanup.md 3.3: a genuinely new lesson should be
+    // tracked on the task that created it (for the review strip), but
+    // reinforcing that same lesson from a later task must not re-flag it.
+    public static async Task AgentTracksNewLessonIdsOnlyForGenuinelyNewLessons()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var taskStore = new FileAgentTaskStateStore(settings);
+    var lessonStore = new SqliteLessonStore(settings);
+    var tools = new AgentWorkspaceTools();
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-sequenced-agent");
+
+    var firstLlm = new FakeSequencedAgentLlm(["not json", "still not json", "nope"]);
+    var firstService = new AgentService(taskStore, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), firstLlm, settings: settings, lessons: lessonStore);
+    var firstState = await firstService.CreateTaskAsync("Investigate deeply", options);
+    AgentStepResult firstStep = null!;
+    for (var i = 0; i < 3; i++)
+        firstStep = await firstService.RunStepAsync(firstState.TaskId, options);
+
+    Equal(1, firstStep.State.NewLessonIds.Count, "the task that actually creates a lesson should track exactly one new lesson id");
+    var createdId = firstStep.State.NewLessonIds[0];
+    var created = await lessonStore.GetByIdAsync(createdId);
+    True(created is not null, "the tracked id should resolve to a real lesson");
+    Equal(1, created!.EvidenceCount, "a freshly created lesson should have evidence count 1");
+
+    var secondLlm = new FakeSequencedAgentLlm(["not json", "still not json", "nope"]);
+    var secondService = new AgentService(taskStore, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), secondLlm, settings: settings, lessons: lessonStore);
+    var secondState = await secondService.CreateTaskAsync("Investigate deeply", options);
+    AgentStepResult secondStep = null!;
+    for (var i = 0; i < 3; i++)
+        secondStep = await secondService.RunStepAsync(secondState.TaskId, options);
+
+    Equal(0, secondStep.State.NewLessonIds.Count, "reinforcing the same lesson signature from a second task should not flag it as new again");
+    var reinforced = await lessonStore.GetByIdAsync(createdId);
+    Equal(2, reinforced!.EvidenceCount, "the same lesson should still get reinforced by the second task's evidence");
     }
 
     public static async Task AgentConfirmsInjectedLessonsOnSuccessfulTaskCompletion()

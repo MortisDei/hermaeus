@@ -50,4 +50,11 @@ public class UiSettings
     /// Enable Windows system-wide hotkeys (requires elevated privileges on Windows).
     /// </summary>
     public bool EnableGlobalHotkeys { get; set; } = false;
+
+    /// <summary>
+    /// Show a text label next to each icon in the top toolbar, instead of
+    /// relying on hover tooltips to discover what each icon does
+    /// (r6 01-first-five-minutes.md 1.1).
+    /// </summary>
+    public bool ShowNavLabels { get; set; } = false;
 }

@@ -177,4 +177,77 @@ public sealed class BenchmarkInsightsMathTests
         var withGpu = new SystemSnapshot { Gpus = [new GpuInfo { Name = "RTX 4060", MemoryTotalBytes = 8_000_000_000 }] };
         Assert.False(BenchmarkInsightsMath.IsHardwareComparable(withGpu, new SystemSnapshot()));
     }
+
+    // r6 02-usage-history-recommendations.md 2.3: usage-aware insights.
+
+    private static KindUsageSummary ChatUsage(int callCount, string dominantModelId) =>
+        new(TraceKind.Chat, callCount, [new ModelUsageShare(dominantModelId, callCount, callCount * 100, 1.0)]);
+
+    [Fact]
+    public void BuildReport_omits_usage_insight_below_the_call_floor()
+    {
+        var now = DateTime.UtcNow;
+        var runs = new[]
+        {
+            BuildRun("model-a", "Model A", "", "", 10, 0.8, 20, now.AddDays(-1)),
+            BuildRun("model-a", "Model A", "", "", 10, 0.8, 20, now)
+        };
+
+        var below = BenchmarkInsightsMath.BuildReport(runs, runs, "0.10.0.0", now, usage: [ChatUsage(19, "model-a")]);
+        Assert.Empty(below.UsageInsightsOrEmpty);
+
+        var atFloor = BenchmarkInsightsMath.BuildReport(runs, runs, "0.10.0.0", now, usage: [ChatUsage(20, "model-a")]);
+        Assert.Single(atFloor.UsageInsightsOrEmpty);
+    }
+
+    [Fact]
+    public void BuildReport_usage_insight_has_no_recommendation_when_dominant_model_is_already_the_leaderboard_top()
+    {
+        var now = DateTime.UtcNow;
+        var runs = new[]
+        {
+            BuildRun("model-a", "Model A", "", "", 10, 0.9, 40, now.AddDays(-1)),
+            BuildRun("model-a", "Model A", "", "", 10, 0.9, 40, now),
+            BuildRun("model-b", "Model B", "", "", 10, 0.3, 5, now.AddDays(-1)),
+            BuildRun("model-b", "Model B", "", "", 10, 0.3, 5, now)
+        };
+
+        var report = BenchmarkInsightsMath.BuildReport(runs, runs, "0.10.0.0", now, usage: [ChatUsage(30, "model-a")]);
+
+        var insight = Assert.Single(report.UsageInsightsOrEmpty);
+        Assert.Null(insight.RecommendedModelName);
+        Assert.Contains("model-a", insight.Sentence, StringComparison.Ordinal);
+        Assert.DoesNotContain(";", insight.Sentence, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BuildReport_usage_insight_recommends_a_switch_when_the_leaderboard_top_clears_the_gap_threshold()
+    {
+        var now = DateTime.UtcNow;
+        var runs = new[]
+        {
+            BuildRun("model-a", "Dominant Model", "", "", 10, 0.5, 10, now.AddDays(-1)),
+            BuildRun("model-a", "Dominant Model", "", "", 10, 0.5, 10, now),
+            BuildRun("model-b", "Better Model", "", "", 10, 0.95, 60, now.AddDays(-1)),
+            BuildRun("model-b", "Better Model", "", "", 10, 0.95, 60, now)
+        };
+
+        var report = BenchmarkInsightsMath.BuildReport(runs, runs, "0.10.0.0", now, usage: [ChatUsage(25, "model-a")]);
+
+        var insight = Assert.Single(report.UsageInsightsOrEmpty);
+        Assert.Equal("Better Model", insight.RecommendedModelName);
+        Assert.True(insight.RankingGapPoints > 10);
+        Assert.Contains("model-a", insight.Sentence, StringComparison.Ordinal);
+        Assert.Contains("Better Model", insight.Sentence, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BuildReport_usage_insight_describes_usage_without_recommendation_when_there_is_no_benchmark_data()
+    {
+        var report = BenchmarkInsightsMath.BuildReport([], [], "0.10.0.0", DateTime.UtcNow, usage: [ChatUsage(50, "model-a")]);
+
+        var insight = Assert.Single(report.UsageInsightsOrEmpty);
+        Assert.Null(insight.RecommendedModelName);
+        Assert.Contains("model-a", insight.Sentence, StringComparison.Ordinal);
+    }
 }

@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Security.Cryptography;
 using Aether.Core.Models;
 using Aether.Core.Services;
@@ -214,6 +215,35 @@ public partial class DataManagementSettingsViewModel : ObservableObject
     [RelayCommand] private void BrowseBackupDirectory() => RequestBackupDirectoryPicker?.Invoke();
     [RelayCommand] private void BrowseRestoreBackup() => RequestRestoreBackupPicker?.Invoke();
 
+    /// <summary>
+    /// Opens the live resolved data root (respecting a configured override,
+    /// not the raw text box) in the OS file explorer, so "where is my data
+    /// stored" (r6 01-first-five-minutes.md 1.2) has a one-click answer.
+    /// </summary>
+    [RelayCommand]
+    private void OpenDataRoot() => OpenFolder(_resolveDataRoot());
+
+    [RelayCommand]
+    private void OpenLocalAiAssetsRoot() => OpenFolder(LocalAiAssetsRoot);
+
+    private void OpenFolder(string path)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
+            {
+                SettingsError = "That folder does not exist yet.";
+                return;
+            }
+
+            Process.Start(new ProcessStartInfo { FileName = Path.GetFullPath(path), UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            SettingsError = ex.Message;
+        }
+    }
+
     [RelayCommand]
     private async Task BackupDataAsync()
     {
@@ -282,6 +312,7 @@ public partial class UiSettingsViewModel : ObservableObject
     [ObservableProperty] private bool _enableLocalHotkeys = true;
     [ObservableProperty] private bool _enableGlobalHotkeys;
     [ObservableProperty] private string _globalHotkeyStatus = "System-wide hotkeys are off.";
+    [ObservableProperty] private bool _showNavLabels;
 
     public string[] Themes { get; } = ["System", "Dark", "Light"];
 
@@ -296,6 +327,7 @@ public partial class UiSettingsViewModel : ObservableObject
         MinimizeToTray = settings.Ui.MinimizeToTray;
         EnableLocalHotkeys = settings.Ui.EnableLocalHotkeys;
         EnableGlobalHotkeys = settings.Ui.EnableGlobalHotkeys;
+        ShowNavLabels = settings.Ui.ShowNavLabels;
     }
 
     public void ApplyTo(AppSettings settings)
@@ -309,6 +341,7 @@ public partial class UiSettingsViewModel : ObservableObject
         settings.Ui.MinimizeToTray = MinimizeToTray;
         settings.Ui.EnableLocalHotkeys = EnableLocalHotkeys;
         settings.Ui.EnableGlobalHotkeys = EnableGlobalHotkeys;
+        settings.Ui.ShowNavLabels = ShowNavLabels;
     }
 }
 

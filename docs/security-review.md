@@ -1,8 +1,16 @@
 # Aether Security Review And Threat Model
 
-Last refreshed for `0.9.41-alpha` (Local API and MCP rows only; the rest of
-this document has not been re-verified against every release since
-`0.9.14-alpha` and may describe earlier behavior for untouched areas).
+Last refreshed for `0.11.0-alpha`. The `0.10.0-alpha` pass re-verified the
+areas that changed in r3-r5 (agent tool execution, run_command recipes,
+lesson store, voice orchestration, benchmark insights) directly against the
+code, and confirmed via git history that the Local API, MCP bridge, secret
+store, redaction, process managers, and RAG ingest code were unchanged since
+their `0.9.41-alpha` verification, so those rows carried forward. r6 then
+implemented two of that pass's own follow-ups (recipe transparency in the
+agent approval prompt, and a lesson review moment) plus one new write path
+(applied-patch revert) with the same review-then-verify treatment below;
+Local API, MCP, secrets, redaction, and RAG remain unchanged since
+`0.9.41-alpha`.
 
 Aether is a local-first desktop application. The primary security goal is to
 keep user data, model paths, API keys, local runtimes, and generated voice audio
@@ -65,7 +73,11 @@ penetration-test report.
 | Logs | Runtime and visible process logs pass through redaction for API keys, bearer tokens, GitHub-style tokens, AWS-style access keys, Azure-style key assignments, query-string secrets, password parameters, and home paths. Log buffers are capped and archive rotation is collision-safe. | Redaction is best effort and may miss provider-specific token formats or sensitive filenames outside the home path. |
 | RAG ingest | Local `.txt`/`.md` ingest is the default. Optional web URL ingest is off by default, accepts only explicit HTTP(S) URLs, caps pages, strips script/style blocks from HTML, validates prompt templates, and verifies pinned embedding model and ONNX reranker assets with SHA256. | Large local files are warned, not refused. Web text extraction is intentionally simple and should not be treated as a browser sandbox or crawler. |
 | Voice backends | Kokoro (native) is the default voice provider and needs no Python subprocess; its ONNX model and voice files are never downloaded on the synthesis path, only through an explicit Doctor install action that verifies each file against a pinned SHA256 hash before it is ever loaded, matching the RAG reranker's asset posture. Generated voice preview audio is handled in memory by the app workflow. Managed Python-based Kokoro and XTTS processes (now `Advanced` fallback providers) are killed on stop/exit. Local AI setup no longer asks for a Python venv when the active provider needs none (native Kokoro, OpenAI). | Configured XTTS output directory exists for server operation and could contain files created by the external XTTS server. First run needs one explicit Doctor install click before native Kokoro can synthesize speech. |
-| Agent workspace tools | Agent file tools are constrained to the selected workspace, reject symlink ancestors, skip symlinked entries, use case-sensitive path checks on case-sensitive platforms, validate task IDs with a safe allowlist, and block unsupported shell/network/install/commit/push actions. | Approved draft patch application can still overwrite intended workspace files, so review remains mandatory. |
+| Agent workspace tools | Agent file tools are constrained to the selected workspace (`AgentWorkspaceTools.ResolveSafePath` plus symlink-ancestor and reparse-point rejection), skip symlinked entries, use case-sensitive path checks on case-sensitive platforms, validate task IDs with a safe allowlist, and block unsupported shell/network/install/commit/push actions. `AgentSafetyGate` auto-executes only a fixed read-only tool list, requires approval for every mutation and every `mcp:` call, and blocks unknown tool names outright. Applied mutations capture a pre-image and are individually revertible, refusing if the file changed again since (r6). | Approved draft patch application can still overwrite intended workspace files before a revert is requested, so review remains mandatory; revert is a mitigation for an approved-but-regretted patch, not a substitute for careful review. |
+| Agent run_command | Commands execute only when they match one of seven hardcoded template families (`dotnet build/test`, `npm test`, `npm run`, `cargo build/test`, `pytest`), the family is also declared in the workspace's own manifest recipes, and the optional argument validates (workspace-contained path, or an npm script that already exists in package.json). Execution uses `ProcessStartInfo.ArgumentList` with no shell, a 5-minute timeout, and process-tree kill; every run requires approval. | The approval prompt shows the command family, not what it transitively executes: `npm run x` runs whatever package.json defines for `x`, and `dotnet build` runs workspace MSBuild targets. On a hostile workspace an approved recipe is still arbitrary code execution. |
+| Agent lessons | Lessons live in `agent/lessons.db` under the data root with schema-versioned additive migrations. They are derived from task outcomes, deduped by signature, confidence-scored, and injected read-only: capped at 10, formatted as a separate prompt block, never reachable by chat's `[MEMORY_UPDATE]`/`[MEMORY_FORGET]` markers, and chat consumption (`Memory.ConsumeAgentLessonsInChat`) is off by default. | Lesson text originates partly from model output and workspace content, so it is a persistence channel: misleading content encountered in one task can be re-injected into later agent tasks or chat as a stored "lesson". Lifecycle controls (pin/retire/delete) exist in the Agent workbench but poisoning is not automatically detected. |
+| Voice channels | Voice output is centralized in `VoiceOrchestrator`: one utterance at a time, priority queue, per-channel enablement that defaults to Chat only, so Doctor/Agent/Benchmark/Notification speech is opt-in. Agent narration is built from task state, never from raw model text. Notification voice forwards only Warning/Error toasts. | Utterance text goes to whichever TTS provider is active. With a remote provider (OpenAI voice), enabled channels send app-generated text such as toast messages and Doctor findings, which can include local file paths, to the remote API. Voice text does not pass through log redaction. |
+| Benchmark insights | Insights are deterministic aggregation over locally stored runs (`BenchmarkInsightsMath`): no LLM, no network, no new database. The Doctor advisory that compares the active model against benchmark leaders is Info-severity only and never switches anything automatically. | None significant; recommendations can be skewed by unrepresentative local runs, which is a quality issue rather than a security one. |
 | MCP tool bridge | Each configured MCP server can optionally be restricted to an explicit allowed-tools list (Settings > MCP Servers); an empty list permits every tool the server declares, matching prior behavior. The bridge independently refuses to forward a tool name the server did not actually declare via `tools/list`, even if a stale allowlist entry names it, so a compromised server cannot expand its own callable surface by simply declaring more tools. Every `mcp:` call always requires approval regardless of what the allowlist or the server claims about itself. The client drains a spawned server's stderr continuously and faults outstanding calls immediately if the server process closes its connection, rather than hanging for the full per-call timeout. | A configured server's declared tool descriptions are still visible to the model verbatim and are prompt-injection surface; the allowlist restricts which tools can execute, not what a malicious description can say to influence the model's next step. |
 | Local state files | Settings, Agent task/profile/memory state, toast history, exports, generated setup scripts, and local fallback secrets use temp-file replacement for writes. Agent task list metadata is indexed in SQLite and reconciled from JSON task state during initialization. Unreadable settings are copied aside before defaults are loaded. | Sudden power loss can still lose the latest write, but should be less likely to leave a half-written primary JSON file. |
 | SQLite schemas | Conversation, memory, RAG, and Agent task-index databases record schema versions in `aether_schema_versions` before running additive migrations. | Existing migrations are additive. Destructive migrations still need bespoke backup and verification steps before public release. |
@@ -172,6 +184,45 @@ Required follow-up:
 
 - Consider hash display/pinning for known local runtime binaries.
 
+### Hostile Workspace Content
+
+Attack path: the Agent is pointed at a workspace containing adversarial
+content (prompt-injection text in source files or docs, a malicious
+package.json script, hostile MSBuild targets). The model is steered into
+proposing harmful patches, running a recipe that executes attacker code, or
+storing misleading lessons that persist into future tasks.
+
+Current mitigations:
+
+- Read-first posture: injected text can only influence the model's proposals;
+  every mutation and every command still stops at the human approval gate.
+- run_command is limited to declared recipe families with validated
+  arguments; no arbitrary shell ever executes.
+- Risk classification is deterministic and recorded in `agent.trace.jsonl`,
+  so the decision trail is auditable after the fact.
+- The command approval prompt shows what a `run_command` will actually
+  execute, not just its family: the exact npm script body read live from
+  package.json for `npm run`, or a fixed provenance note for
+  `dotnet`/`cargo`/`pytest` naming that they run workspace-defined build or
+  test logic (`AgentApprovalPreview`, r6).
+- Lessons are read-only at injection time, capped, labeled with confidence
+  and evidence counts, and manageable (pin/retire/delete) in the workbench.
+  A task that actually creates a new lesson (not merely reinforces an
+  existing one) surfaces it in a "new lessons" strip with Keep/Retire
+  actions at that task's next load, so a poisoned lesson is seen once by a
+  human before it can silently keep influencing future prompts (r6,
+  `AgentTaskState.NewLessonIds`).
+- Agent narration never speaks raw model text, removing one social-engineering
+  channel.
+- Applied file mutations (the manual draft-patch queue and direct
+  `edit_file`/`create_file`/`apply_draft_patch` approvals alike) capture a
+  pre-image and can be reverted; revert refuses instead of overwriting if
+  the file changed again after the patch was applied (r6, `AgentPatchReviewService.RevertAsync`).
+
+Required follow-up:
+
+- None outstanding at this pass.
+
 ### Local API Token Compromise
 
 Attack path: another local process or user on a shared machine calls the
@@ -207,8 +258,8 @@ Required follow-up:
 
 ## Release Gate Status
 
-Security review and threat model refresh was completed for `0.8.4-alpha` as an
-engineering documentation gate. The following items remain public-release
+Security review and threat model refresh was completed for `0.11.0-alpha` as
+an engineering documentation gate. The following items remain public-release
 hardening work:
 
 - Optional blocking policy for network-affecting `llama-server` flags.
@@ -234,3 +285,11 @@ hardening work:
   v2 local format.
 - Agent task IDs reject path separators, reserved Windows device names, unsafe
   characters, and excessive length.
+- Agent run_command rejects undeclared families, workspace-escaping path
+  arguments, and npm scripts absent from package.json.
+- Agent lessons are never mutable from chat and chat consumption defaults off.
+- Voice channels other than Chat default to disabled.
+- Applied-patch revert refuses (does not overwrite) when the file changed
+  again after the patch was applied.
+- model_usage rollup counters are local-only and disclosed in Privacy Audit;
+  never transmitted.

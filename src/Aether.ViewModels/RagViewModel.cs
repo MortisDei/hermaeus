@@ -23,6 +23,22 @@ public partial class RagSourceViewModel : ObservableObject
     public string Content { get; init; } = string.Empty;
     public float  Score   { get; init; }
     public string ScoreDisplay => $"{Score:F3}";
+
+    /// <summary>Per-signal breakdown for "why did retrieval choose this chunk" (r6 1.6).</summary>
+    public int    OutOfCount       { get; init; }
+    public float? VectorScore      { get; init; }
+    public float? KeywordScore     { get; init; }
+    public float? RerankScore      { get; init; }
+    public string MatchedTerm      { get; init; } = string.Empty;
+    public int    MatchedTermCount { get; init; }
+    public string PlainLanguageSummary { get; init; } = string.Empty;
+    public string VectorScoreDisplay  => VectorScore is { } v ? v.ToString("F3") : string.Empty;
+    public string KeywordScoreDisplay => KeywordScore is { } k ? k.ToString("F3") : string.Empty;
+    public string RerankScoreDisplay  => RerankScore is { } r ? r.ToString("F3") : string.Empty;
+    public bool   HasVectorScore  => VectorScore.HasValue;
+    public bool   HasKeywordScore => KeywordScore.HasValue;
+    public bool   HasRerankScore  => RerankScore.HasValue;
+
     public string CitationLabel => $"[{Rank}] {Title}";
     public string ShortCitationLabel => $"[{Rank}]";
     public string Snippet
@@ -574,7 +590,14 @@ public partial class RagViewModel : ObservableObject
                 File = chunk.File,
                 Path = chunk.Path,
                 Score = chunk.Score,
-                Content = chunk.Content
+                Content = chunk.Content,
+                OutOfCount = chunk.OutOfCount,
+                VectorScore = chunk.VectorScore,
+                KeywordScore = chunk.KeywordScore,
+                RerankScore = chunk.RerankScore,
+                MatchedTerm = chunk.MatchedTerm,
+                MatchedTermCount = chunk.MatchedTermCount,
+                PlainLanguageSummary = chunk.PlainLanguageSummary
             });
         SelectedSource = Sources.FirstOrDefault();
         if (SelectedSource is not null)

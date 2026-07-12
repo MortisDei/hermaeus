@@ -11,6 +11,78 @@ limit.
 
 ## [Unreleased]
 
+## [0.11.0-alpha] - 2026-07-12
+
+Implements docs/review r6 in full: answerability. A first-time user can now
+answer, from visible UI, where their data lives, whether anything leaves the
+machine, which model answered, why files/chunks were selected, why a patch
+was flagged risky, and whether they can undo it.
+
+### Answerability surfaces
+
+- **Local/remote badges.** Chat's model selector shows a "Local"/"Remote"
+  badge (`ChatViewModel.IsSelectedModelRemote`, driven by the shared
+  `CompositeLlmService.Providers` registry, the same source Privacy Audit
+  already used).
+- **Outbound-destinations summary.** System Overview's Privacy Audit is
+  retitled "Privacy audit - what can leave this machine" and gains a
+  one-line count (`PrivacyAuditService.CountOutboundDestinationsAsync`)
+  across remote chat/voice providers, web-ingest-enabled RAG datasets, and
+  MCP servers.
+- **Data root affordances.** Settings > Data gets "Open folder" buttons for
+  the data root and AI assets root (resolved live, not the raw text box),
+  plus a "Your data, your machine" explainer and matching statement in
+  System Overview.
+- **Toolbar labels.** `Ui.ShowNavLabels` (default off) adds text captions
+  next to the 13 previously icon-only toolbar buttons.
+- **Per-message model attribution.** Audited and found already correct
+  end-to-end (`Message.ModelId`/`DurationMs` round-trip through
+  `messages_json`); added a regression test rather than new code.
+- **RAG retrieval breakdown.** `RagTraceChunk` now carries per-signal vector/
+  keyword/rerank scores and a deterministic plain-language summary ("Ranked
+  2nd of 8: strong semantic match, term 'x' matched 3 times, reranker
+  confirmed this ranking"), shown in the RAG source inspector.
+- **Agent risk reasons + recipe transparency.** `AgentPendingToolAction`
+  carries the safety gate's `Reason`; the review queue shows it plus, for a
+  pending `run_command` approval, what it actually executes
+  (`AgentApprovalPreview` - the exact npm script body from package.json, or
+  a fixed provenance note for dotnet/cargo/pytest).
+- **Agent context receipt.** Each step's context pack summarizes per
+  section (Memory/RAG/Workspace files/Project instructions/Lessons) as item
+  count + token estimate (`AgentContextReceiptBuilder`), omitting empty
+  sections rather than showing them blank.
+- **Applied-patch revert.** `AgentDraftPatch` captures a pre-image at apply
+  time (both the manual draft-patch queue and direct `edit_file`/
+  `create_file`/`apply_draft_patch` approvals); Revert restores it or
+  deletes a created file, refusing if the file changed again since.
+- **New-lesson review strip.** A task reaching a terminal state with newly
+  *created* (not merely reinforced) lessons shows them once with Keep/Retire
+  actions, tracked via `AgentTaskState.NewLessonIds`.
+
+### Usage-aware benchmark insights
+
+- **`model_usage` rollup.** `SqliteTraceStore` maintains a durable per-
+  model/day/kind counter table alongside the existing trace log, unaffected
+  by trace pruning. `IModelUsageService` exposes windowed summaries.
+- **Usage insights.** `BenchmarkInsightsMath.BuildReport` takes optional
+  per-kind usage; for any activity (Chat/RAG/Agent) with 20+ calls in 30
+  days it names the dominant model, and recommends a switch only when a
+  real leaderboard entry outranks it by the same 10-point gap threshold as
+  the r5 Doctor advisory. A "Based on your usage" card appears in the
+  Benchmarks Insights tab; the Doctor advisory gets at most one appended
+  usage-aware sentence, Info severity only.
+
+### Platform cleanup
+
+- **Removed `InspectionEngine`/`IInspectionCheckProvider`.** Dead
+  aggregation layer nothing consumed; Doctor/Trust/Privacy Audit already
+  each own their checks and views directly.
+- **Remote voice disclosure.** Settings > Voice shows an inline note per
+  enabled channel when the active provider is remote; Privacy Audit gains a
+  matching item.
+
+Coverage floor raised 47 -> 48.
+
 ## [0.10.0-alpha] - 2026-07-12
 
 Implements docs/review r5 in full: voice stops being "TTS for chat" and

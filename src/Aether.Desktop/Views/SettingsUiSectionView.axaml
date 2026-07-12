@@ -12,6 +12,7 @@
                 <TextBlock Grid.Row="1" Grid.Column="0" Text="Theme" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
                 <ComboBox Grid.Row="1" Grid.Column="1" ItemsSource="{Binding Themes}" SelectedItem="{Binding SelectedTheme}" FontSize="13" />
             </Grid>
+            <CheckBox IsChecked="{Binding ShowNavLabels}" Content="Show text labels next to toolbar icons" FontSize="13" />
             <CheckBox IsChecked="{Binding CtrlEnterToSend}" Content="Ctrl+Enter to send (Enter inserts newline)" FontSize="13" />
             <CheckBox IsChecked="{Binding ShowQuickChat}" Content="Show compact quick-chat surface" FontSize="13" />
             <CheckBox IsChecked="{Binding EnableTrayIcon}" Content="Show tray icon" FontSize="13" />

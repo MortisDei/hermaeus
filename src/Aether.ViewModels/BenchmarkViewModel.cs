@@ -27,6 +27,8 @@ public partial class BenchmarkViewModel : ObservableObject
     public ObservableCollection<BenchmarkResultViewModel> SelectedResults { get; } = [];
     public ObservableCollection<TagLeaderboardViewModel> InsightsLeaderboards { get; } = [];
     public ObservableCollection<string> InsightsCaveats { get; } = [];
+    /// <summary>"Based on your usage" card rows; empty when no activity kind has enough calls yet (r6 2.3).</summary>
+    public ObservableCollection<UsageInsightViewModel> InsightsUsage { get; } = [];
 
     [ObservableProperty] private bool _isLoadingInsights;
     [ObservableProperty] private string _insightsHeader = string.Empty;
@@ -68,7 +70,10 @@ public partial class BenchmarkViewModel : ObservableObject
         _services = services;
         _insights = insights;
         _voice = voice;
+        InsightsUsage.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasInsightsUsage));
     }
+
+    public bool HasInsightsUsage => InsightsUsage.Count > 0;
 
     [RelayCommand]
     public async Task LoadAsync()
@@ -273,6 +278,10 @@ public partial class BenchmarkViewModel : ObservableObject
             InsightsCaveats.Clear();
             foreach (var caveat in report.Caveats)
                 InsightsCaveats.Add(caveat);
+
+            InsightsUsage.Clear();
+            foreach (var usage in report.UsageInsightsOrEmpty)
+                InsightsUsage.Add(new UsageInsightViewModel(usage));
         }
         catch (Exception ex)
         {
@@ -541,4 +550,15 @@ public sealed class TagLeaderboardViewModel
         Ranked = board.Ranked.Select(a => new ModelAggregateViewModel(a)).ToList();
         ComparisonSentences = allComparisons.Where(c => c.Tag == board.Tag).Select(c => c.Sentence).ToList();
     }
+}
+
+/// <summary>One row of the Insights tab's "Based on your usage" card (r6 02-usage-history-recommendations.md 2.3).</summary>
+public sealed class UsageInsightViewModel
+{
+    public UsageInsightViewModel(UsageInsight insight) => Insight = insight;
+
+    public UsageInsight Insight { get; }
+    public string KindLabel => Insight.Kind.ToString();
+    public string Sentence => Insight.Sentence;
+    public bool HasRecommendation => Insight.RecommendedModelName is not null;
 }

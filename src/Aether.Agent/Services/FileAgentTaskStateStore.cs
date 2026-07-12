@@ -125,6 +125,19 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
                 r.IsDBNull(9) ? null : ParseDate(r.GetString(9))));
         }
 
+        // The index table only carries summary columns; a task actually
+        // waiting on an approval needs its PendingToolAction, which only
+        // exists in the full per-task state file.
+        for (var i = 0; i < queue.Count; i++)
+        {
+            if (queue[i].Status != AgentTaskStatus.WaitingForUser)
+                continue;
+
+            var full = await LoadAsync(queue[i].TaskId, ct);
+            if (full?.PendingToolAction is not null)
+                queue[i] = queue[i] with { PendingToolAction = full.PendingToolAction };
+        }
+
         return queue;
     }
 

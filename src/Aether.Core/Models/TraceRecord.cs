@@ -39,3 +39,10 @@ public sealed record TraceRecord
     /// <summary>Kind-specific payload as JSON (RagQueryTrace, chat context summary, agent step).</summary>
     public string DetailJson { get; init; } = "{}";
 }
+
+/// <summary>
+/// Durable per-model daily usage rollup (never pruned, unlike
+/// <see cref="TraceRecord"/> rows), aggregated over a requested window.
+/// See r6 02-usage-history-recommendations.md.
+/// </summary>
+public sealed record ModelUsageRow(TraceKind Kind, string ModelId, long CallCount, long TotalTokens);

@@ -280,6 +280,20 @@
                                             </StackPanel>
                                         </Border>
 
+                                        <Border IsVisible="{Binding HasInsightsUsage}"
+                                                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8" Padding="12">
+                                            <StackPanel Spacing="6">
+                                                <TextBlock Text="Based on your usage" FontWeight="SemiBold" FontSize="12" Opacity="0.6" />
+                                                <ItemsControl ItemsSource="{Binding InsightsUsage}">
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate DataType="vm:UsageInsightViewModel">
+                                                            <TextBlock Text="{Binding Sentence}" FontSize="12" TextWrapping="Wrap" Margin="0,2" />
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                            </StackPanel>
+                                        </Border>
+
                                         <ItemsControl ItemsSource="{Binding InsightsLeaderboards}">
                                             <ItemsControl.ItemTemplate>
                                                 <DataTemplate DataType="vm:TagLeaderboardViewModel">
