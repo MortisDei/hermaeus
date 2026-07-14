@@ -1,0 +1,13 @@
+{
+  "id": "10-lesson-hygiene",
+  "title": "Trivial task leaves no lessons",
+  "goal": "Read README.md and report the document title, then finish.",
+  "description": "A trivial, uneventful read-only task should not add noise to the lesson store; guards the lesson-capture rules against over-eager writes.",
+  "tags": ["memory", "lessons"],
+  "max_steps": 5,
+  "expect": {
+    "max_new_lessons": 0,
+    "files_unchanged": ["*"],
+    "final_status_any_of": ["complete", "waiting_for_user"]
+  }
+}

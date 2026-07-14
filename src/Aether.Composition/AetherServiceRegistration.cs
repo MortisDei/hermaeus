@@ -90,6 +90,8 @@ public static class AetherServiceRegistration
         s.AddSingleton<IAgentContextBuilder, AgentContextBuilder>();
         s.AddSingleton<IAgentService, AgentService>();
         s.AddSingleton<IPatchDiffService, PatchDiffService>();
+        s.AddSingleton<IAgentScenarioStore, AgentScenarioStore>();
+        s.AddSingleton<IAgentScenarioRunner, AgentScenarioRunner>();
         return s;
     }
 }

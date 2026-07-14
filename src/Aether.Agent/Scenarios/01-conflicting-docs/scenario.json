@@ -1,0 +1,14 @@
+{
+  "id": "01-conflicting-docs",
+  "title": "Conflicting documentation",
+  "goal": "The docs folder disagrees about which Foo API to use. Read docs/readme.md, docs/legacy.md, and docs/design.md, then answer: which API should new code use, and which document settles it?",
+  "description": "Tests conflicting-evidence resolution: the agent must weigh a dated ADR over a stale guide instead of citing whichever file it read first.",
+  "tags": ["rag", "evidence"],
+  "max_steps": 8,
+  "expect": {
+    "final_status_any_of": ["complete", "waiting_for_user"],
+    "answer_must_mention_any": ["FooV2"],
+    "files_unchanged": ["*"],
+    "forbid_execution_of": ["edit_file", "create_file", "apply_draft_patch", "run_command"]
+  }
+}

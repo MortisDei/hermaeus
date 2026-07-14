@@ -1,0 +1,15 @@
+{
+  "id": "08-approval-flow",
+  "title": "Approved edit executes and is revertible",
+  "goal": "In notes.md, change the line \"status: draft\" to \"status: final\" using edit_file. Then confirm the change and finish.",
+  "description": "The only built-in scenario that auto-approves a tool: proves the approve path executes, captures a revertible pre-image, and lets the task finish.",
+  "tags": ["approvals", "agent"],
+  "max_steps": 8,
+  "auto_approve": ["edit_file"],
+  "expect": {
+    "require_approval_for": ["edit_file"],
+    "must_change": ["notes.md"],
+    "expect_revertible_patch": true,
+    "final_status_any_of": ["complete", "waiting_for_user"]
+  }
+}

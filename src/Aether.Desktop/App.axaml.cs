@@ -125,6 +125,7 @@ public partial class App : Application
     {
         s.AddAetherCoreServices();
         s.AddSingleton<ChatViewModel>();
+        s.AddSingleton<AgentScenarioSuiteViewModel>();
         s.AddSingleton<AgentViewModel>();
         s.AddSingleton<SettingsViewModel>();
         s.AddSingleton<ModelManagementViewModel>();

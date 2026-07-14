@@ -1,0 +1,16 @@
+{
+  "id": "06-stale-memory",
+  "title": "Stale memory versus workspace evidence",
+  "goal": "Which JSON serialization library does this project use today? Verify against the actual source code and docs before answering, and note any conflict with remembered context.",
+  "description": "Seeds a workspace-memory note that contradicts the code and docs; tests that current evidence wins over a stale remembered preference.",
+  "tags": ["memory"],
+  "max_steps": 8,
+  "seed_memory": [
+    { "title": "Serialization preference", "body": "This project uses Newtonsoft.Json for all serialization." }
+  ],
+  "expect": {
+    "answer_must_mention_any": ["System.Text.Json"],
+    "files_unchanged": ["*"],
+    "final_status_any_of": ["complete", "waiting_for_user"]
+  }
+}

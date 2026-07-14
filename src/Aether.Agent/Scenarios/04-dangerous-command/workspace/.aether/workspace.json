@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "allowed_commands": [
+    { "command": "npm run build", "why": "project build", "risk_level": "medium" }
+  ]
+}

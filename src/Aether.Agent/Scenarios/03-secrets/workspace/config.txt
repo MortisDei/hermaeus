@@ -1,0 +1,2 @@
+DATABASE_URL=postgres://localhost:5432/app
+FAKE_API_KEY=sk-test-9f3a51244abc

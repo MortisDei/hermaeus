@@ -1,6 +1,6 @@
 # Aether Security Review And Threat Model
 
-Last refreshed for `0.11.0-alpha`. The `0.10.0-alpha` pass re-verified the
+Last refreshed for `0.12.0-alpha`. The `0.10.0-alpha` pass re-verified the
 areas that changed in r3-r5 (agent tool execution, run_command recipes,
 lesson store, voice orchestration, benchmark insights) directly against the
 code, and confirmed via git history that the Local API, MCP bridge, secret
@@ -8,9 +8,11 @@ store, redaction, process managers, and RAG ingest code were unchanged since
 their `0.9.41-alpha` verification, so those rows carried forward. r6 then
 implemented two of that pass's own follow-ups (recipe transparency in the
 agent approval prompt, and a lesson review moment) plus one new write path
-(applied-patch revert) with the same review-then-verify treatment below;
-Local API, MCP, secrets, redaction, and RAG remain unchanged since
-`0.9.41-alpha`.
+(applied-patch revert) with the same review-then-verify treatment below. r7
+added the Agent Scenario Suite (`AgentScenarioRunner`), a test harness that
+drives the real, unmodified `AgentSafetyGate`/`AgentService` inside an
+isolated sandbox; see the new subsection under Threat Scenarios. Local API,
+MCP, secrets, redaction, and RAG remain unchanged since `0.9.41-alpha`.
 
 Aether is a local-first desktop application. The primary security goal is to
 keep user data, model paths, API keys, local runtimes, and generated voice audio
@@ -256,9 +258,49 @@ Required follow-up:
   MCP per-server allowed-tools list, if the surface grows beyond its current
   five endpoints.
 
+### Agent Scenario Suite (Contributed Scenario Content)
+
+Attack path: a scenario folder (built-in or user/contributed, under
+`agent-scenarios/`) is malicious or buggy, and a suite run is tricked into
+touching real user data, running a real command, or leaking something
+outside its sandbox.
+
+Current mitigations:
+
+- `AgentScenarioRunner` adds no bypass, no new tool, and no new safety-gate
+  disposition: every scenario run drives the real `AgentSafetyGate` and the
+  real `AgentService` unmodified. A scenario cannot make an unapproved
+  action execute; it can only observe whether the gate held.
+- Full isolation: each run gets a copied workspace and a throwaway agent
+  data root (its own `FileAgentTaskStateStore`/`SqliteLessonStore` pointed
+  at a temp directory via a private `ISettingsService`), never the real one.
+  The runner's approval loop only ever grants (per-scenario, explicit
+  `auto_approve` list) or leaves an action pending; it never denies (a
+  denial would itself write a rejection lesson) and never widens what a
+  scenario is allowed to do. No built-in scenario auto-approves
+  `run_command` (enforced by `AgentScenarioManifestValidator` and a
+  regression test), so the suite as shipped can never actually execute a
+  command.
+- `outside_files` (used only by the path-traversal scenario) are written to
+  a sandbox directory that is a sibling of, not inside, the sandboxed
+  workspace, and their keys are validated to reject rooted paths or `..`
+  segments before any file is written.
+- Sandbox cleanup (temp workspace, temp data root) is best-effort but the
+  isolation guarantee does not depend on cleanup succeeding - the real data
+  root is never referenced by the execution path in the first place, only
+  by report export after a suite finishes.
+
+Required follow-up:
+
+- None outstanding at this pass. A user-authored scenario can auto-approve
+  file-mutating tools (`edit_file`, `create_file`, `apply_draft_patch`);
+  those writes land in the sandbox copy only, but a reviewer importing a
+  third-party scenario should still read `scenario.json` before running it,
+  the same way they would review any other script before executing it.
+
 ## Release Gate Status
 
-Security review and threat model refresh was completed for `0.11.0-alpha` as
+Security review and threat model refresh was completed for `0.12.0-alpha` as
 an engineering documentation gate. The following items remain public-release
 hardening work:
 

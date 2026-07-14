@@ -16,4 +16,12 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Aether.Tests" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- Built-in Agent Scenario Suite library; copied to every consumer's output
+         (Desktop, Tests) so IAgentScenarioStore can find it at
+         {AppContext.BaseDirectory}/agent-scenarios without a runtime download. -->
+    <None Include="Scenarios\**\*"
+          CopyToOutputDirectory="PreserveNewest"
+          Link="agent-scenarios\%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
 </Project>

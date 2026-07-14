@@ -8,7 +8,8 @@ public enum EvalMode
 {
     QuickCompare,
     Suite,
-    Retrieval
+    Retrieval,
+    AgentScenario
 }
 
 /// <summary>Deterministic expectations a case can be checked against.</summary>

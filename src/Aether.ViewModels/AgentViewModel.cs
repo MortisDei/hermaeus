@@ -308,6 +308,15 @@ public partial class AgentViewModel : ObservableObject
 
     public string CapabilityLabel => "Current agent scope";
 
+    /// <summary>
+    /// Drives the workbench's Scenario Evals panel (r7): deterministic
+    /// behaviour checks run against isolated sandbox copies of small
+    /// scenario workspaces. Null only when a caller constructs
+    /// <see cref="AgentViewModel"/> without it (existing tests that do not
+    /// exercise this panel); real DI wiring always supplies one.
+    /// </summary>
+    public AgentScenarioSuiteViewModel? ScenarioSuite { get; }
+
     public Action? RequestWorkspaceRootPicker { get; set; }
 
     [ObservableProperty] private string _goalText = string.Empty;
@@ -372,7 +381,8 @@ public partial class AgentViewModel : ObservableObject
         IWorkspaceManifestStore workspaceManifests,
         ISettingsService? settings = null,
         ILessonStore? lessons = null,
-        IVoiceOrchestrator? voice = null)
+        IVoiceOrchestrator? voice = null,
+        AgentScenarioSuiteViewModel? scenarioSuite = null)
     {
         _agent = agent;
         _store = store;
@@ -387,6 +397,7 @@ public partial class AgentViewModel : ObservableObject
         _settings = settings;
         _lessons = lessons;
         _voice = voice;
+        ScenarioSuite = scenarioSuite;
         _patchReview = new AgentPatchReviewService(workspaceTools, store, agent);
         WorkspaceRoot = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
@@ -467,6 +478,11 @@ public partial class AgentViewModel : ObservableObject
             await RefreshLessonsAsync();
             await RefreshWorkspaceFilesAsync();
             await ExplainWorkspaceAsync();
+            if (ScenarioSuite is not null)
+            {
+                ScenarioSuite.ModelId = SelectedModel?.Id ?? string.Empty;
+                await ScenarioSuite.LoadScenariosAsync();
+            }
         }
         catch (Exception ex)
         {
@@ -1265,6 +1281,8 @@ public partial class AgentViewModel : ObservableObject
     {
         StartCommand.NotifyCanExecuteChanged();
         RunStepCommand.NotifyCanExecuteChanged();
+        if (ScenarioSuite is not null)
+            ScenarioSuite.ModelId = value?.Id ?? string.Empty;
     }
     partial void OnCurrentTaskChanged(AgentTaskState? value)
     {
