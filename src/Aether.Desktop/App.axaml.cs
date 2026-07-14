@@ -5,6 +5,7 @@ using Aether.Agent.Services;
 using Aether.Composition;
 using Aether.Core.Models;
 using Aether.Core.Services;
+using Aether.Rag.Embeddings;
 using Aether.Desktop.Views;
 using Aether.Rag.Storage;
 using Aether.Services;
@@ -44,10 +45,20 @@ public partial class App : Application
             window.Opened += async (_, _) => await InitializeAppAsync(sp, vm);
             desktop.Exit += (_, _) =>
             {
-                sp.GetRequiredService<AppLifecycleJournalService>().RecordCleanExit();
-                _desktopIntegration?.Dispose();
-                vm.Shutdown();
-                sp.Dispose();
+                try
+                {
+                    sp.GetRequiredService<AppLifecycleJournalService>().RecordCleanExit();
+                    _desktopIntegration?.Dispose();
+                    vm.Shutdown();
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"Error during shutdown: {ex}");
+                }
+                finally
+                {
+                    sp.Dispose();
+                }
             };
         }
 
@@ -70,6 +81,25 @@ public partial class App : Application
                 sp.GetRequiredService<IAgentTaskStateStore>().InitializeAsync(),
                 sp.GetRequiredService<BenchmarkService>().InitializeAsync(),
                 sp.GetRequiredService<IEvalStore>().InitializeAsync());
+
+            // Warm up the embedding model at startup to prevent "cold-start" delay on first chat
+            try
+            {
+                var embeddings = sp.GetService<IEmbeddingService>();
+                if (embeddings is not null)
+                {
+                    await embeddings.EmbedAsync("warmup", CancellationToken.None);
+                }
+            }
+            catch (Exception ex)
+            {
+                sp.GetRequiredService<IRuntimeLogService>().Add(new RuntimeLogEntry(
+                    DateTime.UtcNow,
+                    RuntimeLogLevel.Warning,
+                    RuntimeLogCategory.Service,
+                    $"Embedding model warm-up failed: {ex.Message}"));
+            }
+
             // Probe active voice provider health at startup to detect externally-running services
             try
             {

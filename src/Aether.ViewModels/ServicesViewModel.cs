@@ -719,6 +719,14 @@ public partial class ServicesViewModel : ObservableObject
         if (server is null)
             return;
 
+        // Guard: If the path is invalid, do NOT restart the server.
+        // This prevents the "Death Spiral" where a stale path kills a working server.
+        if (!File.Exists(modelPath))
+        {
+            _toasts.Show("Model Load Error", $"The model file does not exist: {Path.GetFileName(modelPath)}", ToastKind.Error);
+            return;
+        }
+
         await server.SelectModelAndRestartAsync(modelPath, ct);
     }
 

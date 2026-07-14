@@ -373,20 +373,35 @@ public sealed class MemoryStore : IMemoryStore
         foreach (var m in ftsResults) candidates[m.Id] = m;
 
         var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT * FROM memories WHERE is_archived = 0 AND embedding IS NOT NULL";
+        // Optimization: Only select the ID and Embedding blob to minimize data transfer from SQLite
+        cmd.CommandText = "SELECT id, embedding FROM memories WHERE is_archived = 0 AND embedding IS NOT NULL";
         await using (var rd = await cmd.ExecuteReaderAsync(ct))
         {
             while (await rd.ReadAsync(ct))
             {
-                var ordinal = rd.GetOrdinal("embedding");
-                if (rd.IsDBNull(ordinal)) continue;
-
-                var m = Map(rd);
-                var vector = FromBlob((byte[])rd[ordinal]);
+                var id = rd.GetString(0);
+                var vector = FromBlob((byte[])rd[1]);
                 var cosine = Math.Max(0.0, CosineSimilarity(queryVector, vector));
-                var ftsScore = ftsRank.GetValueOrDefault(m.Id, 0.0);
-                m.RelevanceScore = (0.5 * ftsScore) + (0.5 * cosine);
-                candidates[m.Id] = m;
+                
+                if (candidates.TryGetValue(id, out var m))
+                {
+                    var ftsScore = ftsRank.GetValueOrDefault(id, 0.0);
+                    m.RelevanceScore = (0.5 * ftsScore) + (0.5 * cosine);
+                }
+                else
+                {
+                    // For memories not in FTS results, we need to fetch the full object
+                    // but only if the cosine similarity is high enough to be relevant.
+                    if (cosine > 0.7) 
+                    {
+                        var mFull = await GetByIdAsync(id, ct);
+                        if (mFull is not null)
+                        {
+                            mFull.RelevanceScore = 0.5 * cosine;
+                            candidates[id] = mFull;
+                        }
+                    }
+                }
             }
         }
 

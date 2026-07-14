@@ -73,6 +73,24 @@ internal static class KokoroPhonemizer
                 break;
             }
 
+            // Rhoticity: Check for vowel + 'r' combinations
+            if (i + 1 < word.Length && word[i + 1] == 'r' && "aeiouy".Contains(word[i]))
+            {
+                char v = word[i];
+                string rhotic = v switch
+                {
+                    'a' => "ɑɹ",
+                    'e' => "ɚ",
+                    'i' => "ɝ",
+                    'o' => "ɔɹ",
+                    'u' => "ʊɹ",
+                    _ => KokoroVocab.TurnedR
+                };
+                sb.Append(rhotic);
+                i += 2;
+                continue;
+            }
+
             var consumed = TryMatchDigraph(word, i, out var phoneme);
             if (consumed == 0)
             {
@@ -106,6 +124,13 @@ internal static class KokoroPhonemizer
     private static int TryMatchDigraph(string word, int i, out string phoneme)
     {
         var remaining = word.Length - i;
+        if (remaining >= 4)
+        {
+            var quad = word.Substring(i, 4);
+            if (quad == "tion") { phoneme = "ʃən"; return 4; }
+            if (quad == "sion") { phoneme = "ʒən"; return 4; }
+        }
+
         if (remaining >= 2)
         {
             var pair = word.Substring(i, 2);

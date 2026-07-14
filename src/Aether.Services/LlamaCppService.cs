@@ -41,10 +41,13 @@ public sealed class LlamaCppService : IDisposable
         try
         {
             var resp = await _http.GetAsync($"{Base}/v1/models", ct);
+            if (resp.StatusCode == System.Net.HttpStatusCode.ServiceUnavailable)
+                return [];
+
             resp.EnsureSuccessStatusCode();
             var data = await resp.Content.ReadFromJsonAsync<ModelsResponse>(JsonOpts, ct);
             var models = data?.Data?
-                .Select(m => new LlmModel { Id = m.Id, Name = m.Id, Provider = "llama.cpp", ProviderTag = ProviderTagValue })
+                .Select(m => new LlmModel { Id = m.Id, Name = Path.GetFileNameWithoutExtension(m.Id), Provider = "llama.cpp", ProviderTag = ProviderTagValue })
                 .ToList() ?? [];
 
             // llama-server hosts exactly one model at a time, so the probed context
