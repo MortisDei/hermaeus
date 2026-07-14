@@ -435,6 +435,10 @@ public partial class BenchmarkViewModel : ObservableObject
         if (_services is null || !IsManagedLocalGguf(model))
             return;
 
+        // Only restart if the model has actually changed to avoid 1-2 minute delays on every run
+        if (string.Equals(_settings.Settings.Llm.DefaultModel, model.Id, StringComparison.OrdinalIgnoreCase))
+            return;
+
         await _services.SelectChatModelAndRestartAsync(model.Id, ct);
     }
 

@@ -60,14 +60,42 @@ internal static class KokoroPhonemizer
 
     private static void AppendFallback(StringBuilder sb, string word)
     {
+        // Basic "Magic E" detection: if word ends in 'e' and has a vowel before it,
+        // we treat the 'e' as silent and potentially shift the vowel.
+        bool hasMagicE = word.Length > 2 && word[^1] == 'e' && "aeiouy".Contains(word[^2]);
+
         var i = 0;
         while (i < word.Length)
         {
+            if (hasMagicE && i == word.Length - 1)
+            {
+                i++; // Skip the silent 'e'
+                break;
+            }
+
             var consumed = TryMatchDigraph(word, i, out var phoneme);
             if (consumed == 0)
             {
                 consumed = 1;
-                phoneme = MapLetter(word[i]);
+                char c = word[i];
+                
+                // Simple vowel shift for Magic E
+                if (hasMagicE && "aeiouy".Contains(c))
+                {
+                    phoneme = c switch
+                    {
+                        'a' => "e", // a -> eɪ (approx)
+                        'e' => "i", // e -> iː (approx)
+                        'i' => "aɪ", // i -> aɪ
+                        'o' => "oʊ", // o -> oʊ
+                        'u' => "ju", // u -> juː
+                        _ => MapLetter(c)
+                    };
+                }
+                else
+                {
+                    phoneme = MapLetter(c);
+                }
             }
 
             sb.Append(phoneme);
@@ -85,7 +113,7 @@ internal static class KokoroPhonemizer
             {
                 case "th": phoneme = KokoroVocab.Theta; return 2;
                 case "sh": phoneme = KokoroVocab.Esh; return 2;
-                case "ch": phoneme = "t" + KokoroVocab.Esh; return 2;
+                case "ch": phoneme = "ʧ"; return 2;
                 case "ng": phoneme = KokoroVocab.Eng; return 2;
                 case "ph": phoneme = "f"; return 2;
                 case "qu": phoneme = "k" + "w"; return 2;
@@ -99,6 +127,9 @@ internal static class KokoroPhonemizer
                 case "oi": phoneme = KokoroVocab.OpenO + KokoroVocab.NearCloseI; return 2;
                 case "ou": phoneme = KokoroVocab.OpenBackA + KokoroVocab.NearCloseU; return 2;
                 case "ow": phoneme = KokoroVocab.OpenBackA + KokoroVocab.NearCloseU; return 2;
+                case "gh": phoneme = "f"; return 2;
+                case "wh": phoneme = "w"; return 2;
+                case "kn": phoneme = "n"; return 2;
             }
         }
 
@@ -115,7 +146,7 @@ internal static class KokoroPhonemizer
         'u' => KokoroVocab.Wedge,
         'y' => KokoroVocab.NearCloseI,
         'g' => KokoroVocab.ScriptG,
-        'j' => "d" + KokoroVocab.Ezh,
+        'j' => "ʤ",
         'r' => KokoroVocab.TurnedR,
         'x' => "ks",
         'c' => "k",
@@ -133,75 +164,272 @@ internal static class KokoroPhonemizer
 
     private static IReadOnlyDictionary<string, string> BuildDictionary()
     {
-        string R = KokoroVocab.TurnedR, Sch = KokoroVocab.Schwa, Ash = KokoroVocab.Ash,
-            I = KokoroVocab.NearCloseI, U = KokoroVocab.NearCloseU,
-            V = KokoroVocab.Wedge, Aa = KokoroVocab.OpenBackA, Oo = KokoroVocab.OpenO,
-            Th = KokoroVocab.Theta, Dh = KokoroVocab.Eth, Sh = KokoroVocab.Esh,
-            Ng = KokoroVocab.Eng, G = KokoroVocab.ScriptG;
-
         var entries = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            ["the"] = Dh + Sch,
-            ["a"] = Sch,
-            ["an"] = Ash + "n",
-            ["is"] = "ɪz",
-            ["was"] = "wʌz",
-            ["are"] = "ɑɹ",
-            ["were"] = "wɜɹ",
-            ["to"] = "tu",
+            // Function words
+            ["the"] = "ðə",
+            ["a"] = "ə",
+            ["an"] = "æn",
+            ["and"] = "ænd",
             ["of"] = "ʌv",
-            ["and"] = Ash + "nd",
+            ["to"] = "tu",
             ["in"] = "ɪn",
-            ["that"] = Dh + Ash + "t",
-            ["it"] = "ɪt",
+            ["on"] = "ɑn",
+            ["at"] = "æt",
+            ["for"] = "fɔɹ",
+            ["from"] = "fɹʌm",
+            ["with"] = "wɪθ",
+            ["without"] = "wɪˈðaʊt",
+            ["into"] = "ˈɪntu",
+            ["onto"] = "ˈɑntu",
+            ["over"] = "ˈoʊvɚ",
+            ["under"] = "ˈʌndɚ",
+            ["between"] = "bɪˈtwiːn",
+            ["through"] = "θɹu",
+            ["around"] = "ɚˈaʊnd",
+            ["about"] = "əˈbaʊt",
+            ["before"] = "bɪˈfɔɹ",
+            ["after"] = "ˈæftɚ",
+            ["during"] = "ˈdʊɹɪŋ",
+            ["while"] = "waɪl",
+            ["until"] = "ʌnˈtɪl",
+
+            // Pronouns
+            ["i"] = "aɪ",
+            ["me"] = "mi",
+            ["my"] = "maɪ",
+            ["mine"] = "maɪn",
             ["you"] = "ju",
+            ["your"] = "jɔɹ",
+            ["yours"] = "jɔɹz",
             ["he"] = "hi",
-            ["she"] = Sh + "i",
+            ["him"] = "hɪm",
+            ["his"] = "hɪz",
+            ["she"] = "ʃi",
+            ["her"] = "hɚ",
+            ["hers"] = "hɚz",
             ["we"] = "wi",
-            ["they"] = Dh + "e" + I,
-            ["this"] = Dh + "ɪs",
-            ["have"] = "h" + Ash + "v",
-            ["has"] = "h" + Ash + "z",
-            ["had"] = "h" + Ash + "d",
-            ["do"] = "du",
-            ["does"] = "d" + V + "z",
-            ["did"] = "dɪd",
-            ["will"] = "wɪl",
-            ["would"] = "w" + U + "d",
-            ["can"] = "k" + Ash + "n",
-            ["could"] = "k" + U + "d",
-            ["should"] = Sh + U + "d",
-            ["not"] = "n" + Aa + "t",
-            ["no"] = "no" + U,
-            ["yes"] = "jɛs",
-            ["hello"] = "hɛlo" + U,
-            ["world"] = "wɜɹld",
-            ["one"] = "w" + V + "n",
-            ["two"] = "tu",
-            ["three"] = "θɹi",
-            ["what"] = "w" + V + "t",
+            ["us"] = "ʌs",
+            ["our"] = "aʊɹ",
+            ["they"] = "ðeɪ",
+            ["them"] = "ðɛm",
+            ["their"] = "ðɛɹ",
+            ["theirs"] = "ðɛɹz",
+
+            // Demonstratives
+            ["this"] = "ðɪs",
+            ["that"] = "ðæt",
+            ["these"] = "ðiːz",
+            ["those"] = "ðoʊz",
+
+            // Question words
+            ["what"] = "wʌt",
             ["when"] = "wɛn",
             ["where"] = "wɛɹ",
             ["who"] = "hu",
-            ["why"] = "wa" + I,
-            ["how"] = "ha" + U,
-            ["i"] = "a" + I,
-            ["my"] = "ma" + I,
-            ["your"] = "j" + Oo + R,
-            ["their"] = Dh + "ɛɹ",
-            ["with"] = "wɪ" + Th,
-            ["from"] = "fɹ" + V + "m",
-            ["for"] = "f" + Oo + R,
-            ["on"] = Aa + "n",
-            ["at"] = Ash + "t",
-            ["by"] = "ba" + I,
-            ["all"] = Oo + "l",
+            ["why"] = "waɪ",
+            ["how"] = "haʊ",
+            ["which"] = "wɪtʃ",
+            ["whose"] = "huːz",
+
+            // Irregular verbs
             ["be"] = "bi",
+            ["am"] = "æm",
+            ["is"] = "ɪz",
+            ["are"] = "ɑɹ",
+            ["was"] = "wʌz",
+            ["were"] = "wɚ",
             ["been"] = "bɪn",
-            ["good"] = G + U + "d",
-            ["going"] = G + "o" + U + "ɪ" + Ng
+            ["have"] = "hæv",
+            ["has"] = "hæz",
+            ["had"] = "hæd",
+            ["do"] = "du",
+            ["does"] = "dʌz",
+            ["did"] = "dɪd",
+            ["done"] = "dʌn",
+            ["say"] = "seɪ",
+            ["says"] = "sɛz",
+            ["said"] = "sɛd",
+            ["go"] = "goʊ",
+            ["goes"] = "goʊz",
+            ["went"] = "wɛnt",
+            ["gone"] = "ɡɔn",
+            ["make"] = "meɪk",
+            ["made"] = "meɪd",
+            ["know"] = "noʊ",
+            ["knew"] = "nu",
+            ["known"] = "noʊn",
+            ["take"] = "teɪk",
+            ["took"] = "tʊk",
+            ["taken"] = "ˈteɪkən",
+            ["come"] = "kʌm",
+            ["came"] = "keɪm",
+            ["coming"] = "ˈkʌmɪŋ",
+            ["see"] = "si",
+            ["saw"] = "sɔ",
+            ["seen"] = "siːn",
+            ["get"] = "ɡɛt",
+            ["got"] = "ɡɑt",
+            ["gotten"] = "ˈɡɑtən",
+            ["give"] = "ɡɪv",
+            ["gave"] = "ɡeɪv",
+            ["given"] = "ˈɡɪvən",
+
+            // Modal verbs
+            ["can"] = "kæn",
+            ["could"] = "kʊd",
+            ["should"] = "ʃʊd",
+            ["would"] = "wʊd",
+            ["will"] = "wɪl",
+            ["shall"] = "ʃæl",
+            ["may"] = "meɪ",
+            ["might"] = "maɪt",
+            ["must"] = "mʌst",
+
+            // Contractions
+            ["i'm"] = "aɪm",
+            ["you're"] = "jɔɹ",
+            ["we're"] = "wɪɹ",
+            ["they're"] = "ðɛɹ",
+            ["it's"] = "ɪts",
+            ["that's"] = "ðæts",
+            ["there's"] = "ðɛɹz",
+            ["don't"] = "doʊnt",
+            ["doesn't"] = "ˈdʌzənt",
+            ["can't"] = "kænt",
+            ["won't"] = "woʊnt",
+            ["isn't"] = "ˈɪzənt",
+            ["aren't"] = "ɑɹnt",
+            ["shouldn't"] = "ˈʃʊdənt",
+            ["wouldn't"] = "ˈwʊdənt",
+            ["couldn't"] = "ˈkʊdənt",
+
+            // Common adverbs
+            ["just"] = "dʒʌst",
+            ["very"] = "ˈvɛɹi",
+            ["really"] = "ˈɹɪəli",
+            ["only"] = "ˈoʊnli",
+            ["even"] = "ˈiːvən",
+            ["always"] = "ˈɔlweɪz",
+            ["never"] = "ˈnɛvɚ",
+            ["maybe"] = "ˈmeɪbi",
+            ["almost"] = "ˈɔlmoʊst",
+            ["quite"] = "kwaɪt",
+            ["still"] = "stɪl",
+            ["again"] = "əˈɡɛn",
+
+            // Filler words
+            ["like"] = "laɪk",
+            ["well"] = "wɛl",
+            ["okay"] = "oʊˈkeɪ",
+            ["yeah"] = "jæ",
+            ["uh"] = "ʌ",
+            ["um"] = "ʌm",
+            ["hmm"] = "hm",
+
+            // Numbers
+            ["zero"] = "ˈziɹoʊ",
+            ["one"] = "wʌn",
+            ["two"] = "tu",
+            ["three"] = "θɹi",
+            ["four"] = "fɔɹ",
+            ["five"] = "faɪv",
+            ["six"] = "sɪks",
+            ["seven"] = "ˈsɛvən",
+            ["eight"] = "eɪt",
+            ["nine"] = "naɪn",
+            ["ten"] = "tɛn",
+            ["eleven"] = "ɪˈlɛvən",
+            ["twelve"] = "twɛlv",
+            ["thirteen"] = "ˈθɜːtiːn",
+            ["fourteen"] = "ˈfɔːtiːn",
+            ["fifteen"] = "ˈfɪftiːn",
+            ["twenty"] = "ˈtwɛni",
+            ["thirty"] = "ˈθɜːti",
+            ["forty"] = "ˈfɔːti",
+            ["fifty"] = "ˈfɪfti",
+            ["hundred"] = "ˈhʌndɹəd",
+
+            // Days
+            ["monday"] = "ˈmʌndeɪ",
+            ["tuesday"] = "ˈtuːzdeɪ",
+            ["wednesday"] = "ˈwɛnzdeɪ",
+            ["thursday"] = "ˈθɜːzdeɪ",
+            ["friday"] = "ˈfɹaɪdeɪ",
+            ["saturday"] = "ˈsætɚdeɪ",
+            ["sunday"] = "ˈsʌndeɪ",
+
+            // Months
+            ["january"] = "ˈdʒænjʊˌɛɹi",
+            ["february"] = "ˈfɛbɹuˌɛɹi",
+            ["march"] = "mɑɹtʃ",
+            ["april"] = "ˈeɪpɹəl",
+            ["may"] = "meɪ",
+            ["june"] = "dʒuːn",
+            ["july"] = "dʒuˈlaɪ",
+            ["august"] = "ˈɔːɡəst",
+            ["september"] = "sɛpˈtɛmbɚ",
+            ["october"] = "ɑkˈtoʊbɚ",
+            ["november"] = "noʊˈvɛmbɚ",
+            ["december"] = "dɪˈsɛmbɚ",
+
+            // High-frequency nouns
+            ["time"] = "taɪm",
+            ["person"] = "ˈpɜːsən",
+            ["year"] = "jɪɹ",
+            ["way"] = "weɪ",
+            ["day"] = "deɪ",
+            ["thing"] = "θɪŋ",
+            ["man"] = "mæn",
+            ["woman"] = "ˈwʊmən",
+            ["child"] = "tʃaɪld",
+            ["life"] = "laɪf",
+            ["world"] = "wɜːld",
+            ["hand"] = "hænd",
+            ["part"] = "pɑɹt",
+            ["place"] = "pleɪs",
+            ["work"] = "wɜːk",
+            ["week"] = "wiːk",
+            ["case"] = "keɪs",
+            ["point"] = "pɔɪnt",
+            ["government"] = "ˈɡʌvɚnmənt",
+            ["company"] = "ˈkʌmpəni",
+            ["number"] = "ˈnʌmbɚ",
+            ["group"] = "ɡɹuːp",
+
+            // High-frequency adjectives
+            ["good"] = "ɡʊd",
+            ["bad"] = "bæd",
+            ["new"] = "nu",
+            ["first"] = "fɜːst",
+            ["last"] = "læst",
+            ["long"] = "lɔŋ",
+            ["great"] = "ɡɹeɪt",
+            ["little"] = "ˈlɪtəl",
+            ["own"] = "oʊn",
+            ["other"] = "ˈʌðɚ",
+            ["old"] = "oʊld",
+            ["right"] = "ɹaɪt",
+            ["big"] = "bɪɡ",
+            ["small"] = "smɔl",
+
+            // Critical diphthong fixes
+            ["voice"] = "vɔɪs",
+            ["choice"] = "tʃɔɪs",
+            ["noise"] = "nɔɪz",
+            ["view"] = "vju",
+            ["preview"] = "ˈpɹiːvju",
+            ["review"] = "ɹɪˈvju",
+            ["few"] = "fju",
+            ["new"] = "nju",
+            ["blue"] = "blu",
+            ["crew"] = "kɹu",
+            ["chew"] = "tʃu",
+            ["due"] = "dju",
+            ["queue"] = "kju"
         };
 
         return entries;
     }
+
 }

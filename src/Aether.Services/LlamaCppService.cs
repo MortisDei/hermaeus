@@ -13,6 +13,7 @@ public sealed class LlamaCppService : IDisposable
     private static readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(10) };
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> _contextLengthCache = new();
     private readonly ISettingsService _settings;
+    private readonly IRuntimeLogService _logs;
 
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
@@ -27,9 +28,10 @@ public sealed class LlamaCppService : IDisposable
     public string ProviderName => "llama.cpp";
     public bool   IsConfigured => true;
 
-    public LlamaCppService(ISettingsService settings)
+    public LlamaCppService(ISettingsService settings, IRuntimeLogService logs)
     {
         _settings = settings;
+        _logs = logs;
     }
 
     private string Base => _settings.Settings.Llm.LlamaCppBaseUrl.TrimEnd('/');
@@ -56,7 +58,11 @@ public sealed class LlamaCppService : IDisposable
 
             return models;
         }
-        catch { return []; }
+        catch (Exception ex)
+        {
+            _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Error, RuntimeLogCategory.Service, $"Failed to fetch models from llama.cpp: {ex.Message}"));
+            return [];
+        }
     }
 
     private async Task<int?> ProbeContextLengthAsync(CancellationToken ct)
@@ -74,14 +80,18 @@ public sealed class LlamaCppService : IDisposable
             var nCtx = ParsePropsContextLength(await resp.Content.ReadAsStringAsync(ct));
             if (nCtx is { } value)
             {
+                if (_contextLengthCache.Count > 50)
+                    _contextLengthCache.Clear();
+
                 _contextLengthCache[baseUrl] = value;
                 return value;
             }
 
             return null;
         }
-        catch
+        catch (Exception ex)
         {
+            _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Service, $"Failed to probe context length for {baseUrl}: {ex.Message}"));
             return null;
         }
     }

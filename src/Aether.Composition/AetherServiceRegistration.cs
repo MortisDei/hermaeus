@@ -49,7 +49,7 @@ public static class AetherServiceRegistration
         s.AddSingleton<IMemoryStore, MemoryStore>();
         s.AddSingleton<MemoryExtractionService>();
         s.AddSingleton<MemoryInjectionService>();
-        s.AddSingleton<IConversationMemoryService, ConversationMemoryService>();
+                s.AddSingleton<IConversationMemoryService, ConversationMemoryService>();
         s.AddSingleton<LlamaCppService>();
         s.AddSingleton<OpenAiService>();
         s.AddSingleton<RuntimeProfileService>();
