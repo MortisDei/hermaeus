@@ -1,4 +1,3 @@
-using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using Aether.Core.Models;
@@ -17,8 +16,8 @@ public partial class RagSettingsViewModel : ObservableObject
     [ObservableProperty] private string _embeddingModel = "nomic-embed-text";
     [ObservableProperty] private string _ragRerankerModelPath = string.Empty;
 
-    public ObservableCollection<string> EmbeddingModelOptions { get; } = [];
-    public ObservableCollection<string> RerankerModelPathOptions { get; } = [];
+    public UiBoundCollection<string> EmbeddingModelOptions { get; } = [];
+    public UiBoundCollection<string> RerankerModelPathOptions { get; } = [];
 
     public RagSettingsViewModel(Func<string> fallbackRoot) => _fallbackRoot = fallbackRoot;
 

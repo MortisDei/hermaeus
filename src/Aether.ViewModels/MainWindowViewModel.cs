@@ -1,4 +1,3 @@
-using System.Collections.ObjectModel;
 using Aether.Core.Models;
 using Aether.Core.Services;
 using Aether.Services;
@@ -7,13 +6,12 @@ using CommunityToolkit.Mvvm.Input;
 
 namespace Aether.ViewModels;
 
-public partial class MainWindowViewModel : ObservableObject
+public partial class MainWindowViewModel : ViewModelBase
 {
     private readonly IConversationStore _store;
     private readonly IToastService _toasts;
     private readonly IRuntimeLogService _logs;
     private readonly ConversationExportService _exports;
-    private readonly SynchronizationContext? _sync;
     private CancellationTokenSource? _searchCts;
     private readonly ISettingsService _settingsService;
     private bool _refreshingFolderFilters;
@@ -31,10 +29,10 @@ public partial class MainWindowViewModel : ObservableObject
     public LogsViewModel            Logs { get; }
     public SetupWizardViewModel     Wizard { get; }
 
-    public ObservableCollection<ConversationItemViewModel> Conversations { get; } = [];
-    public ObservableCollection<ToastViewModel> Toasts { get; } = [];
-    public ObservableCollection<ToastViewModel> ToastHistory { get; } = [];
-    public ObservableCollection<string> FolderFilters { get; } = ["All"];
+    public UiBoundCollection<ConversationItemViewModel> Conversations { get; } = [];
+    public UiBoundCollection<ToastViewModel> Toasts { get; } = [];
+    public UiBoundCollection<ToastViewModel> ToastHistory { get; } = [];
+    public UiBoundCollection<string> FolderFilters { get; } = ["All"];
 
     [ObservableProperty] private bool   _isSidebarOpen = true;
     [ObservableProperty] private string _searchQuery   = string.Empty;
@@ -98,7 +96,6 @@ public partial class MainWindowViewModel : ObservableObject
         IRuntimeLogService runtimeLogs,
         ConversationExportService exports)
     {
-        _sync = SynchronizationContext.Current;
         _toasts = toasts;
         _logs = runtimeLogs;
         _exports = exports;
@@ -632,35 +629,6 @@ public partial class MainWindowViewModel : ObservableObject
                 $"Model refresh failed: {ex.Message}"));
             _toasts.Show("Model refresh failed", ex.Message, ToastKind.Warning, 7000);
         }
-    }
-
-    private void RunOnUi(Action action)
-    {
-        if (_sync is null)
-            action();
-        else
-            _sync.Post(_ => action(), null);
-    }
-
-    private Task RunOnUiAsync(Func<Task> action)
-    {
-        if (_sync is null)
-            return action();
-
-        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        _sync.Post(async _ =>
-        {
-            try
-            {
-                await action();
-                tcs.SetResult();
-            }
-            catch (Exception ex)
-            {
-                tcs.SetException(ex);
-            }
-        }, null);
-        return tcs.Task;
     }
 
     private void RunBackgroundTaskAsync(string operation, Func<Task> action)

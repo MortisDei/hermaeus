@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Reflection;
 using Xunit;
 
@@ -91,5 +92,31 @@ public sealed class ArchitectureTests
             .ToList();
         Assert.True(offenders.Count == 0,
             $"Aether.Core gained unapproved references: {string.Join(", ", offenders)}");
+    }
+
+    /// <summary>
+    /// Types provably never bound to an Avalonia ItemsControl. Keep this empty
+    /// unless a specific, reviewed exception is needed (r9 03-ui-thread-safety.md 3.3).
+    /// </summary>
+    private static readonly (Type Type, string Property)[] ObservableCollectionOptOuts = [];
+
+    [Fact]
+    public void ViewModel_collections_are_UI_thread_guarded()
+    {
+        var offenders = new List<string>();
+        foreach (var type in ViewModels.GetTypes().Where(t => t.IsPublic))
+        {
+            foreach (var prop in type.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly))
+            {
+                if (!prop.PropertyType.IsGenericType) continue;
+                if (prop.PropertyType.GetGenericTypeDefinition() != typeof(ObservableCollection<>)) continue;
+                if (ObservableCollectionOptOuts.Any(o => o.Type == type && o.Property == prop.Name)) continue;
+                offenders.Add($"{type.Name}.{prop.Name}");
+            }
+        }
+
+        Assert.True(offenders.Count == 0,
+            "Public ObservableCollection<T> properties on ViewModels must be UiBoundCollection<T> " +
+            $"so cross-thread mutation fails loudly instead of corrupting Avalonia's container generator: {string.Join(", ", offenders)}");
     }
 }

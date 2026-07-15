@@ -51,6 +51,7 @@ internal static class LocalApiTests
             Task.FromResult(conversationIds.ToDictionary(id => id, _ => 0));
         public Task MarkRecalledAsync(IEnumerable<string> ids, CancellationToken ct = default) => Task.CompletedTask;
         public Task<int> ArchiveStaleMemoriesAsync(double importanceFloor = 0.05, int unrecalledForDays = 180, CancellationToken ct = default) => Task.FromResult(0);
+        public Task RunEmbeddingBackfillAsync(CancellationToken ct = default) => Task.CompletedTask;
     }
 
     private static async Task<(IHost Host, HttpClient Client)> StartTestHostAsync(TempDir temp, bool configureToken = true, IReadOnlyList<(string Name, string Token)>? tokens = null)

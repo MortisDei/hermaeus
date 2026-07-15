@@ -1,4 +1,3 @@
-using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using Aether.Core.Models;
@@ -11,7 +10,7 @@ namespace Aether.ViewModels;
 
 public partial class McpSettingsViewModel : ObservableObject
 {
-    public ObservableCollection<McpServerConfigViewModel> Servers { get; } = [];
+    public UiBoundCollection<McpServerConfigViewModel> Servers { get; } = [];
 
     public void ReloadFrom(AppSettings settings)
     {

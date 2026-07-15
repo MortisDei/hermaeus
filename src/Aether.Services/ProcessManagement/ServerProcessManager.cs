@@ -18,6 +18,8 @@ public sealed class ServerProcessManager : IDisposable
     private CancellationTokenSource? _monitorCts;
     private readonly ConcurrentQueue<string> _logRing = new();
     private readonly RedactionService? _redactor;
+    private readonly IProcessJobObject _jobObject;
+    private readonly IPortOwnerLookup _portOwnerLookup;
     private const int MaxLogLines = 300;
 
     public ServerStatus Status { get; private set; } = ServerStatus.Stopped;
@@ -32,9 +34,11 @@ public sealed class ServerProcessManager : IDisposable
     private static readonly Regex FitLayersRegex =
         new(@"Vulkan\d+.*:\s+(?<used>\d+)\s+layers", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-    public ServerProcessManager(RedactionService? redactor = null)
+    public ServerProcessManager(RedactionService? redactor = null, IProcessJobObject? jobObject = null, IPortOwnerLookup? portOwnerLookup = null)
     {
         _redactor = redactor;
+        _jobObject = jobObject ?? ProcessJobObject.Default;
+        _portOwnerLookup = portOwnerLookup ?? PortOwnerLookup.Default;
     }
 
     // ── Public API ────────────────────────────────────────────────────────────
@@ -42,6 +46,22 @@ public sealed class ServerProcessManager : IDisposable
     public async Task StartAsync(ServerConfig cfg, CancellationToken ct = default)
     {
         if (Status is ServerStatus.Running or ServerStatus.Starting) return;
+
+        // Port preflight (r9 02-server-lifecycle.md 2.2): a conflicting port
+        // fails instantly with the port and (best-effort) its owner named,
+        // instead of launching a doomed process that exits the moment it
+        // tries to bind, leaving the real cause buried in the log ring.
+        if (_portOwnerLookup.IsPortListening(cfg.Port))
+        {
+            var owner = _portOwnerLookup.FindOwner(cfg.Port);
+            ErrorMessage = owner is null
+                ? $"Port {cfg.Port} is already in use. Stop that process or change this server's port."
+                : $"Port {cfg.Port} is already in use by {owner.ProcessName} (PID {owner.Pid}). Stop that process or change this server's port.";
+            ClearLog();
+            SetStatus(ServerStatus.Error);
+            Emit($"[aether] ERROR: {ErrorMessage}");
+            return;
+        }
 
         ErrorMessage = string.Empty;
         ClearLog();
@@ -58,6 +78,9 @@ public sealed class ServerProcessManager : IDisposable
             if (!_process.Start())
                 throw new InvalidOperationException($"Failed to start '{cfg.ExecutablePath}'");
 
+            if (OperatingSystem.IsWindows() && !_jobObject.TryAssign(_process))
+                Emit("[aether] Warning: could not attach process to the app's job object; it may survive an abnormal app exit.");
+
             _process.BeginOutputReadLine();
             _process.BeginErrorReadLine();
 
@@ -73,6 +96,7 @@ public sealed class ServerProcessManager : IDisposable
         catch (OperationCanceledException)
         {
             KillProcess();
+            Emit("[aether] Start cancelled.");
             SetStatus(ServerStatus.Stopped);
         }
         catch (Exception ex)
@@ -213,6 +237,9 @@ public sealed class ServerProcessManager : IDisposable
         {
             if (!process.Start())
                 return ProbeResult.Failed($"Failed to start '{probe.ExecutablePath}'.");
+
+            if (OperatingSystem.IsWindows() && !ProcessJobObject.Default.TryAssign(process))
+                progress?.Report("[aether] Warning: could not attach auto-tune probe to the app's job object.");
 
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
@@ -479,7 +506,11 @@ public sealed class ServerProcessManager : IDisposable
                 var r = await http.GetAsync(url, ct);
                 if (r.IsSuccessStatusCode) return;
             }
-            catch (Exception ex) when (ex is not OperationCanceledException) { }
+            // The HttpClient's own 2 s timeout throws OperationCanceledException too, indistinguishable
+            // from a real cancellation by type alone; only a genuinely cancelled ct should escape this
+            // retry loop (r9 02-server-lifecycle.md 2.4: an HTTP timeout must not masquerade as a
+            // user-initiated cancel and overwrite an already-diagnosed Error state with a silent Stopped).
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested) { }
 
             await Task.Delay(600, ct);
         }
@@ -493,7 +524,19 @@ public sealed class ServerProcessManager : IDisposable
         var code = _process?.ExitCode ?? -1;
         Emit($"[aether] Process exited with code {code}.");
         if (Status == ServerStatus.Running)
+        {
             SetStatus(code == 0 ? ServerStatus.Stopped : ServerStatus.Error);
+        }
+        else if (Status == ServerStatus.Starting)
+        {
+            // The health-wait loop would eventually notice HasExited on its
+            // next poll, but reacting to the exit event directly (r9
+            // 02-server-lifecycle.md 2.4) reports the failure immediately
+            // instead of leaving Starting stuck for up to one poll interval.
+            ErrorMessage = BuildErrorMessage(
+                new InvalidOperationException($"llama-server exited before it became ready. Exit code: {code}."));
+            SetStatus(ServerStatus.Error);
+        }
     }
 
     private void KillProcess()

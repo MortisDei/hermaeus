@@ -1,5 +1,4 @@
 using System;
-using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -47,7 +46,7 @@ public partial class VoiceProfileEditViewModel : ObservableObject
     [ObservableProperty] private double? _speed;
 }
 
-public partial class TtsSettingsViewModel : ObservableObject, IDisposable
+public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
 {
     private readonly ITtsService _tts;
     private readonly IVoiceProviderRegistry _voiceProviderRegistry;
@@ -57,12 +56,11 @@ public partial class TtsSettingsViewModel : ObservableObject, IDisposable
     private readonly ISecretStore _secrets;
     private readonly ISettingsService _settings;
     private readonly IVoiceOrchestrator? _voice;
-    private readonly SynchronizationContext? _sync;
     private bool _externalServiceRunning;
     private bool _isReloading;
 
-    public ObservableCollection<VoiceChannelSettingViewModel> VoiceChannels { get; } = [];
-    public ObservableCollection<VoiceProfileEditViewModel> VoiceProfiles { get; } = [];
+    public UiBoundCollection<VoiceChannelSettingViewModel> VoiceChannels { get; } = [];
+    public UiBoundCollection<VoiceProfileEditViewModel> VoiceProfiles { get; } = [];
 
     [ObservableProperty] private bool _autoSpeakChatReplies;
     [ObservableProperty] private bool _streamingChatSpeech;
@@ -103,8 +101,8 @@ public partial class TtsSettingsViewModel : ObservableObject, IDisposable
     public Action? RequestTtsVoiceDirectoryPicker { get; set; }
 
     public string[] TtsDevices { get; } = ["cpu", "auto", "cuda", "rocm", "mps"];
-    public ObservableCollection<string> TtsVoices { get; } = ["default"];
-    public ObservableCollection<VoiceProviderInfo> VoiceProviders { get; } = [];
+    public UiBoundCollection<string> TtsVoices { get; } = ["default"];
+    public UiBoundCollection<VoiceProviderInfo> VoiceProviders { get; } = [];
 
     public bool IsTtsRunning => IsXttsV2Provider
         ? (_xttsProcess.IsRunning || _externalServiceRunning)
@@ -192,7 +190,6 @@ public partial class TtsSettingsViewModel : ObservableObject, IDisposable
         _secrets = secrets;
         _settings = settings;
         _voice = voiceOrchestrator;
-        _sync = SynchronizationContext.Current;
         _xttsProcess.StatusChanged += OnXttsStatusChanged;
         _kokoroProcess.StatusChanged += OnXttsStatusChanged;
     }
@@ -255,13 +252,7 @@ public partial class TtsSettingsViewModel : ObservableObject, IDisposable
             channel.RemoteProviderActive = remote;
     }
 
-    private void OnXttsStatusChanged()
-    {
-        if (_sync is not null)
-            _sync.Post(_ => ApplyXttsStatus(), null);
-        else
-            ApplyXttsStatus();
-    }
+    private void OnXttsStatusChanged() => RunOnUi(ApplyXttsStatus);
 
     private void ApplyXttsStatus()
     {

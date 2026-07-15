@@ -456,6 +456,7 @@ public sealed class ChatWorkbenchTests
             Task.FromResult(conversationIds.ToDictionary(id => id, _ => 0));
         public Task MarkRecalledAsync(IEnumerable<string> ids, CancellationToken ct = default) => Task.CompletedTask;
         public Task<int> ArchiveStaleMemoriesAsync(double importanceFloor = 0.05, int unrecalledForDays = 180, CancellationToken ct = default) => Task.FromResult(0);
+        public Task RunEmbeddingBackfillAsync(CancellationToken ct = default) => Task.CompletedTask;
     }
 
     private sealed class SearchableMemoryStore(List<Memory> memories) : IMemoryStore
@@ -476,6 +477,7 @@ public sealed class ChatWorkbenchTests
             Task.FromResult(conversationIds.ToDictionary(id => id, _ => memories.Count));
         public Task MarkRecalledAsync(IEnumerable<string> ids, CancellationToken ct = default) => Task.CompletedTask;
         public Task<int> ArchiveStaleMemoriesAsync(double importanceFloor = 0.05, int unrecalledForDays = 180, CancellationToken ct = default) => Task.FromResult(0);
+        public Task RunEmbeddingBackfillAsync(CancellationToken ct = default) => Task.CompletedTask;
     }
 
     private sealed class NoOpConversationMemoryService : IConversationMemoryService

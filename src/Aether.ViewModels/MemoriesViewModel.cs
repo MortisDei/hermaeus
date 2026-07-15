@@ -1,4 +1,3 @@
-using System.Collections.ObjectModel;
 using Aether.Core.Models;
 using Aether.Core.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -16,11 +15,11 @@ public partial class MemoriesViewModel : ObservableObject
     private readonly ISettingsService _settings;
     private readonly IToastService _toasts;
 
-    public ObservableCollection<MemoryItemViewModel> Memories { get; } = [];
+    public UiBoundCollection<MemoryItemViewModel> Memories { get; } = [];
 
     /// <summary>Per-conversation memory counts, for triaging where memory sprawl is
     /// coming from. Replaces the standalone Session Usage panel (Feature Audit: Merge).</summary>
-    public ObservableCollection<ConversationFilterItemViewModel> ConversationFilters { get; } = [];
+    public UiBoundCollection<ConversationFilterItemViewModel> ConversationFilters { get; } = [];
 
     [ObservableProperty] private string _searchText = string.Empty;
     [ObservableProperty] private string _selectedCategory = string.Empty;  // Filter by category

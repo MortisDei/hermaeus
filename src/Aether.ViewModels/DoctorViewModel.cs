@@ -1,4 +1,3 @@
-using System.Collections.ObjectModel;
 using System.Linq;
 using Aether.Core.Models;
 using Aether.Core.Services;
@@ -31,7 +30,7 @@ public partial class DoctorViewModel : ObservableObject
 
     private readonly System.Text.StringBuilder _embeddingLogBuffer = new();
 
-    public ObservableCollection<DoctorCheck> Checks { get; } = [];
+    public UiBoundCollection<DoctorCheck> Checks { get; } = [];
 
     public Action<string>? RequestCopyToClipboard { get; set; }
     public Action<string>? RequestNavigate { get; set; }

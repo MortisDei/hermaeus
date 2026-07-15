@@ -1,4 +1,3 @@
-using System.Collections.ObjectModel;
 using System.Text.Json;
 using Aether.Agent.Models;
 using Aether.Agent.Services;
@@ -279,23 +278,23 @@ public partial class AgentViewModel : ObservableObject
     private CancellationTokenSource? _cts;
     private string _activeWorkspaceVoiceProfile = string.Empty;
 
-    public ObservableCollection<LlmModel> AvailableModels { get; } = [];
-    public ObservableCollection<RagDataset> Datasets { get; } = [];
-    public ObservableCollection<AgentTaskListItem> RecentTasks { get; } = [];
-    public ObservableCollection<AgentReviewQueueItemViewModel> ReviewQueue { get; } = [];
-    public ObservableCollection<AgentWorkspaceMemoryEntryViewModel> WorkspaceMemory { get; } = [];
-    public ObservableCollection<AgentLessonViewModel> Lessons { get; } = [];
+    public UiBoundCollection<LlmModel> AvailableModels { get; } = [];
+    public UiBoundCollection<RagDataset> Datasets { get; } = [];
+    public UiBoundCollection<AgentTaskListItem> RecentTasks { get; } = [];
+    public UiBoundCollection<AgentReviewQueueItemViewModel> ReviewQueue { get; } = [];
+    public UiBoundCollection<AgentWorkspaceMemoryEntryViewModel> WorkspaceMemory { get; } = [];
+    public UiBoundCollection<AgentLessonViewModel> Lessons { get; } = [];
     /// <summary>Lessons newly created (not merely reinforced) by the open task, for the "new lessons" review strip (r6 3.3).</summary>
-    public ObservableCollection<AgentLessonViewModel> NewLessons { get; } = [];
-    public ObservableCollection<AgentWorkspaceFileViewModel> WorkspaceFiles { get; } = [];
-    public ObservableCollection<AgentContextItemViewModel> RetrievedContext { get; } = [];
+    public UiBoundCollection<AgentLessonViewModel> NewLessons { get; } = [];
+    public UiBoundCollection<AgentWorkspaceFileViewModel> WorkspaceFiles { get; } = [];
+    public UiBoundCollection<AgentContextItemViewModel> RetrievedContext { get; } = [];
     /// <summary>Per-section counts/token estimates for the most recent step's context pack (r6 1.5).</summary>
-    public ObservableCollection<AgentContextReceiptSectionViewModel> ContextReceipt { get; } = [];
-    public ObservableCollection<AgentDraftPatchViewModel> QueuedPatches { get; } = [];
-    public ObservableCollection<ProjectInstructionFileViewModel> ProjectInstructions { get; } = [];
-    public ObservableCollection<WorkspaceCommandRecipeViewModel> CommandRecipes { get; } = [];
-    public ObservableCollection<string> WorkspaceRisks { get; } = [];
-    public ObservableCollection<string> InstructionWarnings { get; } = [];
+    public UiBoundCollection<AgentContextReceiptSectionViewModel> ContextReceipt { get; } = [];
+    public UiBoundCollection<AgentDraftPatchViewModel> QueuedPatches { get; } = [];
+    public UiBoundCollection<ProjectInstructionFileViewModel> ProjectInstructions { get; } = [];
+    public UiBoundCollection<WorkspaceCommandRecipeViewModel> CommandRecipes { get; } = [];
+    public UiBoundCollection<string> WorkspaceRisks { get; } = [];
+    public UiBoundCollection<string> InstructionWarnings { get; } = [];
 
     public IReadOnlyList<string> CapabilityNotes { get; } =
     [

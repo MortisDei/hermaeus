@@ -1,4 +1,3 @@
-using System.Collections.ObjectModel;
 using Aether.Core.Models;
 using Aether.Core.Services;
 using Aether.Services;
@@ -13,10 +12,10 @@ public partial class SystemOverviewViewModel : ObservableObject
     private readonly IToastService _toasts;
     private readonly PrivacyAuditService _privacyAudit;
 
-    public ObservableCollection<SystemMetricViewModel> Metrics { get; } = [];
-    public ObservableCollection<GpuInfoViewModel> Gpus { get; } = [];
-    public ObservableCollection<ComponentStatusViewModel> Components { get; } = [];
-    public ObservableCollection<PrivacyAuditItemViewModel> PrivacyAuditItems { get; } = [];
+    public UiBoundCollection<SystemMetricViewModel> Metrics { get; } = [];
+    public UiBoundCollection<GpuInfoViewModel> Gpus { get; } = [];
+    public UiBoundCollection<ComponentStatusViewModel> Components { get; } = [];
+    public UiBoundCollection<PrivacyAuditItemViewModel> PrivacyAuditItems { get; } = [];
 
     [ObservableProperty] private string _privacyAuditSummary = string.Empty;
     [ObservableProperty] private string _status = "Ready.";

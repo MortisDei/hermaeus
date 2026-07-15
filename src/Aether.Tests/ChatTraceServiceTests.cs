@@ -28,7 +28,8 @@ public sealed class ChatTraceServiceTests
             ProviderUsage: new ChatTokenUsage(50, 20, 70),
             FirstTokenMs: 100,
             TotalLatencyMs: 400,
-            ErrorDetails: string.Empty);
+            ErrorDetails: string.Empty,
+            PreStreamBreakdown: "recall 240 ms, select 3 ms, lesson 1 ms, prompt build 2 ms, first token 100 ms, total 400 ms");
 
         await traces.PersistAsync(entry, conversationId: "conv-1");
         var recent = await traces.LoadRecentAsync();
@@ -40,6 +41,7 @@ public sealed class ChatTraceServiceTests
         Assert.Equal(entry.SystemPrompt, loaded.SystemPrompt);
         Assert.Equal(entry.AttachmentCount, loaded.AttachmentCount);
         Assert.Equal(70, loaded.ProviderUsage?.TotalTokens);
+        Assert.Equal(entry.PreStreamBreakdown, loaded.PreStreamBreakdown);
     }
 
     [Fact]

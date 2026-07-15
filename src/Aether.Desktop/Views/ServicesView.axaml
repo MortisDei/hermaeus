@@ -189,6 +189,24 @@
                                                Foreground="{DynamicResource SystemFillColorCriticalBrush}" />
                                 </Border>
 
+                                <!-- ── Orphan-from-previous-session banner (r9 2.3) ── -->
+                                <Border IsVisible="{Binding HasOrphan}"
+                                        CornerRadius="6" Padding="10,6"
+                                        Background="{DynamicResource SystemFillColorCautionBackgroundBrush}">
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                                        <TextBlock Grid.Column="0"
+                                                   Text="{Binding OrphanBannerText}"
+                                                   FontSize="12" TextWrapping="Wrap"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource SystemFillColorCautionBrush}" />
+                                        <Button Grid.Column="1"
+                                                Command="{Binding StopOrphanCommand}"
+                                                IsVisible="{Binding CanStopOrphan}"
+                                                Content="Stop"
+                                                Padding="12,4" CornerRadius="6" FontSize="12" />
+                                    </Grid>
+                                </Border>
+
                                 <!-- ── Config grid ───────────────────────── -->
                                 <Grid ColumnDefinitions="100,*,Auto"
                                       RowDefinitions="Auto,Auto,Auto,Auto,Auto"
@@ -279,6 +297,12 @@
                                                        FontSize="13"
                                                        IsEnabled="{Binding CanEdit}"
                                                        ToolTip.Tip="GPU layers to request. 0 leaves llama.cpp in auto-fit mode; use a high value such as 999 to request full offload when VRAM allows." />
+                                        <TextBlock Grid.Column="3"
+                                                   Text="{Binding OversizedContextNote}"
+                                                   IsVisible="{Binding HasOversizedContext}"
+                                                   TextWrapping="Wrap"
+                                                   VerticalAlignment="Center"
+                                                   Opacity="0.7" FontSize="12" />
                                     </Grid>
 
                                     <!-- Threads -->

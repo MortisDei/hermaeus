@@ -170,6 +170,33 @@ public sealed partial class DoctorService
             modelCheck.Diagnostics,
             "RAG");
 
+    /// <summary>
+    /// Blank EmbeddingBaseUrl silently falls back to the chat server, queuing
+    /// embed calls behind generation on a single-slot llama-server (r9
+    /// 01-send-path-latency.md 1.4). Advisory only; the fallback stays the
+    /// zero-config default.
+    /// </summary>
+    private DoctorCheck? CheckEmbeddingEndpointFallbackAdvisory()
+    {
+        var configured = _settings.Settings.Rag.EmbeddingBaseUrl?.Trim();
+        if (!string.IsNullOrWhiteSpace(configured))
+            return null;
+        if (!_settings.Settings.Memory.Enabled && !_settings.Settings.Rag.Enabled)
+            return null;
+
+        var chatUrl = _settings.Settings.Llm.LlamaCppBaseUrl.TrimEnd('/');
+        return BuildCheck(
+            "embedding-endpoint-fallback",
+            "Embedding endpoint configuration",
+            DoctorCheckStatus.Info,
+            "Embedding requests fall back to the chat server",
+            $"Rag.EmbeddingBaseUrl is not set; embedding requests fall back to {chatUrl}, queuing behind chat generation. Configure a dedicated embeddings server for best latency.",
+            "Open Settings",
+            true,
+            $"Fallback endpoint: {chatUrl}",
+            "RAG");
+    }
+
     private DoctorCheck CheckRerankerAssets()
     {
         if (!_settings.Settings.Rag.RerankerEnabled)

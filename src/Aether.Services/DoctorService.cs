@@ -113,6 +113,12 @@ public sealed partial class DoctorService : IDoctorService
         if (benchmarkAdvisory is not null)
             checks.Add(benchmarkAdvisory);
 
+        var embeddingFallbackAdvisory = CheckEmbeddingEndpointFallbackAdvisory();
+        if (embeddingFallbackAdvisory is not null)
+            checks.Add(embeddingFallbackAdvisory);
+
+        checks.AddRange(CheckOversizedContextAdvisories());
+
         var errorCount = checks.Count(c => c.Status == DoctorCheckStatus.Error);
         var warningCount = checks.Count(c => c.Status == DoctorCheckStatus.Warning);
         var summary = errorCount == 0 && warningCount == 0

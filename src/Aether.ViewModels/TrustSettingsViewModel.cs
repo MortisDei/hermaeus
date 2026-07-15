@@ -1,4 +1,3 @@
-using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using Aether.Core.Models;
@@ -23,7 +22,7 @@ public partial class TrustSettingsViewModel : ObservableObject
     [ObservableProperty] private string _trustLastScanned = string.Empty;
     [ObservableProperty] private string _settingsError = string.Empty;
 
-    public ObservableCollection<TrustItem> TrustItems { get; } = [];
+    public UiBoundCollection<TrustItem> TrustItems { get; } = [];
 
     public TrustSettingsViewModel(
         ISettingsService settings,

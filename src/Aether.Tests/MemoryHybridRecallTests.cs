@@ -81,7 +81,7 @@ public sealed class MemoryHybridRecallTests
     }
 
     [Fact]
-    public async Task Preexisting_rows_are_backfilled_with_embeddings_on_first_hybrid_search()
+    public async Task Preexisting_rows_are_backfilled_with_embeddings_after_a_background_pass()
     {
         using var temp = new TempDir();
         var settings = NewSettings(temp);
@@ -92,8 +92,11 @@ public sealed class MemoryHybridRecallTests
         await plainStore.InitializeAsync();
         await plainStore.SaveAsync(new Memory { Id = "m1", Content = "User prefers running llama.cpp for local inference." });
 
-        // A later store instance backed by an embedding service should backfill it lazily.
+        // Backfill runs off the send path (r9 01-send-path-latency.md 1.2): a
+        // hybrid search never embeds anything but the query, so an explicit
+        // background pass is what makes the preexisting row vector-recallable.
         var hybridStore = new MemoryStore(settings, new TopicEmbeddingService());
+        await hybridStore.RunEmbeddingBackfillAsync();
         var results = await hybridStore.SearchAsync("local model runtime");
 
         Assert.Contains(results, m => m.Id == "m1" && m.RelevanceScore > 0.4);

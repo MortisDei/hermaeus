@@ -20,7 +20,8 @@ public sealed record ChatTraceEntry(
     ChatTokenUsage? ProviderUsage,
     long FirstTokenMs,
     long TotalLatencyMs,
-    string ErrorDetails);
+    string ErrorDetails,
+    string PreStreamBreakdown = "");
 
 /// <summary>
 /// Persists and reloads chat traces through the shared <see cref="ITraceStore"/>.
@@ -32,7 +33,7 @@ public sealed record ChatTraceEntry(
 /// </summary>
 public sealed class ChatTraceService
 {
-    private sealed record ChatTraceDetail(string Provider, string Runtime, string SystemPrompt, int AttachmentCount, int EstimatedTokens);
+    private sealed record ChatTraceDetail(string Provider, string Runtime, string SystemPrompt, int AttachmentCount, int EstimatedTokens, string PreStreamBreakdown = "");
 
     private readonly ITraceStore? _traceStore;
     private readonly IRuntimeLogService _runtimeLogs;
@@ -65,7 +66,7 @@ public sealed class ChatTraceService
                 TotalTokens = trace.ProviderUsage?.TotalTokens ?? trace.EstimatedTokens,
                 Error = trace.ErrorDetails,
                 DetailJson = JsonSerializer.Serialize(new ChatTraceDetail(
-                    trace.Provider, trace.Runtime, trace.SystemPrompt, trace.AttachmentCount, trace.EstimatedTokens))
+                    trace.Provider, trace.Runtime, trace.SystemPrompt, trace.AttachmentCount, trace.EstimatedTokens, trace.PreStreamBreakdown))
             }, ct);
         }
         catch (Exception ex)
@@ -112,7 +113,8 @@ public sealed class ChatTraceService
                 : null,
             record.FirstTokenMs,
             record.TotalLatencyMs,
-            record.Error);
+            record.Error,
+            detail?.PreStreamBreakdown ?? string.Empty);
     }
 
     private static ChatTraceDetail? TryParseDetail(string json)

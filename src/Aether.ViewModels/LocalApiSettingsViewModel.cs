@@ -1,4 +1,3 @@
-using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using Aether.Core.Models;
@@ -28,7 +27,7 @@ public partial class LocalApiSettingsViewModel : ObservableObject
     [ObservableProperty] private string _tokenStatus = "No tokens generated yet. The local API refuses every request until one is saved.";
     [ObservableProperty] private string _processStatusLabel = "Stopped";
 
-    public ObservableCollection<LocalApiTokenRowViewModel> Tokens { get; } = [];
+    public UiBoundCollection<LocalApiTokenRowViewModel> Tokens { get; } = [];
 
     public LocalApiSettingsViewModel(ISecretStore secrets, ISettingsService? settings = null)
     {

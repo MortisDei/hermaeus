@@ -1,4 +1,3 @@
-using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using Aether.Core.Models;
@@ -30,10 +29,10 @@ public partial class LocalAiSetupSettingsViewModel : ObservableObject
     [ObservableProperty] private string _localAiInstallPlanActionId = string.Empty;
     [ObservableProperty] private string _settingsError = string.Empty;
 
-    public ObservableCollection<LocalAiReadinessItem> LocalAiReadinessItems { get; } = [];
-    public ObservableCollection<LocalAiSetupAction> LocalAiSetupActions { get; } = [];
-    public ObservableCollection<string> LocalAiInstallPlanCreates { get; } = [];
-    public ObservableCollection<string> LocalAiInstallPlanInstalls { get; } = [];
+    public UiBoundCollection<LocalAiReadinessItem> LocalAiReadinessItems { get; } = [];
+    public UiBoundCollection<LocalAiSetupAction> LocalAiSetupActions { get; } = [];
+    public UiBoundCollection<string> LocalAiInstallPlanCreates { get; } = [];
+    public UiBoundCollection<string> LocalAiInstallPlanInstalls { get; } = [];
 
     public Action<string>? RequestCopyToClipboard { get; set; }
 

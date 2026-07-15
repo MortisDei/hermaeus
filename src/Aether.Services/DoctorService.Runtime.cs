@@ -192,6 +192,30 @@ public sealed partial class DoctorService
             "Runtime");
     }
 
+    private const int LargeContextSizeThreshold = 16384;
+
+    /// <summary>
+    /// Large KV caches spill out of VRAM and make prompt processing crawl (r9
+    /// 01-send-path-latency.md 1.5). Advisory only, no auto-tuning or
+    /// clamping: the value may have been chosen deliberately.
+    /// </summary>
+    private List<DoctorCheck> CheckOversizedContextAdvisories()
+    {
+        return _settings.Settings.ManagedServers
+            .Where(server => server.ContextSize > LargeContextSizeThreshold)
+            .Select(server => BuildCheck(
+                $"oversized-context-{server.Id}",
+                $"{server.Name} context size",
+                DoctorCheckStatus.Info,
+                $"Large context configured ({server.ContextSize:N0})",
+                $"{server.Name} is configured with ContextSize {server.ContextSize:N0}, above {LargeContextSizeThreshold:N0}. Large KV caches can spill out of VRAM and slow prompt processing and increase memory use.",
+                "Open Services",
+                true,
+                $"ContextSize: {server.ContextSize}",
+                "Runtime"))
+            .ToList();
+    }
+
     private async Task<DoctorCheck> CheckOllamaAsync(CancellationToken ct)
     {
         var profiles = _runtimes.Profiles.Where(p => p.Enabled && p.Kind == RuntimeKind.Ollama).ToList();

@@ -324,6 +324,51 @@ Three new download/content-rendering surfaces landed in `0.13.0-alpha`.
   validation is skipped and logged, never executed, interpolated, or passed
   to a shell. The file only ever affects locally-synthesized speech text.
 
+### r9: Server Lifecycle Hardening
+
+`0.14.0-alpha` closes the process-lifecycle gap the 2026-07-15 crash exposed:
+an orphaned `llama-server` held a port, RAM, and GPU layers across app
+restarts. Three new surfaces, all confined to processes the app itself
+launched.
+
+- **Job-object process containment** (`ProcessJobObject`,
+  `Win32ProcessJobObject`). On Windows, every managed server, auto-tune
+  probe, and voice-engine (XTTS/Kokoro) child process is assigned to one
+  shared job object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, so the OS
+  kills them when the app process dies, however it dies. This is containment
+  of the app's own children, not a new attack surface: no new process is
+  launched that wasn't already being launched, and job-object creation or
+  assignment failure only logs a Warning and never blocks or alters the
+  launch. Non-Windows is a no-op behind `OperatingSystem.IsWindows()`.
+- **Port-owner lookup** (`PortOwnerLookup`, `SystemPortOwnerLookup`). Before
+  launching, and when detecting an orphan, the app reads local TCP listener
+  state (`IPGlobalProperties.GetActiveTcpListeners()`, cross-platform) and,
+  best-effort on Windows, the PID and executable path of whatever process
+  owns a given loopback port (`GetExtendedTcpTable`, read-only). This is
+  read-only process metadata inspection - it names a process for the user,
+  it never acts on what it finds by itself.
+- **Orphan Stop affordance** (`OrphanServerDetector`). This is the only place
+  the app terminates a process it did not start this session, so it is the
+  most sensitive of the three additions. Mitigations: (1) exact-path
+  identification - a process only qualifies as "this server's own orphan,"
+  and only then gets a Stop button, when its executable path matches the
+  server's configured `ExecutablePath` exactly (normalized, case-insensitive
+  on Windows); any other process on the port is reported for information
+  only, with no Stop affordance, matching the existing rule that the app must
+  never terminate a process it cannot positively identify as its own binary.
+  (2) Stopping is never automatic - it requires an explicit user click,
+  routed through `OrphanServerDetector.TryStop`. (3) PID-reuse guard: the
+  port's owner and its executable path are both re-verified immediately
+  before the kill, inside `TryStop` itself, not from a cached snapshot the
+  UI took when it first showed the banner; a PID that has since been
+  reassigned to a different process, or whose executable no longer matches,
+  refuses the stop instead of killing the wrong process.
+
+Explicitly rejected for this round (see `docs/review/04-roadmap.md`):
+auto-killing an unrecognized process on a conflicting port, and any
+synchronization-based alternative to UI-thread marshaling for the unrelated
+`UiBoundCollection<T>` guard work landing in the same release.
+
 ## Release Gate Status
 
 Security review and threat model refresh was completed for `0.13.0-alpha` as

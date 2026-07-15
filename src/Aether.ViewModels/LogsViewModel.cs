@@ -1,4 +1,3 @@
-using System.Collections.ObjectModel;
 using System.Linq;
 using Aether.Core.Models;
 using Aether.Core.Services;
@@ -20,16 +19,15 @@ public class LogEntryDisplayViewModel
     }
 }
 
-public partial class LogsViewModel : ObservableObject
+public partial class LogsViewModel : ViewModelBase
 {
     private readonly IRuntimeLogService _logs;
     private readonly RedactionService _redactor;
-    private readonly SynchronizationContext? _sync;
 
     [ObservableProperty] private string _selectedFilter = "All";
     [ObservableProperty] private string _statusText = "";
 
-    public ObservableCollection<string> Filters { get; } =
+    public UiBoundCollection<string> Filters { get; } =
     [
         "All",
         "Errors",
@@ -52,7 +50,6 @@ public partial class LogsViewModel : ObservableObject
     {
         _logs = logs;
         _redactor = redactor;
-        _sync = SynchronizationContext.Current;
         _logs.LogAdded += _ => RunOnUi(Refresh);
         Refresh();
     }
@@ -99,14 +96,6 @@ public partial class LogsViewModel : ObservableObject
         var path = _logs.GetLogDirectory();
         RequestOpenFolder?.Invoke(path);
         StatusText = "Opened log folder";
-    }
-
-    private void RunOnUi(Action action)
-    {
-        if (_sync is null)
-            action();
-        else
-            _sync.Post(_ => action(), null);
     }
 
     private static IEnumerable<RuntimeLogEntry> ApplyFilter(IReadOnlyList<RuntimeLogEntry> entries, string filter)

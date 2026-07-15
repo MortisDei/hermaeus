@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Aether.Core.Models;
+using Aether.Core.Services;
 
 namespace Aether.Services.ProcessManagement;
 
@@ -7,6 +8,14 @@ public sealed class XttsProcessManager : IDisposable
 {
     private Process? _process;
     private CancellationTokenSource? _healthCts;
+    private readonly IProcessJobObject _jobObject;
+    private readonly IRuntimeLogService? _runtimeLogs;
+
+    public XttsProcessManager(IProcessJobObject? jobObject = null, IRuntimeLogService? runtimeLogs = null)
+    {
+        _jobObject = jobObject ?? ProcessJobObject.Default;
+        _runtimeLogs = runtimeLogs;
+    }
 
     public bool IsRunning => _process is { HasExited: false };
     public string StatusLabel { get; private set; } = "Stopped";
@@ -64,6 +73,10 @@ public sealed class XttsProcessManager : IDisposable
         {
             if (!_process.Start())
                 throw new InvalidOperationException("Failed to start XTTS v2 server.");
+
+            if (OperatingSystem.IsWindows() && !_jobObject.TryAssign(_process))
+                _runtimeLogs?.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Voice,
+                    "Could not attach XTTS v2 process to the app's job object; it may survive an abnormal app exit."));
 
             _healthCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             await WaitForHealthAsync(settings.Tts.ServiceUrl, _healthCts.Token);

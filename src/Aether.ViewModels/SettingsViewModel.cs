@@ -7,7 +7,7 @@ using CommunityToolkit.Mvvm.Input;
 
 namespace Aether.ViewModels;
 
-public partial class SettingsViewModel : ObservableObject
+public partial class SettingsViewModel : ViewModelBase
 {
     private readonly ISettingsService _svc;
     private readonly IToastService _toasts;
@@ -150,7 +150,7 @@ public partial class SettingsViewModel : ObservableObject
         Mcp = new McpSettingsViewModel();
         LocalApi = new LocalApiSettingsViewModel(secrets, _svc);
         LocalApi.ProcessStatusLabel = _localApiProcess.StatusLabel;
-        _localApiProcess.StatusChanged += () => LocalApi.ProcessStatusLabel = _localApiProcess.StatusLabel;
+        _localApiProcess.StatusChanged += () => RunOnUi(() => LocalApi.ProcessStatusLabel = _localApiProcess.StatusLabel);
         Tts = new TtsSettingsViewModel(tts, voiceProviderRegistry, _toasts, xttsProcess, kokoroProcess, secrets, _svc, voiceOrchestrator);
         LocalAiSetup = new LocalAiSetupSettingsViewModel(_svc, localAiSetup, _toasts, Tts, Data, Rag, SaveAsync);
         Trust = new TrustSettingsViewModel(_svc, trust, _toasts, Tts, Data, Rag);

@@ -149,6 +149,25 @@ public partial class App : Application
                         RuntimeLogCategory.Service,
                         $"Embedding model warm-up failed: {ex.Message}"));
                 }
+
+                // Backfill runs off the send path (r9 01-send-path-latency.md
+                // 1.2): once here, after the warm-up above, and again after
+                // memory writes (MemoryStore.SaveAsync), never inside a chat
+                // send.
+                try
+                {
+                    var memoryStore = sp.GetService<IMemoryStore>();
+                    if (memoryStore is not null)
+                        await memoryStore.RunEmbeddingBackfillAsync();
+                }
+                catch (Exception ex)
+                {
+                    logs.Add(new RuntimeLogEntry(
+                        DateTime.UtcNow,
+                        RuntimeLogLevel.Warning,
+                        RuntimeLogCategory.Service,
+                        $"Startup embedding backfill failed: {ex.Message}"));
+                }
             });
         }
         catch (Exception ex)

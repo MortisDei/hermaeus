@@ -1,4 +1,3 @@
-using System.Collections.ObjectModel;
 using System.Text;
 using Aether.Rag;
 using Aether.Rag.Eval;
@@ -127,12 +126,12 @@ public partial class RagViewModel : ObservableObject
     private CancellationTokenSource? _ingestCts;
     private RagDataset? _targetDatasetForIngest;
 
-    public ObservableCollection<RagDataset>       Datasets  { get; } = [];
-    public ObservableCollection<RagSourceViewModel> Sources  { get; } = [];
-    public ObservableCollection<RagSourceViewModel> VisibleCitationSources { get; } = [];
-    public ObservableCollection<RagEvalResultViewModel> EvalResults { get; } = [];
-    public ObservableCollection<RagIngestReportItemViewModel> IngestReportItems { get; } = [];
-    public ObservableCollection<RagDatasetManagerItemViewModel> DatasetManagerItems { get; } = [];
+    public UiBoundCollection<RagDataset>       Datasets  { get; } = [];
+    public UiBoundCollection<RagSourceViewModel> Sources  { get; } = [];
+    public UiBoundCollection<RagSourceViewModel> VisibleCitationSources { get; } = [];
+    public UiBoundCollection<RagEvalResultViewModel> EvalResults { get; } = [];
+    public UiBoundCollection<RagIngestReportItemViewModel> IngestReportItems { get; } = [];
+    public UiBoundCollection<RagDatasetManagerItemViewModel> DatasetManagerItems { get; } = [];
 
     [ObservableProperty] private RagDataset? _selectedDataset;
     [ObservableProperty] private string      _questionText    = string.Empty;

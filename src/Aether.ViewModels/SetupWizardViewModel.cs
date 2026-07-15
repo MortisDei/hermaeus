@@ -1,4 +1,3 @@
-using System.Collections.ObjectModel;
 using Aether.Core.Models;
 using Aether.Core.Services;
 using Aether.Services;
@@ -62,7 +61,7 @@ public partial class SetupWizardViewModel : ObservableObject
 
     private bool _syncingRuntimeSelection;
 
-    public ObservableCollection<string> Steps { get; } =
+    public UiBoundCollection<string> Steps { get; } =
     [
         "Data roots",
         "Chat backend",
@@ -72,9 +71,9 @@ public partial class SetupWizardViewModel : ObservableObject
         "Finish"
     ];
 
-    public ObservableCollection<RuntimeProfileViewModel> RuntimeOptions { get; } = [];
-    public ObservableCollection<VoiceProviderInfo> VoiceOptions { get; } = [];
-    public ObservableCollection<string> VoiceOnboardingSteps { get; } = [];
+    public UiBoundCollection<RuntimeProfileViewModel> RuntimeOptions { get; } = [];
+    public UiBoundCollection<VoiceProviderInfo> VoiceOptions { get; } = [];
+    public UiBoundCollection<string> VoiceOnboardingSteps { get; } = [];
 
     public string CurrentStepTitle => StepIndex >= 0 && StepIndex < Steps.Count ? Steps[StepIndex] : string.Empty;
     public bool IsLastStep => StepIndex >= Steps.Count - 1;

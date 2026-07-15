@@ -1,4 +1,3 @@
-using System.Collections.ObjectModel;
 using Aether.Agent.Models;
 using Aether.Agent.Services;
 using Aether.Core.Services;
@@ -80,7 +79,7 @@ public sealed partial class AgentScenarioSuiteViewModel : ObservableObject
     private IReadOnlyList<AgentScenario> _loadedScenarios = [];
     private CancellationTokenSource? _cts;
 
-    public ObservableCollection<AgentScenarioRowViewModel> Scenarios { get; } = [];
+    public UiBoundCollection<AgentScenarioRowViewModel> Scenarios { get; } = [];
 
     [ObservableProperty] private bool _isLoading;
     [ObservableProperty] private bool _isRunning;

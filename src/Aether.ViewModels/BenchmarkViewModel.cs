@@ -1,4 +1,3 @@
-using System.Collections.ObjectModel;
 using Aether.Core.Models;
 using Aether.Core.Services;
 using Aether.Services;
@@ -20,15 +19,15 @@ public partial class BenchmarkViewModel : ObservableObject
     private CancellationTokenSource? _runCts;
     private bool _isLoading;
 
-    public ObservableCollection<BenchmarkSuite> Suites { get; } = [];
-    public ObservableCollection<BenchmarkRunViewModel> Runs { get; } = [];
-    public ObservableCollection<BenchmarkRunViewModel> RankedRuns { get; } = [];
-    public ObservableCollection<LlmModel> Models { get; } = [];
-    public ObservableCollection<BenchmarkResultViewModel> SelectedResults { get; } = [];
-    public ObservableCollection<TagLeaderboardViewModel> InsightsLeaderboards { get; } = [];
-    public ObservableCollection<string> InsightsCaveats { get; } = [];
+    public UiBoundCollection<BenchmarkSuite> Suites { get; } = [];
+    public UiBoundCollection<BenchmarkRunViewModel> Runs { get; } = [];
+    public UiBoundCollection<BenchmarkRunViewModel> RankedRuns { get; } = [];
+    public UiBoundCollection<LlmModel> Models { get; } = [];
+    public UiBoundCollection<BenchmarkResultViewModel> SelectedResults { get; } = [];
+    public UiBoundCollection<TagLeaderboardViewModel> InsightsLeaderboards { get; } = [];
+    public UiBoundCollection<string> InsightsCaveats { get; } = [];
     /// <summary>"Based on your usage" card rows; empty when no activity kind has enough calls yet (r6 2.3).</summary>
-    public ObservableCollection<UsageInsightViewModel> InsightsUsage { get; } = [];
+    public UiBoundCollection<UsageInsightViewModel> InsightsUsage { get; } = [];
 
     [ObservableProperty] private bool _isLoadingInsights;
     [ObservableProperty] private string _insightsHeader = string.Empty;
@@ -368,7 +367,7 @@ public partial class BenchmarkViewModel : ObservableObject
         if (!_isLoading)
         {
             // Refresh ranking view to show only runs for the selected suite.
-            _ = Task.Run(async () => await ReloadRunsAsync());
+            _ = ReloadRunsAsync();
         }
     }
 

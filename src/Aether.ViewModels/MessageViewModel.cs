@@ -1,4 +1,3 @@
-using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using Aether.Core.Models;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -25,7 +24,7 @@ public partial class MessageViewModel : ObservableObject
     /// Stores attachment file paths when this is a user message with context attachments.
     /// Populated when attachments are added; used during regeneration to recover attachments.
     /// </summary>
-    public ObservableCollection<string> AttachedFilePaths { get; } = [];
+    public UiBoundCollection<string> AttachedFilePaths { get; } = [];
 
     /// <summary>
     /// Memories (and, in future, RAG/agent citations) actually injected into
@@ -34,7 +33,7 @@ public partial class MessageViewModel : ObservableObject
     /// for the turn just generated; reloaded history has no source
     /// association recorded, so it stays empty.
     /// </summary>
-    public ObservableCollection<SourceReference> Sources { get; } = [];
+    public UiBoundCollection<SourceReference> Sources { get; } = [];
 
     public MessageViewModel() => Sources.CollectionChanged += OnSourcesChanged;
 

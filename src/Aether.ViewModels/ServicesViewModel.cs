@@ -1,4 +1,3 @@
-using System.Collections.ObjectModel;
 using Aether.Core.Models;
 using Aether.Core.Services;
 using Aether.Services;
@@ -10,14 +9,16 @@ namespace Aether.ViewModels;
 
 // ── Per-server VM ─────────────────────────────────────────────────────────────
 
-public partial class ServerProcessViewModel : ObservableObject, IDisposable
+public partial class ServerProcessViewModel : ViewModelBase, IDisposable
 {
     private readonly ServerProcessManager  _mgr;
     private readonly ISettingsService      _settings;
     private readonly TrustService         _trust;
     private readonly IToastService         _toasts;
     private readonly IRuntimeLogService    _runtimeLogs;
+    private readonly OrphanServerDetector  _orphanDetector;
     private readonly ServerConfig          _config;
+    private OrphanServerInfo? _orphanInfo;
 
     [ObservableProperty] private string       _name;
     [ObservableProperty] private string       _executablePath;
@@ -35,6 +36,9 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
     [ObservableProperty] private bool         _logExpanded  = false;
     [ObservableProperty] private bool         _isAutoTuning;
     [ObservableProperty] private string       _autoTuneStatus = string.Empty;
+    [ObservableProperty] private bool         _hasOrphan;
+    [ObservableProperty] private bool         _canStopOrphan;
+    [ObservableProperty] private string       _orphanBannerText = string.Empty;
 
     public string Id => _config.Id;
     public bool IsRunning  => Status == ServerStatus.Running;
@@ -81,7 +85,14 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
     public Action<string>? RequestFolderPicker { get; set; }
     public Func<ServerProcessViewModel, Task>? BeforeStartAsync { get; set; }
 
-    public ObservableCollection<string> DetectedModelPaths { get; } = [];
+    private const int LargeContextSizeThreshold = 16384;
+
+    /// <summary>Drives the inline oversized-context note (r9 01-send-path-latency.md 1.5). Advisory only.</summary>
+    public bool HasOversizedContext => ContextSize > LargeContextSizeThreshold;
+    public string OversizedContextNote =>
+        $"Large context ({ContextSize:N0} tokens) can spill out of VRAM, slowing prompt processing and increasing memory use.";
+
+    public UiBoundCollection<string> DetectedModelPaths { get; } = [];
 
     public void RefreshDetectedModels()
     {
@@ -102,7 +113,8 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
         RedactionService redactor,
         TrustService trust,
         IToastService toasts,
-        IRuntimeLogService runtimeLogs)
+        IRuntimeLogService runtimeLogs,
+        OrphanServerDetector? orphanDetector = null)
     {
         _mgr = new ServerProcessManager(redactor);
         _config   = config;
@@ -110,6 +122,7 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
         _trust = trust;
         _toasts = toasts;
         _runtimeLogs = runtimeLogs;
+        _orphanDetector = orphanDetector ?? new OrphanServerDetector();
 
         _name           = config.Name;
         _executablePath = config.ExecutablePath;
@@ -122,7 +135,7 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
         _autoStart      = config.AutoStart;
         _extraArgs      = config.ExtraArgs;
 
-        _mgr.StatusChanged += s =>
+        _mgr.StatusChanged += s => RunOnUi(() =>
         {
             Status       = s;
             ErrorMessage = _mgr.ErrorMessage;
@@ -134,16 +147,73 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
                 RuntimeLogCategory.Service,
                 $"{Name} status: {StatusLabel}"));
             NotifyStatusProps();
-        };
+        });
 
-        _mgr.LogLine += line =>
+        _mgr.LogLine += line => RunOnUi(() =>
         {
             LogOutput = _mgr.GetLog();
             if (!string.IsNullOrWhiteSpace(line))
                 _runtimeLogs.Add(MapLog(line));
-        };
+        });
 
         RefreshDetectedModels();
+    }
+
+    /// <summary>
+    /// Checks whether this server's configured port is held by a leftover
+    /// process from a previous session (r9 02-server-lifecycle.md 2.3).
+    /// Called at startup and on Services view refresh; a no-op while this
+    /// server is Running (nothing "leftover" about the process we manage).
+    /// </summary>
+    public Task RefreshOrphanStatusAsync()
+    {
+        if (Status == ServerStatus.Running)
+        {
+            ClearOrphanBanner();
+            return Task.CompletedTask;
+        }
+
+        var info = _orphanDetector.Detect(BuildConfig());
+        if (info is null)
+        {
+            ClearOrphanBanner();
+            return Task.CompletedTask;
+        }
+
+        _orphanInfo = info;
+        HasOrphan = true;
+        CanStopOrphan = info.IsOwnBinary;
+        OrphanBannerText = info.IsOwnBinary
+            ? $"A {Name} process from a previous session is still running on port {info.Port} (PID {info.Pid})."
+            : $"Port {info.Port} is already in use by {info.ProcessName} (PID {info.Pid}).";
+        return Task.CompletedTask;
+    }
+
+    private void ClearOrphanBanner()
+    {
+        _orphanInfo = null;
+        HasOrphan = false;
+        CanStopOrphan = false;
+        OrphanBannerText = string.Empty;
+    }
+
+    [RelayCommand]
+    private void StopOrphan()
+    {
+        var info = _orphanInfo;
+        if (info is null || !info.IsOwnBinary) return;
+
+        var result = _orphanDetector.TryStop(BuildConfig(), info.Pid);
+        if (result.Success)
+        {
+            _runtimeLogs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Service,
+                $"Stopped orphaned {Name} process from a previous session (PID {info.Pid})."));
+            ClearOrphanBanner();
+        }
+        else
+        {
+            _toasts.Show("Could not stop process", result.Message, ToastKind.Warning, 7000);
+        }
     }
 
     [RelayCommand]
@@ -487,7 +557,12 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
     partial void OnExecutablePathChanged(string value) => OnPropertyChanged(nameof(HasUnsavedChanges));
     partial void OnModelPathChanged(string value) => OnPropertyChanged(nameof(HasUnsavedChanges));
     partial void OnPortChanged(int value) => OnPropertyChanged(nameof(HasUnsavedChanges));
-    partial void OnContextSizeChanged(int value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnContextSizeChanged(int value)
+    {
+        OnPropertyChanged(nameof(HasUnsavedChanges));
+        OnPropertyChanged(nameof(HasOversizedContext));
+        OnPropertyChanged(nameof(OversizedContextNote));
+    }
     partial void OnGpuLayersChanged(int value) => OnPropertyChanged(nameof(HasUnsavedChanges));
     partial void OnThreadsChanged(int value) => OnPropertyChanged(nameof(HasUnsavedChanges));
     partial void OnEmbeddingsModeChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
@@ -530,7 +605,7 @@ public partial class ServerProcessViewModel : ObservableObject, IDisposable
 
 // ── ServicesViewModel ─────────────────────────────────────────────────────────
 
-public partial class ServicesViewModel : ObservableObject
+public partial class ServicesViewModel : ViewModelBase
 {
     private readonly ISettingsService _settings;
     private readonly RuntimeProfileService _runtimeProfiles;
@@ -538,9 +613,10 @@ public partial class ServicesViewModel : ObservableObject
     private readonly RedactionService _redactor;
     private readonly TrustService _trust;
     private readonly IRuntimeLogService _runtimeLogs;
+    private readonly OrphanServerDetector _orphanDetector;
 
-    public ObservableCollection<ServerProcessViewModel> Servers { get; } = [];
-    public ObservableCollection<RuntimeProfileViewModel> RuntimeProfiles { get; } = [];
+    public UiBoundCollection<ServerProcessViewModel> Servers { get; } = [];
+    public UiBoundCollection<RuntimeProfileViewModel> RuntimeProfiles { get; } = [];
     public event EventHandler? ServerAvailabilityChanged;
 
     public RuntimeKind[] RuntimeKinds { get; } =
@@ -556,7 +632,8 @@ public partial class ServicesViewModel : ObservableObject
         IToastService toasts,
         RedactionService redactor,
         TrustService trust,
-        IRuntimeLogService runtimeLogs)
+        IRuntimeLogService runtimeLogs,
+        OrphanServerDetector? orphanDetector = null)
     {
         _settings = settings;
         _runtimeProfiles = runtimeProfiles;
@@ -564,8 +641,17 @@ public partial class ServicesViewModel : ObservableObject
         _redactor = redactor;
         _trust = trust;
         _runtimeLogs = runtimeLogs;
+        _orphanDetector = orphanDetector ?? new OrphanServerDetector();
         Rebuild();
-        _settings.SettingsChanged += (_, _) => Rebuild();
+        _settings.SettingsChanged += (_, _) => RunOnUi(Rebuild);
+    }
+
+    /// <summary>Re-checks every non-Running server's port for a leftover process (r9 02-server-lifecycle.md 2.3). Startup and Services-view-refresh entry point.</summary>
+    [RelayCommand]
+    public async Task RefreshOrphanDetectionAsync()
+    {
+        foreach (var server in Servers.ToList())
+            await server.RefreshOrphanStatusAsync();
     }
 
     private void Rebuild()
@@ -591,7 +677,7 @@ public partial class ServicesViewModel : ObservableObject
         {
             var vm = existing.TryGetValue(cfg.Id, out var current)
                 ? current
-                : new ServerProcessViewModel(cfg, _settings, _redactor, _trust, _toasts, _runtimeLogs);
+                : new ServerProcessViewModel(cfg, _settings, _redactor, _trust, _toasts, _runtimeLogs, _orphanDetector);
 
             vm.BeforeStartAsync = StopSamePortPeersBeforeStartAsync;
             vm.PropertyChanged += OnServerPropertyChanged;
@@ -604,6 +690,7 @@ public partial class ServicesViewModel : ObservableObject
             RuntimeProfiles.Add(new RuntimeProfileViewModel(profile));
 
         ServerAvailabilityChanged?.Invoke(this, EventArgs.Empty);
+        _ = RefreshOrphanDetectionAsync();
     }
 
     [RelayCommand]

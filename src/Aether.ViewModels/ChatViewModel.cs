@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
+using System.Diagnostics;
 using Aether.Agent.Models;
 using Aether.Agent.Services;
 using Aether.Core.Models;
@@ -35,6 +36,9 @@ public sealed class ChatTraceViewModel
     public long FirstTokenMs { get; init; }
     public long TotalLatencyMs { get; init; }
     public string ErrorDetails { get; init; } = string.Empty;
+
+    /// <summary>Pre-stream stage timing (r9 01-send-path-latency.md 1.1), e.g. "recall 240 ms, select 3 ms, ...".</summary>
+    public string PreStreamBreakdown { get; init; } = string.Empty;
     public string Summary => $"{Timestamp:HH:mm:ss} {ModelId} · {TotalLatencyMs} ms · {EstimatedTokens:N0} est tokens";
     public string UsageLabel => ProviderUsage is null
         ? "provider usage unavailable"
@@ -74,7 +78,7 @@ public sealed class ModelCompareResultViewModel
         : Error;
 }
 
-public partial class ChatViewModel : ObservableObject
+public partial class ChatViewModel : ViewModelBase
 {
     private readonly ILlmService _llm;
     private readonly IConversationStore _store;
@@ -96,7 +100,6 @@ public partial class ChatViewModel : ObservableObject
     private CancellationTokenSource? _ttsCts;
     private CancellationTokenSource? _contextUsageCts;
     private DateTime _modelsLoadedAtUtc = DateTime.MinValue;
-    private readonly SynchronizationContext? _sync;
 
     public UiBoundCollection<MessageViewModel> Messages        { get; } = [];
 
@@ -213,7 +216,6 @@ public partial class ChatViewModel : ObservableObject
         _voice = voice;
         _evalEngine = evalEngine ?? new EvalEngine(llm);
         _workspaceActivation = workspaceActivation;
-        _sync = SynchronizationContext.Current;
         _temperature  = settings.Settings.Llm.Temperature;
         _topP = settings.Settings.Llm.TopP;
         _topK = settings.Settings.Llm.TopK;
@@ -399,10 +401,11 @@ public partial class ChatViewModel : ObservableObject
         var chunker = streamingSpeech ? new SentenceChunker() : null;
         try
         {
-            var (memoryContext, memorySources, injectedMemoryIds) = await BuildMemoryInjectionAsync(text, _cts.Token);
+            var (memoryContext, memorySources, injectedMemoryIds, recallMs, selectMs, lessonMs) = await BuildMemoryInjectionAsync(text, _cts.Token);
             foreach (var source in memorySources)
                 asst.Sources.Add(source);
 
+            var promptBuildSw = Stopwatch.StartNew();
             var systemPromptTokens = EstimateTokens(SystemPrompt) + EstimateTokens(memoryContext);
             var history = TruncateHistoryToContextWindow(
                 Messages.Where(m => !m.IsStreaming).ToList(),
@@ -411,6 +414,7 @@ public partial class ChatViewModel : ObservableObject
                 Math.Max(0, snapshot.EstimatedTokens - snapshot.HistoryTokens - systemPromptTokens));
             if (history.Count > 0 && history[^1].Role == "user")
                 history[^1] = history[^1] with { Content = promptText };
+            var promptBuildMs = promptBuildSw.ElapsedMilliseconds;
 
             var result = await ChatSendOrchestrator.StreamAsync(
                 _llm, selectedModelId, history,
@@ -436,10 +440,11 @@ public partial class ChatViewModel : ObservableObject
                 ScrollToBottom?.Invoke(this, EventArgs.Empty);
             }
 
+            var timing = new ChatSendTiming(recallMs, selectMs, lessonMs, promptBuildMs, result.FirstTokenMs, result.TotalLatencyMs);
             asst.DurationMs = result.TotalLatencyMs;
             PerformanceLog = result.Cancelled
                 ? $"cancelled after {result.TotalLatencyMs} ms"
-                : $"first token {result.FirstTokenMs} ms · full {result.TotalLatencyMs} ms · render batches {accumulator.RenderBatches}";
+                : $"{timing.Format()} · render batches {accumulator.RenderBatches}";
             asst.IsStreaming = false;
 
             if (result.Cancelled)
@@ -487,7 +492,7 @@ public partial class ChatViewModel : ObservableObject
                     SpeakStreamingChunk(asst.Content);
             }
 
-            AddChatTrace(snapshot, selectedModelId, result.Usage, result.FirstTokenMs, result.TotalLatencyMs, traceError);
+            AddChatTrace(snapshot, selectedModelId, result.Usage, result.FirstTokenMs, result.TotalLatencyMs, traceError, timing.Format());
         }
         finally
         {
@@ -818,23 +823,30 @@ public partial class ChatViewModel : ObservableObject
     /// <c>InjectedMemoryIds</c>, so a model's [MEMORY_UPDATE]/[MEMORY_FORGET]
     /// marker can never target a lesson.
     /// </summary>
-    private async Task<(string ContextText, List<SourceReference> Sources, List<string> InjectedMemoryIds)> BuildMemoryInjectionAsync(string question, CancellationToken ct)
+    private async Task<(string ContextText, List<SourceReference> Sources, List<string> InjectedMemoryIds, long RecallMs, long SelectMs, long LessonMs)> BuildMemoryInjectionAsync(string question, CancellationToken ct)
     {
         if (!_settings.Settings.Memory.Enabled)
-            return (string.Empty, [], []);
+            return (string.Empty, [], [], 0, 0, 0);
 
         var contextText = string.Empty;
         var sources = new List<SourceReference>();
         var injectedIds = new List<string>();
+        long recallMs = 0, selectMs = 0, lessonMs = 0;
 
         if (_memoryInjection is not null && !string.IsNullOrWhiteSpace(question))
         {
             try
             {
+                var sw = Stopwatch.StartNew();
                 var candidates = await _memoryStore.SearchAsync(question, ct);
+                recallMs = sw.ElapsedMilliseconds;
+
+                sw.Restart();
                 var selected = candidates.Count == 0
                     ? []
                     : await _memoryInjection.SelectMemoriesForInjectionAsync(candidates, _settings.Settings.Memory.InjectionTokenBudget);
+                selectMs = sw.ElapsedMilliseconds;
+
                 if (selected.Count > 0)
                 {
                     contextText = _memoryInjection.BuildMemoryContext(selected);
@@ -851,9 +863,13 @@ public partial class ChatViewModel : ObservableObject
         }
 
         if (_settings.Settings.Memory.ConsumeAgentLessonsInChat)
+        {
+            var sw = Stopwatch.StartNew();
             contextText += await BuildLessonContextAsync(ct);
+            lessonMs = sw.ElapsedMilliseconds;
+        }
 
-        return (contextText, sources, injectedIds);
+        return (contextText, sources, injectedIds, recallMs, selectMs, lessonMs);
     }
 
     /// <summary>
@@ -946,7 +962,7 @@ public partial class ChatViewModel : ObservableObject
         ContextPreviewRaw = string.Join("\n\n---\n\n", snapshot.Parts.Select(part => $"[{part.Kind}] {part.Title}\n{part.Content}"));
     }
 
-    private void AddChatTrace(ChatContextSnapshot snapshot, string modelId, ChatTokenUsage? usage, long firstTokenMs, long totalMs, string error)
+    private void AddChatTrace(ChatContextSnapshot snapshot, string modelId, ChatTokenUsage? usage, long firstTokenMs, long totalMs, string error, string preStreamBreakdown)
     {
         var model = AvailableModels.FirstOrDefault(m => m.Id == modelId);
         var trace = new ChatTraceViewModel
@@ -960,7 +976,8 @@ public partial class ChatViewModel : ObservableObject
             ProviderUsage = usage,
             FirstTokenMs = firstTokenMs,
             TotalLatencyMs = totalMs,
-            ErrorDetails = error
+            ErrorDetails = error,
+            PreStreamBreakdown = preStreamBreakdown
         };
         ChatTraces.Insert(0, trace);
         SelectedChatTrace = trace;
@@ -970,7 +987,7 @@ public partial class ChatViewModel : ObservableObject
         var entry = new ChatTraceEntry(
             trace.Id, trace.Timestamp, trace.ModelId, trace.Provider, trace.Runtime, trace.SystemPrompt,
             trace.AttachmentCount, trace.EstimatedTokens, trace.ProviderUsage, trace.FirstTokenMs,
-            trace.TotalLatencyMs, trace.ErrorDetails);
+            trace.TotalLatencyMs, trace.ErrorDetails, trace.PreStreamBreakdown);
         _ = Task.Run(() => _chatTraces?.PersistAsync(entry, CurrentConversationId) ?? Task.CompletedTask);
     }
 
@@ -993,7 +1010,8 @@ public partial class ChatViewModel : ObservableObject
             ProviderUsage = entry.ProviderUsage,
             FirstTokenMs = entry.FirstTokenMs,
             TotalLatencyMs = entry.TotalLatencyMs,
-            ErrorDetails = entry.ErrorDetails
+            ErrorDetails = entry.ErrorDetails,
+            PreStreamBreakdown = entry.PreStreamBreakdown
         }).ToList();
 
         RunOnUi(() =>
@@ -1195,14 +1213,6 @@ public partial class ChatViewModel : ObservableObject
             }
             catch (OperationCanceledException) { }
         }, token);
-    }
-
-    private void RunOnUi(Action action)
-    {
-        if (_sync is null)
-            action();
-        else
-            _sync.Post(_ => action(), null);
     }
 
     private sealed record ChatContextSnapshot(

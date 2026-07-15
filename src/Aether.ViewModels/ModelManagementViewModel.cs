@@ -1,4 +1,3 @@
-using System.Collections.ObjectModel;
 using Aether.Core.Models;
 using System.Threading;
 using Aether.Core.Services;
@@ -18,7 +17,7 @@ public partial class ModelManagementViewModel : ObservableObject
     private readonly List<LlmModel> _modelCache = [];
     private readonly object _modelCacheLock = new();
 
-    public ObservableCollection<ModelProfileItemViewModel> Models { get; } = [];
+    public UiBoundCollection<ModelProfileItemViewModel> Models { get; } = [];
 
     [ObservableProperty] private bool   _isLoading;
     [ObservableProperty] private string _statusMessage = string.Empty;

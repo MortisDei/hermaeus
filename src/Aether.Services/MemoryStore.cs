@@ -12,10 +12,19 @@ namespace Aether.Services;
 public sealed class MemoryStore : IMemoryStore
 {
     private const int SchemaVersion = 4;
+    private const int MaxBackfillAttemptsPerRow = 5;
+    private static readonly TimeSpan QueryEmbedTimeout = TimeSpan.FromSeconds(3);
+
     private readonly ISettingsService _settings;
     private readonly IEmbeddingService? _embeddings;
+    private readonly IRuntimeLogService? _runtimeLogs;
+    private readonly TimeProvider _timeProvider;
+    private readonly TimeSpan _backfillCooldown;
     private string _initializedPath = string.Empty;
     private readonly SemaphoreSlim _initGate = new(1, 1);
+    private readonly SemaphoreSlim _backfillGate = new(1, 1);
+    private readonly Dictionary<string, (DateTime NextAttemptUtc, int Attempts)> _backfillState = new(StringComparer.Ordinal);
+    private bool _queryEmbedFallbackLogged;
 
     private string DbPath
     {
@@ -29,10 +38,18 @@ public sealed class MemoryStore : IMemoryStore
 
     private string Cs => $"Data Source={DbPath}";
 
-    public MemoryStore(ISettingsService settings, IEmbeddingService? embeddings = null)
+    public MemoryStore(
+        ISettingsService settings,
+        IEmbeddingService? embeddings = null,
+        IRuntimeLogService? runtimeLogs = null,
+        TimeProvider? timeProvider = null,
+        TimeSpan? backfillCooldown = null)
     {
         _settings = settings;
         _embeddings = embeddings;
+        _runtimeLogs = runtimeLogs;
+        _timeProvider = timeProvider ?? TimeProvider.System;
+        _backfillCooldown = backfillCooldown ?? TimeSpan.FromMinutes(10);
     }
 
     public async Task InitializeAsync(CancellationToken ct = default)
@@ -273,6 +290,14 @@ public sealed class MemoryStore : IMemoryStore
 
         await cmd.ExecuteNonQueryAsync(ct);
         await UpsertFtsAsync(c, memory, tagsJson, ct);
+
+        // Backfill runs off the send path (r9 01-send-path-latency.md 1.2): a
+        // write is the other trigger point besides the startup pass, so a
+        // freshly-created row without its own embedding (e.g. no embedding
+        // service configured at save time) still becomes vector-recallable
+        // once one is available, without taxing the next chat send.
+        if (embeddingBlob is null && _embeddings is not null)
+            _ = Task.Run(() => RunEmbeddingBackfillAsync(CancellationToken.None));
     }
 
     public async Task DeleteAsync(string id, CancellationToken ct = default)
@@ -351,15 +376,16 @@ public sealed class MemoryStore : IMemoryStore
     /// </summary>
     private async Task<List<Memory>> HybridRerankAsync(SqliteConnection c, string q, List<Memory> ftsResults, CancellationToken ct)
     {
-        await BackfillEmbeddingsAsync(c, ct);
-
         float[] queryVector;
         try
         {
-            queryVector = await _embeddings!.EmbedAsync(q, ct);
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeoutCts.CancelAfter(QueryEmbedTimeout);
+            queryVector = await _embeddings!.EmbedAsync(q, timeoutCts.Token);
         }
-        catch
+        catch (Exception ex)
         {
+            LogQueryEmbedFallbackOnce(ex);
             for (var i = 0; i < ftsResults.Count; i++)
                 ftsResults[i].RelevanceScore = 1.0 / (i + 1);
             return ftsResults;
@@ -439,35 +465,87 @@ public sealed class MemoryStore : IMemoryStore
             .ToList();
     }
 
-    private async Task BackfillEmbeddingsAsync(SqliteConnection c, CancellationToken ct)
+    /// <summary>
+    /// Embeds up to 200 rows without a vector, off the send path (r9
+    /// 01-send-path-latency.md 1.2). Called once shortly after startup (after
+    /// the embedding model warm-up) and after memory writes. Rows that fail
+    /// to embed are not retried more than once per <see cref="_backfillCooldown"/>
+    /// and are dropped entirely after <see cref="MaxBackfillAttemptsPerRow"/>
+    /// failures for the rest of the process's life, so a down or
+    /// misconfigured embedding endpoint cannot tax every write forever.
+    /// </summary>
+    public async Task RunEmbeddingBackfillAsync(CancellationToken ct = default)
     {
         if (_embeddings is null) return;
+        if (!await _backfillGate.WaitAsync(0, ct)) return;
 
-        var pending = new List<(string Id, string Content)>();
-        var select = c.CreateCommand();
-        select.CommandText = "SELECT id, content FROM memories WHERE embedding IS NULL AND is_archived = 0 AND length(content) > 0 LIMIT 200";
-        await using (var rd = await select.ExecuteReaderAsync(ct))
+        try
         {
-            while (await rd.ReadAsync(ct))
-                pending.Add((rd.GetString(0), rd.GetString(1)));
-        }
+            await EnsureInitializedAsync(ct);
+            await using var c = new SqliteConnection(Cs);
+            await c.OpenAsync(ct);
 
-        foreach (var (id, content) in pending)
-        {
-            try
+            var pending = new List<(string Id, string Content)>();
+            var select = c.CreateCommand();
+            select.CommandText = "SELECT id, content FROM memories WHERE embedding IS NULL AND is_archived = 0 AND length(content) > 0 LIMIT 200";
+            await using (var rd = await select.ExecuteReaderAsync(ct))
             {
-                var vector = await _embeddings.EmbedAsync(content, ct);
-                var update = c.CreateCommand();
-                update.CommandText = "UPDATE memories SET embedding = $embedding WHERE id = $id";
-                update.Parameters.AddWithValue("$embedding", ToBlob(vector));
-                update.Parameters.AddWithValue("$id", id);
-                await update.ExecuteNonQueryAsync(ct);
+                while (await rd.ReadAsync(ct))
+                    pending.Add((rd.GetString(0), rd.GetString(1)));
             }
-            catch
+
+            var now = _timeProvider.GetUtcNow().UtcDateTime;
+            var failures = 0;
+            foreach (var (id, content) in pending)
             {
-                // Leave this row unembedded; it is retried on a later search.
+                if (_backfillState.TryGetValue(id, out var state))
+                {
+                    if (state.Attempts >= MaxBackfillAttemptsPerRow) continue;
+                    if (now < state.NextAttemptUtc) continue;
+                }
+
+                try
+                {
+                    var vector = await _embeddings.EmbedAsync(content, ct);
+                    var update = c.CreateCommand();
+                    update.CommandText = "UPDATE memories SET embedding = $embedding WHERE id = $id";
+                    update.Parameters.AddWithValue("$embedding", ToBlob(vector));
+                    update.Parameters.AddWithValue("$id", id);
+                    await update.ExecuteNonQueryAsync(ct);
+                    _backfillState.Remove(id);
+                }
+                catch
+                {
+                    var attempts = (_backfillState.TryGetValue(id, out var previous) ? previous.Attempts : 0) + 1;
+                    _backfillState[id] = (now.Add(_backfillCooldown), attempts);
+                    failures++;
+                }
             }
+
+            if (failures > 0)
+                _runtimeLogs?.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Rag,
+                    $"Embedding backfill: {failures} row(s) failed to embed; will retry after a cooldown."));
         }
+        finally
+        {
+            _backfillGate.Release();
+        }
+    }
+
+    private void LogQueryEmbedFallbackOnce(Exception ex)
+    {
+        if (_queryEmbedFallbackLogged) return;
+        _queryEmbedFallbackLogged = true;
+        _runtimeLogs?.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Rag,
+            $"Query embedding at {ResolveEmbeddingEndpoint()} did not complete in time; memory recall falls back to FTS-ranked results ({ex.GetType().Name}: {ex.Message})."));
+    }
+
+    private string ResolveEmbeddingEndpoint()
+    {
+        var configured = _settings.Settings.Rag.EmbeddingBaseUrl?.Trim();
+        return !string.IsNullOrWhiteSpace(configured)
+            ? configured.TrimEnd('/')
+            : _settings.Settings.Llm.LlamaCppBaseUrl.TrimEnd('/');
     }
 
     public async Task MarkRecalledAsync(IEnumerable<string> ids, CancellationToken ct = default)

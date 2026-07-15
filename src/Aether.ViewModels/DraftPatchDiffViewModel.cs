@@ -1,5 +1,4 @@
 using System;
-using System.Collections.ObjectModel;
 using System.Threading.Tasks;
 using Aether.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -11,7 +10,7 @@ public partial class DraftPatchDiffViewModel : ObservableObject
 {
     private readonly IPatchDiffService _diffService;
 
-    public ObservableCollection<DiffLine> Lines { get; } = new();
+    public UiBoundCollection<DiffLine> Lines { get; } = new();
 
     public string RelativePath { get; private set; } = string.Empty;
     public string OldContent { get; private set; } = string.Empty;

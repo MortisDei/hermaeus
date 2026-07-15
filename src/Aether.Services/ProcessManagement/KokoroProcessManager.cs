@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using Aether.Core.Models;
+using Aether.Core.Services;
 
 namespace Aether.Services.ProcessManagement;
 
@@ -9,6 +10,14 @@ public sealed class KokoroProcessManager : IDisposable
     private Process? _process;
     private CancellationTokenSource? _healthCts;
     private string? _serverScriptPath;
+    private readonly IProcessJobObject _jobObject;
+    private readonly IRuntimeLogService? _runtimeLogs;
+
+    public KokoroProcessManager(IProcessJobObject? jobObject = null, IRuntimeLogService? runtimeLogs = null)
+    {
+        _jobObject = jobObject ?? ProcessJobObject.Default;
+        _runtimeLogs = runtimeLogs;
+    }
 
     public bool IsRunning => _process is { HasExited: false };
     public string StatusLabel { get; private set; } = "Stopped";
@@ -62,6 +71,10 @@ public sealed class KokoroProcessManager : IDisposable
         {
             if (!_process.Start())
                 throw new InvalidOperationException("Failed to start Kokoro voice service.");
+
+            if (OperatingSystem.IsWindows() && !_jobObject.TryAssign(_process))
+                _runtimeLogs?.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Voice,
+                    "Could not attach Kokoro process to the app's job object; it may survive an abnormal app exit."));
 
             _healthCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             await WaitForHealthAsync(settings.Tts.ServiceUrl, _healthCts.Token);

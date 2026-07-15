@@ -89,4 +89,12 @@ public interface IMemoryStore
     /// Returns how many were archived.
     /// </summary>
     Task<int> ArchiveStaleMemoriesAsync(double importanceFloor = 0.05, int unrecalledForDays = 180, CancellationToken ct = default);
+
+    /// <summary>
+    /// Embeds rows that have no vector yet, off the chat send path (r9
+    /// 01-send-path-latency.md 1.2). Call once shortly after startup (after
+    /// the embedding model warm-up) and after memory writes; a no-op when no
+    /// embedding service is configured.
+    /// </summary>
+    Task RunEmbeddingBackfillAsync(CancellationToken ct = default);
 }

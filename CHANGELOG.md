@@ -11,6 +11,62 @@ limit.
 
 ## [Unreleased]
 
+## [0.14.0-alpha] - 2026-07-15
+
+Implements docs/review r9 in full: the send-path latency and orphaned-server
+issues that shipped as documentation-only alongside the 0.13.1-alpha crash
+fix are now implemented, plus the full UI-thread-safety sweep the crash fix
+started.
+
+### Fixed
+
+- **HTTP timeout misreported as a user cancel.** `ServerProcessManager`'s
+  health-check poll used a 2 s `HttpClient` timeout; that timeout throws
+  `OperationCanceledException` too, indistinguishable by type from a real
+  caller cancellation, so a slow (not dead) health check could silently
+  overwrite an already-diagnosed Error status with an unexplained Stopped.
+  Only a genuinely cancelled token now escapes the retry loop.
+- **Untuned `Task.Run` wrapper caused a benchmark-history race.**
+  `BenchmarkViewModel`'s suite-change handler wrapped an already-`await`-based
+  reload in `Task.Run`, mutating UI-bound collections off the UI thread.
+
+### Added
+
+- **Send-path instrumentation** (`ChatSendTiming`). Every send now measures
+  memory recall, injection selection, lesson context, prompt build, and
+  first-token wait, surfaced in `PerformanceLog` and persisted on the chat
+  trace.
+- **Embedding backfill moved off the send path** (`MemoryStore.
+  RunEmbeddingBackfillAsync`). `SearchAsync` embeds only the query now;
+  backfill runs from a background pass at startup and after writes, with a
+  per-row cooldown and attempt cap so a down embedding endpoint cannot tax
+  every send.
+- **Fast-fail query embedding.** A 3 s timeout on the query embed falls back
+  to FTS-ranked recall instead of inheriting the embedding HTTP client's 60 s
+  timeout; the fallback logs once per process.
+- **Embedding endpoint fallback visibility.** A blank `Rag.EmbeddingBaseUrl`
+  falling back to the chat server now logs once and raises a Doctor advisory.
+- **Oversized-context advisory.** Services view and Doctor both flag managed
+  servers configured with `ContextSize` above 16384.
+- **Job-object process containment** (`ProcessJobObject`). Managed servers,
+  auto-tune probes, and voice-engine (XTTS/Kokoro) children join one Windows
+  job object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, so they die with the
+  app however it dies.
+- **Port preflight with a named owner** (`PortOwnerLookup`). A conflicting
+  port fails instantly, naming the port and (best-effort) its owning process,
+  instead of launching a doomed process.
+- **Orphan detection with an explicit Stop** (`OrphanServerDetector`). A
+  leftover server from a previous session is identified by an exact
+  executable-path match and offered a Stop button; anything else is reported
+  only. Stopping re-verifies the PID and executable immediately before
+  killing it.
+- **`ViewModelBase`** (`Aether.ViewModels`). One `RunOnUi`/`RunOnUiAsync`
+  implementation, replacing three private copies plus `TtsSettingsViewModel`'s
+  bespoke `SynchronizationContext` usage.
+- **Architecture test**: any public `ObservableCollection<T>` property on a
+  ViewModel now fails the build; every ViewModel collection is
+  `UiBoundCollection<T>`.
+
 ## [0.13.1-alpha] - 2026-07-15
 
 Emergency stability fix for a crash found in first sustained field use of
