@@ -13,7 +13,10 @@
   and the raw prompt sections that will be sent to the model.
 - Chat Trace Viewer records completed sends with selected model/runtime,
   system prompt, attachment count, estimated tokens, provider usage when
-  reported, first-token latency, total latency, and error details.
+  reported, first-token latency, total latency, error details, and a
+  pre-stream timing breakdown (memory recall, injection selection, lesson
+  context, prompt build, first token) so a slow send is diagnosable without a
+  profiler.
 - Compare Models sends the current draft prompt to one to four selected models
   and compares answers, latency, token usage, and simple quality notes without
   adding the comparison run to chat history.
@@ -36,8 +39,10 @@
 - Hybrid recall: memory search blends full-text search with cosine similarity
   against an embedding model when one is configured, so a paraphrase with no
   lexical overlap can still surface; falls back to pure FTS/LIKE ranking when
-  no embedding model is available. Existing rows are backfilled with
-  embeddings lazily on first hybrid search.
+  no embedding model is available, and also if the query embedding itself
+  does not complete within 3 seconds. Search never embeds anything but the
+  query; rows without their own embedding yet are backfilled by a background
+  pass shortly after startup and after memory writes, not on the send path.
 - Relevance-aware injection: memories selected for chat context are ranked by
   the search's own relevance score blended with importance, not recency-first
   as before; recency is now only the final tiebreaker.
@@ -170,6 +175,21 @@
   are removed. Starting a managed server stops any running peer on the same
   port first, allowing Chat and Embeddings to share a port when only one is
   active.
+- Managed server processes (and the auto-tune probe and XTTS/Kokoro voice
+  engines) join one Windows job object on launch, so they are killed by the
+  OS if the app exits abnormally instead of surviving as an orphan holding a
+  port and GPU memory.
+- Starting a managed server checks the configured port first: a port already
+  in use fails instantly and names the port and, best-effort, the owning
+  process (PID and name), instead of launching a doomed process.
+- If a leftover server process from a previous session is still holding a
+  configured port, the Services view shows a banner naming it; a Stop button
+  appears only when the process's executable exactly matches this server's
+  configured binary (re-verified immediately before the process is killed).
+  Any other process on the port is reported for information only.
+- A managed server configured with a context size above 16384 shows an
+  inline advisory in the Services view and a matching Doctor advisory: large
+  KV caches can spill out of VRAM and slow prompt processing.
 - Compare Models provides an in-chat practical comparison path for trying the
   same prompt across multiple visible models before choosing one for normal
   conversation.
@@ -235,6 +255,10 @@
 - Doctor embedding model install downloads the default model from a pinned
   Hugging Face commit, verifies SHA256, removes failed downloads, and points the
   embedding server at the verified file.
+- Doctor flags a blank embedding endpoint (RAG's `EmbeddingBaseUrl`) while
+  memory or RAG is enabled: embedding requests silently fall back to the chat
+  server otherwise, queuing behind chat generation on a single-slot
+  llama-server.
 - Doctor reports whether the previous session exited cleanly, using a small
   local-only lifecycle journal (no telemetry, nothing leaves the machine).
   If Aether did not shut down cleanly last time (a crash or force-close), the
