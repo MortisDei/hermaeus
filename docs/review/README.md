@@ -1,66 +1,52 @@
-# Review Round 9 (r9)
+# Review Round 10 (r10)
 
-Theme: **stability under real use**. r8 polished the product; first
-sustained field use immediately surfaced three problems: a hard crash
-(Avalonia "Collection was modified" from cross-thread collection
-mutation), 1+ minute to first token on every chat message, and a model
-Start button that silently reverted until the fourth click. The crash
-fix and its enforcement guard (`UiThreadGuard` / `UiBoundCollection<T>`,
-marshaling fixes in `ChatViewModel` and `LogsViewModel`) shipped ahead
-of this pack in 0.13.1-alpha, in the same commit that adds it. r9
-finishes the job: no UI-bound state may be touched off the UI thread
-anywhere, the send path must be observable and fast, and a crash must
-never leave orphaned llama-server processes that block the next launch.
+Theme: **RAG deep-dive**, plus the field follow-ups from first real use
+of 0.14.0-alpha. RAG is the one major subsystem that has never had a
+dedicated round; this audit read every file in `Aether.Rag` plus
+`RagViewModel` and found real correctness bugs (one retrieval mode is
+broken end to end, dataset deletion leaks rows forever, re-ingest
+serves stale results until restart) alongside quality problems that
+silently cap retrieval relevance (embeddings computed from a ~192-token
+prefix of chunks sized at ~400 tokens).
 
-Field evidence backing this round (2026-07-15, owner's machine):
+Field report on 0.14.0-alpha (2026-07-16, owner): no more crashes,
+Start works first click, sends are much faster, speech is much better.
+Three residual issues, all specced in doc 03:
 
-- Crash stack in `PanelContainerGenerator.OnItemsChanged`, during a
-  chat wait. Root cause class confirmed: background-thread mutation of
-  ItemsControl-bound `ObservableCollection`s.
-- After the crash, an orphaned `llama-server` (parent PID dead) held
-  port 42069, 3 GB RAM, and 33 GPU layers. Nothing ties child servers
-  to the app's lifetime on abnormal exit; a new server cannot bind the
-  held port, exits instantly, and the Start button reverts with the
-  cause buried in the log ring.
-- Every send stalls before the first token. `MemoryStore.SearchAsync`
-  runs `BackfillEmbeddingsAsync` on the send path (up to 200 sequential
-  HTTP embed calls, 60 s timeout each, failures silently retried on
-  every subsequent send), and with `Rag.EmbeddingBaseUrl` unset the
-  embedding client falls back to the chat server, queueing embeds
-  behind generation on a single-slot llama-server. The owner's server
-  also runs `--ctx-size 64502`; KV-cache spill is a plausible
-  co-factor, so the round mandates measurement before tuning.
-
-Priorities (binding):
-
-- **Never crash the UI from a worker thread.** Enforced, not hoped for.
-- **Never lose a llama-server.** Children die with the app, however
-  the app dies; port conflicts are diagnosed, named, and actionable.
-- **The send path is observable.** Time every stage; fix what the
-  numbers convict; no speculative tuning.
+- The app throws an unhandled `InvalidOperationException` on shutdown:
+  the DI container is disposed synchronously from the window Closed
+  path but now contains the async-only `McpToolBridge`.
+- Around 20-30 seconds of silence after send before the GPU starts
+  prompt processing. The r9 `ChatSendTiming` instrumentation exists
+  precisely for this; doc 03 mandates reading it and adds the missing
+  server-side breakdown.
+- Voice: capitalized/marked-up words fall through the dictionary and
+  gain a spoken trailing "e" ("Joke" as "Jok-e"); typographic
+  punctuation (U+2014 dashes, curly quotes) confuses the phonemizer.
 
 ## Documents
 
-- `01-send-path-latency.md` - send-path instrumentation, embedding
-  backfill off the send path, fast-fail query embedding, embedding
-  endpoint fallback visibility, oversized-context advisory.
-- `02-server-lifecycle.md` - job-object kill-on-close, port preflight
-  with named owner, orphan detection with an explicit user-approved
-  stop, honest Starting-state transitions.
-- `03-ui-thread-safety.md` - one RunOnUi helper, full ViewModel sweep
-  onto `UiBoundCollection<T>` with marshaled service events, and an
-  architecture test that keeps it that way.
+- `01-rag-correctness.md` - parent-child retrieval broken, dataset
+  delete orphans rows, stale query cache after re-ingest, embedding
+  model/dimension mismatch guard and reindex, deleted sources never
+  leave a dataset, dry-run writes, lost `LastIngestPath`.
+- `02-rag-quality.md` - embedding input clamp vs chunk size, refusal
+  preflight scoring, dead grounding mode, boost scale inconsistency,
+  BM25 query-time cost, dataset health cost, eval harness gaps.
+- `03-field-follow-ups.md` - shutdown disposal crash, send-lag
+  diagnosis with llama-server timings, voice pronunciation fixes.
 - `04-roadmap.md` - version, sequencing, test expectations, security
   review touch, explicit rejections.
 
 ## How to work this pack
 
-Same conventions as r1-r8 (see `docs/review/archived/`): every item has
+Same conventions as r1-r9 (see `docs/review/archived/`): every item has
 acceptance criteria; check archived rounds before re-proposing anything
 explicitly rejected; zero-warning builds (`TreatWarningsAsErrors`
 solution-wide); tests run via
 `dotnet test src/Aether.Tests/Aether.Tests.csproj` (see the
 `build-and-verify` skill); no em dashes anywhere in code, comments, or
-docs; the approval-gated agent security posture is non-negotiable.
-Anything touching process launching or termination must follow the
-`security-posture` skill.
+docs (write U+2014 when a spec must name the character); the
+approval-gated agent security posture is non-negotiable. Anything that
+deletes user data (01 items 1.2 and 1.5) must be explicit,
+user-confirmed, and reported afterwards.

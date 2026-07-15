@@ -2,62 +2,84 @@
 
 ## Version
 
-Implementing this pack ships **0.14.0-alpha**. The crash fix and
-guard already shipped as **0.13.1-alpha** alongside this pack's
-authoring commit; r9 implementation builds on it.
+Implementing this pack ships **0.15.0-alpha**. Version bump lives only
+in `Directory.Build.props`, per r8 convention.
 
 ## Sequencing
 
-1. **Doc 03 (UI thread safety)** first. It is mechanical, prevents
-   the only known crash class, and the guard turns any writer missed
-   during docs 01/02 work into an immediate, attributable failure
-   instead of a field crash. Everything after benefits.
-2. **Doc 01 item 1.1 (instrumentation)** next, before any latency
-   fix, to capture a baseline on the owner's machine.
-3. **Doc 01 items 1.2-1.5**, convicted by inspection and (after 1.1)
-   by numbers.
-4. **Doc 02 (server lifecycle)** last; it is independent and its
-   manual verification step (kill the app, watch the child die) is
-   easiest once everything else is stable.
+1. **3.1 (shutdown crash)** first: five-line fix plus a guard test,
+   removes the one remaining unhandled exception in daily use.
+2. **3.3 (voice)** next: self-contained in Aether.Voice, high
+   perceived-quality payoff, golden tests make it safe.
+3. **3.2 step 1-3 (send-lag measurement + timings + warning)**: land
+   the observability before any tuning; step 4 only if the numbers
+   demand it.
+4. **Doc 01 (RAG correctness)** in item order: 1.1 and 1.2 change
+   storage and must land before quality work re-ranks anything;
+   1.3-1.7 are independent after that.
+5. **2.7 (eval fixtures)** before 2.1/2.2/2.3 so ranking changes are
+   measured, then **doc 02** in item order.
 
 ## Test expectations
 
-Rough guide, not a quota: 1.1 formatter + trace round-trip (3-4),
-1.2 backfill relocation + cooldown (4-5), 1.3 fast-fail (2), 1.4/1.5
-advisories (3-4), 2.2 preflight (2-3), 2.3 identify/verify seam
-(3-4), 2.4 transitions (2-3), 3.3 architecture test (1, plus the
-sweep keeps 517 green). Expect roughly 20-30 new tests. All tests
-run without a live llama-server or network, per the standing rule;
-process and HTTP boundaries get seams/fakes.
+Rough guide, not a quota: 1.1 (3, incl. migration), 1.2 (2), 1.3 (1),
+1.4 (4), 1.5 (2), 1.6 (1), 1.7 (1), 2.1 (3), 2.2 (3), 2.3 (3),
+2.4 (2), 2.5 (1), 2.6 (2), 2.7 fixtures feeding the above, 3.1 (1-2),
+3.2 (2), 3.3 (6-8 golden). Expect roughly 35-45 new tests, from 517.
+All tests run without a live llama-server, embedding server, or
+network: embedding and LLM boundaries use the existing fake seams;
+SQLite tests use per-test temp data roots (tests stay sequential).
+
+## Docs touch
+
+`docs/rag.md` gains: reindex action, remove-missing-sources action,
+mismatch guard behaviour, refusal-with-sources behaviour.
+`docs/voice.md`: typographic normalization coverage. `docs/features.md`
+and `CHANGELOG.md` per the standing rule. `docs/security-review.md`
+gains an r10 subsection (below).
 
 ## Security review touch
 
-docs/security-review.md gains an r9 subsection covering: job-object
-process containment (2.1), the port-owner lookup (2.2, reads process
-metadata only), and the orphan Stop affordance (2.3, the only place
-the app terminates a process it did not start this session; document
-the executable-path verification and PID-reuse guard as the
-mitigations).
+- 1.5 remove-missing-sources and 1.4 reindex are the only
+  data-destructive/data-rewriting additions: both are explicit,
+  user-confirmed, and operate only on the app's own database (no
+  filesystem deletes). Document the confirm gate.
+- 3.1 changes shutdown disposal only; the 5 s bound means a hung MCP
+  child is abandoned to the r9 job object rather than blocking exit.
+- No new network surface anywhere in the pack.
 
 ## Explicit rejections
 
-Checked against archived rounds and rejected for r9; do not
+Checked against archived rounds and rejected for r10; do not
 re-propose without new evidence:
 
-- **Auto-killing unrecognized processes on a conflicting port.** Only
-  a verified own-binary orphan gets a user-clicked Stop (2.3).
-- **Thread-safe collection wrappers or locks instead of marshaling.**
-  Avalonia requires UI-thread mutation; synchronization does not
-  satisfy that, it only hides the corruption window.
-- **Arming UiThreadGuard from SynchronizationContext presence or
-  type-name sniffing.** Proven wrong under xunit; explicit Arm() from
-  the Desktop app is the contract.
-- **A global exception handler that swallows dispatcher exceptions.**
-  Masks corruption; the guard exists to fail loudly and early.
-- **Making the 1.3 query-embed timeout user-configurable.** One more
-  setting nobody can reason about; a constant is fine until evidence
-  says otherwise.
-- **Speculative context-size clamping or auto-tuning (1.5).** Advisory
-  only; the owner chose that context deliberately.
-- **A Linux job-object equivalent (2.1).** Windows-first app; no
-  field evidence of the problem elsewhere.
+- **A vector database or search-library dependency** (sqlite-vec,
+  FAISS, Lucene). Corpus sizes in field use do not justify a
+  dependency; the r10 fixes keep brute-force scan + BM25 fast enough,
+  and the no-new-NuGet rule stands.
+- **A persisted inverted index / ANN index for BM25 or cosine.** Same
+  reasoning; 2.4's one-pass tokenization removes the observed cost.
+  Revisit only with a trace showing retrieval latency dominating on a
+  real corpus.
+- **Auto-reindexing datasets on embedding-model change.** Reindex is
+  minutes of GPU work the user did not ask for; it is a button (1.4),
+  never a side effect.
+- **Auto-removing missing-source chunks during ingest.** An unmounted
+  drive must not shred a dataset silently (1.5); removal is
+  user-clicked, like r9's orphan Stop.
+- **LLM-based query expansion or rewriting on the query path.** Adds
+  a generation round-trip before retrieval; the alias file + variant
+  mechanism covers it deterministically.
+- **A semantic grounding scorer to replace token overlap.** The dead
+  `SemanticPlaceholder` mode is deleted, not implemented: post-answer
+  overlap is adequate, and the refusal gate now uses retrieval scores
+  (2.2) which are already semantic.
+- **Auto-changing llama-server flags from lag findings (3.2).**
+  Advisory only, quoting observed evidence; r9's rejection of
+  speculative context tuning stands.
+- **Async-over-sync shutdown rework (making app exit fully async).**
+  Avalonia's Exit event is synchronous; a bounded blocking wait at
+  process end is the honest version.
+- **Stripping em dashes app-wide or in chat rendering (3.3).** The
+  repo's no-em-dash rule is about authored text; user/model content
+  is normalized only at the speech boundary.
