@@ -836,7 +836,8 @@ namespace Aether.Tests
                 new RuntimeProfileService(settings),
                 new FakeVoiceProviderRegistryKokoroInstall(settings),
                 new FakeDoctorService(),
-                new FakeToasts());
+                new FakeToasts(),
+                new FakeSystemInfo());
 
             True(wizard.VoiceOnboardingSummary.Contains("Kokoro", StringComparison.Ordinal), "wizard should surface Kokoro onboarding summary");
             True(wizard.VoiceOnboardingSteps.Any(step => step.Contains("Install Kokoro packages", StringComparison.Ordinal)), "wizard should include Kokoro install step");

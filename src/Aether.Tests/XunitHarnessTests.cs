@@ -12,6 +12,17 @@ public sealed record HarnessCase(string Name, Func<Task> Run)
 
 public static class HarnessCases
 {
+    public static IEnumerable<object[]> Acceptance =>
+    [
+        [new HarnessCase("trace schema file is valid and sample conforms", AcceptanceTests.TraceSchema_FileIsValidAndSampleConforms)],
+        [new HarnessCase("agent UI acceptance: patch queue metadata is rendered", AcceptanceTests.AgentUiAcceptance_PatchQueueMetadataIsRendered)]
+    ];
+
+    public static IEnumerable<object[]> HarnessRegistrationGuard =>
+    [
+        [new HarnessCase("every harness test class method is registered exactly once", HarnessRegistrationGuardTests.EveryHarnessTestClassMethodIsRegisteredExactlyOnce)]
+    ];
+
     public static IEnumerable<object[]> Backup =>
     [
         [new HarnessCase("data root migration previews moveable files", BackupMigrationTests.DataRootMigrationPreview)],
@@ -30,6 +41,7 @@ public static class HarnessCases
         [new HarnessCase("benchmark starter suites include expanded deterministic set", ServiceTests.BenchmarkStarterSuitesIncludeExpandedDeterministicSet)],
         [new HarnessCase("benchmark single iteration exports cold run mode", ServiceTests.BenchmarkSingleIterationRunExportsColdRunMode)],
         [new HarnessCase("benchmark run history can be cleared", ServiceTests.BenchmarkRunHistoryCanBeCleared)],
+        [new HarnessCase("benchmark export all creates batch folder", ServiceTests.BenchmarkExportAllCreatesBatchFolder)],
         [new HarnessCase("benchmark scoring and ranking are deterministic", ServiceTests.BenchmarkScoringAndRanking)],
         [new HarnessCase("system info returns safe fallback values", ServiceTests.SystemInfoSafeFallback)],
         [new HarnessCase("privacy audit reports remote providers and exposed servers", ServiceTests.PrivacyAuditReportsRemoteAndNetworkExposure)],
@@ -107,6 +119,7 @@ public static class HarnessCases
         [new HarnessCase("memory injection uses full budget", ServiceTests.MemoryInjectionUsesFullBudget)],
         [new HarnessCase("memory injection prefers search relevance over raw importance", ServiceTests.MemoryInjectionPrefersSearchRelevanceOverRawImportance)],
         [new HarnessCase("memory lifecycle decays unrecalled memories and archives below floor", ServiceTests.MemoryLifecycleDecaysUnrecalledMemoriesAndArchivesBelowFloor)],
+        [new HarnessCase("memory store counts by conversation work", ServiceTests.MemoryStoreCountsByConversationWork)],
         [new HarnessCase("conversation memory applies update and forget markers only for injected ids", ServiceTests.ConversationMemoryAppliesUpdateAndForgetMarkersOnlyForInjectedIds)],
         [new HarnessCase("XTTS API template delegates to generator", ServiceTests.XttsApiTemplateDelegatesToGenerator)],
         [new HarnessCase("extra args parser handles escaped quotes", ServiceTests.ExtraArgsParserHandlesEscapedQuotes)],
@@ -135,6 +148,7 @@ public static class HarnessCases
         [new HarnessCase("RAG ingest cancellation during embedding stops gracefully", RagTests.RagIngestCancellationDuringEmbedding)],
         [new HarnessCase("RAG ingest cancellation during storage stops gracefully", RagTests.RagIngestCancellationDuringStorage)],
         [new HarnessCase("RAG ingest clamps oversized embedding inputs", RagTests.RagIngestClampsOversizedEmbeddingInputs)],
+        [new HarnessCase("RAG directory ingest persists completed file batches", RagTests.RagDirectoryIngestPersistsCompletedFileBatches)],
         [new HarnessCase("RAG view model parses trace bindings", TraceBindingTests.RagViewModel_ParsesTraceBindings)],
         [new HarnessCase("RAG small dataset retrieval and trace integration", TraceBindingTests.RagIntegration_SmallDatasetRetrievalAndTrace)],
         [new HarnessCase("RAG query stream trace chunks carry score breakdown", TraceBindingTests.RagQueryStreamTraceChunksCarryScoreBreakdown)]
@@ -144,7 +158,8 @@ public static class HarnessCases
     [
         [new HarnessCase("voice provider capability gating prevents unsupported providers", TtsTests.VoiceProviderCapabilityGating)],
         [new HarnessCase("voice provider XTTS v2 requires local and TTS", TtsTests.VoiceProviderXttsV2RequiresLocalAndTts)],
-        [new HarnessCase("voice device options include Apple Silicon MPS", TtsTests.VoiceDeviceOptionsIncludeMps)]
+        [new HarnessCase("voice device options include Apple Silicon MPS", TtsTests.VoiceDeviceOptionsIncludeMps)],
+        [new HarnessCase("voice preview skips blank text", TtsTests.VoicePreviewSkipsBlankText)]
     ];
 
     public static IEnumerable<object[]> Agent =>
@@ -255,6 +270,81 @@ public static class HarnessCases
         [new HarnessCase("native provider re-resolves assets root after settings change", VoiceTests.NativeProviderReResolvesAssetsRootAfterSettingsChange)],
         [new HarnessCase("native provider requires no python version", VoiceTests.NativeProviderRequiresNoPythonVersion)]
     ];
+
+    public static IEnumerable<object[]> VoicePronunciation =>
+    [
+        [new HarnessCase("normalizer expands cardinals with thousands separators", VoicePronunciationTests.NormalizerExpandsCardinalsWithThousandsSeparators)],
+        [new HarnessCase("normalizer expands decimals", VoicePronunciationTests.NormalizerExpandsDecimals)],
+        [new HarnessCase("normalizer expands negatives", VoicePronunciationTests.NormalizerExpandsNegatives)],
+        [new HarnessCase("normalizer expands ordinals", VoicePronunciationTests.NormalizerExpandsOrdinals)],
+        [new HarnessCase("normalizer expands percent", VoicePronunciationTests.NormalizerExpandsPercent)],
+        [new HarnessCase("normalizer expands currency", VoicePronunciationTests.NormalizerExpandsCurrency)],
+        [new HarnessCase("normalizer expands clock times", VoicePronunciationTests.NormalizerExpandsClockTimes)],
+        [new HarnessCase("normalizer expands standalone symbols", VoicePronunciationTests.NormalizerExpandsStandaloneSymbols)],
+        [new HarnessCase("normalizer leaves plain prose unchanged", VoicePronunciationTests.NormalizerLeavesPlainProseUnchanged)],
+        [new HarnessCase("normalizer does not drop digits that were the original bug", VoicePronunciationTests.NormalizerDoesNotDropDigitsThatWereTheOriginalBug)],
+        [new HarnessCase("arpabet ipa map uses only vocab symbols", VoicePronunciationTests.ArpabetIpaMapUsesOnlyVocabSymbols)],
+        [new HarnessCase("cmudict resolves golden words to exact ipa", VoicePronunciationTests.CmuDictResolvesGoldenWordsToExactIpa)],
+        [new HarnessCase("cmudict miss words fall back gracefully", VoicePronunciationTests.CmuDictMissWordsFallBackGracefully)],
+        [new HarnessCase("user lexicon overrides cmudict", VoicePronunciationTests.UserLexiconOverridesCmuDict)],
+        [new HarnessCase("user lexicon seeds defaults including the app's own name", VoicePronunciationTests.UserLexiconSeedsDefaultsIncludingTheAppsOwnName)],
+        [new HarnessCase("user lexicon skips invalid lines without throwing", VoicePronunciationTests.UserLexiconSkipsInvalidLinesWithoutThrowing)],
+        [new HarnessCase("user lexicon reloads when file changes", VoicePronunciationTests.UserLexiconReloadsWhenFileChanges)],
+        [new HarnessCase("morphology resolves possessive of user lexicon word", VoicePronunciationTests.MorphologyResolvesPossessiveOfUserLexiconWord)],
+        [new HarnessCase("common inflected forms resolve to exact ipa", VoicePronunciationTests.CommonInflectedFormsResolveToExactIpa)],
+        [new HarnessCase("word-initial gh is hard g not f", VoicePronunciationTests.WordInitialGhIsHardGNotF)],
+        [new HarnessCase("unknown acronym is spelled out letter by letter", VoicePronunciationTests.UnknownAcronymIsSpelledOutLetterByLetter)],
+        [new HarnessCase("known acronym uses its real cmudict pronunciation", VoicePronunciationTests.KnownAcronymUsesItsRealCmuDictPronunciation)],
+        [new HarnessCase("golden sentences produce stable phonemization", VoicePronunciationTests.GoldenSentencesProduceStablePhonemization)],
+        [new HarnessCase("golden sentences drop no characters during tokenization", VoicePronunciationTests.GoldenSentencesDropNoCharactersDuringTokenization)]
+    ];
+
+    public static IEnumerable<object[]> SetupWizardOnboarding =>
+    [
+        [new HarnessCase("recommend returns small tier when no gpu is present", SetupWizardOnboardingTests.RecommendReturnsSmallTierWhenNoGpuIsPresent)],
+        [new HarnessCase("recommend treats unavailable gpu probe as no gpu", SetupWizardOnboardingTests.RecommendTreatsUnavailableGpuProbeAsNoGpu)],
+        [new HarnessCase("recommend returns small tier for low vram", SetupWizardOnboardingTests.RecommendReturnsSmallTierForLowVram)],
+        [new HarnessCase("recommend returns medium tier for mid vram", SetupWizardOnboardingTests.RecommendReturnsMediumTierForMidVram)],
+        [new HarnessCase("recommend returns large tier for high vram", SetupWizardOnboardingTests.RecommendReturnsLargeTierForHighVram)],
+        [new HarnessCase("catalog entries declare https urls and sha256 hashes", SetupWizardOnboardingTests.CatalogEntriesDeclareHttpsUrlsAndSha256Hashes)],
+        [new HarnessCase("wizard downloads starter model verifies hash and sets model path", SetupWizardOnboardingTests.WizardDownloadsStarterModelVerifiesHashAndSetsModelPath)],
+        [new HarnessCase("wizard starter model download deletes file and reports error on hash mismatch", SetupWizardOnboardingTests.WizardStarterModelDownloadDeletesFileAndReportsErrorOnHashMismatch)],
+        [new HarnessCase("only kokoro native can install from wizard", SetupWizardOnboardingTests.OnlyKokoroNativeCanInstallFromWizard)],
+        [new HarnessCase("wizard voice install calls the same doctor entry point as settings", SetupWizardOnboardingTests.WizardVoiceInstallCallsTheSameDoctorEntryPointAsSettings)],
+        [new HarnessCase("wizard voice install failure leaves finish later message", SetupWizardOnboardingTests.WizardVoiceInstallFailureLeavesFinishLaterMessage)]
+    ];
+
+    public static IEnumerable<object[]> MarkdownViewer =>
+    [
+        [new HarnessCase("link scheme gate allows http and https", MarkdownViewerTests.LinkSchemeGateAllowsHttpAndHttps)],
+        [new HarnessCase("link scheme gate refuses dangerous or malformed schemes", MarkdownViewerTests.LinkSchemeGateRefusesDangerousOrMalformedSchemes)],
+        [new HarnessCase("fence language normalization maps known aliases", MarkdownViewerTests.FenceLanguageNormalizationMapsKnownAliases)],
+        [new HarnessCase("reuse prefix matches only leading identical blocks", MarkdownViewerTests.ReusePrefixMatchesOnlyLeadingIdenticalBlocks)],
+        [new HarnessCase("reuse prefix never treats empty source text as a match", MarkdownViewerTests.ReusePrefixNeverTreatsEmptySourceTextAsAMatch)],
+        [new HarnessCase("reuse prefix handles shrinking or growing block counts", MarkdownViewerTests.ReusePrefixHandlesShrinkingOrGrowingBlockCounts)],
+        [new HarnessCase("incremental parsing converges to the same blocks as one-shot rendering", MarkdownViewerTests.IncrementalParsingConvergesToTheSameBlocksAsOneShotRendering)],
+        [new HarnessCase("streaming append-only document reuses the majority of blocks", MarkdownViewerTests.StreamingAppendOnlyDocumentReusesTheMajorityOfBlocks)]
+    ];
+}
+
+public sealed class AcceptanceHarnessTests
+{
+    [Theory]
+    [MemberData(nameof(HarnessCases.Acceptance), MemberType = typeof(HarnessCases))]
+    public async Task Runs_Acceptance_Cases(HarnessCase testCase)
+    {
+        await testCase.Run();
+    }
+}
+
+public sealed class HarnessRegistrationGuardHarnessTests
+{
+    [Theory]
+    [MemberData(nameof(HarnessCases.HarnessRegistrationGuard), MemberType = typeof(HarnessCases))]
+    public async Task Runs_HarnessRegistrationGuard_Cases(HarnessCase testCase)
+    {
+        await testCase.Run();
+    }
 }
 
 public sealed class BackupHarnessTests
@@ -332,6 +422,36 @@ public sealed class VoiceHarnessTests
     [Theory]
     [MemberData(nameof(HarnessCases.Voice), MemberType = typeof(HarnessCases))]
     public async Task Runs_Voice_Cases(HarnessCase testCase)
+    {
+        await testCase.Run();
+    }
+}
+
+public sealed class VoicePronunciationHarnessTests
+{
+    [Theory]
+    [MemberData(nameof(HarnessCases.VoicePronunciation), MemberType = typeof(HarnessCases))]
+    public async Task Runs_VoicePronunciation_Cases(HarnessCase testCase)
+    {
+        await testCase.Run();
+    }
+}
+
+public sealed class SetupWizardOnboardingHarnessTests
+{
+    [Theory]
+    [MemberData(nameof(HarnessCases.SetupWizardOnboarding), MemberType = typeof(HarnessCases))]
+    public async Task Runs_SetupWizardOnboarding_Cases(HarnessCase testCase)
+    {
+        await testCase.Run();
+    }
+}
+
+public sealed class MarkdownViewerHarnessTests
+{
+    [Theory]
+    [MemberData(nameof(HarnessCases.MarkdownViewer), MemberType = typeof(HarnessCases))]
+    public async Task Runs_MarkdownViewer_Cases(HarnessCase testCase)
     {
         await testCase.Run();
     }

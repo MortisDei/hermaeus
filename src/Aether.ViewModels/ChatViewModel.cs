@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using Aether.Agent.Models;
 using Aether.Agent.Services;
 using Aether.Core.Models;
@@ -97,6 +98,20 @@ public partial class ChatViewModel : ObservableObject
     private DateTime _modelsLoadedAtUtc = DateTime.MinValue;
 
     public ObservableCollection<MessageViewModel> Messages        { get; } = [];
+
+    /// <summary>
+    /// Windowed view over <see cref="Messages"/> that the chat view actually
+    /// renders (r8 03-performance.md 3.4): opening a long conversation only
+    /// materializes the most recent <see cref="MessageWindowSize"/> message
+    /// controls instead of every message ever sent. Persistence, memory
+    /// extraction, and prompt-history truncation all continue to operate on
+    /// the full <see cref="Messages"/> list, never this window.
+    /// </summary>
+    public ObservableCollection<MessageViewModel> VisibleMessages { get; } = [];
+    private const int MessageWindowSize = 100;
+    private int _revealedEarlierMessageCount;
+
+    public bool HasEarlierMessages => Messages.Count > MessageWindowSize + _revealedEarlierMessageCount;
     public ObservableCollection<LlmModel>         AvailableModels { get; } = [];
     public ObservableCollection<ChatContextAttachment> ContextAttachments { get; } = [];
     public ObservableCollection<ChatContextPartViewModel> ContextPreviewParts { get; } = [];
@@ -115,6 +130,9 @@ public partial class ChatViewModel : ObservableObject
     /// truth shared with the Privacy Audit (r6 01-first-five-minutes.md 1.3).
     /// </summary>
     public bool HasSelectedModel => SelectedModel is not null;
+
+    /// <summary>Drives the "no model configured" empty state (r8 02-onboarding-and-usability.md 2.6).</summary>
+    public bool HasNoAvailableModels => AvailableModels.Count == 0;
 
     public bool IsSelectedModelRemote =>
         SelectedModel is not null
@@ -163,6 +181,7 @@ public partial class ChatViewModel : ObservableObject
     public Func<ConversationExportFormat, Task<string?>>? RequestConversationExportPath { get; set; }
     public ISettingsService Settings => _settings;
     public bool HasContextAttachments => ContextAttachments.Count > 0;
+    public Action<string>? RequestNavigate { get; set; }
 
     public ChatViewModel(
         ILlmService llm,
@@ -201,10 +220,13 @@ public partial class ChatViewModel : ObservableObject
         _frequencyPenalty = settings.Settings.Llm.FrequencyPenalty;
         _presencePenalty = settings.Settings.Llm.PresencePenalty;
         _systemPrompt = settings.Settings.Llm.DefaultSystemPrompt;
-        Messages.CollectionChanged += (_, _) =>
+        Messages.CollectionChanged += (_, e) =>
         {
             HasMessages = Messages.Count > 0;
             ScheduleContextUsageRefresh();
+            if (e.Action == NotifyCollectionChangedAction.Reset)
+                _revealedEarlierMessageCount = 0;
+            RefreshVisibleMessageWindow();
         };
         ContextAttachments.CollectionChanged += (_, _) =>
         {
@@ -212,6 +234,7 @@ public partial class ChatViewModel : ObservableObject
             SendCommand.NotifyCanExecuteChanged();
             ScheduleContextUsageRefresh();
         };
+        AvailableModels.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasNoAvailableModels));
         RefreshEstimatedContextUsage();
         _ = Task.Run(RefreshMemoryStatusAsync);
         _ = Task.Run(LoadPersistedChatTracesAsync);
@@ -249,6 +272,31 @@ public partial class ChatViewModel : ObservableObject
         }
         _modelsLoadedAtUtc = DateTime.UtcNow;
     }
+
+    [RelayCommand]
+    private void ShowEarlierMessages()
+    {
+        _revealedEarlierMessageCount += MessageWindowSize;
+        RefreshVisibleMessageWindow();
+    }
+
+    private void RefreshVisibleMessageWindow()
+    {
+        var windowSize = MessageWindowSize + _revealedEarlierMessageCount;
+        var skip = Math.Max(0, Messages.Count - windowSize);
+
+        VisibleMessages.Clear();
+        for (var i = skip; i < Messages.Count; i++)
+            VisibleMessages.Add(Messages[i]);
+
+        OnPropertyChanged(nameof(HasEarlierMessages));
+    }
+
+    [RelayCommand]
+    private void OpenSetupWizardFromEmptyState() => RequestNavigate?.Invoke("wizard");
+
+    [RelayCommand]
+    private void OpenServicesFromEmptyState() => RequestNavigate?.Invoke("services");
 
     [RelayCommand]
     public async Task ActivateWorkspaceAsync()

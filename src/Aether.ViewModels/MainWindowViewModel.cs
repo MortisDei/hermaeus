@@ -107,6 +107,7 @@ public partial class MainWindowViewModel : ObservableObject
         Models = models; Rag = rag; Services = services;
         Benchmarks = benchmarks; SystemOverview = systemOverview; Doctor = doctor; Memories = memories; Logs = logs; Wizard = wizard;
         Doctor.RequestNavigate = panel => ActivePanel = panel;
+        Chat.RequestNavigate = panel => ActivePanel = panel;
         // Keep toolbar doctor badge in sync with doctor checks
         Doctor.Checks.CollectionChanged += (_, _) => UpdateDoctorStatus();
         UpdateDoctorStatus();

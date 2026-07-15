@@ -629,6 +629,35 @@ namespace Aether.Tests
         public Task<bool> InstallNativeKokoroAssetsAsync(IProgress<string> progress, CancellationToken ct = default) => Task.FromResult(true);
     }
 
+    /// <summary>Records native-Kokoro install invocations so the wizard's "Install now" (r8 2.2)
+    /// can be asserted as calling the exact same IDoctorService entry point as Settings/Doctor.</summary>
+    sealed class FakeDoctorServiceWithKokoroInstallTracking : IDoctorService
+    {
+        public int InstallCallCount { get; private set; }
+        public bool InstallResult { get; set; } = true;
+        public List<string> ProgressMessages { get; } = [];
+
+        public Task<DoctorReport> ScanAsync(CancellationToken ct = default) =>
+            Task.FromResult(new DoctorReport([], DateTime.UtcNow, "ok"));
+
+        public Task<bool> InstallRerankerAssetsAsync(CancellationToken ct = default) => Task.FromResult(true);
+        public Task<bool> InstallRerankerAssetsAsync(IProgress<string> progress, CancellationToken ct = default) => Task.FromResult(true);
+        public Task<bool> InstallEmbeddingModelAsync(CancellationToken ct = default) => Task.FromResult(true);
+        public Task<bool> InstallEmbeddingModelAsync(IProgress<string> progress, CancellationToken ct = default) => Task.FromResult(true);
+        public Task<bool> InstallLlamaServerUpdateAsync(CancellationToken ct = default) => Task.FromResult(true);
+        public Task<bool> InstallLlamaServerUpdateAsync(IProgress<string> progress, CancellationToken ct = default) => Task.FromResult(true);
+        public Task<bool> InstallNativeKokoroAssetsAsync(CancellationToken ct = default) => Task.FromResult(InstallResult);
+
+        public Task<bool> InstallNativeKokoroAssetsAsync(IProgress<string> progress, CancellationToken ct = default)
+        {
+            InstallCallCount++;
+            var message = "Installing Kokoro (native)...";
+            ProgressMessages.Add(message);
+            progress.Report(message);
+            return Task.FromResult(InstallResult);
+        }
+    }
+
     internal static class PdfHelpers
     {
         public static void WriteSimplePdf(string path, string text)

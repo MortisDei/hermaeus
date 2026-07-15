@@ -1,6 +1,6 @@
 # Aether Security Review And Threat Model
 
-Last refreshed for `0.12.0-alpha`. The `0.10.0-alpha` pass re-verified the
+Last refreshed for `0.13.0-alpha`. The `0.10.0-alpha` pass re-verified the
 areas that changed in r3-r5 (agent tool execution, run_command recipes,
 lesson store, voice orchestration, benchmark insights) directly against the
 code, and confirmed via git history that the Local API, MCP bridge, secret
@@ -11,8 +11,10 @@ agent approval prompt, and a lesson review moment) plus one new write path
 (applied-patch revert) with the same review-then-verify treatment below. r7
 added the Agent Scenario Suite (`AgentScenarioRunner`), a test harness that
 drives the real, unmodified `AgentSafetyGate`/`AgentService` inside an
-isolated sandbox; see the new subsection under Threat Scenarios. Local API,
-MCP, secrets, redaction, and RAG remain unchanged since `0.9.41-alpha`.
+isolated sandbox; see the new subsection under Threat Scenarios. r8 added
+starter-model downloads, clickable markdown links, and a user pronunciation
+lexicon; see the r8 subsection under Threat Scenarios. Local API, MCP,
+secrets, redaction, and RAG remain unchanged since `0.9.41-alpha`.
 
 Aether is a local-first desktop application. The primary security goal is to
 keep user data, model paths, API keys, local runtimes, and generated voice audio
@@ -298,9 +300,33 @@ Required follow-up:
   third-party scenario should still read `scenario.json` before running it,
   the same way they would review any other script before executing it.
 
+### r8: Starter Model Downloads, Clickable Links, Pronunciation Lexicon
+
+Three new download/content-rendering surfaces landed in `0.13.0-alpha`.
+
+- **Starter model downloads** (`StarterModelCatalog`, wired through the setup
+  wizard). The catalog is a hardcoded, three-entry list (no user-supplied
+  URLs); every entry is `https://` and carries a pinned SHA256 verified via
+  the existing `ModelDownloadService.VerifyHashAsync` before the file is
+  trusted. A hash mismatch deletes the downloaded file and reports an error;
+  the app's settings are left untouched. No new download primitive was
+  introduced - this reuses the same verified path `DoctorService`'s
+  reranker/embedding-model installs already use.
+- **Clickable markdown links** (`MarkdownViewer`). Assistant output can now
+  open the user's default browser on click. Mitigations: a scheme allowlist
+  (`IsSafeLinkScheme`, `http`/`https` only - `file:`, `javascript:`, `data:`,
+  and anything unparsable render as inert styled text, never launched), an
+  explicit user click is required (nothing auto-opens), and the full target
+  URL is shown in the link's tooltip before the click happens.
+- **User pronunciation lexicon** (`{DataRoot}/voice/lexicon.txt`). Plain text,
+  parsed defensively: every IPA value is validated against Kokoro's fixed
+  vocabulary symbol-by-symbol before being accepted; a line that fails
+  validation is skipped and logged, never executed, interpolated, or passed
+  to a shell. The file only ever affects locally-synthesized speech text.
+
 ## Release Gate Status
 
-Security review and threat model refresh was completed for `0.12.0-alpha` as
+Security review and threat model refresh was completed for `0.13.0-alpha` as
 an engineering documentation gate. The following items remain public-release
 hardening work:
 

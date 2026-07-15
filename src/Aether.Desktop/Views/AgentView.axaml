@@ -156,15 +156,21 @@
                                Text="Workspace"
                                VerticalAlignment="Center"
                                Opacity="0.6" />
-                        <TextBox Grid.Row="1" Grid.Column="1"
-                             Text="{Binding WorkspaceRoot}"
-                             Watermark="/path/to/project"
-                             IsEnabled="{Binding !IsRunning}" />
+                        <StackPanel Grid.Row="1" Grid.Column="1" Spacing="2">
+                            <TextBox Text="{Binding WorkspaceRoot}"
+                                 Watermark="/path/to/project"
+                                 IsEnabled="{Binding !IsRunning}"
+                                 ToolTip.Tip="The folder the agent can read and edit. Nothing outside it is touched." />
+                            <TextBlock Text="No workspace selected. Choose a folder so the agent has somewhere to work."
+                                       FontSize="11" Opacity="0.5" TextWrapping="Wrap"
+                                       IsVisible="{Binding !HasWorkspace}" />
+                        </StackPanel>
                         <Button Grid.Row="1" Grid.Column="2"
                             Command="{Binding BrowseWorkspaceRootCommand}"
                             Content="Browse"
                             Padding="8,4"
-                            CornerRadius="6" />
+                            CornerRadius="6"
+                            VerticalAlignment="Top" />
 
                     <TextBlock Grid.Row="2" Grid.Column="0"
                                Text="Model"

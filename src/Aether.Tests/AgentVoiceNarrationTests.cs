@@ -98,4 +98,20 @@ public sealed class AgentVoiceNarrationTests
 
         Assert.False(vmNoVoice.IsError, "agent run should complete without an orchestrator wired in");
     }
+
+    [Fact]
+    public async Task HasWorkspaceDrivesTheNoWorkspaceSelectedEmptyState()
+    {
+        using var temp = new TempDir();
+        var (vm, _, _) = await BuildAsync(temp);
+
+        vm.WorkspaceRoot = string.Empty;
+        Assert.False(vm.HasWorkspace, "An empty workspace root must show the empty state.");
+
+        vm.WorkspaceRoot = temp.PathFor("does-not-exist");
+        Assert.False(vm.HasWorkspace, "A workspace root that does not exist on disk must show the empty state.");
+
+        vm.WorkspaceRoot = temp.PathFor("workspace");
+        Assert.True(vm.HasWorkspace, "An existing workspace directory must hide the empty state.");
+    }
 }

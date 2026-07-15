@@ -15,9 +15,11 @@
                       IsChecked="{Binding ForceRefresh}"
                       VerticalAlignment="Center"
                       FontSize="12"
-                      Opacity="0.7" />
+                      Opacity="0.7"
+                      ToolTip.Tip="Bypasses the cached model list and re-queries every configured provider." />
             <Button Grid.Column="2" Command="{Binding RefreshCommand}"
-                    Content="Refresh" Padding="14,7" CornerRadius="6" FontSize="13" />
+                    Content="Refresh" Padding="14,7" CornerRadius="6" FontSize="13"
+                    ToolTip.Tip="Reloads the model list from all enabled providers." />
         </Grid>
 
         <!-- Status -->
@@ -75,17 +77,20 @@
                                              Text="{Binding DisplayName}"
                                              Watermark="Display name"
                                              CornerRadius="6"
-                                             Padding="10,6" />
+                                             Padding="10,6"
+                                             ToolTip.Tip="Friendly name shown in the model picker instead of the raw provider ID." />
                                     <TextBox Grid.Row="0" Grid.Column="1"
                                              Text="{Binding Description}"
                                              Watermark="Description"
                                              CornerRadius="6"
-                                             Padding="10,6" />
+                                             Padding="10,6"
+                                             ToolTip.Tip="Optional note shown alongside the model in pickers." />
                                     <TextBox Grid.Row="0" Grid.Column="2"
                                              Text="{Binding TagsText}"
                                              Watermark="tags"
                                              CornerRadius="6"
-                                             Padding="10,6" />
+                                             Padding="10,6"
+                                             ToolTip.Tip="Comma-separated tags used for grouping and benchmark leaderboards." />
 
                                     <NumericUpDown Grid.Row="1" Grid.Column="0"
                                                    Value="{Binding DefaultTemperature}"
@@ -93,19 +98,22 @@
                                                    Minimum="0"
                                                    Maximum="2"
                                                    Increment="0.1"
-                                                   FormatString="F1" />
+                                                   FormatString="F1"
+                                                   ToolTip.Tip="Per-model default temperature, overriding the global Settings > LLM value for this model only." />
                                     <NumericUpDown Grid.Row="1" Grid.Column="1"
                                                    Value="{Binding DefaultContextSize}"
                                                    Watermark="{Binding ContextWatermark}"
                                                    Minimum="0"
                                                    Maximum="262144"
-                                                   Increment="512" />
+                                                   Increment="512"
+                                                   ToolTip.Tip="Context window size in tokens this model supports." />
                                     <NumericUpDown Grid.Row="1" Grid.Column="2"
                                                    Value="{Binding DefaultMaxTokens}"
                                                    Watermark="Max tokens"
                                                    Minimum="0"
                                                    Maximum="262144"
-                                                   Increment="256" />
+                                                   Increment="256"
+                                                   ToolTip.Tip="Per-model default max reply length in tokens, overriding the global default." />
 
                                     <NumericUpDown Grid.Row="2" Grid.Column="0"
                                                    Value="{Binding DefaultTopP}"
@@ -113,20 +121,23 @@
                                                    Minimum="0"
                                                    Maximum="1"
                                                    Increment="0.05"
-                                                   FormatString="F2" />
+                                                   FormatString="F2"
+                                                   ToolTip.Tip="Per-model nucleus sampling override. Leave blank to use the provider's own default." />
                                     <NumericUpDown Grid.Row="2" Grid.Column="1"
                                                    Value="{Binding DefaultTopK}"
                                                    Watermark="Top K"
                                                    Minimum="0"
                                                    Maximum="500"
-                                                   Increment="1" />
+                                                   Increment="1"
+                                                   ToolTip.Tip="Per-model top-K sampling override. llama.cpp/Ollama only." />
                                     <NumericUpDown Grid.Row="2" Grid.Column="2"
                                                    Value="{Binding DefaultMinP}"
                                                    Watermark="Min P"
                                                    Minimum="0"
                                                    Maximum="1"
                                                    Increment="0.01"
-                                                   FormatString="F2" />
+                                                   FormatString="F2"
+                                                   ToolTip.Tip="Per-model min-P sampling override. llama.cpp/Ollama only." />
 
                                     <NumericUpDown Grid.Row="3" Grid.Column="0"
                                                    Value="{Binding DefaultRepeatPenalty}"
@@ -134,44 +145,51 @@
                                                    Minimum="0.5"
                                                    Maximum="2"
                                                    Increment="0.05"
-                                                   FormatString="F2" />
+                                                   FormatString="F2"
+                                                   ToolTip.Tip="Per-model repeat penalty override. 1.0 is no penalty." />
                                     <NumericUpDown Grid.Row="3" Grid.Column="1"
                                                    Value="{Binding DefaultFrequencyPenalty}"
                                                    Watermark="Frequency penalty"
                                                    Minimum="-2"
                                                    Maximum="2"
                                                    Increment="0.1"
-                                                   FormatString="F1" />
+                                                   FormatString="F1"
+                                                   ToolTip.Tip="Per-model frequency penalty override. OpenAI-compatible endpoints only." />
                                     <NumericUpDown Grid.Row="3" Grid.Column="2"
                                                    Value="{Binding DefaultPresencePenalty}"
                                                    Watermark="Presence penalty"
                                                    Minimum="-2"
                                                    Maximum="2"
                                                    Increment="0.1"
-                                                   FormatString="F1" />
+                                                   FormatString="F1"
+                                                   ToolTip.Tip="Per-model presence penalty override. OpenAI-compatible endpoints only." />
 
                                     <StackPanel Grid.Row="4" Grid.Column="0"
                                                 Orientation="Horizontal"
                                                 Spacing="8">
                                         <CheckBox Content="Visible"
                                                   IsChecked="{Binding IsVisible}"
-                                                  FontSize="12" />
+                                                  FontSize="12"
+                                                  ToolTip.Tip="Whether this model appears in the chat model picker. Unchecking hides it without deleting it." />
                                     </StackPanel>
                                     <TextBox Grid.Row="4" Grid.Column="1"
                                              Text="{Binding Avatar}"
                                              Watermark="Avatar/icon label"
                                              CornerRadius="6"
-                                             Padding="10,6" />
+                                             Padding="10,6"
+                                             ToolTip.Tip="Short label or initials shown as this model's avatar in chat." />
                                     <StackPanel Grid.Row="4" Grid.Column="2"
                                                 Orientation="Horizontal"
                                                 Spacing="8"
                                                 HorizontalAlignment="Right">
                                         <Button Content="Save"
                                                 Command="{Binding $parent[ItemsControl].DataContext.SaveProfileCommand}"
-                                                CommandParameter="{Binding}" />
+                                                CommandParameter="{Binding}"
+                                                ToolTip.Tip="Saves this model's overrides." />
                                         <Button Content="Reset"
                                                 Command="{Binding $parent[ItemsControl].DataContext.ResetProfileCommand}"
-                                                CommandParameter="{Binding}" />
+                                                CommandParameter="{Binding}"
+                                                ToolTip.Tip="Clears all overrides for this model, reverting to provider/global defaults." />
                                     </StackPanel>
                                 </Grid>
                             </Grid>

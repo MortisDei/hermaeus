@@ -30,35 +30,41 @@
                                          Text="{Binding Command}"
                                          Watermark="Executable, e.g. npx"
                                          CornerRadius="6"
-                                         Padding="10,6" />
+                                         Padding="10,6"
+                                         ToolTip.Tip="Program Aether launches as a child process to speak MCP over stdio." />
                                 <TextBox Grid.Row="0" Grid.Column="2"
                                          Text="{Binding ArgumentsText}"
                                          Watermark="Arguments, space separated"
                                          CornerRadius="6"
-                                         Padding="10,6" />
+                                         Padding="10,6"
+                                         ToolTip.Tip="Command-line arguments passed to the executable, exactly as typed here." />
                                 <StackPanel Grid.Row="0" Grid.Column="3"
                                             Orientation="Horizontal"
                                             Spacing="8">
                                     <CheckBox Content="Enabled"
                                               IsChecked="{Binding Enabled}"
                                               VerticalAlignment="Center"
-                                              FontSize="12" />
+                                              FontSize="12"
+                                              ToolTip.Tip="Whether the Agent can see and call this server's tools." />
                                     <Button Content="Remove"
                                             Command="{Binding $parent[ItemsControl].DataContext.RemoveServerCommand}"
-                                            CommandParameter="{Binding}" />
+                                            CommandParameter="{Binding}"
+                                            ToolTip.Tip="Deletes this server entry. Does not affect a currently-running process until restarted." />
                                 </StackPanel>
 
                                 <TextBox Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3"
                                          Text="{Binding WorkingDirectory}"
                                          Watermark="Working directory (optional)"
                                          CornerRadius="6"
-                                         Padding="10,6" />
+                                         Padding="10,6"
+                                         ToolTip.Tip="Directory the server process starts in. Defaults to Aether's own working directory if left blank." />
 
                                 <TextBox Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="4"
                                          Text="{Binding AllowedToolsText}"
                                          Watermark="Allowed tools, comma separated (empty = allow every tool the server declares)"
                                          CornerRadius="6"
-                                         Padding="10,6" />
+                                         Padding="10,6"
+                                         ToolTip.Tip="Restricts which of the server's declared tools the Agent may call. Every call is still separately approval-gated." />
                             </Grid>
                         </Border>
                     </DataTemplate>

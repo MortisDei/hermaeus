@@ -14,4 +14,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Aether.Tests" />
   </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\cmudict.txt.gz" LogicalName="Aether.Voice.Assets.cmudict.txt.gz" />
+  </ItemGroup>
 </Project>

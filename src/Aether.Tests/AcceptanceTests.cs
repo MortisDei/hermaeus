@@ -22,7 +22,8 @@ namespace Aether.Tests
         // Very small, schema-like validator that ensures required trace fields exist
         public static Task TraceSchema_FileIsValidAndSampleConforms()
         {
-            var schemaPath = Path.Combine("docs", "schemas", "agent_trace.schema.json");
+            var repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../"));
+            var schemaPath = Path.Combine(repoRoot, "docs", "schemas", "agent_trace.schema.json");
             var schemaText = File.ReadAllText(schemaPath);
             // Ensure schema is valid JSON
             using var schemaDoc = JsonDocument.Parse(schemaText);

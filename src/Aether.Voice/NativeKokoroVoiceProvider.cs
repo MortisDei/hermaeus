@@ -24,6 +24,7 @@ public sealed class NativeKokoroVoiceProvider : ITtsService, IVoiceProvider, IDi
 
     private readonly ISettingsService _settings;
     private readonly KokoroOnnxModel _model;
+    private readonly IRuntimeLogService? _runtimeLogs;
     private readonly SemaphoreSlim _synthesisGate = new(1, 1);
 
     public VoiceProvider Id => VoiceProvider.KokoroNative;
@@ -31,10 +32,11 @@ public sealed class NativeKokoroVoiceProvider : ITtsService, IVoiceProvider, IDi
     public VoiceCapability Capabilities => VoiceCapability.TextToSpeech | VoiceCapability.Local;
     public (int Major, int Minor)? RequiredPythonVersion => null;
 
-    public NativeKokoroVoiceProvider(ISettingsService settings, AppLifecycleJournalService? journal = null)
+    public NativeKokoroVoiceProvider(ISettingsService settings, AppLifecycleJournalService? journal = null, IRuntimeLogService? runtimeLogs = null)
     {
         _settings = settings;
         _model = new KokoroOnnxModel(() => ResolveAssetsDirectory(_settings.Settings), journal);
+        _runtimeLogs = runtimeLogs;
     }
 
     public static string ResolveAssetsDirectory(AppSettings settings)
@@ -44,6 +46,16 @@ public sealed class NativeKokoroVoiceProvider : ITtsService, IVoiceProvider, IDi
             ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Aether")
             : Path.GetFullPath(configured);
         return Path.Combine(root, "Models", "voice", "kokoro-native");
+    }
+
+    /// <summary>{DataRoot}/voice/lexicon.txt: see docs/review/01-voice-pronunciation.md item 1.3.</summary>
+    private static string ResolveUserLexiconPath(AppSettings settings)
+    {
+        var configured = settings.DataManagement.DataRootDirectory?.Trim();
+        var root = string.IsNullOrWhiteSpace(configured)
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Aether")
+            : Path.GetFullPath(configured);
+        return Path.Combine(root, "voice", "lexicon.txt");
     }
 
     public bool IsInstalled => _model.AssetsPresent(NormalizeVoice(_settings.Settings.Tts.Speaker));
@@ -187,7 +199,8 @@ public sealed class NativeKokoroVoiceProvider : ITtsService, IVoiceProvider, IDi
             // not freeze for the duration (docs/review/01-code-audit.md P2-7).
             await Task.Run(() =>
             {
-                var phonemes = KokoroPhonemizer.ToPhonemes(text);
+                var lexiconPath = ResolveUserLexiconPath(_settings.Settings);
+                var phonemes = KokoroPhonemizer.ToPhonemes(text, lexiconPath, _runtimeLogs);
                 var chunks = KokoroTokenizer.Encode(phonemes);
                 if (chunks.Count == 0)
                     throw new InvalidOperationException("Input text produced no phonemes to synthesize.");

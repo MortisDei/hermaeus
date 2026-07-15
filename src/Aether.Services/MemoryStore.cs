@@ -372,8 +372,15 @@ public sealed class MemoryStore : IMemoryStore
         var candidates = new Dictionary<string, Memory>(StringComparer.Ordinal);
         foreach (var m in ftsResults) candidates[m.Id] = m;
 
+        const int resultLimit = 100;
+
+        // First pass stays a lightweight id+embedding projection (the aea2326
+        // optimization was sound); every embedded row is scored here, not
+        // just ones above an arbitrary cosine cutoff, so a paraphrase with no
+        // keyword overlap can still surface (that is the entire point of
+        // hybrid recall).
+        var nonFtsScores = new List<(string Id, double Score)>();
         var cmd = c.CreateCommand();
-        // Optimization: Only select the ID and Embedding blob to minimize data transfer from SQLite
         cmd.CommandText = "SELECT id, embedding FROM memories WHERE is_archived = 0 AND embedding IS NOT NULL";
         await using (var rd = await cmd.ExecuteReaderAsync(ct))
         {
@@ -382,7 +389,7 @@ public sealed class MemoryStore : IMemoryStore
                 var id = rd.GetString(0);
                 var vector = FromBlob((byte[])rd[1]);
                 var cosine = Math.Max(0.0, CosineSimilarity(queryVector, vector));
-                
+
                 if (candidates.TryGetValue(id, out var m))
                 {
                     var ftsScore = ftsRank.GetValueOrDefault(id, 0.0);
@@ -390,18 +397,33 @@ public sealed class MemoryStore : IMemoryStore
                 }
                 else
                 {
-                    // For memories not in FTS results, we need to fetch the full object
-                    // but only if the cosine similarity is high enough to be relevant.
-                    if (cosine > 0.7) 
-                    {
-                        var mFull = await GetByIdAsync(id, ct);
-                        if (mFull is not null)
-                        {
-                            mFull.RelevanceScore = 0.5 * cosine;
-                            candidates[id] = mFull;
-                        }
-                    }
+                    nonFtsScores.Add((id, 0.5 * cosine));
                 }
+            }
+        }
+
+        // Only the ids that could plausibly make the final cut are hydrated,
+        // and in a single batched query rather than one round trip per row.
+        var idsToHydrate = nonFtsScores
+            .OrderByDescending(s => s.Score)
+            .Take(resultLimit)
+            .Select(s => s.Id)
+            .ToList();
+        if (idsToHydrate.Count > 0)
+        {
+            var scoreById = nonFtsScores.ToDictionary(s => s.Id, s => s.Score, StringComparer.Ordinal);
+            var hydrateCmd = c.CreateCommand();
+            var paramNames = idsToHydrate.Select((_, i) => $"$p{i}").ToList();
+            hydrateCmd.CommandText = $"SELECT * FROM memories WHERE id IN ({string.Join(",", paramNames)})";
+            for (var i = 0; i < idsToHydrate.Count; i++)
+                hydrateCmd.Parameters.AddWithValue(paramNames[i], idsToHydrate[i]);
+
+            await using var hydrateRd = await hydrateCmd.ExecuteReaderAsync(ct);
+            while (await hydrateRd.ReadAsync(ct))
+            {
+                var hydrated = Map(hydrateRd);
+                hydrated.RelevanceScore = scoreById.GetValueOrDefault(hydrated.Id, 0.0);
+                candidates[hydrated.Id] = hydrated;
             }
         }
 
@@ -413,7 +435,7 @@ public sealed class MemoryStore : IMemoryStore
         return candidates.Values
             .OrderByDescending(m => m.IsPinned)
             .ThenByDescending(m => m.RelevanceScore)
-            .Take(100)
+            .Take(resultLimit)
             .ToList();
     }
 

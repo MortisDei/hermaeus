@@ -32,11 +32,13 @@
                                     IsEnabled="{Binding !IsScanning}"
                                     Content="Run Doctor"
                                     Padding="12,6"
-                                    CornerRadius="6" />
+                                    CornerRadius="6"
+                                    ToolTip.Tip="Re-runs every check below now." />
                             <Button Command="{Binding CopyAllDiagnosticsCommand}"
                                     Content="Copy Diagnostics"
                                     Padding="12,6"
-                                    CornerRadius="6" />
+                                    CornerRadius="6"
+                                    ToolTip.Tip="Copies every check's status and detail to the clipboard, ready to paste into a bug report." />
                         </StackPanel>
                     </Grid>
                 </StackPanel>
@@ -64,11 +66,13 @@
                                                 IsEnabled="{Binding CanFix}"
                                                 Command="{Binding $parent[ItemsControl].DataContext.RunFixCommand}"
                                                 CommandParameter="{Binding}"
-                                                Padding="10,5" CornerRadius="6" />
+                                                Padding="10,5" CornerRadius="6"
+                                                ToolTip.Tip="Runs the suggested fix for this specific check." />
                                         <Button Content="Copy"
                                                 Command="{Binding $parent[ItemsControl].DataContext.CopyDiagnosticsCommand}"
                                                 CommandParameter="{Binding}"
-                                                Padding="10,5" CornerRadius="6" />
+                                                Padding="10,5" CornerRadius="6"
+                                                ToolTip.Tip="Copies this one check's status and detail to the clipboard." />
                                     </StackPanel>
                                 </Grid>
                                 <TextBlock Text="{Binding Detail}" FontSize="12" Opacity="0.5" TextWrapping="Wrap" />

@@ -24,6 +24,67 @@ public sealed class ChatWorkbenchTests
     }
 
     [Fact]
+    public async Task HasNoAvailableModelsDrivesTheChatEmptyState()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var vm = new ChatViewModel(
+            new UsageLlm(),
+            new InMemoryConversationStore(),
+            new EmptyMemoryStore(),
+            settings,
+            new FakeTts(),
+            new ModelProfileService(settings),
+            new FakeToasts(),
+            new NoOpConversationMemoryService(),
+            new RuntimeLogService(settings),
+            new ConversationExportService());
+
+        Assert.True(vm.HasNoAvailableModels, "Before any models load, the empty state should offer setup guidance.");
+
+        await vm.LoadModelsAsync(force: true);
+
+        Assert.False(vm.HasNoAvailableModels, "Once a provider returns models, the setup-guidance empty state must not show.");
+    }
+
+    [Fact]
+    public async Task LongConversationRendersOnlyTheNewestWindowUntilShowEarlierIsClicked()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var store = new InMemoryConversationStore();
+        var conversation = new Conversation { Id = "long-convo", Title = "Long" };
+        for (var i = 0; i < 250; i++)
+            conversation.Messages.Add(new Message { Role = i % 2 == 0 ? "user" : "assistant", Content = $"message {i}" });
+        await store.SaveAsync(conversation);
+
+        var vm = new ChatViewModel(
+            new UsageLlm(),
+            store,
+            new EmptyMemoryStore(),
+            settings,
+            new FakeTts(),
+            new ModelProfileService(settings),
+            new FakeToasts(),
+            new NoOpConversationMemoryService(),
+            new RuntimeLogService(settings),
+            new ConversationExportService());
+
+        await vm.LoadConversationAsync("long-convo");
+
+        Assert.Equal(250, vm.Messages.Count);
+        Assert.Equal(100, vm.VisibleMessages.Count);
+        Assert.Equal("message 249", vm.VisibleMessages[^1].Content);
+        Assert.True(vm.HasEarlierMessages, "A 250-message conversation windowed to 100 must offer to show earlier messages.");
+
+        vm.ShowEarlierMessagesCommand.Execute(null);
+
+        Assert.Equal(200, vm.VisibleMessages.Count);
+        Assert.Equal("message 249", vm.VisibleMessages[^1].Content);
+        Assert.True(vm.HasEarlierMessages, "50 messages still remain hidden after one reveal.");
+    }
+
+    [Fact]
     public async Task ContextInspectorTraceAndCompareModelsWork()
     {
         using var temp = new TempDir();

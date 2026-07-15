@@ -319,6 +319,9 @@ public partial class AgentViewModel : ObservableObject
 
     public Action? RequestWorkspaceRootPicker { get; set; }
 
+    /// <summary>Drives the "no workspace selected" empty state (r8 02-onboarding-and-usability.md 2.6).</summary>
+    public bool HasWorkspace => !string.IsNullOrWhiteSpace(WorkspaceRoot) && Directory.Exists(WorkspaceRoot);
+
     [ObservableProperty] private string _goalText = string.Empty;
     [ObservableProperty] private string _workspaceRoot = string.Empty;
     [ObservableProperty] private LlmModel? _selectedModel;
@@ -1274,6 +1277,7 @@ public partial class AgentViewModel : ObservableObject
     {
         StartCommand.NotifyCanExecuteChanged();
         ExplainWorkspaceCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(HasWorkspace));
     }
     partial void OnWorkspaceFileQueryChanged(string value) => _ = RefreshWorkspaceFilesAsync();
     partial void OnSelectedWorkspaceFileChanged(AgentWorkspaceFileViewModel? value) => _ = LoadSelectedWorkspaceFileAsync(value);

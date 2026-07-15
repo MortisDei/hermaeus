@@ -14,6 +14,8 @@ public partial class SetupWizardViewModel : ObservableObject
     private readonly IVoiceProviderRegistry _voiceProviders;
     private readonly IDoctorService _doctor;
     private readonly IToastService _toasts;
+    private readonly ISystemInfoService _systemInfo;
+    private readonly ModelDownloadService _modelDownloads;
 
     [ObservableProperty] private int _stepIndex;
     [ObservableProperty] private string _dataRootDirectory = string.Empty;
@@ -27,6 +29,36 @@ public partial class SetupWizardViewModel : ObservableObject
     [ObservableProperty] private string _voiceOnboardingRiskNotes = string.Empty;
     [ObservableProperty] private bool _doctorRan;
     [ObservableProperty] private bool _isDoctorRunning;
+
+    // ── Guided starter model download (docs/review 02-onboarding-and-usability.md 2.1) ──
+    [ObservableProperty] private bool _useStarterModelDownload;
+    [ObservableProperty] private StarterModelEntry? _recommendedStarterModel;
+    [ObservableProperty] private bool _isDownloadingStarterModel;
+    [ObservableProperty] private double _starterModelDownloadPercent;
+    [ObservableProperty] private string _starterModelDownloadStatus = string.Empty;
+    [ObservableProperty] private string _starterModelDownloadError = string.Empty;
+    [ObservableProperty] private bool _starterModelDownloadCompleted;
+
+    // ── Voice install from the wizard (docs/review 02-onboarding-and-usability.md 2.2) ──
+    [ObservableProperty] private bool _isInstallingVoice;
+    [ObservableProperty] private string _voiceInstallProgress = string.Empty;
+    [ObservableProperty] private string _voiceInstallError = string.Empty;
+    [ObservableProperty] private bool _voiceInstallCompleted;
+
+    public bool CanInstallSelectedVoiceProvider => SelectedVoiceProvider?.Id == VoiceProvider.KokoroNative;
+
+    /// <summary>Shown on the Finish step; see docs/review 02-onboarding-and-usability.md item 2.2.</summary>
+    public string VoiceReadinessSummary
+    {
+        get
+        {
+            if (VoiceInstallCompleted)
+                return "Voice is ready.";
+            if (!CanInstallSelectedVoiceProvider)
+                return "Voice provider selected. Finish any further setup it needs in Settings > Voice.";
+            return "Voice is not installed yet. You can finish this later in Settings > Voice.";
+        }
+    }
 
     private bool _syncingRuntimeSelection;
 
@@ -65,13 +97,17 @@ public partial class SetupWizardViewModel : ObservableObject
         RuntimeProfileService runtimeProfiles,
         IVoiceProviderRegistry voiceProviders,
         IDoctorService doctor,
-        IToastService toasts)
+        IToastService toasts,
+        ISystemInfoService systemInfo,
+        ModelDownloadService? modelDownloads = null)
     {
         _settings = settings;
         _runtimeProfiles = runtimeProfiles;
         _voiceProviders = voiceProviders;
         _doctor = doctor;
         _toasts = toasts;
+        _systemInfo = systemInfo;
+        _modelDownloads = modelDownloads ?? new ModelDownloadService();
         LoadFromSettings();
     }
 
@@ -81,6 +117,7 @@ public partial class SetupWizardViewModel : ObservableObject
         DataRootDirectory = s.DataManagement.DataRootDirectory;
         LocalAiAssetsRoot = s.DataManagement.LocalAiAssetsRoot;
         ModelFolder = s.ManagedServers.FirstOrDefault()?.ModelPath ?? string.Empty;
+        UseStarterModelDownload = string.IsNullOrWhiteSpace(ModelFolder) || !ModelFolder.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase);
 
         RuntimeOptions.Clear();
         foreach (var profile in _runtimeProfiles.Profiles)
@@ -96,6 +133,21 @@ public partial class SetupWizardViewModel : ObservableObject
         SelectedVoiceProvider = VoiceOptions.FirstOrDefault(p => p.Id == activeProviderId)
             ?? VoiceOptions.FirstOrDefault();
         UpdateVoiceOnboarding(SelectedVoiceProvider);
+
+        _ = RefreshRecommendedStarterModelAsync();
+    }
+
+    private async Task RefreshRecommendedStarterModelAsync()
+    {
+        try
+        {
+            var snapshot = await _systemInfo.CaptureAsync();
+            RecommendedStarterModel = StarterModelCatalog.Recommend(snapshot);
+        }
+        catch
+        {
+            RecommendedStarterModel = StarterModelCatalog.Small;
+        }
     }
 
     [RelayCommand]
@@ -161,6 +213,94 @@ public partial class SetupWizardViewModel : ObservableObject
         }
     }
 
+    [RelayCommand]
+    private async Task DownloadStarterModelAsync()
+    {
+        if (IsDownloadingStarterModel) return;
+        var entry = RecommendedStarterModel ?? StarterModelCatalog.Small;
+
+        IsDownloadingStarterModel = true;
+        StarterModelDownloadCompleted = false;
+        StarterModelDownloadError = string.Empty;
+        StarterModelDownloadPercent = 0;
+        try
+        {
+            var folder = ResolveStarterModelFolder();
+            Directory.CreateDirectory(folder);
+            var destination = Path.Combine(folder, entry.FileName);
+
+            StarterModelDownloadStatus = $"Downloading {entry.DisplayName}...";
+            var progress = new Progress<DownloadProgress>(p => StarterModelDownloadPercent = p.PercentComplete);
+            var result = await _modelDownloads.DownloadAsync(entry.DownloadUrl, destination, progress);
+            if (!result.Success)
+            {
+                StarterModelDownloadError = result.Message;
+                return;
+            }
+
+            StarterModelDownloadStatus = "Verifying download...";
+            if (!await _modelDownloads.VerifyHashAsync(destination, entry.Sha256))
+            {
+                try { File.Delete(destination); } catch { }
+                StarterModelDownloadError = "The downloaded file failed hash verification and was removed. Please try again.";
+                return;
+            }
+
+            ModelFolder = destination;
+            StarterModelDownloadCompleted = true;
+            StarterModelDownloadStatus = $"{entry.DisplayName} is ready.";
+        }
+        catch (Exception ex)
+        {
+            StarterModelDownloadError = ex.Message;
+        }
+        finally
+        {
+            IsDownloadingStarterModel = false;
+        }
+    }
+
+    private string ResolveStarterModelFolder()
+    {
+        var configured = _settings.Settings.DataManagement.LocalAiAssetsRoot?.Trim();
+        var root = string.IsNullOrWhiteSpace(configured)
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Aether")
+            : Path.GetFullPath(configured);
+        return Path.Combine(root, "Models", "chat");
+    }
+
+    [RelayCommand]
+    private async Task InstallVoiceAsync()
+    {
+        if (IsInstallingVoice || !CanInstallSelectedVoiceProvider) return;
+
+        IsInstallingVoice = true;
+        VoiceInstallCompleted = false;
+        VoiceInstallError = string.Empty;
+        try
+        {
+            var progress = new Progress<string>(s => VoiceInstallProgress = s);
+            var ok = await _doctor.InstallNativeKokoroAssetsAsync(progress, CancellationToken.None);
+            if (ok)
+            {
+                VoiceInstallCompleted = true;
+                VoiceInstallProgress = "Kokoro (native) voice installed.";
+            }
+            else
+            {
+                VoiceInstallError = "Voice install failed. See diagnostics for details.";
+            }
+        }
+        catch (Exception ex)
+        {
+            VoiceInstallError = ex.Message;
+        }
+        finally
+        {
+            IsInstallingVoice = false;
+        }
+    }
+
     partial void OnSelectedRuntimeChanged(RuntimeProfileViewModel? value)
     {
         if (_syncingRuntimeSelection)
@@ -195,7 +335,16 @@ public partial class SetupWizardViewModel : ObservableObject
         }
     }
 
-    partial void OnSelectedVoiceProviderChanged(VoiceProviderInfo? value) => UpdateVoiceOnboarding(value);
+    partial void OnSelectedVoiceProviderChanged(VoiceProviderInfo? value)
+    {
+        UpdateVoiceOnboarding(value);
+        OnPropertyChanged(nameof(CanInstallSelectedVoiceProvider));
+        OnPropertyChanged(nameof(VoiceReadinessSummary));
+        VoiceInstallCompleted = false;
+        VoiceInstallError = string.Empty;
+    }
+
+    partial void OnVoiceInstallCompletedChanged(bool value) => OnPropertyChanged(nameof(VoiceReadinessSummary));
 
     partial void OnStepIndexChanged(int value)
     {

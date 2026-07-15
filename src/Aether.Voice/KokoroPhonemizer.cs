@@ -1,37 +1,41 @@
 using System.Text;
+using Aether.Core.Services;
 
 namespace Aether.Voice;
 
 /// <summary>
-/// A deliberately small, English-only text-to-phoneme converter. This is not
-/// a port of misaki (Kokoro's real G2P dependency, which needs espeak-ng and
-/// full linguistic rule sets); it is a dictionary of common words plus a
-/// letter-by-letter fallback for everything else, scoped exactly as
-/// docs/review/archived/r1/07-roadmap.md item 5 describes: "focused, English-first ...
-/// not attempting full multi-language phonemization." Pronunciation accuracy
-/// on out-of-dictionary words is approximate by design.
+/// Converts English text to phonemes for Kokoro's ONNX graph. Numbers,
+/// currency, percentages, ordinals and clock times are expanded to words
+/// first (<see cref="KokoroTextNormalizer"/>), then each word is resolved in
+/// order: the user's pronunciation lexicon, the embedded CMU Pronouncing
+/// Dictionary (<see cref="CmuPronouncingDictionary"/>), a suffix-stripping
+/// retry against both of those, unknown all-caps acronyms spelled out
+/// letter by letter, and finally a small letter-by-letter rule fallback for
+/// anything still unresolved (names, invented words, typos). Pronunciation
+/// accuracy on that final fallback tier is approximate by design.
 /// </summary>
 internal static class KokoroPhonemizer
 {
-    public static string ToPhonemes(string text)
+    public static string ToPhonemes(string text, string? userLexiconPath = null, IRuntimeLogService? logs = null)
     {
         if (string.IsNullOrWhiteSpace(text))
             return string.Empty;
 
+        var normalized = KokoroTextNormalizer.Normalize(text);
         var sb = new StringBuilder();
-        var words = text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        var words = normalized.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
         for (var i = 0; i < words.Length; i++)
         {
             if (i > 0)
                 sb.Append(KokoroVocab.Space);
 
-            AppendWord(sb, words[i]);
+            AppendWord(sb, words[i], userLexiconPath, logs);
         }
 
         return sb.ToString();
     }
 
-    private static void AppendWord(StringBuilder sb, string rawWord)
+    private static void AppendWord(StringBuilder sb, string rawWord, string? userLexiconPath, IRuntimeLogService? logs)
     {
         var trailingPunctuation = new StringBuilder();
         var word = rawWord;
@@ -48,15 +52,164 @@ internal static class KokoroPhonemizer
             return;
         }
 
-        if (Dictionary.TryGetValue(core, out var phonemes))
-            sb.Append(phonemes);
-        else
-            AppendFallback(sb, core.ToLowerInvariant());
-
+        sb.Append(ResolveCore(core, userLexiconPath, logs));
         sb.Append(trailingPunctuation);
     }
 
     private static bool IsSentencePunctuation(char c) => c is '.' or ',' or '!' or '?' or ';' or ':';
+
+    private static string ResolveCore(string core, string? userLexiconPath, IRuntimeLogService? logs)
+    {
+        var lower = core.ToLowerInvariant();
+
+        if (KokoroUserLexicon.TryGetIpa(userLexiconPath, lower, out var userIpa, logs))
+            return userIpa;
+
+        if (CmuPronouncingDictionary.TryGetIpa(lower, out var cmuIpa))
+            return cmuIpa;
+
+        if (TryResolveWithSuffixMorphology(lower, userLexiconPath, logs, out var morphIpa))
+            return morphIpa;
+
+        if (IsAcronymCandidate(core))
+            return SpellAcronym(core);
+
+        var sb = new StringBuilder();
+        AppendFallback(sb, lower);
+        return sb.ToString();
+    }
+
+    // ── Suffix morphology (doc 01 item 1.4) ─────────────────────────────────
+
+    private static bool TryResolveWithSuffixMorphology(string lower, string? userLexiconPath, IRuntimeLogService? logs, out string ipa)
+    {
+        ipa = string.Empty;
+
+        if (lower.EndsWith("'s", StringComparison.Ordinal) && lower.Length > 2)
+        {
+            var stem = lower[..^2];
+            if (TryResolveStem(stem, userLexiconPath, logs, out var stemIpa))
+            {
+                ipa = stemIpa + SuffixPhoneme(stemIpa, isPastTense: false);
+                return true;
+            }
+        }
+
+        if (lower.EndsWith("ing", StringComparison.Ordinal) && lower.Length > 4)
+        {
+            var stem = lower[..^3];
+            if (TryResolveStemWithSilentE(stem, userLexiconPath, logs, out var stemIpa))
+            {
+                ipa = stemIpa + "ɪŋ";
+                return true;
+            }
+        }
+
+        if (lower.EndsWith("ed", StringComparison.Ordinal) && lower.Length > 3)
+        {
+            var stem = lower[..^2];
+            if (TryResolveStemWithSilentE(stem, userLexiconPath, logs, out var stemIpa))
+            {
+                ipa = stemIpa + SuffixPhoneme(stemIpa, isPastTense: true);
+                return true;
+            }
+        }
+
+        if (lower.EndsWith("es", StringComparison.Ordinal) && lower.Length > 3)
+        {
+            var stem = lower[..^2];
+            if (TryResolveStem(stem, userLexiconPath, logs, out var stemIpa))
+            {
+                ipa = stemIpa + "ɪz";
+                return true;
+            }
+        }
+
+        if (lower.EndsWith("s", StringComparison.Ordinal) && !lower.EndsWith("ss", StringComparison.Ordinal) && lower.Length > 2)
+        {
+            var stem = lower[..^1];
+            if (TryResolveStem(stem, userLexiconPath, logs, out var stemIpa))
+            {
+                ipa = stemIpa + SuffixPhoneme(stemIpa, isPastTense: false);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryResolveStem(string stem, string? userLexiconPath, IRuntimeLogService? logs, out string ipa)
+    {
+        if (KokoroUserLexicon.TryGetIpa(userLexiconPath, stem, out ipa, logs)) return true;
+        if (CmuPronouncingDictionary.TryGetIpa(stem, out ipa)) return true;
+        ipa = string.Empty;
+        return false;
+    }
+
+    /// <summary>Tries the bare stem, then the stem with a silent 'e' restored ("hop" -> "hope").</summary>
+    private static bool TryResolveStemWithSilentE(string stem, string? userLexiconPath, IRuntimeLogService? logs, out string ipa)
+    {
+        if (TryResolveStem(stem, userLexiconPath, logs, out ipa)) return true;
+        return TryResolveStem(stem + "e", userLexiconPath, logs, out ipa);
+    }
+
+    private static readonly HashSet<char> VoicelessConsonants = ['p', 't', 'k', 'f', 'θ', 's', 'ʃ', 'ʧ', 'h'];
+    private static readonly HashSet<char> Sibilants = ['s', 'z', 'ʃ', 'ʒ', 'ʧ', 'ʤ'];
+
+    private static string SuffixPhoneme(string stemIpa, bool isPastTense)
+    {
+        var last = LastSoundChar(stemIpa);
+        if (isPastTense)
+        {
+            if (last is 't' or 'd') return "ɪd";
+            return VoicelessConsonants.Contains(last) ? "t" : "d";
+        }
+
+        if (Sibilants.Contains(last)) return "ɪz";
+        return VoicelessConsonants.Contains(last) ? "s" : "z";
+    }
+
+    private static char LastSoundChar(string ipa)
+    {
+        for (var i = ipa.Length - 1; i >= 0; i--)
+        {
+            var c = ipa[i];
+            if (c is 'ˈ' or 'ˌ' or 'ː') continue;
+            return c;
+        }
+        return '\0';
+    }
+
+    // ── Unknown all-caps acronyms (doc 01 item 1.1's spelling bullet) ──────
+
+    private static bool IsAcronymCandidate(string core) =>
+        core.Length is >= 2 and <= 6 && core.All(char.IsUpper);
+
+    private static readonly IReadOnlyDictionary<char, string> LetterNames = new Dictionary<char, string>
+    {
+        ['a'] = "eɪ", ['b'] = "bi", ['c'] = "si", ['d'] = "di", ['e'] = "i",
+        ['f'] = "ɛf", ['g'] = "ʤi", ['h'] = "eɪʧ", ['i'] = "aɪ", ['j'] = "ʤeɪ",
+        ['k'] = "keɪ", ['l'] = "ɛl", ['m'] = "ɛm", ['n'] = "ɛn", ['o'] = "oʊ",
+        ['p'] = "pi", ['q'] = "kju", ['r'] = "ɑɹ", ['s'] = "ɛs", ['t'] = "ti",
+        ['u'] = "ju", ['v'] = "vi", ['w'] = "dʌbəlju", ['x'] = "ɛks", ['y'] = "waɪ",
+        ['z'] = "zi"
+    };
+
+    private static string SpellAcronym(string core)
+    {
+        var sb = new StringBuilder();
+        foreach (var c in core.ToLowerInvariant())
+        {
+            if (!LetterNames.TryGetValue(c, out var name))
+                continue;
+            if (sb.Length > 0)
+                sb.Append(KokoroVocab.Space);
+            sb.Append(name);
+        }
+        return sb.ToString();
+    }
+
+    // ── Rule-based fallback for words the dictionary has no entry for ──────
 
     private static void AppendFallback(StringBuilder sb, string word)
     {
@@ -81,7 +234,9 @@ internal static class KokoroPhonemizer
                 {
                     'a' => "ɑɹ",
                     'e' => "ɚ",
-                    'i' => "ɝ",
+                    // "ɝ" (stressed r-colored vowel) is not in Kokoro's vocabulary;
+                    // "ɜɹ" stays within the vocab and matches the a/o/u pattern below.
+                    'i' => "ɜɹ",
                     'o' => "ɔɹ",
                     'u' => "ʊɹ",
                     _ => KokoroVocab.TurnedR
@@ -96,7 +251,7 @@ internal static class KokoroPhonemizer
             {
                 consumed = 1;
                 char c = word[i];
-                
+
                 // Simple vowel shift for Magic E
                 if (hasMagicE && "aeiouy".Contains(c))
                 {
@@ -152,6 +307,9 @@ internal static class KokoroPhonemizer
                 case "oi": phoneme = KokoroVocab.OpenO + KokoroVocab.NearCloseI; return 2;
                 case "ou": phoneme = KokoroVocab.OpenBackA + KokoroVocab.NearCloseU; return 2;
                 case "ow": phoneme = KokoroVocab.OpenBackA + KokoroVocab.NearCloseU; return 2;
+                // Word-initial "gh" is a hard /g/ (ghost, ghastly); word-final/medial
+                // "gh" (enough, laugh, tough) is /f/, handled by the fallthrough below.
+                case "gh" when i == 0: phoneme = KokoroVocab.ScriptG; return 2;
                 case "gh": phoneme = "f"; return 2;
                 case "wh": phoneme = "w"; return 2;
                 case "kn": phoneme = "n"; return 2;
@@ -179,282 +337,4 @@ internal static class KokoroPhonemizer
         _ when char.IsLetter(c) => c.ToString(),
         _ => string.Empty
     };
-
-    /// <summary>
-    /// A small set of very common English words whose pronunciation the
-    /// letter-fallback rules above would otherwise get noticeably wrong
-    /// (silent letters, irregular vowels). Not exhaustive by design.
-    /// </summary>
-    private static readonly IReadOnlyDictionary<string, string> Dictionary = BuildDictionary();
-
-    private static IReadOnlyDictionary<string, string> BuildDictionary()
-    {
-        var entries = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            // Function words
-            ["the"] = "ðə",
-            ["a"] = "ə",
-            ["an"] = "æn",
-            ["and"] = "ænd",
-            ["of"] = "ʌv",
-            ["to"] = "tu",
-            ["in"] = "ɪn",
-            ["on"] = "ɑn",
-            ["at"] = "æt",
-            ["for"] = "fɔɹ",
-            ["from"] = "fɹʌm",
-            ["with"] = "wɪθ",
-            ["without"] = "wɪˈðaʊt",
-            ["into"] = "ˈɪntu",
-            ["onto"] = "ˈɑntu",
-            ["over"] = "ˈoʊvɚ",
-            ["under"] = "ˈʌndɚ",
-            ["between"] = "bɪˈtwiːn",
-            ["through"] = "θɹu",
-            ["around"] = "ɚˈaʊnd",
-            ["about"] = "əˈbaʊt",
-            ["before"] = "bɪˈfɔɹ",
-            ["after"] = "ˈæftɚ",
-            ["during"] = "ˈdʊɹɪŋ",
-            ["while"] = "waɪl",
-            ["until"] = "ʌnˈtɪl",
-
-            // Pronouns
-            ["i"] = "aɪ",
-            ["me"] = "mi",
-            ["my"] = "maɪ",
-            ["mine"] = "maɪn",
-            ["you"] = "ju",
-            ["your"] = "jɔɹ",
-            ["yours"] = "jɔɹz",
-            ["he"] = "hi",
-            ["him"] = "hɪm",
-            ["his"] = "hɪz",
-            ["she"] = "ʃi",
-            ["her"] = "hɚ",
-            ["hers"] = "hɚz",
-            ["we"] = "wi",
-            ["us"] = "ʌs",
-            ["our"] = "aʊɹ",
-            ["they"] = "ðeɪ",
-            ["them"] = "ðɛm",
-            ["their"] = "ðɛɹ",
-            ["theirs"] = "ðɛɹz",
-
-            // Demonstratives
-            ["this"] = "ðɪs",
-            ["that"] = "ðæt",
-            ["these"] = "ðiːz",
-            ["those"] = "ðoʊz",
-
-            // Question words
-            ["what"] = "wʌt",
-            ["when"] = "wɛn",
-            ["where"] = "wɛɹ",
-            ["who"] = "hu",
-            ["why"] = "waɪ",
-            ["how"] = "haʊ",
-            ["which"] = "wɪtʃ",
-            ["whose"] = "huːz",
-
-            // Irregular verbs
-            ["be"] = "bi",
-            ["am"] = "æm",
-            ["is"] = "ɪz",
-            ["are"] = "ɑɹ",
-            ["was"] = "wʌz",
-            ["were"] = "wɚ",
-            ["been"] = "bɪn",
-            ["have"] = "hæv",
-            ["has"] = "hæz",
-            ["had"] = "hæd",
-            ["do"] = "du",
-            ["does"] = "dʌz",
-            ["did"] = "dɪd",
-            ["done"] = "dʌn",
-            ["say"] = "seɪ",
-            ["says"] = "sɛz",
-            ["said"] = "sɛd",
-            ["go"] = "goʊ",
-            ["goes"] = "goʊz",
-            ["went"] = "wɛnt",
-            ["gone"] = "ɡɔn",
-            ["make"] = "meɪk",
-            ["made"] = "meɪd",
-            ["know"] = "noʊ",
-            ["knew"] = "nu",
-            ["known"] = "noʊn",
-            ["take"] = "teɪk",
-            ["took"] = "tʊk",
-            ["taken"] = "ˈteɪkən",
-            ["come"] = "kʌm",
-            ["came"] = "keɪm",
-            ["coming"] = "ˈkʌmɪŋ",
-            ["see"] = "si",
-            ["saw"] = "sɔ",
-            ["seen"] = "siːn",
-            ["get"] = "ɡɛt",
-            ["got"] = "ɡɑt",
-            ["gotten"] = "ˈɡɑtən",
-            ["give"] = "ɡɪv",
-            ["gave"] = "ɡeɪv",
-            ["given"] = "ˈɡɪvən",
-
-            // Modal verbs
-            ["can"] = "kæn",
-            ["could"] = "kʊd",
-            ["should"] = "ʃʊd",
-            ["would"] = "wʊd",
-            ["will"] = "wɪl",
-            ["shall"] = "ʃæl",
-            ["may"] = "meɪ",
-            ["might"] = "maɪt",
-            ["must"] = "mʌst",
-
-            // Contractions
-            ["i'm"] = "aɪm",
-            ["you're"] = "jɔɹ",
-            ["we're"] = "wɪɹ",
-            ["they're"] = "ðɛɹ",
-            ["it's"] = "ɪts",
-            ["that's"] = "ðæts",
-            ["there's"] = "ðɛɹz",
-            ["don't"] = "doʊnt",
-            ["doesn't"] = "ˈdʌzənt",
-            ["can't"] = "kænt",
-            ["won't"] = "woʊnt",
-            ["isn't"] = "ˈɪzənt",
-            ["aren't"] = "ɑɹnt",
-            ["shouldn't"] = "ˈʃʊdənt",
-            ["wouldn't"] = "ˈwʊdənt",
-            ["couldn't"] = "ˈkʊdənt",
-
-            // Common adverbs
-            ["just"] = "dʒʌst",
-            ["very"] = "ˈvɛɹi",
-            ["really"] = "ˈɹɪəli",
-            ["only"] = "ˈoʊnli",
-            ["even"] = "ˈiːvən",
-            ["always"] = "ˈɔlweɪz",
-            ["never"] = "ˈnɛvɚ",
-            ["maybe"] = "ˈmeɪbi",
-            ["almost"] = "ˈɔlmoʊst",
-            ["quite"] = "kwaɪt",
-            ["still"] = "stɪl",
-            ["again"] = "əˈɡɛn",
-
-            // Filler words
-            ["like"] = "laɪk",
-            ["well"] = "wɛl",
-            ["okay"] = "oʊˈkeɪ",
-            ["yeah"] = "jæ",
-            ["uh"] = "ʌ",
-            ["um"] = "ʌm",
-            ["hmm"] = "hm",
-
-            // Numbers
-            ["zero"] = "ˈziɹoʊ",
-            ["one"] = "wʌn",
-            ["two"] = "tu",
-            ["three"] = "θɹi",
-            ["four"] = "fɔɹ",
-            ["five"] = "faɪv",
-            ["six"] = "sɪks",
-            ["seven"] = "ˈsɛvən",
-            ["eight"] = "eɪt",
-            ["nine"] = "naɪn",
-            ["ten"] = "tɛn",
-            ["eleven"] = "ɪˈlɛvən",
-            ["twelve"] = "twɛlv",
-            ["thirteen"] = "ˈθɜːtiːn",
-            ["fourteen"] = "ˈfɔːtiːn",
-            ["fifteen"] = "ˈfɪftiːn",
-            ["twenty"] = "ˈtwɛni",
-            ["thirty"] = "ˈθɜːti",
-            ["forty"] = "ˈfɔːti",
-            ["fifty"] = "ˈfɪfti",
-            ["hundred"] = "ˈhʌndɹəd",
-
-            // Days
-            ["monday"] = "ˈmʌndeɪ",
-            ["tuesday"] = "ˈtuːzdeɪ",
-            ["wednesday"] = "ˈwɛnzdeɪ",
-            ["thursday"] = "ˈθɜːzdeɪ",
-            ["friday"] = "ˈfɹaɪdeɪ",
-            ["saturday"] = "ˈsætɚdeɪ",
-            ["sunday"] = "ˈsʌndeɪ",
-
-            // Months
-            ["january"] = "ˈdʒænjʊˌɛɹi",
-            ["february"] = "ˈfɛbɹuˌɛɹi",
-            ["march"] = "mɑɹtʃ",
-            ["april"] = "ˈeɪpɹəl",
-            ["may"] = "meɪ",
-            ["june"] = "dʒuːn",
-            ["july"] = "dʒuˈlaɪ",
-            ["august"] = "ˈɔːɡəst",
-            ["september"] = "sɛpˈtɛmbɚ",
-            ["october"] = "ɑkˈtoʊbɚ",
-            ["november"] = "noʊˈvɛmbɚ",
-            ["december"] = "dɪˈsɛmbɚ",
-
-            // High-frequency nouns
-            ["time"] = "taɪm",
-            ["person"] = "ˈpɜːsən",
-            ["year"] = "jɪɹ",
-            ["way"] = "weɪ",
-            ["day"] = "deɪ",
-            ["thing"] = "θɪŋ",
-            ["man"] = "mæn",
-            ["woman"] = "ˈwʊmən",
-            ["child"] = "tʃaɪld",
-            ["life"] = "laɪf",
-            ["world"] = "wɜːld",
-            ["hand"] = "hænd",
-            ["part"] = "pɑɹt",
-            ["place"] = "pleɪs",
-            ["work"] = "wɜːk",
-            ["week"] = "wiːk",
-            ["case"] = "keɪs",
-            ["point"] = "pɔɪnt",
-            ["government"] = "ˈɡʌvɚnmənt",
-            ["company"] = "ˈkʌmpəni",
-            ["number"] = "ˈnʌmbɚ",
-            ["group"] = "ɡɹuːp",
-
-            // High-frequency adjectives
-            ["good"] = "ɡʊd",
-            ["bad"] = "bæd",
-            ["new"] = "nu",
-            ["first"] = "fɜːst",
-            ["last"] = "læst",
-            ["long"] = "lɔŋ",
-            ["great"] = "ɡɹeɪt",
-            ["little"] = "ˈlɪtəl",
-            ["own"] = "oʊn",
-            ["other"] = "ˈʌðɚ",
-            ["old"] = "oʊld",
-            ["right"] = "ɹaɪt",
-            ["big"] = "bɪɡ",
-            ["small"] = "smɔl",
-
-            // Critical diphthong fixes
-            ["voice"] = "vɔɪs",
-            ["choice"] = "tʃɔɪs",
-            ["noise"] = "nɔɪz",
-            ["view"] = "vju",
-            ["preview"] = "ˈpɹiːvju",
-            ["review"] = "ɹɪˈvju",
-            ["few"] = "fju",
-            ["new"] = "nju",
-            ["blue"] = "blu",
-            ["crew"] = "kɹu",
-            ["chew"] = "tʃu",
-            ["due"] = "dju",
-            ["queue"] = "kju"
-        };
-
-        return entries;
-    }
-
 }

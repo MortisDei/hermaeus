@@ -20,21 +20,26 @@
                             <TextBlock Text="Filter" FontSize="12" Opacity="0.6" VerticalAlignment="Center" />
                             <ComboBox ItemsSource="{Binding Filters}"
                                       SelectedItem="{Binding SelectedFilter}"
-                                      FontSize="12" Width="160" />
+                                      FontSize="12" Width="160"
+                                      ToolTip.Tip="Show only log entries at or above this severity." />
                         </StackPanel>
                         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
                             <Button Command="{Binding CopyVisibleLogsCommand}"
                                     Content="Copy visible logs"
-                                    FontSize="11" Padding="10,5" CornerRadius="6" />
+                                    FontSize="11" Padding="10,5" CornerRadius="6"
+                                    ToolTip.Tip="Copies exactly what's shown below (respecting the filter) to the clipboard." />
                             <Button Command="{Binding CopyRedactedDiagnosticsCommand}"
                                     Content="Copy redacted diagnostics"
-                                    FontSize="11" Padding="10,5" CornerRadius="6" />
+                                    FontSize="11" Padding="10,5" CornerRadius="6"
+                                    ToolTip.Tip="Copies the visible log entries with secrets and file paths redacted, safe to paste into a bug report." />
                             <Button Command="{Binding OpenLogFolderCommand}"
                                     Content="Open log folder"
-                                    FontSize="11" Padding="10,5" CornerRadius="6" />
+                                    FontSize="11" Padding="10,5" CornerRadius="6"
+                                    ToolTip.Tip="Opens the folder containing full, unredacted log files on disk." />
                             <Button Command="{Binding ClearViewCommand}"
                                     Content="Clear view"
-                                    FontSize="11" Padding="10,5" CornerRadius="6" />
+                                    FontSize="11" Padding="10,5" CornerRadius="6"
+                                    ToolTip.Tip="Clears this in-memory view only. Log files on disk are unaffected." />
                         </StackPanel>
                     </Grid>
                     <TextBlock Text="{Binding StatusText}" FontSize="11" Opacity="0.5" />

@@ -63,8 +63,13 @@
                                 ToolTip.Tip="Deletes all saved benchmark runs after confirmation. Export any runs you want to keep first." />
                         </StackPanel>
                 </Grid>
+                <TextBlock Grid.Row="3"
+                           Text="No runs yet. Pick a suite and model above, then click Run."
+                           FontSize="12" Opacity="0.5" TextWrapping="Wrap"
+                           IsVisible="{Binding !HasRuns}" />
                 <ListBox Grid.Row="3"
                          MaxHeight="180"
+                         IsVisible="{Binding HasRuns}"
                          ItemsSource="{Binding Runs}"
                          SelectedItem="{Binding SelectedRun}">
                     <ListBox.ItemTemplate>

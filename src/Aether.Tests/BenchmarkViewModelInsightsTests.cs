@@ -10,6 +10,21 @@ namespace Aether.Tests;
 public sealed class BenchmarkViewModelInsightsTests
 {
     [Fact]
+    public void HasRunsDrivesTheRunHistoryEmptyState()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var benchmarks = new BenchmarkService(settings, new FakeLlm(), new FakeSystemInfo(), new FakeEvalStore());
+        var vm = new BenchmarkViewModel(benchmarks, new FakeLlm(), new ModelProfileService(settings), settings, new FakeToasts());
+
+        Assert.False(vm.HasRuns, "No runs should show the empty state.");
+
+        vm.Runs.Add(new BenchmarkRunViewModel(new BenchmarkRun { SuiteName = "Suite", ModelName = "Model" }));
+
+        Assert.True(vm.HasRuns, "Adding a run must hide the empty state.");
+    }
+
+    [Fact]
     public async Task LoadInsightsAsync_populates_header_leaderboards_and_best_overall()
     {
         using var temp = new TempDir();

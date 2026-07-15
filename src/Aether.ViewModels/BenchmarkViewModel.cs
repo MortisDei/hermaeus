@@ -71,9 +71,13 @@ public partial class BenchmarkViewModel : ObservableObject
         _insights = insights;
         _voice = voice;
         InsightsUsage.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasInsightsUsage));
+        Runs.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasRuns));
     }
 
     public bool HasInsightsUsage => InsightsUsage.Count > 0;
+
+    /// <summary>Drives the "no runs yet" empty state (r8 02-onboarding-and-usability.md 2.6).</summary>
+    public bool HasRuns => Runs.Count > 0;
 
     [RelayCommand]
     public async Task LoadAsync()
@@ -435,7 +439,10 @@ public partial class BenchmarkViewModel : ObservableObject
         if (_services is null || !IsManagedLocalGguf(model))
             return;
 
-        // Only restart if the model has actually changed to avoid 1-2 minute delays on every run
+        // Only restart if the model has actually changed to avoid 1-2 minute delays on every run.
+        // This is a coarse, model-ID-based fast skip; SelectModelAndRestartAsync
+        // (ServicesViewModel.cs) also guards by normalized file path further in,
+        // so an unchanged model never restarts even if this check is bypassed.
         if (string.Equals(_settings.Settings.Llm.DefaultModel, model.Id, StringComparison.OrdinalIgnoreCase))
             return;
 

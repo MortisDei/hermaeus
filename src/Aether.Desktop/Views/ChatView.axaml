@@ -306,19 +306,27 @@
                           VerticalScrollBarVisibility="Auto"
                           HorizontalScrollBarVisibility="Disabled"
                           Padding="16,8">
-                <ItemsControl x:Name="MessagesList"
-                              ItemsSource="{Binding Messages}">
-                    <ItemsControl.ItemsPanel>
-                        <ItemsPanelTemplate>
-                            <StackPanel />
-                        </ItemsPanelTemplate>
-                    </ItemsControl.ItemsPanel>
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate DataType="vm:MessageViewModel">
-                            <controls:MessageControl />
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
+                <StackPanel>
+                    <Button Content="Show earlier messages"
+                            Command="{Binding ShowEarlierMessagesCommand}"
+                            IsVisible="{Binding HasEarlierMessages}"
+                            HorizontalAlignment="Center"
+                            Margin="0,0,0,10"
+                            ToolTip.Tip="Loads 100 more older messages from this conversation." />
+                    <ItemsControl x:Name="MessagesList"
+                                  ItemsSource="{Binding VisibleMessages}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:MessageViewModel">
+                                <controls:MessageControl />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
             </ScrollViewer>
 
             <StackPanel IsVisible="{Binding !HasMessages}"
@@ -326,15 +334,34 @@
                         VerticalAlignment="Top"
                         Margin="0,80,0,0"
                         Spacing="10">
-                <PathIcon Data="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"
-                          Width="52" Height="52" Opacity="0.12"
-                          HorizontalAlignment="Center" />
-                <TextBlock Text="Start a conversation"
-                           HorizontalAlignment="Center"
-                           FontSize="17" Opacity="0.25" />
-                <TextBlock Text="Select a model above then type below"
-                           HorizontalAlignment="Center"
-                           FontSize="13" Opacity="0.18" />
+                <StackPanel IsVisible="{Binding !HasNoAvailableModels}" Spacing="10">
+                    <PathIcon Data="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"
+                              Width="52" Height="52" Opacity="0.12"
+                              HorizontalAlignment="Center" />
+                    <TextBlock Text="Start a conversation"
+                               HorizontalAlignment="Center"
+                               FontSize="17" Opacity="0.25" />
+                    <TextBlock Text="Select a model above then type below"
+                               HorizontalAlignment="Center"
+                               FontSize="13" Opacity="0.18" />
+                </StackPanel>
+
+                <StackPanel IsVisible="{Binding HasNoAvailableModels}" Spacing="10">
+                    <PathIcon Data="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"
+                              Width="52" Height="52" Opacity="0.18"
+                              HorizontalAlignment="Center" />
+                    <TextBlock Text="No chat model is set up yet"
+                               HorizontalAlignment="Center"
+                               FontSize="17" Opacity="0.4" />
+                    <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
+                        <Button Content="Open setup wizard"
+                                Command="{Binding OpenSetupWizardFromEmptyStateCommand}"
+                                ToolTip.Tip="Walks you through choosing or downloading a model, a runtime, and voice." />
+                        <Button Content="Open Services"
+                                Command="{Binding OpenServicesFromEmptyStateCommand}"
+                                ToolTip.Tip="Manage and start the local model server directly." />
+                    </StackPanel>
+                </StackPanel>
             </StackPanel>
         </Grid>
 

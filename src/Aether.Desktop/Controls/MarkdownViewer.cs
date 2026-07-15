@@ -1,13 +1,16 @@
+using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
 using Avalonia.Controls.Primitives;
+using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
 using AvaloniaEdit;
 using AvaloniaEdit.Highlighting;
 using Markdig;
+using Markdig.Extensions.Tables;
 using Markdig.Syntax;
 using Markdig.Syntax.Inlines;
 
@@ -37,6 +40,15 @@ public sealed class MarkdownViewer : ContentControl, IDisposable
     private bool _lastRenderedIsError;
     private double _lastRenderedFontSize;
     private int _renderVersion;
+
+    // Incremental re-render (r8 03-performance.md 3.5): each top-level block's
+    // exact source text is remembered alongside the control it produced, so a
+    // streaming append only rebuilds the blocks whose source text actually
+    // changed instead of the whole document every debounce tick.
+    private readonly List<(string SourceText, Control Control)> _lastRenderedBlocks = [];
+    private double _lastBlockRenderFontSize = double.NaN;
+    internal int LastReusedBlockCount { get; private set; }
+    internal int LastRebuiltBlockCount { get; private set; }
 
     public MarkdownViewer()
     {
@@ -138,16 +150,75 @@ public sealed class MarkdownViewer : ContentControl, IDisposable
         if (version != _renderVersion)
             return;
 
-        Render(doc);
+        Render(doc, md);
     }
 
-    private void Render(MarkdownDocument doc)
+    private void Render(MarkdownDocument doc, string sourceText)
     {
-        var panel = new StackPanel { Spacing = 4 };
-        foreach (var block in doc)
-            panel.Children.Add(RenderBlock(block));
+        var blockSources = doc.Select(b => SourceTextFor(b, sourceText)).ToList();
 
-        Content = panel;
+        // A font-size change re-renders every block at the new size; nothing
+        // from a previous render at a different size may be reused.
+        var fontSizeChanged = Math.Abs(FontSize - _lastBlockRenderFontSize) >= 0.01;
+        _lastBlockRenderFontSize = FontSize;
+
+        var previousSources = _lastRenderedBlocks.Select(b => b.SourceText).ToList();
+        var reusePrefixLength = fontSizeChanged || Content is not StackPanel
+            ? 0
+            : ComputeReusePrefixLength(blockSources, previousSources);
+
+        if (Content is not StackPanel panel)
+        {
+            panel = new StackPanel { Spacing = 4 };
+            Content = panel;
+            _lastRenderedBlocks.Clear();
+        }
+
+        while (panel.Children.Count > reusePrefixLength)
+            panel.Children.RemoveAt(panel.Children.Count - 1);
+        while (_lastRenderedBlocks.Count > reusePrefixLength)
+            _lastRenderedBlocks.RemoveAt(_lastRenderedBlocks.Count - 1);
+
+        for (var i = reusePrefixLength; i < doc.Count; i++)
+        {
+            var control = RenderBlock(doc[i]);
+            panel.Children.Add(control);
+            _lastRenderedBlocks.Add((blockSources[i], control));
+        }
+
+        LastReusedBlockCount = reusePrefixLength;
+        LastRebuiltBlockCount = doc.Count - reusePrefixLength;
+    }
+
+    internal static string SourceTextFor(Block block, string sourceText)
+    {
+        var span = block.Span;
+        if (span.Start < 0 || span.Length <= 0 || span.Start + span.Length > sourceText.Length)
+            return string.Empty;
+        return sourceText.Substring(span.Start, span.Length);
+    }
+
+    internal static IReadOnlyList<string> BlockSourceTexts(MarkdownDocument doc, string sourceText) =>
+        doc.Select(b => SourceTextFor(b, sourceText)).ToList();
+
+    /// <summary>
+    /// Longest common prefix of unchanged block source text between two
+    /// renders: this many leading blocks may keep their existing control,
+    /// everything from the first mismatch onward must be rebuilt. An empty
+    /// source text (an invalid/unavailable span) never counts as a match,
+    /// so a bad span forces a safe rebuild instead of a false-positive reuse.
+    /// </summary>
+    internal static int ComputeReusePrefixLength(IReadOnlyList<string> currentBlockSources, IReadOnlyList<string> previousBlockSources)
+    {
+        var n = 0;
+        while (n < currentBlockSources.Count
+               && n < previousBlockSources.Count
+               && currentBlockSources[n].Length > 0
+               && currentBlockSources[n] == previousBlockSources[n])
+        {
+            n++;
+        }
+        return n;
     }
 
     // ── Block rendering ──────────────────────────────────────────────────────
@@ -157,6 +228,7 @@ public sealed class MarkdownViewer : ContentControl, IDisposable
         HeadingBlock h    => RenderHeading(h),
         FencedCodeBlock c => RenderFencedCode(c),
         CodeBlock c       => RenderCodeBlock(c),
+        Table t           => RenderTable(t),
         ListBlock l       => RenderList(l),
         QuoteBlock q      => RenderQuote(q),
         ThematicBreakBlock => new Border
@@ -358,6 +430,74 @@ public sealed class MarkdownViewer : ContentControl, IDisposable
         };
     }
 
+    private Control RenderTable(Table table)
+    {
+        var columnCount = table.ColumnDefinitions.Count > 0
+            ? table.ColumnDefinitions.Count
+            : table.OfType<TableRow>().Select(r => r.Count).DefaultIfEmpty(0).Max();
+        if (columnCount == 0)
+            return RenderFallback(table);
+
+        var grid = new Grid { RowSpacing = 2, ColumnSpacing = 16 };
+        for (var c = 0; c < columnCount; c++)
+            grid.ColumnDefinitions.Add(new ColumnDefinition(c == columnCount - 1 ? GridLength.Star : GridLength.Auto));
+
+        var rowIndex = 0;
+        foreach (var row in table.OfType<TableRow>())
+        {
+            grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+            var columnIndex = 0;
+            foreach (var cellBlock in row)
+            {
+                if (cellBlock is TableCell cell)
+                {
+                    var cellControl = RenderTableCell(cell, row.IsHeader);
+                    Grid.SetRow(cellControl, rowIndex);
+                    Grid.SetColumn(cellControl, columnIndex);
+                    grid.Children.Add(cellControl);
+                }
+                columnIndex++;
+            }
+
+            rowIndex++;
+            if (row.IsHeader)
+            {
+                grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+                var separator = new Border
+                {
+                    Height = 1,
+                    Background = new SolidColorBrush(Color.FromArgb(90, 128, 128, 128)),
+                    Margin = new Thickness(0, 2)
+                };
+                Grid.SetRow(separator, rowIndex);
+                Grid.SetColumnSpan(separator, columnCount);
+                grid.Children.Add(separator);
+                rowIndex++;
+            }
+        }
+
+        return new ScrollViewer
+        {
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            Margin = new Thickness(0, 4),
+            Content = grid
+        };
+    }
+
+    private StackPanel RenderTableCell(TableCell cell, bool isHeader)
+    {
+        var panel = new StackPanel { Spacing = 2, Margin = new Thickness(0, 2, 0, 2) };
+        foreach (var block in cell)
+            panel.Children.Add(RenderBlock(block));
+
+        if (isHeader)
+            foreach (var child in panel.Children.OfType<SelectableTextBlock>())
+                child.FontWeight = FontWeight.Bold;
+
+        return panel;
+    }
+
     // ── Inline rendering ─────────────────────────────────────────────────────
 
     private InlineCollection BuildInlines(ContainerInline? container)
@@ -399,13 +539,7 @@ public sealed class MarkdownViewer : ContentControl, IDisposable
                 break;
 
             case LinkInline link:
-                var linkSpan = new Span
-                {
-                    Foreground = new SolidColorBrush(Color.Parse("#4FC3F7"))
-                };
-                foreach (var child in link)
-                    AddInline(linkSpan.Inlines, child);
-                col.Add(linkSpan);
+                col.Add(BuildLinkInline(link));
                 break;
 
             case HtmlInline:
@@ -419,6 +553,69 @@ public sealed class MarkdownViewer : ContentControl, IDisposable
                 foreach (var child in ci)
                     AddInline(col, child);
                 break;
+        }
+    }
+
+    /// <summary>
+    /// Only http/https links are made clickable; everything else (file:,
+    /// javascript:, data:, or an unparsable URL) renders as plain styled
+    /// text so a malicious or malformed link can never be launched.
+    /// </summary>
+    public static bool IsSafeLinkScheme(string? url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https";
+
+    private static readonly SolidColorBrush LinkBrush = new(Color.Parse("#4FC3F7"));
+
+    private Avalonia.Controls.Documents.Inline BuildLinkInline(LinkInline link)
+    {
+        var url = link.Url ?? string.Empty;
+        if (!IsSafeLinkScheme(url))
+            return BuildPlainLinkSpan(link);
+
+        var textBlock = new TextBlock
+        {
+            Inlines = BuildInlines(link),
+            FontSize = FontSize,
+            Foreground = LinkBrush,
+            TextDecorations = Avalonia.Media.TextDecorations.Underline
+        };
+
+        var button = new Button
+        {
+            Content = textBlock,
+            Padding = new Thickness(0),
+            Margin = new Thickness(0),
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            Cursor = new Cursor(StandardCursorType.Hand),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        ToolTip.SetTip(button, url);
+        button.Click += (_, _) => OpenUrl(url);
+
+        return new InlineUIContainer(button);
+    }
+
+    private Span BuildPlainLinkSpan(LinkInline link)
+    {
+        var span = new Span { Foreground = LinkBrush };
+        foreach (var child in link)
+            AddInline(span.Inlines, child);
+        return span;
+    }
+
+    private static void OpenUrl(string url)
+    {
+        if (!IsSafeLinkScheme(url))
+            return;
+        try
+        {
+            Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true });
+        }
+        catch
+        {
+            // Best-effort: no OS handler registered, or the launch failed; nothing more to do from here.
         }
     }
 }

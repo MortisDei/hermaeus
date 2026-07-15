@@ -14,7 +14,8 @@
                         Content="Refresh"
                         Command="{Binding RefreshCommand}"
                         IsEnabled="{Binding !IsRefreshing}"
-                        VerticalAlignment="Center" />
+                        VerticalAlignment="Center"
+                        ToolTip.Tip="Re-reads CPU, memory, GPU, and component status now." />
             </Grid>
 
             <ItemsControl ItemsSource="{Binding Metrics}">
@@ -55,7 +56,8 @@
                         <Button Grid.Column="1"
                                 Content="Refresh"
                                 Command="{Binding RefreshPrivacyAuditCommand}"
-                                IsEnabled="{Binding !IsRefreshing}" />
+                                IsEnabled="{Binding !IsRefreshing}"
+                                ToolTip.Tip="Re-scans for remote providers, exposed local services, and other data-leaving-this-machine risks." />
                     </Grid>
                     <TextBlock Text="{Binding PrivacyAuditSummary}" FontSize="13" FontWeight="SemiBold" />
                     <ItemsControl ItemsSource="{Binding PrivacyAuditItems}">

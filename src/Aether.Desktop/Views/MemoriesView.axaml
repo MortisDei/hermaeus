@@ -23,7 +23,8 @@
                             <TextBlock Text="Search memories" FontSize="12" Opacity="0.6" />
                             <TextBox Text="{Binding SearchText}"
                                      Watermark="Search by content, tags, category..."
-                                     FontSize="12" Padding="10,8" />
+                                     FontSize="12" Padding="10,8"
+                                     ToolTip.Tip="Matches memory content, tags, and category as you type." />
                         </StackPanel>
 
                         <!-- Category Filter -->
@@ -31,7 +32,8 @@
                             <TextBlock Text="Filter by category" FontSize="12" Opacity="0.6" />
                             <ComboBox ItemsSource="{Binding AvailableCategories}"
                                       SelectedItem="{Binding SelectedCategory}"
-                                      FontSize="12" />
+                                      FontSize="12"
+                                      ToolTip.Tip="Shows only memories saved under this category." />
                         </StackPanel>
                     </Grid>
 
@@ -42,7 +44,8 @@
                             <ComboBox ItemsSource="{Binding ConversationFilters}"
                                       SelectedItem="{Binding SelectedConversationFilter}"
                                       PlaceholderText="All conversations"
-                                      FontSize="12" HorizontalAlignment="Stretch">
+                                      FontSize="12" HorizontalAlignment="Stretch"
+                                      ToolTip.Tip="Shows only memories created from this conversation.">
                                 <ComboBox.ItemTemplate>
                                     <DataTemplate DataType="vm:ConversationFilterItemViewModel">
                                         <TextBlock Text="{Binding Display}" />
@@ -53,12 +56,14 @@
                         <StackPanel Grid.Column="1" Orientation="Vertical" Spacing="6" VerticalAlignment="Bottom">
                             <Button Content="Clear"
                                     Command="{Binding ClearConversationFilterCommand}"
-                                    FontSize="12" Padding="10,8" />
+                                    FontSize="12" Padding="10,8"
+                                    ToolTip.Tip="Resets the conversation filter to show memories from every conversation." />
                         </StackPanel>
                         <StackPanel Grid.Column="2" Orientation="Vertical" Spacing="6" VerticalAlignment="Bottom">
                             <Button Content="Export CSV"
                                     Command="{Binding ExportConversationCsvCommand}"
-                                    FontSize="12" Padding="10,8" />
+                                    FontSize="12" Padding="10,8"
+                                    ToolTip.Tip="Exports the currently filtered memories to a CSV file." />
                         </StackPanel>
                     </Grid>
 
@@ -120,13 +125,15 @@
                                                     Command="{Binding #MemoriesView.DataContext.TogglePinCommand}"
                                                     CommandParameter="{Binding Id}"
                                                     Content="{Binding PinButtonLabel}"
-                                                    FontSize="11" Padding="8,5" CornerRadius="6" />
+                                                    FontSize="11" Padding="8,5" CornerRadius="6"
+                                                    ToolTip.Tip="Pinned memories are weighted higher and are never auto-archived." />
 
                                             <!-- Delete Button -->
                                             <Button Command="{Binding #MemoriesView.DataContext.DeleteMemoryCommand}"
                                                     CommandParameter="{Binding Id}"
                                                     Content="Delete"
-                                                    FontSize="11" Padding="8,5" CornerRadius="6" />
+                                                    FontSize="11" Padding="8,5" CornerRadius="6"
+                                                    ToolTip.Tip="Permanently deletes this memory. This cannot be undone." />
                                         </StackPanel>
                                     </Grid>
                                 </Border>

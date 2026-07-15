@@ -11,9 +11,12 @@
                     <TextBlock Text="Local AI Setup" FontSize="14" FontWeight="SemiBold" />
                     <TextBlock Text="{Binding LocalAiSetupSummary}" FontSize="12" Opacity="0.62" TextWrapping="Wrap" />
                 </StackPanel>
-                <Button Grid.Column="1" Command="{Binding ApplyLocalAiAssetsCommand}" Content="Apply" FontSize="12" Padding="10,5" CornerRadius="6" />
-                <Button Grid.Column="2" Command="{Binding ScanLocalAiSetupCommand}" Content="Scan" IsEnabled="{Binding !LocalAiSetupBusy}" FontSize="12" Padding="10,5" CornerRadius="6" />
-                <Button Grid.Column="3" Command="{Binding CopyLocalAiSetupCommandsCommand}" Content="Copy" FontSize="12" Padding="10,5" CornerRadius="6" />
+                <Button Grid.Column="1" Command="{Binding ApplyLocalAiAssetsCommand}" Content="Apply" FontSize="12" Padding="10,5" CornerRadius="6"
+                        ToolTip.Tip="Applies the detected asset paths to your settings without running any install actions." />
+                <Button Grid.Column="2" Command="{Binding ScanLocalAiSetupCommand}" Content="Scan" IsEnabled="{Binding !LocalAiSetupBusy}" FontSize="12" Padding="10,5" CornerRadius="6"
+                        ToolTip.Tip="Re-checks disk for installed models, runtimes, and other local AI assets." />
+                <Button Grid.Column="3" Command="{Binding CopyLocalAiSetupCommandsCommand}" Content="Copy" FontSize="12" Padding="10,5" CornerRadius="6"
+                        ToolTip.Tip="Copies the setup commands for every pending action to the clipboard, for running manually." />
             </Grid>
             <ItemsControl ItemsSource="{Binding LocalAiReadinessItems}">
                 <ItemsControl.ItemTemplate>
@@ -43,12 +46,14 @@
                                         <Button Content="Plan"
                                                 Command="{Binding $parent[ItemsControl].DataContext.PreviewLocalAiInstallPlanCommand}"
                                                 CommandParameter="{Binding}"
-                                                FontSize="11" Padding="10,5" CornerRadius="6" />
+                                                FontSize="11" Padding="10,5" CornerRadius="6"
+                                                ToolTip.Tip="Shows exactly what this action will do before you approve it." />
                                         <Button Content="Approve"
                                                 IsEnabled="{Binding CanRun}"
                                                 Command="{Binding $parent[ItemsControl].DataContext.RunLocalAiSetupActionCommand}"
                                                 CommandParameter="{Binding}"
-                                                FontSize="11" Padding="10,5" CornerRadius="6" />
+                                                FontSize="11" Padding="10,5" CornerRadius="6"
+                                                ToolTip.Tip="Runs this setup action now." />
                                     </StackPanel>
                                 </Grid>
                                 <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
@@ -74,7 +79,8 @@
             </Border>
             <TextBox Text="{Binding LocalAiSetupLog}" AcceptsReturn="True" TextWrapping="Wrap"
                      MinHeight="74" MaxHeight="160" IsReadOnly="True"
-                     FontFamily="Consolas, Cascadia Mono, monospace" FontSize="11" />
+                     FontFamily="Consolas, Cascadia Mono, monospace" FontSize="11"
+                     ToolTip.Tip="Read-only output from the most recent scan or setup action." />
             <TextBlock Text="{Binding SettingsError}" FontSize="12" Foreground="{DynamicResource SystemFillColorCriticalBrush}" TextWrapping="Wrap" />
         </StackPanel>
     </Border>
