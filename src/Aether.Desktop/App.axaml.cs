@@ -25,6 +25,7 @@ public partial class App : Application
 
     public override void OnFrameworkInitializationCompleted()
     {
+        UiThreadGuard.Arm();
         var services = new ServiceCollection();
         ConfigureServices(services);
         var sp = services.BuildServiceProvider();

@@ -24,6 +24,7 @@ public partial class LogsViewModel : ObservableObject
 {
     private readonly IRuntimeLogService _logs;
     private readonly RedactionService _redactor;
+    private readonly SynchronizationContext? _sync;
 
     [ObservableProperty] private string _selectedFilter = "All";
     [ObservableProperty] private string _statusText = "";
@@ -42,7 +43,7 @@ public partial class LogsViewModel : ObservableObject
         "Service"
     ];
 
-    public ObservableCollection<LogEntryDisplayViewModel> VisibleEntries { get; } = [];
+    public UiBoundCollection<LogEntryDisplayViewModel> VisibleEntries { get; } = [];
 
     public Action<string>? RequestCopyToClipboard { get; set; }
     public Action<string>? RequestOpenFolder { get; set; }
@@ -51,7 +52,8 @@ public partial class LogsViewModel : ObservableObject
     {
         _logs = logs;
         _redactor = redactor;
-        _logs.LogAdded += _ => Refresh();
+        _sync = SynchronizationContext.Current;
+        _logs.LogAdded += _ => RunOnUi(Refresh);
         Refresh();
     }
 
@@ -97,6 +99,14 @@ public partial class LogsViewModel : ObservableObject
         var path = _logs.GetLogDirectory();
         RequestOpenFolder?.Invoke(path);
         StatusText = "Opened log folder";
+    }
+
+    private void RunOnUi(Action action)
+    {
+        if (_sync is null)
+            action();
+        else
+            _sync.Post(_ => action(), null);
     }
 
     private static IEnumerable<RuntimeLogEntry> ApplyFilter(IReadOnlyList<RuntimeLogEntry> entries, string filter)

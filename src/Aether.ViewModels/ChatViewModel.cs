@@ -96,8 +96,9 @@ public partial class ChatViewModel : ObservableObject
     private CancellationTokenSource? _ttsCts;
     private CancellationTokenSource? _contextUsageCts;
     private DateTime _modelsLoadedAtUtc = DateTime.MinValue;
+    private readonly SynchronizationContext? _sync;
 
-    public ObservableCollection<MessageViewModel> Messages        { get; } = [];
+    public UiBoundCollection<MessageViewModel> Messages        { get; } = [];
 
     /// <summary>
     /// Windowed view over <see cref="Messages"/> that the chat view actually
@@ -107,17 +108,17 @@ public partial class ChatViewModel : ObservableObject
     /// extraction, and prompt-history truncation all continue to operate on
     /// the full <see cref="Messages"/> list, never this window.
     /// </summary>
-    public ObservableCollection<MessageViewModel> VisibleMessages { get; } = [];
+    public UiBoundCollection<MessageViewModel> VisibleMessages { get; } = [];
     private const int MessageWindowSize = 100;
     private int _revealedEarlierMessageCount;
 
     public bool HasEarlierMessages => Messages.Count > MessageWindowSize + _revealedEarlierMessageCount;
-    public ObservableCollection<LlmModel>         AvailableModels { get; } = [];
-    public ObservableCollection<ChatContextAttachment> ContextAttachments { get; } = [];
-    public ObservableCollection<ChatContextPartViewModel> ContextPreviewParts { get; } = [];
-    public ObservableCollection<ChatTraceViewModel> ChatTraces { get; } = [];
-    public ObservableCollection<CompareModelOptionViewModel> CompareModels { get; } = [];
-    public ObservableCollection<ModelCompareResultViewModel> CompareResults { get; } = [];
+    public UiBoundCollection<LlmModel>         AvailableModels { get; } = [];
+    public UiBoundCollection<ChatContextAttachment> ContextAttachments { get; } = [];
+    public UiBoundCollection<ChatContextPartViewModel> ContextPreviewParts { get; } = [];
+    public UiBoundCollection<ChatTraceViewModel> ChatTraces { get; } = [];
+    public UiBoundCollection<CompareModelOptionViewModel> CompareModels { get; } = [];
+    public UiBoundCollection<ModelCompareResultViewModel> CompareResults { get; } = [];
 
     [ObservableProperty] private string    _inputText = string.Empty;
     [ObservableProperty] private bool      _isGenerating;
@@ -212,6 +213,7 @@ public partial class ChatViewModel : ObservableObject
         _voice = voice;
         _evalEngine = evalEngine ?? new EvalEngine(llm);
         _workspaceActivation = workspaceActivation;
+        _sync = SynchronizationContext.Current;
         _temperature  = settings.Settings.Llm.Temperature;
         _topP = settings.Settings.Llm.TopP;
         _topK = settings.Settings.Llm.TopK;
@@ -978,24 +980,29 @@ public partial class ChatViewModel : ObservableObject
             return;
 
         var entries = await _chatTraces.LoadRecentAsync(50);
-        foreach (var entry in entries)
+        var loaded = entries.Select(entry => new ChatTraceViewModel
         {
-            ChatTraces.Add(new ChatTraceViewModel
-            {
-                Id = entry.Id,
-                Timestamp = entry.Timestamp,
-                ModelId = entry.ModelId,
-                Provider = entry.Provider,
-                Runtime = entry.Runtime,
-                SystemPrompt = entry.SystemPrompt,
-                AttachmentCount = entry.AttachmentCount,
-                EstimatedTokens = entry.EstimatedTokens,
-                ProviderUsage = entry.ProviderUsage,
-                FirstTokenMs = entry.FirstTokenMs,
-                TotalLatencyMs = entry.TotalLatencyMs,
-                ErrorDetails = entry.ErrorDetails
-            });
-        }
+            Id = entry.Id,
+            Timestamp = entry.Timestamp,
+            ModelId = entry.ModelId,
+            Provider = entry.Provider,
+            Runtime = entry.Runtime,
+            SystemPrompt = entry.SystemPrompt,
+            AttachmentCount = entry.AttachmentCount,
+            EstimatedTokens = entry.EstimatedTokens,
+            ProviderUsage = entry.ProviderUsage,
+            FirstTokenMs = entry.FirstTokenMs,
+            TotalLatencyMs = entry.TotalLatencyMs,
+            ErrorDetails = entry.ErrorDetails
+        }).ToList();
+
+        RunOnUi(() =>
+        {
+            if (ChatTraces.Count > 0)
+                return;
+            foreach (var trace in loaded)
+                ChatTraces.Add(trace);
+        });
     }
 
     private void RefreshEstimatedContextUsage()
@@ -1111,28 +1118,33 @@ public partial class ChatViewModel : ObservableObject
 
     private async Task RefreshMemoryStatusAsync()
     {
+        string status;
         if (!_settings.Settings.Memory.Enabled)
         {
-            MemoryStatus = "Memory off";
-            return;
+            status = "Memory off";
         }
-
-        try
+        else
         {
-            var recent = await _memoryStore.GetRecentAsync(200);
-            if (string.IsNullOrWhiteSpace(CurrentConversationId))
+            try
             {
-                MemoryStatus = $"Memory on · {recent.Count} recent";
-                return;
+                var recent = await _memoryStore.GetRecentAsync(200);
+                if (string.IsNullOrWhiteSpace(CurrentConversationId))
+                {
+                    status = $"Memory on · {recent.Count} recent";
+                }
+                else
+                {
+                    var inConversation = recent.Count(m => string.Equals(m.SourceConversationId, CurrentConversationId, StringComparison.Ordinal));
+                    status = $"Memory on · {inConversation} in this chat · {recent.Count} recent";
+                }
             }
+            catch
+            {
+                status = "Memory on";
+            }
+        }
 
-            var inConversation = recent.Count(m => string.Equals(m.SourceConversationId, CurrentConversationId, StringComparison.Ordinal));
-            MemoryStatus = $"Memory on · {inConversation} in this chat · {recent.Count} recent";
-        }
-        catch
-        {
-            MemoryStatus = "Memory on";
-        }
+        RunOnUi(() => MemoryStatus = status);
     }
 
     partial void OnInputTextChanged(string value)
@@ -1179,10 +1191,18 @@ public partial class ChatViewModel : ObservableObject
             {
                 await Task.Delay(150, token);
                 if (!token.IsCancellationRequested)
-                    RefreshEstimatedContextUsage();
+                    RunOnUi(RefreshEstimatedContextUsage);
             }
             catch (OperationCanceledException) { }
         }, token);
+    }
+
+    private void RunOnUi(Action action)
+    {
+        if (_sync is null)
+            action();
+        else
+            _sync.Post(_ => action(), null);
     }
 
     private sealed record ChatContextSnapshot(
