@@ -133,7 +133,7 @@ public sealed class NativeKokoroVoiceProvider : ITtsService, IVoiceProvider, IDi
         {
             var outputPath = await RenderToFileAsync(request.Text, request.Voice, request.OutputPath, ct);
             if (request.PlayAudio)
-                await KokoroAudioPlayback.PlayAsync(outputPath, ct);
+                await AudioPlayback.PlayAsync(outputPath, ct);
             return new VoiceSynthesisResult(true, "Kokoro native synthesis complete.", outputPath);
         }
         catch (Exception ex)
@@ -152,7 +152,7 @@ public sealed class NativeKokoroVoiceProvider : ITtsService, IVoiceProvider, IDi
         var output = await RenderToFileAsync(text, _settings.Settings.Tts.Speaker, null, ct);
         try
         {
-            await KokoroAudioPlayback.PlayAsync(output, ct);
+            await AudioPlayback.PlayAsync(output, ct);
         }
         finally
         {
@@ -166,7 +166,7 @@ public sealed class NativeKokoroVoiceProvider : ITtsService, IVoiceProvider, IDi
         var output = await RenderToFileAsync(text, speaker, null, ct);
         try
         {
-            await KokoroAudioPlayback.PlayAsync(output, ct);
+            await AudioPlayback.PlayAsync(output, ct);
         }
         finally
         {

@@ -63,7 +63,9 @@ public sealed partial class DoctorService
             status = DoctorCheckStatus.Warning;
 
         var required = provider.RequiredPythonVersion.Value;
-        var title = $"Python {required.Major}.{required.Minor} for {provider.DisplayName}";
+        var title = provider.MaxExclusivePythonVersion is { } maxExclusive && maxExclusive.Major == required.Major
+            ? $"Python {required.Major}.{required.Minor}-{maxExclusive.Minor - 1} for {provider.DisplayName}"
+            : $"Python {required.Major}.{required.Minor} for {provider.DisplayName}";
 
         return BuildCheck(
             "python",

@@ -44,8 +44,6 @@ public partial class BenchmarkViewModel : ObservableObject
     [ObservableProperty] private LlmModel? _selectedModel;
     [ObservableProperty] private string _status = "Ready.";
     [ObservableProperty] private bool _isRunning;
-    [ObservableProperty] private bool _useJudge;
-    [ObservableProperty] private string _judgeModelId = string.Empty;
     [ObservableProperty] private int _timeoutSeconds = 120;
     [ObservableProperty] private int _maxCases;
     [ObservableProperty] private double _temperature = 0.7;
@@ -400,8 +398,6 @@ public partial class BenchmarkViewModel : ObservableObject
         Temperature = SelectedSuite.Temperature;
         TimeoutSeconds = SelectedSuite.TimeoutSeconds;
         MaxCases = SelectedSuite.MaxCases;
-        UseJudge = SelectedSuite.UseJudge;
-        JudgeModelId = SelectedSuite.JudgeModelId;
     }
 
     private BenchmarkSuite ConfigureSuite(BenchmarkSuite source)
@@ -410,8 +406,6 @@ public partial class BenchmarkViewModel : ObservableObject
         suite.Temperature = Temperature;
         suite.TimeoutSeconds = TimeoutSeconds;
         suite.MaxCases = MaxCases;
-        suite.UseJudge = UseJudge;
-        suite.JudgeModelId = JudgeModelId;
         return suite;
     }
 

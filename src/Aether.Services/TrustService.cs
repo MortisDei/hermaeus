@@ -164,7 +164,7 @@ public sealed class TrustService
     private static string ResolvePathTarget(string target, PathTargetKind kind)
     {
         if (kind == PathTargetKind.File && !LooksLikePath(target) && !Path.IsPathFullyQualified(target))
-            return FindOnPath(target) ?? target;
+            return ExecutableResolver.FindOnPath(target) ?? target;
 
         return Path.GetFullPath(target);
     }
@@ -203,21 +203,6 @@ public sealed class TrustService
 
         return !value.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase)
                && !value.Equals("::1", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string? FindOnPath(string executableName)
-    {
-        var path = Environment.GetEnvironmentVariable("PATH");
-        if (string.IsNullOrWhiteSpace(path)) return null;
-
-        foreach (var dir in path.Split(Path.PathSeparator))
-        {
-            if (string.IsNullOrWhiteSpace(dir)) continue;
-            var candidate = Path.Combine(dir, executableName);
-            if (File.Exists(candidate)) return candidate;
-        }
-
-        return null;
     }
 
     private static bool LooksLikePath(string value) =>

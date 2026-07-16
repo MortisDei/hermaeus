@@ -10,8 +10,9 @@ namespace Aether.Services;
 public sealed class LlamaCppService : IDisposable
 {
     private const string ProviderTagValue = "llama.cpp";
-    private static readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(10) };
+    private static readonly HttpClient SharedHttp = new() { Timeout = TimeSpan.FromMinutes(10) };
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> _contextLengthCache = new();
+    private readonly HttpClient _http;
     private readonly ISettingsService _settings;
     private readonly IRuntimeLogService _logs;
 
@@ -28,10 +29,11 @@ public sealed class LlamaCppService : IDisposable
     public string ProviderName => "llama.cpp";
     public bool   IsConfigured => true;
 
-    public LlamaCppService(ISettingsService settings, IRuntimeLogService logs)
+    public LlamaCppService(ISettingsService settings, IRuntimeLogService logs, HttpClient? http = null)
     {
         _settings = settings;
         _logs = logs;
+        _http = http ?? SharedHttp;
     }
 
     private string Base => _settings.Settings.Llm.LlamaCppBaseUrl.TrimEnd('/');
@@ -54,7 +56,7 @@ public sealed class LlamaCppService : IDisposable
             // length from /props applies to whatever it returned above.
             if (models.Count > 0)
             {
-                var contextLength = await ProbeContextLengthAsync(ct);
+                var contextLength = await ProbeContextLengthAsync(models[0].Id, ct);
                 foreach (var model in models)
                     model.ProbedContextLength = contextLength;
             }
@@ -68,10 +70,19 @@ public sealed class LlamaCppService : IDisposable
         }
     }
 
-    private async Task<int?> ProbeContextLengthAsync(CancellationToken ct)
+    /// <summary>
+    /// Cached by (baseUrl, modelId) rather than baseUrl alone (r11 2.5):
+    /// restarting the managed server with a different model or --ctx-size
+    /// keeps the same 127.0.0.1:port, so a baseUrl-only key served the
+    /// previous model's n_ctx forever. Keying on the id /v1/models just
+    /// reported means a model swap is itself a cache miss - no separate
+    /// invalidation hook needed.
+    /// </summary>
+    private async Task<int?> ProbeContextLengthAsync(string modelId, CancellationToken ct)
     {
         var baseUrl = Base;
-        if (_contextLengthCache.TryGetValue(baseUrl, out var cached))
+        var cacheKey = $"{baseUrl}|{modelId}";
+        if (_contextLengthCache.TryGetValue(cacheKey, out var cached))
             return cached;
 
         try
@@ -86,7 +97,7 @@ public sealed class LlamaCppService : IDisposable
                 if (_contextLengthCache.Count > 50)
                     _contextLengthCache.Clear();
 
-                _contextLengthCache[baseUrl] = value;
+                _contextLengthCache[cacheKey] = value;
                 return value;
             }
 

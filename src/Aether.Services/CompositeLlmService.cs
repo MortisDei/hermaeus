@@ -16,9 +16,26 @@ public sealed class CompositeLlmService : ILlmService, IDisposable
 
     private readonly Dictionary<string, StreamChatDelegate> _streamByTag;
     private readonly List<LlmModel> _cachedModels = [];
+
+    /// <summary>
+    /// Id-&gt;provider-tag memory that outlives the 300 s model cache (r11 2.4):
+    /// upserted on every successful scan, never cleared, so a model id whose
+    /// tag was learned once still routes correctly after the cache expires or
+    /// a later scan finds every provider unreachable (which caches nothing
+    /// under the old clear-then-rebuild scheme).
+    /// </summary>
     private readonly Dictionary<string, string> _providerTagsByModelId = new(StringComparer.OrdinalIgnoreCase);
     private readonly ReaderWriterLockSlim _cacheLock = new();
     private DateTime _cacheUntilUtc = DateTime.MinValue;
+    private static readonly TimeSpan PositiveCacheTtl = TimeSpan.FromSeconds(300);
+
+    /// <summary>
+    /// When every provider scan comes back empty, still cache that (short)
+    /// result so a chat view repeatedly calling GetModelsAsync doesn't turn
+    /// into a fresh 5 s-per-provider probe storm on every call while
+    /// everything is down (r11 2.4).
+    /// </summary>
+    private static readonly TimeSpan NegativeCacheTtl = TimeSpan.FromSeconds(15);
 
     public string ProviderName => "Composite";
     public bool   IsConfigured => _llamaCpp.IsConfigured || _openAi.IsConfigured
@@ -98,7 +115,10 @@ public sealed class CompositeLlmService : ILlmService, IDisposable
         _cacheLock.EnterReadLock();
         try
         {
-            if (_cachedModels.Count > 0 && DateTime.UtcNow < _cacheUntilUtc)
+            // No Count > 0 gate (r11 2.4): an empty result is itself cached for
+            // NegativeCacheTtl, so an all-providers-down scan does not re-probe
+            // on every call.
+            if (DateTime.UtcNow < _cacheUntilUtc)
                 return _cachedModels.Select(Clone).ToList();
         }
         finally
@@ -123,13 +143,14 @@ public sealed class CompositeLlmService : ILlmService, IDisposable
         {
             _cachedModels.Clear();
             _cachedModels.AddRange(all.Select(Clone));
-            _providerTagsByModelId.Clear();
+            // _providerTagsByModelId is intentionally never cleared here; see
+            // its declaration.
             foreach (var model in _cachedModels)
             {
                 if (!string.IsNullOrWhiteSpace(model.ProviderTag))
                     _providerTagsByModelId[model.Id] = model.ProviderTag;
             }
-            _cacheUntilUtc = DateTime.UtcNow.AddSeconds(300);
+            _cacheUntilUtc = DateTime.UtcNow.Add(all.Count > 0 ? PositiveCacheTtl : NegativeCacheTtl);
         }
         finally
         {
@@ -191,9 +212,27 @@ public sealed class CompositeLlmService : ILlmService, IDisposable
         LlmChatOptions? options = null,
         CancellationToken ct = default)
     {
-        var tag = DescribeModel(modelId).Tag;
+        var tag = ResolveProviderTag(modelId);
+        if (tag is null && OllamaService.IsOllamaModelId(modelId))
+            tag = OllamaService.Descriptor.Tag;
+
+        // r11 2.4: a model id with no known provider tag must not silently
+        // route to llama.cpp - that posted whatever conversation the user was
+        // having with a remote model to the local server the moment the model
+        // cache expired or a refresh failed. Ambiguity is reported, never
+        // guessed.
+        if (tag is null)
+            return YieldRoutingError(modelId);
+
         var stream = _streamByTag.TryGetValue(tag, out var fn) ? fn : _llamaCpp.StreamChatAsync;
         return stream(modelId, messages, options, ct);
+    }
+
+    private static async IAsyncEnumerable<LlmStreamEvent> YieldRoutingError(string modelId)
+    {
+        yield return LlmStreamEvent.Error(
+            $"*Could not determine which provider serves model '{modelId}'. Refresh the model list and try again.*");
+        await Task.CompletedTask;
     }
 
     private string? ResolveProviderTag(string modelId)

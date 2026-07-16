@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Aether.Core.Models;
+using Aether.Core.Services;
 
 namespace Aether.Services.ProcessManagement;
 
@@ -14,10 +15,23 @@ namespace Aether.Services.ProcessManagement;
 public sealed class LocalApiProcessManager : IDisposable
 {
     private Process? _process;
+    private readonly IProcessJobObject _jobObject;
+    private readonly IRuntimeLogService? _runtimeLogs;
+    private readonly Func<(string? FileName, IReadOnlyList<string> Args)> _resolveLaunchTarget;
 
     public bool IsRunning => _process is { HasExited: false };
     public string StatusLabel { get; private set; } = "Stopped";
     public event Action? StatusChanged;
+
+    public LocalApiProcessManager(
+        IProcessJobObject? jobObject = null,
+        IRuntimeLogService? runtimeLogs = null,
+        Func<(string? FileName, IReadOnlyList<string> Args)>? launchTargetResolver = null)
+    {
+        _jobObject = jobObject ?? ProcessJobObject.Default;
+        _runtimeLogs = runtimeLogs;
+        _resolveLaunchTarget = launchTargetResolver ?? (() => ResolveLaunchTarget());
+    }
 
     public async Task StartAsync(AppSettings settings, CancellationToken ct = default)
     {
@@ -30,7 +44,7 @@ public sealed class LocalApiProcessManager : IDisposable
             return;
         }
 
-        var (fileName, args) = ResolveLaunchTarget();
+        var (fileName, args) = _resolveLaunchTarget();
         if (fileName is null)
         {
             SetStatus("Stopped (Aether.LocalApi executable not found)");
@@ -59,6 +73,14 @@ public sealed class LocalApiProcessManager : IDisposable
         {
             if (!_process.Start())
                 throw new InvalidOperationException("Failed to start Aether.LocalApi.");
+
+            // r11 4.1: unlike ServerProcessManager/KokoroProcessManager/XttsProcessManager,
+            // this manager never joined the app's job object, so an app crash
+            // orphaned the LocalApi process holding its port and per-app tokens
+            // alive in memory (the r9 2.1 orphan class, missed for this manager).
+            if (OperatingSystem.IsWindows() && !_jobObject.TryAssign(_process))
+                _runtimeLogs?.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Service,
+                    "Could not attach Aether.LocalApi process to the app's job object; it may survive an abnormal app exit."));
 
             _process.BeginOutputReadLine();
             _process.BeginErrorReadLine();

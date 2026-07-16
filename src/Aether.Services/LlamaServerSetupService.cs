@@ -2,36 +2,47 @@ using System.Runtime.InteropServices;
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
 using Aether.Core.Models;
+using Aether.Services.ProcessManagement;
 
 namespace Aether.Services;
 
 /// <summary>
+/// The supported llama.cpp release platforms. Kept independent of
+/// OperatingSystem.Is*/RuntimeInformation.ProcessArchitecture so
+/// SelectDownloadAsset can be exercised against every platform's asset
+/// naming from a single test run instead of only whichever OS runs CI
+/// (r11 1.2 acceptance).
+/// </summary>
+public enum LlamaPlatform { WinX64, WinArm64, LinuxX64, LinuxArm64, MacX64, MacArm64 }
+
+/// <summary>
 /// Manages llama-server binary installation and detection.
-/// Handles platform-specific binary downloads from GitHub releases.
+///
+/// r11 1.1/1.2: the previously pinned asset names (llama-server-b4341-*)
+/// named files that do not exist in any llama.cpp release; every release
+/// ships zip (Windows) / tar.gz (Linux/macOS) archives named
+/// llama-&lt;tag&gt;-bin-&lt;os&gt;[-cpu]-&lt;arch&gt;.&lt;ext&gt;, verified against the live
+/// GitHub API for tag b10034 on 2026-07-16. Both the pinned path
+/// (InstallAsync) and the latest-release path (InstallLatestAsync) now
+/// download the real archive and extract it through ArchiveExtractor
+/// (zip-slip guarded) instead of moving a raw archive into place as if it
+/// were the executable.
 /// </summary>
 public sealed class LlamaServerSetupService
 {
-    private static readonly DownloadDefinition[] DownloadDefinitions =
-    [
-        new(() => OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64,
-            "Windows x64 AVX2",
-            "llama-server-b4341-win-avx2.exe"),
-        new(() => OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.Arm64,
-            "Windows ARM64",
-            "llama-server-b4341-win-arm64.exe"),
-        new(() => OperatingSystem.IsLinux() && RuntimeInformation.ProcessArchitecture == Architecture.X64,
-            "Linux x64",
-            "llama-server-b4341-linux-x64"),
-        new(() => OperatingSystem.IsLinux() && RuntimeInformation.ProcessArchitecture == Architecture.Arm64,
-            "Linux ARM64",
-            "llama-server-b4341-linux-arm64"),
-        new(() => OperatingSystem.IsMacOS() && RuntimeInformation.ProcessArchitecture == Architecture.X64,
-            "macOS x64",
-            "llama-server-b4341-macos-x64"),
-        new(() => OperatingSystem.IsMacOS() && RuntimeInformation.ProcessArchitecture == Architecture.Arm64,
-            "macOS ARM64",
-            "llama-server-b4341-macos-arm64")
-    ];
+    /// <summary>
+    /// llama.cpp release tag this pinned install downloads. Verified against
+    /// the live GitHub releases API on 2026-07-16: tag b10034, published
+    /// 2026-07-15, assets confirmed for every platform below. GitHub does not
+    /// publish per-asset hashes in the release API; provenance for the
+    /// pinned path is tag+HTTPS+GitHub-origin only (recorded in
+    /// docs/security-review.md).
+    /// </summary>
+    public const string PinnedTag = "b10034";
+
+    private const string ReleaseRepo = "ggerganov/llama.cpp";
+    private const string ReleaseBaseUrl = $"https://github.com/{ReleaseRepo}/releases/download";
+    private const string ReleaseApiBaseUrl = $"https://api.github.com/repos/{ReleaseRepo}/releases";
 
     private readonly ModelDownloadService _downloader;
     private readonly HttpClient _http;
@@ -40,6 +51,11 @@ public sealed class LlamaServerSetupService
     {
         _downloader = downloader ?? new ModelDownloadService();
         _http = http ?? new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
+        // Set once at construction (r11 1.2): GetLatestDownloadInfoAsync used to
+        // call ParseAdd on every invocation, appending a duplicate UA product
+        // to the shared client's DefaultRequestHeaders on each call.
+        if (!_http.DefaultRequestHeaders.UserAgent.Any())
+            _http.DefaultRequestHeaders.UserAgent.ParseAdd("Aether-Doctor/1.0");
     }
 
     /// <summary>
@@ -56,13 +72,16 @@ public sealed class LlamaServerSetupService
             {
                 if (File.Exists(installPath))
                     searchPaths.Add(installPath);
-                searchPaths.Add(Path.Combine(installPath, exeName));
+
+                var found = FindInstalledExecutable(installPath);
+                if (found is not null)
+                    searchPaths.Add(found);
             }
 
-            var pathResult = FindInPath(exeName);
+            var pathResult = ExecutableResolver.FindOnPath(exeName);
             if (pathResult != null)
                 searchPaths.Add(pathResult);
-            
+
             searchPaths.Add(Path.Combine(AppContext.BaseDirectory, exeName));
 
             return searchPaths.Where(p => !string.IsNullOrWhiteSpace(p)).Any(File.Exists);
@@ -82,7 +101,10 @@ public sealed class LlamaServerSetupService
     }
 
     /// <summary>
-    /// Gets the full path to the llama-server executable.
+    /// Gets the expected path to the llama-server executable directly inside
+    /// installPath. The archive may actually extract it into a nested
+    /// subdirectory; use <see cref="FindInstalledExecutable"/> after install
+    /// to get the real, possibly-nested, location.
     /// </summary>
     public string GetExecutablePath(string installPath)
     {
@@ -99,7 +121,12 @@ public sealed class LlamaServerSetupService
         if (IsInstalled(installPath))
             return actions;
 
-        var (downloadUrl, displayName) = GetDownloadInfo();
+        var platform = CurrentPlatform();
+        if (platform is null)
+            return actions;
+
+        var displayName = DisplayNameFor(platform.Value);
+        var downloadUrl = $"{ReleaseBaseUrl}/{PinnedTag}/{AssetNameFor(platform.Value, PinnedTag)}";
         var exePath = GetExecutablePath(installPath);
 
         actions.Add(new(
@@ -119,14 +146,15 @@ public sealed class LlamaServerSetupService
 
     public IReadOnlyList<LlamaServerReleaseInfo> GetSupportedReleaseInfo()
     {
-        var baseUrl = "https://github.com/ggerganov/llama.cpp/releases/download/b4341";
-        return DownloadDefinitions
-            .Select(def => new LlamaServerReleaseInfo(def.DisplayName, $"{baseUrl}/{def.AssetName}"))
+        return Enum.GetValues<LlamaPlatform>()
+            .Select(platform => new LlamaServerReleaseInfo(
+                DisplayNameFor(platform),
+                $"{ReleaseBaseUrl}/{PinnedTag}/{AssetNameFor(platform, PinnedTag)}"))
             .ToList();
     }
 
     /// <summary>
-    /// Downloads and installs llama-server binary.
+    /// Downloads and installs llama-server binary at the pinned tag.
     /// </summary>
     public async Task<LocalAiSetupResult> InstallAsync(
         string installPath,
@@ -138,52 +166,22 @@ public sealed class LlamaServerSetupService
             progress?.Report("Preparing llama-server installation...");
             Directory.CreateDirectory(installPath);
 
-            var (downloadUrl, displayName) = GetDownloadInfo();
-            var exePath = GetExecutablePath(installPath);
-
-            if (File.Exists(exePath))
+            var existing = FindInstalledExecutable(installPath);
+            if (existing is not null)
             {
-                progress?.Report($"llama-server already exists at {exePath}");
-                return new LocalAiSetupResult(true, $"llama-server is ready at {exePath}", exePath);
+                progress?.Report($"llama-server already exists at {existing}");
+                return new LocalAiSetupResult(true, $"llama-server is ready at {existing}", existing);
             }
 
-            progress?.Report($"Downloading llama-server ({displayName})...");
-            var lastPercent = -1;
-            var downloadProgress = progress is null
-                ? null
-                : new Progress<DownloadProgress>(state =>
-                {
-                    var percent = (int)Math.Floor(state.PercentComplete);
-                    if (percent <= lastPercent)
-                        return;
+            var platform = CurrentPlatform();
+            if (platform is null)
+                return new LocalAiSetupResult(false, $"Unsupported platform: {CurrentPlatformDisplayName()}");
 
-                    lastPercent = percent;
-                    progress.Report($"Downloading llama-server ({displayName})... {percent}%");
-                });
-            var downloadResult = await _downloader.DownloadAsync(
-                downloadUrl,
-                exePath,
-                progress: downloadProgress,
-                ct: ct);
+            var assetName = AssetNameFor(platform.Value, PinnedTag);
+            var displayName = DisplayNameFor(platform.Value);
+            var url = $"{ReleaseBaseUrl}/{PinnedTag}/{assetName}";
 
-            if (!downloadResult.Success)
-                return new LocalAiSetupResult(false, $"Failed to download: {downloadResult.Message}");
-
-            progress?.Report("Making executable...");
-            if (!OperatingSystem.IsWindows())
-            {
-                try
-                {
-                    var fileInfo = new System.IO.FileInfo(exePath);
-                    var unixFileMode = fileInfo.UnixFileMode | System.IO.UnixFileMode.UserExecute |
-                                      System.IO.UnixFileMode.GroupExecute | System.IO.UnixFileMode.OtherExecute;
-                    fileInfo.UnixFileMode = unixFileMode;
-                }
-                catch { }
-            }
-
-            progress?.Report($"llama-server installed successfully at {exePath}");
-            return new LocalAiSetupResult(true, $"llama-server installed at {exePath}", exePath);
+            return await DownloadExtractAndLocateAsync(installPath, url, assetName, $"llama-server {PinnedTag} ({displayName})", progress, ct);
         }
         catch (OperationCanceledException)
         {
@@ -195,6 +193,17 @@ public sealed class LlamaServerSetupService
         }
     }
 
+    /// <summary>
+    /// Downloads and installs the latest llama.cpp release for the current platform.
+    /// Extracts into a tag-versioned subdirectory of installPath rather than
+    /// installPath itself: installPath usually already holds a previous
+    /// install whose exe/DLLs are memory-mapped by any llama-server process
+    /// still running (e.g. a chat and an embeddings server sharing one
+    /// binary), and overwriting those files in place fails on Windows with a
+    /// file-in-use error. A fresh subdirectory never touches files a running
+    /// process holds open; existing servers keep running unaffected until
+    /// they're next restarted against the new path.
+    /// </summary>
     public async Task<LocalAiSetupResult> InstallLatestAsync(
         string installPath,
         IProgress<string>? progress = null,
@@ -203,47 +212,12 @@ public sealed class LlamaServerSetupService
         try
         {
             progress?.Report("Checking latest llama.cpp release...");
-            Directory.CreateDirectory(installPath);
             var release = await GetLatestDownloadInfoAsync(ct);
-            var exePath = GetExecutablePath(installPath);
-            var tempPath = $"{exePath}.download";
-            if (File.Exists(tempPath))
-                File.Delete(tempPath);
+            var versionedInstallPath = Path.Combine(installPath, release.TagName);
+            Directory.CreateDirectory(versionedInstallPath);
 
-            progress?.Report($"Downloading llama-server {release.TagName} ({release.DisplayName})...");
-            var lastPercent = -1;
-            var downloadProgress = progress is null
-                ? null
-                : new Progress<DownloadProgress>(state =>
-                {
-                    var percent = (int)Math.Floor(state.PercentComplete);
-                    if (percent <= lastPercent)
-                        return;
-
-                    lastPercent = percent;
-                    progress.Report($"Downloading llama-server {release.TagName}... {percent}%");
-                });
-
-            var downloadResult = await _downloader.DownloadAsync(release.Url, tempPath, downloadProgress, ct);
-            if (!downloadResult.Success)
-                return new LocalAiSetupResult(false, $"Failed to download: {downloadResult.Message}");
-
-            if (!OperatingSystem.IsWindows())
-            {
-                try
-                {
-                    var fileInfo = new FileInfo(tempPath);
-                    fileInfo.UnixFileMode |= UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute;
-                }
-                catch { }
-            }
-
-            if (File.Exists(exePath))
-                File.Delete(exePath);
-            File.Move(tempPath, exePath);
-
-            progress?.Report($"llama-server {release.TagName} installed at {exePath}");
-            return new LocalAiSetupResult(true, $"llama-server {release.TagName} installed at {exePath}", exePath);
+            return await DownloadExtractAndLocateAsync(
+                versionedInstallPath, release.Url, release.AssetName, $"llama-server {release.TagName} ({release.DisplayName})", progress, ct);
         }
         catch (OperationCanceledException)
         {
@@ -255,12 +229,80 @@ public sealed class LlamaServerSetupService
         }
     }
 
+    private async Task<LocalAiSetupResult> DownloadExtractAndLocateAsync(
+        string installPath,
+        string url,
+        string assetName,
+        string label,
+        IProgress<string>? progress,
+        CancellationToken ct)
+    {
+        var archivePath = Path.Combine(installPath, assetName);
+        progress?.Report($"Downloading {label}...");
+        var lastPercent = -1;
+        var downloadProgress = progress is null
+            ? null
+            : new Progress<DownloadProgress>(state =>
+            {
+                var percent = (int)Math.Floor(state.PercentComplete);
+                if (percent <= lastPercent)
+                    return;
+
+                lastPercent = percent;
+                progress.Report($"Downloading {label}... {percent}%");
+            });
+
+        var downloadResult = await _downloader.DownloadAsync(url, archivePath, progress: downloadProgress, ct: ct);
+        if (!downloadResult.Success)
+            return new LocalAiSetupResult(false, $"Failed to download: {downloadResult.Message}");
+
+        try
+        {
+            progress?.Report("Extracting archive...");
+            await ArchiveExtractor.ExtractAsync(archivePath, installPath, ct);
+        }
+        finally
+        {
+            try { File.Delete(archivePath); }
+            catch { }
+        }
+
+        var exePath = FindInstalledExecutable(installPath);
+        if (exePath is null)
+            return new LocalAiSetupResult(false, $"Archive extracted but no llama-server executable was found under {installPath}.");
+
+        if (!OperatingSystem.IsWindows())
+        {
+            try
+            {
+                var fileInfo = new FileInfo(exePath);
+                fileInfo.UnixFileMode |= UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute;
+            }
+            catch { }
+        }
+
+        progress?.Report($"{label} installed at {exePath}");
+        return new LocalAiSetupResult(true, $"{label} installed at {exePath}", exePath);
+    }
+
+    /// <summary>Direct probe, then a recursive search: archives sometimes nest the binary under a build/bin-style subdirectory.</summary>
+    private static string? FindInstalledExecutable(string installPath)
+    {
+        if (!Directory.Exists(installPath))
+            return null;
+
+        var direct = ExecutableResolver.ResolveInDirectory(installPath, "llama-server");
+        if (direct is not null)
+            return direct;
+
+        var matches = ExecutableResolver.FindAllInDirectory(installPath, "llama-server", SearchOption.AllDirectories);
+        return matches.Count > 0 ? matches[0] : null;
+    }
+
     public async Task<LlamaServerLatestDownload> GetLatestDownloadInfoAsync(CancellationToken ct = default)
     {
-        _http.DefaultRequestHeaders.UserAgent.ParseAdd("Aether-Doctor/1.0");
-        var release = await _http.GetFromJsonAsync<GitHubRelease>(
-            "https://api.github.com/repos/ggerganov/llama.cpp/releases/latest",
-            ct) ?? throw new InvalidOperationException("GitHub did not return llama.cpp release metadata.");
+        var release = await _http.GetFromJsonAsync<GitHubRelease>($"{ReleaseApiBaseUrl}/latest", ct)
+            ?? throw new InvalidOperationException("GitHub did not return llama.cpp release metadata.");
         var asset = SelectDownloadAsset(release.Assets ?? []);
         if (asset is null)
             throw new InvalidOperationException($"No llama-server asset matched this platform in release {release.TagName}.");
@@ -272,77 +314,61 @@ public sealed class LlamaServerSetupService
             CurrentPlatformDisplayName());
     }
 
-    public static GitHubReleaseAsset? SelectDownloadAsset(IReadOnlyList<GitHubReleaseAsset> assets)
+    /// <summary>
+    /// Selects the default (no accelerator) build for a platform: Windows
+    /// publishes an explicit "-cpu-" segment; Linux/macOS CPU builds carry no
+    /// extra variant token between the os and arch segments, so an exact
+    /// suffix match on "-bin-&lt;os&gt;[-cpu]-&lt;arch&gt;.&lt;ext&gt;" is what tells the
+    /// plain build apart from the cuda/rocm/hip/vulkan/sycl/opencl/openvino
+    /// variants published alongside it (r11 1.1/1.2, verified against the
+    /// live b10034 asset list on 2026-07-16).
+    /// </summary>
+    public static GitHubReleaseAsset? SelectDownloadAsset(IReadOnlyList<GitHubReleaseAsset> assets, LlamaPlatform? platform = null)
     {
-        var candidates = assets
-            .Where(asset => asset.Name.Contains("llama-server", StringComparison.OrdinalIgnoreCase))
-            .ToList();
+        var resolvedPlatform = platform ?? CurrentPlatform();
+        if (resolvedPlatform is null)
+            return null;
 
-        bool Has(string value, string token) => value.Contains(token, StringComparison.OrdinalIgnoreCase);
-        if (OperatingSystem.IsWindows())
-        {
-            var arm = RuntimeInformation.ProcessArchitecture == Architecture.Arm64;
-            return candidates.FirstOrDefault(asset =>
-                Has(asset.Name, "win") && (arm ? Has(asset.Name, "arm64") : !Has(asset.Name, "arm64") && (Has(asset.Name, "x64") || Has(asset.Name, "avx2"))));
-        }
+        var suffix = SuffixFor(resolvedPlatform.Value);
+        return assets.FirstOrDefault(asset =>
+            asset.Name.StartsWith("llama-", StringComparison.OrdinalIgnoreCase) &&
+            asset.Name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase));
+    }
 
-        if (OperatingSystem.IsLinux())
-        {
-            var arm = RuntimeInformation.ProcessArchitecture == Architecture.Arm64;
-            return candidates.FirstOrDefault(asset =>
-                Has(asset.Name, "linux") && (arm ? Has(asset.Name, "arm64") : Has(asset.Name, "x64")));
-        }
+    private static string AssetNameFor(LlamaPlatform platform, string tag) => $"llama-{tag}{SuffixFor(platform)}";
 
-        if (OperatingSystem.IsMacOS())
-        {
-            var arm = RuntimeInformation.ProcessArchitecture == Architecture.Arm64;
-            return candidates.FirstOrDefault(asset =>
-                (Has(asset.Name, "macos") || Has(asset.Name, "darwin")) && (arm ? Has(asset.Name, "arm64") : Has(asset.Name, "x64")));
-        }
+    private static string SuffixFor(LlamaPlatform platform) => platform switch
+    {
+        LlamaPlatform.WinX64 => "-bin-win-cpu-x64.zip",
+        LlamaPlatform.WinArm64 => "-bin-win-cpu-arm64.zip",
+        LlamaPlatform.LinuxX64 => "-bin-ubuntu-x64.tar.gz",
+        LlamaPlatform.LinuxArm64 => "-bin-ubuntu-arm64.tar.gz",
+        LlamaPlatform.MacX64 => "-bin-macos-x64.tar.gz",
+        LlamaPlatform.MacArm64 => "-bin-macos-arm64.tar.gz",
+        _ => throw new ArgumentOutOfRangeException(nameof(platform))
+    };
 
+    private static string DisplayNameFor(LlamaPlatform platform) => platform switch
+    {
+        LlamaPlatform.WinX64 => "Windows x64 CPU",
+        LlamaPlatform.WinArm64 => "Windows ARM64 CPU",
+        LlamaPlatform.LinuxX64 => "Linux x64",
+        LlamaPlatform.LinuxArm64 => "Linux ARM64",
+        LlamaPlatform.MacX64 => "macOS x64",
+        LlamaPlatform.MacArm64 => "macOS ARM64",
+        _ => throw new ArgumentOutOfRangeException(nameof(platform))
+    };
+
+    public static LlamaPlatform? CurrentPlatform()
+    {
+        var arm = RuntimeInformation.ProcessArchitecture == Architecture.Arm64;
+        if (OperatingSystem.IsWindows()) return arm ? LlamaPlatform.WinArm64 : LlamaPlatform.WinX64;
+        if (OperatingSystem.IsLinux()) return arm ? LlamaPlatform.LinuxArm64 : LlamaPlatform.LinuxX64;
+        if (OperatingSystem.IsMacOS()) return arm ? LlamaPlatform.MacArm64 : LlamaPlatform.MacX64;
         return null;
     }
 
-    private static string GetExecutableName()
-    {
-        return OperatingSystem.IsWindows() ? "llama-server.exe" : "llama-server";
-    }
-
-    private static (string url, string displayName) GetDownloadInfo()
-    {
-        var match = DownloadDefinitions.FirstOrDefault(def => def.MatchesCurrentPlatform());
-        if (match is null)
-            throw new NotSupportedException($"Unsupported platform: {(OperatingSystem.IsWindows() ? "Windows" : OperatingSystem.IsLinux() ? "Linux" : OperatingSystem.IsMacOS() ? "macOS" : "Unknown")} {RuntimeInformation.ProcessArchitecture}");
-
-        return ($"https://github.com/ggerganov/llama.cpp/releases/download/b4341/{match.AssetName}", match.DisplayName);
-    }
-
-    private static string? FindInPath(string exeName)
-    {
-        try
-        {
-            var pathEnv = Environment.GetEnvironmentVariable("PATH");
-            if (string.IsNullOrWhiteSpace(pathEnv))
-                return null;
-
-            var separator = OperatingSystem.IsWindows() ? ';' : ':';
-            foreach (var dir in pathEnv.Split(separator))
-            {
-                var trimmed = dir.Trim();
-                if (string.IsNullOrWhiteSpace(trimmed))
-                    continue;
-
-                var fullPath = Path.Combine(trimmed, exeName);
-                if (File.Exists(fullPath))
-                    return fullPath;
-            }
-        }
-        catch { }
-
-        return null;
-    }
-
-    private sealed record DownloadDefinition(Func<bool> MatchesCurrentPlatform, string DisplayName, string AssetName);
+    private static string GetExecutableName() => OperatingSystem.IsWindows() ? "llama-server.exe" : "llama-server";
 
     private static string CurrentPlatformDisplayName()
     {

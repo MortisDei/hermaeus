@@ -24,10 +24,10 @@ public sealed class OllamaService : IDisposable
         ProviderCapabilities.Streaming | ProviderCapabilities.UsageReporting
         | ProviderCapabilities.ModelPull | ProviderCapabilities.ModelDelete);
 
-    public OllamaService(RuntimeProfileService profiles)
+    public OllamaService(RuntimeProfileService profiles, HttpClient? http = null)
     {
         _profiles = profiles;
-        _http = SharedHttp;
+        _http = http ?? SharedHttp;
     }
 
     public async Task<List<LlmModel>> GetModelsAsync(CancellationToken ct = default)
@@ -144,36 +144,69 @@ public sealed class OllamaService : IDisposable
             }
         };
 
-        using var resp = await _http.PostAsJsonAsync($"{profile.BaseUrl.TrimEnd('/')}/api/chat", req, JsonOpts, ct);
-        resp.EnsureSuccessStatusCode();
-        await using var stream = await resp.Content.ReadAsStreamAsync(ct);
-        using var reader = new StreamReader(stream);
-        while (!ct.IsCancellationRequested)
+        // r11 2.1: PostAsJsonAsync completes only once the full response body is
+        // buffered (ResponseContentRead default), so with stream=true the call
+        // did not return until generation finished, replaying buffered lines
+        // afterward - no incremental tokens, and an unreachable endpoint threw
+        // out of the iterator instead of yielding an error event like
+        // LlamaCppService/OpenAiService. ResponseHeadersRead plus an explicit
+        // error event fixes both.
+        var (success, resp, error) = await GetStreamResponseAsync(profile.BaseUrl, req, ct);
+        if (!success)
         {
-            var line = await reader.ReadLineAsync(ct);
-            if (string.IsNullOrWhiteSpace(line)) continue;
-            ChatChunk? chunk;
-            try
-            {
-                chunk = JsonSerializer.Deserialize<ChatChunk>(line);
-            }
-            catch (JsonException)
-            {
-                continue;
-            }
+            yield return LlmStreamEvent.Error(error);
+            yield break;
+        }
 
-            if (!string.IsNullOrEmpty(chunk?.Message?.Content))
-                yield return new LlmStreamEvent(chunk.Message.Content);
-            if (chunk?.Done == true)
+        using (resp!)
+        await using (var stream = await resp!.Content.ReadAsStreamAsync(ct))
+        using (var reader = new StreamReader(stream))
+        {
+            while (!ct.IsCancellationRequested)
             {
-                // Ollama returns tool calls whole in the terminal chunk
-                // rather than fragmenting them across the stream the way
-                // OpenAI-compatible servers do, so no accumulator is needed.
-                var toolCalls = ToToolCalls(chunk);
-                var usage = ToUsage(chunk);
-                yield return new LlmStreamEvent(Usage: usage, IsFinal: true, ToolCalls: toolCalls);
-                yield break;
+                var line = await reader.ReadLineAsync(ct);
+                if (line is null) break;
+                if (string.IsNullOrWhiteSpace(line)) continue;
+                ChatChunk? chunk;
+                try
+                {
+                    chunk = JsonSerializer.Deserialize<ChatChunk>(line);
+                }
+                catch (JsonException)
+                {
+                    continue;
+                }
+
+                if (!string.IsNullOrEmpty(chunk?.Message?.Content))
+                    yield return new LlmStreamEvent(chunk.Message.Content);
+                if (chunk?.Done == true)
+                {
+                    // Ollama returns tool calls whole in the terminal chunk
+                    // rather than fragmenting them across the stream the way
+                    // OpenAI-compatible servers do, so no accumulator is needed.
+                    var toolCalls = ToToolCalls(chunk);
+                    var usage = ToUsage(chunk);
+                    yield return new LlmStreamEvent(Usage: usage, IsFinal: true, ToolCalls: toolCalls);
+                    yield break;
+                }
             }
+        }
+    }
+
+    private async Task<(bool Success, HttpResponseMessage? Response, string Error)> GetStreamResponseAsync(
+        string baseUrl, object payload, CancellationToken ct)
+    {
+        try
+        {
+            var req = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl.TrimEnd('/')}/api/chat")
+                { Content = JsonContent.Create(payload, options: JsonOpts) };
+            var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+            resp.EnsureSuccessStatusCode();
+            return (true, resp, string.Empty);
+        }
+        catch (Exception ex)
+        {
+            return (false, null, $"\n\n*Ollama error: {ex.Message}*");
         }
     }
 

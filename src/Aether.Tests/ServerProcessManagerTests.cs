@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
+using System.Reflection;
 using Aether.Core.Models;
 using Aether.Services.ProcessManagement;
 using Xunit;
@@ -21,6 +22,13 @@ public sealed class ServerProcessManagerTests
             AssignAttempted = true;
             return succeeds;
         }
+    }
+
+    private sealed class FakePortOwnerLookup : IPortOwnerLookup
+    {
+        public PortOwnerInfo? Owner { get; set; }
+        public bool IsPortListening(int port) => Owner is not null;
+        public PortOwnerInfo? FindOwner(int port) => Owner;
     }
 
     private static int GetFreePort()
@@ -128,4 +136,79 @@ public sealed class ServerProcessManagerTests
         Assert.Equal(ServerStatus.Stopped, mgr.Status);
         Assert.Contains("cancelled", mgr.GetLog(), StringComparison.OrdinalIgnoreCase);
     }
+
+    /// <summary>r11 4.4: StartAsync replaced _monitorCts on restart without disposing the previous instance.</summary>
+    [Fact]
+    public async Task StartAsync_disposes_the_previous_monitor_cts_on_restart()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+
+        using var temp = new TempDir();
+        var modelPath = temp.PathFor("model.gguf");
+        File.WriteAllText(modelPath, "fake");
+
+        var mgr = new ServerProcessManager();
+        var config = NewConfig(ImmediateExitExecutable, modelPath, GetFreePort());
+
+        // where.exe exits before /health ever responds, but StartAsync still
+        // creates _monitorCts before the health-wait loop observes that.
+        await mgr.StartAsync(config);
+        Assert.Equal(ServerStatus.Error, mgr.Status);
+        var firstCts = GetMonitorCts(mgr);
+        Assert.NotNull(firstCts);
+
+        config.Port = GetFreePort();
+        await mgr.StartAsync(config);
+
+        Assert.Throws<ObjectDisposedException>(() => firstCts!.Token.Register(() => { }));
+    }
+
+    /// <summary>r11 4.5: NormalizeConfig used to write the resolved executable/model paths back onto the caller's ServerConfig - typically the settings object itself - silently rewriting a directory/bare-name configuration in memory, later persisted by an unrelated SaveAsync.</summary>
+    [Fact]
+    public async Task StartAsync_does_not_mutate_the_callers_ServerConfig()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+
+        using var temp = new TempDir();
+        var modelDir = temp.PathFor("models");
+        Directory.CreateDirectory(modelDir);
+        var modelPath = Path.Combine(modelDir, "model.gguf");
+        File.WriteAllText(modelPath, "fake");
+
+        var mgr = new ServerProcessManager();
+        // A directory for ExecutablePath and ModelPath so NormalizeConfig
+        // must resolve both to concrete files internally.
+        var executableDir = temp.PathFor("bin");
+        Directory.CreateDirectory(executableDir);
+        File.Copy(ImmediateExitExecutable, Path.Combine(executableDir, "llama-server.exe"));
+        var config = NewConfig(executableDir, modelDir, GetFreePort());
+
+        await mgr.StartAsync(config);
+
+        Assert.Equal(executableDir, config.ExecutablePath);
+        Assert.Equal(modelDir, config.ModelPath);
+    }
+
+    /// <summary>r11 1.5: auto-tune probes started processes and waited for /health on a port it never checked for prior occupancy; if anything was already listening there, every candidate "reached /health" instantly against the wrong process.</summary>
+    [Fact]
+    public async Task AutoTuneAsync_fails_fast_with_the_named_port_owner_when_the_port_is_occupied()
+    {
+        using var temp = new TempDir();
+        var modelPath = temp.PathFor("model.gguf");
+        File.WriteAllText(modelPath, "fake");
+
+        var lookup = new FakePortOwnerLookup { Owner = new PortOwnerInfo(4321, "some-other-server", null) };
+        var config = NewConfig(ImmediateExitExecutable, modelPath, GetFreePort());
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => ServerProcessManager.AutoTuneAsync(config, portOwnerLookup: lookup));
+
+        Assert.Contains("some-other-server", ex.Message);
+        Assert.Contains("4321", ex.Message);
+    }
+
+    private static CancellationTokenSource? GetMonitorCts(ServerProcessManager mgr) =>
+        (CancellationTokenSource?)typeof(ServerProcessManager)
+            .GetField("_monitorCts", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .GetValue(mgr);
 }

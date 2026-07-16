@@ -64,6 +64,27 @@ namespace Aether.Tests
             True(File.Exists(Path.Combine(settings.Settings.DataManagement.DataRootDirectory, "benchmarks.db")), "benchmark db should be created");
         }
 
+        /// <summary>r11 3.7: EnsureInitializedAsync lacked the SemaphoreSlim init gate every other store uses, so concurrent first calls could race the starter-suite seed (read `existing`, then insert) into a double-insert or a PK violation.</summary>
+        public static async Task BenchmarkInitializationIsGatedAgainstConcurrentFirstCalls()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var service = new BenchmarkService(settings, new FakeLlm(), new FakeSystemInfo(), new FakeEvalStore());
+
+            var results = await Task.WhenAll(
+                service.GetSuitesAsync(),
+                service.GetSuitesAsync(),
+                service.GetSuitesAsync(),
+                service.GetSuitesAsync());
+
+            foreach (var suites in results)
+                Equal(12, suites.Count, "every concurrent first call should observe exactly one set of seeded starter suites");
+
+            var finalSuites = await service.GetSuitesAsync();
+            Equal(12, finalSuites.Count, "starter suites should not be double-seeded by a concurrent first call race");
+        }
+
         public static Task BenchmarkStarterSuitesIncludeExpandedDeterministicSet()
         {
             var suites = BenchmarkService.StarterSuites();
@@ -158,6 +179,44 @@ namespace Aether.Tests
             Equal(fast.Id, scores[0].Id, "highest scoring run should rank first");
             Equal(2, scores.Count, "duplicate models should collapse to their best run in rankings");
             True(scores[0].RankingScore >= scores[^1].RankingScore, "scores should be sorted descending");
+            return Task.CompletedTask;
+        }
+
+        public static async Task BenchmarkRerunPreservesCaseTags()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var service = new BenchmarkService(settings, new FakeLlm(), new FakeSystemInfo(), new FakeEvalStore());
+
+            var suite = BenchmarkService.StarterSuites().First();
+            suite.MaxCases = 1;
+            suite.Cases[0].Tags = ["smoke", "critical"];
+
+            var run = await service.RunAsync(suite, new LlmModel { Id = "fake-agent", Name = "Fake Agent", Provider = "Test" });
+            True(run.Results.Count > 0 && run.Results.All(r => r.Tags.Contains("smoke") && r.Tags.Contains("critical")),
+                "initial run results should carry case tags");
+
+            var rerun = await service.RerunAsync(run.Id);
+
+            True(rerun.Results.Count > 0, "rerun should produce results");
+            True(rerun.Results.All(r => r.Tags.Contains("smoke") && r.Tags.Contains("critical")),
+                "r11 2.7: rerun rebuilds cases from stored results and must preserve Tags, or reruns silently fall out of per-tag insights");
+        }
+
+        /// <summary>r11 2.6: the benchmark judge fields are removed from the UI (no code ever invoked a judge model) but must stay on the model classes so previously stored suite/run JSON still deserializes.</summary>
+        public static Task BenchmarkJudgeFieldsRoundTripWithoutUiBinding()
+        {
+            var axamlPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../src/Aether.Desktop/Views/BenchmarkView.axaml"));
+            var axaml = File.ReadAllText(axamlPath);
+            False(axaml.Contains("UseJudge", StringComparison.Ordinal), "benchmark view should no longer bind UseJudge");
+            False(axaml.Contains("JudgeModelId", StringComparison.Ordinal), "benchmark view should no longer bind JudgeModelId");
+
+            const string json = """{"id":"legacy-suite","name":"Legacy","useJudge":true,"judgeModelId":"gpt-4o","cases":[]}""";
+            var suite = JsonSerializer.Deserialize<BenchmarkSuite>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            True(suite is not null, "legacy stored suite JSON with judge fields should still deserialize");
+            True(suite!.UseJudge, "stored useJudge=true should round-trip even though the UI no longer edits it");
+            Equal("gpt-4o", suite.JudgeModelId, "stored judgeModelId should round-trip");
             return Task.CompletedTask;
         }
 
@@ -816,6 +875,26 @@ namespace Aether.Tests
             False(report.SetupCommands.Contains(';', StringComparison.Ordinal), "command previews should not synthesize shell separators");
         }
 
+        /// <summary>r11 1.8: rocm5.8 has never been a published PyTorch index (verified: HTTP 403), so the ROCm branch always failed pip resolution; cu118 was years stale. This pins the current per-backend argument construction so a future edit is a visible, reviewable diff.</summary>
+        public static Task LocalAiSetupBuildsCorrectTorchInstallArgsPerBackend()
+        {
+            var cuda = LocalAiSetupService.BuildTorchInstallArgs("cuda");
+            Equal("--index-url", cuda[^2], "cuda args should end with an index-url flag");
+            Equal(LocalAiSetupService.CudaTorchIndexUrl, cuda[^1], "cuda should use the pinned CUDA index");
+            False(cuda[^1].Contains("cu118", StringComparison.Ordinal), "cuda index should not be the stale cu118");
+
+            var rocm = LocalAiSetupService.BuildTorchInstallArgs("rocm");
+            Equal(LocalAiSetupService.RocmTorchIndexUrl, rocm[^1], "rocm should use the pinned ROCm index");
+            False(rocm[^1].Contains("rocm5.8", StringComparison.Ordinal), "rocm index should not be the never-published rocm5.8");
+
+            var mps = LocalAiSetupService.BuildTorchInstallArgs("mps");
+            False(mps.Contains("--index-url"), "mps should install from the default PyPI index");
+
+            var cpu = LocalAiSetupService.BuildTorchInstallArgs("cpu");
+            True(cpu[^1].EndsWith("/whl/cpu", StringComparison.Ordinal), "cpu should use the cpu-only index");
+            return Task.CompletedTask;
+        }
+
         public static Task LocalAiSetupDoesNotShipPlaceholderHashes()
         {
             var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../"));
@@ -824,6 +903,43 @@ namespace Aether.Tests
             False(source.Contains("b0aca5b1", StringComparison.OrdinalIgnoreCase), "setup service should not ship placeholder hashes");
             False(source.Contains("Placeholder: Replace", StringComparison.OrdinalIgnoreCase), "setup service should not ship placeholder hash comments");
             return Task.CompletedTask;
+        }
+
+        /// <summary>r11 1.6: ModelHashes was an empty map, so the Phi-4 download's "verify hash for security if available" branch was dead code and it landed unverified.</summary>
+        public static Task LocalAiSetupPinsARealSha256ForThePhi4Download()
+        {
+            var field = typeof(LocalAiSetupService).GetField("ModelHashes", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+            var hashes = (System.Collections.Generic.Dictionary<string, string>)field!.GetValue(null)!;
+
+            True(hashes.Count > 0, "ModelHashes should no longer be an empty dead map");
+            True(hashes.TryGetValue(LocalAiSetupService.Phi4ModelUrl, out var sha256), "Phi-4 download URL should have a pinned hash");
+            Equal(64, sha256!.Length, "SHA256 should be a 64-character hex string, not a placeholder");
+            True(sha256.All(Uri.IsHexDigit), "pinned hash should be valid hex");
+            return Task.CompletedTask;
+        }
+
+        /// <summary>A failed hash verification must delete the downloaded file, matching the Doctor embedding-model install pattern.</summary>
+        public static async Task LocalAiSetupPhi4DownloadRejectsHashMismatchAndDeletesTheFile()
+        {
+            using var temp = new TempDir();
+            var targetPath = temp.PathFor("models/phi-4-mini-reasoning-Q5_K_M.gguf");
+            var downloads = new ModelDownloadService(new HttpClient(new CapturingRangeHttpHandler("tampered content, not the real model")));
+            var service = new LocalAiSetupService(new PythonHealthValidator(), downloads);
+            var action = new LocalAiSetupAction(
+                "download-phi4-model",
+                LocalAiSetupActionKind.DownloadGgufModel,
+                "Download Phi-4 Mini Reasoning Model",
+                targetPath,
+                [LocalAiSetupService.Phi4ModelUrl],
+                LocalAiSetupRiskLevel.Medium,
+                "test",
+                true, true, true);
+
+            var settings = NewSettings(temp);
+            var result = await service.RunActionAsync(action, settings.Settings);
+
+            False(result.Success, "download should fail when the SHA256 does not match the pinned hash");
+            False(File.Exists(targetPath), "a failed verification should remove the downloaded file");
         }
 
         public static async Task LocalAiSetupSurfcesKokoroOnboarding()
@@ -990,24 +1106,61 @@ namespace Aether.Tests
             var releases = service.GetSupportedReleaseInfo();
 
             Equal(6, releases.Count, "release data should cover all supported platforms");
-            True(releases.All(entry => entry.Url.Contains("b4341", StringComparison.Ordinal)), "release urls should use the expected tag");
+            True(releases.All(entry => entry.Url.Contains(LlamaServerSetupService.PinnedTag, StringComparison.Ordinal)), "release urls should use the expected tag");
+            True(releases.All(entry => entry.Url.EndsWith(".zip", StringComparison.Ordinal) || entry.Url.EndsWith(".tar.gz", StringComparison.Ordinal)),
+                "release urls should point at real llama.cpp archive assets, not a bare exe");
             True(releases.Select(entry => entry.DisplayName).Distinct(StringComparer.Ordinal).Count() == releases.Count, "release labels should be unique");
             return Task.CompletedTask;
         }
 
+        /// <summary>
+        /// Asset list captured from the live GitHub API for tag b10034 on
+        /// 2026-07-16 (r11 1.1/1.2 fixture): every platform's default (no
+        /// accelerator) build plus a representative sample of the
+        /// cuda/rocm/hip/vulkan/sycl/opencl/openvino variants and non-binary
+        /// assets it must NOT select.
+        /// </summary>
+        private static readonly GitHubReleaseAsset[] LlamaB10034Assets =
+        [
+            new("cudart-llama-bin-win-cuda-12.4-x64.zip", "https://example.test/cudart-win"),
+            new("llama-b10034-bin-android-arm64.tar.gz", "https://example.test/android"),
+            new("llama-b10034-bin-macos-arm64.tar.gz", "https://example.test/macos-arm64"),
+            new("llama-b10034-bin-macos-x64.tar.gz", "https://example.test/macos-x64"),
+            new("llama-b10034-bin-ubuntu-arm64.tar.gz", "https://example.test/linux-arm64"),
+            new("llama-b10034-bin-ubuntu-openvino-2026.2.1-x64.tar.gz", "https://example.test/ubuntu-openvino"),
+            new("llama-b10034-bin-ubuntu-rocm-7.2-x64.tar.gz", "https://example.test/ubuntu-rocm"),
+            new("llama-b10034-bin-ubuntu-s390x.tar.gz", "https://example.test/s390x"),
+            new("llama-b10034-bin-ubuntu-sycl-fp16-x64.tar.gz", "https://example.test/ubuntu-sycl"),
+            new("llama-b10034-bin-ubuntu-vulkan-arm64.tar.gz", "https://example.test/ubuntu-vulkan-arm64"),
+            new("llama-b10034-bin-ubuntu-vulkan-x64.tar.gz", "https://example.test/ubuntu-vulkan-x64"),
+            new("llama-b10034-bin-ubuntu-x64.tar.gz", "https://example.test/linux-x64"),
+            new("llama-b10034-bin-win-cpu-arm64.zip", "https://example.test/win-arm64"),
+            new("llama-b10034-bin-win-cpu-x64.zip", "https://example.test/win-x64"),
+            new("llama-b10034-bin-win-cuda-12.4-x64.zip", "https://example.test/win-cuda"),
+            new("llama-b10034-bin-win-hip-radeon-x64.zip", "https://example.test/win-hip"),
+            new("llama-b10034-bin-win-opencl-adreno-arm64.zip", "https://example.test/win-opencl"),
+            new("llama-b10034-bin-win-openvino-2026.2.1-x64.zip", "https://example.test/win-openvino"),
+            new("llama-b10034-bin-win-sycl-x64.zip", "https://example.test/win-sycl"),
+            new("llama-b10034-bin-win-vulkan-x64.zip", "https://example.test/win-vulkan"),
+            new("llama-b10034-ui.tar.gz", "https://example.test/ui"),
+            new("llama-b10034-xcframework.zip", "https://example.test/xcframework")
+        ];
+
         public static Task LlamaServerLatestAssetSelectionFindsCurrentPlatform()
         {
-            var selected = LlamaServerSetupService.SelectDownloadAsset(
-            [
-                new GitHubReleaseAsset("llama-server-b9999-linux-x64", "https://example.test/linux"),
-                new GitHubReleaseAsset("llama-server-b9999-win-avx2.exe", "https://example.test/win"),
-                new GitHubReleaseAsset("llama-server-b9999-macos-arm64", "https://example.test/macos")
-            ]);
-
-            if (OperatingSystem.IsLinux() && System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture == System.Runtime.InteropServices.Architecture.X64)
-                Equal("https://example.test/linux", selected?.BrowserDownloadUrl, "latest llama asset selection should match Linux x64");
-            else
-                True(selected is not null, "latest llama asset selection should match the current supported platform");
+            foreach (var (platform, expectedUrl) in new[]
+            {
+                (LlamaPlatform.WinX64, "https://example.test/win-x64"),
+                (LlamaPlatform.WinArm64, "https://example.test/win-arm64"),
+                (LlamaPlatform.LinuxX64, "https://example.test/linux-x64"),
+                (LlamaPlatform.LinuxArm64, "https://example.test/linux-arm64"),
+                (LlamaPlatform.MacX64, "https://example.test/macos-x64"),
+                (LlamaPlatform.MacArm64, "https://example.test/macos-arm64")
+            })
+            {
+                var selected = LlamaServerSetupService.SelectDownloadAsset(LlamaB10034Assets, platform);
+                Equal(expectedUrl, selected?.BrowserDownloadUrl, $"asset selection for {platform} should pick the default CPU build, not a cuda/rocm/vulkan/sycl/opencl/openvino variant");
+            }
 
             return Task.CompletedTask;
         }
@@ -2155,6 +2308,26 @@ namespace Aether.Tests
             Equal("--arg", args[0], "first arg should be flag");
             Equal("value with \"inner\" quotes", args[1], "escaped quotes should be preserved");
             Equal("--flag", args[2], "trailing arg should parse");
+            return Task.CompletedTask;
+        }
+
+        /// <summary>r11 1.4: every backslash consumed the next character as an escape, so a bare Windows path like C:\models\proj.gguf became C:modelsproj.gguf before reaching llama-server.</summary>
+        public static Task ExtraArgsParserPreservesBareWindowsPaths()
+        {
+            var args = ExtraArgsParser.Split(@"--mmproj C:\models\proj.gguf").ToList();
+            Equal(2, args.Count, "parser should return two args");
+            Equal("--mmproj", args[0], "first arg should be flag");
+            Equal(@"C:\models\proj.gguf", args[1], "bare Windows path should round trip intact");
+            return Task.CompletedTask;
+        }
+
+        /// <summary>A quoted Windows path (needed when it contains a space) must also keep its backslashes intact.</summary>
+        public static Task ExtraArgsParserPreservesQuotedWindowsPathsWithSpaces()
+        {
+            var args = ExtraArgsParser.Split("--mmproj \"C:\\models\\a b\\x.gguf\"").ToList();
+            Equal(2, args.Count, "parser should return two args");
+            Equal("--mmproj", args[0], "first arg should be flag");
+            Equal(@"C:\models\a b\x.gguf", args[1], "quoted Windows path with an embedded space should round trip intact");
             return Task.CompletedTask;
         }
 

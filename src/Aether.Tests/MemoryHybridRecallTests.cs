@@ -63,6 +63,39 @@ public sealed class MemoryHybridRecallTests
         Assert.True(top.RelevanceScore > 0, "the top hybrid result should carry a positive relevance score");
     }
 
+    /// <summary>r11 3.3: FTS candidates used to be ordered by is_pinned/importance_score/updated_at, so the "FTS rank" half of hybrid scoring measured importance, not how well the text matched. A short, term-dense match must now outrank a long, low-relevance one even though it has far lower importance.</summary>
+    [Fact]
+    public async Task Search_ranks_the_lexically_better_match_first_even_with_lower_importance()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        var store = new MemoryStore(settings);
+        await store.InitializeAsync();
+
+        await store.SaveAsync(new Memory
+        {
+            Id = "dense-match",
+            Content = "rocket rocket launch mission control rocket",
+            ImportanceScore = 0.1
+        });
+        await store.SaveAsync(new Memory
+        {
+            Id = "diluted-match",
+            Content = string.Join(' ', Enumerable.Repeat("filler", 40)) + " rocket " + string.Join(' ', Enumerable.Repeat("padding", 40)),
+            ImportanceScore = 0.9
+        });
+
+        var results = await store.SearchAsync("rocket");
+
+        Assert.Contains(results, m => m.Id == "dense-match");
+        Assert.Contains(results, m => m.Id == "diluted-match");
+        var denseScore = results.Single(m => m.Id == "dense-match").RelevanceScore;
+        var dilutedScore = results.Single(m => m.Id == "diluted-match").RelevanceScore;
+        Assert.True(denseScore > dilutedScore,
+            $"the term-dense, low-importance match (score {denseScore}) should rank above the diluted, high-importance match (score {dilutedScore})");
+    }
+
     [Fact]
     public async Task Search_without_an_embedding_service_still_attaches_a_rank_based_score()
     {

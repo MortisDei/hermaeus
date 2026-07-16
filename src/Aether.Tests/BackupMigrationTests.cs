@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Aether.Services;
+using Microsoft.Data.Sqlite;
 using static Aether.Tests.Helpers;
 
 namespace Aether.Tests
@@ -91,13 +92,124 @@ namespace Aether.Tests
                 "migration should keep a backup copy of Agent state");
         }
 
+        /// <summary>r11 3.1: migration used to move only conversations.db*/memories.db*/benchmarks.db*/agent/, stranding everything else the app writes to the data root. A fixture containing every other known family must move completely.</summary>
+        public static async Task DataRootMigrationMovesEveryKnownFileFamily()
+        {
+            using var temp = new TempDir();
+            var previous = temp.PathFor("previous");
+            var next = temp.PathFor("next");
+            Directory.CreateDirectory(previous);
+            File.WriteAllText(Path.Combine(previous, "conversations.db"), "db");
+            File.WriteAllText(Path.Combine(previous, "secrets.local.json"), "secret");
+            File.WriteAllText(Path.Combine(previous, "secrets.local.key"), "key");
+            File.WriteAllText(Path.Combine(previous, "traces.db"), "traces");
+            File.WriteAllText(Path.Combine(previous, "eval_runs.db"), "evals");
+            Directory.CreateDirectory(Path.Combine(previous, "logs"));
+            File.WriteAllText(Path.Combine(previous, "logs", "app.log"), "log");
+            Directory.CreateDirectory(Path.Combine(previous, "voice"));
+            File.WriteAllText(Path.Combine(previous, "voice", "lexicon.txt"), "lexicon");
+            Directory.CreateDirectory(Path.Combine(previous, "agent-scenarios"));
+            File.WriteAllText(Path.Combine(previous, "agent-scenarios", "scenario.json"), "scenario");
+            Directory.CreateDirectory(Path.Combine(previous, "eval-runs"));
+            File.WriteAllText(Path.Combine(previous, "eval-runs", "run.json"), "run");
+            // A never-before-seen file family must also move without any manifest edit.
+            File.WriteAllText(Path.Combine(previous, "some-future-store.db"), "future");
+
+            var service = NewSettings(temp);
+            var plan = service.PreviewDataRootMigration(previous, next);
+
+            service.Settings.DataManagement.DataRootDirectory = next;
+            var result = await service.SaveAsync(previous);
+
+            Equal(10, result.FilesMoved, "every known and unknown file family should move");
+            Equal(plan.FilesToMove, result.FilesMoved, "preview counts should match what migration actually moves");
+            True(File.Exists(Path.Combine(next, "secrets.local.json")), "secrets store should move");
+            True(File.Exists(Path.Combine(next, "secrets.local.key")), "secrets key should move");
+            True(File.Exists(Path.Combine(next, "traces.db")), "trace store should move");
+            True(File.Exists(Path.Combine(next, "eval_runs.db")), "eval store should move");
+            True(File.Exists(Path.Combine(next, "logs", "app.log")), "logs should move");
+            True(File.Exists(Path.Combine(next, "voice", "lexicon.txt")), "voice lexicon should move");
+            True(File.Exists(Path.Combine(next, "agent-scenarios", "scenario.json")), "agent scenarios should move");
+            True(File.Exists(Path.Combine(next, "eval-runs", "run.json")), "eval runs should move");
+            True(File.Exists(Path.Combine(next, "some-future-store.db")), "an unmodeled future file family should still move");
+            False(Directory.Exists(previous), "old root should retain nothing after a full migration");
+
+            if (!OperatingSystem.IsWindows())
+            {
+                var mode = File.GetUnixFileMode(Path.Combine(next, "secrets.local.json"));
+                True(mode.HasFlag(UnixFileMode.UserRead) && !mode.HasFlag(UnixFileMode.GroupRead) && !mode.HasFlag(UnixFileMode.OtherRead),
+                    "moved secrets file should keep restrictive owner-only permissions");
+            }
+        }
+
+        /// <summary>r11 3.1 acceptance: secrets stored through ISecretStore before a data-root move must still resolve correctly afterward.</summary>
+        public static async Task SecretsResolveCorrectlyAfterDataRootMigration()
+        {
+            var previousEnv = Environment.GetEnvironmentVariable("AETHER_DISABLE_OS_KEYCHAIN");
+            Environment.SetEnvironmentVariable("AETHER_DISABLE_OS_KEYCHAIN", "1");
+            try
+            {
+                using var temp = new TempDir();
+                var previous = temp.PathFor("previous");
+                var next = temp.PathFor("next");
+                Directory.CreateDirectory(previous);
+
+                var service = NewSettings(temp);
+                service.Settings.DataManagement.DataRootDirectory = previous;
+                await service.SaveAsync();
+
+                var secrets = new SecretStore(service);
+                var reference = await secrets.StoreAsync("test-provider-key", "super-secret-value");
+                True(secrets.IsReference(reference), "storing a secret should return a reference");
+
+                service.Settings.DataManagement.DataRootDirectory = next;
+                var migration = await service.SaveAsync(previous);
+                True(migration.DataMigrated, "migration should have moved the fallback secrets vault");
+
+                var resolved = await secrets.ResolveAsync(reference);
+                Equal("super-secret-value", resolved, "secret should resolve correctly after its data root moved");
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("AETHER_DISABLE_OS_KEYCHAIN", previousEnv);
+            }
+        }
+
+        /// <summary>
+        /// r11 3.1 regression guard: settings.json bootstraps the data root
+        /// and is explicitly rejected as a migration target
+        /// (docs/review/r11/05-roadmap.md). When the data root has never
+        /// been customized, settings.json's directory IS the data root, so
+        /// "move everything under the root" must not sweep it up the first
+        /// time a user points DataRootDirectory somewhere new.
+        /// </summary>
+        public static async Task DataRootMigrationNeverMovesSettingsJson()
+        {
+            using var temp = new TempDir();
+            var previousRoot = temp.PathFor("previous");
+            var next = temp.PathFor("next");
+            Directory.CreateDirectory(previousRoot);
+
+            var settingsPath = Path.Combine(previousRoot, "settings.json");
+            var service = new SettingsService(settingsPath);
+            await service.SaveAsync();
+            File.WriteAllText(Path.Combine(previousRoot, "conversations.db"), "db");
+
+            service.Settings.DataManagement.DataRootDirectory = next;
+            var result = await service.SaveAsync(previousRoot);
+
+            True(result.DataMigrated, "migration should still move other data");
+            True(File.Exists(settingsPath), "settings.json must never move out of its bootstrap location");
+            False(File.Exists(Path.Combine(next, "settings.json")), "settings.json must not be copied into the new data root either");
+        }
+
         public static async Task BackupExcludesSecretsAndRefusesOverwrite()
         {
             using var temp = new TempDir();
             var root = temp.PathFor("root");
             var backupTarget = temp.PathFor("backup");
             Directory.CreateDirectory(root);
-            File.WriteAllText(Path.Combine(root, "conversations.db"), "db");
+            await CreateMarkerSqliteDbAsync(Path.Combine(root, "conversations.db"), "db");
             File.WriteAllText(Path.Combine(root, "secrets.local.json"), "secret");
             File.WriteAllText(Path.Combine(root, "secrets.local.key"), "key");
 
@@ -119,7 +231,68 @@ namespace Aether.Tests
             service.Settings.DataManagement.DataRootDirectory = restoreRoot;
             await ThrowsAsync<IOException>(() => backups.RestoreAsync(backup.Path));
             await backups.RestoreAsync(backup.Path, allowOverwrite: true);
-            Equal("db", await File.ReadAllTextAsync(Path.Combine(restoreRoot, "conversations.db")), "overwrite restore should replace existing files");
+            Equal("db", await ReadMarkerAsync(Path.Combine(restoreRoot, "conversations.db")), "overwrite restore should replace existing files");
+        }
+
+        /// <summary>r11 3.6: a raw zip of a live SQLite file risks an internally inconsistent copy if it is mid-write; backup must instead use SQLite's own online-backup API to produce a consistent snapshot.</summary>
+        public static async Task BackupOfADatabaseWithAnOpenWriterYieldsAConsistentSnapshot()
+        {
+            using var temp = new TempDir();
+            var root = temp.PathFor("root");
+            var backupTarget = temp.PathFor("backup");
+            Directory.CreateDirectory(root);
+            var dbPath = Path.Combine(root, "conversations.db");
+            await CreateMarkerSqliteDbAsync(dbPath, "before-write");
+
+            await using var writer = new SqliteConnection($"Data Source={dbPath}");
+            await writer.OpenAsync();
+            await using var transaction = await writer.BeginTransactionAsync();
+            var insert = writer.CreateCommand();
+            insert.Transaction = (SqliteTransaction)transaction;
+            insert.CommandText = "INSERT INTO marker (value) VALUES ('mid-transaction-row')";
+            await insert.ExecuteNonQueryAsync();
+            // Deliberately left open (uncommitted) across the backup call below,
+            // simulating a backup taken during an in-flight write.
+
+            var service = NewSettings(temp);
+            service.Settings.DataManagement.DataRootDirectory = root;
+            var backups = new BackupService(service);
+            var backup = await backups.BackupAsync(backupTarget);
+
+            await transaction.RollbackAsync();
+
+            var extractDir = temp.PathFor("extracted");
+            Directory.CreateDirectory(extractDir);
+            using (var archive = System.IO.Compression.ZipFile.OpenRead(backup.Path))
+                archive.GetEntry("conversations.db")!.ExtractToFile(Path.Combine(extractDir, "conversations.db"));
+
+            await using var check = new SqliteConnection($"Data Source={Path.Combine(extractDir, "conversations.db")}");
+            await check.OpenAsync();
+            var integrityCmd = check.CreateCommand();
+            integrityCmd.CommandText = "PRAGMA integrity_check";
+            Equal("ok", (string)(await integrityCmd.ExecuteScalarAsync())!, "backed-up database should pass integrity_check");
+
+            Equal("before-write", await ReadMarkerAsync(Path.Combine(extractDir, "conversations.db")),
+                "snapshot should reflect committed state only, not the uncommitted in-flight transaction");
+        }
+
+        private static async Task CreateMarkerSqliteDbAsync(string path, string marker)
+        {
+            await using var connection = new SqliteConnection($"Data Source={path}");
+            await connection.OpenAsync();
+            var cmd = connection.CreateCommand();
+            cmd.CommandText = "CREATE TABLE marker (value TEXT); INSERT INTO marker (value) VALUES ($v);";
+            cmd.Parameters.AddWithValue("$v", marker);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        private static async Task<string> ReadMarkerAsync(string path)
+        {
+            await using var connection = new SqliteConnection($"Data Source={path}");
+            await connection.OpenAsync();
+            var cmd = connection.CreateCommand();
+            cmd.CommandText = "SELECT value FROM marker LIMIT 1";
+            return (string)(await cmd.ExecuteScalarAsync())!;
         }
 
         public static async Task BackupRestoreRejectsUnsafePathPrefix()

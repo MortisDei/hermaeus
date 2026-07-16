@@ -40,7 +40,7 @@ public sealed class OrphanServerDetector
 
         return new OrphanServerInfo(
             config.Id, config.Name, config.Port, owner.Pid, owner.ProcessName,
-            IsSameExecutable(owner.ExecutablePath, config.ExecutablePath));
+            IsSameExecutable(owner.ExecutablePath, ResolveConfiguredExecutable(config.ExecutablePath)));
     }
 
     /// <summary>
@@ -54,7 +54,7 @@ public sealed class OrphanServerDetector
         if (owner is null || owner.Pid != expectedPid)
             return OrphanStopResult.Refused("The process on this port has changed since it was detected; refusing to stop it.");
 
-        if (!IsSameExecutable(owner.ExecutablePath, config.ExecutablePath))
+        if (!IsSameExecutable(owner.ExecutablePath, ResolveConfiguredExecutable(config.ExecutablePath)))
             return OrphanStopResult.Refused("The process no longer matches this server's configured executable; refusing to stop it.");
 
         try
@@ -67,6 +67,22 @@ public sealed class OrphanServerDetector
         {
             return OrphanStopResult.Refused($"Failed to stop process {expectedPid}: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Resolves a configured value (bare name, directory, or full path)
+    /// against the same rules ServerProcessManager launches with, so a bare
+    /// "llama-server" or a directory still matches the running process's
+    /// resolved .exe (r11 1.3). Falls back to the raw value on failure; this
+    /// only weakens a match, it never widens one.
+    /// </summary>
+    private static string? ResolveConfiguredExecutable(string? configuredPath)
+    {
+        if (string.IsNullOrWhiteSpace(configuredPath))
+            return configuredPath;
+
+        var resolution = ExecutableResolver.Resolve(configuredPath.Trim(), "llama-server");
+        return resolution.Success ? resolution.Path : configuredPath;
     }
 
     internal static bool IsSameExecutable(string? actual, string? configured)

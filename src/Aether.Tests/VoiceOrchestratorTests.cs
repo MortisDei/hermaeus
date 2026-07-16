@@ -176,6 +176,39 @@ public sealed class VoiceOrchestratorTests
         Assert.Empty(provider.Calls);
     }
 
+    /// <summary>r11 4.6: _toastedProviderFailures never reset, so after one failure toast for a provider, a later distinct failure stayed silent for the app's lifetime. A success in between must reset the key so the next failure toasts again.</summary>
+    [Fact]
+    public async Task Failure_toasts_once_per_episode_reset_by_an_intervening_success()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var provider = new RecordingVoiceProvider { ShouldFail = true };
+        var toasts = new FakeToasts();
+        var toastCount = 0;
+        toasts.ToastRaised += _ => Interlocked.Increment(ref toastCount);
+        using var orchestrator = new VoiceOrchestrator(settings, new SingleProviderRegistry(provider), toasts);
+
+        await orchestrator.EnqueueAsync(new VoiceUtterance("first failure", VoiceChannel.Chat));
+        await WaitUntilAsync(() => provider.Calls.Count >= 1, TimeSpan.FromSeconds(2));
+        await WaitUntilAsync(() => toastCount >= 1, TimeSpan.FromSeconds(2));
+
+        await orchestrator.EnqueueAsync(new VoiceUtterance("second consecutive failure", VoiceChannel.Chat));
+        await WaitUntilAsync(() => provider.Calls.Count >= 2, TimeSpan.FromSeconds(2));
+        await Task.Delay(100);
+        Assert.Equal(1, toastCount);
+
+        provider.ShouldFail = false;
+        await orchestrator.EnqueueAsync(new VoiceUtterance("recovers", VoiceChannel.Chat));
+        await WaitUntilAsync(() => provider.Calls.Count >= 3, TimeSpan.FromSeconds(2));
+        await Task.Delay(100);
+        Assert.Equal(1, toastCount);
+
+        provider.ShouldFail = true;
+        await orchestrator.EnqueueAsync(new VoiceUtterance("new failure episode", VoiceChannel.Chat));
+        await WaitUntilAsync(() => toastCount >= 2, TimeSpan.FromSeconds(2));
+        Assert.Equal(2, toastCount);
+    }
+
     private sealed class RecordingVoiceProvider : IVoiceProvider
     {
         public VoiceProvider Id => VoiceProvider.Kokoro;
@@ -184,6 +217,7 @@ public sealed class VoiceOrchestratorTests
         public (int Major, int Minor)? RequiredPythonVersion => null;
         public bool IsInstalled => true;
         public int DelayMs { get; set; } = 10;
+        public bool ShouldFail { get; set; }
         public List<(DateTime Start, DateTime End, string Voice, string Text)> Calls { get; } = [];
 
         public VoiceProviderDetection Detect() => new(true, "ok", "ok");
@@ -201,7 +235,9 @@ public sealed class VoiceOrchestratorTests
             await Task.Delay(DelayMs, ct);
             var end = DateTime.UtcNow;
             Calls.Add((start, end, request.Voice ?? string.Empty, request.Text));
-            return new VoiceSynthesisResult(true, "ok");
+            return ShouldFail
+                ? new VoiceSynthesisResult(false, "simulated failure")
+                : new VoiceSynthesisResult(true, "ok");
         }
     }
 

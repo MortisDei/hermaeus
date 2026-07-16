@@ -144,16 +144,23 @@ public sealed partial class DoctorService
         }
 
         var hashOk = await _downloads.VerifyHashAsync(search.Path, _embeddingDownload.Sha256, null, ct);
+        // Both branches are informational: the model is already found on disk
+        // (search.Found above), so there is nothing to "fix" here regardless
+        // of hash outcome. The previous unconditional canFix:true + "Download
+        // embedding model" label re-triggered a fresh download over a model
+        // the user already had installed and working, even when the hash
+        // matched. Only the primary "embedding-model" check offers a real
+        // download fix, for a genuinely missing model.
         return BuildCheck(
             "embedding-model-update",
             "nomic embedding model version",
-            hashOk ? DoctorCheckStatus.Ready : DoctorCheckStatus.Warning,
-            hashOk ? "Pinned nomic embedding model verified" : "nomic embedding model should be refreshed",
+            hashOk ? DoctorCheckStatus.Ready : DoctorCheckStatus.Info,
+            hashOk ? "Pinned nomic embedding model verified" : "Installed nomic embedding model differs from the pinned build",
             hashOk
                 ? "Installed file matches the pinned nomic-embed-text-v1.5 GGUF."
-                : "Download the pinned nomic-embed-text-v1.5 GGUF so RAG embeddings use the expected model.",
-            "Download embedding model",
-            true,
+                : "This does not mean the model is missing or broken; it just isn't byte-identical to Aether's pinned reference build. Re-download from Services only if you suspect a corrupted file.",
+            "Details",
+            false,
             search.Path,
             "RAG");
     }

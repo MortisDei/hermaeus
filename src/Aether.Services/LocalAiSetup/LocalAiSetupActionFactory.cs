@@ -33,7 +33,7 @@ internal static class LocalAiSetupActionFactory
             modelPath,
             [url],
             LocalAiSetupRiskLevel.Medium,
-            "Downloads the Phi-4 mini reasoning GGUF model (Q5_K_M, ~9GB) for local reasoning.",
+            "Downloads the Phi-4 mini reasoning GGUF model (Q5_K_M, ~2.8 GB) for local reasoning.",
             true, true, true);
 
     internal static LocalAiSetupAction DownloadTtsModelAction(string modelPath, string url) =>

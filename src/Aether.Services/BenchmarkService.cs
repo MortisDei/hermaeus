@@ -18,6 +18,7 @@ public sealed class BenchmarkService
     private readonly IEvalStore _evalStore;
     private string _initializedPath = string.Empty;
     private string _starterSuitesSeededPath = string.Empty;
+    private readonly SemaphoreSlim _initGate = new(1, 1);
 
     public BenchmarkService(ISettingsService settings, ILlmService llm, ISystemInfoService system, IEvalStore evalStore)
     {
@@ -145,8 +146,6 @@ public sealed class BenchmarkService
             IterationsPerCase = Math.Max(1, suite.IterationsPerCase),
             Temperature = suite.Temperature,
             TimeoutSeconds = suite.TimeoutSeconds <= 0 ? 120 : suite.TimeoutSeconds,
-            UseJudge = suite.UseJudge,
-            JudgeModelId = suite.JudgeModelId,
             StartedAt = DateTime.UtcNow,
             Status = "Running",
             HardwareSnapshot = await _system.CaptureAsync(ct)
@@ -201,8 +200,6 @@ public sealed class BenchmarkService
             ScoringProfile = previous.ScoringProfile,
             Temperature = previous.Temperature,
             TimeoutSeconds = previous.TimeoutSeconds,
-            UseJudge = previous.UseJudge,
-            JudgeModelId = previous.JudgeModelId,
             IterationsPerCase = previous.IterationsPerCase,
             Cases = previous.Results.Select(r => new BenchmarkCase
             {
@@ -214,7 +211,11 @@ public sealed class BenchmarkService
                 SystemPrompt = r.SystemPrompt,
                 ExpectedKeywords = r.ExpectedKeywords.ToList(),
                 ExpectedRegexes = r.ExpectedRegexes.ToList(),
-                ShouldRefuse = r.ShouldRefuse
+                ShouldRefuse = r.ShouldRefuse,
+                // r11 2.7: reruns rebuild cases from stored results but used to
+                // drop Tags, so reruns produced untagged results and fell out
+                // of the per-tag insights the moment the original suite was gone.
+                Tags = r.Tags.ToList()
             }).ToList()
         };
         var model = new LlmModel { Id = previous.ModelId, Name = previous.ModelName, Provider = previous.Provider };
@@ -474,38 +475,52 @@ public sealed class BenchmarkService
         var dbPath = DbPath;
         if (_initializedPath == dbPath && File.Exists(dbPath)) return;
 
-        await using var c = new SqliteConnection(Cs);
-        await c.OpenAsync(ct);
-        var cmd = c.CreateCommand();
-        cmd.CommandText = @"
-            CREATE TABLE IF NOT EXISTS benchmark_suites (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                suite_json TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS benchmark_runs (
-                id TEXT PRIMARY KEY,
-                suite_id TEXT NOT NULL,
-                suite_name TEXT NOT NULL,
-                model_id TEXT NOT NULL,
-                model_name TEXT NOT NULL,
-                provider TEXT NOT NULL,
-                started_at TEXT NOT NULL,
-                finished_at TEXT NOT NULL DEFAULT '',
-                status TEXT NOT NULL,
-                ranking_score REAL NOT NULL DEFAULT 0,
-                run_json TEXT NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_benchmark_runs_started ON benchmark_runs(started_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_benchmark_runs_model ON benchmark_runs(model_id);";
-        await cmd.ExecuteNonQueryAsync(ct);
-        _initializedPath = dbPath;
-
-        if (_starterSuitesSeededPath != dbPath)
+        // r11 3.7: every other store gates first-call CREATE TABLE + seeding
+        // behind a SemaphoreSlim; this one didn't, so concurrent first calls
+        // could race the starter-suite seed (EnsureStarterSuitesAsync reads
+        // `existing` then inserts) into a double-insert or a PK violation.
+        await _initGate.WaitAsync(ct);
+        try
         {
-            await EnsureStarterSuitesAsync(ct);
-            _starterSuitesSeededPath = dbPath;
+            if (_initializedPath == dbPath && File.Exists(dbPath)) return;
+
+            await using var c = new SqliteConnection(Cs);
+            await c.OpenAsync(ct);
+            var cmd = c.CreateCommand();
+            cmd.CommandText = @"
+                CREATE TABLE IF NOT EXISTS benchmark_suites (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    suite_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS benchmark_runs (
+                    id TEXT PRIMARY KEY,
+                    suite_id TEXT NOT NULL,
+                    suite_name TEXT NOT NULL,
+                    model_id TEXT NOT NULL,
+                    model_name TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    started_at TEXT NOT NULL,
+                    finished_at TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL,
+                    ranking_score REAL NOT NULL DEFAULT 0,
+                    run_json TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_benchmark_runs_started ON benchmark_runs(started_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_benchmark_runs_model ON benchmark_runs(model_id);";
+            await cmd.ExecuteNonQueryAsync(ct);
+            _initializedPath = dbPath;
+
+            if (_starterSuitesSeededPath != dbPath)
+            {
+                await EnsureStarterSuitesAsync(ct);
+                _starterSuitesSeededPath = dbPath;
+            }
+        }
+        finally
+        {
+            _initGate.Release();
         }
     }
 

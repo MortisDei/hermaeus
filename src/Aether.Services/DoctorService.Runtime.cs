@@ -314,19 +314,11 @@ public sealed partial class DoctorService
         if (string.IsNullOrWhiteSpace(executablePath))
             return string.Empty;
 
-        var trimmed = executablePath.Trim();
-        if (Path.IsPathFullyQualified(trimmed))
-            return File.Exists(trimmed) ? trimmed : string.Empty;
-
-        var path = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
-        foreach (var dir in path.Split(Path.PathSeparator))
-        {
-            if (string.IsNullOrWhiteSpace(dir)) continue;
-            var candidate = Path.Combine(dir, trimmed);
-            if (File.Exists(candidate)) return candidate;
-        }
-
-        return string.Empty;
+        // Same resolver ServerProcessManager uses to launch (r11 1.3): a
+        // directory, bare-name, or PATH answer here must agree with whether
+        // the server can actually start.
+        var resolution = ProcessManagement.ExecutableResolver.Resolve(executablePath.Trim(), "llama-server");
+        return resolution.Success ? resolution.Path! : string.Empty;
     }
 
     private static async Task<LlamaVersionInfo> ReadLlamaServerVersionAsync(string executablePath, CancellationToken ct)

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using Aether.Core.Services;
+using Aether.Services.ProcessManagement;
 
 namespace Aether.Services;
 
@@ -84,71 +85,16 @@ internal static class VoiceProviderProcessRunner
         return (process.ExitCode == 0, log.ToString());
     }
 
-    internal static async Task PlayWavFileAsync(string wavFilePath, CancellationToken ct)
-    {
-        if (IsOnPath("paplay") && await TryPlayWavFileAsync("paplay", [wavFilePath], ct)) return;
-        if (IsOnPath("pw-play") && await TryPlayWavFileAsync("pw-play", [wavFilePath], ct)) return;
-        if (IsOnPath("aplay") && await TryPlayWavFileAsync("aplay", ["-q", wavFilePath], ct)) return;
-        if (IsOnPath("ffplay") && await TryPlayWavFileAsync("ffplay", ["-nodisp", "-autoexit", wavFilePath], ct)) return;
+    /// <summary>
+    /// r11 4.2: this used to try only paplay/pw-play/aplay/ffplay - Linux
+    /// audio players - so on a stock Windows machine playback threw
+    /// "Could not find paplay...". Delegates to Aether.Voice.AudioPlayback,
+    /// the one playback helper shared by every voice provider now.
+    /// </summary>
+    internal static Task PlayWavFileAsync(string wavFilePath, CancellationToken ct) =>
+        Aether.Voice.AudioPlayback.PlayAsync(wavFilePath, ct);
 
-        throw new InvalidOperationException("Could not find paplay, pw-play, aplay, or ffplay to play generated audio.");
-    }
-
-    internal static bool IsOnPath(string command) => FindOnPath(command) is not null;
-
-    internal static string? FindOnPath(string command)
-    {
-        if (string.IsNullOrWhiteSpace(command))
-            return null;
-
-        if (Path.IsPathRooted(command) && File.Exists(command))
-            return command;
-
-        var path = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
-        var extensions = OperatingSystem.IsWindows()
-            ? (Environment.GetEnvironmentVariable("PATHEXT") ?? ".EXE;.BAT;.CMD").Split(';', StringSplitOptions.RemoveEmptyEntries)
-            : [string.Empty];
-        foreach (var dir in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
-        {
-            foreach (var ext in extensions)
-            {
-                var candidate = Path.Combine(dir, command + ext);
-                if (File.Exists(candidate))
-                    return candidate;
-            }
-        }
-
-        return null;
-    }
-
-    private static async Task<bool> TryPlayWavFileAsync(string command, IReadOnlyList<string> args, CancellationToken ct)
-    {
-        var psi = new ProcessStartInfo
-        {
-            FileName = command,
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true
-        };
-
-        foreach (var arg in args)
-            psi.ArgumentList.Add(arg);
-
-        try
-        {
-            using var process = new Process { StartInfo = psi, EnableRaisingEvents = true };
-            if (!process.Start())
-                return false;
-
-            await process.WaitForExitAsync(ct);
-            return process.ExitCode == 0;
-        }
-        catch
-        {
-            return false;
-        }
-    }
+    internal static bool IsOnPath(string command) => ExecutableResolver.FindOnPath(command) is not null;
 
     internal static string ResolvePythonPath(ISettingsService settings)
     {
@@ -167,7 +113,7 @@ internal static class VoiceProviderProcessRunner
         if (Path.IsPathFullyQualified(command))
             return File.Exists(command);
 
-        return FindOnPath(command) is not null;
+        return ExecutableResolver.FindOnPath(command) is not null;
     }
 
     internal static string? ResolveSpeakerFile(ISettingsService settings)

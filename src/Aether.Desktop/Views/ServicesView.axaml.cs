@@ -89,6 +89,13 @@ public partial class ServicesView : UserControl
                        new FilePickerFileType("All files")  { Patterns = ["*"] }]
             };
 
+            if (!isExe && !string.IsNullOrWhiteSpace(srv.SuggestedModelBrowseDirectory))
+            {
+                var startFolder = await top.StorageProvider.TryGetFolderFromPathAsync(srv.SuggestedModelBrowseDirectory);
+                if (startFolder is not null)
+                    options.SuggestedStartLocation = startFolder;
+            }
+
             var files = await top.StorageProvider.OpenFilePickerAsync(options);
             if (files.Count == 0) return;
 

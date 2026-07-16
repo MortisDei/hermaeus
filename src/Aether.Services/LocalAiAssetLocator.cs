@@ -79,6 +79,30 @@ public static class LocalAiAssetLocator
         }
     }
 
+    /// <summary>
+    /// Best-guess folder to open a file picker in for an embedding model:
+    /// the first existing embed/embedding/embeddings subdirectory under the
+    /// detected models folder, falling back to the models folder itself (or
+    /// root) so browsing never lands the user in an unrelated location like
+    /// the chat models folder.
+    /// </summary>
+    public static string GetPreferredEmbeddingsDirectory(string root)
+    {
+        root = root.Trim();
+        if (string.IsNullOrWhiteSpace(root))
+            return string.Empty;
+
+        root = Path.GetFullPath(root);
+        if (!Directory.Exists(root))
+            return string.Empty;
+
+        var models = FindModelsDirectory(root);
+        if (string.IsNullOrWhiteSpace(models))
+            return root;
+
+        return GetEmbeddingDirectories(models).FirstOrDefault(Directory.Exists) ?? models;
+    }
+
     public static IReadOnlyList<string> FindRerankerDirectories(string root)
     {
         root = root.Trim();

@@ -5,12 +5,16 @@ namespace Aether.Services;
 
 public sealed class RuntimeProfileService : IDisposable
 {
-    private static readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(3) };
+    private static readonly HttpClient SharedHttp = new() { Timeout = TimeSpan.FromSeconds(3) };
+    private readonly HttpClient _http;
     private readonly ISettingsService _settings;
+    private readonly ISecretStore? _secrets;
 
-    public RuntimeProfileService(ISettingsService settings)
+    public RuntimeProfileService(ISettingsService settings, ISecretStore? secrets = null, HttpClient? http = null)
     {
         _settings = settings;
+        _secrets = secrets;
+        _http = http ?? SharedHttp;
         EnsureDefaults();
     }
 
@@ -62,7 +66,14 @@ public sealed class RuntimeProfileService : IDisposable
             };
             using var req = new HttpRequestMessage(HttpMethod.Get, url);
             if (!string.IsNullOrWhiteSpace(profile.ApiKey))
-                req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", profile.ApiKey);
+            {
+                // r11 2.8: when the key was stored through ISecretStore, profile.ApiKey
+                // holds the reference "secret:<name>", not the credential itself; sending
+                // that literal string as a bearer token authenticates with the reference,
+                // not the secret, and fails against any endpoint that requires auth.
+                var resolvedKey = _secrets is null ? profile.ApiKey : await _secrets.ResolveAsync(profile.ApiKey, ct);
+                req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", resolvedKey);
+            }
 
             var resp = await _http.SendAsync(req, ct);
             return resp.IsSuccessStatusCode

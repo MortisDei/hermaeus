@@ -152,17 +152,6 @@
                                                ToolTip.Tip="0 runs every case in each selected suite. Use a small value for a quick smoke pass." />
                             </StackPanel>
                         </WrapPanel>
-                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
-                            <CheckBox Grid.Column="0"
-                                      Content="Use judge"
-                                      IsChecked="{Binding UseJudge}"
-                                      VerticalAlignment="Center"
-                                      ToolTip.Tip="Optional second model scoring. Leave off for a faster offline deterministic benchmark." />
-                            <TextBox Grid.Column="1"
-                                     Text="{Binding JudgeModelId}"
-                                     Watermark="Judge model id (optional)"
-                                     ToolTip.Tip="Model id used for judge scoring when enabled." />
-                        </Grid>
                         <CheckBox Content="Run all suites"
                                   IsChecked="{Binding RunAllSuites}"
                                   ToolTip.Tip="When enabled, one click runs every benchmark suite with the selected model. Turn off to run only the highlighted suite." />

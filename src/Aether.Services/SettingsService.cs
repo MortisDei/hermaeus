@@ -190,16 +190,38 @@ public sealed class SettingsService : ISettingsService
             var target = Path.Combine(next, file.RelativePath);
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
             File.Move(file.SourcePath, target);
+            if (IsSecretsFile(target))
+                TryRestrictSecretsPermissions(target);
         }
 
-        if (!string.Equals(previous, DefaultDir, StringComparison.OrdinalIgnoreCase)
-            && Directory.Exists(previous)
-            && !Directory.EnumerateFileSystemEntries(previous).Any())
+        // Moving every file (r11 3.1) can leave now-empty subdirectories
+        // (logs/, voice/, agent-scenarios/, ...) behind; prune those before
+        // checking whether the old root itself is empty, or a full migration
+        // never cleans up the old root at all.
+        if (!string.Equals(previous, DefaultDir, StringComparison.OrdinalIgnoreCase) && Directory.Exists(previous))
         {
-            Directory.Delete(previous);
+            PruneEmptyDirectories(previous);
+            if (!Directory.EnumerateFileSystemEntries(previous).Any())
+                Directory.Delete(previous);
         }
 
         return new SettingsSaveResult(true, previous, next, backupDir, files.Count);
+    }
+
+    private static void PruneEmptyDirectories(string root)
+    {
+        foreach (var directory in Directory.EnumerateDirectories(root, "*", SearchOption.AllDirectories)
+                     .OrderByDescending(d => d.Length))
+        {
+            try
+            {
+                if (Directory.Exists(directory) && !Directory.EnumerateFileSystemEntries(directory).Any())
+                    Directory.Delete(directory);
+            }
+            catch
+            {
+            }
+        }
     }
 
     private static void NormalizeSettings(AppSettings settings)
@@ -302,37 +324,31 @@ public sealed class SettingsService : ISettingsService
             : name.Equals("Chat", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static IEnumerable<MigrationFile> EnumerateMigrationFiles(string root)
+    /// <summary>
+    /// r11 3.1: previously moved only conversations.db*/memories.db*/benchmarks.db*/agent/,
+    /// stranding secrets.local.*, traces.db, eval_runs.db, logs/, voice/lexicon.txt,
+    /// agent-scenarios/, and eval-runs/ in the old root. Now backed by
+    /// DataRootManifest, the same enumerator BackupService uses, so a moved data
+    /// root and a backup can never disagree about what the data root contains.
+    /// </summary>
+    private static IEnumerable<MigrationFile> EnumerateMigrationFiles(string root) =>
+        DataRootManifest.EnumerateAll(root).Select(f => new MigrationFile(f.SourcePath, f.RelativePath));
+
+    private static bool IsSecretsFile(string path) =>
+        string.Equals(Path.GetFileName(path), "secrets.local.json", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(Path.GetFileName(path), "secrets.local.key", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Mirrors SecretStore's own TryRestrictPermissions so a moved secrets file keeps the same owner-only mode it had before the move (r11 3.1 security-review note).</summary>
+    private static void TryRestrictSecretsPermissions(string path)
     {
-        foreach (var file in EnumerateFamily(root, "conversations.db*", root))
-            yield return file;
-        foreach (var file in EnumerateFamily(root, "memories.db*", root))
-            yield return file;
-        foreach (var file in EnumerateFamily(root, "benchmarks.db*", root))
-            yield return file;
-        foreach (var file in EnumerateDirectory(root, "agent"))
-            yield return file;
-    }
-
-    private static IEnumerable<MigrationFile> EnumerateFamily(string root, string pattern, string relativeRoot)
-    {
-        if (!Directory.Exists(root))
-            return [];
-
-        return Directory.EnumerateFiles(root, pattern)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Select(path => new MigrationFile(path, Path.GetRelativePath(relativeRoot, path)));
-    }
-
-    private static IEnumerable<MigrationFile> EnumerateDirectory(string root, string relativeDirectory)
-    {
-        var directory = Path.Combine(root, relativeDirectory);
-        if (!Directory.Exists(directory))
-            return [];
-
-        return Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Select(path => new MigrationFile(path, Path.GetRelativePath(root, path)));
+        try
+        {
+            if (!OperatingSystem.IsWindows())
+                File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+        catch
+        {
+        }
     }
 
     private static void ValidateDataRoot(string path)

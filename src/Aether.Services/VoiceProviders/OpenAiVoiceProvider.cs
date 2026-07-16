@@ -73,9 +73,10 @@ public sealed class OpenAiVoiceProvider : ITtsService, IVoiceProvider, IDisposab
 
     public async Task<VoiceSynthesisResult> GenerateSpeechAsync(VoiceSynthesisRequest request, CancellationToken ct = default)
     {
+        var outputPath = string.Empty;
         try
         {
-            var outputPath = await RenderToFileAsync(request.Text, request.Voice, request.OutputPath, ct);
+            outputPath = await RenderToFileAsync(request.Text, request.Voice, request.OutputPath, ct);
             if (request.PlayAudio)
                 await VoiceProviderProcessRunner.PlayWavFileAsync(outputPath, ct);
             return new VoiceSynthesisResult(true, "OpenAI synthesis complete.", outputPath);
@@ -83,6 +84,15 @@ public sealed class OpenAiVoiceProvider : ITtsService, IVoiceProvider, IDisposab
         catch (Exception ex)
         {
             return new VoiceSynthesisResult(false, ex.Message);
+        }
+        finally
+        {
+            // r11 4.3: see KokoroVoiceProvider.GenerateSpeechAsync.
+            if (request.OutputPath is null && request.PlayAudio && !string.IsNullOrWhiteSpace(outputPath))
+            {
+                try { File.Delete(outputPath); }
+                catch { }
+            }
         }
     }
 

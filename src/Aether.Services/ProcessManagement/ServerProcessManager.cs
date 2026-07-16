@@ -87,6 +87,9 @@ public sealed class ServerProcessManager : IDisposable
             Emit($"[aether] Launched PID {_process.Id} - waiting for /health on port {cfg.Port}...");
             Emit($"[aether] Model: {cfg.ModelPath}");
 
+            // r11 4.4: restart previously replaced _monitorCts without disposing
+            // the one from the prior start.
+            _monitorCts?.Dispose();
             _monitorCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             await WaitForHealthAsync(cfg.Port, () => _process, _monitorCts.Token);
 
@@ -151,7 +154,8 @@ public sealed class ServerProcessManager : IDisposable
     public static async Task<ServerTuneResult> AutoTuneAsync(
         ServerConfig cfg,
         IProgress<string>? progress = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        IPortOwnerLookup? portOwnerLookup = null)
     {
         var baseConfig = NormalizeConfig(new ServerConfig
         {
@@ -166,6 +170,23 @@ public sealed class ServerProcessManager : IDisposable
             AutoStart      = false,
             ExtraArgs      = cfg.ExtraArgs
         });
+
+        // r11 1.5: probes started processes and waited for /health on
+        // cfg.Port without the port preflight StartAsync performs. If
+        // anything was already listening there (the orphan scenario r9 was
+        // built around, or an unrelated service), every candidate "reached
+        // /health" instantly against the wrong process, and auto-tune
+        // reported the first candidate (999 layers) as working against a
+        // foreign server's log.
+        var lookup = portOwnerLookup ?? PortOwnerLookup.Default;
+        if (lookup.IsPortListening(baseConfig.Port))
+        {
+            var owner = lookup.FindOwner(baseConfig.Port);
+            var detail = owner is null
+                ? $"Port {baseConfig.Port} is already in use."
+                : $"Port {baseConfig.Port} is already in use by {owner.ProcessName} (PID {owner.Pid}).";
+            throw new InvalidOperationException($"Cannot auto-tune: {detail} Stop that process or change this server's port first.");
+        }
 
         var threads = ChooseThreadCount(baseConfig.Threads);
         var candidates = BuildGpuLayerCandidates(baseConfig.GpuLayers);
@@ -389,9 +410,26 @@ public sealed class ServerProcessManager : IDisposable
         if (cfg.Port < 1 || cfg.Port > 65535)
             throw new ArgumentOutOfRangeException(nameof(cfg.Port), cfg.Port, "Port must be between 1 and 65535");
 
-        cfg.ExecutablePath = ResolveExecutable(cfg.ExecutablePath);
-        cfg.ModelPath      = ResolveModel(cfg.ModelPath);
-        return cfg;
+        // r11 4.5: resolution results are launch-time values, not
+        // configuration edits. Mutating the caller's ServerConfig in place
+        // (typically the settings object itself) silently rewrote a
+        // directory or bare-name configuration to a concrete resolved path
+        // in memory, which the next unrelated SaveAsync then persisted.
+        // Returning a copy keeps the caller's instance byte-identical.
+        return new ServerConfig
+        {
+            Id             = cfg.Id,
+            Name           = cfg.Name,
+            ExecutablePath = ResolveExecutable(cfg.ExecutablePath),
+            ModelPath      = ResolveModel(cfg.ModelPath),
+            Port           = cfg.Port,
+            ContextSize    = cfg.ContextSize,
+            GpuLayers      = cfg.GpuLayers,
+            Threads        = cfg.Threads,
+            EmbeddingsMode = cfg.EmbeddingsMode,
+            AutoStart      = cfg.AutoStart,
+            ExtraArgs      = cfg.ExtraArgs
+        };
     }
 
     private static string ResolveExecutable(string executablePath)
@@ -400,33 +438,16 @@ public sealed class ServerProcessManager : IDisposable
             throw new InvalidOperationException("Set the llama-server executable path first.");
 
         var trimmed = executablePath.Trim();
-        if (Directory.Exists(trimmed))
+        var resolution = ExecutableResolver.Resolve(trimmed, "llama-server");
+        if (resolution.Success) return resolution.Path!;
+
+        throw resolution.Failure switch
         {
-            var direct = Path.Combine(trimmed, "llama-server");
-            if (File.Exists(direct)) return direct;
-
-            var matches = Directory.EnumerateFiles(trimmed, "llama-server", SearchOption.AllDirectories)
-                .Take(2)
-                .ToArray();
-
-            return matches.Length switch
-            {
-                1 => matches[0],
-                0 => throw new FileNotFoundException($"No llama-server executable was found inside '{trimmed}'."),
-                _ => throw new InvalidOperationException($"More than one llama-server executable was found inside '{trimmed}'. Select the exact file.")
-            };
-        }
-
-        if (File.Exists(trimmed)) return trimmed;
-
-        if (!LooksLikePath(trimmed))
-        {
-            var resolved = FindOnPath(trimmed);
-            if (resolved is not null) return resolved;
-            throw new FileNotFoundException($"'{trimmed}' was not found on PATH. Select the full llama-server executable.");
-        }
-
-        throw new FileNotFoundException($"The llama-server executable does not exist: '{trimmed}'.");
+            ExecutableResolutionFailure.Ambiguous => new InvalidOperationException($"More than one llama-server executable was found inside '{trimmed}'. Select the exact file."),
+            ExecutableResolutionFailure.NoneInDirectory => new FileNotFoundException($"No llama-server executable was found inside '{trimmed}'."),
+            ExecutableResolutionFailure.NotOnPath => new FileNotFoundException($"'{trimmed}' was not found on PATH. Select the full llama-server executable."),
+            _ => new FileNotFoundException($"The llama-server executable does not exist: '{trimmed}'.")
+        };
     }
 
     private static string ResolveModel(string modelPath)
@@ -468,21 +489,6 @@ public sealed class ServerProcessManager : IDisposable
         value.Contains(Path.DirectorySeparatorChar) ||
         value.Contains(Path.AltDirectorySeparatorChar);
 
-    private static string? FindOnPath(string executableName)
-    {
-        var path = Environment.GetEnvironmentVariable("PATH");
-        if (string.IsNullOrWhiteSpace(path)) return null;
-
-        foreach (var dir in path.Split(Path.PathSeparator))
-        {
-            if (string.IsNullOrWhiteSpace(dir)) continue;
-            var candidate = Path.Combine(dir, executableName);
-            if (File.Exists(candidate)) return candidate;
-        }
-
-        return null;
-    }
-
     // ── Health poll ───────────────────────────────────────────────────────────
 
     private static async Task WaitForHealthAsync(
@@ -521,7 +527,12 @@ public sealed class ServerProcessManager : IDisposable
 
     private void OnProcessExited(object? sender, EventArgs e)
     {
-        var code = _process?.ExitCode ?? -1;
+        // r11 4.4: reads via the sender captured at event-raise time, not the
+        // _process field, which KillProcess() may be disposing concurrently
+        // on another thread (process-crash class); ExitCode access on an
+        // already-disposed Process is swallowed rather than left to throw
+        // ObjectDisposedException on a threadpool thread.
+        var code = TryGetExitCode(sender as Process);
         Emit($"[aether] Process exited with code {code}.");
         if (Status == ServerStatus.Running)
         {
@@ -549,6 +560,14 @@ public sealed class ServerProcessManager : IDisposable
         catch { }
         _process?.Dispose();
         _process = null;
+    }
+
+    private static int TryGetExitCode(Process? process)
+    {
+        if (process is null) return -1;
+        try { return process.ExitCode; }
+        catch (ObjectDisposedException) { return -1; }
+        catch (InvalidOperationException) { return -1; }
     }
 
     private void SetStatus(ServerStatus s)

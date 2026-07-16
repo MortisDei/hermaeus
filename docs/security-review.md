@@ -424,6 +424,56 @@ Avalonia's synchronous `Exit` event, and stripping em dashes app-wide (the
 new typographic normalization in `KokoroTextNormalizer` is scoped to the
 speech boundary only, not authored text or chat rendering).
 
+### r11: Services Deep-Dive
+
+`0.16.0-alpha` is the first dedicated audit of Aether.Services (providers,
+process management, stores, setup/download, Doctor, voice glue). No new
+network surface; the touches below are to the app's only self-updating
+binary download, the data-root migration, and an information-leak-class fix.
+
+- **The llama-server installer is rebuilt.** Previously the only code path
+  that downloads and runs a third-party binary. `ArchiveExtractor` extracts
+  the real llama.cpp release archive (zip on Windows, tar.gz elsewhere) with
+  a zip-slip guard: every entry's resolved destination is checked to remain
+  inside the target directory before it is written, and a malicious entry
+  (`../evil.exe`, or an absolute path) is rejected outright rather than
+  extracted. **Provenance decision:** GitHub's releases API does not publish
+  per-asset SHA256 hashes, so the pinned-tag download path is HTTPS + GitHub
+  origin + exact tag + exact asset name, not a pinned hash - the same trust
+  boundary the app already places in GitHub for its own release channel. The
+  latest-release path additionally verifies the selected asset matches this
+  platform's expected naming exactly (`SelectDownloadAsset`, tested against
+  a captured real release fixture) before downloading. This is a narrower
+  guarantee than the SHA256-pinned starter-model and embedding-model
+  downloads (r8/Doctor), which remain the standard for content Aether can
+  pin a fixed hash for; it is recorded here as a deliberate, scoped
+  exception for a binary that moves with every llama.cpp release.
+- **The setup wizard's Phi-4 model download closes the last unverified-
+  download gap.** `ModelHashes` was an empty map (dead verification branch);
+  the download is now pinned via the Hugging Face LFS oid, matching the r8
+  `StarterModelCatalog`/Doctor embedding-model precedent, and a failed
+  verification deletes the file.
+- **Data-root migration now moves `secrets.local.json`/`secrets.local.key`
+  along with everything else the app writes to the data root**, closing a
+  gap where a moved data root left a live copy of the app's most sensitive
+  file behind in the old root while the new root's `SecretStore` silently
+  reported missing credentials. The move is a `File.Move` (not copy), so the
+  old root retains nothing after migration; the moved files have their
+  owner-only Unix permissions re-applied (mirrors `SecretStore`'s own
+  `TryRestrictPermissions`) since a move does not guarantee mode bits
+  survive across filesystems. `BackupService` shares the same
+  `DataRootManifest` enumeration and continues to exclude both secrets files
+  from backups by design, unchanged from prior rounds.
+- **Runtime-profile health checks no longer send a secret reference as a
+  bearer token.** When a runtime profile's API key was stored through
+  `ISecretStore`, `CheckHealthAsync` sent the literal `secret:<name>` string
+  as the `Authorization` header instead of resolving it - an information-
+  leak-class issue (the reference string reaches a network peer instead of
+  the credential), low severity and loopback-typical for local runtimes, but
+  a real bug for any profile pointed at a remote OpenAI-compatible endpoint.
+  Resolved via the same `ISecretStore.ResolveAsync` path every other
+  outbound call uses.
+
 ## Release Gate Status
 
 Security review and threat model refresh was completed for `0.13.0-alpha` as

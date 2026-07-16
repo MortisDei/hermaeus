@@ -429,6 +429,16 @@ public partial class MainWindowViewModel : ViewModelBase
 
     partial void OnActivePanelChanged(string value)
     {
+        // Wizard is a DI singleton constructed once at startup; without
+        // refreshing here, re-entering it later (Settings' "re-run setup
+        // wizard", the chat empty-state's "Open setup wizard") shows
+        // whatever it last held, which can be blank fields (e.g. a startup
+        // race where settings hadn't loaded from disk yet at construction).
+        // Advancing "Next" from a blank Data roots step then saves those
+        // blanks over the user's real DataRootDirectory/LocalAiAssetsRoot.
+        if (value == "wizard")
+            Wizard.LoadFromSettings();
+
         OnPropertyChanged(nameof(ShowChat));
         OnPropertyChanged(nameof(ShowAgent));
         OnPropertyChanged(nameof(ShowSettings));

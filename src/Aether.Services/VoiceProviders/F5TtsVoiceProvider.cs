@@ -90,9 +90,10 @@ public sealed class F5TtsVoiceProvider : ITtsService, IVoiceProvider
 
     public async Task<VoiceSynthesisResult> GenerateSpeechAsync(VoiceSynthesisRequest request, CancellationToken ct = default)
     {
+        var outputPath = string.Empty;
         try
         {
-            var outputPath = await RenderToFileAsync(request.Text, request.VoiceSamplePath ?? request.Voice, request.OutputPath, ct);
+            outputPath = await RenderToFileAsync(request.Text, request.VoiceSamplePath ?? request.Voice, request.OutputPath, ct);
             if (request.PlayAudio)
                 await VoiceProviderProcessRunner.PlayWavFileAsync(outputPath, ct);
             return new VoiceSynthesisResult(true, "F5-TTS synthesis complete.", outputPath);
@@ -100,6 +101,15 @@ public sealed class F5TtsVoiceProvider : ITtsService, IVoiceProvider
         catch (Exception ex)
         {
             return new VoiceSynthesisResult(false, ex.Message);
+        }
+        finally
+        {
+            // r11 4.3: see KokoroVoiceProvider.GenerateSpeechAsync.
+            if (request.OutputPath is null && request.PlayAudio && !string.IsNullOrWhiteSpace(outputPath))
+            {
+                try { File.Delete(outputPath); }
+                catch { }
+            }
         }
     }
 

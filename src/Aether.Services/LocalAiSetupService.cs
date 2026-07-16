@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
-using System.Text.RegularExpressions;
 using Aether.Core.Models;
 using Aether.Core.Services;
 
@@ -12,7 +11,21 @@ public sealed class LocalAiSetupService
     private static readonly Version MinSupportedXttsPython = new(3, 9);
     private static readonly Version MaxSupportedXttsPythonExclusive = new(3, 12);
 
-    private static readonly Dictionary<string, string> ModelHashes = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>
+    /// r11 1.6: this was an empty map, so the "verify hash for security if
+    /// available" branch in DownloadGgufModelAsync was dead code and the
+    /// Phi-4 download landed unverified, contradicting the security-posture
+    /// skill and the r8 StarterModelCatalog precedent. SHA256 verified via
+    /// the Hugging Face LFS pointer (`raw/main/&lt;file&gt;` -&gt; `oid sha256:...`),
+    /// the same method StarterModelCatalog documents, checked 2026-07-16.
+    /// </summary>
+    internal const string Phi4ModelUrl = "https://huggingface.co/bartowski/microsoft_Phi-4-mini-reasoning-GGUF/resolve/main/microsoft_Phi-4-mini-reasoning-Q5_K_M.gguf?download=true";
+    private const string Phi4ModelSha256 = "daabb3e23ca39e969ccd1ee8eec731a164f3c1754bbc70ce946a474ce4df0d7b";
+
+    private static readonly Dictionary<string, string> ModelHashes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        [Phi4ModelUrl] = Phi4ModelSha256
+    };
 
     private readonly PythonHealthValidator _pythonValidator;
     private readonly ModelDownloadService _modelDownloader;
@@ -144,8 +157,7 @@ public sealed class LocalAiSetupService
         {
             var modelsDir = Path.Combine(layout.Root, "models");
             var phi4ModelPath = Path.Combine(modelsDir, "phi-4-mini-reasoning-Q5_K_M.gguf");
-            const string phi4Url = "https://huggingface.co/bartowski/microsoft_Phi-4-mini-reasoning-GGUF/resolve/main/microsoft_Phi-4-mini-reasoning-Q5_K_M.gguf?download=true";
-            actions.Add(DownloadGgufModelAction(phi4ModelPath, phi4Url));
+            actions.Add(DownloadGgufModelAction(phi4ModelPath, Phi4ModelUrl));
 
             items.Add(new("default-model", "Default reasoning model", LocalAiReadinessStatus.NeedsAction,
                 "Phi-4 mini reasoning model can be downloaded automatically.",
@@ -235,7 +247,13 @@ public sealed class LocalAiSetupService
                 progress?.Report("Verifying model integrity...");
                 var hashValid = await _modelDownloader.VerifyHashAsync(action.TargetPath, expectedHash, progress, ct);
                 if (!hashValid)
+                {
+                    // r11 1.6: a failed verification must not leave a
+                    // corrupted/tampered file in place for something else to
+                    // pick up later as if it were trusted.
+                    TryDeleteFile(action.TargetPath);
                     return new LocalAiSetupResult(false, "Model hash verification failed. Downloaded file may be corrupted or tampered with.");
+                }
                 progress?.Report("Model integrity verified.");
             }
 
@@ -392,7 +410,7 @@ public sealed class LocalAiSetupService
         if (File.Exists(trimmed))
             return Path.GetFileName(trimmed).Contains("llama-server", StringComparison.OrdinalIgnoreCase);
 
-        return FindOnPath(trimmed) is not null
+        return ProcessManagement.ExecutableResolver.FindOnPath(trimmed) is not null
             && Path.GetFileName(trimmed).Contains("llama-server", StringComparison.OrdinalIgnoreCase);
     }
 
@@ -468,9 +486,9 @@ public sealed class LocalAiSetupService
     private static async Task<GpuBackendDetection> DetectGpuBackendAsync()
     {
         // Prefer hardware-specific accelerators before falling back to CPU.
-        if (FindOnPath("nvidia-smi") is not null)
+        if (ProcessManagement.ExecutableResolver.FindOnPath("nvidia-smi") is not null)
             return new GpuBackendDetection("cuda", null);
-        if (FindOnPath("rocminfo") is not null)
+        if (ProcessManagement.ExecutableResolver.FindOnPath("rocminfo") is not null)
             return new GpuBackendDetection("rocm", null);
         if (OperatingSystem.IsMacOS() && RuntimeInformation.ProcessArchitecture is Architecture.Arm64)
             return new GpuBackendDetection("mps", null);
@@ -519,21 +537,6 @@ public sealed class LocalAiSetupService
         }
 
         return new GpuBackendDetection("cpu", null);
-    }
-
-    private static string? FindOnPath(string executableName)
-    {
-        var path = Environment.GetEnvironmentVariable("PATH");
-        if (string.IsNullOrWhiteSpace(path)) return null;
-
-        foreach (var dir in path.Split(Path.PathSeparator))
-        {
-            if (string.IsNullOrWhiteSpace(dir)) continue;
-            var candidate = Path.Combine(dir, executableName);
-            if (File.Exists(candidate)) return candidate;
-        }
-
-        return null;
     }
 
     private static Task<LocalAiSetupResult> InstallXttsAsync(string pythonPath, AppSettings settings, IReadOnlyList<string> packages, IProgress<string>? progress, CancellationToken ct)
@@ -624,14 +627,36 @@ public sealed class LocalAiSetupService
         if (!upgrade.Success)
             return upgrade;
 
+        return await RunProcessAsync(pythonPath, BuildTorchInstallArgs(backend), workingDirectory, progress, ct);
+    }
+
+    /// <summary>
+    /// r11 1.8: rocm5.8 has never been a published PyTorch index (returns
+    /// HTTP 403 from download.pytorch.org) so the ROCm branch always failed
+    /// pip resolution; cu118, while still valid, is years old. Verified
+    /// against download.pytorch.org on 2026-07-16: cu118 through cu132 and
+    /// rocm6.0 through rocm7.2 all resolve; these two are the indices
+    /// pytorch.org's own install-selector currently recommends. A failed
+    /// install still surfaces the attempted --index-url to the user via
+    /// RunProcessAsync's "Command: ..." log line, threaded through by
+    /// InstallXttsWithRepairAsync's failure message. Pulled out as a pure
+    /// function so a future index change is a one-line, reviewable diff with
+    /// a test that pins the expected arguments per backend.
+    /// </summary>
+    internal const string CudaTorchIndexUrl = "https://download.pytorch.org/whl/cu128";
+    internal const string RocmTorchIndexUrl = "https://download.pytorch.org/whl/rocm6.3";
+    private const string CpuTorchIndexUrl = "https://download.pytorch.org/whl/cpu";
+
+    internal static IReadOnlyList<string> BuildTorchInstallArgs(string backend)
+    {
         var args = new List<string> { "-m", "pip", "install" };
         if (backend == "cuda")
         {
-            args.AddRange(["torch", "torchaudio", "torchvision", "--index-url", "https://download.pytorch.org/whl/cu118"]);
+            args.AddRange(["torch", "torchaudio", "torchvision", "--index-url", CudaTorchIndexUrl]);
         }
         else if (backend == "rocm")
         {
-            args.AddRange(["torch", "torchaudio", "torchvision", "--index-url", "https://download.pytorch.org/whl/rocm5.8"]);
+            args.AddRange(["torch", "torchaudio", "torchvision", "--index-url", RocmTorchIndexUrl]);
         }
         else if (backend == "mps")
         {
@@ -639,10 +664,10 @@ public sealed class LocalAiSetupService
         }
         else
         {
-            args.AddRange(["torch", "torchaudio", "torchvision", "--index-url", "https://download.pytorch.org/whl/cpu"]);
+            args.AddRange(["torch", "torchaudio", "torchvision", "--index-url", CpuTorchIndexUrl]);
         }
 
-        return await RunProcessAsync(pythonPath, args, workingDirectory, progress, ct);
+        return args;
     }
 
     private static async Task<GpuBackendDetection> DetectGpuBackendForSettingsAsync(AppSettings settings, CancellationToken ct)
@@ -705,32 +730,22 @@ public sealed class LocalAiSetupService
         return Path.GetDirectoryName(binDir) ?? string.Empty;
     }
 
-    private static async Task<Version?> ReadPythonVersionAsync(string pythonPath, string workingDirectory, CancellationToken ct)
-    {
-        var result = await RunProcessAsync(
-            pythonPath,
-            ["-c", "import sys; print(f'AETHER_PYVER={sys.version_info[0]}.{sys.version_info[1]}')"],
-            workingDirectory,
-            progress: null,
-            ct);
-
-        if (!result.Success)
-            return null;
-
-        var match = Regex.Match(result.Log, @"AETHER_PYVER=(\d+)\.(\d+)", RegexOptions.CultureInvariant);
-        if (!match.Success)
-            return null;
-
-        if (!int.TryParse(match.Groups[1].Value, out var major) || !int.TryParse(match.Groups[2].Value, out var minor))
-            return null;
-
-        return new Version(major, minor);
-    }
-
     private static bool IsXttsCompatibleVersion(Version version) =>
         version >= MinSupportedXttsPython && version < MaxSupportedXttsPythonExclusive;
 
-    private static async Task<bool> ValidatePythonForXttsAsync(string pythonPath, string workingDirectory, IProgress<string>? progress, CancellationToken ct)
+    private static Task<bool> ValidatePythonForXttsAsync(string pythonPath, string workingDirectory, IProgress<string>? progress, CancellationToken ct) =>
+        ValidatePythonForXttsAsync(pythonPath, [], workingDirectory, progress, ct);
+
+    /// <summary>
+    /// r11 1.7: runs the full candidate command (FileName + PrefixArgs, e.g.
+    /// "py -3.11") instead of just FileName - testing "py -3.11" used to
+    /// actually validate plain "py" (the machine default). Also the only
+    /// place that compares the reported version against
+    /// MinSupportedXttsPython/MaxSupportedXttsPythonExclusive; the script
+    /// previously reported a version but nothing ever checked it, so a 3.13
+    /// interpreter passed every check.
+    /// </summary>
+    private static async Task<bool> ValidatePythonForXttsAsync(string pythonPath, IReadOnlyList<string> prefixArgs, string workingDirectory, IProgress<string>? progress, CancellationToken ct)
     {
         var validationScript = """
 import sys
@@ -796,7 +811,7 @@ for check_name, passed in checks:
 
         var result = await RunProcessAsync(
             pythonPath,
-            ["-c", validationScript],
+            [.. prefixArgs, "-c", validationScript],
             workingDirectory,
             progress: null,
             ct);
@@ -809,8 +824,14 @@ for check_name, passed in checks:
 
         var checks = new Dictionary<string, bool>();
         var errors = new List<string>();
+        string? reportedVersion = null;
 
-        foreach (var line in result.Log.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        // TrimEntries: the log is built with StringBuilder.AppendLine, which
+        // uses Environment.NewLine ("\r\n" on Windows); splitting on '\n'
+        // alone left a trailing '\r' on every line, so "PASS" never equaled
+        // the parsed "PASS\r" and every check silently failed regardless of
+        // the interpreter (found while adding the r11 1.7 version-range test).
+        foreach (var line in result.Log.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
             if (line.StartsWith("AETHER_CHECK="))
             {
@@ -826,10 +847,16 @@ for check_name, passed in checks:
             }
             else if (line.StartsWith("AETHER_VERSION="))
             {
-                var version = line.Substring("AETHER_VERSION=".Length);
-                progress?.Report($"Validating Python {version}...");
+                reportedVersion = line.Substring("AETHER_VERSION=".Length);
+                progress?.Report($"Validating Python {reportedVersion}...");
             }
         }
+
+        checks["Version in supported range"] = reportedVersion is not null
+            && Version.TryParse(reportedVersion, out var parsedVersion)
+            && IsXttsCompatibleVersion(parsedVersion);
+        if (checks["Version in supported range"] == false)
+            errors.Add($"Python {reportedVersion ?? "unknown"} is outside the supported range {MinSupportedXttsPython} - {MaxSupportedXttsPythonExclusive} (exclusive).");
 
         var allPassed = checks.Values.All(v => v);
 
@@ -860,14 +887,8 @@ for check_name, passed in checks:
 
         foreach (var candidate in preferredCandidates)
         {
-            var testPython = candidate.FileName;
-            if (candidate.PrefixArgs.Count > 0)
-            {
-                testPython = $"{candidate.FileName} {string.Join(" ", candidate.PrefixArgs)}".Trim();
-            }
-
             progress?.Report($"Testing {candidate.DisplayName}...");
-            if (!await ValidatePythonForXttsAsync(candidate.FileName, Environment.CurrentDirectory, progress, ct))
+            if (!await ValidatePythonForXttsAsync(candidate.FileName, candidate.PrefixArgs, Environment.CurrentDirectory, progress, ct))
                 continue;
 
             progress?.Report($"Using Python for XTTS setup: {candidate.DisplayName}");
@@ -875,7 +896,7 @@ for check_name, passed in checks:
         }
 
         progress?.Report($"Testing {fallbackCandidate.DisplayName}...");
-        if (await ValidatePythonForXttsAsync(fallbackCandidate.FileName, Environment.CurrentDirectory, progress, ct))
+        if (await ValidatePythonForXttsAsync(fallbackCandidate.FileName, fallbackCandidate.PrefixArgs, Environment.CurrentDirectory, progress, ct))
         {
             progress?.Report($"Preferred Python 3.9-3.11 not found. Using {fallbackCandidate.DisplayName}. This may have compatibility issues.");
             return fallbackCandidate;
@@ -1003,6 +1024,18 @@ for check_name, passed in checks:
         }
     }
 
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+        catch
+        {
+        }
+    }
+
     private static void AppendLine(string? line, StringBuilder log, IProgress<string>? progress)
     {
         if (string.IsNullOrWhiteSpace(line)) return;
@@ -1013,8 +1046,6 @@ for check_name, passed in checks:
 
     private static string PythonPathForVenv(string venv) =>
         Path.Combine(venv, OperatingSystem.IsWindows() ? "Scripts" : "bin", OperatingSystem.IsWindows() ? "python.exe" : "python");
-
-    private static string DefaultPythonCommand() => OperatingSystem.IsWindows() ? "python" : "python3";
 
     private sealed record PythonCommand(string FileName, IReadOnlyList<string> PrefixArgs, string DisplayName);
 

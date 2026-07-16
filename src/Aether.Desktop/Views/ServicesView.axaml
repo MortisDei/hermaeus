@@ -340,7 +340,7 @@
                                              Watermark="--flash-attn --mlock  etc."
                                              FontSize="13" CornerRadius="6" Padding="10,6"
                                              IsEnabled="{Binding CanEdit}"
-                                             ToolTip.Tip="Extra llama-server arguments are passed without a shell. Network flags such as --host 0.0.0.0 produce a trust warning." />
+                                             ToolTip.Tip="Extra llama-server arguments are passed without a shell. Network flags such as --host 0.0.0.0 produce a trust warning. Quote a value containing spaces, e.g. --mmproj &quot;C:\models\a b\proj.gguf&quot;; a backslash is only an escape before a quote or another backslash, so plain Windows paths like C:\models\proj.gguf do not need to be escaped." />
 
                                 </Grid>
 

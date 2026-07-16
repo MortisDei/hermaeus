@@ -179,8 +179,19 @@ public sealed class VoiceOrchestrator : IVoiceOrchestrator, IDisposable
         var provider = _voiceProviders.GetActiveVoiceProvider();
         var request = new VoiceSynthesisRequest(utterance.Text, Voice: ResolveVoice(utterance), PlayAudio: true);
         var result = await provider.GenerateSpeechAsync(request, ct).ConfigureAwait(false);
-        if (!result.Success)
+        if (result.Success)
+        {
+            // r11 4.6: _toastedProviderFailures never reset, so after one
+            // failure toast for a provider, a later distinct failure (a
+            // different root cause, hours later) stayed silent for the rest
+            // of the app's lifetime. Reset on a subsequent successful
+            // utterance so each failure episode toasts once, not each app run.
+            _toastedProviderFailures.Remove(provider.DisplayName);
+        }
+        else
+        {
             HandleSynthesisFailure(result.Message, provider.DisplayName);
+        }
     }
 
     private void HandleSynthesisFailure(string message, string? providerName = null)

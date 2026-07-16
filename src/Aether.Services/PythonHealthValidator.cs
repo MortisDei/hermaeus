@@ -12,17 +12,32 @@ public sealed class PythonHealthValidator
 
     private readonly int _requiredMajor;
     private readonly int _requiredMinor;
+    private readonly int? _maxExclusiveMinor;
 
-    public PythonHealthValidator(int requiredMajor = DefaultRequiredMajor, int requiredMinor = DefaultRequiredMinor)
+    public PythonHealthValidator(int requiredMajor = DefaultRequiredMajor, int requiredMinor = DefaultRequiredMinor, int? maxExclusiveMinor = null)
     {
         _requiredMajor = requiredMajor;
         _requiredMinor = requiredMinor;
+        _maxExclusiveMinor = maxExclusiveMinor;
     }
 
+    /// <summary>
+    /// r11 1.7: per-provider max so Doctor and the setup wizard's own XTTS
+    /// validation agree about the same requirement instead of disagreeing
+    /// (setup claimed max-exclusive 3.12; Doctor's IsRequiredVersion accepted
+    /// any minor &gt;= required, so 3.13 passed the Doctor check).
+    /// </summary>
     public static PythonHealthValidator ForProvider(IVoiceProvider provider)
     {
         var required = provider.RequiredPythonVersion;
-        return required is { } version ? new PythonHealthValidator(version.Major, version.Minor) : new PythonHealthValidator();
+        if (required is not { } version)
+            return new PythonHealthValidator();
+
+        var maxExclusive = provider.MaxExclusivePythonVersion;
+        if (maxExclusive is { } max && max.Major == version.Major)
+            return new PythonHealthValidator(version.Major, version.Minor, max.Minor);
+
+        return new PythonHealthValidator(version.Major, version.Minor);
     }
 
     public async Task<PythonHealthReport> ValidateAsync(string pythonPath, CancellationToken ct = default)
@@ -139,14 +154,18 @@ print(json.dumps({"version": version, "issues": issues, "base_prefix": base_pref
     private bool IsRequiredVersion(string version)
     {
         if (string.IsNullOrWhiteSpace(version)) return false;
-        // Accept any patch version and any newer minor version within the same major.
-        // e.g., required 3.11 should accept 3.11.x and 3.12.x, 3.13.x, etc.
+        // Accept any patch version and any newer minor version within the same major,
+        // up to (but excluding) _maxExclusiveMinor when the provider names one
+        // (r11 1.7: this used to accept any minor >= required with no ceiling,
+        // so Doctor's "Python 3.11 for XTTS v2" check passed on 3.13, which
+        // coqui TTS does not support).
         var parts = version.Split('.', StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length < 2) return false;
         if (!int.TryParse(parts[0], out var major)) return false;
         if (!int.TryParse(parts[1], out var minor)) return false;
         if (major != _requiredMajor) return false;
-        return minor >= _requiredMinor;
+        if (minor < _requiredMinor) return false;
+        return _maxExclusiveMinor is not { } maxExclusive || minor < maxExclusive;
     }
 
     private static async Task<(bool Success, string Output)> RunPythonAsync(string pythonPath, string script, CancellationToken ct)

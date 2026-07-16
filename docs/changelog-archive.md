@@ -2,6 +2,98 @@
 
 The CHANGELOG.md in root only contains the current 10 versions of changelogs. The rest are archived here in line with the 10 version limit in the main changelog.
 
+## [0.9.42-alpha] - 2026-07-11
+
+Implements docs/review/03-next-level-roadmap.md Phases 1 through 4 in full
+(r2 review). Each phase is independently shippable; landed together here.
+
+### Phase 1 - Provenance convergence
+
+- **RAG citations are now a typed stream event, not a sentinel string.**
+  `RagQueryService.StreamQueryAsync` used to interleave plain answer tokens
+  with magic-prefixed `"__RAG_SOURCES__...__END_SOURCES__"` and
+  `"__RAG_TRACE__...__END_TRACE__"` strings that every consumer had to
+  independently detect and strip. It now yields a closed `RagStreamEvent`
+  (`Token`/`Sources`/`Trace`) with a typed `RagTraceSummary` payload.
+  `RagStreamProtocol` (the shared sentinel parser) is deleted; `RagViewModel`,
+  `RagEvalService`, and `Aether.LocalApi` all switch on `Kind` instead. Fixed
+  a real bug in passing: the trace event now actually carries
+  `ExpandedQuery`/`QueryVariants`/`PlannerNotes`/`ContextPackingSummary`,
+  which the persisted trace always computed but the old sentinel JSON never
+  included, so `RagViewModel`'s Context Transparency fields for those were
+  silently always empty.
+- **Memory gained a structured `Source` (`SourceReference`)** alongside the
+  existing `SourceConversationId`. Additive `MemoryStore` schema migration
+  (v3, `source_json` column). Rows written before this migration backfill a
+  `SourceReference` from `SourceConversationId` at read time; no data
+  rewrite. `MemoryExtractionService` and `ConversationMemoryService` now
+  populate it with a short content-derived title, the conversation locator,
+  and a snippet.
+- **Chat now actually injects memory, and shows a Sources panel.** Memory
+  injection (`MemoryInjectionService`) existed since early memory work but
+  nothing in `ChatViewModel` ever called it. `SendAsync` now searches
+  relevant global memories (gated by the existing `Memory.Enabled` setting),
+  builds a memory-context block appended to that turn's system prompt, and
+  populates a new `MessageViewModel.Sources` collection with the
+  `SourceReference`s actually used, rendered as a small chip row under the
+  assistant's reply (tooltip shows the memory content).
+
+### Phase 2 - Local API: from demo to substrate
+
+- **Streaming.** `POST /v1/chat/completions` accepts `"stream": true` and
+  responds with Server-Sent Events in the OpenAI `chat.completion.chunk`
+  wire shape (deliberate wire compatibility with existing SSE clients, not a
+  dependency on OpenAI). Buffered JSON stays the default.
+- **Per-app tokens, replacing the single shared token.**
+  `LocalApiSettings.Tokens` is now a list of named entries
+  (`LocalApiTokenEntry`: Id, Name, secret-store reference, created-at);
+  Settings > Local API manages the list (add-with-name, revoke individually,
+  each action applies and saves immediately rather than waiting for the
+  page's main Save button, since a pending revocation that silently reverted
+  would be a real footgun for a credential list). `LocalApiTokenAuth`
+  authenticates against every configured entry and records which one
+  matched; `LocalApiEndpoints` now traces calls under that verified token
+  name, with the caller-supplied `X-Aether-Client` header kept alongside it
+  only as an unverified display hint. A load-time settings migration
+  converts an existing single `ApiToken` into a "Default" named entry so
+  upgrading users keep a working integration.
+- **Embeddings endpoint.** `POST /v1/embeddings` wraps `IEmbeddingService`,
+  returning one vector per input string plus the provider's dimensionality.
+
+### Phase 3 - MCP hardening
+
+- **Per-server tool allowlists.** `McpServerConfig.AllowedTools` restricts
+  which of a server's declared tools are actually callable (empty means no
+  restriction, matching prior behavior); configurable per server in
+  Settings > MCP Servers. Also closes a real gap found while implementing
+  this: `McpToolBridge.ExecuteAsync` previously forwarded any
+  `mcp:{server}:{tool}` reference to the server without checking it was
+  ever declared via `tools/list`; it now verifies the tool is both
+  allowlisted and actually declared before calling it.
+
+### Phase 4 - Local-only crash/lifecycle journal
+
+- **`AppLifecycleJournalService`** (`Aether.Core.Services`, so Aether.Rag and
+  Aether.Voice can both use it without a reference against the established
+  Desktop/ViewModels to Services/Agent/Rag to Core dependency direction):
+  one small atomic-write JSON file in the data root recording session start
+  time, whether the session exited cleanly, and the last notable operation
+  it was performing. Generalizes the ad-hoc preflight logging added for the
+  0.9.38-0.9.40 native Kokoro ONNX crash into a reusable mechanism, now also
+  wired into the RAG cross-encoder reranker's ONNX session loads. Doctor
+  reports a new "Previous session exited cleanly" check, warning and naming
+  the last recorded operation when the prior session never recorded a clean
+  exit, purely local diagnosis with no telemetry or upload.
+
+### Docs
+
+- docs/features.md, docs/agent.md, and docs/security-review.md updated for
+  all of the above (Local API endpoints/tokens, chat Sources panel, MCP
+  allowlists, Doctor's clean-shutdown check). docs/security-review.md's
+  Local API and MCP rows are refreshed for `0.9.42-alpha`; the rest of that
+  document is unchanged from its `0.9.14-alpha` baseline and is flagged as
+  such rather than implicitly re-certified.
+
 ## [0.9.41-alpha] - 2026-07-11
 
 Second architecture/security review pass (docs/review/, r2). Closes every

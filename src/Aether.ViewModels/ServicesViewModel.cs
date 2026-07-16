@@ -94,9 +94,25 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
 
     public UiBoundCollection<string> DetectedModelPaths { get; } = [];
 
+    /// <summary>Folder a model-path file picker should open in: the embeddings subfolder for the embeddings server, otherwise the models folder.</summary>
+    public string SuggestedModelBrowseDirectory
+    {
+        get
+        {
+            var root = _settings.Settings.DataManagement.LocalAiAssetsRoot;
+            if (string.IsNullOrWhiteSpace(root)) return string.Empty;
+            return EmbeddingsMode
+                ? Aether.Services.LocalAiAssetLocator.GetPreferredEmbeddingsDirectory(root)
+                : Aether.Services.LocalAiAssetLocator.Detect(root).ModelsDirectory;
+        }
+    }
+
     public void RefreshDetectedModels()
     {
-        var found = Aether.Services.LocalAiAssetLocator.FindGgufModels(_settings.Settings.DataManagement.LocalAiAssetsRoot);
+        var root = _settings.Settings.DataManagement.LocalAiAssetsRoot;
+        var found = EmbeddingsMode
+            ? Aether.Services.LocalAiAssetLocator.FindEmbeddingModels(root)
+            : Aether.Services.LocalAiAssetLocator.FindGgufModels(root);
         var current = ModelPath;
         DetectedModelPaths.Clear();
         foreach (var path in found)

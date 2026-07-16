@@ -19,7 +19,8 @@ public sealed class XttsV2VoiceProvider : ITtsService, IVoiceProvider, IDisposab
     public VoiceProvider Id => VoiceProvider.XttsV2;
     public string DisplayName => "XTTS v2";
     public VoiceCapability Capabilities => VoiceCapability.TextToSpeech | VoiceCapability.VoiceCloning | VoiceCapability.Local;
-    public (int Major, int Minor)? RequiredPythonVersion => (3, 11);
+    public (int Major, int Minor)? RequiredPythonVersion => (3, 9);
+    public (int Major, int Minor)? MaxExclusivePythonVersion => (3, 12);
 
     public bool IsInstalled => File.Exists(_settings.Settings.Tts.ScriptPath);
 
@@ -100,16 +101,26 @@ public sealed class XttsV2VoiceProvider : ITtsService, IVoiceProvider, IDisposab
 
     public async Task<VoiceSynthesisResult> GenerateSpeechAsync(VoiceSynthesisRequest request, CancellationToken ct = default)
     {
+        var outputPath = string.Empty;
         try
         {
-            var outputPath = await RenderToFileAsync(request.Text, request.Voice ?? string.Empty, request.OutputPath, ct);
+            outputPath = await RenderToFileAsync(request.Text, request.Voice ?? string.Empty, request.OutputPath, ct);
             if (request.PlayAudio)
-                await PlayAsync(await File.ReadAllBytesAsync(outputPath, ct), ct);
+                await Aether.Voice.AudioPlayback.PlayAsync(outputPath, ct);
             return new VoiceSynthesisResult(true, "XTTS synthesis complete.", outputPath);
         }
         catch (Exception ex)
         {
             return new VoiceSynthesisResult(false, ex.Message);
+        }
+        finally
+        {
+            // r11 4.3: see KokoroVoiceProvider.GenerateSpeechAsync.
+            if (request.OutputPath is null && request.PlayAudio && !string.IsNullOrWhiteSpace(outputPath))
+            {
+                try { File.Delete(outputPath); }
+                catch { }
+            }
         }
     }
 
@@ -128,11 +139,10 @@ public sealed class XttsV2VoiceProvider : ITtsService, IVoiceProvider, IDisposab
             speaker = string.Empty;
 
         var outputPath = await RenderToFileAsync(text, speaker, null, ct);
-        var wav = await File.ReadAllBytesAsync(outputPath, ct);
-        if (wav.Length == 0)
+        if (new FileInfo(outputPath).Length == 0)
             throw new InvalidOperationException("XTTS v2 returned an empty audio response.");
 
-        await PlayAsync(wav, ct);
+        await Aether.Voice.AudioPlayback.PlayAsync(outputPath, ct);
         try { File.Delete(outputPath); }
         catch { }
     }
@@ -148,11 +158,10 @@ public sealed class XttsV2VoiceProvider : ITtsService, IVoiceProvider, IDisposab
         var baseUrl = _settings.Settings.Tts.ServiceUrl.TrimEnd('/');
 
         var outputPath = await RenderToFileAsync(text, speaker, null, ct);
-        var wav = await File.ReadAllBytesAsync(outputPath, ct);
-        if (wav.Length == 0)
+        if (new FileInfo(outputPath).Length == 0)
             throw new InvalidOperationException("XTTS v2 returned an empty audio response.");
 
-        await PlayAsync(wav, ct);
+        await Aether.Voice.AudioPlayback.PlayAsync(outputPath, ct);
         try { File.Delete(outputPath); }
         catch { }
     }
@@ -247,36 +256,6 @@ public sealed class XttsV2VoiceProvider : ITtsService, IVoiceProvider, IDisposab
         catch
         {
             return null;
-        }
-    }
-
-    private static async Task PlayAsync(byte[] wavData, CancellationToken ct)
-    {
-        var tempFile = Path.Combine(Path.GetTempPath(), $"aether-tts-{Guid.NewGuid():N}.wav");
-        try
-        {
-            File.WriteAllBytes(tempFile, wavData);
-
-            var psi = new ProcessStartInfo
-            {
-                FileName = "ffplay",
-                ArgumentList = { "-nodisp", "-autoexit", tempFile },
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true
-            };
-
-            using var process = new Process { StartInfo = psi, EnableRaisingEvents = true };
-            if (!process.Start())
-                throw new InvalidOperationException("ffplay not available; cannot play audio.");
-
-            await process.WaitForExitAsync(ct);
-        }
-        finally
-        {
-            try { File.Delete(tempFile); }
-            catch { }
         }
     }
 

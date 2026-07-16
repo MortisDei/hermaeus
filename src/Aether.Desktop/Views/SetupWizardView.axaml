@@ -34,7 +34,13 @@
                     <StackPanel IsVisible="{Binding IsStep1}" Spacing="10">
                         <TextBlock Text="Pick the chat backend you want to use." FontSize="12" Opacity="0.6" />
                         <ComboBox ItemsSource="{Binding RuntimeOptions}"
-                                  SelectedItem="{Binding SelectedRuntime}" />
+                                  SelectedItem="{Binding SelectedRuntime}">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate DataType="vm:RuntimeProfileViewModel">
+                                    <TextBlock Text="{Binding Name}" />
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
                     </StackPanel>
 
                     <StackPanel IsVisible="{Binding IsStep2}" Spacing="10">

@@ -11,6 +11,212 @@ limit.
 
 ## [Unreleased]
 
+## [0.16.0-alpha] - 2026-07-16
+
+Implements docs/review r11 in full: the first dedicated audit of
+Aether.Services (73 files, ~14k lines - providers, process management,
+stores, setup/download, Doctor, voice glue). Reads every .cs file in the
+project the way r10 read every file in Aether.Rag, and finds the same
+pattern: features that look done and have never worked end to end, sitting
+next to real field-impacting defects.
+
+### Fixed
+
+- **The built-in llama-server installer has never worked.** The pinned
+  download URLs named release assets that do not exist (verified against
+  the live GitHub API); the install-latest path filtered assets by a
+  substring no real asset name contains, so it always threw "no asset
+  matched"; and even with correct names, both paths moved a raw archive
+  into place as the executable instead of extracting it. `ArchiveExtractor`
+  (zip and tar.gz, zip-slip guarded, no new NuGet) now backs both the pinned
+  path (re-pinned to a current release tag) and the latest-release path,
+  shared by `LlamaServerSetupService`. Doctor's "Download llama.cpp" fix
+  action rides the same code, so it's fixed too.
+- **Windows executable resolution never tried `.exe`.** Four independent
+  copies of PATH/directory resolution in `ServerProcessManager`,
+  `DoctorService`, `TrustService`, and `LocalAiSetupService` probed only for
+  the bare name `llama-server`, which cannot resolve on Windows; the default
+  settings ship `ExecutablePath = "llama-server"`, so a fresh Windows
+  install's managed servers were unstartable out of the box. This is the
+  root cause of the r10 field finding that the owner's Embeddings server
+  never launched. One shared `ExecutableResolver` (PATHEXT-aware, matching
+  `VoiceProviderProcessRunner`'s already-correct logic) now backs all four
+  call sites plus `OrphanServerDetector`; an architecture test bans any
+  other `FindOnPath` reimplementation in Aether.Services.
+- **Ollama chat did not stream.** `StreamChatAsync` used `PostAsJsonAsync`,
+  which buffers the full response before returning, so first-token latency
+  equaled total latency and Stop/cancel could not interrupt mid-generation.
+  Now uses `HttpRequestMessage` + `ResponseHeadersRead` like the other two
+  providers, and an unreachable endpoint yields an in-stream error event
+  instead of throwing out of the async iterator.
+- **Moving the data root silently lost secrets, traces, evals, logs, and the
+  voice lexicon.** Migration only ever moved `conversations.db*`,
+  `memories.db*`, `benchmarks.db*`, and `agent/`; everything else the app
+  writes to the data root stayed behind, including the fallback secrets
+  vault. A single `DataRootManifest` (walks the whole data root) now backs
+  migration, its preview, and `BackupService`, so the three can never
+  disagree again; secrets keep their restrictive permissions across the
+  move.
+- **The benchmark LLM judge was a phantom feature.** `UseJudge`/
+  `JudgeModelId` were editable in the UI and persisted with every suite and
+  run, and no code anywhere executed a judge. The UI controls and the
+  copy-into-every-run wiring are removed; the model properties themselves
+  stay so previously stored suite/run JSON still deserializes.
+- OpenAI chat/model-list requests mutated `Authorization` on the shared
+  static `HttpClient`'s `DefaultRequestHeaders`, racy under concurrent chat
+  + model refresh; auth is now set per request.
+- The "OpenAI-compatible" model list filtered to `gpt`/`o1`/`o3`/`o4`-
+  prefixed ids, so pointing it at LM Studio/Groq/OpenRouter/vLLM etc.
+  returned zero models. The prefix allow-list is dropped; a deny-list of
+  known non-chat ids (embeddings/tts/whisper/dall-e) applies only when the
+  host is `api.openai.com`.
+- A model id whose provider tag was learned in an earlier scan, then not
+  seen again in a later scan (a provider going temporarily unreachable),
+  could silently route to llama.cpp - the id-to-tag memory is now durable
+  (upserted, never cleared) across scans, and a genuinely never-seen id
+  yields an explicit routing error instead of a silent guess. An
+  all-providers-down scan no longer turns every `GetModelsAsync` call into a
+  fresh probe storm (bounded negative-cache TTL).
+- `LlamaCppService`'s probed context-length cache was keyed by base URL
+  alone, so restarting the managed server with a different model or
+  `--ctx-size` fed the previous model's window into token-budget math
+  forever; now keyed by (base URL, model id), so a model swap is itself a
+  cache miss.
+- A runtime profile's health check sent a stored `secret:<name>` reference
+  verbatim as the bearer token instead of resolving it, so any profile whose
+  key went through the secret store failed health checks.
+- Rerun rebuilt cases from stored results but dropped `Tags`, so reruns fell
+  out of per-tag benchmark insights.
+- Memory saves awaited the embedding call with no timeout on the
+  post-response path, so a hung embedding endpoint stalled every memory
+  write for up to the full HTTP timeout; now bounded by the same 3 s class
+  the query path already used (existing backfill/COALESCE semantics pick up
+  the null-embedding row later).
+- Memory full-text search ordered candidates by `is_pinned`/
+  `importance_score`/`updated_at` instead of FTS5's own bm25 rank, so the
+  lexical half of hybrid scoring measured importance, not match quality.
+  Pinned/importance influence still applies downstream, where it belonged
+  all along.
+- `MemoryStore`/`ConversationStore` parsed stored UTC timestamps with plain
+  `DateTime.Parse`, which silently converts a "...Z" string to Local-kind on
+  read; every store's date parsing now goes through one
+  `DateTimeStyles.RoundtripKind` helper.
+- Archiving a stale memory ran the full `SaveAsync`, re-embedding unchanged
+  content once per archived row purely to flip a status flag; archiving now
+  does a narrow `UPDATE` of `is_archived`/`updated_at` only.
+- Backup zipped live SQLite files directly, risking an internally
+  inconsistent copy if taken mid-write; each database is now snapshotted
+  through SQLite's own online-backup API first.
+- `BenchmarkService`'s first-call initialization lacked the `SemaphoreSlim`
+  gate every other store uses, so concurrent first calls could race the
+  starter-suite seed into a double-insert.
+- `Aether.LocalApi`'s child process never joined the app's Windows job
+  object (unlike every other managed process), so an app crash could orphan
+  it holding its port and per-app tokens in memory.
+- Subprocess/remote voice providers (Kokoro Python, F5-TTS, XTTS, OpenAI
+  voice) could only play audio through Linux players (paplay/pw-play/
+  aplay/ffplay), so every non-default voice provider was synthesize-only on
+  a stock Windows machine; `XttsV2VoiceProvider` separately hardcoded
+  ffplay with no Windows fallback at all. One `Aether.Voice.AudioPlayback`
+  helper (PowerShell `Media.SoundPlayer` on Windows, native players
+  elsewhere) now backs all four providers.
+- Every spoken chat reply, notification, and agent narration left a `%TEMP%`
+  wav on disk forever - `GenerateSpeechAsync` never cleaned up when the
+  caller (always `VoiceOrchestrator`) didn't request a persisted output
+  path. Now deleted after playback in that case.
+- `ServerProcessManager`'s process-exit handler read `_process?.ExitCode`
+  while `Stop()`/`Dispose()` could be disposing the same `Process` on
+  another thread, risking an `ObjectDisposedException` on a threadpool
+  thread; it now reads from the event's own `sender` and swallows disposed-
+  object access. A restart also now disposes the previous monitor
+  `CancellationTokenSource` instead of leaking it.
+- `NormalizeConfig` wrote resolved executable/model paths back onto the
+  caller's `ServerConfig` - typically the settings object itself - silently
+  rewriting a directory or bare-name configuration in memory, later
+  persisted by an unrelated `SaveAsync`. It now returns a copy.
+- A voice provider's failure toast never reset, so after one toast a later,
+  unrelated failure for that provider stayed silent for the app's lifetime;
+  a subsequent successful utterance now resets it.
+- `ExtraArgsParser` treated every backslash as an escape character, so any
+  Windows path in a managed server's extra args (`--mmproj C:\models\
+  proj.gguf`) was silently corrupted before reaching llama-server. A
+  backslash now only escapes an immediately following quote or backslash.
+- Auto-tune started GPU-layer probe candidates and waited for `/health` on
+  the configured port without the same preflight `StartAsync` performs, so
+  a port already held by another process made every candidate look like it
+  worked. Auto-tune now fails fast and names the port owner.
+- The setup wizard's Phi-4 model download was never hash-verified
+  (`ModelHashes` was an empty map, so the "verify if available" branch was
+  dead code); now pinned via the Hugging Face LFS oid, with a failed
+  verification deleting the file, matching the Doctor embedding-model
+  install pattern. The advertised size ("~9GB") is corrected to ~2.8 GB.
+- XTTS's "Python 3.9-3.11" requirement was never actually enforced: the
+  setup wizard tested `py -3.11` candidates by validating plain `py` (their
+  `PrefixArgs` were dropped before the subprocess call), the validation
+  script reported a version but nothing compared it to the supported range,
+  and `PythonHealthValidator` accepted any minor at or above the required
+  one with no ceiling, so Doctor's XTTS check passed on Python 3.13, which
+  coqui TTS does not support. `IVoiceProvider` gained an optional
+  `MaxExclusivePythonVersion` so Doctor and the setup wizard's own
+  validation now agree; found and fixed a second, related bug in the same
+  method while adding coverage - the check-parsing loop split the captured
+  log on `'\n'` but the log was built with `StringBuilder.AppendLine`
+  (`\r\n` on Windows), leaving a trailing `\r` that made every "PASS" check
+  compare false regardless of the interpreter.
+- `rocm5.8` has never been a published PyTorch index (confirmed: HTTP 403);
+  `cu118` was years stale. Both re-pinned to current indices verified
+  against download.pytorch.org, and the per-backend argument construction
+  is now a pure, independently testable function.
+
+### Docs
+
+- docs/features.md updated for Ollama streaming, the fixed llama-server
+  installer, the corrected XTTS Python range label, the full-manifest
+  data-root migration, and SQLite-online-backup-based snapshots.
+- docs/security-review.md gains an r11 subsection covering the rebuilt
+  installer's provenance decision, the closed unverified-download gap, the
+  secrets-inclusive data-root migration, and the runtime-profile
+  bearer-token information-leak fix.
+- Services view's Extra Args tooltip documents the backslash/quoting rule.
+
+### Fixed (field testing on the r11 build, same day)
+
+- The setup wizard's chat-backend picker rendered every runtime profile as
+  the literal string `Aether.ViewModels.RuntimeProfileViewModel` (no
+  `DisplayMemberPath`/`ItemTemplate`, so the `ComboBox` fell back to
+  `ToString()`). It now shows each profile's `Name`.
+- llama.cpp update-in-place failed whenever a chat and an embeddings server
+  shared the same binary and either was running: extraction overwrote the
+  live exe/DLLs, which Windows refuses while they're memory-mapped.
+  `InstallLatestAsync` now extracts into a tag-versioned subdirectory
+  instead of the existing install directory, so a running server is never
+  touched; it picks up the new binary on its next restart.
+- The embeddings server's model picker (both the detected-models dropdown
+  and the file-browse dialog) searched/opened the general models folder,
+  which `FindGgufModels` explicitly excludes embed/embedding/embeddings
+  subdirectories from - so it could never list or default into an actual
+  embedding model. The Services view now uses `FindEmbeddingModels` and a
+  new `LocalAiAssetLocator.GetPreferredEmbeddingsDirectory` for the
+  embeddings row.
+- Doctor's "nomic embedding model version" check offered a "Download
+  embedding model" fix - re-downloading over a model that was already
+  installed and working - any time the on-disk file wasn't byte-identical
+  to the pinned reference build, including when the hash check passed. Both
+  branches are now informational only (`canFix: false`); the primary
+  "embedding model availability" check still offers a real download when a
+  model is genuinely missing.
+- Reopening the setup wizard after initial setup (Settings' "re-run setup
+  wizard", or the chat empty-state's "Open setup wizard") showed blank Data
+  root / AI assets fields instead of the current values: `SetupWizardViewModel`
+  is a DI singleton whose fields are only populated once, at construction,
+  which can race `ISettingsService.LoadAsync()`. Advancing past that blank
+  step then saved the blanks over the real `DataRootDirectory`/
+  `LocalAiAssetsRoot`, which is very likely what actually caused the wizard
+  to reappear and "lose" conversation history in the first place - the data
+  was never deleted, just pointed at an empty folder. `MainWindowViewModel`
+  now reloads the wizard from current settings every time its panel becomes
+  active.
+
 ## [0.15.0-alpha] - 2026-07-16
 
 Implements docs/review r10 in full: the first dedicated RAG deep-dive (a
@@ -720,97 +926,3 @@ new per-machine agent self-learning (lesson) store.
   `MemoryInjectionService`/`MemoryExtractionService`; the agent trace now
   logs the full context pack once per task plus a small delta per step
   instead of the full pack on every step.
-
-## [0.9.42-alpha] - 2026-07-11
-
-Implements docs/review/03-next-level-roadmap.md Phases 1 through 4 in full
-(r2 review). Each phase is independently shippable; landed together here.
-
-### Phase 1 - Provenance convergence
-
-- **RAG citations are now a typed stream event, not a sentinel string.**
-  `RagQueryService.StreamQueryAsync` used to interleave plain answer tokens
-  with magic-prefixed `"__RAG_SOURCES__...__END_SOURCES__"` and
-  `"__RAG_TRACE__...__END_TRACE__"` strings that every consumer had to
-  independently detect and strip. It now yields a closed `RagStreamEvent`
-  (`Token`/`Sources`/`Trace`) with a typed `RagTraceSummary` payload.
-  `RagStreamProtocol` (the shared sentinel parser) is deleted; `RagViewModel`,
-  `RagEvalService`, and `Aether.LocalApi` all switch on `Kind` instead. Fixed
-  a real bug in passing: the trace event now actually carries
-  `ExpandedQuery`/`QueryVariants`/`PlannerNotes`/`ContextPackingSummary`,
-  which the persisted trace always computed but the old sentinel JSON never
-  included, so `RagViewModel`'s Context Transparency fields for those were
-  silently always empty.
-- **Memory gained a structured `Source` (`SourceReference`)** alongside the
-  existing `SourceConversationId`. Additive `MemoryStore` schema migration
-  (v3, `source_json` column). Rows written before this migration backfill a
-  `SourceReference` from `SourceConversationId` at read time; no data
-  rewrite. `MemoryExtractionService` and `ConversationMemoryService` now
-  populate it with a short content-derived title, the conversation locator,
-  and a snippet.
-- **Chat now actually injects memory, and shows a Sources panel.** Memory
-  injection (`MemoryInjectionService`) existed since early memory work but
-  nothing in `ChatViewModel` ever called it. `SendAsync` now searches
-  relevant global memories (gated by the existing `Memory.Enabled` setting),
-  builds a memory-context block appended to that turn's system prompt, and
-  populates a new `MessageViewModel.Sources` collection with the
-  `SourceReference`s actually used, rendered as a small chip row under the
-  assistant's reply (tooltip shows the memory content).
-
-### Phase 2 - Local API: from demo to substrate
-
-- **Streaming.** `POST /v1/chat/completions` accepts `"stream": true` and
-  responds with Server-Sent Events in the OpenAI `chat.completion.chunk`
-  wire shape (deliberate wire compatibility with existing SSE clients, not a
-  dependency on OpenAI). Buffered JSON stays the default.
-- **Per-app tokens, replacing the single shared token.**
-  `LocalApiSettings.Tokens` is now a list of named entries
-  (`LocalApiTokenEntry`: Id, Name, secret-store reference, created-at);
-  Settings > Local API manages the list (add-with-name, revoke individually,
-  each action applies and saves immediately rather than waiting for the
-  page's main Save button, since a pending revocation that silently reverted
-  would be a real footgun for a credential list). `LocalApiTokenAuth`
-  authenticates against every configured entry and records which one
-  matched; `LocalApiEndpoints` now traces calls under that verified token
-  name, with the caller-supplied `X-Aether-Client` header kept alongside it
-  only as an unverified display hint. A load-time settings migration
-  converts an existing single `ApiToken` into a "Default" named entry so
-  upgrading users keep a working integration.
-- **Embeddings endpoint.** `POST /v1/embeddings` wraps `IEmbeddingService`,
-  returning one vector per input string plus the provider's dimensionality.
-
-### Phase 3 - MCP hardening
-
-- **Per-server tool allowlists.** `McpServerConfig.AllowedTools` restricts
-  which of a server's declared tools are actually callable (empty means no
-  restriction, matching prior behavior); configurable per server in
-  Settings > MCP Servers. Also closes a real gap found while implementing
-  this: `McpToolBridge.ExecuteAsync` previously forwarded any
-  `mcp:{server}:{tool}` reference to the server without checking it was
-  ever declared via `tools/list`; it now verifies the tool is both
-  allowlisted and actually declared before calling it.
-
-### Phase 4 - Local-only crash/lifecycle journal
-
-- **`AppLifecycleJournalService`** (`Aether.Core.Services`, so Aether.Rag and
-  Aether.Voice can both use it without a reference against the established
-  Desktop/ViewModels to Services/Agent/Rag to Core dependency direction):
-  one small atomic-write JSON file in the data root recording session start
-  time, whether the session exited cleanly, and the last notable operation
-  it was performing. Generalizes the ad-hoc preflight logging added for the
-  0.9.38-0.9.40 native Kokoro ONNX crash into a reusable mechanism, now also
-  wired into the RAG cross-encoder reranker's ONNX session loads. Doctor
-  reports a new "Previous session exited cleanly" check, warning and naming
-  the last recorded operation when the prior session never recorded a clean
-  exit, purely local diagnosis with no telemetry or upload.
-
-### Docs
-
-- docs/features.md, docs/agent.md, and docs/security-review.md updated for
-  all of the above (Local API endpoints/tokens, chat Sources panel, MCP
-  allowlists, Doctor's clean-shutdown check). docs/security-review.md's
-  Local API and MCP rows are refreshed for `0.9.42-alpha`; the rest of that
-  document is unchanged from its `0.9.14-alpha` baseline and is flagged as
-  such rather than implicitly re-certified.
-
-

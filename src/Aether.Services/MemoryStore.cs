@@ -234,11 +234,21 @@ public sealed class MemoryStore : IMemoryStore
         // requirement: if no embedding model is configured or the call
         // fails, save proceeds with a null blob and COALESCE below keeps
         // whatever embedding (if any) the row already had rather than
-        // clobbering it.
+        // clobbering it. Bounded by the same QueryEmbedTimeout the query path
+        // uses (r11 3.2): this save runs on the post-response path
+        // (ConversationMemoryService.ApplyInjectedMemoryMarkersAsync /
+        // MergeAndSaveAsync), so a hung embedding endpoint must not stall it
+        // for the full HTTP timeout; the backfill path already handles rows
+        // saved without an embedding.
         byte[]? embeddingBlob = null;
         if (_embeddings is not null && !string.IsNullOrWhiteSpace(memory.Content))
         {
-            try { embeddingBlob = ToBlob(await _embeddings.EmbedAsync(memory.Content, ct)); }
+            try
+            {
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                timeoutCts.CancelAfter(QueryEmbedTimeout);
+                embeddingBlob = ToBlob(await _embeddings.EmbedAsync(memory.Content, timeoutCts.Token));
+            }
             catch { }
         }
 
@@ -332,12 +342,19 @@ public sealed class MemoryStore : IMemoryStore
         else
         {
             var cmd = c.CreateCommand();
+            // r11 3.3: ordering by is_pinned/importance_score/updated_at made
+            // the "FTS rank" half of hybrid scoring (HybridRerankAsync's
+            // ftsRank[id] = 1/(i+1)) measure importance, not how well the
+            // text matched - FTS5's own bm25-backed rank column was never
+            // consulted. Pinned/importance influence still applies, just
+            // downstream (MemoryInjectionService.EffectiveScore and its
+            // pinned-first ordering), where it belongs.
             cmd.CommandText = @"
                 SELECT m.*
                 FROM memories m
                 JOIN memories_fts f ON f.id = m.id
                 WHERE memories_fts MATCH $q
-                ORDER BY m.is_pinned DESC, m.importance_score DESC, m.updated_at DESC
+                ORDER BY f.rank
                 LIMIT 100";
             cmd.Parameters.AddWithValue("$q", ftsQuery);
 
@@ -574,6 +591,9 @@ public sealed class MemoryStore : IMemoryStore
         var now = DateTime.UtcNow;
         var archived = 0;
 
+        await using var c = new SqliteConnection(Cs);
+        await c.OpenAsync(ct);
+
         foreach (var memory in candidates)
         {
             if (memory.IsPinned) continue;
@@ -581,8 +601,16 @@ public sealed class MemoryStore : IMemoryStore
             if ((now - reference).TotalDays < unrecalledForDays) continue;
             if (MemoryLifecycle.ComputeEffectiveImportance(memory, now) >= importanceFloor) continue;
 
-            memory.IsArchived = true;
-            await SaveAsync(memory, ct);
+            // Narrow update (r11 3.5): the full SaveAsync re-embeds unchanged
+            // content (one HTTP call per archived row) purely to flip a
+            // status flag. Archiving touches only is_archived/updated_at;
+            // content/tags/title are unchanged, so the FTS index needs no
+            // rewrite either.
+            var cmd = c.CreateCommand();
+            cmd.CommandText = "UPDATE memories SET is_archived = 1, updated_at = $ua WHERE id = $id";
+            cmd.Parameters.AddWithValue("$ua", now.ToString("O"));
+            cmd.Parameters.AddWithValue("$id", memory.Id);
+            await cmd.ExecuteNonQueryAsync(ct);
             archived++;
         }
 
@@ -777,8 +805,8 @@ public sealed class MemoryStore : IMemoryStore
             Id = GetString(r, "id"),
             Category = GetString(r, "category", "facts"),
             Content = GetString(r, "content"),
-            CreatedAt = DateTime.Parse(GetString(r, "created_at")),
-            UpdatedAt = DateTime.Parse(GetString(r, "updated_at")),
+            CreatedAt = SqliteDateTime.Parse(GetString(r, "created_at")),
+            UpdatedAt = SqliteDateTime.Parse(GetString(r, "updated_at")),
             SourceConversationId = sourceConversationId,
             Source = ResolveSource(GetStringNullable(r, "source_json"), sourceConversationId),
             ImportanceScore = GetDouble(r, "importance_score", 0.5),
@@ -850,9 +878,7 @@ public sealed class MemoryStore : IMemoryStore
     private static DateTime? GetDateTimeNullable(SqliteDataReader r, string name)
     {
         var ordinal = r.GetOrdinal(name);
-        if (r.IsDBNull(ordinal)) return null;
-        var str = r.GetString(ordinal);
-        return string.IsNullOrWhiteSpace(str) ? null : DateTime.Parse(str);
+        return r.IsDBNull(ordinal) ? null : SqliteDateTime.ParseNullable(r.GetString(ordinal));
     }
 
     private static List<string> NormalizeTags(IEnumerable<string> tags) =>

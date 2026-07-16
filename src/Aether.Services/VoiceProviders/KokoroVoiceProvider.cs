@@ -129,9 +129,10 @@ public sealed class KokoroVoiceProvider : ITtsService, IVoiceProvider
 
     public async Task<VoiceSynthesisResult> GenerateSpeechAsync(VoiceSynthesisRequest request, CancellationToken ct = default)
     {
+        var outputPath = string.Empty;
         try
         {
-            var outputPath = await RenderToFileAsync(request.Text, request.Voice, request.OutputPath, ct);
+            outputPath = await RenderToFileAsync(request.Text, request.Voice, request.OutputPath, ct);
             if (request.PlayAudio)
                 await VoiceProviderProcessRunner.PlayWavFileAsync(outputPath, ct);
             return new VoiceSynthesisResult(true, "Kokoro synthesis complete.", outputPath);
@@ -139,6 +140,18 @@ public sealed class KokoroVoiceProvider : ITtsService, IVoiceProvider
         catch (Exception ex)
         {
             return new VoiceSynthesisResult(false, ex.Message);
+        }
+        finally
+        {
+            // r11 4.3: when the caller did not request a persisted OutputPath,
+            // this synthesized to a %TEMP% file and never deleted it.
+            // VoiceOrchestrator.PlayAsync always calls GenerateSpeechAsync with
+            // no OutputPath, so every spoken chat reply leaked one wav.
+            if (request.OutputPath is null && request.PlayAudio && !string.IsNullOrWhiteSpace(outputPath))
+            {
+                try { File.Delete(outputPath); }
+                catch { }
+            }
         }
     }
 

@@ -11,9 +11,20 @@ namespace Aether.Services;
 public sealed class OpenAiService : IDisposable
 {
     private const string ProviderTagValue = "openai";
-    private static readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(10) };
+    private static readonly HttpClient SharedHttp = new() { Timeout = TimeSpan.FromMinutes(10) };
+    private readonly HttpClient _http;
     private readonly ISettingsService _settings;
     private readonly ISecretStore _secrets;
+
+    /// <summary>
+    /// Ids that are never chat-usable regardless of how a real OpenAI account
+    /// names its models. Only consulted against api.openai.com (r11 2.3):
+    /// pointing OpenAiBaseUrl at LM Studio, Groq, OpenRouter, vLLM, etc. must
+    /// surface every model that endpoint reports, since the old gpt/o1/o3/o4
+    /// prefix allow-list made "OpenAI-compatible" unusable for the compatible
+    /// endpoints it is named for.
+    /// </summary>
+    private static readonly string[] NonChatModelIdMarkers = ["embedding", "tts", "whisper", "dall-e", "moderation"];
 
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
@@ -28,31 +39,38 @@ public sealed class OpenAiService : IDisposable
     public string ProviderName => "OpenAI";
     public bool   IsConfigured => !string.IsNullOrWhiteSpace(_settings.Settings.Llm.OpenAiApiKey);
 
-    public OpenAiService(ISettingsService settings, ISecretStore secrets)
+    public OpenAiService(ISettingsService settings, ISecretStore secrets, HttpClient? http = null)
     {
         _settings = settings;
         _secrets = secrets;
+        _http = http ?? SharedHttp;
     }
 
     private string Base => _settings.Settings.Llm.OpenAiBaseUrl.TrimEnd('/');
-    private async Task AuthAsync(CancellationToken ct) =>
-        _http.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", await _secrets.ResolveAsync(_settings.Settings.Llm.OpenAiApiKey, ct));
+
+    private bool IsRealOpenAiEndpoint =>
+        Uri.TryCreate(Base, UriKind.Absolute, out var uri) && uri.Host.Equals("api.openai.com", StringComparison.OrdinalIgnoreCase);
+
+    private async Task<AuthenticationHeaderValue> BuildAuthHeaderAsync(CancellationToken ct) =>
+        new("Bearer", await _secrets.ResolveAsync(_settings.Settings.Llm.OpenAiApiKey, ct));
 
     public async Task<List<LlmModel>> GetModelsAsync(CancellationToken ct = default)
     {
         if (!IsConfigured) return [];
         try
         {
-            await AuthAsync(ct);
-            var resp = await _http.GetAsync($"{Base}/v1/models", ct);
+            var req = new HttpRequestMessage(HttpMethod.Get, $"{Base}/v1/models");
+            req.Headers.Authorization = await BuildAuthHeaderAsync(ct);
+            var resp = await _http.SendAsync(req, ct);
             resp.EnsureSuccessStatusCode();
             var data = await resp.Content.ReadFromJsonAsync<ModelsResponse>(JsonOpts, ct);
-            return data?.Data?
-                .Where(m => m.Id.StartsWith("gpt") || m.Id.StartsWith("o1") ||
-                            m.Id.StartsWith("o3") || m.Id.StartsWith("o4"))
+            var models = data?.Data ?? [];
+            var chatUsable = IsRealOpenAiEndpoint
+                ? models.Where(m => !NonChatModelIdMarkers.Any(marker => m.Id.Contains(marker, StringComparison.OrdinalIgnoreCase)))
+                : models;
+            return chatUsable
                 .Select(m => new LlmModel { Id = m.Id, Name = m.Id, Provider = "OpenAI", ProviderTag = ProviderTagValue })
-                .ToList() ?? [];
+                .ToList();
         }
         catch { return []; }
     }
@@ -110,12 +128,12 @@ public sealed class OpenAiService : IDisposable
     {
         try
         {
-            await AuthAsync(ct);
             var payload = BuildChatPayload(
                 modelId, messages, options,
                 options.MaxTokens ?? _settings.Settings.Llm.MaxTokens);
             var req = new HttpRequestMessage(HttpMethod.Post, $"{Base}/v1/chat/completions")
                 { Content = JsonContent.Create(payload, options: JsonOpts) };
+            req.Headers.Authorization = await BuildAuthHeaderAsync(ct);
             var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
             resp.EnsureSuccessStatusCode();
             return (true, resp, string.Empty);

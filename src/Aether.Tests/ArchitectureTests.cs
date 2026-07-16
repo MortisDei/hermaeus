@@ -100,6 +100,27 @@ public sealed class ArchitectureTests
     /// </summary>
     private static readonly (Type Type, string Property)[] ObservableCollectionOptOuts = [];
 
+    /// <summary>
+    /// r11 1.3: four independent FindOnPath/ResolveExecutable reimplementations
+    /// in Aether.Services never tried PATHEXT, so "llama-server" could never
+    /// resolve to "llama-server.exe" on Windows. Aether.Services.ProcessManagement.ExecutableResolver
+    /// is now the one place PATH/directory probing lives; nothing else in
+    /// Aether.Services may declare its own FindOnPath.
+    /// </summary>
+    [Fact]
+    public void Services_do_not_reimplement_FindOnPath()
+    {
+        var offenders = Services.GetTypes()
+            .Where(t => t != typeof(Aether.Services.ProcessManagement.ExecutableResolver))
+            .SelectMany(t => t.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.DeclaredOnly))
+            .Where(m => m.Name == "FindOnPath")
+            .Select(m => $"{m.DeclaringType!.Name}.{m.Name}")
+            .ToList();
+
+        Assert.True(offenders.Count == 0,
+            $"FindOnPath must live only in ExecutableResolver so PATHEXT resolution can never regress independently; found: {string.Join(", ", offenders)}");
+    }
+
     [Fact]
     public void ViewModel_collections_are_UI_thread_guarded()
     {

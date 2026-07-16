@@ -173,6 +173,8 @@
 
 - Model profiles with display names, descriptions, tags, visibility, and defaults.
 - Runtime profiles for `llama.cpp`, Ollama, and OpenAI-compatible endpoints.
+  Ollama chat streams incrementally like the other two providers, instead of
+  buffering the full reply before the first token.
 - Managed `llama-server` start/stop, auto-start, logs, and GPU auto-tune that
   verifies GPU layer candidates before saving a per-GGUF tuned profile.
 - Managed Chat and Embeddings cards are normalized so duplicate default cards
@@ -246,9 +248,14 @@
 - The first-run Setup Wizard now shows Kokoro onboarding details in the voice
   step, including the install plan and risk notes before you continue.
 - Local AI setup scans can offer approval-gated downloads for a default Phi-4
-  mini reasoning GGUF file and a platform-specific `llama-server` binary when
-  they are missing from the selected AI assets folder. Model downloads verify a
-  SHA256 hash when Aether has trusted hash metadata for that exact URL.
+  mini reasoning GGUF file (SHA256-verified) and a platform-specific
+  `llama-server` binary when they are missing from the selected AI assets
+  folder. The llama-server download fetches the real llama.cpp release
+  archive for your platform, extracts it with a zip-slip guard, and locates
+  the executable inside (Windows resolution also tries `.exe`, so a fresh
+  Windows install's default managed servers are startable out of the box).
+  Model downloads verify a SHA256 hash when Aether has trusted hash metadata
+  for that exact URL.
 - Local AI setup scans are voice-provider aware. Kokoro setup checks Kokoro
   Python imports and does not show XTTS script or model actions unless XTTS v2
   is selected.
@@ -275,7 +282,9 @@
 - Aether Doctor now validates the configured Python and voice backend
   health before installs or playback.
 - Doctor labels the Python check with the selected voice provider's actual
-  requirement, such as Python 3.12 for Kokoro or Python 3.11 for XTTS v2.
+  requirement, such as Python 3.12+ for Kokoro or Python 3.9-11 for XTTS v2,
+  and rejects an interpreter outside that range instead of accepting any
+  newer minor version.
 - Doctor only counts dedicated embedding GGUFs as embedding models, skips
   embedding backend health until one is installed, and leaves Linux global
   hotkeys out of problem reporting because system-wide support is not available
@@ -317,8 +326,11 @@
   hotkeys.
 - Toast notifications throughout the app with opaque popup backgrounds.
 - Configurable data root with migration, backup, restore, and conflict refusal.
-- Data-root migration includes Agent task state and workspace memory under
-  `agent/`.
+- Data-root migration moves everything under the data root through one
+  shared manifest (conversations, memories, benchmarks, Agent task state
+  under `agent/`, secrets, trace/eval history, logs, the voice lexicon, and
+  any future store), so migration, its preview, and backup can never
+  disagree about what the data root contains.
 - Local SQLite stores record schema versions and run additive migrations through
   a shared migration runner.
 - Settings, small local state files, generated setup scripts, and export files
@@ -339,6 +351,9 @@
 - Data-safety test harness for migration, backup/restore, and redaction.
 - Backup restore rejects traversal and path-prefix escape entries before
   extraction, while still excluding the local fallback secret vault and key.
+- Backup snapshots each SQLite database through SQLite's own online-backup
+  API rather than zipping the raw file, so a backup taken mid-write is still
+  internally consistent.
 
 ## Workbench Glue
 
