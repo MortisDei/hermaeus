@@ -11,6 +11,114 @@ limit.
 
 ## [Unreleased]
 
+## [0.15.0-alpha] - 2026-07-16
+
+Implements docs/review r10 in full: the first dedicated RAG deep-dive (a
+broken parent-child retrieval mode, a dataset-delete leak, a stale query
+cache, an embedding-model mismatch guard, an embedding-input clamp that cut
+off the back half of default-sized chunks, an inconsistent boost scale, a
+3x-per-query BM25 re-tokenization cost, and eval harness gaps), plus the
+three residual field-report issues from 0.14.0-alpha's first real use.
+
+### Fixed
+
+- **Shutdown crash with an MCP session open.** `App.axaml.cs` disposed the DI
+  container synchronously; `McpToolBridge` is `IAsyncDisposable`-only, so
+  `ServiceProvider.Dispose()` threw an unhandled `InvalidOperationException`
+  from the window-close path. Shutdown now awaits `DisposeAsync()` with a
+  bounded 5 s wait, and a guard test enumerates every singleton registration
+  to catch the next async-only service before it reintroduces this.
+- **Parent-child retrieval returned nothing.** `GetChunksAsync` filtered on
+  `parent_id IS NULL`, which excludes every embedded child chunk instead of
+  the unembedded parent bodies; with `UseParentChild` enabled, semantic scan
+  saw zero candidates and BM25 scored only parent bodies. An explicit
+  `is_parent` column (additive migration, backfilled from existing
+  `parent_id` references) replaces the inverted filter.
+- **Deleting a dataset leaked every chunk row.** `DeleteDatasetAsync` relied
+  on `ON DELETE CASCADE`, but no connection ever enabled SQLite foreign-key
+  enforcement, so chunks and BM25 stats for a deleted dataset stayed in
+  `conversations.db` forever. Deletes are now explicit and transactional;
+  store initialization also does a one-time sweep for rows already orphaned
+  by the old behavior.
+- **Re-ingest served stale results until restart.** Adding documents to an
+  already-queried dataset never cleared `RagQueryService`'s in-memory chunk
+  cache. Ingest, reindex, and remove-missing-sources now all clear it.
+- **Embedding-model mismatch surfaced as a raw exception or silent garbage
+  rankings.** Querying a dataset with a different current embedding model now
+  skips semantic search and falls back to BM25-only with a planner note;
+  ingest refuses to mix models into one dataset. `CosineScan` also filters to
+  matching embedding lengths as a belt-and-braces guard.
+- **A file removed from the ingest folder stayed in the dataset forever.**
+  There was no way to act on the `MissingFiles` health signal. A user-clicked
+  "Remove missing sources" action (never automatic) now exists.
+- **Dry-run ingest wrote to the database.** The initial `SaveDatasetAsync`
+  call ran regardless of `DryRun`, so a dry run created a zero-chunk dataset
+  row. It's now skipped for dry runs.
+- **`LastIngestPath`/`LastIngestUtc` were never persisted.** They only lived
+  in memory, so the Add-to-dataset folder pre-fill worked only within one
+  session. Both are now columns, set on first ingest as well as re-ingest.
+- **Embeddings saw only the first ~192 tokens (roughly half) of a default
+  1600-char chunk.** The metadata header (title/path/heading) was prepended
+  inside the same tiny budget with no cap of its own. The clamp is raised to
+  512 tokens (retry ladder 512/256/128) and the header is capped at 48
+  tokens, truncating an oversized source path (keeping its distinctive tail)
+  rather than the chunk content.
+- **The refusal preflight scored the wrong thing.** It measured
+  question-vs-context token overlap, so a question phrased in different
+  vocabulary than the corpus got refused even when semantic retrieval found
+  the right chunks with a strong cosine score. It now refuses only when
+  retrieval itself found nothing (best semantic score below threshold AND no
+  BM25 term match). A refusal now also emits the closest sources it
+  considered instead of a bare sentence. The dead `SemanticPlaceholder`
+  grounding mode is deleted (post-answer grounding stays token overlap).
+- **Structural boosts could outrank a clear semantic winner.** The same
+  small constants were added directly to both raw BM25 scores (1-10, making
+  them a no-op there) and RRF fusion scores (~0.01, where they dominated).
+  The metadata boost inside `Bm25Scorer` is deleted; `HybridRetriever`'s
+  fusion boost is now a capped proportional multiplier that can only break
+  ties and lift near-ties.
+- **BM25 re-tokenized the whole corpus up to 3x per query.** Each of up to 3
+  query variants re-tokenized every candidate chunk's full content. TF is now
+  computed once per query and reused across variants.
+- **Dataset health loaded every chunk's full content on every refresh.**
+  `RefreshDatasetManagerAsync` runs after every ingest, delete, and app load;
+  it now loads only the source path/chunk index/modified-timestamp columns
+  health actually needs.
+- **Retrieval-only eval mode could never pass a `should_refuse` case.**
+  `Passed` required both a retrieval hit and `!ShouldRefuse`, which is never
+  true when a case expects a refusal. It now evaluates the same
+  retrieval-strength gate the live query path uses.
+- **Evals were uncancellable from the UI.** `RunEvalAsync` passed
+  `CancellationToken.None`; a Stop button and wired cancellation token now
+  match the pattern ingest already had. A cancelled eval never reaches the
+  export step, so no partial run is written.
+- **Voice: a dictionary miss gained a spoken trailing "e".** The
+  letter-fallback's Magic-E rule checked the wrong side of the trailing "e"
+  (silent only when the *preceding* character was a vowel, backwards from
+  English's actual vowel-consonant-e pattern), so any out-of-dictionary word
+  like "joke" spoke as "jok-e". Typographic characters LLM output produces
+  constantly (curly quotes, em/en dashes, ellipsis) were not stripped either,
+  which is why capitalized/quoted words missed the dictionary in the first
+  place. Both are fixed; every word that reaches the fallback is now logged
+  once per session for the next pronunciation report.
+
+### Added
+
+- **Reindex action.** Re-embeds every stored chunk of a dataset with the
+  current embedding model, from stored content only (no source files
+  required), then rebuilds BM25 stats and the query cache.
+- **llama-server prompt-processing timings on the chat trace.** When
+  llama.cpp reports its own `timings` object, the send trace now shows
+  `server prompt N tok / X ms` alongside the existing pre-stream breakdown,
+  decomposing a large first-token wait into request-queue time versus actual
+  prompt evaluation. A send whose pre-first-token wait exceeds 10 s logs a
+  runtime warning with the full breakdown.
+
+### Docs
+
+- docs/rag.md, docs/voice.md, docs/features.md, and docs/security-review.md
+  updated for all of the above.
+
 ## [0.14.0-alpha] - 2026-07-15
 
 Implements docs/review r9 in full: the send-path latency and orphaned-server
@@ -705,89 +813,4 @@ Implements docs/review/03-next-level-roadmap.md Phases 1 through 4 in full
   document is unchanged from its `0.9.14-alpha` baseline and is flagged as
   such rather than implicitly re-certified.
 
-## [0.9.41-alpha] - 2026-07-11
-
-Second architecture/security review pass (docs/review/, r2). Closes every
-Phase 0 item in docs/review/01-code-audit.md: two P1s, eight P2s, and the
-resolvable P3s.
-
-### Fixed
-- **`LocalApi.Enabled` was a phantom toggle**: nothing ever launched the
-  `Aether.LocalApi` host process, so the Settings checkbox did nothing, and
-  a manually-launched host ignored the setting entirely. `LocalApiProcessManager`
-  now actually starts/stops the host (packaged sibling install, or the
-  dev build output when running via `dotnet run`/F5), wired into app startup,
-  settings save, and shutdown; `Aether.LocalApi/Program.cs` refuses to serve
-  (exit 1) when `Enabled` is false even if launched directly. `build.ps1`/`build.sh`
-  now also publish `Aether.LocalApi` into a `LocalApi/` subfolder of the
-  release package. A new unauthenticated `/health` endpoint backs the
-  process manager's startup health-poll.
-- Local API call tracing built `DetailJson` by string-interpolating the
-  caller-controlled `X-Aether-Client` header, so a crafted header could
-  inject malformed/extra JSON into stored trace records; it's now built
-  with `JsonSerializer.Serialize`, and the caller name is stripped of
-  control characters and capped at 64 characters.
-- `McpClient.CallToolAsync` stringified every tool argument via `ToString()`,
-  so a server expecting a JSON number/boolean/object for a declared
-  parameter received a string instead; arguments now map by runtime type.
-- `McpClient` never drained a spawned server's stderr; a server that logged
-  more than the OS pipe buffer would block on its next stderr write, hanging
-  every in-flight call until the 30-second timeout with no diagnostic. Stderr
-  is now drained continuously into a bounded tail, included in failure
-  messages.
-- `McpClient` requests made after the server process closed its stdout used
-  to hang for the full 30-second per-call timeout; the client now faults all
-  outstanding and future calls immediately when the connection closes.
-- The agent's `inspect_git_diff` tool read stdout/stderr only after
-  `WaitForExit`, which deadlocks against git blocking on a full pipe for a
-  large working tree, previously surfacing as a false "git status timed
-  out." Streams are now read concurrently with the wait, matching the
-  pattern `run_command` already used.
-- `apply_draft_patch` wrote the user's approved file changes with a plain
-  `File.WriteAllText`; a crash mid-write could truncate their source file.
-  It now goes through the same temp-plus-move `AtomicFileWriter` already
-  used for state files (`IAgentWorkspaceTools.ApplyDraftPatch` is now
-  `ApplyDraftPatchAsync`).
-- The native Kokoro model download buffered the full response (a few
-  hundred MB) into memory before writing to disk; it now streams via
-  `HttpCompletionOption.ResponseHeadersRead`.
-- Native Kokoro speech synthesis (phonemize/tokenize/ONNX inference) ran on
-  the caller's thread, which is the UI thread for `SpeakAsync`/`PreviewVoiceAsync`,
-  freezing the app for the duration; it's now offloaded to a background thread.
-- `secrets.local.key` (the AES key protecting every fallback-stored secret)
-  was written with a bare `File.WriteAllText`, restricting permissions only
-  after the file was already visible, and non-atomically. It's now written
-  temp-then-move with permissions restricted before the move, matching
-  `secrets.local.json`'s own write path.
-- A secret that fails to decrypt under both the current and legacy format
-  (e.g. a corrupted or replaced `secrets.local.key`) used to silently
-  resolve to an empty string; `SecretStore` now logs a warning through
-  `IRuntimeLogService` so the failure is diagnosable instead of surfacing
-  only as a downstream provider auth failure.
-- The local API's chat completion endpoint only forwarded
-  Temperature/MaxTokens, ignoring the five other sampling parameters added
-  in 0.9.39 and any saved per-model profile defaults, so API callers got
-  different output than the desktop app for the same model. It now applies
-  the same explicit-value / model-profile-default / global-setting
-  precedence the desktop `ChatViewModel` uses.
-- The local API's RAG source parsing kept a third private copy of the
-  `__RAG_SOURCES__` sentinel regex/JSON-shape logic; it now calls the
-  shared `RagStreamProtocol.ParseSources` like every other consumer.
-
-### Added
-- `LocalApiSettingsViewModel.ProcessStatusLabel`, shown in Settings > Local
-  API, so the Enable checkbox has a visible, honest status ("Running",
-  "Stopped", "Stopped (no token configured)", etc.) instead of an assumed
-  effect.
-
-### Docs
-- docs/review/ now holds a second review round (r2): a code audit, an
-  architecture assessment of the post-r1 v2.0/v3.0 code, and a next-level
-  roadmap. r1 moved to docs/review/archived/r1/.
-
-## [0.9.40-alpha] - 2026-07-07
-
-### Fixed
-- `NativeKokoroVoiceProvider`/`KokoroOnnxModel` resolved `LocalAiAssetsRoot` once at DI-singleton construction time and cached it forever; changing the setting later in the same running session silently kept reading/writing the old location. The assets root is now re-resolved from current settings on every access, and a loaded ONNX session/voice-style cache is dropped and reloaded if the root changes underneath it.
-- Diagnosed a real crash: the Kokoro Native install actually completed successfully (model + all 28 voices downloaded, SHA256 verified) but a subsequent model load via `new InferenceSession(...)` crashed the whole process natively (bypassing all managed exception handling) on at least one machine. `InferenceSession` construction now uses explicit, conservative `SessionOptions` (basic graph optimization, single-threaded, sequential execution) instead of the all-optimizations default, trading a little inference speed for avoiding whatever fused/parallel kernel path was crashing.
 

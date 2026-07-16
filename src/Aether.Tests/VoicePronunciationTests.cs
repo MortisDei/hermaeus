@@ -272,4 +272,78 @@ internal static class VoicePronunciationTests
         Equal(expectedIpa, ipa, $"Unexpected IPA for '{word}'.");
         Equal(expectedIpa, KokoroPhonemizer.ToPhonemes(word), $"Phonemizer output for '{word}' should match its cmudict entry exactly.");
     }
+
+    // ── 3.3 Typographic normalization + Magic-E fallback fix ────────────────
+    // (r10 03-field-follow-ups.md): em/en dashes, curly quotes, ellipsis and
+    // markdown residue confuse the phonemizer; the letter-rule fallback's
+    // Magic-E check was inverted.
+
+    public static Task NormalizerMapsEmDashAndDoubleHyphenToCommaPause()
+    {
+        Equal("wait, what", KokoroTextNormalizer.Normalize("wait\u2014what"), "An em dash glued between two words must become a comma pause and split the words.");
+        Equal("wait, what", KokoroTextNormalizer.Normalize("wait\u2013what"), "An en dash glued between two words must become a comma pause and split the words.");
+        Equal("wait, what", KokoroTextNormalizer.Normalize("wait--what"), "A double hyphen between word characters must become a comma pause.");
+        return Task.CompletedTask;
+    }
+
+    public static Task NormalizerMapsCurlyQuotesAndEllipsis()
+    {
+        Equal("\"Joke\"", KokoroTextNormalizer.Normalize("\u201CJoke\u201D"), "Curly double quotes must normalize to straight quotes.");
+        Equal("'Joke'", KokoroTextNormalizer.Normalize("\u2018Joke\u2019"), "Curly single quotes must normalize to straight quotes.");
+        Equal("wait...", KokoroTextNormalizer.Normalize("wait\u2026"), "An ellipsis character must expand to three periods.");
+        return Task.CompletedTask;
+    }
+
+    public static Task NormalizerStripsMarkdownEmphasisResidue()
+    {
+        Equal("Bold word", KokoroTextNormalizer.Normalize("**Bold** word"), "Markdown bold emphasis asterisks must be stripped without touching the enclosed word.");
+        Equal("snake_case_word", KokoroTextNormalizer.Normalize("snake_case_word"), "An underscore inside a word (not markdown emphasis) must be preserved.");
+        Equal("code", KokoroTextNormalizer.Normalize("`code`"), "Inline-code backticks must be stripped.");
+        return Task.CompletedTask;
+    }
+
+    public static Task CapitalizedWordMatchesLowercaseDictionaryPronunciation()
+    {
+        True(CmuPronouncingDictionary.TryGetIpa("joke", out var expected), "cmudict is expected to contain 'joke'.");
+        Equal(expected, KokoroPhonemizer.ToPhonemes("Joke"), "A bare capitalized word must resolve via the lowercase dictionary lookup, not the letter fallback.");
+        Equal(expected, KokoroPhonemizer.ToPhonemes("\u201CJoke\u201D"), "A capitalized word wrapped in curly quotes must still hit the dictionary once typographic punctuation is normalized and the quotes are trimmed.");
+        return Task.CompletedTask;
+    }
+
+    public static Task FallbackMagicERuleSilencesTrailingEOnlyAfterVowelConsonantE()
+    {
+        False(CmuPronouncingDictionary.TryGetIpa("zoke", out _), "'zoke' must not be a real cmudict entry for this test to exercise the fallback.");
+        Equal("zoʊk", KokoroPhonemizer.ToPhonemes("zoke"), "'zoke' follows vowel-consonant-e (like 'joke'); the trailing e must be silent, not spoken as an extra vowel.");
+
+        False(CmuPronouncingDictionary.TryGetIpa("glarpe", out _), "'glarpe' must not be a real cmudict entry for this test to exercise the fallback.");
+        var glarpePhonemes = KokoroPhonemizer.ToPhonemes("glarpe");
+        False(glarpePhonemes.EndsWith(KokoroVocab.OpenMidE, StringComparison.Ordinal), $"'glarpe' has a vowel before its final consonant cluster, so its trailing e must be silent, got: {glarpePhonemes}");
+        return Task.CompletedTask;
+    }
+
+    // ── Typographic normalization must never leak characters outside vocab ──
+
+    private static readonly string[] TypographicGoldenSentences =
+    [
+        "wait\u2014what",
+        "wait\u2013what",
+        "\u201CJoke\u201D said the narrator",
+        "\u2018quoted\u2019 text",
+        "wait\u2026 really",
+        "**Bold** word and `code`",
+        "this -- that"
+    ];
+
+    public static Task TypographicGoldenSentencesDropNoCharactersDuringTokenization()
+    {
+        foreach (var sentence in TypographicGoldenSentences)
+        {
+            var phonemes = KokoroPhonemizer.ToPhonemes(sentence);
+            True(phonemes.Length > 0, $"'{sentence}' must produce non-empty phonemes.");
+            var chunks = KokoroTokenizer.Encode(phonemes);
+            var totalTokens = chunks.Sum(c => c.Length) - (chunks.Count * 2); // minus the two pad tokens per chunk
+            Equal(phonemes.Length, totalTokens, $"'{sentence}' phonemized to {phonemes.Length} chars but only {totalTokens} were tokenized; some characters were silently dropped.");
+        }
+        return Task.CompletedTask;
+    }
 }

@@ -2,6 +2,92 @@
 
 The CHANGELOG.md in root only contains the current 10 versions of changelogs. The rest are archived here in line with the 10 version limit in the main changelog.
 
+## [0.9.41-alpha] - 2026-07-11
+
+Second architecture/security review pass (docs/review/, r2). Closes every
+Phase 0 item in docs/review/01-code-audit.md: two P1s, eight P2s, and the
+resolvable P3s.
+
+### Fixed
+- **`LocalApi.Enabled` was a phantom toggle**: nothing ever launched the
+  `Aether.LocalApi` host process, so the Settings checkbox did nothing, and
+  a manually-launched host ignored the setting entirely. `LocalApiProcessManager`
+  now actually starts/stops the host (packaged sibling install, or the
+  dev build output when running via `dotnet run`/F5), wired into app startup,
+  settings save, and shutdown; `Aether.LocalApi/Program.cs` refuses to serve
+  (exit 1) when `Enabled` is false even if launched directly. `build.ps1`/`build.sh`
+  now also publish `Aether.LocalApi` into a `LocalApi/` subfolder of the
+  release package. A new unauthenticated `/health` endpoint backs the
+  process manager's startup health-poll.
+- Local API call tracing built `DetailJson` by string-interpolating the
+  caller-controlled `X-Aether-Client` header, so a crafted header could
+  inject malformed/extra JSON into stored trace records; it's now built
+  with `JsonSerializer.Serialize`, and the caller name is stripped of
+  control characters and capped at 64 characters.
+- `McpClient.CallToolAsync` stringified every tool argument via `ToString()`,
+  so a server expecting a JSON number/boolean/object for a declared
+  parameter received a string instead; arguments now map by runtime type.
+- `McpClient` never drained a spawned server's stderr; a server that logged
+  more than the OS pipe buffer would block on its next stderr write, hanging
+  every in-flight call until the 30-second timeout with no diagnostic. Stderr
+  is now drained continuously into a bounded tail, included in failure
+  messages.
+- `McpClient` requests made after the server process closed its stdout used
+  to hang for the full 30-second per-call timeout; the client now faults all
+  outstanding and future calls immediately when the connection closes.
+- The agent's `inspect_git_diff` tool read stdout/stderr only after
+  `WaitForExit`, which deadlocks against git blocking on a full pipe for a
+  large working tree, previously surfacing as a false "git status timed
+  out." Streams are now read concurrently with the wait, matching the
+  pattern `run_command` already used.
+- `apply_draft_patch` wrote the user's approved file changes with a plain
+  `File.WriteAllText`; a crash mid-write could truncate their source file.
+  It now goes through the same temp-plus-move `AtomicFileWriter` already
+  used for state files (`IAgentWorkspaceTools.ApplyDraftPatch` is now
+  `ApplyDraftPatchAsync`).
+- The native Kokoro model download buffered the full response (a few
+  hundred MB) into memory before writing to disk; it now streams via
+  `HttpCompletionOption.ResponseHeadersRead`.
+- Native Kokoro speech synthesis (phonemize/tokenize/ONNX inference) ran on
+  the caller's thread, which is the UI thread for `SpeakAsync`/`PreviewVoiceAsync`,
+  freezing the app for the duration; it's now offloaded to a background thread.
+- `secrets.local.key` (the AES key protecting every fallback-stored secret)
+  was written with a bare `File.WriteAllText`, restricting permissions only
+  after the file was already visible, and non-atomically. It's now written
+  temp-then-move with permissions restricted before the move, matching
+  `secrets.local.json`'s own write path.
+- A secret that fails to decrypt under both the current and legacy format
+  (e.g. a corrupted or replaced `secrets.local.key`) used to silently
+  resolve to an empty string; `SecretStore` now logs a warning through
+  `IRuntimeLogService` so the failure is diagnosable instead of surfacing
+  only as a downstream provider auth failure.
+- The local API's chat completion endpoint only forwarded
+  Temperature/MaxTokens, ignoring the five other sampling parameters added
+  in 0.9.39 and any saved per-model profile defaults, so API callers got
+  different output than the desktop app for the same model. It now applies
+  the same explicit-value / model-profile-default / global-setting
+  precedence the desktop `ChatViewModel` uses.
+- The local API's RAG source parsing kept a third private copy of the
+  `__RAG_SOURCES__` sentinel regex/JSON-shape logic; it now calls the
+  shared `RagStreamProtocol.ParseSources` like every other consumer.
+
+### Added
+- `LocalApiSettingsViewModel.ProcessStatusLabel`, shown in Settings > Local
+  API, so the Enable checkbox has a visible, honest status ("Running",
+  "Stopped", "Stopped (no token configured)", etc.) instead of an assumed
+  effect.
+
+### Docs
+- docs/review/ now holds a second review round (r2): a code audit, an
+  architecture assessment of the post-r1 v2.0/v3.0 code, and a next-level
+  roadmap. r1 moved to docs/review/archived/r1/.
+
+## [0.9.40-alpha] - 2026-07-07
+
+### Fixed
+- `NativeKokoroVoiceProvider`/`KokoroOnnxModel` resolved `LocalAiAssetsRoot` once at DI-singleton construction time and cached it forever; changing the setting later in the same running session silently kept reading/writing the old location. The assets root is now re-resolved from current settings on every access, and a loaded ONNX session/voice-style cache is dropped and reloaded if the root changes underneath it.
+- Diagnosed a real crash: the Kokoro Native install actually completed successfully (model + all 28 voices downloaded, SHA256 verified) but a subsequent model load via `new InferenceSession(...)` crashed the whole process natively (bypassing all managed exception handling) on at least one machine. `InferenceSession` construction now uses explicit, conservative `SessionOptions` (basic graph optimization, single-threaded, sequential execution) instead of the all-optimizations default, trading a little inference speed for avoiding whatever fused/parallel kernel path was crashing.
+
 ## [0.9.39-alpha] - 2026-07-07
 
 ### Added

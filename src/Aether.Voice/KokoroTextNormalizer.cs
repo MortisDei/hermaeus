@@ -70,6 +70,27 @@ internal static partial class KokoroTextNormalizer
         ['='] = "equals"
     };
 
+    // ── Typographic punctuation (r10 03-field-follow-ups.md 3.3) ────────────
+    // LLM chat output uses U+2014/U+2013 dashes, curly quotes, ellipsis and
+    // markdown emphasis constantly; none of these are in the phonemizer's
+    // dictionary lookup or letter-fallback tables, so left as-is they cause
+    // dictionary misses (fused words) and dropped characters.
+
+    [GeneratedRegex("[\\u2014\\u2013]")]
+    private static partial Regex EmDashPattern();
+
+    [GeneratedRegex(@"(?<=[\w\s])--(?=[\w\s])")]
+    private static partial Regex DoubleHyphenPattern();
+
+    [GeneratedRegex("[\\u2018\\u2019]")]
+    private static partial Regex CurlySingleQuotePattern();
+
+    [GeneratedRegex("[\\u201C\\u201D]")]
+    private static partial Regex CurlyDoubleQuotePattern();
+
+    [GeneratedRegex(@"(?<!\w)[*`_]|[*`_](?!\w)")]
+    private static partial Regex MarkdownEmphasisPattern();
+
     /// <summary>
     /// Expands numbers, currency, percentages, ordinals and clock times into
     /// plain English words, and spells out a handful of standalone symbols.
@@ -85,6 +106,12 @@ internal static partial class KokoroTextNormalizer
             return text;
 
         var s = text;
+        s = EmDashPattern().Replace(s, ", ");
+        s = DoubleHyphenPattern().Replace(s, ", ");
+        s = CurlySingleQuotePattern().Replace(s, "'");
+        s = CurlyDoubleQuotePattern().Replace(s, "\"");
+        s = s.Replace("\u2026", "...", StringComparison.Ordinal);
+        s = MarkdownEmphasisPattern().Replace(s, "");
         s = CurrencyPattern().Replace(s, m => ExpandCurrency(m));
         s = PercentPattern().Replace(s, m => ExpandPercent(m));
         s = TimePattern().Replace(s, m => ExpandTime(m));

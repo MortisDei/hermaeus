@@ -440,12 +440,16 @@ public partial class ChatViewModel : ViewModelBase
                 ScrollToBottom?.Invoke(this, EventArgs.Empty);
             }
 
-            var timing = new ChatSendTiming(recallMs, selectMs, lessonMs, promptBuildMs, result.FirstTokenMs, result.TotalLatencyMs);
+            var timing = new ChatSendTiming(recallMs, selectMs, lessonMs, promptBuildMs, result.FirstTokenMs, result.TotalLatencyMs, result.ServerTimings);
             asst.DurationMs = result.TotalLatencyMs;
             PerformanceLog = result.Cancelled
                 ? $"cancelled after {result.TotalLatencyMs} ms"
                 : $"{timing.Format()} · render batches {accumulator.RenderBatches}";
             asst.IsStreaming = false;
+
+            if (!result.Cancelled && timing.IsSlow)
+                _runtimeLogs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Service,
+                    $"Slow chat send ({timing.PreFirstTokenMs} ms before first token): {timing.Format()}"));
 
             if (result.Cancelled)
             {

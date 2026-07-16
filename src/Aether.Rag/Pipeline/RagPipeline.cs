@@ -34,8 +34,15 @@ public sealed class RagPipeline
     private const int EmbedBatchSize = 10;
     private const int DirectoryFileBatchSize = 50;
     private const int MaxWebPageBytes = 2 * 1024 * 1024;
-    private const int MaxEmbeddingInputTokens = 192;
-    private static readonly int[] EmbeddingInputRetryTokenLimits = [MaxEmbeddingInputTokens, 128, 64];
+
+    // r10 02-rag-quality.md 2.1: raised from 192 so a default 1600-char chunk
+    // (plus its metadata header) fits inside one embedding call; the retry
+    // ladder still steps down for servers with small physical batches.
+    private const int MaxEmbeddingInputTokens = 512;
+    private static readonly int[] EmbeddingInputRetryTokenLimits = [MaxEmbeddingInputTokens, 256, 128];
+
+    /// <summary>Header (title/path/heading/etc.) must not crowd out chunk content inside the embedding budget.</summary>
+    private const int MaxHeaderTokens = 48;
 
     public RagPipeline(SqliteRagStore store, IEmbeddingService embed)
         : this(store, embed, null)
@@ -80,11 +87,16 @@ public sealed class RagPipeline
         var existingHashes = await _store.GetSourceHashesAsync(dataset.Id, files, ct);
 
         var health = new RagIngestHealth { FileCount = files.Count };
+        AddChunkSizeGuardWarning(health, dataset.Config);
         var duplicateKeys = new HashSet<string>(StringComparer.Ordinal);
         var totalChunksSeen = 0;
 
         // ── 1. Chunk, embed, and store in file batches ────────────────────
-        await _store.SaveDatasetAsync(dataset, ct);
+        // r10 01-rag-correctness.md 1.6: a dry run must not create or
+        // update the dataset row; the final save at the end of this method
+        // is already skipped by the dry-run early return below.
+        if (!options.DryRun)
+            await _store.SaveDatasetAsync(dataset, ct);
         for (int batchStart = 0; batchStart < files.Count; batchStart += DirectoryFileBatchSize)
         {
             ct.ThrowIfCancellationRequested();
@@ -162,6 +174,7 @@ public sealed class RagPipeline
                         // Parent chunk (stored but not embedded for indexing)
                         var parentId = Guid.NewGuid().ToString();
                         var parent = CreateChunk(dataset.Id, document.SourceFile, document.SourcePath, document.SourceHash, document.ModifiedUtc, document.Title, tc, tc.ParentContent, parentId, null);
+                        parent.IsParent = true;
                         batchParents.Add(parent);
                         chunk.ParentId = parentId;
                     }
@@ -218,6 +231,58 @@ public sealed class RagPipeline
         return report;
     }
 
+    /// <summary>
+    /// Re-embeds every stored chunk of a dataset with its current
+    /// <see cref="RagDatasetConfig.EmbeddingModel"/> (caller sets that field
+    /// to the new model before calling), rebuilds BM25 stats, and updates
+    /// the dataset row (r10 01-rag-correctness.md 1.4). Works from stored
+    /// chunk content only; the original source files are never touched.
+    /// </summary>
+    public async Task<int> ReindexDatasetAsync(
+        RagDataset dataset,
+        IProgress<IngestProgress>? progress = null,
+        CancellationToken ct = default)
+    {
+        var chunks = await _store.GetChunksAsync(dataset.Id, includeEmbeddings: false, ct);
+        if (chunks.Count == 0)
+        {
+            progress?.Report(new IngestProgress("Done", 0, 0, "Nothing to reindex."));
+            return 0;
+        }
+
+        progress?.Report(new IngestProgress("Embedding", 0, chunks.Count, $"Reindexing {chunks.Count} chunk(s)..."));
+
+        for (var i = 0; i < chunks.Count; i += EmbedBatchSize)
+        {
+            ct.ThrowIfCancellationRequested();
+            var batch = chunks.Skip(i).Take(EmbedBatchSize).ToList();
+            var embeddings = await EmbedBatchWithRetryAsync(batch, dataset.Config, ct);
+            if (embeddings.Count > 0)
+                dataset.Config.EmbeddingDimensions = embeddings[0].Length;
+
+            for (var j = 0; j < batch.Count; j++)
+                batch[j].Embedding = embeddings[j];
+
+            ct.ThrowIfCancellationRequested();
+            await _store.SaveChunksBatchAsync(batch, ct);
+
+            var done = Math.Min(i + EmbedBatchSize, chunks.Count);
+            progress?.Report(new IngestProgress("Embedding", done, chunks.Count, $"Reindexed {done} of {chunks.Count} chunk(s)"));
+        }
+
+        progress?.Report(new IngestProgress("Indexing", 0, 1, "Rebuilding BM25 stats..."));
+        ct.ThrowIfCancellationRequested();
+        var statsSource = await _store.GetChunksAsync(dataset.Id, includeEmbeddings: false, ct);
+        var stats = Bm25Scorer.BuildStats(statsSource);
+        await _store.SaveBm25StatsAsync(dataset.Id, stats, ct);
+
+        ct.ThrowIfCancellationRequested();
+        await _store.SaveDatasetAsync(dataset, ct);
+
+        progress?.Report(new IngestProgress("Done", chunks.Count, chunks.Count, $"Reindex complete: {chunks.Count} chunk(s)."));
+        return chunks.Count;
+    }
+
     public async Task<IngestReport> IngestWebAsync(
         RagDataset dataset,
         IProgress<IngestProgress>? progress = null,
@@ -249,6 +314,7 @@ public sealed class RagPipeline
         var parentChunks = new List<RagChunk>();
         var sourcePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var health = new RagIngestHealth { FileCount = documents.Count };
+        AddChunkSizeGuardWarning(health, dataset.Config);
         progress?.Report(new IngestProgress("Chunking", 0, documents.Count, $"Chunking {documents.Count} web page(s)"));
 
         for (var i = 0; i < documents.Count; i++)
@@ -269,7 +335,9 @@ public sealed class RagPipeline
                 if (tc.ParentContent is not null)
                 {
                     var parentId = Guid.NewGuid().ToString();
-                    parentChunks.Add(CreateChunk(dataset.Id, doc.Url.Host, doc.Url.ToString(), sourceHash, DateTime.UtcNow, doc.Title, tc, tc.ParentContent, parentId, null));
+                    var parent = CreateChunk(dataset.Id, doc.Url.Host, doc.Url.ToString(), sourceHash, DateTime.UtcNow, doc.Title, tc, tc.ParentContent, parentId, null);
+                    parent.IsParent = true;
+                    parentChunks.Add(parent);
                     chunk.ParentId = parentId;
                 }
 
@@ -303,15 +371,40 @@ public sealed class RagPipeline
         return finalReport;
     }
 
+    /// <summary>
+    /// r10 02-rag-quality.md 2.1: the metadata header used to be prepended
+    /// inside the same token budget as the content with no cap of its own,
+    /// so a long source path could crowd out most of a chunk. The header is
+    /// capped at <see cref="MaxHeaderTokens"/>; if it doesn't fit, the path
+    /// (the most variable, least front-loaded-informative line) is
+    /// truncated from the head, keeping the distinctive tail. Content is
+    /// never truncated here.
+    /// </summary>
     private static string BuildEmbeddingText(RagChunk chunk, RagDatasetConfig cfg)
+    {
+        var header = ComposeEmbeddingHeader(chunk, cfg, chunk.SourcePath);
+        if (header.Length > 0 && ParagraphChunker.EstimateTokens(header) > MaxHeaderTokens && !string.IsNullOrWhiteSpace(chunk.SourcePath))
+        {
+            var withoutPathTokens = ParagraphChunker.EstimateTokens(ComposeEmbeddingHeader(chunk, cfg, string.Empty));
+            var pathBudgetChars = Math.Max(16, (MaxHeaderTokens - withoutPathTokens) * 4);
+            var truncatedPath = chunk.SourcePath.Length > pathBudgetChars
+                ? chunk.SourcePath[^pathBudgetChars..]
+                : chunk.SourcePath;
+            header = ComposeEmbeddingHeader(chunk, cfg, truncatedPath);
+        }
+
+        return header.Length == 0 ? chunk.Content : header + "\n\n" + chunk.Content;
+    }
+
+    private static string ComposeEmbeddingHeader(RagChunk chunk, RagDatasetConfig cfg, string sourcePath)
     {
         var builder = new StringBuilder();
 
         if (cfg.PrependTitleToEmbedding && !string.IsNullOrWhiteSpace(chunk.SourceTitle))
             builder.AppendLine($"Title: {chunk.SourceTitle}");
 
-        if (!string.IsNullOrWhiteSpace(chunk.SourcePath))
-            builder.AppendLine($"Source: {chunk.SourcePath}");
+        if (!string.IsNullOrWhiteSpace(sourcePath))
+            builder.AppendLine($"Source: {sourcePath}");
 
         if (chunk.ChunkKind != RagChunkKind.PlainText)
             builder.AppendLine($"Chunk kind: {chunk.ChunkKind}");
@@ -331,11 +424,7 @@ public sealed class RagPipeline
         if (!string.IsNullOrWhiteSpace(chunk.SourceUrl))
             builder.AppendLine($"Url: {chunk.SourceUrl}");
 
-        if (builder.Length > 0)
-            builder.AppendLine();
-
-        builder.Append(chunk.Content);
-        return builder.ToString();
+        return builder.ToString().TrimEnd('\r', '\n');
     }
 
     private static void AddHealthWarnings(RagIngestHealth health)
@@ -344,6 +433,16 @@ public sealed class RagPipeline
             health.Warnings.Add($"{health.DuplicateChunkCount} duplicate chunks detected.");
         if (health.EmptyChunkCount > 0)
             health.Warnings.Add($"{health.EmptyChunkCount} empty chunks detected.");
+    }
+
+    /// <summary>r10 02-rag-quality.md 2.1: an oversized custom chunk config should be visible, not silently truncated.</summary>
+    private static void AddChunkSizeGuardWarning(RagIngestHealth health, RagDatasetConfig cfg)
+    {
+        var maxChunkCharsForClamp = MaxEmbeddingInputTokens * 4;
+        if (cfg.TargetChunkChars > maxChunkCharsForClamp)
+            health.Warnings.Add(
+                $"Chunk size ({cfg.TargetChunkChars} chars) exceeds the embedding input clamp " +
+                $"({MaxEmbeddingInputTokens} tokens, ~{maxChunkCharsForClamp} chars); the end of oversized chunks may not be embedded.");
     }
 
     private static RagChunk CreateChunk(

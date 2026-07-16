@@ -126,6 +126,20 @@
                                                             Padding="10,6"
                                                             CornerRadius="6"
                                                             ToolTip.Tip="Add more documents to this dataset" />
+                                                    <Button Content="Reindex"
+                                                            Command="{Binding $parent[ItemsControl].DataContext.ReindexDatasetCommand}"
+                                                            CommandParameter="{Binding}"
+                                                            IsVisible="{Binding ReindexRequired}"
+                                                            Padding="10,6"
+                                                            CornerRadius="6"
+                                                            ToolTip.Tip="Re-embed every chunk with the current embedding model" />
+                                                    <Button Content="Remove missing"
+                                                            Command="{Binding $parent[ItemsControl].DataContext.RemoveMissingSourcesCommand}"
+                                                            CommandParameter="{Binding}"
+                                                            IsVisible="{Binding MissingFiles, Converter={x:Static views:RagView.IsNonZero}}"
+                                                            Padding="10,6"
+                                                            CornerRadius="6"
+                                                            ToolTip.Tip="Remove chunks whose source files no longer exist on disk" />
                                                     <Button Content="Delete"
                                                             Command="{Binding $parent[ItemsControl].DataContext.DeleteDatasetCommand}"
                                                             CommandParameter="{Binding}"
@@ -552,7 +566,7 @@
                                        FontSize="12"
                                        Opacity="0.5"
                                        TextWrapping="Wrap" />
-                            <Grid ColumnDefinitions="90,*,Auto,Auto" ColumnSpacing="8">
+                            <Grid ColumnDefinitions="90,*,Auto,Auto,Auto" ColumnSpacing="8">
                                 <TextBlock Grid.Column="0"
                                            Text="Eval file"
                                            VerticalAlignment="Center"
@@ -574,6 +588,12 @@
                                         Command="{Binding RunFullEvalCommand}"
                                         IsEnabled="{Binding !IsEvaluating}"
                                         Content="Full Eval"
+                                        Padding="12,7"
+                                        CornerRadius="6" />
+                                <Button Grid.Column="4"
+                                        Command="{Binding StopEvalCommand}"
+                                        IsVisible="{Binding IsEvaluating}"
+                                        Content="Stop"
                                         Padding="12,7"
                                         CornerRadius="6" />
                             </Grid>

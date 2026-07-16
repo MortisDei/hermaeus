@@ -16,7 +16,11 @@
   reported, first-token latency, total latency, error details, and a
   pre-stream timing breakdown (memory recall, injection selection, lesson
   context, prompt build, first token) so a slow send is diagnosable without a
-  profiler.
+  profiler. When llama.cpp reports its own prompt-processing timings, the
+  breakdown also shows the server-side prompt tokens/time so a slow send can
+  be narrowed to request queuing versus actual prompt evaluation. A send
+  whose pre-first-token wait exceeds 10 seconds logs a runtime warning with
+  the full breakdown, so it is visible without opening the trace panel.
 - Compare Models sends the current draft prompt to one to four selected models
   and compares answers, latency, token usage, and simple quality notes without
   adding the comparison run to chat history.
@@ -211,7 +215,31 @@
   current embedding model differs from the dataset metadata.
 - Dataset metadata now records the embedding model and observed embedding
   dimensions during ingest so future reindex decisions are visible instead of
-  implicit.
+  implicit. The last ingest folder/URL list and timestamp are recorded from
+  the very first ingest, not just re-ingests, and persist across restarts.
+- **Reindex** action on a dataset card (shown when the embedding model
+  differs) re-embeds every stored chunk with the current model, from stored
+  content only, and rebuilds BM25 stats and the query cache. Adding documents
+  to a dataset embedded with a different model is blocked with a message
+  naming both models until you reindex.
+- **Remove missing sources** action on a dataset card (shown when files are
+  missing) lists the missing paths and, after confirmation, deletes their
+  chunks and rebuilds BM25 stats and health. This is always an explicit,
+  user-confirmed action; ingest never removes sources automatically.
+- Parent-child chunking (a small embedded child size with a larger parent
+  context size) now correctly returns child matches upgraded to parent
+  content, instead of returning nothing.
+- Deleting a dataset removes all of its chunks and BM25 stats explicitly, so
+  nothing is left behind in the database.
+- Re-ingesting into an already-queried dataset clears the in-memory query
+  cache immediately, so new chunks are retrievable without restarting.
+- RAG query refusal now checks retrieval strength (best semantic and BM25
+  scores) instead of how much the question's wording overlaps the context, so
+  differently-phrased questions that retrieval actually answered are no
+  longer refused. A refusal still shows the closest sources it considered.
+- Embedding input for a chunk now fits a full default-length chunk plus its
+  header, instead of only the first roughly-quarter of it; an oversized
+  custom chunk size setting surfaces an ingest health warning.
 
 ## Local AI Setup
 
@@ -268,6 +296,11 @@
 
 ## System Integration
 
+- App shutdown disposes the service container asynchronously so an
+  async-only background service (like an active MCP session) no longer
+  raises an unhandled exception on window close; a hung MCP child process is
+  abandoned to the existing job-object cleanup after a bounded 5-second wait
+  rather than blocking exit indefinitely.
 - System overview for app version, CPU, RAM, storage, databases, managed
   components, and best-effort GPU/VRAM visibility.
 - Privacy Audit dashboard connects local-first posture into one view covering

@@ -82,6 +82,35 @@ If no GGUF models are found, Aether can offer the default Phi-4 mini reasoning
 download. If `llama-server` is not available, Aether can offer a matching
 binary download for the current platform.
 
+## Pronunciation and Text Normalization
+
+Before phonemization, Kokoro speech text is normalized so LLM chat output
+reads naturally instead of being spelled out or mispronounced:
+
+- Numbers, currency, percentages, ordinals, and clock times expand to words
+  (e.g. "$5.20" -> "five dollars twenty cents").
+- Em dashes (U+2014), en dashes (U+2013), and a standalone `--` become a
+  comma pause, which also splits words a dash fused together without spaces.
+- Curly quotes normalize to straight quotes and an ellipsis (U+2026) expands
+  to three periods, so quoted or trailing-off text does not fall through to
+  the letter-by-letter fallback just because of the punctuation attached to
+  it.
+- Stray markdown emphasis characters (`*`, `` ` ``, `_`) are stripped when
+  they are not part of a word, while an underscore inside an identifier
+  (like `snake_case`) is left alone.
+- Word lookup goes through a user override lexicon, then the embedded CMU
+  Pronouncing Dictionary, then suffix-stripping retries (`-ing`, `-ed`,
+  `-'s`, and so on), then unknown all-caps acronyms spelled out letter by
+  letter. A final letter-by-letter rule-based fallback covers anything still
+  unresolved (invented words, typos); its trailing-"e" rule correctly treats
+  only the real vowel-consonant-e pattern ("joke", "hope") as silent, not any
+  word ending in "e".
+- Words that reach the letter-by-letter fallback are logged once per
+  distinct word per session (Debug level) so pronunciation reports can be
+  checked against what actually fell through, rather than guessed at.
+- The user pronunciation lexicon (`{DataRoot}/voice/lexicon.txt`) always
+  takes priority and is reloaded automatically when the file changes.
+
 ## Audio Data and Privacy Lifecycle
 
 - Voice previews use transient generated audio and delete temporary WAV files

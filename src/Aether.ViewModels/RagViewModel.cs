@@ -101,6 +101,7 @@ public sealed class RagDatasetManagerItemViewModel
     public int MissingFiles { get; set; }
     public int StaleFiles { get; set; }
     public int DuplicateSources { get; set; }
+    public IReadOnlyList<string> MissingSourcePaths { get; set; } = [];
     public string LastIngestLabel => CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
     public string DimensionsLabel => EmbeddingDimensions <= 0 ? "unknown dimensions" : $"{EmbeddingDimensions:N0} dimensions";
     public bool ReindexRequired => !string.IsNullOrWhiteSpace(CurrentEmbeddingModel)
@@ -124,6 +125,7 @@ public partial class RagViewModel : ObservableObject
     private readonly KokoroProcessManager? _kokoro;
     private CancellationTokenSource? _cts;
     private CancellationTokenSource? _ingestCts;
+    private CancellationTokenSource? _evalCts;
     private RagDataset? _targetDatasetForIngest;
 
     public UiBoundCollection<RagDataset>       Datasets  { get; } = [];
@@ -182,6 +184,7 @@ public partial class RagViewModel : ObservableObject
     public event EventHandler? ScrollToBottom;
     public Action<string>? RequestCopyToClipboard { get; set; }
     public Func<RagDatasetManagerItemViewModel, Task<bool>>? RequestDeleteDatasetConfirmation { get; set; }
+    public Func<RagDatasetManagerItemViewModel, Task<bool>>? RequestRemoveMissingSourcesConfirmation { get; set; }
     public bool IsLocalIngest => !EnableWebLoader;
 
     public RagViewModel(RagQueryService query, RagPipeline pipeline, RagEvalService eval, IToastService toasts, IRuntimeLogService logs, ISettingsService settings, ServicesViewModel? services = null, XttsProcessManager? xtts = null, KokoroProcessManager? kokoro = null)
@@ -277,6 +280,24 @@ public partial class RagViewModel : ObservableObject
         if (EnableWebLoader && string.IsNullOrWhiteSpace(WebUrlList)) return;
         if (!EnableWebLoader && string.IsNullOrWhiteSpace(IngestPath)) return;
 
+        // r10 01-rag-correctness.md 1.4: adding documents to an existing
+        // dataset under a different current embedding model would mix
+        // incompatible vectors in one dataset (old chunks are never
+        // re-embedded by a plain add). Reindex is the only sanctioned way
+        // to change a dataset's embedding model.
+        if (_targetDatasetForIngest is not null)
+        {
+            var datasetModel = _targetDatasetForIngest.Config.EmbeddingModel;
+            var currentModel = _settings.Settings.Rag.EmbeddingModel;
+            if (!string.IsNullOrWhiteSpace(datasetModel)
+                && !string.IsNullOrWhiteSpace(currentModel)
+                && !string.Equals(datasetModel, currentModel, StringComparison.OrdinalIgnoreCase))
+            {
+                SetError($"Cannot add documents: '{_targetDatasetForIngest.Name}' was embedded with '{datasetModel}', current model is '{currentModel}'. Reindex the dataset first.");
+                return;
+            }
+        }
+
         IsIngesting = true;
         IsError = false;
         StatusMessage = string.Empty;
@@ -322,6 +343,12 @@ public partial class RagViewModel : ObservableObject
             {
                 report = await _pipeline.IngestDirectoryAsync(ds, IngestPath, progress, _ingestCts.Token, new IngestOptions { DryRun = IngestDryRun, DuplicatePolicy = IngestPolicy });
             }
+
+            // r10 01-rag-correctness.md 1.3: re-ingest into an already-queried
+            // dataset must not keep serving the pre-ingest in-memory chunk
+            // list until the app restarts.
+            if (!IngestDryRun)
+                _query.ClearCache(ds.Id);
 
             IngestReportItems.Clear();
             foreach (var document in report.Documents)
@@ -453,6 +480,128 @@ public partial class RagViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// r10 01-rag-correctness.md 1.5: a source file removed from the ingest
+    /// folder stays in the dataset forever unless explicitly removed here.
+    /// Never automatic (a temporarily unmounted drive must not silently
+    /// shred a dataset), and always user-confirmed with the list of paths
+    /// that will be dropped.
+    /// </summary>
+    [RelayCommand]
+    private async Task RemoveMissingSourcesAsync(RagDatasetManagerItemViewModel item)
+    {
+        if (item?.Dataset is null || item.MissingSourcePaths.Count == 0)
+            return;
+
+        var confirmed = RequestRemoveMissingSourcesConfirmation is not null
+            && await RequestRemoveMissingSourcesConfirmation(item);
+
+        if (!confirmed)
+            return;
+
+        try
+        {
+            var remaining = await _query.RemoveMissingSourcesAsync(item.Dataset.Id, item.MissingSourcePaths);
+
+            await LoadDatasetsAsync();
+            await RefreshDatasetManagerAsync();
+
+            StatusMessage = $"Removed {item.MissingSourcePaths.Count} missing source(s) from '{item.Dataset.Name}'; {remaining} chunk(s) remain.";
+            _toasts.Show("Missing sources removed", StatusMessage, ToastKind.Info, 5000);
+            _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Rag,
+                $"RAG missing sources removed by user from dataset {item.Dataset.Name} ({item.Dataset.Id}): {item.MissingSourcePaths.Count} source(s)."));
+        }
+        catch (Exception ex)
+        {
+            SetError($"Failed to remove missing sources: {ex.Message}");
+            _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Error, RuntimeLogCategory.Rag,
+                $"Failed to remove missing sources: {ex.Message}"));
+        }
+    }
+
+    /// <summary>
+    /// r10 01-rag-correctness.md 1.4: re-embeds every chunk of a dataset
+    /// with the current embedding model, from stored content only (no
+    /// source files required). The only way a dataset's recorded embedding
+    /// model changes; ingest refuses that mix instead.
+    /// </summary>
+    [RelayCommand]
+    private async Task ReindexDatasetAsync(RagDatasetManagerItemViewModel item)
+    {
+        if (item?.Dataset is null || !item.ReindexRequired)
+            return;
+
+        IsIngesting = true;
+        IsError = false;
+        StatusMessage = string.Empty;
+        _ingestCts = new CancellationTokenSource();
+        var dataset = item.Dataset;
+        var previousModel = string.IsNullOrWhiteSpace(dataset.Config.EmbeddingModel) ? "unknown" : dataset.Config.EmbeddingModel;
+        var newModel = _settings.Settings.Rag.EmbeddingModel;
+
+        var suspension = new RagIngestServiceSuspension(_services, _xtts, _kokoro, _settings);
+        Func<Task<IReadOnlyList<string>>>? restoreServices = null;
+
+        try
+        {
+            restoreServices = await suspension.SuspendAsync();
+            _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Rag,
+                $"RAG reindex started for dataset {dataset.Name}: {previousModel} -> {newModel}"));
+
+            dataset.Config.EmbeddingModel = newModel;
+
+            var progress = new Progress<IngestProgress>(p =>
+            {
+                IngestStage = p.Stage;
+                IngestStageDone = p.Done;
+                IngestStageTotal = p.Total;
+                IngestDone = p.Done;
+                IngestTotal = p.Total;
+                IngestProgressLabel = BuildIngestProgressLabel(p);
+                StatusMessage = p.Detail;
+            });
+
+            var count = await _pipeline.ReindexDatasetAsync(dataset, progress, _ingestCts.Token);
+            _query.ClearCache(dataset.Id);
+
+            await LoadDatasetsAsync();
+            await RefreshDatasetManagerAsync();
+            StatusMessage = $"Reindex complete: {count} chunk(s) re-embedded with {newModel}.";
+            _toasts.Show("RAG reindex complete", $"{dataset.Name}: {count} chunk(s) re-embedded.", ToastKind.Success);
+            _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Rag,
+                $"RAG reindex complete for dataset {dataset.Name}: {count} chunk(s), {previousModel} -> {newModel}."));
+        }
+        catch (OperationCanceledException)
+        {
+            StatusMessage = "Reindex cancelled.";
+            _toasts.Show("RAG reindex cancelled", "Reindex was cancelled before completion.", ToastKind.Info, 5000);
+            _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Rag,
+                "RAG reindex cancelled."));
+        }
+        catch (Exception ex)
+        {
+            SetError($"Reindex failed: {ex.Message}");
+            _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Error, RuntimeLogCategory.Rag,
+                $"RAG reindex failed: {ex.Message}"));
+            _toasts.Show("RAG reindex failed", ex.Message, ToastKind.Error, 7000);
+        }
+        finally
+        {
+            IsIngesting = false;
+            IngestStage = string.Empty;
+            IngestProgressLabel = string.Empty;
+            _ingestCts?.Dispose();
+            _ingestCts = null;
+            if (restoreServices is not null)
+            {
+                var restoreErrors = await restoreServices();
+                foreach (var error in restoreErrors)
+                    _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Rag,
+                        $"RAG service restore failed: {error}"));
+            }
+        }
+    }
+
     [RelayCommand]
     private void CopyAnswer()
     {
@@ -507,6 +656,9 @@ public partial class RagViewModel : ObservableObject
         IsEvaluating = true;
         EvalResults.Clear();
         EvalStatus = "Starting eval...";
+        // r10 02-rag-quality.md 2.6: evals used to run with CancellationToken.None,
+        // so a long eval set could not be stopped from the UI once started.
+        _evalCts = new CancellationTokenSource();
         try
         {
             var run = await _eval.RunAsync(
@@ -514,7 +666,7 @@ public partial class RagViewModel : ObservableObject
                 EvalPath,
                 fullAnswer,
                 new Progress<string>(s => EvalStatus = s),
-                CancellationToken.None);
+                _evalCts.Token);
 
             EvalPassed = run.Passed;
             EvalTotal = run.Total;
@@ -526,6 +678,11 @@ public partial class RagViewModel : ObservableObject
             EvalStatus = $"Eval exported to eval-runs/{run.Id}.";
             _toasts.Show("RAG eval complete", $"{run.Passed}/{run.Total} passed.", run.PassRate >= 0.8 ? ToastKind.Success : ToastKind.Warning);
         }
+        catch (OperationCanceledException)
+        {
+            EvalStatus = "Eval cancelled.";
+            _toasts.Show("RAG eval cancelled", "Eval was cancelled before completion; no partial export was written.", ToastKind.Info, 5000);
+        }
         catch (Exception ex)
         {
             EvalStatus = ex.Message;
@@ -534,8 +691,13 @@ public partial class RagViewModel : ObservableObject
         finally
         {
             IsEvaluating = false;
+            _evalCts?.Dispose();
+            _evalCts = null;
         }
     }
+
+    [RelayCommand]
+    private void StopEval() => _evalCts?.Cancel();
 
     private bool CanQuery()  => !IsQuerying && !IsIngesting && SelectedDataset is not null
                                 && !string.IsNullOrWhiteSpace(QuestionText);
@@ -556,12 +718,16 @@ public partial class RagViewModel : ObservableObject
             var item = new RagDatasetManagerItemViewModel(dataset, _settings.Settings.Rag.EmbeddingModel);
             try
             {
-                var chunks = await _query.GetChunksForDatasetAsync(dataset.Id, includeEmbeddings: false);
-                var health = RagDatasetHealthService.Compute(chunks);
+                // r10 02-rag-quality.md 2.5: this runs after every ingest,
+                // delete, and app load; load only the columns health needs,
+                // not full chunk content.
+                var healthInfo = await _query.GetChunkHealthInfoForDatasetAsync(dataset.Id);
+                var health = RagDatasetHealthService.Compute(healthInfo);
                 item.SourceCount = health.SourceCount;
                 item.DuplicateSources = health.DuplicateSources;
                 item.MissingFiles = health.MissingFiles;
                 item.StaleFiles = health.StaleFiles;
+                item.MissingSourcePaths = health.MissingSourcePaths;
             }
             catch
             {

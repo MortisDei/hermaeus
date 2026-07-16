@@ -88,7 +88,8 @@ public sealed class RagEvalService
     private async Task<RagEvalResult> RunRetrievalCaseAsync(string datasetId, RagEvalCase test, CancellationToken ct)
     {
         var sw = Stopwatch.StartNew();
-        var retrieval = await _query.RetrieveAsync(datasetId, test.Question, new RagQueryOptions(TopK: 5), ct);
+        var opts = new RagQueryOptions(TopK: 5);
+        var retrieval = await _query.RetrieveAsync(datasetId, test.Question, opts, ct);
         sw.Stop();
         var retrieved = retrieval.Selected.Select((r, i) => ToTraceChunk(r, i + 1)).ToList();
         var expectedCount = test.ExpectedSources.Count;
@@ -96,14 +97,26 @@ public sealed class RagEvalService
         var retrievalRank = FindFirstExpectedRank(retrieved, test.ExpectedSources);
         var semanticRank = FindFirstExpectedRank(retrieval.SemanticCandidates.Select((r, i) => ToTraceChunk(r, i + 1)), test.ExpectedSources);
 
+        // r10 02-rag-quality.md 2.6: retrieval-only mode used to hard-fail
+        // every should_refuse case (Passed required hitCount > 0 AND
+        // !ShouldRefuse, which is never true when ShouldRefuse is true).
+        // Evaluate the same preflight gate StreamQueryAsync uses instead:
+        // a should_refuse case passes when the gate would actually refuse.
+        var wouldRefuse = RagQueryService.WouldRefuse(retrieval.SemanticCandidates, retrieval.Bm25Candidates, opts.RefusalThreshold);
+        var refusalCorrect = test.ShouldRefuse ? wouldRefuse : true;
+        var passed = test.ShouldRefuse ? wouldRefuse : hitCount > 0;
+        var notes = test.ShouldRefuse
+            ? (wouldRefuse ? "Preflight gate correctly refused (retrieval-only check)." : "Preflight gate did not refuse; expected a refusal.")
+            : (hitCount > 0 ? "Expected source found in top K." : "Expected source missing from top K.");
+
         return new RagEvalResult
         {
             CaseId = test.Id,
             Question = test.Question,
             RetrievalHit = hitCount > 0,
             KeywordHit = !test.AnswerKeywords.Any(),
-            RefusalCorrect = !test.ShouldRefuse,
-            Passed = hitCount > 0 && !test.ShouldRefuse,
+            RefusalCorrect = refusalCorrect,
+            Passed = passed,
             LatencyMs = sw.Elapsed.TotalMilliseconds,
             Retrieved = retrieved,
             RecallAtK = expectedCount == 0 ? 1d : (double)hitCount / expectedCount,
@@ -115,7 +128,7 @@ public sealed class RagEvalService
             SemanticRank = semanticRank,
             SelectedRank = retrievalRank,
             RerankerDelta = semanticRank > 0 && retrievalRank > 0 ? semanticRank - retrievalRank : 0,
-            Notes = hitCount > 0 ? "Expected source found in top K." : "Expected source missing from top K."
+            Notes = notes
         };
     }
 

@@ -6,7 +6,8 @@ public enum RuntimeLogLevel
 {
     Info,
     Warning,
-    Error
+    Error,
+    Debug
 }
 
 public enum RuntimeLogCategory

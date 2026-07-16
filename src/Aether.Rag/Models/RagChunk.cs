@@ -26,6 +26,7 @@ public class RagChunk
     public int      ChunkIndex   { get; set; }
     public int      ChunkTotal   { get; set; }
     public string?  ParentId     { get; set; }   // non-null = child chunk
+    public bool     IsParent     { get; set; }   // true = parent body row, excluded from retrieval candidates
     public int      TokenCount   { get; set; }
     public float[]  Embedding    { get; set; } = [];
     public DateTime CreatedAt    { get; set; } = DateTime.UtcNow;

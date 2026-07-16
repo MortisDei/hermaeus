@@ -369,6 +369,61 @@ auto-killing an unrecognized process on a conflicting port, and any
 synchronization-based alternative to UI-thread marshaling for the unrelated
 `UiBoundCollection<T>` guard work landing in the same release.
 
+### r10: RAG Storage-Destructive Actions and Shutdown Disposal
+
+`0.15.0-alpha` is a RAG-subsystem correctness/quality pass with two
+data-destructive or data-rewriting additions and one shutdown-disposal
+change. No new network surface.
+
+- **Reindex action** (`RagPipeline.ReindexDatasetAsync`, `RagViewModel.
+  ReindexDatasetAsync`). Re-embeds every stored chunk of a dataset with the
+  currently configured embedding model and rewrites the dataset's recorded
+  `EmbeddingModel`/`EmbeddingDimensions`. Explicit and user-clicked (a button
+  shown only when the dataset's recorded model differs from the current
+  one); never a side effect of ingest or a background pass. Operates only on
+  the app's own `conversations.db` chunk rows - it re-embeds stored content,
+  never touches or requires the original source files, and never reaches the
+  filesystem outside the data root.
+- **Remove missing sources** (`RagQueryService.RemoveMissingSourcesAsync`,
+  `RagViewModel.RemoveMissingSourcesAsync`). Deletes chunk rows for source
+  files no longer present on disk. Confirm-gated in the VM the same way
+  dataset delete is (`RequestRemoveMissingSourcesConfirmation`, a dialog
+  listing the exact paths about to be dropped before the user can proceed).
+  Never automatic during ingest or a health refresh: a temporarily
+  unmounted drive must not silently shred a dataset, matching r9's
+  rejection of auto-killing an unrecognized process. Deletes only rows in
+  the app's own database; the source files themselves are never touched.
+- **Dataset delete no longer relies on a foreign-key pragma.**
+  `DeleteDatasetAsync` previously depended on `ON DELETE CASCADE`, but no
+  connection ever enabled SQLite foreign-key enforcement, so every deleted
+  dataset left its chunks and BM25 stats behind. Deletes are now explicit,
+  transactional statements in `SqliteRagStore`, and store initialization
+  does a one-time sweep (logged if non-zero) for rows already orphaned by
+  the old behavior. This closes a data-retention gap (deleted data was not
+  actually deleted), not a new destructive surface.
+- **Shutdown disposal.** `App.axaml.cs` disposed the DI container
+  synchronously (`sp.Dispose()`), which throws for any singleton that is
+  `IAsyncDisposable`-only - `McpToolBridge` is exactly that, so an active MCP
+  session produced an unhandled exception on window close. Shutdown now
+  awaits `sp.DisposeAsync()` bounded to 5 seconds; a hung MCP child process
+  is abandoned to the existing r9 job-object containment rather than
+  blocking exit. This changes shutdown disposal only, not what the app is
+  allowed to launch or terminate during a normal session. A guard test
+  (`ShutdownDisposalTests`) enumerates every singleton registration whose
+  implementation type is `IAsyncDisposable`-only against a maintained
+  allowlist, so the next async-only service added to the DI graph fails the
+  build instead of silently reintroducing this crash.
+
+Explicitly rejected for this round (see `docs/review/04-roadmap.md`):
+auto-reindexing a dataset when the embedding model changes, auto-removing
+missing-source chunks during ingest, a vector database or persisted
+ANN/inverted index dependency, LLM-based query expansion on the query path, a
+semantic grounding scorer to replace token overlap, auto-changing
+`llama-server` flags from send-lag findings, an async-over-sync rework of
+Avalonia's synchronous `Exit` event, and stripping em dashes app-wide (the
+new typographic normalization in `KokoroTextNormalizer` is scoped to the
+speech boundary only, not authored text or chat rendering).
+
 ## Release Gate Status
 
 Security review and threat model refresh was completed for `0.13.0-alpha` as

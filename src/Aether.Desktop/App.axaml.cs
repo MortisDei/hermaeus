@@ -59,7 +59,20 @@ public partial class App : Application
                 }
                 finally
                 {
-                    sp.Dispose();
+                    // ServiceProvider.Dispose() throws for any registered
+                    // singleton that is IAsyncDisposable-only (e.g.
+                    // McpToolBridge). The app is exiting and there is no UI
+                    // thread work left to deadlock on, so a bounded blocking
+                    // wait on the async path is the honest version; a hung
+                    // MCP child is abandoned to the job object on timeout.
+                    try
+                    {
+                        sp.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(5));
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine($"Error disposing services during shutdown: {ex}");
+                    }
                 }
             };
         }
@@ -176,7 +189,7 @@ public partial class App : Application
         }
     }
 
-    private static void ConfigureServices(IServiceCollection s)
+    internal static void ConfigureServices(IServiceCollection s)
     {
         s.AddAetherCoreServices();
         s.AddSingleton<ChatViewModel>();

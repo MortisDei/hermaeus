@@ -20,7 +20,9 @@ public record RagQueryOptions(
     int    ContextTokenBudget = 3200,
     int    MaxContextChunks   = 8,
     int    MaxChunksPerSource = 2,
-    float  RefusalThreshold   = 0.08f);
+    // r10 02-rag-quality.md 2.2: this is now a cosine-score floor for the
+    // refusal preflight (retrieval strength), not a token-overlap ratio.
+    float  RefusalThreshold   = 0.35f);
 
 /// <summary>
 /// Main entry point for RAG queries.
@@ -149,12 +151,47 @@ public sealed class RagQueryService
     public async Task<List<RagChunk>> GetChunksForDatasetAsync(string datasetId, bool includeEmbeddings = false, CancellationToken ct = default)
         => await _store.GetChunksAsync(datasetId, includeEmbeddings, ct);
 
+    /// <summary>r10 02-rag-quality.md 2.5: the lightweight projection RagDatasetHealthService actually needs.</summary>
+    public async Task<List<RagChunkHealthInfo>> GetChunkHealthInfoForDatasetAsync(string datasetId, CancellationToken ct = default)
+        => await _store.GetChunkHealthInfoAsync(datasetId, ct);
+
     public async Task DeleteDatasetAsync(string datasetId, CancellationToken ct = default)
     {
         ClearCache(datasetId);
         await _store.DeleteDatasetAsync(datasetId, ct);
         _logs?.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Rag,
             $"RAG dataset deleted: {datasetId}"));
+    }
+
+    /// <summary>
+    /// Removes chunks belonging to source files that no longer exist on
+    /// disk (r10 01-rag-correctness.md 1.5). User-clicked only: a
+    /// temporarily unmounted drive must not silently shred a dataset, so
+    /// this is never called from ingest or any background path.
+    /// </summary>
+    public async Task<int> RemoveMissingSourcesAsync(string datasetId, IReadOnlyList<string> sourcePaths, CancellationToken ct = default)
+    {
+        if (sourcePaths.Count == 0)
+            return 0;
+
+        await _store.DeleteChunksForSourcesAsync(datasetId, sourcePaths, ct);
+
+        var remaining = await _store.GetChunksAsync(datasetId, includeEmbeddings: false, ct);
+        var stats = Bm25Scorer.BuildStats(remaining);
+        await _store.SaveBm25StatsAsync(datasetId, stats, ct);
+
+        var ds = (await _store.GetDatasetsAsync(ct)).FirstOrDefault(d => d.Id == datasetId);
+        if (ds is not null)
+        {
+            ds.ChunkCount = remaining.Count;
+            await _store.SaveDatasetAsync(ds, ct);
+        }
+
+        ClearCache(datasetId);
+        _logs?.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Rag,
+            $"RAG removed {sourcePaths.Count} missing source(s) from dataset {datasetId}; {remaining.Count} chunk(s) remain."));
+
+        return remaining.Count;
     }
 
     public async Task<RagRetrievalResult> RetrieveAsync(
@@ -182,9 +219,33 @@ public sealed class RagQueryService
         }
 
         var plan = await BuildQueryPlanAsync(datasetId, question, ct);
-        var qEmbed = await _embed.EmbedAsync(plan.PrimaryQuery, ct);
+
+        // read dataset config to obtain hybrid retriever weights and check the embedding model
+        var ds = (await _store.GetDatasetsAsync(ct)).FirstOrDefault(d => d.Id == datasetId);
+
+        // r10 01-rag-correctness.md 1.4: a dataset embedded with one model
+        // queried under a different current model produces either a raw
+        // exception (mismatched dimensions) or silent garbage rankings
+        // (same dimensions, different model). Skip the semantic scan
+        // entirely and fall back to BM25-only rather than either.
+        var currentEmbeddingModel = _settings.Settings.Rag.EmbeddingModel;
+        var embeddingModelMismatch = !string.IsNullOrWhiteSpace(ds?.Config.EmbeddingModel)
+            && !string.IsNullOrWhiteSpace(currentEmbeddingModel)
+            && !string.Equals(ds!.Config.EmbeddingModel, currentEmbeddingModel, StringComparison.OrdinalIgnoreCase);
+
         var semanticK = Math.Max(opts.TopK * 10, 50);
-        var semantic = HybridRetriever.CosineScan(qEmbed, chunks, semanticK);
+        List<ScoredChunk> semantic = [];
+        var plannerNotes = plan.PlannerNotes;
+        if (embeddingModelMismatch)
+        {
+            var note = $"semantic search skipped: dataset embedded with {ds!.Config.EmbeddingModel}, current model is {currentEmbeddingModel}; reindex to re-enable";
+            plannerNotes = string.IsNullOrWhiteSpace(plannerNotes) ? note : $"{plannerNotes}; {note}";
+        }
+        else
+        {
+            var qEmbed = await _embed.EmbedAsync(plan.PrimaryQuery, ct);
+            semantic = HybridRetriever.CosineScan(qEmbed, chunks, semanticK);
+        }
 
         var bm25Stats = await _store.GetBm25StatsAsync(datasetId, ct);
         List<ScoredChunk> bm25 = [];
@@ -195,8 +256,6 @@ public sealed class RagQueryService
                 .ToList();
         }
 
-        // read dataset config to obtain hybrid retriever weights
-        var ds = (await _store.GetDatasetsAsync(ct)).FirstOrDefault(d => d.Id == datasetId);
         var topFuse = Math.Max(opts.TopK * 2, opts.TopK);
         var fused = HybridRetriever.Fuse(
             plan.PrimaryQuery,
@@ -211,7 +270,7 @@ public sealed class RagQueryService
             fused = await UpgradeToParentsAsync(fused, ct);
 
         sw.Stop();
-        return new RagRetrievalResult(question, plan.PrimaryQuery, plan.QueryVariants, plan.PlannerNotes, semantic, bm25, fused, sw.ElapsedMilliseconds, ds?.Config);
+        return new RagRetrievalResult(question, plan.PrimaryQuery, plan.QueryVariants, plannerNotes, semantic, bm25, fused, sw.ElapsedMilliseconds, ds?.Config);
     }
 
     public async IAsyncEnumerable<RagStreamEvent> StreamQueryAsync(
@@ -243,10 +302,26 @@ public sealed class RagQueryService
             ? _settings.Settings.Llm.DefaultModel
             : opts.ModelId;
 
-        var preflightGrounding = ComputeGroundingScore(question, context, opts.GroundingMode);
-        if (preflightGrounding < opts.RefusalThreshold)
+        // Yield a structured event so consumers can bind sources without
+        // parsing the answer stream themselves; computed before the refusal
+        // check too so a refusal still shows the closest sources instead of
+        // a bare sentence (r10 02-rag-quality.md 2.2).
+        var sourceChunks = fused.Select((r, i) => ToTraceChunk(r, i + 1, fused.Count, semanticById, bm25ById, queryTerms)).ToList();
+
+        var bestSemanticScore = semantic.Count > 0 ? semantic.Max(s => s.Score) : 0f;
+        var bestBm25Score = bm25.Count > 0 ? bm25.Max(s => s.Score) : 0f;
+        var shouldRefuse = WouldRefuse(bestSemanticScore, bestBm25Score, opts.RefusalThreshold);
+
+        if (shouldRefuse)
         {
-            var refusal = "I do not have enough grounded context to answer that reliably.";
+            yield return RagStreamEvent.ForSources(sourceChunks);
+
+            var reason = sourceChunks.Count == 0
+                ? "the dataset has no retrievable chunks"
+                : $"the best semantic score ({bestSemanticScore:F3}) was below the {opts.RefusalThreshold:F3} confidence threshold and no keyword matched either";
+            var refusal = sourceChunks.Count > 0
+                ? $"I do not have enough grounded context to answer that reliably. The closest sources are shown above, but I did not trust them: {reason}."
+                : "I do not have enough grounded context to answer that reliably.";
             yield return RagStreamEvent.ForToken(refusal);
 
             totalSw.Stop();
@@ -261,13 +336,13 @@ public sealed class RagQueryService
                 RetrievalLatencyMs = retrievalSw.ElapsedMilliseconds,
                 TotalLatencyMs = totalSw.ElapsedMilliseconds,
                 GroundingMode = opts.GroundingMode,
-                GroundingScore = preflightGrounding,
+                GroundingScore = bestSemanticScore,
                 Refused = true,
-                RefusalReason = $"Preflight grounding {preflightGrounding:F3} below threshold {opts.RefusalThreshold:F3}",
+                RefusalReason = reason,
                 ContextTokenBudget = opts.ContextTokenBudget,
                 ContextPackingSummary = contextPack.Summary,
                 RetrievedChunks = semantic.Select((r, i) => ToTraceChunk(r, i + 1, semantic.Count, semanticById, bm25ById, queryTerms)).ToList(),
-                SelectedContext = fused.Select((r, i) => ToTraceChunk(r, i + 1, fused.Count, semanticById, bm25ById, queryTerms)).ToList()
+                SelectedContext = sourceChunks
             };
             await PersistTraceAsync(refusalTrace, ct);
             yield return RagStreamEvent.ForTrace(new RagTraceSummary(
@@ -285,9 +360,6 @@ public sealed class RagQueryService
             yield break;
         }
 
-        // Yield a structured event so consumers can bind sources without
-        // parsing the answer stream themselves.
-        var sourceChunks = fused.Select((r, i) => ToTraceChunk(r, i + 1, fused.Count, semanticById, bm25ById, queryTerms)).ToList();
         yield return RagStreamEvent.ForSources(sourceChunks);
 
         // ── 9. Stream LLM answer ─────────────────────────────────────────
@@ -456,9 +528,13 @@ public sealed class RagQueryService
         var scorer = new Bm25Scorer();
         var best = new Dictionary<string, ScoredChunk>(StringComparer.Ordinal);
 
+        // r10 02-rag-quality.md 2.4: tokenize every candidate's content once
+        // per query, not once per variant (up to 3x on the same corpus).
+        var tfIndex = Bm25Scorer.BuildTfIndex(chunks);
+
         foreach (var variant in variants.Where(v => !string.IsNullOrWhiteSpace(v)))
         {
-            foreach (var scored in scorer.Score(variant, chunks, stats))
+            foreach (var scored in scorer.Score(variant, chunks, stats, tfIndex))
             {
                 if (best.TryGetValue(scored.Chunk.Id, out var existing))
                 {
@@ -567,13 +643,36 @@ public sealed class RagQueryService
         $"Context:\n{context}\n\n" +
         $"Question: {question}\n\nAnswer:";
 
+    /// <summary>
+    /// r10 02-rag-quality.md 2.2/2.6: the refusal preflight gate, based on
+    /// retrieval strength rather than question/context token overlap.
+    /// Refuse only when nothing matched either way: the best semantic
+    /// candidate's cosine score is below <paramref name="refusalThreshold"/>
+    /// AND no BM25 candidate matched any term at all. Shared by
+    /// StreamQueryAsync and RagEvalService's retrieval-only mode so both
+    /// evaluate the exact same gate.
+    /// </summary>
+    public static bool WouldRefuse(float bestSemanticScore, float bestBm25Score, float refusalThreshold) =>
+        bestSemanticScore < refusalThreshold && bestBm25Score <= 0f;
+
+    public static bool WouldRefuse(IReadOnlyList<ScoredChunk> semantic, IReadOnlyList<ScoredChunk> bm25, float refusalThreshold) =>
+        WouldRefuse(
+            semantic.Count > 0 ? semantic.Max(s => s.Score) : 0f,
+            bm25.Count > 0 ? bm25.Max(s => s.Score) : 0f,
+            refusalThreshold);
+
     public static float GroundingScore(string answer, string context)
         => ComputeGroundingScore(answer, context, RagGroundingMode.TokenOverlap);
 
+    /// <summary>
+    /// Post-answer grounding (answer vs context token overlap) is a
+    /// legitimate check regardless of mode; collapsed to one path since
+    /// SemanticPlaceholder never had a distinct implementation
+    /// (r10 02-rag-quality.md 2.2). Kept as a public single-path method so
+    /// existing callers keep compiling.
+    /// </summary>
     public static float ComputeGroundingScore(string answer, string context, RagGroundingMode mode)
-        => mode == RagGroundingMode.SemanticPlaceholder
-            ? ScoreTokenOverlap(answer, context)
-            : ScoreTokenOverlap(answer, context);
+        => ScoreTokenOverlap(answer, context);
 
     private static float ScoreTokenOverlap(string answer, string context)
     {

@@ -228,10 +228,13 @@ public sealed class LlamaCppService : IDisposable
         var usage = chunk?.Usage is null
             ? null
             : new ChatTokenUsage(chunk.Usage.PromptTokens, chunk.Usage.CompletionTokens, chunk.Usage.TotalTokens);
+        var serverTimings = chunk?.Timings is null
+            ? null
+            : new ChatServerTimings(chunk.Timings.PromptN, chunk.Timings.PromptMs, chunk.Timings.PredictedN, chunk.Timings.PredictedMs);
         var isFinal = usage is not null || chunk?.Choices?.FirstOrDefault()?.FinishReason is not null;
-        if (string.IsNullOrEmpty(c) && usage is null && !isFinal)
+        if (string.IsNullOrEmpty(c) && usage is null && serverTimings is null && !isFinal)
             return null;
-        return new LlmStreamEvent(c, usage, isFinal);
+        return new LlmStreamEvent(c, usage, isFinal, ServerTimings: serverTimings);
     }
 
     public void Dispose()
@@ -243,7 +246,8 @@ public sealed class LlamaCppService : IDisposable
     private record ModelData([property: JsonPropertyName("id")] string Id);
     private record StreamChunk(
         [property: JsonPropertyName("choices")] List<Choice>? Choices,
-        [property: JsonPropertyName("usage")] UsageData? Usage);
+        [property: JsonPropertyName("usage")] UsageData? Usage,
+        [property: JsonPropertyName("timings")] TimingsData? Timings);
     private record Choice(
         [property: JsonPropertyName("delta")] Delta? Delta,
         [property: JsonPropertyName("finish_reason")] string? FinishReason);
@@ -252,4 +256,10 @@ public sealed class LlamaCppService : IDisposable
         [property: JsonPropertyName("prompt_tokens")] int PromptTokens,
         [property: JsonPropertyName("completion_tokens")] int CompletionTokens,
         [property: JsonPropertyName("total_tokens")] int TotalTokens);
+    /// <summary>llama-server's own prompt/generation timing, present on the final streamed chunk.</summary>
+    private record TimingsData(
+        [property: JsonPropertyName("prompt_n")] int? PromptN,
+        [property: JsonPropertyName("prompt_ms")] double? PromptMs,
+        [property: JsonPropertyName("predicted_n")] int? PredictedN,
+        [property: JsonPropertyName("predicted_ms")] double? PredictedMs);
 }

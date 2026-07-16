@@ -63,7 +63,41 @@ traces, versioned SQLite schema migrations, and native eval support.
 - Large ingests report separate overall progress and current-stage progress.
   Embedding progress identifies both the file batch and embedding batch, and
   oversized embedding inputs are retried with smaller clamps before failing the
-  ingest.
+  ingest. The embedding input budget is sized to fit a default-length chunk
+  plus its metadata header in one call; a source path that would otherwise
+  crowd out chunk content is truncated (keeping the distinctive tail) instead.
+- A custom chunk size configured larger than the embedding input budget
+  surfaces an ingest health warning naming both numbers, instead of silently
+  truncating the end of every chunk.
+- Dry-run ingest never creates or updates a dataset row; only a real ingest
+  does, so a zero-chunk dataset never appears in the picker.
+- Adding documents to an existing dataset that was embedded with a different
+  model than the one currently configured is blocked with a message naming
+  both models. Use **Reindex** (below) first.
+
+### Dataset Manager
+
+Each dataset card in the manager shows chunk/source counts, missing and stale
+file counts, and duplicate-source counts, with these actions:
+
+- **Add** - ingest more documents into the dataset.
+- **Reindex** - shown only when the dataset's recorded embedding model differs
+  from the currently configured one. Re-embeds every stored chunk with the
+  current model in batches, from stored content only (the original source
+  files are not required), then rebuilds BM25 stats and clears the query
+  cache. Progress reports through the same ingest progress UI.
+- **Remove missing** - shown only when one or more source files no longer
+  exist on disk. Lists the missing paths and, after explicit confirmation,
+  deletes their chunks, rebuilds BM25 stats, and refreshes health. Never runs
+  automatically: a temporarily unmounted drive must not silently shred a
+  dataset.
+- **Delete** - deletes the dataset and all of its chunks and BM25 stats
+  (explicit deletes, not a database cascade), after confirmation.
+
+Re-ingesting into an already-queried dataset, reindexing, and removing missing
+sources all clear the in-memory query cache for that dataset, so a query
+immediately after any of these actions sees the new state without needing an
+app restart.
 
 ### Web Loading
 
@@ -89,8 +123,24 @@ traces, versioned SQLite schema migrations, and native eval support.
   original query, alias-expanded form, and keyword-focused variants together.
 - RAG query service provides hybrid retrieval with structural boosts, optional
   reranking, and budget-aware context packing for improved relevance.
-- Queries can refuse early when the retrieved context is too weak to answer
-  reliably, instead of forcing a speculative response.
+  Structural boosts (title/heading/symbol matches, freshness) are a bounded
+  proportional multiplier on the fused score, so they can only break ties and
+  lift near-ties, never let a low-ranked candidate outrank a clear top result.
+- Queries can refuse early when retrieval itself found nothing (the best
+  semantic score is below the confidence threshold and no BM25 term matched
+  at all), instead of scoring how much the question's own wording overlaps
+  the context. A question phrased differently than the corpus vocabulary no
+  longer gets refused when retrieval actually found the right chunks. A
+  refusal still shows the closest sources it considered and explains why they
+  were not trusted.
+- Parent-child retrieval (chunking with a smaller child size for embedding
+  and a larger parent size for context) correctly returns child matches
+  upgraded to their parent's content; parent bodies are excluded from
+  retrieval candidates.
+- A dataset embedded with one model, queried under a different currently
+  configured model, skips semantic search and falls back to BM25-only
+  retrieval with a planner note, instead of a raw exception or silently
+  wrong rankings. Reindex the dataset to re-enable semantic search.
 
 ### Reranker
 
@@ -128,6 +178,13 @@ The native eval harness now reports retrieval metrics in addition to pass/fail:
 - Unsupported answer rate
 - Refusal accuracy
 - Latency and reranker rank delta
+
+Retrieval-only mode evaluates `should_refuse` cases against the same
+retrieval-strength preflight gate the live query path uses, so a `should_refuse`
+case can pass (it no longer hard-fails every refusal case in this mode). Evals
+are cancellable from the UI; cancelling stops between cases and reports
+"cancelled" without writing a partial export (export only happens once a run
+completes).
 
 ## Model Sources
 

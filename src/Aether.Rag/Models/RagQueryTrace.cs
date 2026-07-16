@@ -1,5 +1,14 @@
 namespace Aether.Rag.Models;
 
+/// <summary>
+/// r10 02-rag-quality.md 2.2: <see cref="SemanticPlaceholder"/> never had a
+/// real semantic implementation; every scoring path already collapsed to
+/// token overlap. The value is kept only because it may be present in
+/// already-persisted trace JSON (<c>RagQueryTrace.DetailJson</c>); nothing
+/// in the codebase currently deserializes that JSON back into this enum,
+/// but if a future reader does, treat <see cref="SemanticPlaceholder"/> as
+/// <see cref="TokenOverlap"/> rather than reviving mode-specific scoring.
+/// </summary>
 public enum RagGroundingMode
 {
     TokenOverlap,

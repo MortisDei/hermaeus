@@ -23,5 +23,11 @@
     <None Include="Scenarios\**\*"
           CopyToOutputDirectory="PreserveNewest"
           Link="agent-scenarios\%(RecursiveDir)%(Filename)%(Extension)" />
+    <!-- Scenario workspace fixtures include .cs files that are fixture DATA
+         (sample code a scenario's agent run edits), not source for this
+         assembly; without this they compile into Aether.Agent.dll's global
+         namespace and can shadow real types for consumers (e.g. a stray
+         global "App" class collided with Aether.Desktop.App in Aether.Tests). -->
+    <Compile Remove="Scenarios\**\*.cs" />
   </ItemGroup>
 </Project>

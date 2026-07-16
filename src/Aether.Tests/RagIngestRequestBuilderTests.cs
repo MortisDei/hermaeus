@@ -25,6 +25,9 @@ public sealed class RagIngestRequestBuilderTests
         Assert.Equal("text-embed-1", ds.Config.EmbeddingModel);
         Assert.False(ds.Config.EnableWebLoader);
         Assert.Equal(RagExtractionMode.TextMarkdown, ds.Config.ExtractionMode);
+        // r10 01-rag-correctness.md 1.7: set on first ingest too, not only re-ingest.
+        Assert.Equal("/data/docs", ds.LastIngestPath);
+        Assert.NotNull(ds.LastIngestUtc);
     }
 
     [Fact]

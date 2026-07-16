@@ -20,11 +20,25 @@ public sealed record LlmToolDefinition(string Name, string Description, JsonElem
 /// <summary>A completed tool call the model asked for; <see cref="ArgumentsJson"/> is the raw JSON object the model produced.</summary>
 public sealed record LlmToolCallRequest(string Id, string Name, string ArgumentsJson);
 
+/// <summary>
+/// llama.cpp server's own timing breakdown for one completion, carried on the
+/// final streamed chunk (r10 03-field-follow-ups.md 3.2). Decomposes a large
+/// FirstTokenMs into "server was evaluating the prompt" vs "request waited
+/// before evaluation". Providers that do not report this leave it null; no
+/// per-provider special cases beyond llama.cpp.
+/// </summary>
+public sealed record ChatServerTimings(
+    int? PromptTokens,
+    double? PromptMs,
+    int? PredictedTokens,
+    double? PredictedMs);
+
 public sealed record LlmStreamEvent(
     string ContentDelta = "",
     ChatTokenUsage? Usage = null,
     bool IsFinal = false,
-    IReadOnlyList<LlmToolCallRequest>? ToolCalls = null)
+    IReadOnlyList<LlmToolCallRequest>? ToolCalls = null,
+    ChatServerTimings? ServerTimings = null)
 {
     public static LlmStreamEvent Error(string message) => new(message, IsFinal: true);
 }

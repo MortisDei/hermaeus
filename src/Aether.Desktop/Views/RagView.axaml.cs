@@ -58,6 +58,16 @@ public partial class RagView : UserControl
                 var result = await dialog.ShowDialog<bool>(owner);
                 return result;
             };
+
+            _vm.RequestRemoveMissingSourcesConfirmation = async item =>
+            {
+                if (TopLevel.GetTopLevel(this) is not Window owner)
+                    return false;
+
+                var dialog = new RemoveMissingSourcesDialog(item.Name, item.MissingSourcePaths);
+                var result = await dialog.ShowDialog<bool>(owner);
+                return result;
+            };
         };
     }
 

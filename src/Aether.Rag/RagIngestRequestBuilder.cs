@@ -36,11 +36,12 @@ public static class RagIngestRequestBuilder
                 ExtractionMode = enableWebLoader ? RagExtractionMode.WebUrl : RagExtractionMode.TextMarkdown
             };
         }
-        else
-        {
-            ds.LastIngestPath = enableWebLoader ? webUrlList.Trim() : ingestPath;
-            ds.LastIngestUtc = DateTime.UtcNow;
-        }
+
+        // r10 01-rag-correctness.md 1.7: set on first ingest too, not only
+        // re-ingest, so SaveDatasetAsync always has a value to persist and
+        // the Add-to-dataset folder pre-fill survives a restart.
+        ds.LastIngestPath = enableWebLoader ? webUrlList.Trim() : ingestPath;
+        ds.LastIngestUtc = DateTime.UtcNow;
 
         return ds;
     }

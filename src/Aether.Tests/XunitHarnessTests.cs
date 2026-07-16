@@ -149,6 +149,26 @@ public static class HarnessCases
         [new HarnessCase("RAG ingest cancellation during storage stops gracefully", RagTests.RagIngestCancellationDuringStorage)],
         [new HarnessCase("RAG ingest clamps oversized embedding inputs", RagTests.RagIngestClampsOversizedEmbeddingInputs)],
         [new HarnessCase("RAG directory ingest persists completed file batches", RagTests.RagDirectoryIngestPersistsCompletedFileBatches)],
+        [new HarnessCase("RAG embedding input includes final sentence of default-sized chunk with long source path", RagTests.RagEmbeddingInputIncludesFinalSentenceOfDefaultSizedChunkWithLongSourcePath)],
+        [new HarnessCase("RAG chunk size guard warns when target chunk chars exceeds the clamp", RagTests.RagChunkSizeGuardWarnsWhenTargetChunkCharsExceedsTheClamp)],
+        [new HarnessCase("RAG raised embedding clamp improves recall on long-chunk fixture", RagTests.RagRaisedEmbeddingClampImprovesRecallOnLongChunkFixture)],
+        [new HarnessCase("RAG query does not refuse on strong semantic match with zero token overlap", RagTests.RagQueryDoesNotRefuseOnStrongSemanticMatchWithZeroTokenOverlap)],
+        [new HarnessCase("RAG query refuses on empty dataset and emits sources and reason", RagTests.RagQueryRefusesOnEmptyDatasetAndEmitsSourcesAndReason)],
+        [new HarnessCase("RAG chunk health info matches ingested sources without loading content", RagTests.RagChunkHealthInfoMatchesIngestedSourcesWithoutLoadingContent)],
+        [new HarnessCase("RAG eval retrieval mode should_refuse case passes on empty dataset and fails when answerable", RagTests.RagEvalRetrievalModeShouldRefuseCasePassesOnEmptyDatasetAndFailsWhenAnswerable)],
+        [new HarnessCase("RAG eval cancellation stops between cases and skips export", RagTests.RagEvalCancellationStopsBetweenCasesAndSkipsExport)],
+        [new HarnessCase("RAG parent-child retrieval resolves child embeddings to parent content", RagTests.RagParentChildRetrievalResolvesChildEmbeddingsToParentContent)],
+        [new HarnessCase("RAG parent-child migration backfills is_parent on existing rows", RagTests.RagParentChildMigrationBackfillsIsParentOnExistingRows)],
+        [new HarnessCase("RAG delete dataset removes all chunk and BM25 rows", RagTests.RagDeleteDatasetRemovesAllChunkAndBm25Rows)],
+        [new HarnessCase("RAG store initialization cleans up preexisting orphan rows", RagTests.RagStoreInitializationCleansUpPreexistingOrphanRows)],
+        [new HarnessCase("RAG re-ingest clears query cache so new chunks are retrievable immediately", RagTests.RagReIngestClearsQueryCacheSoNewChunksAreRetrievableImmediately)],
+        [new HarnessCase("RAG cosine scan ignores mismatched embedding lengths", RagTests.RagCosineScanIgnoresMismatchedEmbeddingLengths)],
+        [new HarnessCase("RAG retrieval falls back to BM25 only when embedding model mismatches", RagTests.RagRetrievalFallsBackToBm25OnlyWhenEmbeddingModelMismatches)],
+        [new HarnessCase("RAG reindex re-embeds chunks and updates config", RagTests.RagReindexReEmbedsChunksAndUpdatesConfig)],
+        [new HarnessCase("RAG ingest into mismatched dataset is blocked with explanation", RagTests.RagIngestIntoMismatchedDatasetIsBlockedWithExplanation)],
+        [new HarnessCase("RAG remove missing sources deletes chunks and rebuilds stats", RagTests.RagRemoveMissingSourcesDeletesChunksAndRebuildsStats)],
+        [new HarnessCase("RAG remove missing sources is blocked without confirmation", RagTests.RagRemoveMissingSourcesIsBlockedWithoutConfirmation)],
+        [new HarnessCase("RAG last ingest path and utc round trip through a fresh store instance", RagTests.RagLastIngestPathAndUtcRoundTripThroughAFreshStoreInstance)],
         [new HarnessCase("RAG view model parses trace bindings", TraceBindingTests.RagViewModel_ParsesTraceBindings)],
         [new HarnessCase("RAG small dataset retrieval and trace integration", TraceBindingTests.RagIntegration_SmallDatasetRetrievalAndTrace)],
         [new HarnessCase("RAG query stream trace chunks carry score breakdown", TraceBindingTests.RagQueryStreamTraceChunksCarryScoreBreakdown)]
@@ -296,7 +316,13 @@ public static class HarnessCases
         [new HarnessCase("unknown acronym is spelled out letter by letter", VoicePronunciationTests.UnknownAcronymIsSpelledOutLetterByLetter)],
         [new HarnessCase("known acronym uses its real cmudict pronunciation", VoicePronunciationTests.KnownAcronymUsesItsRealCmuDictPronunciation)],
         [new HarnessCase("golden sentences produce stable phonemization", VoicePronunciationTests.GoldenSentencesProduceStablePhonemization)],
-        [new HarnessCase("golden sentences drop no characters during tokenization", VoicePronunciationTests.GoldenSentencesDropNoCharactersDuringTokenization)]
+        [new HarnessCase("golden sentences drop no characters during tokenization", VoicePronunciationTests.GoldenSentencesDropNoCharactersDuringTokenization)],
+        [new HarnessCase("normalizer maps em dash and double hyphen to comma pause", VoicePronunciationTests.NormalizerMapsEmDashAndDoubleHyphenToCommaPause)],
+        [new HarnessCase("normalizer maps curly quotes and ellipsis", VoicePronunciationTests.NormalizerMapsCurlyQuotesAndEllipsis)],
+        [new HarnessCase("normalizer strips markdown emphasis residue", VoicePronunciationTests.NormalizerStripsMarkdownEmphasisResidue)],
+        [new HarnessCase("capitalized word matches lowercase dictionary pronunciation", VoicePronunciationTests.CapitalizedWordMatchesLowercaseDictionaryPronunciation)],
+        [new HarnessCase("fallback magic e rule silences trailing e only after vowel consonant e", VoicePronunciationTests.FallbackMagicERuleSilencesTrailingEOnlyAfterVowelConsonantE)],
+        [new HarnessCase("typographic golden sentences drop no characters during tokenization", VoicePronunciationTests.TypographicGoldenSentencesDropNoCharactersDuringTokenization)]
     ];
 
     public static IEnumerable<object[]> SetupWizardOnboarding =>

@@ -1,4 +1,6 @@
+using System.Collections.Concurrent;
 using System.Text;
+using Aether.Core.Models;
 using Aether.Core.Services;
 
 namespace Aether.Voice;
@@ -45,7 +47,7 @@ internal static class KokoroPhonemizer
             word = word[..^1];
         }
 
-        var core = word.Trim('"', '(', ')');
+        var core = word.Trim('"', '\'', '(', ')', '[', ']');
         if (core.Length == 0)
         {
             sb.Append(trailingPunctuation);
@@ -74,9 +76,28 @@ internal static class KokoroPhonemizer
         if (IsAcronymCandidate(core))
             return SpellAcronym(core);
 
+        LogFallbackWord(lower, logs);
         var sb = new StringBuilder();
         AppendFallback(sb, lower);
         return sb.ToString();
+    }
+
+    // ── Fallback diagnosability (r10 03-field-follow-ups.md 3.3 item 5) ────
+    // The letter-by-letter fallback tier is approximate by design; logging
+    // which words actually hit it (once per distinct word per session) lets
+    // the next pronunciation report be checked against real fallback words
+    // instead of guessed at.
+    private static readonly ConcurrentDictionary<string, byte> LoggedFallbackWords = new(StringComparer.Ordinal);
+
+    private static void LogFallbackWord(string lower, IRuntimeLogService? logs)
+    {
+        if (logs is null) return;
+        if (!LoggedFallbackWords.TryAdd(lower, 0)) return;
+        logs.Add(new RuntimeLogEntry(
+            DateTime.UtcNow,
+            RuntimeLogLevel.Debug,
+            RuntimeLogCategory.Voice,
+            $"Pronunciation letter-rule fallback used for '{lower}'"));
     }
 
     // ── Suffix morphology (doc 01 item 1.4) ─────────────────────────────────
@@ -211,11 +232,27 @@ internal static class KokoroPhonemizer
 
     // ── Rule-based fallback for words the dictionary has no entry for ──────
 
+    private static bool HasMagicE(string word)
+    {
+        if (word.Length <= 3 || word[^1] != 'e' || "aeiouy".Contains(word[^2]))
+            return false;
+
+        for (var i = word.Length - 3; i >= 0; i--)
+        {
+            if ("aeiouy".Contains(word[i]))
+                return true;
+        }
+
+        return false;
+    }
+
     private static void AppendFallback(StringBuilder sb, string word)
     {
-        // Basic "Magic E" detection: if word ends in 'e' and has a vowel before it,
-        // we treat the 'e' as silent and potentially shift the vowel.
-        bool hasMagicE = word.Length > 2 && word[^1] == 'e' && "aeiouy".Contains(word[^2]);
+        // "Magic E" detection: the real English pattern is vowel-CONSONANT-e
+        // ("joke", "hope", "state"), not vowel-e ("see"). A trailing 'e' is
+        // silent only when the character right before it is a consonant AND
+        // a vowel appears somewhere before that consonant.
+        bool hasMagicE = HasMagicE(word);
 
         var i = 0;
         while (i < word.Length)

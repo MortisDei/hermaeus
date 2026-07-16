@@ -7,7 +7,8 @@ public sealed record ChatSendResult(
     long TotalLatencyMs,
     ChatTokenUsage? Usage,
     bool Cancelled,
-    string? Error);
+    string? Error,
+    ChatServerTimings? ServerTimings = null);
 
 /// <summary>
 /// Drives one streamed chat completion and reports timing/usage, leaving all
@@ -27,6 +28,7 @@ public static class ChatSendOrchestrator
         var clock = Stopwatch.StartNew();
         long? firstTokenMs = null;
         ChatTokenUsage? usage = null;
+        ChatServerTimings? serverTimings = null;
         try
         {
             await foreach (var evt in llm.StreamChatAsync(modelId, history, options, ct))
@@ -37,6 +39,9 @@ public static class ChatSendOrchestrator
                     onUsage(evt.Usage);
                 }
 
+                if (evt.ServerTimings is not null)
+                    serverTimings = evt.ServerTimings;
+
                 if (!string.IsNullOrEmpty(evt.ContentDelta))
                 {
                     firstTokenMs ??= clock.ElapsedMilliseconds;
@@ -44,7 +49,7 @@ public static class ChatSendOrchestrator
                 }
             }
 
-            return new ChatSendResult(firstTokenMs ?? 0, clock.ElapsedMilliseconds, usage, Cancelled: false, Error: null);
+            return new ChatSendResult(firstTokenMs ?? 0, clock.ElapsedMilliseconds, usage, Cancelled: false, Error: null, ServerTimings: serverTimings);
         }
         catch (OperationCanceledException)
         {
