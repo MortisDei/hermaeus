@@ -50,6 +50,7 @@ node_modules/
 *.tmp
 *.temp
 temp/
+*/temp
 
 # C# Dev Kit Shit
 *.lscache
