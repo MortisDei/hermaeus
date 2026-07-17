@@ -438,9 +438,32 @@ public partial class RagViewModel : ObservableObject
         NewDatasetName = item.Dataset.Name;
         IngestPath = item.Dataset.LastIngestPath;
         EnableWebLoader = item.Dataset.Config.EnableWebLoader;
-        
+
         // Scroll to ingest section (could be done via UI event if needed)
         StatusMessage = $"Ready to add documents to '{item.Dataset.Name}'. Select a directory or configure URLs below.";
+    }
+
+    /// <summary>
+    /// r12 03-runtime-vm-correctness.md 3.6: <see cref="RagIngestRequestBuilder.PrepareDataset"/>
+    /// ignores <see cref="NewDatasetName"/> entirely once a target dataset is
+    /// set, so a user who clicked "Add to dataset" and then edited the name
+    /// box intending a *different* dataset silently ingested into the
+    /// original one. Clear the target as soon as the box no longer matches
+    /// it; the next ingest then creates a new dataset under the edited name.
+    /// </summary>
+    partial void OnNewDatasetNameChanged(string value)
+    {
+        if (_targetDatasetForIngest is not null
+            && !string.Equals(value.Trim(), _targetDatasetForIngest.Name, StringComparison.Ordinal))
+        {
+            var previousTarget = _targetDatasetForIngest.Name;
+            _targetDatasetForIngest = null;
+            StatusMessage = string.IsNullOrWhiteSpace(value.Trim())
+                ? string.Empty
+                : $"Will create a new dataset named '{value.Trim()}' (no longer adding to '{previousTarget}').";
+        }
+
+        IngestCommand.NotifyCanExecuteChanged();
     }
 
     [RelayCommand]
@@ -459,11 +482,13 @@ public partial class RagViewModel : ObservableObject
         try
         {
             await _query.DeleteDatasetAsync(item.Dataset.Id);
-            
+
             // Update UI state
             if (SelectedDataset?.Id == item.Dataset.Id)
                 SelectedDataset = null;
-            
+            if (_targetDatasetForIngest?.Id == item.Dataset.Id)
+                _targetDatasetForIngest = null;
+
             await LoadDatasetsAsync();
             await RefreshDatasetManagerAsync();
             
@@ -535,9 +560,19 @@ public partial class RagViewModel : ObservableObject
         IsError = false;
         StatusMessage = string.Empty;
         _ingestCts = new CancellationTokenSource();
-        var dataset = item.Dataset;
-        var previousModel = string.IsNullOrWhiteSpace(dataset.Config.EmbeddingModel) ? "unknown" : dataset.Config.EmbeddingModel;
+        var previousModel = string.IsNullOrWhiteSpace(item.Dataset.Config.EmbeddingModel) ? "unknown" : item.Dataset.Config.EmbeddingModel;
         var newModel = _settings.Settings.Rag.EmbeddingModel;
+
+        // r12 03-runtime-vm-correctness.md 3.7: the pipeline needs
+        // Config.EmbeddingModel set to the target model before it starts
+        // embedding, but flipping it on the live, UI-bound dataset instance
+        // would make ReindexRequired report false (defeating the r10 1.4
+        // guard) the instant the run *starts*, not when it succeeds. Work
+        // on a clone instead; the live instance is only ever replaced by a
+        // fresh LoadDatasetsAsync reload, which only reflects what the
+        // pipeline actually committed to disk.
+        var workingDataset = item.Dataset.Clone();
+        workingDataset.Config.EmbeddingModel = newModel;
 
         var suspension = new RagIngestServiceSuspension(_services, _xtts, _kokoro, _settings);
         Func<Task<IReadOnlyList<string>>>? restoreServices = null;
@@ -546,9 +581,7 @@ public partial class RagViewModel : ObservableObject
         {
             restoreServices = await suspension.SuspendAsync();
             _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Rag,
-                $"RAG reindex started for dataset {dataset.Name}: {previousModel} -> {newModel}"));
-
-            dataset.Config.EmbeddingModel = newModel;
+                $"RAG reindex started for dataset {workingDataset.Name}: {previousModel} -> {newModel}"));
 
             var progress = new Progress<IngestProgress>(p =>
             {
@@ -561,15 +594,13 @@ public partial class RagViewModel : ObservableObject
                 StatusMessage = p.Detail;
             });
 
-            var count = await _pipeline.ReindexDatasetAsync(dataset, progress, _ingestCts.Token);
-            _query.ClearCache(dataset.Id);
+            var count = await _pipeline.ReindexDatasetAsync(workingDataset, progress, _ingestCts.Token);
+            _query.ClearCache(workingDataset.Id);
 
-            await LoadDatasetsAsync();
-            await RefreshDatasetManagerAsync();
             StatusMessage = $"Reindex complete: {count} chunk(s) re-embedded with {newModel}.";
-            _toasts.Show("RAG reindex complete", $"{dataset.Name}: {count} chunk(s) re-embedded.", ToastKind.Success);
+            _toasts.Show("RAG reindex complete", $"{workingDataset.Name}: {count} chunk(s) re-embedded.", ToastKind.Success);
             _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Rag,
-                $"RAG reindex complete for dataset {dataset.Name}: {count} chunk(s), {previousModel} -> {newModel}."));
+                $"RAG reindex complete for dataset {workingDataset.Name}: {count} chunk(s), {previousModel} -> {newModel}."));
         }
         catch (OperationCanceledException)
         {
@@ -592,6 +623,12 @@ public partial class RagViewModel : ObservableObject
             IngestProgressLabel = string.Empty;
             _ingestCts?.Dispose();
             _ingestCts = null;
+            // Unconditional (success, cancellation, or failure): the working
+            // copy above never touched the live dataset, so this is the only
+            // thing that can bring the UI's view of the model/ReindexRequired
+            // back in sync with whatever the pipeline actually committed.
+            await LoadDatasetsAsync();
+            await RefreshDatasetManagerAsync();
             if (restoreServices is not null)
             {
                 var restoreErrors = await restoreServices();
@@ -832,7 +869,6 @@ public partial class RagViewModel : ObservableObject
     }
     partial void OnIsQueryingChanged(bool value) => QueryCommand.NotifyCanExecuteChanged();
     partial void OnIngestPathChanged(string value) => IngestCommand.NotifyCanExecuteChanged();
-    partial void OnNewDatasetNameChanged(string value) => IngestCommand.NotifyCanExecuteChanged();
     partial void OnWebUrlListChanged(string value) => IngestCommand.NotifyCanExecuteChanged();
     partial void OnEnableWebLoaderChanged(bool value)
     {

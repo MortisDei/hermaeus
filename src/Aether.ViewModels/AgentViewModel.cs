@@ -258,7 +258,7 @@ public sealed class AgentDraftPatchViewModel
 
 public sealed record DraftPatchPreviewRequest(string PatchId, string RelativePath, string OldContent, string NewContent);
 
-public partial class AgentViewModel : ObservableObject
+public partial class AgentViewModel : ViewModelBase
 {
     public Func<DraftPatchPreviewRequest, Task<bool>>? RequestDraftPatchPreview { get; set; }
     private readonly IAgentService _agent;
@@ -277,6 +277,9 @@ public partial class AgentViewModel : ObservableObject
     private readonly IVoiceOrchestrator? _voice;
     private CancellationTokenSource? _cts;
     private string _activeWorkspaceVoiceProfile = string.Empty;
+    private Task? _loadTask;
+    private CancellationTokenSource? _workspaceFileQueryCts;
+    private int _workspaceFileSelectionGeneration;
 
     public UiBoundCollection<LlmModel> AvailableModels { get; } = [];
     public UiBoundCollection<RagDataset> Datasets { get; } = [];
@@ -401,7 +404,13 @@ public partial class AgentViewModel : ObservableObject
         _voice = voice;
         ScenarioSuite = scenarioSuite;
         _patchReview = new AgentPatchReviewService(workspaceTools, store, agent);
-        WorkspaceRoot = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        // r12 03-runtime-vm-correctness.md 3.5: defaulting to the whole user
+        // profile meant every startup (and every Agent panel navigation)
+        // silently enumerated and analyzed it, writing a "Workspace profile"
+        // workspace-memory entry for a folder the user never chose. The
+        // existing HasWorkspace empty-state UI (r8 2.6) already handles "no
+        // workspace selected"; LoadAsync's own guards skip file listing and
+        // analysis while it is empty.
 
         RecentTasks.CollectionChanged += (_, _) =>
         {
@@ -460,19 +469,43 @@ public partial class AgentViewModel : ObservableObject
     public int CommandRecipeCount => CommandRecipes.Count;
     public int WorkspaceRiskCount => WorkspaceRisks.Count;
 
+    /// <summary>
+    /// Re-entrancy-safe (r12 02-async-and-threading.md 2.5): overlapping
+    /// callers (startup, Agent panel navigation) share the one in-flight
+    /// load instead of each running their own Clear/re-add pass.
+    /// </summary>
     [RelayCommand]
-    public async Task LoadAsync()
+    public Task LoadAsync()
+    {
+        if (_loadTask is { IsCompleted: false } inFlight)
+            return inFlight;
+
+        var task = LoadCoreAsync();
+        _loadTask = task;
+        return task;
+    }
+
+    private async Task LoadCoreAsync()
     {
         try
         {
+            // r12 03-runtime-vm-correctness.md 3.4: GetModelsAsync/GetDatasetsAsync
+            // always materialize fresh instances, so a stale-reference
+            // ??= kept the ComboBox pointing at an object no longer in
+            // AvailableModels/Datasets (renders blank) while CanStart still
+            // passed on the stale id. Re-match by id like Chat does.
+            var previousModelId = SelectedModel?.Id;
+            var previousDatasetId = SelectedDataset?.Id;
+
             var models = await _llm.GetModelsAsync();
             AvailableModels.Clear();
             foreach (var model in models.Where(m => m.IsVisible)) AvailableModels.Add(model);
-            SelectedModel ??= AvailableModels.FirstOrDefault();
+            SelectedModel = AvailableModels.FirstOrDefault(m => m.Id == previousModelId) ?? AvailableModels.FirstOrDefault();
 
             var datasets = await _rag.GetDatasetsAsync();
             Datasets.Clear();
             foreach (var dataset in datasets) Datasets.Add(dataset);
+            SelectedDataset = previousDatasetId is null ? null : Datasets.FirstOrDefault(d => d.Id == previousDatasetId);
 
             await RefreshRecentAsync();
             await RefreshReviewQueueAsync();
@@ -790,10 +823,18 @@ public partial class AgentViewModel : ObservableObject
         OnPropertyChanged(nameof(HasWorkspaceFiles));
     }
 
-    private async Task LoadSelectedWorkspaceFileAsync(AgentWorkspaceFileViewModel? file)
+    /// <summary>
+    /// r12 02-async-and-threading.md 2.3: <paramref name="generation"/> is a
+    /// snapshot of <see cref="_workspaceFileSelectionGeneration"/> taken when
+    /// this selection was made; a slower older read/summarize completing
+    /// after a newer selection was made must not overwrite that newer
+    /// selection's preview.
+    /// </summary>
+    private async Task LoadSelectedWorkspaceFileAsync(AgentWorkspaceFileViewModel? file, int generation)
     {
         if (file is null || string.IsNullOrWhiteSpace(WorkspaceRoot))
         {
+            if (generation != _workspaceFileSelectionGeneration) return;
             WorkspaceFilePreview = string.Empty;
             WorkspaceFileSummary = string.Empty;
             DraftProposedContent = string.Empty;
@@ -803,6 +844,9 @@ public partial class AgentViewModel : ObservableObject
         var options = BuildOptions();
         var preview = await Task.Run(() => _workspaceTools.ReadFile(options, file.RelativePath));
         var summary = await Task.Run(() => _workspaceTools.SummarizeFile(options, file.RelativePath));
+        if (generation != _workspaceFileSelectionGeneration)
+            return;
+
         WorkspaceFilePreview = preview.Content;
         WorkspaceFileSummary = summary.Summary;
         // Populate draft proposed content with the current file preview by default
@@ -1278,8 +1322,34 @@ public partial class AgentViewModel : ObservableObject
         ExplainWorkspaceCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(HasWorkspace));
     }
-    partial void OnWorkspaceFileQueryChanged(string value) => _ = RefreshWorkspaceFilesAsync();
-    partial void OnSelectedWorkspaceFileChanged(AgentWorkspaceFileViewModel? value) => _ = LoadSelectedWorkspaceFileAsync(value);
+    /// <summary>
+    /// r12 02-async-and-threading.md 2.3: reuses the 300 ms + CTS debounce
+    /// shape from <see cref="MainWindowViewModel.OnSearchQueryChanged"/>
+    /// instead of firing a full workspace file enumeration per keystroke.
+    /// </summary>
+    partial void OnWorkspaceFileQueryChanged(string value)
+    {
+        _workspaceFileQueryCts?.Cancel();
+        _workspaceFileQueryCts?.Dispose();
+        _workspaceFileQueryCts = new CancellationTokenSource();
+        var token = _workspaceFileQueryCts.Token;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(300, token);
+                if (token.IsCancellationRequested) return;
+                await RunOnUiAsync(RefreshWorkspaceFilesAsync);
+            }
+            catch (OperationCanceledException) { }
+        }, token);
+    }
+
+    partial void OnSelectedWorkspaceFileChanged(AgentWorkspaceFileViewModel? value)
+    {
+        var generation = ++_workspaceFileSelectionGeneration;
+        _ = LoadSelectedWorkspaceFileAsync(value, generation);
+    }
     partial void OnSelectedModelChanged(LlmModel? value)
     {
         StartCommand.NotifyCanExecuteChanged();

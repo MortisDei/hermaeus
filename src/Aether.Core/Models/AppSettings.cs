@@ -3,6 +3,18 @@ namespace Aether.Core.Models;
 public class AppSettings
 {
     /// <summary>
+    /// Deep-clones this settings object via a JSON round trip so a caller can
+    /// apply edits to the copy (settings save, a scan-scoped preview) without
+    /// mutating the live shared instance until the edits are known-good
+    /// (r12 01-settings-lifecycle.md 1.2/1.5).
+    /// </summary>
+    public AppSettings Clone()
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(this);
+        return System.Text.Json.JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
+    }
+
+    /// <summary>
     /// LLM provider configuration (llama.cpp, OpenAI, model selection, generation parameters).
     /// </summary>
     public LlmSettings Llm { get; set; } = new();

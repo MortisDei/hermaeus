@@ -181,6 +181,9 @@ public static class HarnessCases
         [new HarnessCase("RAG remove missing sources deletes chunks and rebuilds stats", RagTests.RagRemoveMissingSourcesDeletesChunksAndRebuildsStats)],
         [new HarnessCase("RAG remove missing sources is blocked without confirmation", RagTests.RagRemoveMissingSourcesIsBlockedWithoutConfirmation)],
         [new HarnessCase("RAG last ingest path and utc round trip through a fresh store instance", RagTests.RagLastIngestPathAndUtcRoundTripThroughAFreshStoreInstance)],
+        [new HarnessCase("RAG add to dataset ingests into a renamed target as a new dataset instead", RagTests.RagAddToDatasetIngestsIntoARenamedTargetAsANewDatasetInstead)],
+        [new HarnessCase("RAG add to dataset without editing the name still ingests into the same dataset", RagTests.RagAddToDatasetWithoutEditingTheNameStillIngestsIntoTheSameDataset)],
+        [new HarnessCase("RAG view model reindex cancelled mid run leaves dataset on the old model", RagTests.RagViewModelReindexCancelledMidRunLeavesDatasetOnTheOldModel)],
         [new HarnessCase("RAG view model parses trace bindings", TraceBindingTests.RagViewModel_ParsesTraceBindings)],
         [new HarnessCase("RAG small dataset retrieval and trace integration", TraceBindingTests.RagIntegration_SmallDatasetRetrievalAndTrace)],
         [new HarnessCase("RAG query stream trace chunks carry score breakdown", TraceBindingTests.RagQueryStreamTraceChunksCarryScoreBreakdown)]
@@ -349,7 +352,10 @@ public static class HarnessCases
         [new HarnessCase("wizard starter model download deletes file and reports error on hash mismatch", SetupWizardOnboardingTests.WizardStarterModelDownloadDeletesFileAndReportsErrorOnHashMismatch)],
         [new HarnessCase("only kokoro native can install from wizard", SetupWizardOnboardingTests.OnlyKokoroNativeCanInstallFromWizard)],
         [new HarnessCase("wizard voice install calls the same doctor entry point as settings", SetupWizardOnboardingTests.WizardVoiceInstallCallsTheSameDoctorEntryPointAsSettings)],
-        [new HarnessCase("wizard voice install failure leaves finish later message", SetupWizardOnboardingTests.WizardVoiceInstallFailureLeavesFinishLaterMessage)]
+        [new HarnessCase("wizard voice install failure leaves finish later message", SetupWizardOnboardingTests.WizardVoiceInstallFailureLeavesFinishLaterMessage)],
+        [new HarnessCase("wizard data root step migrates existing databases with a toast", SetupWizardMigrationTests.WizardDataRootStepMigratesExistingDatabasesWithAToast)],
+        [new HarnessCase("wizard data root step refuses a conflicting target and keeps settings on the old root", SetupWizardMigrationTests.WizardDataRootStepRefusesAConflictingTargetAndKeepsSettingsOnTheOldRoot)],
+        [new HarnessCase("wizard data root step on first run completes without migration noise", SetupWizardMigrationTests.WizardDataRootStepOnFirstRunCompletesWithoutMigrationNoise)]
     ];
 
     public static IEnumerable<object[]> MarkdownViewer =>

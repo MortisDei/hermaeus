@@ -100,4 +100,23 @@ public sealed class ModelCompareOrchestratorTests
         Assert.Null(result.Usage);
         Assert.Equal("model-b", result.DisplayName);
     }
+
+    // ── r12 03-runtime-vm-correctness.md 3.9: guard against an empty CaseResults list ──
+
+    [Fact]
+    public void ToResult_returns_an_error_row_instead_of_throwing_when_CaseResults_is_empty()
+    {
+        var run = new EvalRun(
+            "run-3",
+            EvalMode.QuickCompare,
+            new EvalTarget("model-c", Label: "Model C"),
+            [],
+            DateTime.UtcNow);
+
+        var result = ModelCompareOrchestrator.ToResult(run);
+
+        Assert.Equal("model-c", result.ModelId);
+        Assert.Equal("Model C", result.DisplayName);
+        Assert.NotEqual(string.Empty, result.Error);
+    }
 }

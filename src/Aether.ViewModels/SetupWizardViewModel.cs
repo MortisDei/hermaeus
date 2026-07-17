@@ -162,7 +162,7 @@ public partial class SetupWizardViewModel : ObservableObject
     private async Task NextAsync()
     {
         if (StepIndex >= Steps.Count - 1) return;
-        await ApplyStepAsync(StepIndex);
+        if (!await ApplyStepAsync(StepIndex)) return;
         StepIndex++;
     }
 
@@ -184,7 +184,7 @@ public partial class SetupWizardViewModel : ObservableObject
     [RelayCommand]
     private async Task FinishAsync()
     {
-        await ApplyStepAsync(StepIndex);
+        if (!await ApplyStepAsync(StepIndex)) return;
         _settings.Settings.SetupWizardCompleted = true;
         await _settings.SaveAsync();
         WizardCompleted?.Invoke();
@@ -378,38 +378,83 @@ public partial class SetupWizardViewModel : ObservableObject
             VoiceOnboardingSteps.Add($"{step.Title}: {step.Detail}");
     }
 
-    private async Task ApplyStepAsync(int step)
+    /// <summary>Returns false to refuse advancing the step (r12 01-settings-lifecycle.md 1.1).</summary>
+    private async Task<bool> ApplyStepAsync(int step)
     {
         switch (step)
         {
             case 0:
-                _settings.Settings.DataManagement.DataRootDirectory = DataRootDirectory.Trim();
-                _settings.Settings.DataManagement.LocalAiAssetsRoot = LocalAiAssetsRoot.Trim();
-                await _settings.SaveAsync();
-                break;
+                return await ApplyDataRootStepAsync();
             case 1:
                 // Guard against no runtime options being present
-                if (RuntimeOptions.Count == 0) return;
+                if (RuntimeOptions.Count == 0) return true;
                 foreach (var profile in RuntimeOptions)
                     profile.Enabled = profile.Id == SelectedRuntimeId;
                 foreach (var profile in RuntimeOptions)
                     await _runtimeProfiles.SaveAsync(profile.ToProfile());
-                break;
+                return true;
             case 2:
                 var server = _settings.Settings.ManagedServers.FirstOrDefault();
-                if (server is not null)
+                if (server is null)
                 {
-                    server.ModelPath = ModelFolder.Trim();
-                    await _settings.SaveAsync();
+                    _toasts.Show("No managed server configured", "Add a managed server in Services before setting a model folder.", ToastKind.Warning, 6000);
+                    return true;
                 }
-                break;
+                server.ModelPath = ModelFolder.Trim();
+                await _settings.SaveAsync();
+                return true;
             case 3:
                 if (SelectedVoiceProvider is not null)
                     await _voiceProviders.SetActiveProviderAsync(SelectedVoiceProvider.Id);
-                break;
+                return true;
             default:
-                break;
+                return true;
         }
     }
 
+    /// <summary>
+    /// r12 01-settings-lifecycle.md 1.1: re-running the wizard (Settings'
+    /// "re-run setup" link) and changing the data root used to call a plain
+    /// <c>SaveAsync()</c>, which never migrates - conversations, memories,
+    /// RAG, and traces stayed behind in the old root and silently
+    /// "disappeared". This mirrors <see cref="SettingsViewModel.SaveAsync"/>:
+    /// preview conflicts with the same message the Settings page shows,
+    /// build a candidate copy so a failed save cannot leave a half-applied
+    /// edit in the live settings, and surface the same migrated-files toast.
+    /// </summary>
+    private async Task<bool> ApplyDataRootStepAsync()
+    {
+        var previousDataRoot = _settings.Settings.DataManagement.DataRootDirectory;
+        var nextDataRoot = DataRootDirectory.Trim();
+
+        var plan = _settings.PreviewDataRootMigration(previousDataRoot, nextDataRoot);
+        if (plan.Conflicts.Count > 0)
+        {
+            _toasts.Show("Data root not changed",
+                $"Move blocked: {plan.Conflicts.Count} existing database file(s) in target.",
+                ToastKind.Error, 7000);
+            return false;
+        }
+
+        var candidate = _settings.Settings.Clone();
+        candidate.DataManagement.DataRootDirectory = nextDataRoot;
+        candidate.DataManagement.LocalAiAssetsRoot = LocalAiAssetsRoot.Trim();
+
+        try
+        {
+            var result = await _settings.SaveAsync(candidate, previousDataRoot);
+            if (result.DataMigrated)
+            {
+                var message = $"Moved {result.FilesMoved} database file(s) to {result.CurrentDataRoot}. Backup: {result.BackupDirectory}";
+                _toasts.Show("Aether data moved", message, ToastKind.Success, 7000);
+            }
+        }
+        catch (Exception ex)
+        {
+            _toasts.Show("Data root not changed", ex.Message, ToastKind.Error, 7000);
+            return false;
+        }
+
+        return true;
+    }
 }

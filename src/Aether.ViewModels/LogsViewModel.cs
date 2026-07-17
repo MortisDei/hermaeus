@@ -23,6 +23,10 @@ public partial class LogsViewModel : ViewModelBase
 {
     private readonly IRuntimeLogService _logs;
     private readonly RedactionService _redactor;
+    private readonly object _pendingLock = new();
+    private List<RuntimeLogEntry> _pendingEntries = [];
+    private bool _flushScheduled;
+    private const int MaxVisibleEntries = 1000;
 
     [ObservableProperty] private string _selectedFilter = "All";
     [ObservableProperty] private string _statusText = "";
@@ -50,7 +54,7 @@ public partial class LogsViewModel : ViewModelBase
     {
         _logs = logs;
         _redactor = redactor;
-        _logs.LogAdded += _ => RunOnUi(Refresh);
+        _logs.LogAdded += OnLogAdded;
         Refresh();
     }
 
@@ -64,9 +68,64 @@ public partial class LogsViewModel : ViewModelBase
         StatusText = $"{filtered.Count} log line(s)";
     }
 
+    /// <summary>
+    /// r12 02-async-and-threading.md 2.4: a llama-server startup can emit
+    /// hundreds of log lines in seconds; posting a full O(n) list rebuild
+    /// per line was O(n^2) and flooded the dispatcher exactly when the app
+    /// was busiest. Entries that pass the current filter are appended
+    /// incrementally instead, and bursts are coalesced behind a
+    /// pending-refresh flag so overlapping <see cref="IRuntimeLogService.LogAdded"/>
+    /// callbacks (often from a background reader thread) result in one
+    /// posted flush, not one post per line. Full rebuilds are kept only for
+    /// filter changes and <see cref="ClearView"/>.
+    /// </summary>
+    private void OnLogAdded(RuntimeLogEntry entry)
+    {
+        bool shouldSchedule;
+        lock (_pendingLock)
+        {
+            _pendingEntries.Add(entry);
+            shouldSchedule = !_flushScheduled;
+            _flushScheduled = true;
+        }
+
+        if (shouldSchedule)
+            RunOnUi(FlushPendingEntries);
+    }
+
+    private void FlushPendingEntries()
+    {
+        List<RuntimeLogEntry> batch;
+        lock (_pendingLock)
+        {
+            batch = _pendingEntries;
+            _pendingEntries = [];
+            _flushScheduled = false;
+        }
+
+        var matched = 0;
+        foreach (var entry in ApplyFilter(batch, SelectedFilter))
+        {
+            VisibleEntries.Add(new LogEntryDisplayViewModel(entry));
+            matched++;
+        }
+
+        if (matched == 0)
+            return;
+
+        while (VisibleEntries.Count > MaxVisibleEntries)
+            VisibleEntries.RemoveAt(0);
+
+        StatusText = $"{VisibleEntries.Count} log line(s)";
+    }
+
     [RelayCommand]
     private void ClearView()
     {
+        lock (_pendingLock)
+        {
+            _pendingEntries = [];
+        }
         _logs.ClearInMemory();
         Refresh();
         StatusText = "Logs cleared";

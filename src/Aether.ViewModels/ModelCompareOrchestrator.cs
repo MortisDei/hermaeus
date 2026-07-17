@@ -23,6 +23,16 @@ public static class ModelCompareOrchestrator
 
     public static ModelCompareResultViewModel ToResult(EvalRun run)
     {
+        if (run.CaseResults.Count == 0)
+        {
+            return new ModelCompareResultViewModel
+            {
+                ModelId = run.Target.ModelId,
+                DisplayName = run.Target.Label ?? run.Target.ModelId,
+                Error = "No result was returned for this model."
+            };
+        }
+
         var result = run.CaseResults[0];
         return new ModelCompareResultViewModel
         {

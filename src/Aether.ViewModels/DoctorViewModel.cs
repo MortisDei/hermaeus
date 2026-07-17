@@ -29,6 +29,7 @@ public partial class DoctorViewModel : ObservableObject
     [ObservableProperty] private string _nativeKokoroProgress = string.Empty;
 
     private readonly System.Text.StringBuilder _embeddingLogBuffer = new();
+    private readonly object _embeddingLogFileLock = new();
 
     public UiBoundCollection<DoctorCheck> Checks { get; } = [];
 
@@ -214,20 +215,69 @@ public partial class DoctorViewModel : ObservableObject
         }
         catch { }
 
-        // persist to a log file asynchronously
-        _ = Task.Run(async () =>
+        // r12 03-runtime-vm-correctness.md 3.9: one fire-and-forget Task.Run
+        // per progress line let concurrent writes interleave in the log
+        // file. A progress callback fires often enough, but not on a hot
+        // per-render path, so a lock-serialized synchronous append is fine.
+        try
         {
-            try
+            var root = Aether.Services.SettingsService.ResolveDataRoot(_settingsService.Settings);
+            var dir = Path.Combine(root, "logs");
+            Directory.CreateDirectory(dir);
+            var path = Path.Combine(dir, "embedding_downloads.log");
+            var entry = $"{DateTime.UtcNow:O} {s}{Environment.NewLine}";
+            lock (_embeddingLogFileLock)
             {
-                var root = Aether.Services.SettingsService.ResolveDataRoot(_settingsService.Settings);
-                var dir = Path.Combine(root, "logs");
-                Directory.CreateDirectory(dir);
-                var path = Path.Combine(dir, "embedding_downloads.log");
-                var entry = $"{DateTime.UtcNow:O} {s}{Environment.NewLine}";
-                await File.AppendAllTextAsync(path, entry);
+                File.AppendAllText(path, entry);
             }
-            catch { }
-        });
+        }
+        catch { }
+    }
+
+    /// <summary>
+    /// r12 03-runtime-vm-correctness.md 3.9: the four install actions below
+    /// were copy-pasted, differing only in the busy flag, the progress
+    /// setter, the installer call, and a couple of strings. One helper now
+    /// owns the shared shape (busy guard, CTS lifecycle including disposal,
+    /// success/failure/cancellation toasts, post-install rescan).
+    /// </summary>
+    private async Task RunInstallAsync(
+        Func<bool> isBusy,
+        Action<bool> setBusy,
+        Action<string> setProgress,
+        Func<IProgress<string>, CancellationToken, Task<bool>> installAsync,
+        string successTitle,
+        string successBody,
+        string failureTitle,
+        string cancelledTitle)
+    {
+        if (isBusy()) return;
+        setBusy(true);
+        _installCts = new CancellationTokenSource();
+        try
+        {
+            var progress = new Progress<string>(setProgress);
+            var ok = await installAsync(progress, _installCts.Token);
+            _toasts.Show(ok ? successTitle : failureTitle,
+                ok ? successBody : "See diagnostics for details.",
+                ok ? ToastKind.Success : ToastKind.Error,
+                7000);
+            await ScanAsync();
+        }
+        catch (Exception ex)
+        {
+            _toasts.Show(ex is OperationCanceledException ? cancelledTitle : failureTitle,
+                ex is OperationCanceledException ? "Installation was cancelled." : ex.Message,
+                ex is OperationCanceledException ? ToastKind.Info : ToastKind.Error,
+                7000);
+        }
+        finally
+        {
+            setProgress(string.Empty);
+            setBusy(false);
+            _installCts?.Dispose();
+            _installCts = null;
+        }
     }
 
     [RelayCommand]
@@ -242,144 +292,51 @@ public partial class DoctorViewModel : ObservableObject
         // Special-case reranker installation: perform install action via doctor service
         if (check.Key == "reranker")
         {
-            try
-            {
-                if (IsInstallingReranker) return;
-                IsInstallingReranker = true;
-                _installCts = new CancellationTokenSource();
-                var progress = new Progress<string>(s => RerankerProgress = s);
-                var ok = await _doctor.InstallRerankerAssetsAsync(progress, _installCts.Token);
-                _toasts.Show(ok ? "Reranker installed" : "Reranker install failed",
-                    ok ? "Reranker assets installed." : "See diagnostics for details.",
-                    ok ? ToastKind.Success : ToastKind.Error,
-                    7000);
-                // refresh doctor checks after attempt
-                await ScanAsync();
-                RerankerProgress = string.Empty;
-                IsInstallingReranker = false;
-                _installCts = null;
-                return;
-            }
-            catch (Exception ex)
-            {
-                if (ex is OperationCanceledException)
-                {
-                    _toasts.Show("Reranker install cancelled", "Installation was cancelled.", ToastKind.Info, 4000);
-                }
-                else
-                {
-                    _toasts.Show("Reranker install failed", ex.Message, ToastKind.Error, 7000);
-                }
-                IsInstallingReranker = false;
-                RerankerProgress = string.Empty;
-                _installCts = null;
-                return;
-            }
+            await RunInstallAsync(
+                () => IsInstallingReranker,
+                v => IsInstallingReranker = v,
+                s => RerankerProgress = s,
+                (p, ct) => _doctor.InstallRerankerAssetsAsync(p, ct),
+                "Reranker installed", "Reranker assets installed.",
+                "Reranker install failed", "Reranker install cancelled");
+            return;
         }
 
         if (check.Key == "kokoro-native")
         {
-            try
-            {
-                if (IsInstallingNativeKokoro) return;
-                IsInstallingNativeKokoro = true;
-                _installCts = new CancellationTokenSource();
-                var progress = new Progress<string>(s => NativeKokoroProgress = s);
-                var ok = await _doctor.InstallNativeKokoroAssetsAsync(progress, _installCts.Token);
-                _toasts.Show(ok ? "Kokoro (native) installed" : "Kokoro (native) install failed",
-                    ok ? "Kokoro native ONNX model and voices installed." : "See diagnostics for details.",
-                    ok ? ToastKind.Success : ToastKind.Error,
-                    7000);
-                await ScanAsync();
-                NativeKokoroProgress = string.Empty;
-                IsInstallingNativeKokoro = false;
-                _installCts = null;
-                return;
-            }
-            catch (Exception ex)
-            {
-                if (ex is OperationCanceledException)
-                {
-                    _toasts.Show("Kokoro (native) install cancelled", "Installation was cancelled.", ToastKind.Info, 4000);
-                }
-                else
-                {
-                    _toasts.Show("Kokoro (native) install failed", ex.Message, ToastKind.Error, 7000);
-                }
-                IsInstallingNativeKokoro = false;
-                NativeKokoroProgress = string.Empty;
-                _installCts = null;
-                return;
-            }
+            await RunInstallAsync(
+                () => IsInstallingNativeKokoro,
+                v => IsInstallingNativeKokoro = v,
+                s => NativeKokoroProgress = s,
+                (p, ct) => _doctor.InstallNativeKokoroAssetsAsync(p, ct),
+                "Kokoro (native) installed", "Kokoro native ONNX model and voices installed.",
+                "Kokoro (native) install failed", "Kokoro (native) install cancelled");
+            return;
         }
 
         if (check.Key is "embedding-model" or "embedding-model-update")
         {
-            try
-            {
-                if (IsInstallingEmbeddingModel) return;
-                IsInstallingEmbeddingModel = true;
-                _installCts = new CancellationTokenSource();
-                var progress = new Progress<string>(s => HandleEmbeddingProgress(s));
-                var ok = await _doctor.InstallEmbeddingModelAsync(progress, _installCts.Token);
-                _toasts.Show(ok ? "Embedding model installed" : "Embedding model install failed",
-                    ok ? "Embedding model downloaded and configured." : "See diagnostics for details.",
-                    ok ? ToastKind.Success : ToastKind.Error,
-                    7000);
-                await ScanAsync();
-                EmbeddingModelProgress = string.Empty;
-                IsInstallingEmbeddingModel = false;
-                _installCts = null;
-                return;
-            }
-            catch (Exception ex)
-            {
-                if (ex is OperationCanceledException)
-                {
-                    _toasts.Show("Embedding install cancelled", "Installation was cancelled.", ToastKind.Info, 4000);
-                }
-                else
-                {
-                    _toasts.Show("Embedding model install failed", ex.Message, ToastKind.Error, 7000);
-                }
-                IsInstallingEmbeddingModel = false;
-                EmbeddingModelProgress = string.Empty;
-                _installCts = null;
-                return;
-            }
+            await RunInstallAsync(
+                () => IsInstallingEmbeddingModel,
+                v => IsInstallingEmbeddingModel = v,
+                HandleEmbeddingProgress,
+                (p, ct) => _doctor.InstallEmbeddingModelAsync(p, ct),
+                "Embedding model installed", "Embedding model downloaded and configured.",
+                "Embedding model install failed", "Embedding install cancelled");
+            return;
         }
 
         var wantsLlamaDownload = check.Key == "llama-server" && check.FixLabel.StartsWith("Download", StringComparison.OrdinalIgnoreCase);
         if (check.Key == "llama-server-update" || wantsLlamaDownload)
         {
-            try
-            {
-                if (IsInstallingLlamaServer) return;
-                IsInstallingLlamaServer = true;
-                _installCts = new CancellationTokenSource();
-                var progress = new Progress<string>(s => LlamaServerProgress = s);
-                var ok = await _doctor.InstallLlamaServerUpdateAsync(progress, _installCts.Token);
-                _toasts.Show(ok ? "llama.cpp updated" : "llama.cpp update failed",
-                    ok ? "llama-server downloaded and configured." : "See diagnostics for details.",
-                    ok ? ToastKind.Success : ToastKind.Error,
-                    7000);
-                await ScanAsync();
-                LlamaServerProgress = string.Empty;
-                IsInstallingLlamaServer = false;
-                _installCts = null;
-                return;
-            }
-            catch (Exception ex)
-            {
-                _toasts.Show(ex is OperationCanceledException ? "llama.cpp update cancelled" : "llama.cpp update failed",
-                    ex is OperationCanceledException ? "Update was cancelled." : ex.Message,
-                    ex is OperationCanceledException ? ToastKind.Info : ToastKind.Error,
-                    7000);
-                LlamaServerProgress = string.Empty;
-                IsInstallingLlamaServer = false;
-                _installCts = null;
-                return;
-            }
+            await RunInstallAsync(
+                () => IsInstallingLlamaServer,
+                v => IsInstallingLlamaServer = v,
+                s => LlamaServerProgress = s,
+                (p, ct) => _doctor.InstallLlamaServerUpdateAsync(p, ct),
+                "llama.cpp updated", "llama-server downloaded and configured.",
+                "llama.cpp update failed", "llama.cpp update cancelled");
+            return;
         }
 
         if (RequestNavigate is null)

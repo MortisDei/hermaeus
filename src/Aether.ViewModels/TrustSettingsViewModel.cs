@@ -44,11 +44,11 @@ public partial class TrustSettingsViewModel : ObservableObject
     private async Task RescanTrustAsync()
     {
         SettingsError = string.Empty;
-        SyncSettingsForTrustScan();
+        var scanSettings = BuildScanScopedSettings();
         TrustScanBusy = true;
         try
         {
-            var report = await _trust.ScanAsync(_settings.Settings);
+            var report = await _trust.ScanAsync(scanSettings);
             TrustItems.Clear();
             foreach (var item in report.Items)
                 TrustItems.Add(item);
@@ -70,9 +70,16 @@ public partial class TrustSettingsViewModel : ObservableObject
         }
     }
 
-    private void SyncSettingsForTrustScan()
+    /// <summary>
+    /// r12 01-settings-lifecycle.md 1.5: a trust rescan must never write to
+    /// settings - it only needs the current edit boxes' candidate values, so
+    /// it builds a scan-scoped copy instead of mutating the live
+    /// <see cref="ISettingsService.Settings"/> (which previously lingered
+    /// unsaved until some unrelated save persisted it).
+    /// </summary>
+    private AppSettings BuildScanScopedSettings()
     {
-        var settings = _settings.Settings;
+        var settings = _settings.Settings.Clone();
         settings.DataManagement.LocalAiAssetsRoot = _data.LocalAiAssetsRoot.Trim();
         settings.Tts.PythonPath = _tts.TtsPythonPath.Trim();
         settings.Tts.ScriptPath = _tts.TtsScriptPath.Trim();
@@ -80,5 +87,6 @@ public partial class TrustSettingsViewModel : ObservableObject
         settings.Tts.OutputDirectory = _tts.TtsOutputDirectory.Trim();
         settings.Tts.VoiceDirectory = _tts.TtsVoiceDirectory.Trim();
         settings.Rag.RerankerModelPath = _rag.RagRerankerModelPath.Trim();
+        return settings;
     }
 }

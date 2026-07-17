@@ -926,6 +926,133 @@ namespace Aether.Tests
             True(reloaded.LastIngestUtc.HasValue, "LastIngestUtc should round-trip through a fresh store instance");
         }
 
+        // ── 3.6 AddToDataset renamed-target trap (r12 03-runtime-vm-correctness.md) ──
+
+        public static async Task RagAddToDatasetIngestsIntoARenamedTargetAsANewDatasetInstead()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var store = new SqliteRagStore(settings);
+            await store.InitializeAsync();
+
+            var docs = temp.PathFor("docs");
+            Directory.CreateDirectory(docs);
+            await File.WriteAllTextAsync(Path.Combine(docs, "a.txt"), "apple banana carrot");
+
+            var query = new RagQueryService(store, new FakeEmbeddingService(), new FakeLlm(), settings, new NoOpReranker());
+            var pipeline = new RagPipeline(store, new FakeEmbeddingService());
+            var eval = new Aether.Rag.Eval.RagEvalService(query, settings, new FakeEvalStore());
+            var vm = new RagViewModel(query, pipeline, eval, new FakeToasts(), new RuntimeLogService(settings), settings)
+            {
+                NewDatasetName = "dataset-a",
+                IngestPath = docs
+            };
+            await vm.IngestCommand.ExecuteAsync(null);
+
+            var datasetA = (await query.GetDatasetsAsync()).First(d => d.Name == "dataset-a");
+            await vm.RefreshDatasetManagerCommand.ExecuteAsync(null);
+            var item = vm.DatasetManagerItems.First(i => i.Id == datasetA.Id);
+
+            vm.AddToDatasetCommand.Execute(item);
+            Equal("dataset-a", vm.NewDatasetName, "AddToDataset should pre-fill the target's own name");
+
+            // User edits the name box, intending to create a different dataset.
+            vm.NewDatasetName = "dataset-b";
+            await File.WriteAllTextAsync(Path.Combine(docs, "b.txt"), "zulu unique marker");
+            await vm.IngestCommand.ExecuteAsync(null);
+
+            var all = await query.GetDatasetsAsync();
+            True(all.Any(d => d.Name == "dataset-b"), "editing the name after AddToDataset should create a new dataset");
+            var reloadedA = all.First(d => d.Id == datasetA.Id);
+            var chunksA = await store.GetChunksAsync(reloadedA.Id, includeEmbeddings: false);
+            False(chunksA.Any(c => c.Content.Contains("zulu", StringComparison.OrdinalIgnoreCase)),
+                "the original dataset must not have received the new document");
+        }
+
+        public static async Task RagAddToDatasetWithoutEditingTheNameStillIngestsIntoTheSameDataset()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var store = new SqliteRagStore(settings);
+            await store.InitializeAsync();
+
+            var docs = temp.PathFor("docs");
+            Directory.CreateDirectory(docs);
+            await File.WriteAllTextAsync(Path.Combine(docs, "a.txt"), "apple banana carrot");
+
+            var query = new RagQueryService(store, new FakeEmbeddingService(), new FakeLlm(), settings, new NoOpReranker());
+            var pipeline = new RagPipeline(store, new FakeEmbeddingService());
+            var eval = new Aether.Rag.Eval.RagEvalService(query, settings, new FakeEvalStore());
+            var vm = new RagViewModel(query, pipeline, eval, new FakeToasts(), new RuntimeLogService(settings), settings)
+            {
+                NewDatasetName = "dataset-a",
+                IngestPath = docs
+            };
+            await vm.IngestCommand.ExecuteAsync(null);
+            var datasetA = (await query.GetDatasetsAsync()).First(d => d.Name == "dataset-a");
+            await vm.RefreshDatasetManagerCommand.ExecuteAsync(null);
+            var item = vm.DatasetManagerItems.First(i => i.Id == datasetA.Id);
+
+            vm.AddToDatasetCommand.Execute(item);
+            await File.WriteAllTextAsync(Path.Combine(docs, "b.txt"), "zulu unique marker");
+            await vm.IngestCommand.ExecuteAsync(null);
+
+            var all = await query.GetDatasetsAsync();
+            Equal(1, all.Count(d => d.Name == "dataset-a"), "unmodified AddToDataset must still land in the same dataset, not create a duplicate");
+            var chunksA = await store.GetChunksAsync(datasetA.Id, includeEmbeddings: false);
+            True(chunksA.Any(c => c.Content.Contains("zulu", StringComparison.OrdinalIgnoreCase)),
+                "the new document should be ingested into the existing target dataset");
+        }
+
+        // ── 3.7 Reindex must not flip the recorded model before the pipeline commits (r12 03-runtime-vm-correctness.md) ──
+
+        public static async Task RagViewModelReindexCancelledMidRunLeavesDatasetOnTheOldModel()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var store = new SqliteRagStore(settings);
+            await store.InitializeAsync();
+
+            var docs = temp.PathFor("docs");
+            Directory.CreateDirectory(docs);
+            for (var i = 0; i < 20; i++)
+                await File.WriteAllTextAsync(Path.Combine(docs, $"f{i}.txt"), string.Concat(Enumerable.Repeat($"keyword{i} ", 200)));
+
+            var query = new RagQueryService(store, new FakeEmbeddingService(), new FakeLlm(), settings, new NoOpReranker());
+            var pipeline = new RagPipeline(store, new FakeEmbeddingService());
+            var eval = new Aether.Rag.Eval.RagEvalService(query, settings, new FakeEvalStore());
+            var vm = new RagViewModel(query, pipeline, eval, new FakeToasts(), new RuntimeLogService(settings), settings)
+            {
+                NewDatasetName = "reindex-cancel-test",
+                IngestPath = docs
+            };
+            await vm.IngestCommand.ExecuteAsync(null);
+            var dataset = (await query.GetDatasetsAsync()).First(d => d.Name == "reindex-cancel-test");
+            var originalModel = dataset.Config.EmbeddingModel;
+
+            settings.Settings.Rag.EmbeddingModel = "new-model";
+            await vm.RefreshDatasetManagerCommand.ExecuteAsync(null);
+            var item = vm.DatasetManagerItems.First(i => i.Id == dataset.Id);
+            True(item.ReindexRequired, "the dataset should need reindexing once the current embedding model changes");
+
+            vm.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(RagViewModel.IngestStageDone) && vm.IngestStageDone > 0)
+                    vm.StopIngestCommand.Execute(null);
+            };
+
+            await vm.ReindexDatasetCommand.ExecuteAsync(item);
+
+            var reloaded = (await query.GetDatasetsAsync()).First(d => d.Id == dataset.Id);
+            Equal(originalModel, reloaded.Config.EmbeddingModel, "a cancelled reindex must leave the dataset reporting its old embedding model");
+            await vm.RefreshDatasetManagerCommand.ExecuteAsync(null);
+            var reloadedItem = vm.DatasetManagerItems.First(i => i.Id == dataset.Id);
+            True(reloadedItem.ReindexRequired, "ReindexRequired must remain true after a cancelled reindex");
+        }
+
         // ── 1.4 Embedding model mismatch guard + reindex (r10 01-rag-correctness.md) ──
 
         public static Task RagCosineScanIgnoresMismatchedEmbeddingLengths()

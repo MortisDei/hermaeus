@@ -47,6 +47,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     public bool IsError    => Status == ServerStatus.Error;
     public bool CanEdit => IsStopped && !IsAutoTuning;
     public bool HasUnsavedChanges =>
+        _config.Name != Name ||
         _config.ExecutablePath != ExecutablePath ||
         _config.ModelPath != ModelPath ||
         _config.Port != Port ||
@@ -181,19 +182,29 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     /// Called at startup and on Services view refresh; a no-op while this
     /// server is Running (nothing "leftover" about the process we manage).
     /// </summary>
-    public Task RefreshOrphanStatusAsync()
+    public async Task RefreshOrphanStatusAsync()
     {
         if (Status == ServerStatus.Running)
         {
             ClearOrphanBanner();
-            return Task.CompletedTask;
+            return;
         }
 
-        var info = _orphanDetector.Detect(BuildConfig());
+        // r12 01-settings-lifecycle.md 1.4: port/process scanning is
+        // synchronous OS work; running it off the UI thread keeps a
+        // Services-panel refresh (or the settings-save-triggered rebuild
+        // storm this round also fixes) from blocking the UI while it scans.
+        var config = BuildConfig();
+        var info = await Task.Run(() => _orphanDetector.Detect(config));
+        RunOnUi(() => ApplyOrphanDetectionResult(info));
+    }
+
+    private void ApplyOrphanDetectionResult(OrphanServerInfo? info)
+    {
         if (info is null)
         {
             ClearOrphanBanner();
-            return Task.CompletedTask;
+            return;
         }
 
         _orphanInfo = info;
@@ -202,7 +213,6 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         OrphanBannerText = info.IsOwnBinary
             ? $"A {Name} process from a previous session is still running on port {info.Port} (PID {info.Pid})."
             : $"Port {info.Port} is already in use by {info.ProcessName} (PID {info.Pid}).";
-        return Task.CompletedTask;
     }
 
     private void ClearOrphanBanner()
@@ -570,6 +580,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(CanEdit));
         AutoTuneCommand.NotifyCanExecuteChanged();
     }
+    partial void OnNameChanged(string value) => OnPropertyChanged(nameof(HasUnsavedChanges));
     partial void OnExecutablePathChanged(string value) => OnPropertyChanged(nameof(HasUnsavedChanges));
     partial void OnModelPathChanged(string value) => OnPropertyChanged(nameof(HasUnsavedChanges));
     partial void OnPortChanged(int value) => OnPropertyChanged(nameof(HasUnsavedChanges));
@@ -616,7 +627,14 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         return new RuntimeLogEntry(DateTime.UtcNow, level, category, line);
     }
 
-    public void Dispose() => _mgr.Dispose();
+    /// <summary>Set by <see cref="Dispose"/>; lets tests confirm a row dropped from settings during <see cref="ServicesViewModel.Rebuild"/> was actually disposed, not just removed from the collection.</summary>
+    public bool IsDisposed { get; private set; }
+
+    public void Dispose()
+    {
+        IsDisposed = true;
+        _mgr.Dispose();
+    }
 }
 
 // ── ServicesViewModel ─────────────────────────────────────────────────────────
@@ -634,6 +652,7 @@ public partial class ServicesViewModel : ViewModelBase
     public UiBoundCollection<ServerProcessViewModel> Servers { get; } = [];
     public UiBoundCollection<RuntimeProfileViewModel> RuntimeProfiles { get; } = [];
     public event EventHandler? ServerAvailabilityChanged;
+    private string? _lastAvailabilityFingerprint;
 
     public RuntimeKind[] RuntimeKinds { get; } =
     [
@@ -670,14 +689,21 @@ public partial class ServicesViewModel : ViewModelBase
             await server.RefreshOrphanStatusAsync();
     }
 
+    /// <summary>
+    /// r12 01-settings-lifecycle.md 1.4: <see cref="ISettingsService.SettingsChanged"/>
+    /// fires after every save, so this used to run on every settings save of
+    /// anything (a UI font-size tweak included): Clear/re-add churned every
+    /// <see cref="ServerProcessViewModel"/> (losing UI state like expanded
+    /// logs, leaking the <see cref="ServerProcessManager"/> of any row whose
+    /// config was removed), and unconditionally fired
+    /// <see cref="ServerAvailabilityChanged"/> plus a full orphan port scan.
+    /// Now it diffs by config id (reusing unchanged rows, disposing dropped
+    /// ones) and only fires the availability event/orphan scan when the
+    /// server set, ports, or paths actually changed.
+    /// </summary>
     private void Rebuild()
     {
         Aether.Services.SettingsService.NormalizeManagedServers(_settings.Settings.ManagedServers);
-        var existing = Servers.ToDictionary(s => s.Id);
-
-        foreach (var srv in Servers) srv.PropertyChanged -= OnServerPropertyChanged;
-        Servers.Clear();
-
         var configs = _settings.Settings.ManagedServers;
 
         // Ensure we always have the two default slots
@@ -689,25 +715,52 @@ public partial class ServicesViewModel : ViewModelBase
                 EmbeddingsMode = configs.Count == 1
             });
 
-        foreach (var cfg in configs)
-        {
-            var vm = existing.TryGetValue(cfg.Id, out var current)
-                ? current
-                : new ServerProcessViewModel(cfg, _settings, _redactor, _trust, _toasts, _runtimeLogs, _orphanDetector);
+        var configIds = new HashSet<string>(configs.Select(c => c.Id));
+        var existing = Servers.ToDictionary(s => s.Id);
 
-            vm.BeforeStartAsync = StopSamePortPeersBeforeStartAsync;
-            vm.PropertyChanged += OnServerPropertyChanged;
-            vm.RefreshDetectedModels();
-            Servers.Add(vm);
+        foreach (var stale in Servers.Where(s => !configIds.Contains(s.Id)).ToList())
+        {
+            stale.PropertyChanged -= OnServerPropertyChanged;
+            Servers.Remove(stale);
+            stale.Dispose();
+        }
+
+        for (var index = 0; index < configs.Count; index++)
+        {
+            var cfg = configs[index];
+            if (existing.TryGetValue(cfg.Id, out var current))
+            {
+                var currentIndex = Servers.IndexOf(current);
+                if (currentIndex != index)
+                    Servers.Move(currentIndex, index);
+                current.RefreshDetectedModels();
+            }
+            else
+            {
+                var vm = new ServerProcessViewModel(cfg, _settings, _redactor, _trust, _toasts, _runtimeLogs, _orphanDetector)
+                {
+                    BeforeStartAsync = StopSamePortPeersBeforeStartAsync
+                };
+                vm.PropertyChanged += OnServerPropertyChanged;
+                Servers.Insert(index, vm);
+            }
         }
 
         RuntimeProfiles.Clear();
         foreach (var profile in _runtimeProfiles.Profiles)
             RuntimeProfiles.Add(new RuntimeProfileViewModel(profile));
 
-        ServerAvailabilityChanged?.Invoke(this, EventArgs.Empty);
-        _ = RefreshOrphanDetectionAsync();
+        var fingerprint = BuildAvailabilityFingerprint(configs);
+        if (!string.Equals(_lastAvailabilityFingerprint, fingerprint, StringComparison.Ordinal))
+        {
+            _lastAvailabilityFingerprint = fingerprint;
+            ServerAvailabilityChanged?.Invoke(this, EventArgs.Empty);
+            _ = RefreshOrphanDetectionAsync();
+        }
     }
+
+    private static string BuildAvailabilityFingerprint(IEnumerable<ServerConfig> configs) =>
+        string.Join("|", configs.Select(c => $"{c.Id}:{c.Port}:{c.ExecutablePath}:{c.ModelPath}"));
 
     [RelayCommand]
     private async Task AddRuntimeProfileAsync()

@@ -53,7 +53,6 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
     private readonly IToastService _toasts;
     private readonly XttsProcessManager _xttsProcess;
     private readonly KokoroProcessManager _kokoroProcess;
-    private readonly ISecretStore _secrets;
     private readonly ISettingsService _settings;
     private readonly IVoiceOrchestrator? _voice;
     private bool _externalServiceRunning;
@@ -187,7 +186,6 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
         _toasts = toasts;
         _xttsProcess = xttsProcess;
         _kokoroProcess = kokoroProcess;
-        _secrets = secrets;
         _settings = settings;
         _voice = voiceOrchestrator;
         _xttsProcess.StatusChanged += OnXttsStatusChanged;
@@ -278,7 +276,13 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
         _isReloading = true;
         TtsEnabled = settings.Tts.Enabled;
         TtsServiceUrl = settings.Tts.ServiceUrl;
-        TtsPythonPath = _secrets.IsReference(settings.Tts.PythonPath) ? string.Empty : settings.Tts.PythonPath;
+        // r12 01-settings-lifecycle.md 1.6: Tts.PythonPath is never stored as
+        // a secret reference (paths are not secrets), so the IsReference
+        // guard here was dead and, if it ever did trip, would have blanked
+        // the box on reload while ApplyTtsTo wrote it back unconditionally
+        // on the next save - a reload/apply asymmetry that could wipe a
+        // value. Reload it the same way as every other Tts path field.
+        TtsPythonPath = settings.Tts.PythonPath;
         TtsScriptPath = settings.Tts.ScriptPath;
         TtsModelDirectory = settings.Tts.ModelDirectory;
         TtsOutputDirectory = settings.Tts.OutputDirectory;

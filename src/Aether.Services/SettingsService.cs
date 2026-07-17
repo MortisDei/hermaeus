@@ -134,6 +134,21 @@ public sealed class SettingsService : ISettingsService
         return migration;
     }
 
+    public async Task<SettingsSaveResult> SaveAsync(AppSettings settings, string? previousDataRootDirectory = null)
+    {
+        var previous = Settings;
+        Settings = settings;
+        try
+        {
+            return await SaveAsync(previousDataRootDirectory);
+        }
+        catch
+        {
+            Settings = previous;
+            throw;
+        }
+    }
+
     public DataMigrationPlan PreviewDataRootMigration(string? previousDataRootDirectory, string? nextDataRootDirectory)
     {
         var previous = ResolveDataRoot(new AppSettings { DataManagement = { DataRootDirectory = previousDataRootDirectory ?? string.Empty } });

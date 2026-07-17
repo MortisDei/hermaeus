@@ -80,6 +80,55 @@ namespace Aether.Tests
         }
     }
 
+    /// <summary>
+    /// Counts <see cref="Post"/> calls and executes the callback inline (so
+    /// tests stay synchronous) - used to assert RunOnUi coalescing/posting
+    /// behavior (r12 02-async-and-threading.md 2.4, 2.6) without a real
+    /// message loop.
+    /// </summary>
+    sealed class CountingSynchronizationContext : SynchronizationContext
+    {
+        public int PostCount { get; private set; }
+
+        public override void Post(SendOrPostCallback d, object? state)
+        {
+            PostCount++;
+            d(state);
+        }
+
+        public override void Send(SendOrPostCallback d, object? state) => d(state);
+    }
+
+    /// <summary>
+    /// Queues posted callbacks instead of running them inline, so a test can
+    /// issue several Post calls back-to-back (simulating overlapping
+    /// background-thread callbacks racing a UI thread that has not yet had a
+    /// turn to process its queue) and then drain them explicitly to observe
+    /// coalescing behavior (r12 02-async-and-threading.md 2.4).
+    /// </summary>
+    sealed class QueueingSynchronizationContext : SynchronizationContext
+    {
+        private readonly Queue<(SendOrPostCallback Callback, object? State)> _queue = new();
+        public int PostCount { get; private set; }
+
+        public override void Post(SendOrPostCallback d, object? state)
+        {
+            PostCount++;
+            _queue.Enqueue((d, state));
+        }
+
+        public override void Send(SendOrPostCallback d, object? state) => d(state);
+
+        public void DrainAll()
+        {
+            while (_queue.Count > 0)
+            {
+                var (callback, state) = _queue.Dequeue();
+                callback(state);
+            }
+        }
+    }
+
     sealed class TempDir : IDisposable
     {
         private readonly string _root = Path.Combine(Path.GetTempPath(), $"aether-tests-{Guid.NewGuid():N}");
@@ -372,11 +421,83 @@ namespace Aether.Tests
         }
     }
 
+    /// <summary>In-memory <see cref="IConversationStore"/> whose SaveAsync can be made to throw on demand (r12 02-async-and-threading.md 2.2).</summary>
+    sealed class ThrowingSaveConversationStore : IConversationStore
+    {
+        private readonly Dictionary<string, Conversation> _items = new();
+        public bool ThrowOnSave { get; set; }
+
+        public Task InitializeAsync() => Task.CompletedTask;
+        public Task<List<Conversation>> GetAllAsync(bool includeArchived = true, CancellationToken ct = default) =>
+            Task.FromResult(_items.Values.ToList());
+        public Task<Conversation?> GetByIdAsync(string id, CancellationToken ct = default) =>
+            Task.FromResult(_items.GetValueOrDefault(id));
+        public Task SaveAsync(Conversation conversation, CancellationToken ct = default)
+        {
+            if (ThrowOnSave)
+                throw new InvalidOperationException("simulated locked conversation database");
+            _items[conversation.Id] = conversation;
+            return Task.CompletedTask;
+        }
+        public Task DeleteAsync(string id, CancellationToken ct = default)
+        {
+            _items.Remove(id);
+            return Task.CompletedTask;
+        }
+        public Task<List<Conversation>> SearchAsync(string query, CancellationToken ct = default) =>
+            Task.FromResult(_items.Values.Where(c => c.Title.Contains(query, StringComparison.OrdinalIgnoreCase)).ToList());
+    }
+
+    sealed class FakeConversationMemoryService : IConversationMemoryService
+    {
+        public Task RunAutoSummaryAsync(string conversationId, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<string> ApplyInjectedMemoryMarkersAsync(string responseText, IReadOnlyList<string> injectedMemoryIds, CancellationToken ct = default) =>
+            Task.FromResult(responseText);
+    }
+
+    /// <summary>Returns a scripted list of models on every call, optionally gated behind a delay so tests can control interleaving (r12 02-async-and-threading.md 2.5).</summary>
+    sealed class ScriptedModelsLlm : ILlmService
+    {
+        private readonly Func<List<LlmModel>> _modelsFactory;
+        public TaskCompletionSource? DelayGate { get; set; }
+        public int GetModelsCallCount { get; private set; }
+
+        public ScriptedModelsLlm(Func<List<LlmModel>> modelsFactory) => _modelsFactory = modelsFactory;
+
+        public string ProviderName => "Scripted";
+        public bool IsConfigured => true;
+
+        public async Task<List<LlmModel>> GetModelsAsync(CancellationToken ct = default)
+        {
+            GetModelsCallCount++;
+            if (DelayGate is not null)
+                await DelayGate.Task;
+            return _modelsFactory();
+        }
+
+        public void InvalidateModelCache() { }
+
+        public async IAsyncEnumerable<LlmStreamEvent> StreamChatAsync(
+            string modelId,
+            IReadOnlyList<ChatMessage> messages,
+            LlmChatOptions? options = null,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+        {
+            await Task.Delay(1, ct);
+            yield return new LlmStreamEvent("ok");
+        }
+    }
+
     sealed class FakeToasts : IToastService
     {
         public event Action<ToastMessage>? ToastRaised;
-        public void Show(string title, string message, ToastKind kind = ToastKind.Info, int durationMs = 3500) =>
-            ToastRaised?.Invoke(new ToastMessage(title, message, kind, durationMs));
+        public ToastMessage? LastShown { get; private set; }
+        public void Show(string title, string message, ToastKind kind = ToastKind.Info, int durationMs = 3500)
+        {
+            var toast = new ToastMessage(title, message, kind, durationMs);
+            LastShown = toast;
+            ToastRaised?.Invoke(toast);
+        }
     }
 
     sealed class FakeVoiceOrchestrator : IVoiceOrchestrator

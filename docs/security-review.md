@@ -1,6 +1,7 @@
 # Aether Security Review And Threat Model
 
-Last refreshed for `0.13.0-alpha`. The `0.10.0-alpha` pass re-verified the
+Last refreshed for `0.17.0-alpha` (see the r12 subsection under Threat
+Scenarios). The `0.10.0-alpha` pass re-verified the
 areas that changed in r3-r5 (agent tool execution, run_command recipes,
 lesson store, voice orchestration, benchmark insights) directly against the
 code, and confirmed via git history that the Local API, MCP bridge, secret
@@ -473,6 +474,34 @@ binary download, the data-root migration, and an information-leak-class fix.
   a real bug for any profile pointed at a remote OpenAI-compatible endpoint.
   Resolved via the same `ISecretStore.ResolveAsync` path every other
   outbound call uses.
+
+### r12: ViewModels Deep-Dive
+
+`0.17.0-alpha` is the first dedicated audit of Aether.ViewModels. No new
+network, process, or secret surface; the two touches below shrink an
+existing implicit-trust surface and close a settings-integrity gap.
+
+- **The agent no longer treats the user's whole profile folder as an
+  implicit workspace.** `AgentViewModel.WorkspaceRoot` defaulted to
+  `Environment.SpecialFolder.UserProfile`, and `LoadAsync` (run at every
+  startup and on every Agent panel navigation) unconditionally enumerated
+  and analyzed it, writing a "Workspace profile" workspace-memory entry for
+  a folder the user never explicitly chose - against the standing posture
+  that the agent's workspace is always an explicit user choice. The default
+  is now empty; the existing "no workspace selected" empty state governs
+  until the user picks a root, at which point the previously-audited
+  read-first, approval-gated tool surface applies exactly as before.
+- **Trust rescans are now genuinely read-only with respect to settings.**
+  `TrustSettingsViewModel.SyncSettingsForTrustScan` used to copy the
+  edit-box values (TTS paths, assets root, reranker path) directly onto the
+  live, shared `ISettingsService.Settings` object without saving - a scan
+  could leave an unconfirmed edit sitting in memory until an unrelated save
+  persisted it. Trust scans (and the Local AI setup scan) now build a
+  scan-scoped deep copy instead; nothing a scan does can affect what
+  eventually reaches disk. The broader settings-lifecycle fix behind this
+  (`SettingsViewModel.SaveAsync` applying onto a deep copy, swapped in only
+  on success) is a data-integrity hardening, not a new attack surface, but
+  is recorded here since it changes how live settings can be mutated.
 
 ## Release Gate Status
 

@@ -197,31 +197,46 @@ public partial class SettingsViewModel : ViewModelBase
         Mcp.ReloadFrom(settings);
         LocalApi.ReloadFrom(settings);
         SettingsError = string.Empty;
+        // r12 01-settings-lifecycle.md 1.7: Reset previously left stale
+        // Trust/LocalAiSetup error text behind since only Save cleared it.
+        Data.SettingsError = string.Empty;
+        LocalAiSetup.SettingsError = string.Empty;
+        Trust.SettingsError = string.Empty;
     }
 
+    /// <summary>
+    /// r12 01-settings-lifecycle.md 1.2: every tab's edits are applied onto a
+    /// deep copy of <see cref="ISettingsService.Settings"/>, never the live
+    /// object. <see cref="ISettingsService.SaveAsync(AppSettings, string)"/>
+    /// only swaps the copy in once validation and any data-root migration
+    /// actually succeed, so a failed save leaves the live settings (and every
+    /// other in-flight edit riding along with this save) exactly as they
+    /// were - no partial edit survives in memory to be silently persisted by
+    /// a later, unrelated save.
+    /// </summary>
     [RelayCommand]
     public async Task SaveAsync()
     {
-        var settings = _svc.Settings;
-        var previousDataRoot = settings.DataManagement.DataRootDirectory;
-        var previousEmbedding = settings.Rag.EmbeddingModel;
+        var candidate = _svc.Settings.Clone();
+        var previousDataRoot = _svc.Settings.DataManagement.DataRootDirectory;
+        var previousEmbedding = _svc.Settings.Rag.EmbeddingModel;
         SettingsError = string.Empty;
         Data.SettingsError = string.Empty;
         LocalAiSetup.SettingsError = string.Empty;
         Trust.SettingsError = string.Empty;
 
-        await Llm.ApplyToAsync(settings);
-        Rag.ApplyTo(settings);
-        Data.ApplyTo(settings);
-        Ui.ApplyTo(settings);
-        Memory.ApplyTo(settings);
-        Mcp.ApplyTo(settings);
-        await LocalApi.ApplyToAsync(settings);
-        ApplyTtsTo(settings);
+        await Llm.ApplyToAsync(candidate);
+        Rag.ApplyTo(candidate);
+        Data.ApplyTo(candidate);
+        Ui.ApplyTo(candidate);
+        Memory.ApplyTo(candidate);
+        Mcp.ApplyTo(candidate);
+        await LocalApi.ApplyToAsync(candidate);
+        ApplyTtsTo(candidate);
 
         try
         {
-            var result = await _svc.SaveAsync(previousDataRoot);
+            var result = await _svc.SaveAsync(candidate, previousDataRoot);
             if (result.DataMigrated)
             {
                 var message = $"Moved {result.FilesMoved} database file(s) to {result.CurrentDataRoot}. Backup: {result.BackupDirectory}";
@@ -230,7 +245,8 @@ public partial class SettingsViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            settings.DataManagement.DataRootDirectory = previousDataRoot;
+            // The live settings object was never touched, so the data-root
+            // box just needs to match it again; nothing else to roll back.
             Data.DataRootDirectory = previousDataRoot;
             SettingsError = ex.Message;
             _toasts.Show("Settings not saved", ex.Message, ToastKind.Error);
@@ -241,6 +257,13 @@ public partial class SettingsViewModel : ViewModelBase
         _toasts.Show("Settings saved", "Aether settings were updated.", ToastKind.Success);
         await ApplyEmbeddingModelChangeAsync(previousEmbedding);
         await EnsureLocalApiRunningStateAsync();
+        // r12 01-settings-lifecycle.md 1.7: reset the flag after a short
+        // delay without keeping the async command "executing" for it.
+        _ = ResetIsSavedAfterDelayAsync();
+    }
+
+    private async Task ResetIsSavedAfterDelayAsync()
+    {
         await Task.Delay(2000);
         IsSaved = false;
     }

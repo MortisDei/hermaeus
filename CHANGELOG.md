@@ -11,6 +11,133 @@ limit.
 
 ## [Unreleased]
 
+## [0.17.0-alpha] - 2026-07-18
+
+Implements docs/review r12 in full: the first dedicated audit of
+Aether.ViewModels (37 files, ~10k lines). Two systemic patterns anchor the
+round - the live `ISettingsService.Settings` object is a shared mutable
+global written outside the apply/save path, and fire-and-forget async work
+around UI-bound state races its own later completion.
+
+### Fixed
+
+- **Finishing (or skipping) the setup wizard on first run left the app on a
+  dead chat panel.** `MainWindowViewModel.InitializeAsync` returned early to
+  show the wizard; the `WizardCompleted` handler only navigated to chat, so
+  no servers auto-started and no models/RAG/agent/benchmark data loaded
+  until a restart. The post-wizard sequence is now a named, reusable step
+  (`CompletePostSetupInitializationAsync`) called from both the normal init
+  path and the wizard-completed handler, guarded against double-running.
+  Each step is isolated so one failing store cannot silently skip the rest.
+- **Re-running the wizard and changing the data root bypassed migration.**
+  `SetupWizardViewModel`'s data-root step called a plain `SaveAsync()`,
+  which never migrates - the same "conversations lost" symptom the r11
+  wizard-singleton fix addressed, through a second door. It now previews
+  conflicts (same message the Settings page shows) and migrates through the
+  same path Settings uses, with the same toast.
+- **`SettingsViewModel.SaveAsync` mutated the live settings object before
+  validation, and rolled back only the data root on failure.** Every tab's
+  edits now apply onto a deep copy; a new `ISettingsService.SaveAsync(AppSettings, ...)`
+  overload only swaps the copy in once the save (including migration)
+  actually succeeds, so a failed save leaves every other in-flight edit
+  exactly as it was, not persisted by some later, unrelated save.
+- **Selecting a chat model overwrote `Settings.Llm.MaxTokens` globally**,
+  changing what Benchmark/Agent/RAG sends saw as the cap. `ChatViewModel`
+  now keeps a local `MaxTokens` field like `Temperature`/`TopP`.
+- **A background model-list refresh reset user-tuned sampling parameters.**
+  Model instances are recreated on every fetch, so re-matching by id still
+  reassigned `SelectedModel` to a different object, re-applying profile
+  defaults over a temperature the user had just changed. Refreshes that
+  resolve to the same logical model now update the reference without
+  re-applying defaults; a genuine model switch resets every non-profiled
+  parameter to the settings default instead of leaking the previous model's
+  tuning forward. `AgentViewModel.LoadAsync` had the same stale-reference gap
+  for `SelectedModel`/`SelectedDataset` (a `??=` never re-matched after a
+  refresh) and is fixed the same way.
+- **Every settings save triggered a Services rebuild storm.** `SettingsChanged`
+  fires after every save; `ServicesViewModel.Rebuild` cleared and re-added
+  every server row regardless of what changed, force-invalidating the model
+  cache and refetching models over HTTP, plus a synchronous orphan port scan
+  on the UI thread - on saving anything, including unrelated tabs. `Rebuild`
+  now diffs by config id (reusing unchanged rows, disposing dropped ones)
+  and only fires `ServerAvailabilityChanged`/runs orphan detection when the
+  server set, ports, or paths actually changed; orphan detection moved off
+  the UI thread.
+- **Trust rescans and the Local AI setup scan wrote unsaved edit-box values
+  into live settings.** A trust rescan never even saved, so the mutation
+  lingered until an unrelated save persisted it. Both now build a
+  scan-scoped copy instead of touching the live settings object; the setup
+  flow's genuine persist-before-running-an-action need goes through the
+  real full apply/save, not a partial side-channel write.
+- **Toast history could resurrect cleared/dismissed toasts, or lose the
+  newest one.** `RunOnUi` posted unconditionally even from the UI thread, so
+  code after it ran before the posted mutation - clearing history then
+  immediately serializing it wrote the pre-clear list to disk. `RunOnUi`/
+  `RunOnUiAsync` now execute inline when already on the captured context;
+  toast-history mutation and its save are further bundled into one posted
+  unit so a background-thread toast can never race its own save.
+- **`ChatViewModel.SendAsync` had no exception handling.** Any throw after
+  streaming started (a locked conversation database, an unexpected
+  memory-marker error) left the assistant bubble stuck at `IsStreaming = true`
+  forever with no visible error. A catch now marks the message as failed (or
+  removes it if empty), logs, and toasts.
+- **Per-keystroke searches had no debounce or cancellation.** Memories'
+  search box and the Agent workspace file query each fired a fresh
+  DB/filesystem query per character, with unordered completion interleaving
+  `Clear`/`Add` on the bound list; both now reuse the existing 300 ms + CTS
+  debounce shape. The Agent workspace-file selection loader gained a
+  generation counter so a slower, older read/summarize can no longer
+  overwrite a newer selection's preview.
+- **`LogsViewModel` rebuilt its entire visible list on every log line**,
+  O(n) work per line during a llama-server startup burst. Entries are now
+  appended incrementally when they pass the current filter, with bursts
+  coalesced behind a pending-refresh flag so one post handles many lines;
+  full rebuilds remain for filter changes and Clear.
+- **Concurrent `LoadModelsAsync`/`LoadAsync` calls duplicated models.**
+  `ChatViewModel`, `AgentViewModel`, and `BenchmarkViewModel` now share one
+  in-flight load task instead of each running its own Clear/re-add pass.
+- **The agent's default workspace was the whole user profile**, enumerated
+  and analyzed at every startup, writing a "Workspace profile" workspace
+  memory entry for a folder the user never chose. `WorkspaceRoot` now
+  defaults to empty; the existing empty-state UI handles it.
+- **RAG "Add to dataset" ignored a renamed dataset name.** Editing the
+  dataset-name box after clicking "Add to dataset" silently still ingested
+  into the original target. The target now clears as soon as the box no
+  longer matches it, so the next ingest creates a new dataset under the
+  edited name.
+- **Reindex flipped the dataset's recorded embedding model before the
+  pipeline committed anything.** A cancelled or failed reindex left the
+  live, UI-bound dataset instance claiming the new model while vectors were
+  still old, defeating the r10 mismatch guard. Reindex now works on a clone;
+  the live instance is only ever refreshed from what the pipeline actually
+  persisted.
+- **Benchmark `RerunAsync` had no `IsRunning` guard**; a second click during
+  a run overwrote the run's `CancellationTokenSource`, leaking the first.
+  `RerunFromInsightsAsync` also bypassed `CanExecute` by calling `RunAsync()`
+  directly. Both now route through the guarded `RunCommand`/share `CanRun`.
+- Small fixes: `ModelCompareOrchestrator.ToResult` no longer throws on an
+  empty `CaseResults` list (returns an error row); a dead
+  `!string.IsNullOrWhiteSpace(item.Folder)` check right after setting
+  `Folder = string.Empty` is removed; `ChatViewModel.ClearChat` resets
+  `SystemPrompt` like `NewConversation` does; `RemoveContextAttachment`
+  recomputes the "N files ready" status instead of leaving it stale;
+  `DoctorViewModel.RunFix`'s four copy-pasted install blocks are one shared
+  helper that also disposes its `CancellationTokenSource`; embedding-download
+  progress logging is serialized instead of one fire-and-forget file append
+  per line; the setup wizard's model-folder step surfaces a toast when no
+  managed server exists instead of silently no-op-ing;
+  `McpServerConfigViewModel.ToConfig` now honors quoted arguments containing
+  spaces instead of splitting on every space; a dead `IsReference` guard on
+  `Tts.PythonPath` (paths are never stored as secrets) is removed;
+  `SettingsViewModel.Reload()` now clears stale Trust/LocalAiSetup error
+  text; `SaveAsync` no longer keeps the save command "executing" for an
+  artificial 2 s tail.
+
+37 new tests (688 total). docs/security-review.md gains an r12 subsection
+(the agent no longer treats the user profile as an implicit workspace;
+trust scans are read-only with respect to settings). Archived at
+docs/review/archived/r12/.
+
 ## [0.16.0-alpha] - 2026-07-16
 
 Implements docs/review r11 in full: the first dedicated audit of
@@ -812,117 +939,3 @@ states) on top.
 
 23 new tests (327 total), zero warnings. Full details in
 docs/review/archived/r4/.
-
-## [0.9.43-alpha] - 2026-07-12
-
-Implements docs/review r3 (agent capability, memory, self-learning) in full.
-r2's roadmap was fully actioned; this round targets the Agent workbench's gap
-against Claude Code/Codex, upgrades memory recall and lifecycle, and adds a
-new per-machine agent self-learning (lesson) store.
-
-### Agent capability
-
-- **Persisted step transcript.** Each task keeps `transcript.jsonl` (one line
-  per assistant thought / tool result), replayed budgeted (most-recent-first)
-  into every step's context (`Agent.TranscriptTokenBudget`, default 12,000
-  tokens) instead of only the last five, 4000-char-truncated tool results.
-  Fixed a latent bug found while building this: `AgentJson.Options` was
-  indented, so anything written through it into a JSONL file (including the
-  pre-existing `agent.trace.jsonl`) spread one entry's JSON across multiple
-  physical lines, corrupting line-oriented replay; both now use a new
-  `AgentJson.CompactOptions`.
-- **Autonomous runs.** `IAgentService.RunAsync` loops `RunStepAsync` until a
-  final answer, a question for the user, a gated action needing approval, a
-  blocked task, or `Agent.MaxAutoSteps` (default 20). Start and
-  approve-and-continue both drive the loop; a manual single-step advance
-  remains available. Never auto-approves anything.
-- **Native tool calling.** `LlmChatOptions.Tools` / `LlmStreamEvent.ToolCalls`
-  added to the core LLM contract; implemented in `OpenAiService`,
-  `LlamaCppService` (shared OpenAI-compatible wire format via the new
-  `OpenAiCompatibleToolWire` helper, including streamed tool-call-delta
-  accumulation), and `OllamaService` (whole, non-fragmented tool calls). The
-  agent declares its fixed tool set natively and falls back to the JSON
-  prompt protocol automatically when unsupported.
-- **Surgical edits.** `edit_file` (unique `old_string`/`new_string` replace)
-  and `create_file` (new files only, refuses to overwrite), both
-  approval-gated with the same path containment as every other tool.
-- **Navigation tools.** `glob_files`, regex + context-line support in
-  `search_files`, line-ranged `read_file`, subdirectory/depth-scoped
-  `list_files`.
-- **`set_plan`** tool: a visible, agent-maintained plan checklist; executes
-  immediately since it only mutates task state.
-- **`run_command` template families.** Replaces the fixed verbatim-string
-  dictionary with families that accept an optional, containment-checked
-  path/script argument (`dotnet build`/`test [project]`, `npm test`,
-  `npm run <script>` limited to scripts the workspace's own `package.json`
-  declares, `cargo build`/`test`, `pytest [path]`); the safety gate now
-  matches on family, not exact string, so a workspace declaring bare
-  `dotnet test` also covers `dotnet test tests/Foo.csproj`. Command output
-  bounded to the last 200 lines instead of dumped unbounded then hard-cut
-  mid-line. Per-task remembered approvals: an identical repeat of an
-  already-approved command string may auto-execute for the rest of that
-  task; a different command, even in the same family, still requires its own
-  approval, and the memory never survives past the task.
-
-### Agent self-learning (new)
-
-- New per-machine lesson store (`agent/lessons.db`, `ILessonStore` /
-  `SqliteLessonStore`) capturing deterministic, evidence-backed observations
-  from `run_command` outcomes, `edit_file`/`create_file`/`apply_draft_patch`
-  outcomes, and user approval rejections, plus model-stated
-  `[LESSON: ...]` observations. Repeated matching evidence for the same
-  signature reinforces one row (confidence and evidence count rise, capped);
-  a contradiction decays confidence and, below a floor, retires the lesson,
-  flipping it to the new outcome so later confirming evidence can revive it.
-  Pinning a lesson locks it against further automatic changes.
-- Relevant lessons (global plus the current workspace) are injected into
-  every step's context pack, most confident first.
-- New Lessons panel in the Agent workbench: view, inline edit, pin, retire,
-  reactivate, delete. Lessons only ever inform the model; the safety gate
-  never reads the lesson store.
-
-### Memory
-
-- **Hybrid recall.** `MemoryStore.SearchAsync` blends FTS rank with cosine
-  similarity against a query embedding when an embedding model is
-  configured (additive schema v4, `embedding` BLOB column, lazy backfill on
-  first hybrid search), falling back to the existing FTS/LIKE behaviour
-  otherwise. Every result now carries a `RelevanceScore`.
-- **Relevance-aware injection.** `MemoryInjectionService` selection now
-  blends that relevance score with importance instead of sorting
-  recency-first; unaffected for memories not retrieved via search.
-- **Lifecycle.** New `RecallCount`/`LastRecalledAt` columns (schema v4);
-  `MemoryLifecycle.ComputeEffectiveImportance` decays a memory's effective
-  importance the longer it goes unrecalled (pinned memories never decay).
-  `IMemoryStore.ArchiveStaleMemoriesAsync` auto-archives (never deletes)
-  memories that decay below a floor and stay unrecalled long enough; the
-  Memories panel runs it on open and now sorts by effective importance and
-  shows recall stats.
-- **Update/forget markers.** A model can correct or retire a memory shown to
-  it this turn with `[MEMORY_UPDATE: <id> | <content>]` /
-  `[MEMORY_FORGET: <id>]`; only ids actually injected into that turn are
-  honored, everything else is ignored and logged
-  (`ConversationMemoryService.ApplyInjectedMemoryMarkersAsync`).
-- **Structured extraction.** Auto-summary now asks for JSON
-  (content/category/importance/tags) instead of `[MEMORY: ...]` markers with
-  keyword heuristics, giving model-supplied metadata directly; the marker
-  format remains the fallback.
-- **Unified workspace memory.** Deleted the legacy file-backed
-  `FileAgentWorkspaceMemoryStore` (superseded by the SQLite-backed
-  `WorkspaceMemoryStore` since r2); tests that exercised legacy-file import
-  now write the legacy format directly instead of depending on the removed
-  class.
-
-### Housekeeping
-
-- Moved `tests/Aether.Tests` to `src/Aether.Tests`, alongside every other
-  project, updating the solution, project references, and every doc/skill
-  that pointed at the old path.
-- Added a CI workflow (`.github/workflows/ci.yml`): restore/build/test on
-  ubuntu-latest and windows-latest.
-- Added `scripts/coverage.ps1` / `scripts/coverage.sh`, a line-coverage
-  ratchet via coverlet (floor recorded once measured; only ratchets up).
-- Removed pointless `Task.Run` wrappers around synchronous work in
-  `MemoryInjectionService`/`MemoryExtractionService`; the agent trace now
-  logs the full context pack once per task plus a small delta per step
-  instead of the full pack on every step.

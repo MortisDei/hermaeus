@@ -2,6 +2,121 @@
 
 The CHANGELOG.md in root only contains the current 10 versions of changelogs. The rest are archived here in line with the 10 version limit in the main changelog.
 
+## [0.9.43-alpha] - 2026-07-12
+
+Implements docs/review r3 (agent capability, memory, self-learning) in full.
+r2's roadmap was fully actioned; this round targets the Agent workbench's gap
+against Claude Code/Codex, upgrades memory recall and lifecycle, and adds a
+new per-machine agent self-learning (lesson) store.
+
+### Agent capability
+
+- **Persisted step transcript.** Each task keeps `transcript.jsonl` (one line
+  per assistant thought / tool result), replayed budgeted (most-recent-first)
+  into every step's context (`Agent.TranscriptTokenBudget`, default 12,000
+  tokens) instead of only the last five, 4000-char-truncated tool results.
+  Fixed a latent bug found while building this: `AgentJson.Options` was
+  indented, so anything written through it into a JSONL file (including the
+  pre-existing `agent.trace.jsonl`) spread one entry's JSON across multiple
+  physical lines, corrupting line-oriented replay; both now use a new
+  `AgentJson.CompactOptions`.
+- **Autonomous runs.** `IAgentService.RunAsync` loops `RunStepAsync` until a
+  final answer, a question for the user, a gated action needing approval, a
+  blocked task, or `Agent.MaxAutoSteps` (default 20). Start and
+  approve-and-continue both drive the loop; a manual single-step advance
+  remains available. Never auto-approves anything.
+- **Native tool calling.** `LlmChatOptions.Tools` / `LlmStreamEvent.ToolCalls`
+  added to the core LLM contract; implemented in `OpenAiService`,
+  `LlamaCppService` (shared OpenAI-compatible wire format via the new
+  `OpenAiCompatibleToolWire` helper, including streamed tool-call-delta
+  accumulation), and `OllamaService` (whole, non-fragmented tool calls). The
+  agent declares its fixed tool set natively and falls back to the JSON
+  prompt protocol automatically when unsupported.
+- **Surgical edits.** `edit_file` (unique `old_string`/`new_string` replace)
+  and `create_file` (new files only, refuses to overwrite), both
+  approval-gated with the same path containment as every other tool.
+- **Navigation tools.** `glob_files`, regex + context-line support in
+  `search_files`, line-ranged `read_file`, subdirectory/depth-scoped
+  `list_files`.
+- **`set_plan`** tool: a visible, agent-maintained plan checklist; executes
+  immediately since it only mutates task state.
+- **`run_command` template families.** Replaces the fixed verbatim-string
+  dictionary with families that accept an optional, containment-checked
+  path/script argument (`dotnet build`/`test [project]`, `npm test`,
+  `npm run <script>` limited to scripts the workspace's own `package.json`
+  declares, `cargo build`/`test`, `pytest [path]`); the safety gate now
+  matches on family, not exact string, so a workspace declaring bare
+  `dotnet test` also covers `dotnet test tests/Foo.csproj`. Command output
+  bounded to the last 200 lines instead of dumped unbounded then hard-cut
+  mid-line. Per-task remembered approvals: an identical repeat of an
+  already-approved command string may auto-execute for the rest of that
+  task; a different command, even in the same family, still requires its own
+  approval, and the memory never survives past the task.
+
+### Agent self-learning (new)
+
+- New per-machine lesson store (`agent/lessons.db`, `ILessonStore` /
+  `SqliteLessonStore`) capturing deterministic, evidence-backed observations
+  from `run_command` outcomes, `edit_file`/`create_file`/`apply_draft_patch`
+  outcomes, and user approval rejections, plus model-stated
+  `[LESSON: ...]` observations. Repeated matching evidence for the same
+  signature reinforces one row (confidence and evidence count rise, capped);
+  a contradiction decays confidence and, below a floor, retires the lesson,
+  flipping it to the new outcome so later confirming evidence can revive it.
+  Pinning a lesson locks it against further automatic changes.
+- Relevant lessons (global plus the current workspace) are injected into
+  every step's context pack, most confident first.
+- New Lessons panel in the Agent workbench: view, inline edit, pin, retire,
+  reactivate, delete. Lessons only ever inform the model; the safety gate
+  never reads the lesson store.
+
+### Memory
+
+- **Hybrid recall.** `MemoryStore.SearchAsync` blends FTS rank with cosine
+  similarity against a query embedding when an embedding model is
+  configured (additive schema v4, `embedding` BLOB column, lazy backfill on
+  first hybrid search), falling back to the existing FTS/LIKE behaviour
+  otherwise. Every result now carries a `RelevanceScore`.
+- **Relevance-aware injection.** `MemoryInjectionService` selection now
+  blends that relevance score with importance instead of sorting
+  recency-first; unaffected for memories not retrieved via search.
+- **Lifecycle.** New `RecallCount`/`LastRecalledAt` columns (schema v4);
+  `MemoryLifecycle.ComputeEffectiveImportance` decays a memory's effective
+  importance the longer it goes unrecalled (pinned memories never decay).
+  `IMemoryStore.ArchiveStaleMemoriesAsync` auto-archives (never deletes)
+  memories that decay below a floor and stay unrecalled long enough; the
+  Memories panel runs it on open and now sorts by effective importance and
+  shows recall stats.
+- **Update/forget markers.** A model can correct or retire a memory shown to
+  it this turn with `[MEMORY_UPDATE: <id> | <content>]` /
+  `[MEMORY_FORGET: <id>]`; only ids actually injected into that turn are
+  honored, everything else is ignored and logged
+  (`ConversationMemoryService.ApplyInjectedMemoryMarkersAsync`).
+- **Structured extraction.** Auto-summary now asks for JSON
+  (content/category/importance/tags) instead of `[MEMORY: ...]` markers with
+  keyword heuristics, giving model-supplied metadata directly; the marker
+  format remains the fallback.
+- **Unified workspace memory.** Deleted the legacy file-backed
+  `FileAgentWorkspaceMemoryStore` (superseded by the SQLite-backed
+  `WorkspaceMemoryStore` since r2); tests that exercised legacy-file import
+  now write the legacy format directly instead of depending on the removed
+  class.
+
+### Housekeeping
+
+- Moved `tests/Aether.Tests` to `src/Aether.Tests`, alongside every other
+  project, updating the solution, project references, and every doc/skill
+  that pointed at the old path.
+- Added a CI workflow (`.github/workflows/ci.yml`): restore/build/test on
+  ubuntu-latest and windows-latest.
+- Added `scripts/coverage.ps1` / `scripts/coverage.sh`, a line-coverage
+  ratchet via coverlet (floor recorded once measured; only ratchets up).
+- Removed pointless `Task.Run` wrappers around synchronous work in
+  `MemoryInjectionService`/`MemoryExtractionService`; the agent trace now
+  logs the full context pack once per task plus a small delta per step
+  instead of the full pack on every step.
+
+
 ## [0.9.42-alpha] - 2026-07-11
 
 Implements docs/review/03-next-level-roadmap.md Phases 1 through 4 in full

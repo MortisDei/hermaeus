@@ -10,6 +10,18 @@ public class RagDataset
     public DateTime? LastIngestUtc { get; set; }
     public string LastIngestPath { get; set; } = string.Empty;
     public RagDatasetConfig Config { get; set; } = new();
+
+    /// <summary>
+    /// Deep-clones this dataset via a JSON round trip so a reindex can target
+    /// the new embedding model on a working copy without flipping the live,
+    /// UI-bound instance's recorded model before the pipeline actually
+    /// commits the re-embedded vectors (r12 03-runtime-vm-correctness.md 3.7).
+    /// </summary>
+    public RagDataset Clone()
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(this);
+        return System.Text.Json.JsonSerializer.Deserialize<RagDataset>(json) ?? new RagDataset();
+    }
 }
 
 public class RagDatasetConfig

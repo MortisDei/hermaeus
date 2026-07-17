@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using Aether.Core.Models;
 using Aether.Core.Services;
 using Aether.Services;
+using Aether.Services.ProcessManagement;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -41,7 +42,11 @@ public sealed partial class McpServerConfigViewModel : ObservableObject
         Id = Id,
         Name = Name,
         Command = Command,
-        Arguments = ArgumentsText.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList(),
+        // r12 03-runtime-vm-correctness.md 3.9: a naive space split made a
+        // quoted argument containing spaces impossible; reuse the same
+        // shell-like tokenizer the Services settings page uses for extra
+        // args (honors double quotes).
+        Arguments = ExtraArgsParser.Split(ArgumentsText).ToList(),
         WorkingDirectory = WorkingDirectory,
         Enabled = Enabled,
         AllowedTools = AllowedToolsText.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList()

@@ -100,6 +100,8 @@ public partial class ChatViewModel : ViewModelBase
     private CancellationTokenSource? _ttsCts;
     private CancellationTokenSource? _contextUsageCts;
     private DateTime _modelsLoadedAtUtc = DateTime.MinValue;
+    private Task? _loadModelsTask;
+    private bool _suppressModelProfileDefaults;
 
     public UiBoundCollection<MessageViewModel> Messages        { get; } = [];
 
@@ -145,6 +147,14 @@ public partial class ChatViewModel : ViewModelBase
 
     public string SelectedModelLocalityLabel => SelectedModel is null ? string.Empty : IsSelectedModelRemote ? "Remote" : "Local";
 
+    /// <summary>
+    /// Per-model max-tokens override (r12 01-settings-lifecycle.md 1.3): a
+    /// local field like <see cref="Temperature"/>/<see cref="TopP"/>, never
+    /// written back into <c>Settings.Llm.MaxTokens</c>. Selecting a chat
+    /// model with a profile default used to overwrite that global setting,
+    /// silently changing what Benchmark/Agent/RAG sends saw as the cap.
+    /// </summary>
+    [ObservableProperty] private int       _maxTokens;
     [ObservableProperty] private string    _systemPrompt = string.Empty;
     [ObservableProperty] private string    _currentConversationId = string.Empty;
     [ObservableProperty] private string    _conversationTitle = "New Conversation";
@@ -217,6 +227,7 @@ public partial class ChatViewModel : ViewModelBase
         _evalEngine = evalEngine ?? new EvalEngine(llm);
         _workspaceActivation = workspaceActivation;
         _temperature  = settings.Settings.Llm.Temperature;
+        _maxTokens = settings.Settings.Llm.MaxTokens;
         _topP = settings.Settings.Llm.TopP;
         _topK = settings.Settings.Llm.TopK;
         _minP = settings.Settings.Llm.MinP;
@@ -244,7 +255,23 @@ public partial class ChatViewModel : ViewModelBase
         _ = Task.Run(LoadPersistedChatTracesAsync);
     }
 
-    public async Task LoadModelsAsync(bool force = false)
+    /// <summary>
+    /// Re-entrancy-safe (r12 02-async-and-threading.md 2.5): overlapping
+    /// callers (panel navigation, server-availability events, startup) share
+    /// the one in-flight load instead of each running their own
+    /// Clear/re-add pass, which used to duplicate every model.
+    /// </summary>
+    public Task LoadModelsAsync(bool force = false)
+    {
+        if (_loadModelsTask is { IsCompleted: false } inFlight)
+            return inFlight;
+
+        var task = LoadModelsCoreAsync(force);
+        _loadModelsTask = task;
+        return task;
+    }
+
+    private async Task LoadModelsCoreAsync(bool force)
     {
         if (!force && AvailableModels.Count > 0 && DateTime.UtcNow - _modelsLoadedAtUtc < TimeSpan.FromSeconds(30))
             return;
@@ -268,7 +295,16 @@ public partial class ChatViewModel : ViewModelBase
             var next = AvailableModels.FirstOrDefault(m => m.Id == current)
                 ?? AvailableModels.FirstOrDefault(m => m.Id == def)
                 ?? AvailableModels[0];
-            SelectedModel = next;
+
+            // r12 03-runtime-vm-correctness.md 3.3: GetModelsAsync always
+            // materializes fresh LlmModel instances, so re-matching by id
+            // still reassigns SelectedModel to a *different object* on every
+            // refresh. Suppress OnSelectedModelChanged's profile-default
+            // re-apply when it is the same logical model as before; only a
+            // genuine model switch should touch user-tuned sampling params.
+            _suppressModelProfileDefaults = current is not null && next.Id == current;
+            try { SelectedModel = next; }
+            finally { _suppressModelProfileDefaults = false; }
         }
         else
         {
@@ -498,6 +534,28 @@ public partial class ChatViewModel : ViewModelBase
 
             AddChatTrace(snapshot, selectedModelId, result.Usage, result.FirstTokenMs, result.TotalLatencyMs, traceError, timing.Format());
         }
+        catch (Exception ex)
+        {
+            // r12 02-async-and-threading.md 2.2: any throw after streaming
+            // started (a locked conversation DB on PersistAsync, an
+            // unexpected re-throw from memory-marker handling) used to leave
+            // the assistant bubble stuck at IsStreaming=true forever with no
+            // error surfaced anywhere; the exception disappeared into the
+            // AsyncRelayCommand.
+            asst.IsStreaming = false;
+            if (string.IsNullOrWhiteSpace(asst.Content))
+            {
+                Messages.Remove(asst);
+            }
+            else
+            {
+                asst.IsError = true;
+                asst.Content = $"{asst.Content.TrimEnd()}\n\n[Error: {ex.Message}]";
+            }
+            _runtimeLogs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Error, RuntimeLogCategory.Service,
+                $"Chat send failed: {ex.Message}"));
+            _toasts.Show("Send failed", ex.Message, ToastKind.Error, 7000);
+        }
         finally
         {
             IsGenerating = false; _cts?.Dispose(); _cts = null;
@@ -597,11 +655,7 @@ public partial class ChatViewModel : ViewModelBase
         foreach (var item in loaded)
             ContextAttachments.Add(item);
 
-        var ready = loaded.Count(a => a.IsReady);
-        var skipped = loaded.Count - ready;
-        AttachmentStatus = skipped == 0
-            ? $"{ready} file(s) ready for direct chat context."
-            : $"{ready} file(s) ready, {skipped} skipped.";
+        RefreshAttachmentStatus();
     }
 
     [RelayCommand]
@@ -609,7 +663,28 @@ public partial class ChatViewModel : ViewModelBase
     {
         if (attachment is not null)
             ContextAttachments.Remove(attachment);
-        AttachmentStatus = ContextAttachments.Count == 0 ? string.Empty : AttachmentStatus;
+        RefreshAttachmentStatus();
+    }
+
+    /// <summary>
+    /// r12 03-runtime-vm-correctness.md 3.9: recomputes the "N files ready"
+    /// label from the current attachment list instead of leaving whatever
+    /// text was set by the last add/remove, which went stale (e.g. "2 files
+    /// ready, 1 skipped" after removing the skipped one).
+    /// </summary>
+    private void RefreshAttachmentStatus()
+    {
+        if (ContextAttachments.Count == 0)
+        {
+            AttachmentStatus = string.Empty;
+            return;
+        }
+
+        var ready = ContextAttachments.Count(a => a.IsReady);
+        var skipped = ContextAttachments.Count - ready;
+        AttachmentStatus = skipped == 0
+            ? $"{ready} file(s) ready for direct chat context."
+            : $"{ready} file(s) ready, {skipped} skipped.";
     }
 
     [RelayCommand]
@@ -699,6 +774,7 @@ public partial class ChatViewModel : ViewModelBase
         Messages.Clear();
         CurrentConversationId = string.Empty;
         ConversationTitle = "New Conversation";
+        SystemPrompt = _settings.Settings.Llm.DefaultSystemPrompt;
     }
 
     [RelayCommand]
@@ -798,6 +874,7 @@ public partial class ChatViewModel : ViewModelBase
     {
         SystemPrompt = ComposeSystemPrompt(memoryContext),
         Temperature = Temperature,
+        MaxTokens = MaxTokens > 0 ? MaxTokens : null,
         TopP = TopP,
         TopK = TopK,
         MinP = MinP,
@@ -914,14 +991,6 @@ public partial class ChatViewModel : ViewModelBase
     }
 
     public static int EstimateTokens(string text) => ContextPackBuilder.EstimateTokens(text);
-
-    private int EstimateTokensForSend(string promptText)
-    {
-        var total = EstimateTokens(SystemPrompt) + EstimateTokens(promptText);
-        foreach (var message in Messages.Where(m => !m.IsStreaming))
-            total += EstimateTokens(message.Content);
-        return total;
-    }
 
     private ChatContextSnapshot BuildContextSnapshot(string text, IReadOnlyList<ChatContextAttachment> attachments)
     {
@@ -1176,22 +1245,24 @@ public partial class ChatViewModel : ViewModelBase
     }
     partial void OnSelectedModelChanged(LlmModel? value)
     {
-        if (value?.DefaultTemperature is { } temp)
-            Temperature = temp;
-        if (value?.DefaultMaxTokens is { } max && max > 0)
-            _settings.Settings.Llm.MaxTokens = max;
-        if (value?.DefaultTopP is { } topP)
-            TopP = topP;
-        if (value?.DefaultTopK is { } topK)
-            TopK = topK;
-        if (value?.DefaultMinP is { } minP)
-            MinP = minP;
-        if (value?.DefaultRepeatPenalty is { } repeatPenalty)
-            RepeatPenalty = repeatPenalty;
-        if (value?.DefaultFrequencyPenalty is { } frequencyPenalty)
-            FrequencyPenalty = frequencyPenalty;
-        if (value?.DefaultPresencePenalty is { } presencePenalty)
-            PresencePenalty = presencePenalty;
+        // r12 03-runtime-vm-correctness.md 3.3: only a genuine model switch
+        // applies profile defaults; a same-id refresh (LoadModelsAsync
+        // re-matching against fresh instances) must leave user-tuned
+        // sampling params alone. On a genuine switch, every non-profiled
+        // param resets to the settings default instead of keeping the
+        // previous model's value, so tuning does not leak across models.
+        if (!_suppressModelProfileDefaults)
+        {
+            var defaults = _settings.Settings.Llm;
+            Temperature = value?.DefaultTemperature ?? defaults.Temperature;
+            MaxTokens = value?.DefaultMaxTokens is { } max && max > 0 ? max : defaults.MaxTokens;
+            TopP = value?.DefaultTopP ?? defaults.TopP;
+            TopK = value?.DefaultTopK ?? defaults.TopK;
+            MinP = value?.DefaultMinP ?? defaults.MinP;
+            RepeatPenalty = value?.DefaultRepeatPenalty ?? defaults.RepeatPenalty;
+            FrequencyPenalty = value?.DefaultFrequencyPenalty ?? defaults.FrequencyPenalty;
+            PresencePenalty = value?.DefaultPresencePenalty ?? defaults.PresencePenalty;
+        }
         SendCommand.NotifyCanExecuteChanged();
         ScheduleContextUsageRefresh();
         OnPropertyChanged(nameof(HasSelectedModel));

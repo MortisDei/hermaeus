@@ -282,10 +282,15 @@ internal static class McpTests
 
     private sealed class StubSettingsService(AppSettings settings) : ISettingsService
     {
-        public AppSettings Settings { get; } = settings;
+        public AppSettings Settings { get; private set; } = settings;
         public Task LoadAsync() => Task.CompletedTask;
         public Task<SettingsSaveResult> SaveAsync(string? previousDataRootDirectory = null) =>
             Task.FromResult(new SettingsSaveResult(false, previousDataRootDirectory, previousDataRootDirectory, null, 0));
+        public Task<SettingsSaveResult> SaveAsync(AppSettings settings, string? previousDataRootDirectory = null)
+        {
+            Settings = settings;
+            return Task.FromResult(new SettingsSaveResult(false, previousDataRootDirectory, previousDataRootDirectory, null, 0));
+        }
         public DataMigrationPlan PreviewDataRootMigration(string? previousDataRootDirectory, string? nextDataRootDirectory) =>
             new(false, previousDataRootDirectory ?? string.Empty, nextDataRootDirectory ?? string.Empty, 0, []);
         public event EventHandler? SettingsChanged { add { } remove { } }

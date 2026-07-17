@@ -13,21 +13,27 @@ public abstract class ViewModelBase : ObservableObject
 {
     private readonly SynchronizationContext? _sync = SynchronizationContext.Current;
 
+    /// <summary>
+    /// True when the calling thread is already the one this instance
+    /// captured at construction (or none was captured, i.e. headless tests).
+    /// </summary>
+    private bool IsOnCapturedContext => _sync is null || ReferenceEquals(SynchronizationContext.Current, _sync);
+
     protected void RunOnUi(Action action)
     {
-        if (_sync is null)
+        if (IsOnCapturedContext)
             action();
         else
-            _sync.Post(_ => action(), null);
+            _sync!.Post(_ => action(), null);
     }
 
     protected Task RunOnUiAsync(Func<Task> action)
     {
-        if (_sync is null)
+        if (IsOnCapturedContext)
             return action();
 
         var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        _sync.Post(async _ =>
+        _sync!.Post(async _ =>
         {
             try
             {

@@ -354,7 +354,7 @@ public sealed class AgentScenarioRunner : IAgentScenarioRunner
 
     private sealed class ScenarioSettings : ISettingsService
     {
-        public AppSettings Settings { get; }
+        public AppSettings Settings { get; private set; }
 
         public ScenarioSettings(string dataRoot, int maxAutoSteps)
         {
@@ -367,6 +367,12 @@ public sealed class AgentScenarioRunner : IAgentScenarioRunner
 
         public Task<SettingsSaveResult> SaveAsync(string? previousDataRootDirectory = null) =>
             Task.FromResult(new SettingsSaveResult(false, null, null, null, 0));
+
+        public Task<SettingsSaveResult> SaveAsync(AppSettings settings, string? previousDataRootDirectory = null)
+        {
+            Settings = settings;
+            return Task.FromResult(new SettingsSaveResult(false, null, null, null, 0));
+        }
 
         public DataMigrationPlan PreviewDataRootMigration(string? previousDataRootDirectory, string? nextDataRootDirectory) =>
             new(false, previousDataRootDirectory ?? string.Empty, nextDataRootDirectory ?? string.Empty, 0, []);

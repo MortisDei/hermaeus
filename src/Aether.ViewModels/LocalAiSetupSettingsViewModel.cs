@@ -81,12 +81,12 @@ public partial class LocalAiSetupSettingsViewModel : ObservableObject
     private async Task ScanLocalAiSetupAsync()
     {
         SettingsError = string.Empty;
-        await SaveLocalAiPathsForSetupAsync();
+        var scanSettings = BuildScanScopedSettings();
         LocalAiSetupBusy = true;
         LocalAiSetupLog = string.Empty;
         try
         {
-            var report = await _localAiSetup.ScanAsync(_settings.Settings);
+            var report = await _localAiSetup.ScanAsync(scanSettings);
             LocalAiReadinessItems.Clear();
             foreach (var item in report.Items)
                 LocalAiReadinessItems.Add(item);
@@ -128,7 +128,11 @@ public partial class LocalAiSetupSettingsViewModel : ObservableObject
             return;
         }
 
-        await SaveLocalAiPathsForSetupAsync();
+        // r12 01-settings-lifecycle.md 1.5: an action that is about to write
+        // files derived from these paths genuinely needs them persisted
+        // first, but that persistence is the full apply/save (every tab),
+        // not a partial side-channel write of just these fields.
+        await _saveSettings();
         LocalAiSetupBusy = true;
         LocalAiSetupLog = $"Approved: {action.Title}{Environment.NewLine}{action.CommandPreviewText}{Environment.NewLine}";
         try
@@ -215,9 +219,16 @@ public partial class LocalAiSetupSettingsViewModel : ObservableObject
         _toasts.Show("Setup commands copied", "Review commands before running them outside Aether.", ToastKind.Info);
     }
 
-    private async Task SaveLocalAiPathsForSetupAsync()
+    /// <summary>
+    /// r12 01-settings-lifecycle.md 1.5: a scan is read-only with respect to
+    /// settings, so it works from a clone carrying the current edit-box
+    /// values instead of writing them into the live
+    /// <see cref="ISettingsService.Settings"/> (the old behavior lingered
+    /// there, unsaved, until an unrelated save persisted it).
+    /// </summary>
+    private AppSettings BuildScanScopedSettings()
     {
-        var settings = _settings.Settings;
+        var settings = _settings.Settings.Clone();
         settings.DataManagement.LocalAiAssetsRoot = _data.LocalAiAssetsRoot.Trim();
         settings.Tts.PythonPath = _tts.TtsPythonPath.Trim();
         settings.Tts.ScriptPath = _tts.TtsScriptPath.Trim();
@@ -225,7 +236,7 @@ public partial class LocalAiSetupSettingsViewModel : ObservableObject
         settings.Tts.OutputDirectory = _tts.TtsOutputDirectory.Trim();
         settings.Tts.VoiceDirectory = _tts.TtsVoiceDirectory.Trim();
         settings.Rag.RerankerModelPath = _rag.RagRerankerModelPath.Trim();
-        await _settings.SaveAsync(settings.DataManagement.DataRootDirectory);
+        return settings;
     }
 
     private void ApplySetupResult(LocalAiSetupAction action, LocalAiSetupResult result)

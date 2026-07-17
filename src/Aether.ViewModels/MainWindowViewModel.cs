@@ -15,6 +15,7 @@ public partial class MainWindowViewModel : ViewModelBase
     private CancellationTokenSource? _searchCts;
     private readonly ISettingsService _settingsService;
     private bool _refreshingFolderFilters;
+    private bool _postSetupInitialized;
 
     public ChatViewModel            Chat     { get; }
     public AgentViewModel           Agent    { get; }
@@ -108,7 +109,16 @@ public partial class MainWindowViewModel : ViewModelBase
         // Keep toolbar doctor badge in sync with doctor checks
         Doctor.Checks.CollectionChanged += (_, _) => UpdateDoctorStatus();
         UpdateDoctorStatus();
-        Wizard.WizardCompleted += () => ActivePanel = "chat";
+        Wizard.WizardCompleted += () =>
+        {
+            ActivePanel = "chat";
+            // r12 03-runtime-vm-correctness.md 3.1: finishing (or skipping)
+            // the wizard on first run used to leave the app on a dead chat
+            // panel - InitializeAsync had already returned early to show the
+            // wizard, so nothing here ever auto-started servers, listed
+            // models, or loaded datasets/agent/benchmarks until a restart.
+            RunBackgroundTaskAsync("complete post-setup initialization", CompletePostSetupInitializationAsync);
+        };
         // allow settings view to request re-running the setup wizard
         Settings.RequestShowSetupWizard = () => ActivePanel = "wizard";
         Chat.PropertyChanged += (s, e) => { if (e.PropertyName == "ConversationTitle") OnPropertyChanged(nameof(WindowTitle)); };
@@ -142,15 +152,35 @@ public partial class MainWindowViewModel : ViewModelBase
                 return;
             }
 
-            await Rag.LoadDatasetsAsync();
-            await Agent.LoadAsync();
-            await Benchmarks.LoadAsync();
-            await Services.AutoStartAllAsync();
-            await Settings.EnsureLocalApiRunningStateAsync();
-            await Chat.LoadModelsAsync();
-            RunBackgroundTaskAsync("run startup doctor scan", () => Doctor.RunStartupScanAsync());
+            await CompletePostSetupInitializationAsync();
         }
         finally { IsLoading = false; }
+    }
+
+    /// <summary>
+    /// Everything that only makes sense once setup is complete: RAG/agent/
+    /// benchmark data, auto-starting managed servers, and listing chat
+    /// models. Called from the normal <see cref="InitializeAsync"/> path and
+    /// from the <see cref="SetupWizardViewModel.WizardCompleted"/> handler
+    /// (first-run path, r12 03-runtime-vm-correctness.md 3.1); the guard
+    /// keeps a startup race between the two from double-running it.
+    /// Each step is isolated (r12 3.2) so one failing store (a locked or
+    /// corrupt RAG/benchmark database) cannot silently skip every later
+    /// step - hard-ordering is kept only where a step truly depends on the
+    /// previous one (auto-starting managed servers before listing models).
+    /// </summary>
+    private async Task CompletePostSetupInitializationAsync()
+    {
+        if (_postSetupInitialized) return;
+        _postSetupInitialized = true;
+
+        await RunBackgroundTaskCoreAsync("load RAG datasets", () => Rag.LoadDatasetsAsync());
+        await RunBackgroundTaskCoreAsync("load agent", () => Agent.LoadAsync());
+        await RunBackgroundTaskCoreAsync("load benchmarks", () => Benchmarks.LoadAsync());
+        await RunBackgroundTaskCoreAsync("auto-start managed servers", () => Services.AutoStartAllAsync());
+        await RunBackgroundTaskCoreAsync("ensure Local API running state", () => Settings.EnsureLocalApiRunningStateAsync());
+        await RunBackgroundTaskCoreAsync("load chat models", () => Chat.LoadModelsAsync());
+        RunBackgroundTaskAsync("run startup doctor scan", () => Doctor.RunStartupScanAsync());
     }
 
     public void Shutdown()
@@ -422,8 +452,6 @@ public partial class MainWindowViewModel : ViewModelBase
             };
             Conversations.Insert(0, item);
             foreach (var c in Conversations.Skip(1)) c.IsSelected = false;
-            if (!string.IsNullOrWhiteSpace(item.Folder))
-                _ = SaveConversationMetadataAsync(item);
         }
     }
 
@@ -513,10 +541,25 @@ public partial class MainWindowViewModel : ViewModelBase
             Toasts.Add(vm);
         });
         _ = RemoveToastLaterAsync(vm);
-        // add to persistent history and save
-        RunOnUi(() => ToastHistory.Insert(0, vm));
-        _ = SaveToastHistoryAsync();
+        // Add to persistent history and save from inside the same posted
+        // block (r12 02-async-and-threading.md 2.1): a toast raised from a
+        // background thread must not let the save's enumeration of
+        // ToastHistory race the posted Insert, and the save must see this
+        // toast, not the pre-mutation list.
+        _ = MutateAndSaveHistoryAsync(() => ToastHistory.Insert(0, vm));
     }
+
+    /// <summary>
+    /// Runs <paramref name="mutate"/> and the resulting history save as one
+    /// unit on the UI thread (inline if already there, otherwise posted): the
+    /// mutation and the snapshot the save serializes can never be split
+    /// across a scheduling gap (r12 02-async-and-threading.md 2.1).
+    /// </summary>
+    private Task MutateAndSaveHistoryAsync(Action mutate) => RunOnUiAsync(() =>
+    {
+        mutate();
+        return SaveToastHistoryAsync();
+    });
 
     private async Task LoadToastHistoryAsync()
     {
@@ -600,17 +643,15 @@ public partial class MainWindowViewModel : ViewModelBase
     private async Task DismissToastAsync(ToastViewModel? item)
     {
         if (item is null) return;
-        RunOnUi(() => ToastHistory.Remove(item));
-        TrimToastHistory();
-        await SaveToastHistoryAsync();
+        await MutateAndSaveHistoryAsync(() =>
+        {
+            ToastHistory.Remove(item);
+            TrimToastHistory();
+        });
     }
 
     [RelayCommand]
-    private async Task ClearToastHistoryAsync()
-    {
-        RunOnUi(() => ToastHistory.Clear());
-        await SaveToastHistoryAsync();
-    }
+    private async Task ClearToastHistoryAsync() => await MutateAndSaveHistoryAsync(() => ToastHistory.Clear());
 
     private sealed class ToastHistoryEntry
     {

@@ -8,12 +8,13 @@ namespace Aether.ViewModels;
 /// <summary>
 /// ViewModel for managing and displaying memories in the UI.
 /// </summary>
-public partial class MemoriesViewModel : ObservableObject
+public partial class MemoriesViewModel : ViewModelBase
 {
     private readonly IMemoryStore _store;
     private readonly IConversationStore _conversations;
     private readonly ISettingsService _settings;
     private readonly IToastService _toasts;
+    private CancellationTokenSource? _searchTextCts;
 
     public UiBoundCollection<MemoryItemViewModel> Memories { get; } = [];
 
@@ -236,9 +237,29 @@ public partial class MemoriesViewModel : ObservableObject
         }
     }
 
-    partial void OnSearchTextChanged(string value) 
+    /// <summary>
+    /// r12 02-async-and-threading.md 2.3: debounces per-keystroke search
+    /// (one DB search per character otherwise, with unordered completion
+    /// interleaving Clear/Add on the bound <see cref="Memories"/>
+    /// collection) using the same 300 ms + CTS shape as
+    /// <see cref="MainWindowViewModel.OnSearchQueryChanged"/>.
+    /// </summary>
+    partial void OnSearchTextChanged(string value)
     {
-        SearchCommand.Execute(null);
+        _searchTextCts?.Cancel();
+        _searchTextCts?.Dispose();
+        _searchTextCts = new CancellationTokenSource();
+        var token = _searchTextCts.Token;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(300, token);
+                if (token.IsCancellationRequested) return;
+                await RunOnUiAsync(SearchAsync);
+            }
+            catch (OperationCanceledException) { }
+        }, token);
     }
 
     partial void OnSelectedCategoryChanged(string value)

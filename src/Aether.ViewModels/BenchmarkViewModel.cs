@@ -18,6 +18,7 @@ public partial class BenchmarkViewModel : ObservableObject
     private readonly IVoiceOrchestrator? _voice;
     private CancellationTokenSource? _runCts;
     private bool _isLoading;
+    private Task? _loadTask;
 
     public UiBoundCollection<BenchmarkSuite> Suites { get; } = [];
     public UiBoundCollection<BenchmarkRunViewModel> Runs { get; } = [];
@@ -76,8 +77,23 @@ public partial class BenchmarkViewModel : ObservableObject
     /// <summary>Drives the "no runs yet" empty state (r8 02-onboarding-and-usability.md 2.6).</summary>
     public bool HasRuns => Runs.Count > 0;
 
+    /// <summary>
+    /// Re-entrancy-safe (r12 02-async-and-threading.md 2.5): overlapping
+    /// callers (panel navigation, startup) share the one in-flight load
+    /// instead of each running their own Clear/re-add pass.
+    /// </summary>
     [RelayCommand]
-    public async Task LoadAsync()
+    public Task LoadAsync()
+    {
+        if (_loadTask is { IsCompleted: false } inFlight)
+            return inFlight;
+
+        var task = LoadCoreAsync();
+        _loadTask = task;
+        return task;
+    }
+
+    private async Task LoadCoreAsync()
     {
         _isLoading = true;
         try
@@ -164,11 +180,20 @@ public partial class BenchmarkViewModel : ObservableObject
         Status = "Cancelling benchmark...";
     }
 
-    [RelayCommand]
+    /// <summary>
+    /// r12 03-runtime-vm-correctness.md 3.8: previously had no IsRunning
+    /// guard, so clicking Rerun during an active run overwrote <see cref="_runCts"/>
+    /// (Cancel then stopped only the newer run, leaking the older CTS) and
+    /// interleaved status updates. Shares <see cref="CanRun"/> with the main
+    /// Run command so a second Rerun mid-run is simply disabled.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanRun))]
     private async Task RerunAsync(BenchmarkRunViewModel? run)
     {
         if (run is null) return;
         IsRunning = true;
+        _runCts?.Cancel();
+        _runCts?.Dispose();
         _runCts = new CancellationTokenSource();
         try
         {
@@ -308,7 +333,10 @@ public partial class BenchmarkViewModel : ObservableObject
 
         SelectedSuite = suite;
         SelectedModel = candidate;
-        await RunAsync();
+        // r12 03-runtime-vm-correctness.md 3.8: route through the command so
+        // CanRun is actually honored; calling RunAsync() directly bypassed
+        // the CanExecute guard entirely.
+        await RunCommand.ExecuteAsync(null);
     }
 
     [RelayCommand]
@@ -362,6 +390,7 @@ public partial class BenchmarkViewModel : ObservableObject
     {
         ApplySuiteDefaults();
         RunCommand.NotifyCanExecuteChanged();
+        RerunCommand.NotifyCanExecuteChanged();
         if (!_isLoading)
         {
             // Refresh ranking view to show only runs for the selected suite.
@@ -372,6 +401,7 @@ public partial class BenchmarkViewModel : ObservableObject
     partial void OnSelectedModelChanged(LlmModel? value)
     {
         RunCommand.NotifyCanExecuteChanged();
+        RerunCommand.NotifyCanExecuteChanged();
         if (_isLoading || value is null || !IsManagedLocalGguf(value))
             return;
 
@@ -380,6 +410,7 @@ public partial class BenchmarkViewModel : ObservableObject
     partial void OnIsRunningChanged(bool value)
     {
         RunCommand.NotifyCanExecuteChanged();
+        RerunCommand.NotifyCanExecuteChanged();
         ExportAllRunsCommand.NotifyCanExecuteChanged();
     }
 
