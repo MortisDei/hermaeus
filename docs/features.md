@@ -24,6 +24,13 @@
 - Compare Models sends the current draft prompt to one to four selected models
   and compares answers, latency, token usage, and simple quality notes without
   adding the comparison run to chat history.
+- Selecting a model applies that model's own saved temperature/top-P/top-K/
+  max-tokens/penalty defaults (when it has any) without changing the global
+  LLM defaults other panels (Benchmark, Agent, RAG) see; a background model
+  list refresh no longer resets sampling values you tuned mid-session for
+  the model you already have selected, and switching to a different model
+  resets any value it doesn't specify back to your global default instead
+  of carrying over the previous model's tuning.
 - Chat can attach selected local text/code files directly to the next message.
   Use the attach button or drop files on the input. Aether reads each file once at
   send time, prepends a bounded context block to the model prompt, and stores only
@@ -168,6 +175,10 @@
   languages, frameworks, important files, project instructions, risk notes,
   safe command recipes, a suggested `AGENTS.md`, and a RAG ingest plan. The
   result is saved back into workspace memory.
+- No workspace root is selected by default: the agent never reads or
+  analyzes any folder, and writes no workspace memory, until you explicitly
+  choose one. Choosing a folder is what turns on file listing and workspace
+  analysis for that root.
 
 ## Model Management
 
@@ -202,7 +213,9 @@
 - Model benchmarks with GGUF discovery, one-click full-suite runs, saved run
   history, deterministic quality checks, rankings that group runs by model,
   column headers and tabular display, test info modal for case details,
-  reruns, and Markdown/JSON/CSV export.
+  reruns, and Markdown/JSON/CSV export. Rerun is disabled while a run is
+  already in progress, so a second click can no longer interrupt and leak
+  the first run's state.
 - Benchmark views expose the test-details modal from both the per-result list
   and the best-run ranking rows, and saved benchmark history can be exported
   in bulk as one timestamped folder.
@@ -223,7 +236,13 @@
   differs) re-embeds every stored chunk with the current model, from stored
   content only, and rebuilds BM25 stats and the query cache. Adding documents
   to a dataset embedded with a different model is blocked with a message
-  naming both models until you reindex.
+  naming both models until you reindex. A cancelled or failed reindex leaves
+  the dataset reporting its previous embedding model, so the reindex warning
+  stays accurate instead of claiming a model change that never finished.
+- **Add to dataset** pre-fills the target dataset's name for adding more
+  documents to it. Editing that name box afterward (to create a different
+  dataset instead) is honored - ingest then creates a new dataset under the
+  edited name rather than silently adding to the original one.
 - **Remove missing sources** action on a dataset card (shown when files are
   missing) lists the missing paths and, after confirmation, deletes their
   chunks and rebuilds BM25 stats and health. This is always an explicit,
@@ -272,6 +291,14 @@
   model folder, voice provider, and to run the Aether Doctor for a quick
   health check before you start using the app. The wizard can be skipped
   or re-run from the Settings panel.
+- Finishing or skipping the wizard immediately starts configured servers and
+  loads chat models, RAG datasets, and agent/benchmark data - no restart or
+  extra navigation needed to make first use of the app work.
+- Re-running the wizard and choosing a different data root moves your
+  existing databases to the new location the same way Settings' data-root
+  change does (with a confirmation toast), instead of switching to an empty
+  root. A target folder that already has conflicting data files is refused
+  with an explanation, and the current data root is left untouched.
 
 ## Aether Doctor
 
