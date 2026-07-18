@@ -57,6 +57,42 @@ per the build-and-verify skill; zero warnings.
 
 ## Completion notes
 
-(Filled during implementation: 4.1 root-cause paragraph, verified
-asset names for the chosen release tag, measured before/after send
-timings on the owner's machine.)
+Implemented for 0.19.0-alpha. 40 new tests (794 -> 834), zero-warning
+build, full suite green. UI wired: the runtime-variant selector (Data
+settings), the Slots advanced field and effective-offload label
+(Services), the live phase-feedback placeholder on the streaming chat
+bubble, and a confirm dialog for the update prune flow.
+
+- **Verified asset names (live GitHub API, tag b10066, 2026-07-18):**
+  CPU `llama-b10066-bin-win-cpu-x64.zip`; CUDA
+  `llama-b10066-bin-win-cuda-12.4-x64.zip` and `-13.3-x64.zip` (the
+  selector prefers 12.4 for driver compatibility); Vulkan
+  `llama-b10066-bin-win-vulkan-x64.zip`; CUDA companion
+  `cudart-llama-bin-win-cuda-12.4-x64.zip`. Windows ARM64 ships no
+  CUDA/Vulkan build, so Auto there resolves to CPU via the null-asset
+  fallback. The test fixtures mirror this list.
+
+- **4.1 root cause (pending live trace):** the FirstEvent/FirstToken
+  accounting and the phase split are implemented and tested, but the
+  chat-trace investigation that names *which* channel the gemma stream
+  emits during the invisible decode gap (reasoning deltas vs tool
+  deltas vs transport buffering) requires a live send on the owner's
+  machine and has not been run. If it turns out to be a reasoning
+  channel, `LlamaCppService`'s `Delta` record must also parse
+  `reasoning_content` and surface it via the existing thinking
+  affordance; today only `content` is parsed, so reasoning-only chunks
+  are dropped before they reach the orchestrator's FirstEvent stamp.
+
+- **Still not wired (needs the running Avalonia app to build/verify):**
+  3.3's one-click restart-to-apply *button*. The honest "running
+  servers keep the old build until restarted" log line and a Doctor
+  toast hint are in place, and the prune-confirm dialog is wired, but
+  the one-click control that stops and restarts both managed servers
+  onto the new binary (with the prompt queued until any in-flight
+  generation finishes) is not built. The managed `ServerProcessManager`
+  instances live in `ServicesViewModel`, not in Doctor, so this belongs
+  on the Services page and needs live-app verification of the
+  never-restart-mid-generation guard.
+
+- **Before/after send timings on the owner's machine:** not measured
+  (no access to the owner's hardware from this environment).

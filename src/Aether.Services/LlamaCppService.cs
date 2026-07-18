@@ -12,6 +12,18 @@ public sealed class LlamaCppService : IDisposable
     private const string ProviderTagValue = "llama.cpp";
     private static readonly HttpClient SharedHttp = new() { Timeout = TimeSpan.FromMinutes(10) };
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> _contextLengthCache = new();
+
+    // r14 4.3: tracks whether the last model-fetch against a base URL failed, so
+    // a persistently-down server logs one line per up->down transition instead
+    // of one per call. true = currently in a logged down-state.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> _modelsFetchDown = new();
+
+    /// <summary>
+    /// Optional gate (r14 4.3): returns true when the managed server for a base
+    /// URL is known Stopped, letting GetModelsAsync skip the HTTP attempt and
+    /// the error entirely. Unset means always probe.
+    /// </summary>
+    public Func<string, bool>? IsBaseUrlKnownStopped { get; set; }
     private readonly HttpClient _http;
     private readonly ISettingsService _settings;
     private readonly IRuntimeLogService _logs;
@@ -40,11 +52,22 @@ public sealed class LlamaCppService : IDisposable
 
     public async Task<List<LlmModel>> GetModelsAsync(CancellationToken ct = default)
     {
+        var baseUrl = Base;
+
+        // r14 4.3: a connection-refused probe against our own stopped managed
+        // server is the expected state, not an error. Skip the attempt (and any
+        // log) entirely when the caller knows the server is Stopped.
+        if (IsBaseUrlKnownStopped?.Invoke(baseUrl) == true)
+            return [];
+
         try
         {
-            var resp = await _http.GetAsync($"{Base}/v1/models", ct);
+            var resp = await _http.GetAsync($"{baseUrl}/v1/models", ct);
             if (resp.StatusCode == System.Net.HttpStatusCode.ServiceUnavailable)
+            {
+                _modelsFetchDown[baseUrl] = false;
                 return [];
+            }
 
             resp.EnsureSuccessStatusCode();
             var data = await resp.Content.ReadFromJsonAsync<ModelsResponse>(JsonOpts, ct);
@@ -61,11 +84,18 @@ public sealed class LlamaCppService : IDisposable
                     model.ProbedContextLength = contextLength;
             }
 
+            _modelsFetchDown[baseUrl] = false;
             return models;
         }
         catch (Exception ex)
         {
-            _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Error, RuntimeLogCategory.Service, $"Failed to fetch models from llama.cpp: {ex.Message}"));
+            // r14 4.3: log once per up->down transition; repeats within the same
+            // down-state are silent so a never-started server produces at most
+            // one line per app run.
+            var wasDown = _modelsFetchDown.TryGetValue(baseUrl, out var down) && down;
+            _modelsFetchDown[baseUrl] = true;
+            if (!wasDown)
+                _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Service, $"llama.cpp models unavailable at {baseUrl}: {ex.Message}"));
             return [];
         }
     }
@@ -91,7 +121,14 @@ public sealed class LlamaCppService : IDisposable
             if (!resp.IsSuccessStatusCode)
                 return null;
 
-            var nCtx = ParsePropsContextLength(await resp.Content.ReadAsStringAsync(ct));
+            // r14 2.3: a conversation hits the per-slot ceiling, not the total
+            // context. Slots default to 1 so the two coincide, but the math
+            // stays honest for anyone who raises Slots.
+            var slots = _settings.Settings.ManagedServers
+                .Where(s => !s.EmbeddingsMode)
+                .Select(s => s.Slots)
+                .FirstOrDefault(1);
+            var nCtx = ParsePerSlotContextLength(await resp.Content.ReadAsStringAsync(ct), slots);
             if (nCtx is { } value)
             {
                 if (_contextLengthCache.Count > 50)
@@ -119,6 +156,29 @@ public sealed class LlamaCppService : IDisposable
             var root = doc.RootElement;
             return TryGetInt(root, "n_ctx")
                 ?? (root.TryGetProperty("default_generation_settings", out var settings) ? TryGetInt(settings, "n_ctx") : null);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Reads the per-slot context length from a llama-server /props response
+    /// (r14 2.3). <c>default_generation_settings.n_ctx</c> is already the
+    /// per-slot ceiling (n_ctx_slot); when only the top-level total
+    /// <c>n_ctx</c> is exposed it is divided by the configured slot count.
+    /// Public for tests.
+    /// </summary>
+    public static int? ParsePerSlotContextLength(string propsJson, int slots)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(propsJson);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("default_generation_settings", out var settings) && TryGetInt(settings, "n_ctx") is int perSlot)
+                return perSlot;
+            return TryGetInt(root, "n_ctx") is int total ? total / Math.Max(1, slots) : null;
         }
         catch (JsonException)
         {
@@ -210,6 +270,10 @@ public sealed class LlamaCppService : IDisposable
             messages = msgs,
             stream = true,
             stream_options = new { include_usage = true },
+            // r14 2.2: pin the prompt-cache on explicitly rather than relying on
+            // llama-server's current default, so a follow-up send reprocesses
+            // only the changed suffix instead of the whole prompt.
+            cache_prompt = true,
             temperature = options.Temperature,
             max_tokens = maxTokens,
             top_p = options.TopP,

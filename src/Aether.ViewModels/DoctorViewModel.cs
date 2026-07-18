@@ -1,6 +1,7 @@
 using System.Linq;
 using Aether.Core.Models;
 using Aether.Core.Services;
+using Aether.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -35,6 +36,13 @@ public partial class DoctorViewModel : ObservableObject
 
     public Action<string>? RequestCopyToClipboard { get; set; }
     public Action<string>? RequestNavigate { get; set; }
+
+    /// <summary>
+    /// Asks the user to confirm a titled action (r14 3.2 prune). When unset,
+    /// confirmation is treated as declined so nothing is ever deleted without
+    /// an explicit yes.
+    /// </summary>
+    public Func<string, string, Task<bool>>? RequestConfirmAsync { get; set; }
 
     public DoctorViewModel(IDoctorService doctor, IToastService toasts, ISettingsService settings, IVoiceOrchestrator? voice = null)
     {
@@ -280,6 +288,62 @@ public partial class DoctorViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// Updates llama.cpp via the detailed path so the flow can offer to prune
+    /// superseded version directories (r14 3.2) and hint that running servers
+    /// need a restart to pick up the new binary (r14 3.3).
+    /// </summary>
+    private async Task RunLlamaUpdateAsync()
+    {
+        if (IsInstallingLlamaServer) return;
+        IsInstallingLlamaServer = true;
+        _installCts = new CancellationTokenSource();
+        try
+        {
+            var progress = new Progress<string>(s => LlamaServerProgress = s);
+            var outcome = await _doctor.InstallLlamaServerUpdateDetailedAsync(progress, _installCts.Token);
+            if (!outcome.Success)
+            {
+                _toasts.Show("llama.cpp update failed", "See diagnostics for details.", ToastKind.Error, 7000);
+                return;
+            }
+
+            _toasts.Show("llama.cpp updated",
+                "Running servers keep the old build until you restart them from Services.",
+                ToastKind.Success, 8000);
+
+            if (outcome.PrunableVersionDirectories.Count > 0 && RequestConfirmAsync is not null)
+            {
+                var reclaimable = SystemInfoService.FormatBytes(
+                    outcome.PrunableVersionDirectories.Sum(LlamaServerSetupService.DirectorySizeBytes));
+                var confirmed = await RequestConfirmAsync(
+                    "Remove old llama.cpp versions?",
+                    $"{outcome.PrunableVersionDirectories.Count} superseded version(s) can be removed to reclaim about {reclaimable}. The current and previous versions are kept.");
+                if (confirmed)
+                {
+                    var freed = _doctor.PruneLlamaServerVersions(outcome.PrunableVersionDirectories);
+                    _toasts.Show("Old versions removed", $"Reclaimed {SystemInfoService.FormatBytes(freed)}.", ToastKind.Info, 5000);
+                }
+            }
+
+            await ScanAsync();
+        }
+        catch (Exception ex)
+        {
+            _toasts.Show(ex is OperationCanceledException ? "llama.cpp update cancelled" : "llama.cpp update failed",
+                ex is OperationCanceledException ? "Installation was cancelled." : ex.Message,
+                ex is OperationCanceledException ? ToastKind.Info : ToastKind.Error,
+                7000);
+        }
+        finally
+        {
+            LlamaServerProgress = string.Empty;
+            IsInstallingLlamaServer = false;
+            _installCts?.Dispose();
+            _installCts = null;
+        }
+    }
+
     [RelayCommand]
     private async Task RunFix(DoctorCheck? check)
     {
@@ -329,13 +393,7 @@ public partial class DoctorViewModel : ObservableObject
         var wantsLlamaDownload = check.Key == "llama-server" && check.FixLabel.StartsWith("Download", StringComparison.OrdinalIgnoreCase);
         if (check.Key == "llama-server-update" || wantsLlamaDownload)
         {
-            await RunInstallAsync(
-                () => IsInstallingLlamaServer,
-                v => IsInstallingLlamaServer = v,
-                s => LlamaServerProgress = s,
-                (p, ct) => _doctor.InstallLlamaServerUpdateAsync(p, ct),
-                "llama.cpp updated", "llama-server downloaded and configured.",
-                "llama.cpp update failed", "llama.cpp update cancelled");
+            await RunLlamaUpdateAsync();
             return;
         }
 

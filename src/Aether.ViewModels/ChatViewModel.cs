@@ -83,6 +83,7 @@ public partial class ChatViewModel : ViewModelBase
     private readonly ILlmService _llm;
     private readonly IConversationStore _store;
     private readonly ISettingsService _settings;
+    private readonly ISystemInfoService? _systemInfo;
     private readonly ITtsService _tts;
     private readonly IToastService _toasts;
     private readonly IMemoryStore _memoryStore;
@@ -213,9 +214,11 @@ public partial class ChatViewModel : ViewModelBase
         IWorkspaceActivationService? workspaceActivation = null,
         MemoryInjectionService? memoryInjection = null,
         ILessonStore? lessons = null,
-        IVoiceOrchestrator? voice = null)
+        IVoiceOrchestrator? voice = null,
+        ISystemInfoService? systemInfo = null)
     {
         _llm = llm; _store = store; _settings = settings; _tts = tts; _profiles = profiles; _toasts = toasts;
+        _systemInfo = systemInfo;
         _memoryStore = memoryStore;
         _conversationMemory = conversationMemory;
         _runtimeLogs = runtimeLogs;
@@ -452,11 +455,26 @@ public partial class ChatViewModel : ViewModelBase
                 history[^1] = history[^1] with { Content = promptText };
             var promptBuildMs = promptBuildSw.ElapsedMilliseconds;
 
+            // r14 4.2: drive a lightweight "reading prompt / thinking" placeholder
+            // from elapsed time while no visible content exists yet, so a long
+            // prompt eval no longer renders as a frozen empty bubble.
+            var sendClock = Stopwatch.StartNew();
+            var sawFirstEvent = 0;
+            var sawContent = 0;
+            using var phaseCts = new CancellationTokenSource();
+            var phaseLoop = RunStreamingPhaseAsync(asst, sendClock,
+                () => Volatile.Read(ref sawFirstEvent) == 1,
+                () => Volatile.Read(ref sawContent) == 1,
+                phaseCts.Token);
+
             var result = await ChatSendOrchestrator.StreamAsync(
                 _llm, selectedModelId, history,
                 BuildChatOptions(memoryContext),
                 onToken: token =>
                 {
+                    if (Interlocked.Exchange(ref sawContent, 1) == 0)
+                        asst.StreamingStatus = string.Empty;
+
                     if (accumulator.TryAppend(token, force: false, out var flushed))
                     {
                         asst.Content += flushed;
@@ -468,7 +486,12 @@ public partial class ChatViewModel : ViewModelBase
                             SpeakStreamingChunk(chunk);
                 },
                 onUsage: usage => UpdateContextUsage(usage, "Reported by provider"),
-                _cts.Token);
+                _cts.Token,
+                onFirstEvent: () => Interlocked.Exchange(ref sawFirstEvent, 1));
+
+            phaseCts.Cancel();
+            try { await phaseLoop; } catch (OperationCanceledException) { }
+            asst.StreamingStatus = string.Empty;
 
             if (accumulator.TryAppend(string.Empty, force: true, out var remainder))
             {
@@ -476,7 +499,7 @@ public partial class ChatViewModel : ViewModelBase
                 ScrollToBottom?.Invoke(this, EventArgs.Empty);
             }
 
-            var timing = new ChatSendTiming(recallMs, selectMs, lessonMs, promptBuildMs, result.FirstTokenMs, result.TotalLatencyMs, result.ServerTimings);
+            var timing = new ChatSendTiming(recallMs, selectMs, lessonMs, promptBuildMs, result.FirstTokenMs, result.TotalLatencyMs, result.ServerTimings, result.FirstEventMs);
             asst.DurationMs = result.TotalLatencyMs;
             PerformanceLog = result.Cancelled
                 ? $"cancelled after {result.TotalLatencyMs} ms"
@@ -484,8 +507,15 @@ public partial class ChatViewModel : ViewModelBase
             asst.IsStreaming = false;
 
             if (!result.Cancelled && timing.IsSlow)
-                _runtimeLogs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Service,
-                    $"Slow chat send ({timing.PreFirstTokenMs} ms before first token): {timing.Format()}"));
+            {
+                var hint = ChatSendTiming.SlowSendBottleneckHint(
+                    timing.PromptTokensPerSecond,
+                    await IsGpuPresentButCpuInferenceAsync(_cts.Token));
+                var warning = $"Slow chat send ({timing.PreFirstTokenMs} ms before first token): {timing.Format()}";
+                if (hint is not null)
+                    warning += $" - {hint}";
+                _runtimeLogs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Service, warning));
+            }
 
             if (result.Cancelled)
             {
@@ -543,6 +573,7 @@ public partial class ChatViewModel : ViewModelBase
             // error surfaced anywhere; the exception disappeared into the
             // AsyncRelayCommand.
             asst.IsStreaming = false;
+            asst.StreamingStatus = string.Empty;
             if (string.IsNullOrWhiteSpace(asst.Content))
             {
                 Messages.Remove(asst);
@@ -1132,6 +1163,60 @@ public partial class ChatViewModel : ViewModelBase
             SelectedModel?.DefaultContextSize,
             chatServer?.ContextSize,
             _settings.Settings.Llm.MaxTokens);
+    }
+
+    /// <summary>
+    /// Updates the streaming assistant bubble's phase placeholder at most once
+    /// per second while no visible content has arrived (r14 4.2). Exits when
+    /// content arrives or the send ends; swallows cancellation/disposal.
+    /// </summary>
+    private static async Task RunStreamingPhaseAsync(
+        MessageViewModel asst,
+        Stopwatch clock,
+        Func<bool> sawFirstEvent,
+        Func<bool> sawContent,
+        CancellationToken ct)
+    {
+        try
+        {
+            while (!ct.IsCancellationRequested && !sawContent())
+            {
+                asst.StreamingStatus = ChatStreamingPhase.Describe(clock.ElapsedMilliseconds, sawFirstEvent(), sawContent());
+                await Task.Delay(1_000, ct);
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (ObjectDisposedException) { }
+        finally
+        {
+            if (sawContent())
+                asst.StreamingStatus = string.Empty;
+        }
+    }
+
+    /// <summary>
+    /// True when the machine has a real GPU but the chat server offloads no
+    /// layers (r14 4.5): the condition under which a slow prompt read is worth
+    /// diagnosing as CPU-speed. Uses the cached hardware profile, so repeated
+    /// calls are cheap; returns false when system info is unavailable.
+    /// </summary>
+    private async Task<bool> IsGpuPresentButCpuInferenceAsync(CancellationToken ct)
+    {
+        if (_systemInfo is null)
+            return false;
+        var chatServer = _settings.Settings.ManagedServers.FirstOrDefault(s => !s.EmbeddingsMode)
+            ?? _settings.Settings.ManagedServers.FirstOrDefault();
+        if (chatServer is not null && chatServer.GpuLayers != 0)
+            return false;
+        try
+        {
+            var profile = await _systemInfo.GetHardwareProfileAsync(ct);
+            return profile.MaxGpuVramBytes > 0 || !string.IsNullOrWhiteSpace(profile.GpuName);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     public static List<ChatMessage> TruncateHistoryToContextWindow(

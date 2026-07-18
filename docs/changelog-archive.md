@@ -2,6 +2,63 @@
 
 The CHANGELOG.md in root only contains the current 10 versions of changelogs. The rest are archived here in line with the 10 version limit in the main changelog.
 
+## [0.10.0-alpha] - 2026-07-12
+
+Implements docs/review r5 in full: voice stops being "TTS for chat" and
+becomes a shared service for the whole app, and the benchmark store grows a
+deterministic recommendation engine on top of data it already persists.
+
+### Voice orchestration
+
+- **`IVoiceOrchestrator`.** A single background worker drains a priority
+  queue (Low/Normal/Critical) one utterance at a time, so two consumers can
+  never overlap audio without a mixer. Critical utterances preempt the
+  current playback and clear queued Low items; same-key `DedupeKey`
+  utterances collapse; channels default to disabled except Chat, which
+  preserves the pre-r5 manual speak button.
+- **Voice profiles and per-channel settings.** `TtsSettings.Profiles`
+  (named voice/speed combinations) and `TtsSettings.Channels` (per-channel
+  enable + profile) are new, additive settings fields; a Settings > Voice
+  card exposes a mute toggle, auto-speak, streaming speech, and the
+  channel/profile editors.
+- **Six consumers.** Chat can auto-speak replies (`Tts.AutoSpeakChatReplies`,
+  off by default) and, experimentally, speak them sentence-by-sentence while
+  the model is still streaming (`Tts.StreamingChatSpeech`, via a new
+  `SentenceChunker`). The agent narrates milestones only (task started,
+  waiting for approval/reply at Critical priority, terminal Complete/Failed)
+  and can use a per-workspace voice profile stored in `.aether/workspace.json`.
+  Doctor speaks one Critical summary per scan when it finds Errors.
+  Benchmarks announce run completion. A new `VoiceNotificationBridge`
+  forwards Warning/Error toasts onto the Notification channel.
+- All spoken chat text passes through `ChatSpeechSanitizer`, which replaces
+  fenced/inline code with a spoken placeholder so TTS never reads code
+  character by character.
+
+### Benchmark insights
+
+- **Tag propagation.** `BenchmarkCase.Tags` now copies onto
+  `BenchmarkResult.Tags` at scoring time; `BenchmarkInsightsService`
+  suite-joins tags back onto older runs whose originating suite still
+  exists, so historical runs still feed per-tag leaderboards.
+- **`BenchmarkInsightsService` + `BenchmarkInsightsMath`.** Deterministic,
+  no LLM: groups runs by model + quantization + runtime, filters to
+  hardware comparable to the current machine (GPU name + VRAM within 10%,
+  or both CPU-only), and ranks by `QualityPerSecond = quality *
+  log2(1 + tokens/sec)`. Requires at least 2 runs and 10 cases before a
+  model appears in any leaderboard; flags stale results (>60 days old or a
+  different Aether minor version). Produces pairwise comparison sentences
+  ("X scores 4% lower than Y but runs 2.3x faster").
+- **Insights tab** on the Benchmarks page: best-overall card, per-tag
+  leaderboards with comparison sentences, caveats, and a re-run shortcut.
+  Loaded on demand, not on page open.
+- **Doctor advisory check.** Info-only: when the selected chat model ranks
+  more than 10 points behind the best comparable model, Doctor names both.
+  Never Warning/Error, never switches anything automatically.
+
+55 new tests (327->382), coverage floor raised 45->47. Ships as 0.10.0-alpha because
+two new user-facing capabilities landed in the same round. Archived at
+docs/review/archived/r5/.
+
 ## [0.9.44-alpha] - 2026-07-12
 
 Implements docs/review r4 in full: an audit of the r3 agent loop and lesson

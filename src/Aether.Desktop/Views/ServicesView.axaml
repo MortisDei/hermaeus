@@ -291,12 +291,12 @@
                                                        ToolTip.Tip="Context size (tokens)" />
                                         <NumericUpDown Grid.Column="2"
                                                        Value="{Binding GpuLayers}"
-                                                       Minimum="0" Maximum="999"
+                                                       Minimum="-1" Maximum="999"
                                                        Increment="1"
                                                        HorizontalAlignment="Stretch"
                                                        FontSize="13"
                                                        IsEnabled="{Binding CanEdit}"
-                                                       ToolTip.Tip="GPU layers to request. 0 leaves llama.cpp in auto-fit mode; use a high value such as 999 to request full offload when VRAM allows." />
+                                                       ToolTip.Tip="GPU offload layers. -1 offloads all layers (rendered as --n-gpu-layers 999); 0 keeps inference on the CPU; a positive N offloads exactly N layers." />
                                         <TextBlock Grid.Column="3"
                                                    Text="{Binding OversizedContextNote}"
                                                    IsVisible="{Binding HasOversizedContext}"
@@ -310,7 +310,7 @@
                                                Text="Threads" VerticalAlignment="Center"
                                                Opacity="0.6" FontSize="13" />
                                     <Grid Grid.Row="3" Grid.Column="1"
-                                          ColumnDefinitions="140,Auto,Auto,*"
+                                          ColumnDefinitions="140,Auto,120,Auto,*"
                                           ColumnSpacing="16">
                                         <NumericUpDown Value="{Binding Threads}"
                                                        Minimum="1" Maximum="128"
@@ -319,12 +319,19 @@
                                                        FontSize="13"
                                                        IsEnabled="{Binding CanEdit}"
                                                        ToolTip.Tip="CPU thread count" />
-                                        <TextBlock Grid.Column="1"
-                                                   Text="--embeddings (fixed)"
-                                                   Opacity="0.65"
-                                                   FontSize="13"
-                                                   VerticalAlignment="Center" />
-                                        <CheckBox Grid.Column="2"
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                            <TextBlock Text="Offload:" Opacity="0.6" FontSize="13" />
+                                            <TextBlock Text="{Binding EffectiveOffloadLabel}" FontSize="13" />
+                                        </StackPanel>
+                                        <NumericUpDown Grid.Column="2"
+                                                       Value="{Binding Slots}"
+                                                       Minimum="1" Maximum="32"
+                                                       Increment="1"
+                                                       HorizontalAlignment="Stretch"
+                                                       FontSize="13"
+                                                       IsEnabled="{Binding CanEdit}"
+                                                       ToolTip.Tip="Advanced: parallel request slots (--parallel N). Keep at 1 for a single-user chat app so the whole context belongs to one conversation and every send reuses the KV cache." />
+                                        <CheckBox Grid.Column="3"
                                                   IsChecked="{Binding AutoStart}"
                                                   Content="Auto-start"
                                                   FontSize="13"

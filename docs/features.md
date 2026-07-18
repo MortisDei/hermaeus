@@ -18,9 +18,13 @@
   context, prompt build, first token) so a slow send is diagnosable without a
   profiler. When llama.cpp reports its own prompt-processing timings, the
   breakdown also shows the server-side prompt tokens/time so a slow send can
-  be narrowed to request queuing versus actual prompt evaluation. A send
-  whose pre-first-token wait exceeds 10 seconds logs a runtime warning with
-  the full breakdown, so it is visible without opening the trace panel.
+  be narrowed to request queuing versus actual prompt evaluation. The
+  breakdown also separates the first streamed event of any kind from the first
+  visible content token, so a long non-content stream prefix is no longer
+  hidden inside "before first token". A send whose pre-first-token wait
+  exceeds 10 seconds logs a runtime warning with the full breakdown, and on a
+  machine with a real GPU that is still configured for CPU inference the
+  warning ends with a "prompt was read at CPU speed" hint pointing at Doctor.
 - Compare Models sends the current draft prompt to one to four selected models
   and compares answers, latency, token usage, and simple quality notes without
   adding the comparison run to chat history.
@@ -194,6 +198,22 @@
   buffering the full reply before the first token.
 - Managed `llama-server` start/stop, auto-start, logs, and GPU auto-tune that
   verifies GPU layer candidates before saving a per-GGUF tuned profile.
+- GPU-aware llama.cpp builds. A runtime-variant setting (Auto by default)
+  installs the CUDA build on NVIDIA hardware (with its `cudart` companion
+  runtime), the Vulkan build on any other real GPU, and the CPU build when no
+  GPU is detected; an explicit choice always wins. A GPU build that fails to
+  launch falls back to the CPU build once. `GpuLayers = -1` offloads all
+  layers (the default for new servers when a GPU is present), `0` stays on the
+  CPU, and `N` offloads exactly N.
+- Managed servers launch fast by default for a single user: one request slot
+  (`--parallel 1`, so the whole context belongs to one conversation and every
+  send reuses the KV cache), explicit prompt caching plus `--cache-reuse`, and
+  a pinned embeddings batch pair that silences llama.cpp's clamp warning.
+- Updating llama.cpp installs to the resolved install root instead of nesting
+  a new version directory inside the previous one, preserves the configured
+  runtime variant, notes that running servers keep the old build until
+  restarted, and offers to prune superseded version directories (single
+  confirm; current and previous kept).
 - Managed Chat and Embeddings cards are normalized so duplicate default cards
   are removed. Starting a managed server stops any running peer on the same
   port first, allowing Chat and Embeddings to share a port when only one is
@@ -227,6 +247,9 @@
   in bulk as one timestamped folder.
 - Doctor checks for untuned GGUF files, stale `llama.cpp` binaries, and pinned
   `nomic-embed-text-v1.5` hash drift, with install actions where available.
+- Doctor advises when a real GPU is present but inference is still configured
+  for the CPU (a CPU-only build is installed, or the chat server offloads zero
+  layers), naming the measured consequence and linking the fix in Services.
 - The Models page lists every model as a compact, collapsed-by-default card
   (name, running badge, provider, size, tags, fits/update chips, tune
   summary) with a name/tag filter box, instead of a fully-expanded editor

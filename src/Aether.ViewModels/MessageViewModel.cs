@@ -10,6 +10,14 @@ public partial class MessageViewModel : ObservableObject
     [ObservableProperty] private string _originalContent = string.Empty;
     [ObservableProperty] private bool   _isStreaming;
     [ObservableProperty] private bool   _isError;
+
+    /// <summary>
+    /// Live phase placeholder while a send has produced no visible content yet
+    /// (r14 4.2), e.g. "Reading prompt... 5s". Empty otherwise.
+    /// </summary>
+    [ObservableProperty] private string _streamingStatus = string.Empty;
+    public bool HasStreamingStatus => !string.IsNullOrEmpty(StreamingStatus);
+    partial void OnStreamingStatusChanged(string value) => OnPropertyChanged(nameof(HasStreamingStatus));
     [ObservableProperty] private string _modelId = string.Empty;
     [ObservableProperty] private long   _durationMs;
     [ObservableProperty] private bool   _hasSources;

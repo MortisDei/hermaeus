@@ -25,6 +25,13 @@ public partial class DoctorView : UserControl
             if (top?.Clipboard is not null)
                 await top.Clipboard.SetTextAsync(text);
         };
+        vm.RequestConfirmAsync = async (title, message) =>
+        {
+            if (TopLevel.GetTopLevel(this) is not Window owner)
+                return false;
+            var dialog = new ConfirmActionDialog(title, message);
+            return await dialog.ShowDialog<bool>(owner);
+        };
     }
 }
 

@@ -148,6 +148,74 @@ public sealed partial class DoctorService
             "Runtime");
     }
 
+    /// <summary>
+    /// Fires when a real GPU is present but inference is still configured for
+    /// the CPU (r14 1.4): either the installed build has no GPU backend, or the
+    /// chat server's effective offload is 0. Pure decision for tests.
+    /// </summary>
+    public static bool ShouldAdviseGpuInference(bool hasRealGpu, bool installedBuildIsCpu, int chatGpuLayers)
+        => hasRealGpu && (installedBuildIsCpu || chatGpuLayers == 0);
+
+    private async Task<DoctorCheck?> CheckGpuInferenceAdvisoryAsync(CancellationToken ct)
+    {
+        var profile = await _systemInfo.GetHardwareProfileAsync(ct);
+        var hasRealGpu = profile.MaxGpuVramBytes > 0 || !string.IsNullOrWhiteSpace(profile.GpuName);
+        if (!hasRealGpu)
+            return null;
+
+        var chat = _settings.Settings.ManagedServers.FirstOrDefault(s => !s.EmbeddingsMode)
+            ?? _settings.Settings.ManagedServers.FirstOrDefault();
+        var chatGpuLayers = chat?.GpuLayers ?? 0;
+        var resolvedExe = ResolveExecutable(chat?.ExecutablePath ?? string.Empty);
+        var installedBuildIsCpu = IsCpuOnlyBuild(resolvedExe);
+
+        if (!ShouldAdviseGpuInference(hasRealGpu, installedBuildIsCpu, chatGpuLayers))
+            return null;
+
+        var reason = installedBuildIsCpu
+            ? "the installed llama-server is a CPU-only build"
+            : "the chat server is set to 0 GPU layers";
+        return BuildCheck(
+            "gpu-inference",
+            "GPU inference",
+            DoctorCheckStatus.Warning,
+            $"GPU present but {reason}",
+            $"{profile.GpuName ?? "A GPU"} was detected, but {reason}, so your prompts are read and generated at CPU speed. Install a GPU build in Services and set the chat server to offload all layers.",
+            "Open Services",
+            true,
+            $"GPU: {profile.GpuName}\nInstalled build CPU-only: {installedBuildIsCpu}\nChat gpu-layers: {chatGpuLayers}",
+            "Runtime");
+    }
+
+    /// <summary>
+    /// True when no GPU backend runtime sits next to the executable (r14 1.4):
+    /// CPU builds ship only ggml-cpu/ggml-base DLLs, GPU builds add
+    /// ggml-cuda/ggml-vulkan (and cudart for CUDA). An empty/unresolved path is
+    /// treated as CPU so the advisory nudges toward a real GPU install.
+    /// </summary>
+    private static bool IsCpuOnlyBuild(string executablePath)
+    {
+        if (string.IsNullOrWhiteSpace(executablePath))
+            return true;
+        var dir = Path.GetDirectoryName(executablePath);
+        if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir))
+            return true;
+        try
+        {
+            foreach (var file in Directory.EnumerateFiles(dir, "*.dll", SearchOption.TopDirectoryOnly))
+            {
+                var name = Path.GetFileName(file).ToLowerInvariant();
+                if (name.Contains("cuda") || name.Contains("vulkan") || name.Contains("cudart") || name.Contains("hip") || name.Contains("sycl"))
+                    return false;
+            }
+            return true;
+        }
+        catch
+        {
+            return true;
+        }
+    }
+
     private DoctorCheck CheckUntunedGgufModels()
     {
         var models = LocalAiAssetLocator.FindGgufModels(_settings.Settings.DataManagement.LocalAiAssetsRoot);
@@ -268,9 +336,44 @@ public sealed partial class DoctorService
         => InstallLlamaServerUpdateAsync(null, ct);
 
     public async Task<bool> InstallLlamaServerUpdateAsync(IProgress<string>? progress, CancellationToken ct = default)
+        => (await InstallLlamaServerUpdateDetailedAsync(progress, ct)).Success;
+
+    /// <summary>
+    /// Installs the latest llama.cpp build, honouring the configured runtime
+    /// variant (r14 1.1/3.4), verifying the new binary actually launches and
+    /// falling back to the CPU build if it does not (r14 1.2). Returns the
+    /// details the update flow needs to offer a prune of superseded versions
+    /// (r14 3.2) and a restart-to-apply (r14 3.3).
+    /// </summary>
+    public async Task<LlamaUpdateOutcome> InstallLlamaServerUpdateDetailedAsync(IProgress<string>? progress, CancellationToken ct = default)
     {
         var installPath = ResolveLlamaServerInstallDirectory();
-        var result = await _llamaSetup.InstallLatestAsync(installPath, progress, ct);
+        var previousPath = ResolveExecutable(
+            (_settings.Settings.ManagedServers.FirstOrDefault(s => !s.EmbeddingsMode)
+                ?? _settings.Settings.ManagedServers.FirstOrDefault())?.ExecutablePath ?? string.Empty);
+
+        var profile = await _systemInfo.GetHardwareProfileAsync(ct);
+        var resolvedVariant = LlamaServerSetupService.ResolveVariant(_settings.Settings.DataManagement.LlamaRuntimeVariant, profile);
+
+        var result = await _llamaSetup.InstallLatestAsync(installPath, resolvedVariant, progress, ct);
+        if (result.Success && !string.IsNullOrWhiteSpace(result.UpdatedPath) && resolvedVariant != LlamaRuntimeVariant.Cpu)
+        {
+            // r14 1.2: a GPU build that cannot execute (missing driver/DLL)
+            // reports no version. Fall back to the CPU build once (Cpu is
+            // terminal, so no retry loop) rather than leaving a broken path.
+            var probe = await ReadLlamaServerVersionAsync(result.UpdatedPath, ct);
+            if (ShouldFallbackToCpu(resolvedVariant, probe.BuildNumber is not null))
+            {
+                _runtimeLogs?.Add(new RuntimeLogEntry(
+                    DateTime.UtcNow,
+                    RuntimeLogLevel.Warning,
+                    RuntimeLogCategory.Service,
+                    $"llama.cpp {LlamaServerSetupService.VariantLabel(resolvedVariant)} build did not launch (missing driver or runtime); falling back to the CPU build."));
+                resolvedVariant = LlamaRuntimeVariant.Cpu;
+                result = await _llamaSetup.InstallLatestAsync(installPath, LlamaRuntimeVariant.Cpu, progress, ct);
+            }
+        }
+
         if (!result.Success || string.IsNullOrWhiteSpace(result.UpdatedPath))
         {
             progress?.Report(result.Log);
@@ -279,7 +382,7 @@ public sealed partial class DoctorService
                 RuntimeLogLevel.Error,
                 RuntimeLogCategory.Service,
                 $"llama.cpp update failed: {result.Log}"));
-            return false;
+            return LlamaUpdateOutcome.Failed(result.Log);
         }
 
         foreach (var server in _settings.Settings.ManagedServers)
@@ -291,8 +394,30 @@ public sealed partial class DoctorService
             DateTime.UtcNow,
             RuntimeLogLevel.Info,
             RuntimeLogCategory.Service,
-            $"llama.cpp updated successfully: {result.UpdatedPath}"));
-        return true;
+            $"llama.cpp updated successfully: {result.UpdatedPath} (running servers keep the old build until restarted)."));
+
+        var prunable = LlamaServerSetupService.SelectPrunableVersionDirectories(installPath, result.UpdatedPath, previousPath);
+        return LlamaUpdateOutcome.Ok(result.UpdatedPath, installPath, prunable);
+    }
+
+    /// <summary>
+    /// A non-CPU variant whose installed binary did not report a version failed
+    /// to launch and must fall back to CPU (r14 1.2). CPU never falls back.
+    /// Pure decision for tests.
+    /// </summary>
+    public static bool ShouldFallbackToCpu(LlamaRuntimeVariant installedVariant, bool versionProbeSucceeded)
+        => installedVariant != LlamaRuntimeVariant.Cpu && !versionProbeSucceeded;
+
+    public long PruneLlamaServerVersions(IReadOnlyList<string> versionDirectories)
+    {
+        var reclaimed = LlamaServerSetupService.PruneVersionDirectories(versionDirectories);
+        if (reclaimed > 0)
+            _runtimeLogs?.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Info,
+                RuntimeLogCategory.Service,
+                $"Pruned superseded llama.cpp version directories, reclaimed {SystemInfoService.FormatBytes(reclaimed)}."));
+        return reclaimed;
     }
 
     private string ResolveLlamaServerInstallDirectory()
@@ -301,7 +426,12 @@ public sealed partial class DoctorService
             ?? _settings.Settings.ManagedServers.FirstOrDefault();
         var executable = ResolveExecutable(server?.ExecutablePath ?? string.Empty);
         if (!string.IsNullOrWhiteSpace(executable) && Path.IsPathFullyQualified(executable))
-            return Path.GetDirectoryName(executable) ?? executable;
+        {
+            // r14 3.1: resolve the install root, not the current binary's own
+            // (already versioned) directory, so updates never nest one tag deeper.
+            var dir = Path.GetDirectoryName(executable);
+            return string.IsNullOrEmpty(dir) ? executable : LlamaServerSetupService.ResolveInstallRoot(dir);
+        }
 
         var root = _settings.Settings.DataManagement.LocalAiAssetsRoot.Trim();
         if (string.IsNullOrWhiteSpace(root))

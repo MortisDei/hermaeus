@@ -27,6 +27,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private int          _contextSize;
     [ObservableProperty] private int          _gpuLayers;
     [ObservableProperty] private int          _threads;
+    [ObservableProperty] private int          _slots;
     [ObservableProperty] private bool         _embeddingsMode;
     [ObservableProperty] private bool         _autoStart;
     [ObservableProperty] private string       _extraArgs = string.Empty;
@@ -54,9 +55,21 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _config.ContextSize != ContextSize ||
         _config.GpuLayers != GpuLayers ||
         _config.Threads != Threads ||
+        _config.Slots != Slots ||
         _config.EmbeddingsMode != EmbeddingsMode ||
         _config.AutoStart != AutoStart ||
         _config.ExtraArgs != ExtraArgs;
+
+    /// <summary>
+    /// Human-readable effective GPU offload for the Services card (r14 1.3):
+    /// "all layers" for -1, "0 (CPU)" for 0, or the explicit layer count.
+    /// </summary>
+    public string EffectiveOffloadLabel => GpuLayers switch
+    {
+        < 0 => "all layers",
+        0 => "0 (CPU)",
+        var n => n.ToString()
+    };
     public string ExtraArgsTrustWarning
     {
         get
@@ -155,6 +168,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _contextSize    = config.ContextSize;
         _gpuLayers      = config.GpuLayers;
         _threads        = config.Threads;
+        _slots          = config.Slots;
         _embeddingsMode = config.EmbeddingsMode;
         _autoStart      = config.AutoStart;
         _extraArgs      = config.ExtraArgs;
@@ -454,10 +468,12 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _config.ContextSize    = ContextSize;
         _config.GpuLayers      = GpuLayers;
         _config.Threads        = Threads;
+        _config.Slots          = Slots;
         _config.EmbeddingsMode = EmbeddingsMode;
         _config.AutoStart      = AutoStart;
         _config.ExtraArgs      = ExtraArgs;
         OnPropertyChanged(nameof(HasUnsavedChanges));
+        OnPropertyChanged(nameof(EffectiveOffloadLabel));
         OnPropertyChanged(nameof(ExtraArgsTrustWarning));
 
         // Managed servers are always local processes, so their configured port is the
@@ -491,6 +507,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         ContextSize    = ContextSize,
         GpuLayers      = GpuLayers,
         Threads        = Threads,
+        Slots          = Slots,
         EmbeddingsMode = EmbeddingsMode,
         AutoStart      = AutoStart,
         ExtraArgs      = ExtraArgs
@@ -522,8 +539,13 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(HasOversizedContext));
         OnPropertyChanged(nameof(OversizedContextNote));
     }
-    partial void OnGpuLayersChanged(int value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnGpuLayersChanged(int value)
+    {
+        OnPropertyChanged(nameof(HasUnsavedChanges));
+        OnPropertyChanged(nameof(EffectiveOffloadLabel));
+    }
     partial void OnThreadsChanged(int value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnSlotsChanged(int value) => OnPropertyChanged(nameof(HasUnsavedChanges));
     partial void OnEmbeddingsModeChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
     partial void OnAutoStartChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
     partial void OnExtraArgsChanged(string value)

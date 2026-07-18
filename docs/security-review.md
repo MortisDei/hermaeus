@@ -1,7 +1,7 @@
 # Aether Security Review And Threat Model
 
-Last refreshed for `0.18.0-alpha` (see the r13 subsection under Threat
-Scenarios). The `0.10.0-alpha` pass re-verified the
+Last refreshed for `0.19.0-alpha` (see the r14 subsection under Reviewed
+Controls). The `0.10.0-alpha` pass re-verified the
 areas that changed in r3-r5 (agent tool execution, run_command recipes,
 lesson store, voice orchestration, benchmark insights) directly against the
 code, and confirmed via git history that the Local API, MCP bridge, secret
@@ -565,6 +565,34 @@ RAG remain unchanged since `0.9.41-alpha`.
   privileges beyond what the app already runs with. No WMI (an explicit r13
   rejection: slower and flakier on stripped installs than the P/Invoke +
   registry + `nvidia-smi` combination already in place).
+
+### r14: GPU Runtime, Serving Defaults, Update Hygiene
+
+- **New download assets keep r11's provenance posture.** The GPU build
+  variants (`llama-<tag>-bin-win-cuda-<ver>-x64.zip`,
+  `llama-<tag>-bin-win-vulkan-x64.zip`) and the CUDA runtime companion
+  (`cudart-llama-bin-win-cuda-<ver>-x64.zip`) are the same
+  GitHub-releases-over-HTTPS, tag-pinned-or-latest-API, GitHub-origin trust
+  as the existing CPU asset: no independent per-asset hash is published, so
+  the exception is origin-integrity, not attestation - the deliberate stance
+  first stated in r11. All are extracted through the zip-slip-guarded
+  `ArchiveExtractor`. Asset names are matched by os/arch plus a fixed variant
+  token, re-verified against the live release API at implementation time.
+- **Launch-arg changes stay inside `ArgumentList` (no shell) and bound to
+  `127.0.0.1`.** The new flags (`--parallel`, `--cache-reuse`,
+  `--n-gpu-layers 999`, embeddings `-b/-ub`) are constant literals or config
+  integers, never user-interpolated strings; the loopback host bind and its
+  extra-args precedence are unchanged.
+- **Version pruning deletes only tag-pattern directories under the resolved
+  install root**, is confirm-gated (no confirmation callback means no
+  deletion), keeps the current and previous versions, and skips locked
+  directories. It never touches a user model or data path. The install-root
+  resolver walks up only `bNNNNN` directories and never into a drive root, so
+  a legitimately tag-named install root is preserved.
+- **No background/auto update polling and no auto-restart without consent**
+  (both explicit r14 rejections): update checks and the post-update
+  server-restart remain user-initiated, and no accelerator variants beyond
+  CUDA/Vulkan are added this round.
 
 ## Release Gate Status
 

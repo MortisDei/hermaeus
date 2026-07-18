@@ -119,6 +119,10 @@ public sealed partial class DoctorService : IDoctorService
 
         checks.AddRange(CheckOversizedContextAdvisories());
 
+        var gpuInferenceAdvisory = await CheckGpuInferenceAdvisoryAsync(ct);
+        if (gpuInferenceAdvisory is not null)
+            checks.Add(gpuInferenceAdvisory);
+
         var errorCount = checks.Count(c => c.Status == DoctorCheckStatus.Error);
         var warningCount = checks.Count(c => c.Status == DoctorCheckStatus.Warning);
         var summary = errorCount == 0 && warningCount == 0

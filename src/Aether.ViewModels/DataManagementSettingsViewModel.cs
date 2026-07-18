@@ -20,6 +20,11 @@ public partial class DataManagementSettingsViewModel : ObservableObject
     [ObservableProperty] private string _dataMigrationPreview = string.Empty;
     [ObservableProperty] private string _localAiAssetsRoot = string.Empty;
     [ObservableProperty] private string _localAiAssetsStatus = "Choose a local AI assets folder first.";
+    [ObservableProperty] private LlamaRuntimeVariant _llamaRuntimeVariant = LlamaRuntimeVariant.Auto;
+
+    /// <summary>Selectable llama.cpp build variants for the Services/data settings (r14 1.1).</summary>
+    public IReadOnlyList<LlamaRuntimeVariant> LlamaRuntimeVariantOptions { get; } =
+        Enum.GetValues<LlamaRuntimeVariant>();
     [ObservableProperty] private string _backupDirectory = string.Empty;
     [ObservableProperty] private string _restoreBackupPath = string.Empty;
     [ObservableProperty] private string _settingsError = string.Empty;
@@ -47,6 +52,7 @@ public partial class DataManagementSettingsViewModel : ObservableObject
     {
         DataRootDirectory = settings.DataManagement.DataRootDirectory;
         LocalAiAssetsRoot = settings.DataManagement.LocalAiAssetsRoot;
+        LlamaRuntimeVariant = settings.DataManagement.LlamaRuntimeVariant;
         UpdateMigrationPreview();
         UpdateLocalAiAssetsStatus();
     }
@@ -55,6 +61,7 @@ public partial class DataManagementSettingsViewModel : ObservableObject
     {
         settings.DataManagement.DataRootDirectory = DataRootDirectory.Trim();
         settings.DataManagement.LocalAiAssetsRoot = LocalAiAssetsRoot.Trim();
+        settings.DataManagement.LlamaRuntimeVariant = LlamaRuntimeVariant;
     }
 
     [RelayCommand] private void BrowseDataRoot() => RequestDataRootPicker?.Invoke();

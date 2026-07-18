@@ -113,6 +113,13 @@ public sealed class ServerProcessManager : IDisposable
 
     public void Stop()
     {
+        // r14 4.4: multiple shutdown paths (window close, tray exit, dispose)
+        // all call Stop; an already-stopped server logs nothing and fires no
+        // status change, so the runtime log shows one Stopping/Stopped pair per
+        // actual shutdown instead of three.
+        if (Status == ServerStatus.Stopped && _process is null)
+            return;
+
         Emit("[aether] Stopping...");
         KillProcess();
         SetStatus(ServerStatus.Stopped);
@@ -166,6 +173,7 @@ public sealed class ServerProcessManager : IDisposable
             ContextSize    = cfg.ContextSize,
             GpuLayers      = cfg.GpuLayers,
             Threads        = cfg.Threads,
+            Slots          = cfg.Slots,
             EmbeddingsMode = cfg.EmbeddingsMode,
             AutoStart      = false,
             ExtraArgs      = cfg.ExtraArgs
@@ -206,6 +214,7 @@ public sealed class ServerProcessManager : IDisposable
                 ContextSize    = baseConfig.ContextSize,
                 GpuLayers      = candidate,
                 Threads        = threads,
+                Slots          = baseConfig.Slots,
                 EmbeddingsMode = baseConfig.EmbeddingsMode,
                 AutoStart      = false,
                 ExtraArgs      = baseConfig.ExtraArgs
@@ -377,25 +386,59 @@ public sealed class ServerProcessManager : IDisposable
             parts.Add(cfg.Threads.ToString());
         }
 
-        if (cfg.GpuLayers > 0)
+        // r14 1.3: 0 keeps CPU inference (flag omitted); -1 offloads every
+        // layer, which llama-server spells as a large finite count; N>0 offloads
+        // exactly N.
+        if (cfg.GpuLayers != 0)
         {
             parts.Add("--n-gpu-layers");
-            parts.Add(cfg.GpuLayers.ToString());
+            parts.Add(cfg.GpuLayers < 0 ? "999" : cfg.GpuLayers.ToString());
         }
 
         var extraArgs = string.IsNullOrWhiteSpace(cfg.ExtraArgs)
             ? []
             : ExtraArgsParser.Split(cfg.ExtraArgs).ToList();
 
+        bool HasArg(string flag) => extraArgs.Any(a => string.Equals(a, flag, StringComparison.OrdinalIgnoreCase));
+
+        // r14 2.1: single slot by default so the whole context belongs to one
+        // conversation and every send reuses the same KV cache.
+        if (!HasArg("--parallel"))
+        {
+            parts.Add("--parallel");
+            parts.Add(Math.Max(1, cfg.Slots).ToString());
+        }
+
+        // r14 2.2: let edited/re-rolled prompts reuse KV chunks past the first
+        // divergence instead of only the longest exact prefix.
+        if (!HasArg("--cache-reuse"))
+        {
+            parts.Add("--cache-reuse");
+            parts.Add("256");
+        }
+
         if (cfg.EmbeddingsMode)
         {
             parts.Add("--embeddings");
 
-            var hasPoolingArg = extraArgs.Any(a => string.Equals(a, "--pooling", StringComparison.OrdinalIgnoreCase));
-            if (!hasPoolingArg)
+            if (!HasArg("--pooling"))
             {
                 parts.Add("--pooling");
                 parts.Add("mean");
+            }
+
+            // r14 2.4: llama-server clamps n_batch down to n_ubatch (512) for
+            // embeddings and logs a warning pair every start; set a coherent
+            // pair up front so the start is clean.
+            if (!HasArg("-b") && !HasArg("--batch-size"))
+            {
+                parts.Add("-b");
+                parts.Add("512");
+            }
+            if (!HasArg("-ub") && !HasArg("--ubatch-size"))
+            {
+                parts.Add("-ub");
+                parts.Add("512");
             }
         }
 
@@ -426,6 +469,7 @@ public sealed class ServerProcessManager : IDisposable
             ContextSize    = cfg.ContextSize,
             GpuLayers      = cfg.GpuLayers,
             Threads        = cfg.Threads,
+            Slots          = cfg.Slots,
             EmbeddingsMode = cfg.EmbeddingsMode,
             AutoStart      = cfg.AutoStart,
             ExtraArgs      = cfg.ExtraArgs

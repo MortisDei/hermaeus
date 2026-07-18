@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Net.Http.Json;
+using System.Text.RegularExpressions;
 using System.Text.Json.Serialization;
 using Aether.Core.Models;
 using Aether.Services.ProcessManagement;
@@ -14,6 +15,9 @@ namespace Aether.Services;
 /// (r11 1.2 acceptance).
 /// </summary>
 public enum LlamaPlatform { WinX64, WinArm64, LinuxX64, LinuxArm64, MacX64, MacArm64 }
+
+/// <summary>GPU vendor inferred from an adapter name string (r14 1.1).</summary>
+public enum GpuVendor { Unknown, Nvidia, Amd, Intel }
 
 /// <summary>
 /// Manages llama-server binary installation and detection.
@@ -204,17 +208,36 @@ public sealed class LlamaServerSetupService
     /// process holds open; existing servers keep running unaffected until
     /// they're next restarted against the new path.
     /// </summary>
+    public Task<LocalAiSetupResult> InstallLatestAsync(
+        string installPath,
+        IProgress<string>? progress = null,
+        CancellationToken ct = default)
+        => InstallLatestAsync(installPath, LlamaRuntimeVariant.Cpu, progress, ct);
+
     public async Task<LocalAiSetupResult> InstallLatestAsync(
         string installPath,
+        LlamaRuntimeVariant variant,
         IProgress<string>? progress = null,
         CancellationToken ct = default)
     {
         try
         {
             progress?.Report("Checking latest llama.cpp release...");
-            var release = await GetLatestDownloadInfoAsync(ct);
+            var release = await GetLatestDownloadInfoAsync(variant, ct);
             var versionedInstallPath = Path.Combine(installPath, release.TagName);
             Directory.CreateDirectory(versionedInstallPath);
+
+            // CUDA builds link against the toolkit runtime shipped separately
+            // (r14 1.2): extract it into the same versioned directory first so
+            // the DLLs sit beside llama-server.exe before it is located/started.
+            if (!string.IsNullOrWhiteSpace(release.CompanionAssetName) && !string.IsNullOrWhiteSpace(release.CompanionUrl))
+            {
+                var companion = await DownloadAndExtractArchiveAsync(
+                    versionedInstallPath, release.CompanionUrl!, release.CompanionAssetName!,
+                    $"CUDA runtime ({release.CompanionAssetName})", progress, ct);
+                if (!companion.Success)
+                    return companion;
+            }
 
             return await DownloadExtractAndLocateAsync(
                 versionedInstallPath, release.Url, release.AssetName, $"llama-server {release.TagName} ({release.DisplayName})", progress, ct);
@@ -229,7 +252,7 @@ public sealed class LlamaServerSetupService
         }
     }
 
-    private async Task<LocalAiSetupResult> DownloadExtractAndLocateAsync(
+    private async Task<LocalAiSetupResult> DownloadAndExtractArchiveAsync(
         string installPath,
         string url,
         string assetName,
@@ -267,6 +290,21 @@ public sealed class LlamaServerSetupService
             catch { }
         }
 
+        return new LocalAiSetupResult(true, $"{label} extracted");
+    }
+
+    private async Task<LocalAiSetupResult> DownloadExtractAndLocateAsync(
+        string installPath,
+        string url,
+        string assetName,
+        string label,
+        IProgress<string>? progress,
+        CancellationToken ct)
+    {
+        var extracted = await DownloadAndExtractArchiveAsync(installPath, url, assetName, label, progress, ct);
+        if (!extracted.Success)
+            return extracted;
+
         var exePath = FindInstalledExecutable(installPath);
         if (exePath is null)
             return new LocalAiSetupResult(false, $"Archive extracted but no llama-server executable was found under {installPath}.");
@@ -285,6 +323,101 @@ public sealed class LlamaServerSetupService
         return new LocalAiSetupResult(true, $"{label} installed at {exePath}", exePath);
     }
 
+    /// <summary>
+    /// Nearest ancestor directory whose leaf is a release tag ("bNNNNN"), or
+    /// null when the path is not inside a versioned directory (r14 3.2). Pure.
+    /// </summary>
+    public static string? NearestTagDirectoryName(string? path)
+    {
+        var current = string.IsNullOrWhiteSpace(path) ? null : Path.TrimEndingDirectorySeparator(path);
+        while (!string.IsNullOrEmpty(current))
+        {
+            var leaf = Path.GetFileName(current);
+            if (TagDirectoryPattern.IsMatch(leaf))
+                return leaf;
+            current = Path.GetDirectoryName(current);
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// From a set of sibling directory paths, selects the tag-pattern
+    /// directories that are safe to prune: everything named "bNNNNN" except the
+    /// tags to keep (the newly installed and the previously configured
+    /// versions). Non-tag directories are always ignored (r14 3.2). Pure.
+    /// </summary>
+    public static IReadOnlyList<string> SelectPrunableVersionDirectories(IEnumerable<string> siblingDirectoryPaths, params string?[] keepTags)
+    {
+        var keep = new HashSet<string>(
+            keepTags.Where(t => !string.IsNullOrWhiteSpace(t))!,
+            StringComparer.OrdinalIgnoreCase);
+        return siblingDirectoryPaths
+            .Where(dir =>
+            {
+                var leaf = Path.GetFileName(Path.TrimEndingDirectorySeparator(dir));
+                return TagDirectoryPattern.IsMatch(leaf) && !keep.Contains(leaf);
+            })
+            .ToList();
+    }
+
+    /// <summary>
+    /// Convenience overload that enumerates the install root and derives the
+    /// keep set from the new and previous executable paths (r14 3.2). Returns
+    /// an empty list when the root does not exist.
+    /// </summary>
+    public static IReadOnlyList<string> SelectPrunableVersionDirectories(string installRoot, string newExecutablePath, string? previousExecutablePath)
+    {
+        if (string.IsNullOrWhiteSpace(installRoot) || !Directory.Exists(installRoot))
+            return [];
+        var siblings = Directory.EnumerateDirectories(installRoot);
+        return SelectPrunableVersionDirectories(
+            siblings,
+            NearestTagDirectoryName(newExecutablePath),
+            NearestTagDirectoryName(previousExecutablePath));
+    }
+
+    /// <summary>
+    /// Deletes the given version directories, returning bytes reclaimed. A
+    /// directory whose files are still held open by a running server aborts
+    /// only its own deletion (r14 3.2); it is offered again next time. Only
+    /// ever call with paths from <see cref="SelectPrunableVersionDirectories"/>.
+    /// </summary>
+    public static long PruneVersionDirectories(IEnumerable<string> directories)
+    {
+        long reclaimed = 0;
+        foreach (var dir in directories)
+        {
+            try
+            {
+                if (!Directory.Exists(dir))
+                    continue;
+                var size = DirectorySizeBytes(dir);
+                Directory.Delete(dir, recursive: true);
+                reclaimed += size;
+            }
+            catch
+            {
+                // Locked (server still running the old binary) or otherwise
+                // undeletable: skip this directory without failing the rest.
+            }
+        }
+        return reclaimed;
+    }
+
+    public static long DirectorySizeBytes(string directory)
+    {
+        try
+        {
+            return Directory.Exists(directory)
+                ? Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories).Sum(f => new FileInfo(f).Length)
+                : 0;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
     /// <summary>Direct probe, then a recursive search: archives sometimes nest the binary under a build/bin-style subdirectory.</summary>
     private static string? FindInstalledExecutable(string installPath)
     {
@@ -299,43 +432,224 @@ public sealed class LlamaServerSetupService
         return matches.Count > 0 ? matches[0] : null;
     }
 
-    public async Task<LlamaServerLatestDownload> GetLatestDownloadInfoAsync(CancellationToken ct = default)
+    public Task<LlamaServerLatestDownload> GetLatestDownloadInfoAsync(CancellationToken ct = default)
+        => GetLatestDownloadInfoAsync(LlamaRuntimeVariant.Cpu, ct);
+
+    public async Task<LlamaServerLatestDownload> GetLatestDownloadInfoAsync(LlamaRuntimeVariant variant, CancellationToken ct = default)
     {
         var release = await _http.GetFromJsonAsync<GitHubRelease>($"{ReleaseApiBaseUrl}/latest", ct)
             ?? throw new InvalidOperationException("GitHub did not return llama.cpp release metadata.");
-        var asset = SelectDownloadAsset(release.Assets ?? []);
+        var assets = release.Assets ?? [];
+        var platform = CurrentPlatform();
+
+        // A requested accelerator build the release does not publish for this
+        // platform falls back to the default CPU asset rather than failing the
+        // whole install (r14 1.1); the caller can still verify and re-fall-back.
+        var asset = SelectDownloadAsset(assets, platform, variant);
+        var effectiveVariant = variant;
+        if (asset is null && variant != LlamaRuntimeVariant.Cpu)
+        {
+            asset = SelectDownloadAsset(assets, platform, LlamaRuntimeVariant.Cpu);
+            effectiveVariant = LlamaRuntimeVariant.Cpu;
+        }
         if (asset is null)
             throw new InvalidOperationException($"No llama-server asset matched this platform in release {release.TagName}.");
+
+        string? companionName = null;
+        string? companionUrl = null;
+        if (effectiveVariant == LlamaRuntimeVariant.Cuda)
+        {
+            var companion = SelectCudartAsset(assets, asset.Name);
+            companionName = companion?.Name;
+            companionUrl = companion?.BrowserDownloadUrl;
+        }
+
+        var display = platform is null
+            ? CurrentPlatformDisplayName()
+            : DisplayNameFor(platform.Value, effectiveVariant);
 
         return new LlamaServerLatestDownload(
             release.TagName,
             asset.Name,
             asset.BrowserDownloadUrl,
-            CurrentPlatformDisplayName());
+            display,
+            companionName,
+            companionUrl);
+    }
+
+    private static readonly Regex TagDirectoryPattern = new(@"^b\d+$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex CudaVersionPattern = new(@"-cuda-(?<ver>\d+(?:\.\d+)?)-", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    /// <summary>
+    /// Classifies a GPU adapter name into a vendor (r14 1.1). Pure string
+    /// function so the Auto variant decision is unit-testable without a real
+    /// adapter. Matching is case-insensitive substring; the first vendor whose
+    /// marker appears wins.
+    /// </summary>
+    public static GpuVendor ClassifyGpuVendor(string? gpuName)
+    {
+        if (string.IsNullOrWhiteSpace(gpuName))
+            return GpuVendor.Unknown;
+
+        var name = gpuName.ToLowerInvariant();
+        if (name.Contains("nvidia") || name.Contains("geforce") || name.Contains("rtx") ||
+            name.Contains("gtx") || name.Contains("quadro") || name.Contains("tesla"))
+            return GpuVendor.Nvidia;
+        if (name.Contains("radeon") || name.Contains("amd") || name.Contains("firepro"))
+            return GpuVendor.Amd;
+        if (name.Contains("arc") || name.Contains("iris") || name.Contains("uhd") || name.Contains("intel"))
+            return GpuVendor.Intel;
+        return GpuVendor.Unknown;
     }
 
     /// <summary>
-    /// Selects the default (no accelerator) build for a platform: Windows
-    /// publishes an explicit "-cpu-" segment; Linux/macOS CPU builds carry no
-    /// extra variant token between the os and arch segments, so an exact
-    /// suffix match on "-bin-&lt;os&gt;[-cpu]-&lt;arch&gt;.&lt;ext&gt;" is what tells the
-    /// plain build apart from the cuda/rocm/hip/vulkan/sycl/opencl/openvino
-    /// variants published alongside it (r11 1.1/1.2, verified against the
-    /// live b10034 asset list on 2026-07-16).
+    /// Resolves a configured (possibly Auto) variant against the hardware
+    /// snapshot into a concrete build to install (r14 1.1). Auto: an NVIDIA GPU
+    /// picks Cuda, any other real GPU (with reported VRAM) picks Vulkan, and no
+    /// GPU picks Cpu. An explicit non-Auto choice always wins.
     /// </summary>
-    public static GitHubReleaseAsset? SelectDownloadAsset(IReadOnlyList<GitHubReleaseAsset> assets, LlamaPlatform? platform = null)
+    public static LlamaRuntimeVariant ResolveVariant(LlamaRuntimeVariant configured, HardwareProfile? profile)
+    {
+        if (configured != LlamaRuntimeVariant.Auto)
+            return configured;
+
+        var hasRealGpu = profile is { MaxGpuVramBytes: > 0 } || !string.IsNullOrWhiteSpace(profile?.GpuName);
+        if (!hasRealGpu)
+            return LlamaRuntimeVariant.Cpu;
+
+        return ClassifyGpuVendor(profile?.GpuName) == GpuVendor.Nvidia
+            ? LlamaRuntimeVariant.Cuda
+            : LlamaRuntimeVariant.Vulkan;
+    }
+
+    /// <summary>
+    /// Walks up from a llama-server executable's directory to the install root
+    /// (r14 3.1). Each successful update extracts into a new "bNNNNN" tag
+    /// subdirectory, so the executable's own directory is usually a version
+    /// directory; installing the next update there would nest one level deeper
+    /// forever. This skips consecutive tag-pattern leaves and returns the first
+    /// non-tag ancestor, but never crosses into a drive/filesystem root, so an
+    /// install root that is itself legitimately named like a tag is preserved.
+    /// Pure path arithmetic, no filesystem access.
+    /// </summary>
+    public static string ResolveInstallRoot(string executableDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(executableDirectory))
+            return executableDirectory;
+
+        var current = Path.TrimEndingDirectorySeparator(executableDirectory.Trim());
+        while (TagDirectoryPattern.IsMatch(Path.GetFileName(current)))
+        {
+            var parent = Path.GetDirectoryName(current);
+            if (string.IsNullOrEmpty(parent))
+                break;
+            // Do not walk a tag-named directory that sits directly under a
+            // drive/filesystem root into that root: it is the install root.
+            if (string.IsNullOrEmpty(Path.GetDirectoryName(parent)))
+                break;
+            current = parent;
+        }
+
+        return current;
+    }
+
+    /// <summary>
+    /// Selects the download asset for a platform and build variant (r14 1.1).
+    /// Non-Windows platforms keep the r11 default-build selection untouched
+    /// (exact os/arch suffix, no accelerator token). Windows matches by
+    /// os/arch plus the variant token ("-cpu-", "-cuda-", "-vulkan-"); when a
+    /// release ships more than one CUDA build (e.g. 12.4 and 13.3) the lowest
+    /// version is chosen for the broadest driver compatibility. Returns null
+    /// when no asset matches, letting the caller fall back to Cpu.
+    /// </summary>
+    public static GitHubReleaseAsset? SelectDownloadAsset(
+        IReadOnlyList<GitHubReleaseAsset> assets,
+        LlamaPlatform? platform = null,
+        LlamaRuntimeVariant variant = LlamaRuntimeVariant.Cpu)
     {
         var resolvedPlatform = platform ?? CurrentPlatform();
         if (resolvedPlatform is null)
             return null;
 
-        var suffix = SuffixFor(resolvedPlatform.Value);
+        var p = resolvedPlatform.Value;
+        if (!IsWindows(p) || variant is LlamaRuntimeVariant.Auto or LlamaRuntimeVariant.Cpu)
+        {
+            var suffix = SuffixFor(p);
+            return assets.FirstOrDefault(asset =>
+                asset.Name.StartsWith("llama-", StringComparison.OrdinalIgnoreCase) &&
+                asset.Name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase));
+        }
+
+        var arch = ArchToken(p);
+        var token = variant switch
+        {
+            LlamaRuntimeVariant.Cuda => "-cuda-",
+            LlamaRuntimeVariant.Vulkan => "-vulkan-",
+            _ => "-cpu-"
+        };
+
+        var matches = assets.Where(asset =>
+        {
+            var name = asset.Name.ToLowerInvariant();
+            return name.StartsWith("llama-", StringComparison.Ordinal)
+                && name.EndsWith($"-{arch}.zip", StringComparison.Ordinal)
+                && name.Contains("-bin-win-", StringComparison.Ordinal)
+                && name.Contains(token, StringComparison.Ordinal);
+        }).ToList();
+
+        if (matches.Count == 0)
+            return null;
+        if (variant == LlamaRuntimeVariant.Cuda && matches.Count > 1)
+            return matches.OrderBy(a => ParseCudaVersion(a.Name)).First();
+        return matches[0];
+    }
+
+    /// <summary>
+    /// Finds the CUDA runtime companion archive (cudart-...) that matches a
+    /// chosen CUDA llama build (r14 1.2). CUDA builds link against the toolkit
+    /// runtime shipped in a sibling asset of the same version and arch.
+    /// </summary>
+    public static GitHubReleaseAsset? SelectCudartAsset(IReadOnlyList<GitHubReleaseAsset> assets, string cudaAssetName)
+    {
+        var version = ParseCudaVersionString(cudaAssetName);
+        if (version is null)
+            return null;
+        var arch = cudaAssetName.Contains("-arm64.", StringComparison.OrdinalIgnoreCase) ? "arm64" : "x64";
         return assets.FirstOrDefault(asset =>
-            asset.Name.StartsWith("llama-", StringComparison.OrdinalIgnoreCase) &&
-            asset.Name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase));
+        {
+            var name = asset.Name.ToLowerInvariant();
+            return name.StartsWith("cudart-", StringComparison.Ordinal)
+                && name.Contains($"-cuda-{version}-", StringComparison.Ordinal)
+                && name.EndsWith($"-{arch}.zip", StringComparison.Ordinal);
+        });
+    }
+
+    private static (int Major, int Minor) ParseCudaVersion(string assetName)
+    {
+        var text = ParseCudaVersionString(assetName);
+        if (text is null)
+            return (int.MaxValue, int.MaxValue);
+        var parts = text.Split('.');
+        var major = int.TryParse(parts[0], out var m) ? m : int.MaxValue;
+        var minor = parts.Length > 1 && int.TryParse(parts[1], out var n) ? n : 0;
+        return (major, minor);
+    }
+
+    private static string? ParseCudaVersionString(string assetName)
+    {
+        var match = CudaVersionPattern.Match(assetName);
+        return match.Success ? match.Groups["ver"].Value : null;
     }
 
     private static string AssetNameFor(LlamaPlatform platform, string tag) => $"llama-{tag}{SuffixFor(platform)}";
+
+    private static bool IsWindows(LlamaPlatform platform) => platform is LlamaPlatform.WinX64 or LlamaPlatform.WinArm64;
+
+    private static string ArchToken(LlamaPlatform platform) => platform switch
+    {
+        LlamaPlatform.WinX64 or LlamaPlatform.LinuxX64 or LlamaPlatform.MacX64 => "x64",
+        _ => "arm64"
+    };
 
     private static string SuffixFor(LlamaPlatform platform) => platform switch
     {
@@ -348,6 +662,15 @@ public sealed class LlamaServerSetupService
         _ => throw new ArgumentOutOfRangeException(nameof(platform))
     };
 
+    /// <summary>Human-readable variant label for install UI (r14 1.1).</summary>
+    public static string VariantLabel(LlamaRuntimeVariant variant) => variant switch
+    {
+        LlamaRuntimeVariant.Cuda => "CUDA",
+        LlamaRuntimeVariant.Vulkan => "Vulkan",
+        LlamaRuntimeVariant.Cpu => "CPU",
+        _ => "Auto"
+    };
+
     private static string DisplayNameFor(LlamaPlatform platform) => platform switch
     {
         LlamaPlatform.WinX64 => "Windows x64 CPU",
@@ -358,6 +681,14 @@ public sealed class LlamaServerSetupService
         LlamaPlatform.MacArm64 => "macOS ARM64",
         _ => throw new ArgumentOutOfRangeException(nameof(platform))
     };
+
+    private static string DisplayNameFor(LlamaPlatform platform, LlamaRuntimeVariant variant)
+    {
+        if (!IsWindows(platform) || variant is LlamaRuntimeVariant.Auto or LlamaRuntimeVariant.Cpu)
+            return DisplayNameFor(platform);
+        var arch = ArchToken(platform);
+        return $"Windows {arch} {VariantLabel(variant)}";
+    }
 
     public static LlamaPlatform? CurrentPlatform()
     {
@@ -381,7 +712,13 @@ public sealed class LlamaServerSetupService
 }
 
 public sealed record LlamaServerReleaseInfo(string DisplayName, string Url);
-public sealed record LlamaServerLatestDownload(string TagName, string AssetName, string Url, string DisplayName);
+public sealed record LlamaServerLatestDownload(
+    string TagName,
+    string AssetName,
+    string Url,
+    string DisplayName,
+    string? CompanionAssetName = null,
+    string? CompanionUrl = null);
 public sealed record GitHubRelease(
     [property: JsonPropertyName("tag_name")] string TagName,
     [property: JsonPropertyName("assets")] List<GitHubReleaseAsset>? Assets);

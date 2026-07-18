@@ -8,7 +8,11 @@ public sealed record ChatSendResult(
     ChatTokenUsage? Usage,
     bool Cancelled,
     string? Error,
-    ChatServerTimings? ServerTimings = null);
+    ChatServerTimings? ServerTimings = null,
+    // r14 4.1: the first streamed event of any kind (reasoning/tool deltas,
+    // buffering) vs the first visible content token. The gap is time the user
+    // spent staring at a blank bubble that "before first token" used to hide.
+    long FirstEventMs = 0);
 
 /// <summary>
 /// Drives one streamed chat completion and reports timing/usage, leaving all
@@ -23,16 +27,31 @@ public static class ChatSendOrchestrator
         LlmChatOptions options,
         Action<string> onToken,
         Action<ChatTokenUsage> onUsage,
-        CancellationToken ct)
+        CancellationToken ct,
+        // r14 4.2: fired once when the first stream event of any kind arrives,
+        // so the caller can switch a live "reading prompt" placeholder to
+        // "thinking" before any visible content exists.
+        Action? onFirstEvent = null)
     {
         var clock = Stopwatch.StartNew();
         long? firstTokenMs = null;
+        long? firstEventMs = null;
         ChatTokenUsage? usage = null;
         ChatServerTimings? serverTimings = null;
         try
         {
             await foreach (var evt in llm.StreamChatAsync(modelId, history, options, ct))
             {
+                // r14 4.1: stamp the first event of any kind, before the
+                // content check, so a non-content stream prefix (reasoning or
+                // tool deltas, transport buffering) is attributed to the stream
+                // rather than misreported as "before first token".
+                if (firstEventMs is null)
+                {
+                    firstEventMs = clock.ElapsedMilliseconds;
+                    onFirstEvent?.Invoke();
+                }
+
                 if (evt.Usage is not null)
                 {
                     usage = evt.Usage;
@@ -49,15 +68,15 @@ public static class ChatSendOrchestrator
                 }
             }
 
-            return new ChatSendResult(firstTokenMs ?? 0, clock.ElapsedMilliseconds, usage, Cancelled: false, Error: null, ServerTimings: serverTimings);
+            return new ChatSendResult(firstTokenMs ?? 0, clock.ElapsedMilliseconds, usage, Cancelled: false, Error: null, ServerTimings: serverTimings, FirstEventMs: firstEventMs ?? firstTokenMs ?? 0);
         }
         catch (OperationCanceledException)
         {
-            return new ChatSendResult(firstTokenMs ?? 0, clock.ElapsedMilliseconds, usage, Cancelled: true, Error: null);
+            return new ChatSendResult(firstTokenMs ?? 0, clock.ElapsedMilliseconds, usage, Cancelled: true, Error: null, FirstEventMs: firstEventMs ?? 0);
         }
         catch (Exception ex)
         {
-            return new ChatSendResult(firstTokenMs ?? 0, clock.ElapsedMilliseconds, usage, Cancelled: false, Error: ex.Message);
+            return new ChatSendResult(firstTokenMs ?? 0, clock.ElapsedMilliseconds, usage, Cancelled: false, Error: ex.Message, FirstEventMs: firstEventMs ?? 0);
         }
     }
 }

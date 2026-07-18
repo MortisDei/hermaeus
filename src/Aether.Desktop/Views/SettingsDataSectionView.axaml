@@ -37,6 +37,14 @@
                 </Button>
             </Grid>
             <TextBlock Text="{Binding LocalAiAssetsStatus}" FontSize="11" Opacity="0.45" TextWrapping="Wrap" />
+            <Grid ColumnDefinitions="110,*" ColumnSpacing="8">
+                <TextBlock Grid.Column="0" Text="GPU build" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
+                <ComboBox Grid.Column="1" HorizontalAlignment="Left" MinWidth="180"
+                          FontSize="13"
+                          ItemsSource="{Binding LlamaRuntimeVariantOptions}"
+                          SelectedItem="{Binding LlamaRuntimeVariant}"
+                          ToolTip.Tip="Which llama.cpp build to download for install and update. Auto picks CUDA on NVIDIA, Vulkan on any other GPU, and CPU when no GPU is detected. An explicit choice always wins." />
+            </Grid>
             <Grid ColumnDefinitions="110,*,Auto" ColumnSpacing="8">
                 <TextBlock Grid.Column="0" Text="Backup to" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
                 <TextBox Grid.Column="1" Text="{Binding BackupDirectory}" Watermark="Backup folder"

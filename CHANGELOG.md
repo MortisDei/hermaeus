@@ -11,6 +11,62 @@ limit.
 
 ## [Unreleased]
 
+## [0.19.0-alpha] - 2026-07-18
+
+Implements docs/review r14 in full: "Fast by default." A field log showed an
+8-minute chat send reading a 9,744-token prompt at 51 tokens/sec, because
+every Windows install shipped the CPU-only llama.cpp build and launched it
+with zero GPU offload and four parallel slots (quartering the context). r13
+taught the app what hardware it runs on; r14 makes the runtime use it and
+keeps the latency story honest.
+
+### Added
+
+- **GPU-aware llama.cpp builds.** A new runtime-variant setting (Auto by
+  default) resolves against the detected GPU: NVIDIA picks the CUDA build
+  (with its `cudart` companion runtime), any other real GPU picks Vulkan, and
+  no GPU picks CPU. Asset selection matches the release by os/arch plus the
+  variant token, verified against the live GitHub asset list, and prefers the
+  lowest CUDA version for driver compatibility. After install the binary is
+  launch-verified; a GPU build that cannot start falls back to CPU once.
+- **A Doctor advisory** that fires when a real GPU is present but inference is
+  still configured for the CPU (CPU-only build or zero offload), naming the
+  measured consequence and deep-linking the fix.
+- **Superseded-version pruning.** After a successful update the flow offers to
+  remove old `bNNNNN` version directories under the install root (single
+  confirm, current and previous kept, locked directories skipped).
+
+### Changed
+
+- **GPU offload now uses the GPU.** `GpuLayers = -1` means "all layers"
+  (rendered as `--n-gpu-layers 999`) and is the default for new managed
+  servers when a GPU is detected; `0` remains explicit CPU; `N > 0` offloads
+  exactly N.
+- **One request slot by default.** Managed servers launch with `--parallel 1`
+  so the whole `--ctx-size` belongs to one conversation and every send reuses
+  the same KV cache, instead of silently getting a quarter of the context.
+  Chat requests now send `cache_prompt: true` explicitly and launch with
+  `--cache-reuse 256`; embeddings servers pin `-b 512 -ub 512` to stop the
+  batch-clamp warning. Context-limit math uses the per-slot ceiling.
+- **Updates install to the resolved install root**, not the current binary's
+  own version directory, so they no longer nest one tag deeper each time
+  (`b10064\b10066\...`), and preserve the configured runtime variant.
+- **Latency truth.** Chat timing separates the first streamed event of any
+  kind from the first visible content token, so a long non-content stream
+  prefix is no longer hidden inside "before first token"; the slow-send
+  warning names where the time went and, on a GPU machine configured for CPU
+  inference, appends a "prompt was read at CPU speed" hint.
+
+### Fixed
+
+- **"Failed to fetch models" log spam.** A stopped managed server no longer
+  logs an error per model-fetch call; the line is emitted at most once per
+  up-to-down transition, and skipped entirely when the server is known
+  stopped.
+- **Triple stop-logging per shutdown.** Stop is now idempotent at the logging
+  level: an already-stopped server logs nothing, so the runtime log shows one
+  Stopping/Stopped pair per actual shutdown.
+
 ## [0.18.0-alpha] - 2026-07-18
 
 Implements docs/review r13 in full: "usability is what is going to decide
@@ -892,59 +948,3 @@ was flagged risky, and whether they can undo it.
 
 Coverage floor raised 47 -> 48.
 
-## [0.10.0-alpha] - 2026-07-12
-
-Implements docs/review r5 in full: voice stops being "TTS for chat" and
-becomes a shared service for the whole app, and the benchmark store grows a
-deterministic recommendation engine on top of data it already persists.
-
-### Voice orchestration
-
-- **`IVoiceOrchestrator`.** A single background worker drains a priority
-  queue (Low/Normal/Critical) one utterance at a time, so two consumers can
-  never overlap audio without a mixer. Critical utterances preempt the
-  current playback and clear queued Low items; same-key `DedupeKey`
-  utterances collapse; channels default to disabled except Chat, which
-  preserves the pre-r5 manual speak button.
-- **Voice profiles and per-channel settings.** `TtsSettings.Profiles`
-  (named voice/speed combinations) and `TtsSettings.Channels` (per-channel
-  enable + profile) are new, additive settings fields; a Settings > Voice
-  card exposes a mute toggle, auto-speak, streaming speech, and the
-  channel/profile editors.
-- **Six consumers.** Chat can auto-speak replies (`Tts.AutoSpeakChatReplies`,
-  off by default) and, experimentally, speak them sentence-by-sentence while
-  the model is still streaming (`Tts.StreamingChatSpeech`, via a new
-  `SentenceChunker`). The agent narrates milestones only (task started,
-  waiting for approval/reply at Critical priority, terminal Complete/Failed)
-  and can use a per-workspace voice profile stored in `.aether/workspace.json`.
-  Doctor speaks one Critical summary per scan when it finds Errors.
-  Benchmarks announce run completion. A new `VoiceNotificationBridge`
-  forwards Warning/Error toasts onto the Notification channel.
-- All spoken chat text passes through `ChatSpeechSanitizer`, which replaces
-  fenced/inline code with a spoken placeholder so TTS never reads code
-  character by character.
-
-### Benchmark insights
-
-- **Tag propagation.** `BenchmarkCase.Tags` now copies onto
-  `BenchmarkResult.Tags` at scoring time; `BenchmarkInsightsService`
-  suite-joins tags back onto older runs whose originating suite still
-  exists, so historical runs still feed per-tag leaderboards.
-- **`BenchmarkInsightsService` + `BenchmarkInsightsMath`.** Deterministic,
-  no LLM: groups runs by model + quantization + runtime, filters to
-  hardware comparable to the current machine (GPU name + VRAM within 10%,
-  or both CPU-only), and ranks by `QualityPerSecond = quality *
-  log2(1 + tokens/sec)`. Requires at least 2 runs and 10 cases before a
-  model appears in any leaderboard; flags stale results (>60 days old or a
-  different Aether minor version). Produces pairwise comparison sentences
-  ("X scores 4% lower than Y but runs 2.3x faster").
-- **Insights tab** on the Benchmarks page: best-overall card, per-tag
-  leaderboards with comparison sentences, caveats, and a re-run shortcut.
-  Loaded on demand, not on page open.
-- **Doctor advisory check.** Info-only: when the selected chat model ranks
-  more than 10 points behind the best comparable model, Doctor names both.
-  Never Warning/Error, never switches anything automatically.
-
-55 new tests (327->382), coverage floor raised 45->47. Ships as 0.10.0-alpha because
-two new user-facing capabilities landed in the same round. Archived at
-docs/review/archived/r5/.

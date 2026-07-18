@@ -54,3 +54,6 @@ temp/
 
 # C# Dev Kit Shit
 *.lscache
+
+# Other
+CLAUDE.md
