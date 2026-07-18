@@ -12,6 +12,7 @@ public partial class ChatView : UserControl
 {
     private ChatViewModel? _vm;
     private EventHandler? _scrollHandler;
+    private EventHandler? _settingsChangedHandler;
 
     public ChatView()
     {
@@ -21,6 +22,8 @@ public partial class ChatView : UserControl
         {
             if (_vm is not null && _scrollHandler is not null)
                 _vm.ScrollToBottom -= _scrollHandler;
+            if (_vm is not null && _settingsChangedHandler is not null)
+                _vm.Settings.SettingsChanged -= _settingsChangedHandler;
             if (_vm is not null)
             {
                 _vm.RequestCopyToClipboard = null;
@@ -32,10 +35,15 @@ public partial class ChatView : UserControl
             {
                 _vm = null;
                 _scrollHandler = null;
+                _settingsChangedHandler = null;
                 return;
             }
 
             _vm = vm;
+
+            _settingsChangedHandler = (_, _) => ApplyAcceptsReturn();
+            vm.Settings.SettingsChanged += _settingsChangedHandler;
+            ApplyAcceptsReturn();
 
             _scrollHandler = (_, _) =>
                 Dispatcher.UIThread.Post(() =>
@@ -102,6 +110,21 @@ public partial class ChatView : UserControl
                 return file?.Path.LocalPath;
             };
         };
+    }
+
+    /// <summary>
+    /// AcceptsReturn must reflect Ui.CtrlEnterToSend: when it's true (plain
+    /// Enter inserts a newline, Ctrl+Enter sends), the TextBox needs to own
+    /// Enter for its normal newline insertion. When it's false, AcceptsReturn
+    /// must be false too, otherwise Avalonia's own Enter handling inserts a
+    /// newline and marks the key handled before <see cref="OnInputKeyDown"/>
+    /// ever gets to send on plain Enter.
+    /// </summary>
+    private void ApplyAcceptsReturn()
+    {
+        if (_vm is null) return;
+        if (this.FindControl<TextBox>("InputBox") is { } input)
+            input.AcceptsReturn = _vm.Settings.Settings.Ui.CtrlEnterToSend;
     }
 
     private void OnInputKeyDown(object? sender, KeyEventArgs e)

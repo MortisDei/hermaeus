@@ -4,9 +4,11 @@ using Avalonia.Controls;
 using Avalonia.Controls.Documents;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using AvaloniaEdit;
 using AvaloniaEdit.Highlighting;
 using Markdig;
@@ -50,6 +52,15 @@ public sealed class MarkdownViewer : ContentControl, IDisposable
     internal int LastReusedBlockCount { get; private set; }
     internal int LastRebuiltBlockCount { get; private set; }
 
+    // Cross-block drag selection: each markdown block (paragraph, code
+    // fence, list item, table cell...) renders as its own independently
+    // selectable control, so a drag can't natively span block boundaries.
+    // Once a drag crosses from its starting block into another, every block
+    // is selected as a whole and Ctrl+C copies the message's raw markdown
+    // directly instead of relying on whichever single control has focus.
+    private Control? _dragAnchorBlock;
+    private bool _crossBlockSelectionActive;
+
     public MarkdownViewer()
     {
         _renderTimer = new DispatcherTimer
@@ -57,6 +68,92 @@ public sealed class MarkdownViewer : ContentControl, IDisposable
             Interval = TimeSpan.FromMilliseconds(75)
         };
         _renderTimer.Tick += OnRenderTimerTick;
+
+        AddHandler(PointerPressedEvent, OnViewerPointerPressed, RoutingStrategies.Tunnel);
+        AddHandler(PointerMovedEvent, OnViewerPointerMoved, RoutingStrategies.Tunnel);
+        AddHandler(PointerReleasedEvent, OnViewerPointerReleased, RoutingStrategies.Tunnel);
+        AddHandler(KeyDownEvent, OnViewerKeyDown, RoutingStrategies.Tunnel);
+    }
+
+    private void OnViewerPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (_crossBlockSelectionActive)
+        {
+            ClearAllBlockSelections();
+            _crossBlockSelectionActive = false;
+        }
+        _dragAnchorBlock = e.GetCurrentPoint(this).Properties.IsLeftButtonPressed
+            ? HitTestBlock(e.GetPosition(this))
+            : null;
+    }
+
+    private void OnViewerPointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (_dragAnchorBlock is null || _crossBlockSelectionActive) return;
+        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) return;
+
+        var current = HitTestBlock(e.GetPosition(this));
+        if (current is not null && current != _dragAnchorBlock)
+        {
+            SelectAllBlocks();
+            _crossBlockSelectionActive = true;
+        }
+    }
+
+    private void OnViewerPointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        _dragAnchorBlock = null;
+    }
+
+    private void OnViewerKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (!_crossBlockSelectionActive || e.Key != Key.C || e.KeyModifiers != KeyModifiers.Control)
+            return;
+
+        e.Handled = true;
+        _ = CopyFullMarkdownAsync();
+    }
+
+    private async Task CopyFullMarkdownAsync()
+    {
+        try
+        {
+            if (TopLevel.GetTopLevel(this)?.Clipboard is { } clipboard)
+                await clipboard.SetTextAsync(Markdown ?? string.Empty);
+        }
+        catch
+        {
+            // Best-effort: no clipboard available on this platform/session.
+        }
+    }
+
+    /// <summary>Top-level rendered block (direct child of the content StackPanel) under <paramref name="pointInViewer"/>, or null outside any block.</summary>
+    private Control? HitTestBlock(Point pointInViewer)
+    {
+        if (Content is not StackPanel panel) return null;
+        var pointInPanel = this.TranslatePoint(pointInViewer, panel) ?? pointInViewer;
+        foreach (var child in panel.Children)
+            if (child.Bounds.Contains(pointInPanel))
+                return child;
+        return null;
+    }
+
+    private void SelectAllBlocks()
+    {
+        if (Content is not Control root) return;
+        foreach (var stb in root.GetSelfAndVisualDescendants().OfType<SelectableTextBlock>())
+            stb.SelectAll();
+        foreach (var editor in root.GetSelfAndVisualDescendants().OfType<TextEditor>())
+            editor.SelectAll();
+    }
+
+    private void ClearAllBlockSelections()
+    {
+        if (Content is not Control root) return;
+        foreach (var stb in root.GetSelfAndVisualDescendants().OfType<SelectableTextBlock>())
+            stb.ClearSelection();
+        foreach (var editor in root.GetSelfAndVisualDescendants().OfType<TextEditor>())
+            editor.Select(0, 0);
     }
 
     public string? Markdown
@@ -79,8 +176,13 @@ public sealed class MarkdownViewer : ContentControl, IDisposable
         {
             if (change.Property == MarkdownProperty)
             {
-                _renderTimer.Stop();
-                _renderTimer.Start();
+                // Throttle, don't debounce: during streaming, content changes faster
+                // than the render interval, so restarting the timer on every change
+                // would keep pushing the deadline out and never actually fire until
+                // the stream pauses. Leaving an already-running timer alone gives a
+                // steady render cadence instead.
+                if (!_renderTimer.IsEnabled)
+                    _renderTimer.Start();
             }
             else
             {

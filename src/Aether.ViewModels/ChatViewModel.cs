@@ -118,6 +118,15 @@ public partial class ChatViewModel : ViewModelBase
     private const int MessageWindowSize = 100;
     private int _revealedEarlierMessageCount;
 
+    // Tracks the skip offset and total Messages count used to build the
+    // current VisibleMessages, so a plain send (append at the tail) can add
+    // just the new item(s) instead of Clear()-ing the whole collection. A
+    // full Clear/rebuild collapses the ItemsControl's realized containers to
+    // zero, which snaps the chat ScrollViewer back to the top before the
+    // explicit scroll-to-bottom call catches up.
+    private int _visibleWindowSkip = -1;
+    private int _visibleWindowMessageCount;
+
     public bool HasEarlierMessages => Messages.Count > MessageWindowSize + _revealedEarlierMessageCount;
     public UiBoundCollection<LlmModel>         AvailableModels { get; } = [];
     public UiBoundCollection<ChatContextAttachment> ContextAttachments { get; } = [];
@@ -328,9 +337,24 @@ public partial class ChatViewModel : ViewModelBase
         var windowSize = MessageWindowSize + _revealedEarlierMessageCount;
         var skip = Math.Max(0, Messages.Count - windowSize);
 
-        VisibleMessages.Clear();
-        for (var i = skip; i < Messages.Count; i++)
-            VisibleMessages.Add(Messages[i]);
+        var canAppendInPlace = skip == _visibleWindowSkip
+            && Messages.Count > _visibleWindowMessageCount
+            && VisibleMessages.Count == _visibleWindowMessageCount - _visibleWindowSkip;
+
+        if (canAppendInPlace)
+        {
+            for (var i = _visibleWindowMessageCount; i < Messages.Count; i++)
+                VisibleMessages.Add(Messages[i]);
+        }
+        else
+        {
+            VisibleMessages.Clear();
+            for (var i = skip; i < Messages.Count; i++)
+                VisibleMessages.Add(Messages[i]);
+        }
+
+        _visibleWindowSkip = skip;
+        _visibleWindowMessageCount = Messages.Count;
 
         OnPropertyChanged(nameof(HasEarlierMessages));
     }

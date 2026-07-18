@@ -11,6 +11,39 @@ limit.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Chat responses appeared all at once instead of streaming.** `MarkdownViewer`'s
+  75ms render-debounce timer was stopped and restarted on every content
+  change; since streamed tokens arrive faster than that, the timer kept
+  getting pushed back and only ever fired once the stream paused, i.e. at the
+  end. It now leaves an already-running timer alone, giving a steady render
+  cadence during a stream instead of a debounce that never fires.
+- **Sending a message scrolled the chat view back to the top.**
+  `ChatViewModel.RefreshVisibleMessageWindow` did a full `Clear()` and rebuild
+  of the windowed message list on every send, which collapses the
+  `ScrollViewer`'s content to zero height and snaps it to the top before the
+  explicit scroll-to-bottom call can catch up. It now appends just the new
+  message(s) in place when the window's start position hasn't shifted.
+- **"Ctrl+Enter to send" had no effect on plain Enter.** The chat input's
+  `AcceptsReturn` was hardcoded `true` in `AppStyles.axaml` regardless of the
+  `Ui.CtrlEnterToSend` setting, so Avalonia's own newline-insertion consumed
+  Enter before the app's key handler ever saw it. `AcceptsReturn` is now set
+  dynamically from the setting (and kept live via `SettingsChanged`).
+- **Dragging over an assistant response only selected one block at a time.**
+  `MarkdownViewer` renders each markdown block (paragraph, code fence, list
+  item, table cell) as its own independent selectable control, so a drag
+  couldn't span block boundaries. A drag that crosses from its starting
+  block into another now selects every block in the response as a whole, and
+  Ctrl+C copies the message's full raw markdown directly.
+- **Nothing stopped a second Aether process from launching.** Two instances
+  writing to the same SQLite data root with no cross-process coordination is
+  a real corruption risk. A `SingleInstanceGuard` now holds an exclusive
+  lock file (`%LocalAppData%/Aether/aether.lock`) for the process lifetime;
+  a second launch attempt exits immediately instead of opening a second
+  window. The OS releases the lock automatically on exit, crash, or kill, so
+  there is never a stale lock to clean up.
+
 ## [0.19.0-alpha] - 2026-07-18
 
 Implements docs/review r14 in full: "Fast by default." A field log showed an

@@ -420,6 +420,10 @@
   and home paths.
 - Tray integration, minimize-to-tray, local hotkeys, and Windows system-wide
   hotkeys.
+- Single-instance guard: launching Aether while another instance for the
+  same user account is already running exits immediately instead of opening
+  a second window, since two processes would otherwise write to the same
+  SQLite data root with no coordination between them.
 - Toast notifications throughout the app with opaque popup backgrounds.
 - Configurable data root with migration, backup, restore, and conflict refusal.
 - Data-root migration moves everything under the data root through one

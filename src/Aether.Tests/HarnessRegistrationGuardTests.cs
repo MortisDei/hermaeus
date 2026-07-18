@@ -31,6 +31,7 @@ internal static class HarnessRegistrationGuardTests
         typeof(ServiceTests),
         typeof(SetupWizardOnboardingTests),
         typeof(SetupWizardMigrationTests),
+        typeof(SingleInstanceGuardTests),
         typeof(TraceBindingTests),
         typeof(TtsTests),
         typeof(VoicePronunciationTests),

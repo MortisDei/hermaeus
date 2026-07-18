@@ -358,6 +358,12 @@ public static class HarnessCases
         [new HarnessCase("wizard data root step on first run completes without migration noise", SetupWizardMigrationTests.WizardDataRootStepOnFirstRunCompletesWithoutMigrationNoise)]
     ];
 
+    public static IEnumerable<object[]> SingleInstanceGuard =>
+    [
+        [new HarnessCase("second acquire on the same lock file fails", SingleInstanceGuardTests.SecondAcquireOnTheSameLockFileFails)],
+        [new HarnessCase("release frees the lock for a next acquire", SingleInstanceGuardTests.ReleaseFreesTheLockForANextAcquire)]
+    ];
+
     public static IEnumerable<object[]> MarkdownViewer =>
     [
         [new HarnessCase("link scheme gate allows http and https", MarkdownViewerTests.LinkSchemeGateAllowsHttpAndHttps)],
@@ -496,6 +502,16 @@ public sealed class MarkdownViewerHarnessTests
     [Theory]
     [MemberData(nameof(HarnessCases.MarkdownViewer), MemberType = typeof(HarnessCases))]
     public async Task Runs_MarkdownViewer_Cases(HarnessCase testCase)
+    {
+        await testCase.Run();
+    }
+}
+
+public sealed class SingleInstanceGuardHarnessTests
+{
+    [Theory]
+    [MemberData(nameof(HarnessCases.SingleInstanceGuard), MemberType = typeof(HarnessCases))]
+    public async Task Runs_SingleInstanceGuard_Cases(HarnessCase testCase)
     {
         await testCase.Run();
     }

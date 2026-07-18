@@ -46,7 +46,10 @@
         <Setter Property="MinHeight" Value="48" />
         <Setter Property="MaxHeight" Value="200" />
         <Setter Property="TextWrapping" Value="Wrap" />
-        <Setter Property="AcceptsReturn" Value="True" />
+        <!-- AcceptsReturn is set dynamically in ChatView.axaml.cs based on
+             Ui.CtrlEnterToSend: hardcoding it true here would make Avalonia's
+             own newline-insertion swallow a plain Enter before the app's send
+             handler ever sees it, regardless of the setting. -->
         <Setter Property="VerticalContentAlignment" Value="Center" />
     </Style>
 
