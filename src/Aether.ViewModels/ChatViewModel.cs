@@ -1252,23 +1252,37 @@ public partial class ChatViewModel : ViewModelBase
         // param resets to the settings default instead of keeping the
         // previous model's value, so tuning does not leak across models.
         if (!_suppressModelProfileDefaults)
-        {
-            var defaults = _settings.Settings.Llm;
-            Temperature = value?.DefaultTemperature ?? defaults.Temperature;
-            MaxTokens = value?.DefaultMaxTokens is { } max && max > 0 ? max : defaults.MaxTokens;
-            TopP = value?.DefaultTopP ?? defaults.TopP;
-            TopK = value?.DefaultTopK ?? defaults.TopK;
-            MinP = value?.DefaultMinP ?? defaults.MinP;
-            RepeatPenalty = value?.DefaultRepeatPenalty ?? defaults.RepeatPenalty;
-            FrequencyPenalty = value?.DefaultFrequencyPenalty ?? defaults.FrequencyPenalty;
-            PresencePenalty = value?.DefaultPresencePenalty ?? defaults.PresencePenalty;
-        }
+            ApplyModelProfileDefaults(value);
         SendCommand.NotifyCanExecuteChanged();
         ScheduleContextUsageRefresh();
         OnPropertyChanged(nameof(HasSelectedModel));
         OnPropertyChanged(nameof(IsSelectedModelRemote));
         OnPropertyChanged(nameof(SelectedModelLocalityLabel));
     }
+
+    /// <summary>The default-application fallback chain (per-model profile override, else the
+    /// global Settings > LLM value): shared by a genuine model switch (OnSelectedModelChanged)
+    /// and the sampling flyout's "Reset to model defaults" button so there is exactly one copy
+    /// of this logic (r13 04-chat-sampling.md 4.1).</summary>
+    private void ApplyModelProfileDefaults(LlmModel? value)
+    {
+        var defaults = _settings.Settings.Llm;
+        Temperature = value?.DefaultTemperature ?? defaults.Temperature;
+        MaxTokens = value?.DefaultMaxTokens is { } max && max > 0 ? max : defaults.MaxTokens;
+        TopP = value?.DefaultTopP ?? defaults.TopP;
+        TopK = value?.DefaultTopK ?? defaults.TopK;
+        MinP = value?.DefaultMinP ?? defaults.MinP;
+        RepeatPenalty = value?.DefaultRepeatPenalty ?? defaults.RepeatPenalty;
+        FrequencyPenalty = value?.DefaultFrequencyPenalty ?? defaults.FrequencyPenalty;
+        PresencePenalty = value?.DefaultPresencePenalty ?? defaults.PresencePenalty;
+    }
+
+    /// <summary>Re-applies model-profile/global sampling defaults exactly like a genuine model
+    /// switch does, without touching ISettingsService.Settings (these are VM-local values, per
+    /// the r12 1.x boundary - see the flyout's "Applies to this conversation only" note).</summary>
+    [RelayCommand]
+    private void ResetSamplingToModelDefaults() => ApplyModelProfileDefaults(SelectedModel);
+
     partial void OnIsGeneratingChanged(bool value)       => SendCommand.NotifyCanExecuteChanged();
 
     private void ScheduleContextUsageRefresh()

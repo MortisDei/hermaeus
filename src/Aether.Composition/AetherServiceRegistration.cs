@@ -56,6 +56,9 @@ public static class AetherServiceRegistration
         s.AddSingleton<OllamaService>();
         s.AddSingleton<ILlmService, CompositeLlmService>();
         s.AddSingleton<ModelProfileService>();
+        s.AddSingleton<ModelManifestStore>();
+        s.AddSingleton<HuggingFaceClient>();
+        s.AddSingleton<ModelDownloadService>();
         s.AddSingleton<XttsV2VoiceProvider>();
         s.AddSingleton<KokoroVoiceProvider>();
         s.AddSingleton<F5TtsVoiceProvider>();

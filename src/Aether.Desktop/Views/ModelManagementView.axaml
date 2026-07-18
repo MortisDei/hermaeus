@@ -2,12 +2,13 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Aether.ViewModels"
              xmlns:views="using:Aether.Desktop.Views"
+             xmlns:conv="clr-namespace:Avalonia.Data.Converters;assembly=Avalonia.Base"
              x:Class="Aether.Desktop.Views.ModelManagementView"
              x:DataType="vm:ModelManagementViewModel">
 
     <DockPanel Margin="24">
 
-        <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto,Auto" Margin="0,0,0,16" ColumnSpacing="10">
+        <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto" Margin="0,0,0,10" ColumnSpacing="10">
             <TextBlock Grid.Column="0" Text="Models"
                        FontSize="22" FontWeight="SemiBold" VerticalAlignment="Center" />
             <CheckBox Grid.Column="1"
@@ -17,10 +18,128 @@
                       FontSize="12"
                       Opacity="0.7"
                       ToolTip.Tip="Bypasses the cached model list and re-queries every configured provider." />
-            <Button Grid.Column="2" Command="{Binding RefreshCommand}"
+            <Button Grid.Column="2"
+                    Command="{Binding OrganizeModelsFolderCommand}"
+                    Content="Organize folder..."
+                    IsEnabled="{Binding !IsOrganizing}"
+                    Padding="14,7" CornerRadius="6" FontSize="13"
+                    ToolTip.Tip="Moves nested Hugging Face hub-cache files into a flat Models\LLM folder. Preview and confirm before anything moves." />
+            <Button Grid.Column="3"
+                    Command="{Binding CheckForUpdatesCommand}"
+                    Content="Check for updates"
+                    IsEnabled="{Binding !IsCheckingUpdates}"
+                    Padding="14,7" CornerRadius="6" FontSize="13"
+                    ToolTip.Tip="Compares models linked to a Hugging Face repo against the repo's current file hash. Manual only, huggingface.co, anonymous." />
+            <Button Grid.Column="4"
+                    Command="{Binding AutoTuneAllCommand}"
+                    Content="Auto-tune all"
+                    IsVisible="{Binding !IsAutoTuningAll}"
+                    Padding="14,7" CornerRadius="6" FontSize="13"
+                    ToolTip.Tip="Auto-tunes every local GGUF that is not running and does not already have a fresh tune profile, one at a time." />
+            <Button Grid.Column="4"
+                    Command="{Binding CancelAutoTuneAllCommand}"
+                    Content="Cancel tuning"
+                    IsVisible="{Binding IsAutoTuningAll}"
+                    Padding="14,7" CornerRadius="6" FontSize="13"
+                    ToolTip.Tip="Stops after the model currently being probed finishes." />
+            <Button Grid.Column="5" Command="{Binding RefreshCommand}"
                     Content="Refresh" Padding="14,7" CornerRadius="6" FontSize="13"
                     ToolTip.Tip="Reloads the model list from all enabled providers." />
         </Grid>
+
+        <TextBlock DockPanel.Dock="Top"
+                   Text="{Binding OrganizeStatus}"
+                   IsVisible="{Binding OrganizeStatus, Converter={x:Static views:NotEmptyConverter.Instance}}"
+                   FontSize="12" Opacity="0.65" Margin="0,0,0,6" />
+
+        <TextBlock DockPanel.Dock="Top"
+                   Text="{Binding UpdateCheckStatus}"
+                   IsVisible="{Binding UpdateCheckStatus, Converter={x:Static views:NotEmptyConverter.Instance}}"
+                   FontSize="12" Opacity="0.65" Margin="0,0,0,6" />
+
+        <TextBlock DockPanel.Dock="Top"
+                   Text="{Binding AutoTuneAllStatus}"
+                   IsVisible="{Binding AutoTuneAllStatus, Converter={x:Static views:NotEmptyConverter.Instance}}"
+                   FontSize="12" Opacity="0.65" Margin="0,0,0,10" />
+
+        <Expander DockPanel.Dock="Top"
+                  Header="Get models from Hugging Face"
+                  IsExpanded="{Binding IsHfBrowserExpanded}"
+                  Margin="0,0,0,12">
+            <StackPanel Spacing="10" Margin="0,10,0,0">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                    <TextBox Grid.Column="0"
+                             Text="{Binding HfSearchQuery}"
+                             Watermark="Search GGUF repos, e.g. 'llama 3 instruct'"
+                             CornerRadius="6"
+                             Padding="10,6" />
+                    <Button Grid.Column="1"
+                            Content="Search"
+                            Command="{Binding SearchHuggingFaceCommand}"
+                            IsEnabled="{Binding !IsSearchingHf}"
+                            Padding="14,7" CornerRadius="6"
+                            ToolTip.Tip="Searches huggingface.co/api/models, filtered to GGUF repos. Manual only." />
+                </Grid>
+
+                <TextBlock Text="{Binding HfBrowserStatus}"
+                           IsVisible="{Binding HfBrowserStatus, Converter={x:Static views:NotEmptyConverter.Instance}}"
+                           FontSize="12" Opacity="0.65" />
+
+                <ItemsControl ItemsSource="{Binding HfSearchResults}" MaxHeight="180">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="vm:HfRepoResultViewModel">
+                            <Button Content="{Binding RepoId}"
+                                    Command="{Binding $parent[ItemsControl].DataContext.SelectHfRepoCommand}"
+                                    CommandParameter="{Binding}"
+                                    HorizontalAlignment="Stretch"
+                                    HorizontalContentAlignment="Left"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    Padding="6,4"
+                                    ToolTip.Tip="{Binding Downloads, StringFormat='{}{0:N0} downloads'}" />
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <StackPanel Spacing="6" IsVisible="{Binding SelectedHfRepo, Converter={x:Static conv:ObjectConverters.IsNotNull}}">
+                    <TextBlock FontSize="13" FontWeight="SemiBold">
+                        <Run Text="Files in" /> <Run Text="{Binding SelectedHfRepo.RepoId}" /> <Run Text="(license:" /> <Run Text="{Binding SelectedHfRepo.License}" /> <Run Text=")" />
+                    </TextBlock>
+                    <ItemsControl ItemsSource="{Binding HfFiles}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:HfFileResultViewModel">
+                                <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="10" Margin="0,4">
+                                    <TextBlock Grid.Column="0" Text="{Binding FileName}" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                    <TextBlock Grid.Column="1" Text="{Binding SizeDisplay}" FontSize="11" Opacity="0.5" VerticalAlignment="Center" />
+                                    <Border Grid.Column="2" CornerRadius="4" Padding="6,1"
+                                            VerticalAlignment="Center"
+                                            IsVisible="{Binding FitLabel, Converter={x:Static views:NotEmptyConverter.Instance}}"
+                                            Background="{Binding FitTier, Converter={x:Static views:FitTierBrushConverter.Instance}}"
+                                            ToolTip.Tip="{Binding FitReason}">
+                                        <TextBlock Text="{Binding FitLabel}" FontSize="10" FontWeight="SemiBold" />
+                                    </Border>
+                                    <Button Grid.Column="3"
+                                            Content="{Binding IsDownloading, Converter={x:Static views:DownloadingLabelConverter.Instance}}"
+                                            Command="{Binding $parent[ItemsControl].DataContext.DownloadHfFileCommand}"
+                                            CommandParameter="{Binding}"
+                                            IsEnabled="{Binding !IsDownloading}"
+                                            FontSize="12" Padding="10,4" CornerRadius="6"
+                                            ToolTip.Tip="Downloads to Models\LLM\, SHA256-verified against the repo before use." />
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </StackPanel>
+        </Expander>
+
+        <TextBox DockPanel.Dock="Top"
+                 Text="{Binding FilterText}"
+                 Watermark="Filter by name or tag..."
+                 CornerRadius="6"
+                 Padding="10,6"
+                 Margin="0,0,0,12"
+                 ToolTip.Tip="Narrows the list already loaded below by name or tag. Does not re-query providers." />
 
         <!-- Status -->
         <TextBlock DockPanel.Dock="Top"
@@ -30,49 +149,82 @@
                    Foreground="{Binding IsError, Converter={x:Static views:ErrorColorConverter.Instance}}" />
 
         <!-- Model list -->
-        <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <ScrollViewer x:Name="ModelListScrollViewer" VerticalScrollBarVisibility="Auto">
             <ItemsControl ItemsSource="{Binding Models}">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate DataType="vm:ModelProfileItemViewModel">
                         <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
                                 BorderThickness="1" CornerRadius="6"
-                                Padding="14,12" Margin="0,4">
-                            <Grid RowDefinitions="Auto,Auto" RowSpacing="10">
-                                <Grid Grid.Row="0" ColumnDefinitions="*,Auto">
-                                    <StackPanel Grid.Column="0" Spacing="3">
-                                        <StackPanel Orientation="Horizontal" Spacing="8">
-                                            <TextBlock Text="{Binding EffectiveName}"
-                                                       FontSize="15" FontWeight="SemiBold" />
-                                            <Border CornerRadius="4" Padding="6,1"
-                                                    VerticalAlignment="Center"
-                                                    IsVisible="{Binding IsRunning}"
-                                                    Background="{DynamicResource SystemFillColorSuccessBrush}">
-                                                <TextBlock Text="Running" FontSize="10" FontWeight="SemiBold" />
-                                            </Border>
+                                Margin="0,4">
+                            <Expander IsExpanded="{Binding IsExpanded}" Padding="14,10">
+                                <Expander.Header>
+                                    <Grid ColumnDefinitions="*,Auto,Auto">
+                                        <StackPanel Grid.Column="0" Spacing="3">
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <TextBlock Text="{Binding EffectiveName}"
+                                                           FontSize="15" FontWeight="SemiBold" />
+                                                <Border CornerRadius="4" Padding="6,1"
+                                                        VerticalAlignment="Center"
+                                                        IsVisible="{Binding IsRunning}"
+                                                        Background="{DynamicResource SystemFillColorSuccessBrush}">
+                                                    <TextBlock Text="Running" FontSize="10" FontWeight="SemiBold" />
+                                                </Border>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                                <TextBlock Text="{Binding RawName}"
+                                                           FontSize="11" Opacity="0.45" />
+                                                <TextBlock Text="{Binding Provider}"
+                                                           FontSize="11" Opacity="0.45" />
+                                                <TextBlock Text="{Binding SizeDisplay}"
+                                                           FontSize="11" Opacity="0.45" />
+                                                <TextBlock Text="{Binding TagsDisplay}"
+                                                           FontSize="11" Opacity="0.45" />
+                                                <Border CornerRadius="4" Padding="6,1"
+                                                        VerticalAlignment="Center"
+                                                        IsVisible="{Binding FitLabel, Converter={x:Static views:NotEmptyConverter.Instance}}"
+                                                        Background="{Binding FitTier, Converter={x:Static views:FitTierBrushConverter.Instance}}"
+                                                        ToolTip.Tip="{Binding FitReason}">
+                                                    <TextBlock Text="{Binding FitLabel}" FontSize="10" FontWeight="SemiBold" />
+                                                </Border>
+                                                <TextBlock Text="{Binding TuneSummary}"
+                                                           IsVisible="{Binding TuneSummary, Converter={x:Static views:NotEmptyConverter.Instance}}"
+                                                           FontSize="11" Opacity="0.45"
+                                                           ToolTip.Tip="Auto-tuned llama.cpp GPU layers/threads for this model, from the shared tune-profile store also used on the Services page." />
+                                                <Border CornerRadius="4" Padding="6,1"
+                                                        VerticalAlignment="Center"
+                                                        IsVisible="{Binding UpdateLabel, Converter={x:Static views:NotEmptyConverter.Instance}}"
+                                                        Background="{Binding UpdateStatus, Converter={x:Static views:UpdateStatusBrushConverter.Instance}}"
+                                                        ToolTip.Tip="From the Hugging Face repo linked to this model. Press &quot;Check for updates&quot; to refresh.">
+                                                    <TextBlock Text="{Binding UpdateLabel}" FontSize="10" FontWeight="SemiBold" />
+                                                </Border>
+                                                <TextBlock Text="Re-tune recommended"
+                                                           IsVisible="{Binding RetuneRecommended}"
+                                                           FontSize="10" Opacity="0.6" FontStyle="Italic" />
+                                            </StackPanel>
                                         </StackPanel>
-                                        <StackPanel Orientation="Horizontal" Spacing="10">
-                                            <TextBlock Text="{Binding RawName}"
-                                                       FontSize="11" Opacity="0.45" />
-                                            <TextBlock Text="{Binding Provider}"
-                                                       FontSize="11" Opacity="0.45" />
-                                            <TextBlock Text="{Binding SizeDisplay}"
-                                                       FontSize="11" Opacity="0.45" />
-                                            <TextBlock Text="{Binding TagsDisplay}"
-                                                       FontSize="11" Opacity="0.45" />
-                                        </StackPanel>
-                                    </StackPanel>
-                                    <TextBlock Grid.Column="1"
-                                               Text="{Binding ModifiedDisplay}"
-                                               FontSize="11" Opacity="0.35"
-                                               VerticalAlignment="Top"
-                                               Margin="12,2,0,0" />
-                                </Grid>
+                                        <Button Grid.Column="1"
+                                                Content="{Binding IsTuning, Converter={x:Static views:TuningLabelConverter.Instance}}"
+                                                Command="{Binding $parent[ItemsControl].DataContext.AutoTuneModelCommand}"
+                                                CommandParameter="{Binding}"
+                                                IsVisible="{Binding IsLocalGguf}"
+                                                IsEnabled="{Binding !IsRunning}"
+                                                FontSize="12" Padding="10,4" CornerRadius="6"
+                                                VerticalAlignment="Center"
+                                                Margin="12,0"
+                                                ToolTip.Tip="Probes GPU layer counts against the first configured managed llama-server executable and saves the result to the shared tune-profile store." />
+                                        <TextBlock Grid.Column="2"
+                                                   Text="{Binding ModifiedDisplay}"
+                                                   FontSize="11" Opacity="0.35"
+                                                   VerticalAlignment="Top"
+                                                   Margin="0,2,0,0" />
+                                    </Grid>
+                                </Expander.Header>
 
-                                <Grid Grid.Row="1"
-                                      ColumnDefinitions="1.1*,1.2*,0.9*"
-                                      RowDefinitions="Auto,Auto,Auto,Auto,Auto"
+                                <Grid ColumnDefinitions="1.1*,1.2*,0.9*"
+                                      RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto"
                                       ColumnSpacing="10"
-                                      RowSpacing="8">
+                                      RowSpacing="8"
+                                      Margin="0,10,0,0">
                                     <TextBox Grid.Row="0" Grid.Column="0"
                                              Text="{Binding DisplayName}"
                                              Watermark="Display name"
@@ -191,8 +343,26 @@
                                                 CommandParameter="{Binding}"
                                                 ToolTip.Tip="Clears all overrides for this model, reverting to provider/global defaults." />
                                     </StackPanel>
+
+                                    <StackPanel Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="3"
+                                                Orientation="Horizontal"
+                                                Spacing="8"
+                                                IsVisible="{Binding IsLocalGguf}">
+                                        <Button Content="{Binding RepoId, Converter={x:Static views:RepoLinkLabelConverter.Instance}}"
+                                                Command="{Binding $parent[ItemsControl].DataContext.LinkToHuggingFaceRepoCommand}"
+                                                CommandParameter="{Binding}"
+                                                FontSize="12" Padding="10,4" CornerRadius="6"
+                                                ToolTip.Tip="Links this model to a Hugging Face repo (org/repo) so &quot;Check for updates&quot; can compare it. Validated against the model-card API before saving." />
+                                        <Button Content="{Binding IsUpdating, Converter={x:Static views:UpdatingLabelConverter.Instance}}"
+                                                Command="{Binding $parent[ItemsControl].DataContext.UpdateModelCommand}"
+                                                CommandParameter="{Binding}"
+                                                IsVisible="{Binding UpdateStatus, Converter={x:Static views:UpdateAvailableConverter.Instance}}"
+                                                IsEnabled="{Binding !IsRunning}"
+                                                FontSize="12" Padding="10,4" CornerRadius="6"
+                                                ToolTip.Tip="Downloads the update to a .update.tmp file, verifies its hash against the repo, then atomically swaps it in. Refuses while the model is running." />
+                                    </StackPanel>
                                 </Grid>
-                            </Grid>
+                            </Expander>
                         </Border>
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>

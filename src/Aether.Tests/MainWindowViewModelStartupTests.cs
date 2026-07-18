@@ -59,11 +59,12 @@ public sealed class MainWindowViewModelStartupTests
         var secrets = new FakeSecretStore();
         var settingsVm = NewSettingsViewModel(settings, secrets);
 
-        var models = new ModelManagementViewModel(llm, new ModelProfileService(settings), toasts, settings);
+        var servicesVm = new ServicesViewModel(settings, new RuntimeProfileService(settings), toasts, new RedactionService(), new TrustService(), logs);
+        var models = new ModelManagementViewModel(llm, new ModelProfileService(settings), toasts, settings, new FakeSystemInfo(), servicesVm,
+            new ModelManifestStore(settings), new HuggingFaceClient(), new ModelDownloadService());
 
         var ragPipeline = new RagPipeline(ragStore, new FakeEmbeddingService());
         var ragEval = new RagEvalService(ragQuery, settings, new FakeEvalStore());
-        var servicesVm = new ServicesViewModel(settings, new RuntimeProfileService(settings), toasts, new RedactionService(), new TrustService(), logs);
         var rag = new RagViewModel(ragQuery, ragPipeline, ragEval, toasts, logs, settings, servicesVm);
 
         var benchmarks = new BenchmarkViewModel(new BenchmarkService(settings, llm, new FakeSystemInfo(), new FakeEvalStore()), llm, new ModelProfileService(settings), settings, toasts);

@@ -18,6 +18,7 @@ public sealed class PrivacyAuditService
     private readonly IVoiceProviderRegistry _voiceProviders;
     private readonly ITraceStore _traces;
     private readonly SqliteRagStore? _ragStore;
+    private readonly ModelManifestStore? _modelManifest;
 
     public PrivacyAuditService(
         ISettingsService settings,
@@ -25,7 +26,8 @@ public sealed class PrivacyAuditService
         IRuntimeLogService logs,
         IVoiceProviderRegistry voiceProviders,
         ITraceStore traces,
-        SqliteRagStore? ragStore = null)
+        SqliteRagStore? ragStore = null,
+        ModelManifestStore? modelManifest = null)
     {
         _settings = settings;
         _secrets = secrets;
@@ -33,6 +35,19 @@ public sealed class PrivacyAuditService
         _voiceProviders = voiceProviders;
         _traces = traces;
         _ragStore = ragStore;
+        _modelManifest = modelManifest;
+    }
+
+    /// <summary>Whether the model manifest has at least one repo-linked entry, meaning the
+    /// manual "Check for updates" / HF browser downloads are a live outbound surface for this
+    /// install (r13 03-hugging-face.md 3.2). Manual-only, never on startup or a timer.</summary>
+    private async Task<bool> HasHuggingFaceLinkedModelsAsync(CancellationToken ct)
+    {
+        if (_modelManifest is null)
+            return false;
+
+        var entries = await _modelManifest.LoadAsync(ct);
+        return entries.Any(e => !string.IsNullOrWhiteSpace(e.RepoId));
     }
 
     /// <summary>
@@ -60,6 +75,10 @@ public sealed class PrivacyAuditService
         }
 
         count += settings.Mcp.Servers.Count;
+
+        if (await HasHuggingFaceLinkedModelsAsync(ct))
+            count++;
+
         return count;
     }
 
@@ -126,6 +145,14 @@ public sealed class PrivacyAuditService
             "Model usage counters",
             "Local only",
             "Per-feature daily call and token counts are stored locally in traces.db (model_usage table) to power usage-aware benchmark insights. Never transmitted."));
+
+        if (await HasHuggingFaceLinkedModelsAsync(ct))
+        {
+            items.Add(new PrivacyAuditItem(
+                "Hugging Face model search/download",
+                "Review",
+                "At least one local model is linked to a Hugging Face repo for update checks. Update checks and downloads (huggingface.co) only happen when you press \"Check for updates\", \"Update\", or search/download in the Get Models browser - never on startup or a timer, anonymous access only."));
+        }
 
         if (voiceRemote)
         {

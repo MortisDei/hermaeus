@@ -87,14 +87,87 @@
                     </StackPanel>
                 </StackPanel>
 
-                <StackPanel Grid.Column="2"
-                            Orientation="Horizontal" Spacing="6"
-                            VerticalAlignment="Center">
-                    <TextBlock Text="Temp" Opacity="0.5" FontSize="12" VerticalAlignment="Center" />
-                    <NumericUpDown Value="{Binding Temperature}"
-                                  Minimum="0" Maximum="2" Increment="0.1"
-                                  FormatString="F1" FontSize="13" Width="110" />
-                </StackPanel>
+                <Button Grid.Column="2"
+                        Classes="icon-btn"
+                        Content="{Binding Temperature, StringFormat='T {0:F1}'}"
+                        ToolTip.Tip="Sampling settings for this conversation"
+                        Padding="8,4">
+                    <Button.Flyout>
+                        <Flyout Placement="Bottom">
+                            <StackPanel Width="360" Spacing="12">
+                                <TextBlock Text="Sampling settings" FontSize="14" FontWeight="SemiBold" />
+
+                                <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="12" RowSpacing="10">
+                                    <StackPanel Grid.Row="0" Grid.Column="0" Spacing="4">
+                                        <TextBlock Text="Temperature" FontSize="11" Opacity="0.6" />
+                                        <NumericUpDown Value="{Binding Temperature}"
+                                                       Minimum="0" Maximum="2" Increment="0.1" FormatString="F1"
+                                                       ToolTip.Tip="Sampling temperature for this conversation, overriding the global Settings > LLM value." />
+                                    </StackPanel>
+                                    <StackPanel Grid.Row="0" Grid.Column="1" Spacing="4">
+                                        <TextBlock Text="Top P" FontSize="11" Opacity="0.6" />
+                                        <NumericUpDown Value="{Binding TopP}"
+                                                       Minimum="0" Maximum="1" Increment="0.05" FormatString="F2"
+                                                       Watermark="provider default"
+                                                       ToolTip.Tip="Nucleus sampling override for this conversation. Leave blank to use the provider's own default." />
+                                    </StackPanel>
+
+                                    <StackPanel Grid.Row="1" Grid.Column="0" Spacing="4">
+                                        <TextBlock Text="Top K" FontSize="11" Opacity="0.6" />
+                                        <NumericUpDown Value="{Binding TopK}"
+                                                       Minimum="0" Maximum="500" Increment="1"
+                                                       Watermark="provider default"
+                                                       ToolTip.Tip="Top-K sampling override for this conversation. llama.cpp/Ollama only." />
+                                    </StackPanel>
+                                    <StackPanel Grid.Row="1" Grid.Column="1" Spacing="4">
+                                        <TextBlock Text="Min P" FontSize="11" Opacity="0.6" />
+                                        <NumericUpDown Value="{Binding MinP}"
+                                                       Minimum="0" Maximum="1" Increment="0.01" FormatString="F2"
+                                                       Watermark="provider default"
+                                                       ToolTip.Tip="Min-P sampling override for this conversation. llama.cpp/Ollama only." />
+                                    </StackPanel>
+
+                                    <StackPanel Grid.Row="2" Grid.Column="0" Spacing="4">
+                                        <TextBlock Text="Repeat penalty" FontSize="11" Opacity="0.6" />
+                                        <NumericUpDown Value="{Binding RepeatPenalty}"
+                                                       Minimum="0.5" Maximum="2" Increment="0.05" FormatString="F2"
+                                                       Watermark="provider default"
+                                                       ToolTip.Tip="Repeat penalty override for this conversation. 1.0 is no penalty." />
+                                    </StackPanel>
+                                    <StackPanel Grid.Row="2" Grid.Column="1" Spacing="4">
+                                        <TextBlock Text="Frequency penalty" FontSize="11" Opacity="0.6" />
+                                        <NumericUpDown Value="{Binding FrequencyPenalty}"
+                                                       Minimum="-2" Maximum="2" Increment="0.1" FormatString="F1"
+                                                       Watermark="provider default"
+                                                       ToolTip.Tip="Frequency penalty override for this conversation. OpenAI-compatible endpoints only." />
+                                    </StackPanel>
+
+                                    <StackPanel Grid.Row="3" Grid.Column="0" Spacing="4">
+                                        <TextBlock Text="Presence penalty" FontSize="11" Opacity="0.6" />
+                                        <NumericUpDown Value="{Binding PresencePenalty}"
+                                                       Minimum="-2" Maximum="2" Increment="0.1" FormatString="F1"
+                                                       Watermark="provider default"
+                                                       ToolTip.Tip="Presence penalty override for this conversation. OpenAI-compatible endpoints only." />
+                                    </StackPanel>
+                                    <StackPanel Grid.Row="3" Grid.Column="1" Spacing="4">
+                                        <TextBlock Text="Max tokens" FontSize="11" Opacity="0.6" />
+                                        <NumericUpDown Value="{Binding MaxTokens}"
+                                                       Minimum="0" Maximum="262144" Increment="256"
+                                                       ToolTip.Tip="Maximum reply length in tokens for this conversation, overriding the global default." />
+                                    </StackPanel>
+                                </Grid>
+
+                                <Button Content="Reset to model defaults"
+                                        Command="{Binding ResetSamplingToModelDefaultsCommand}"
+                                        HorizontalAlignment="Left"
+                                        FontSize="12" Padding="10,5" CornerRadius="6" />
+
+                                <TextBlock Text="Applies to this conversation only."
+                                           FontSize="11" Opacity="0.55" FontStyle="Italic" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Flyout>
+                    </Button.Flyout>
+                </Button>
 
                 <Button Grid.Column="3" Classes="icon-btn"
                         Command="{Binding ToggleSystemPromptCommand}"

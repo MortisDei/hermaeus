@@ -110,7 +110,9 @@ public sealed class GpuInfoViewModel
     public string Status => _gpu.Status;
     public string Memory => _gpu.MemoryUsedBytes.HasValue && _gpu.MemoryTotalBytes.HasValue
         ? $"{SystemOverviewViewModel.FormatBytes(_gpu.MemoryUsedBytes.Value)} / {SystemOverviewViewModel.FormatBytes(_gpu.MemoryTotalBytes.Value)}"
-        : "VRAM unavailable";
+        : _gpu.MemoryTotalBytes.HasValue
+            ? $"{SystemOverviewViewModel.FormatBytes(_gpu.MemoryTotalBytes.Value)} total"
+            : "VRAM unavailable";
     public GpuInfoViewModel(GpuInfo gpu) => _gpu = gpu;
 }
 

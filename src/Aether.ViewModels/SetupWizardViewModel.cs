@@ -32,6 +32,8 @@ public partial class SetupWizardViewModel : ObservableObject
     // ── Guided starter model download (docs/review 02-onboarding-and-usability.md 2.1) ──
     [ObservableProperty] private bool _useStarterModelDownload;
     [ObservableProperty] private StarterModelEntry? _recommendedStarterModel;
+    [ObservableProperty] private string _recommendedStarterModelFitLabel = string.Empty;
+    [ObservableProperty] private string _recommendedStarterModelFitReason = string.Empty;
     [ObservableProperty] private bool _isDownloadingStarterModel;
     [ObservableProperty] private double _starterModelDownloadPercent;
     [ObservableProperty] private string _starterModelDownloadStatus = string.Empty;
@@ -146,6 +148,19 @@ public partial class SetupWizardViewModel : ObservableObject
         catch
         {
             RecommendedStarterModel = StarterModelCatalog.Small;
+        }
+
+        try
+        {
+            var hardware = await _systemInfo.GetHardwareProfileAsync();
+            var fit = ModelFitEstimator.Estimate(RecommendedStarterModel.SizeBytes, hardware);
+            RecommendedStarterModelFitLabel = ModelFitEstimator.Label(fit.Tier);
+            RecommendedStarterModelFitReason = fit.Reason;
+        }
+        catch
+        {
+            RecommendedStarterModelFitLabel = string.Empty;
+            RecommendedStarterModelFitReason = string.Empty;
         }
     }
 

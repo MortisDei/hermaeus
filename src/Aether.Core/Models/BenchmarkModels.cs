@@ -192,6 +192,14 @@ public sealed class ComponentStatus
     public string Detail { get; set; } = string.Empty;
 }
 
+/// <summary>
+/// Cheap, process-lifetime-cached hardware facts for repeated per-model checks
+/// (fits-on-your-hardware, HF browser). Hardware does not hot-change, so
+/// this is captured once and reused instead of re-running CaptureAsync's
+/// process spawns per row (r13 01-system-truth.md 1.5).
+/// </summary>
+public sealed record HardwareProfile(long TotalRamBytes, long MaxGpuVramBytes, string? GpuName);
+
 public static class BenchmarkScoring
 {
     public static double RankingScore(double quality, double tokensPerSecond, double stability, double resource)

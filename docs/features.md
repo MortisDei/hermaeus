@@ -31,6 +31,12 @@
   the model you already have selected, and switching to a different model
   resets any value it doesn't specify back to your global default instead
   of carrying over the previous model's tuning.
+- The chat header's temperature control is a compact "T <value>" button that
+  opens a sampling flyout with all eight parameters (temperature, top-P,
+  top-K, min-P, repeat/frequency/presence penalty, max tokens), matching the
+  same ranges and descriptions as the Models page editor, plus a "Reset to
+  model defaults" button. These values remain conversation-local and are
+  never written back to settings.
 - Chat can attach selected local text/code files directly to the next message.
   Use the attach button or drop files on the input. Aether reads each file once at
   send time, prepends a bounded context block to the model prompt, and stores only
@@ -221,6 +227,42 @@
   in bulk as one timestamped folder.
 - Doctor checks for untuned GGUF files, stale `llama.cpp` binaries, and pinned
   `nomic-embed-text-v1.5` hash drift, with install actions where available.
+- The Models page lists every model as a compact, collapsed-by-default card
+  (name, running badge, provider, size, tags, fits/update chips, tune
+  summary) with a name/tag filter box, instead of a fully-expanded editor
+  grid per model; expanding one shows the same editor as before. Mouse-wheel
+  scrolling now works anywhere over the list, including over an expanded
+  card's spinners.
+- Per-model "Auto tune" button probes GPU layer candidates against the first
+  configured managed `llama-server` executable and saves the result to the
+  same tune-profile store the Services page uses, so a tune from either page
+  shows up on both. "Auto-tune all" tunes every local GGUF that is not
+  running and does not already have a fresh profile (missing, size/mtime
+  drift, or a different llama-server build), sequentially and cancellable.
+- Fits-on-your-hardware chips (Fits GPU / Partial offload / Too large) on
+  Models-page cards, the Hugging Face browser's file list, and the setup
+  wizard's recommended starter model, from a shared rough-headroom estimator
+  and a process-lifetime-cached hardware snapshot.
+- "Organize folder..." flattens a Hugging Face hub-cache layout
+  (`hub\models--org--repo\snapshots\<sha>\*.gguf`) into a flat
+  `Models\LLM\<file>.gguf` folder: plan, preview every move and any name
+  collisions, confirm, then execute (same-volume rename or verified
+  copy-then-delete across volumes). Never renames files, never overwrites a
+  name collision, moves multi-part GGUF sets atomically, rewrites every
+  settings reference to a moved file, and offers a separately-confirmed
+  cleanup of folders left empty by the move.
+- Local models can be linked to the Hugging Face repo they came from (via
+  the folder organizer, the "Get models" browser, the starter-model
+  download, or a manual "Link to Hugging Face repo..." action that validates
+  the repo before saving). "Check for updates" compares each linked model's
+  stored hash against the repo's current file hash (batched one HTTP call
+  per repo); "Update" downloads, hash-verifies, and atomically swaps in the
+  new file, flagging the card "re-tune recommended" afterward. A collapsed
+  "Get models from Hugging Face" section on the Models page searches GGUF
+  repos and downloads straight into the flat models folder. All Hugging
+  Face access is anonymous, HTTPS-only, and manual-button-triggered - never
+  on startup or a timer - and is disclosed in the Privacy Audit whenever a
+  model is repo-linked.
 
 ## RAG
 
@@ -338,7 +380,11 @@
   abandoned to the existing job-object cleanup after a bounded 5-second wait
   rather than blocking exit indefinitely.
 - System overview for app version, CPU, RAM, storage, databases, managed
-  components, and best-effort GPU/VRAM visibility.
+  components, and GPU/VRAM visibility. On Windows this now reports real
+  available/total RAM (not the GC's view), an honest OS name and build
+  (Windows 11 detected by build number, not the kernel string's misleading
+  "10.0.x"), the marketing CPU name from the registry, and GPU name/VRAM
+  from a registry fallback when `nvidia-smi` is not on PATH.
 - Privacy Audit dashboard connects local-first posture into one view covering
   configured remote providers, local providers, network-facing managed server
   flags, secret backend health, runtime log redaction, data-root backup status,

@@ -1,6 +1,6 @@
 # Aether Security Review And Threat Model
 
-Last refreshed for `0.17.0-alpha` (see the r12 subsection under Threat
+Last refreshed for `0.18.0-alpha` (see the r13 subsection under Threat
 Scenarios). The `0.10.0-alpha` pass re-verified the
 areas that changed in r3-r5 (agent tool execution, run_command recipes,
 lesson store, voice orchestration, benchmark insights) directly against the
@@ -502,6 +502,69 @@ existing implicit-trust surface and close a settings-integrity gap.
   (`SettingsViewModel.SaveAsync` applying onto a deep copy, swapped in only
   on success) is a data-integrity hardening, not a new attack surface, but
   is recorded here since it changes how live settings can be mutated.
+
+### r13: Model Library And Hugging Face Integration
+
+`0.18.0-alpha` adds one genuinely new outbound surface (huggingface.co) and
+two new data-mutation actions (the model folder organizer and the model
+updater), plus read-only registry queries for honest system info. Everything
+below is scoped to that new surface; Local API, MCP, secrets, redaction, and
+RAG remain unchanged since `0.9.41-alpha`.
+
+- **New outbound surface: huggingface.co, manual-only.** `HuggingFaceClient`
+  only calls `https://huggingface.co/api/...` and
+  `https://huggingface.co/{repo}/resolve/main/...` (HTTPS, host-hardcoded,
+  no user-configurable base URL). Every call is triggered by a specific
+  button press (search, select a repo, download, "Check for updates",
+  "Update", "Link to Hugging Face repo..."); none run on startup or a timer,
+  matching the r6/r8 posture that Aether's "0 configured outbound
+  destinations" claim must stay literally true until the user opts in.
+  Access is anonymous only - no HF token, no gated/private repo support (an
+  explicit r13 rejection) - so there is no new credential to store or leak.
+  `PrivacyAuditService.CountOutboundDestinationsAsync` and `ScanAsync` now
+  disclose this surface whenever the model manifest has at least one
+  repo-linked entry, so the System page's outbound-destination count stays
+  honest the same way it already does for remote chat/voice providers, RAG
+  web ingest, and MCP servers.
+- **Download integrity is origin-integrity, the same deliberate stance as
+  r11's llama-server binary.** Every HF download (starter model precedent,
+  browser download, and update) is verified against the SHA256 the repo's
+  own tree API reports (`lfs.oid`) before the file is trusted or swapped
+  into place. This is integrity against corruption and against
+  huggingface.co serving something other than what its own metadata
+  describes - not independent third-party attestation, since the hash and
+  the file come from the same origin. This mirrors the r8 starter-model
+  posture exactly and is recorded explicitly here per the r13 spec's
+  request, the same way r11 recorded the equivalent scoped exception for
+  the llama-server binary.
+- **The folder organizer is move-only and confirmation-gated.**
+  `ModelFolderOrganizer.Plan` is pure (no filesystem writes); `ExecuteAsync`
+  only runs after the view shows a full "from -> to" preview (including
+  every collision it will skip) and the user confirms. It never renames a
+  file, never overwrites a name collision, and moves multi-part GGUF sets
+  atomically (all parts or none). Leftover empty directories are offered for
+  removal as a **second, separate** confirmation, and that removal path only
+  ever deletes directories that are still empty at removal time - it never
+  deletes a file. The organizer also refuses to start while any managed
+  server is running, since Windows holds an exclusive lock on a model file a
+  running `llama-server` has open.
+- **The model updater's atomic swap never destroys the original on
+  failure.** `ModelUpdateApplier.Swap` moves the current file to
+  `<file>.previous`, moves the (already hash-verified) replacement into
+  place, and only deletes `<file>.previous` once both moves succeeded; a
+  failure at the second move restores the original from `.previous` before
+  returning, and a leftover `.previous` from a prior interrupted update is
+  refused rather than silently overwritten. The update path itself refuses
+  to run while the model is running, or while any managed server currently
+  running has that file as its `ModelPath`. A hash mismatch after download
+  deletes only the `.update.tmp` file and leaves the original untouched. No
+  update is ever auto-applied - "Update" is a per-model button press, and
+  there is no background update polling (both explicit r13 rejections).
+- **Registry reads for system truth (RAM, OS build, CPU name, GPU/VRAM) are
+  read-only HKLM queries**, wrapped in try/catch, requiring no new
+  privileges beyond what the app already runs with. No WMI (an explicit r13
+  rejection: slower and flakier on stripped installs than the P/Invoke +
+  registry + `nvidia-smi` combination already in place).
 
 ## Release Gate Status
 

@@ -58,4 +58,21 @@ public sealed class ShutdownDisposalTests
 
         await provider.DisposeAsync();
     }
+
+    /// <summary>
+    /// r13 caught a real bug this way during implementation: ModelManagementViewModel grew a
+    /// required ModelDownloadService constructor parameter, but ModelDownloadService was never
+    /// registered in AetherServiceRegistration (only ever constructed ad-hoc at call sites), so
+    /// the app crashed on startup with "Unable to resolve service for type
+    /// ModelDownloadService". BuildServiceProvider() alone does not catch this - it is lazy and
+    /// only validates a service's dependency graph when something actually resolves it.
+    /// ValidateOnBuild forces that resolution for every registration up front.
+    /// </summary>
+    [Fact]
+    public void Every_registered_services_dependency_graph_resolves()
+    {
+        var services = BuildFullServiceCollection();
+
+        using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
+    }
 }

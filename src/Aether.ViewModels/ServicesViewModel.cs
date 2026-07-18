@@ -394,7 +394,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
 
     private void ApplyTuneProfileIfAvailable()
     {
-        var profile = FindTuneProfile(ModelPath);
+        var profile = LlamaTuneProfileStore.Find(_settings.Settings, ModelPath);
         if (profile is null)
             return;
 
@@ -406,85 +406,10 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
             ExtraArgs = profile.ExtraArgs;
     }
 
-    private const int MaxTuneProfiles = 200;
-
     private Task PersistTuneProfileAsync(ServerTuneResult? result = null)
     {
-        var normalized = ResolveExistingModelPath(ModelPath);
-        if (string.IsNullOrWhiteSpace(normalized))
-            return Task.CompletedTask;
-
-        var file = new FileInfo(normalized);
-        var profile = FindTuneProfile(normalized);
-        if (profile is null)
-        {
-            profile = new LlamaTuneProfile();
-            _settings.Settings.LlamaTuneProfiles.Add(profile);
-        }
-
-        profile.ModelPath = normalized;
-        profile.ModelSizeBytes = file.Length;
-        profile.ModelModifiedAtUtc = file.LastWriteTimeUtc;
-        profile.GpuLayers = result?.GpuLayers ?? GpuLayers;
-        profile.TotalLayers = result?.TotalLayers ?? profile.TotalLayers;
-        profile.Threads = result?.Threads ?? Threads;
-        profile.ContextSize = ContextSize;
-        profile.ExtraArgs = ExtraArgs;
-        profile.LlamaServerVersion = result?.LlamaServerVersion ?? profile.LlamaServerVersion;
-        profile.TunedAtUtc = DateTime.UtcNow;
-        PruneTuneProfiles();
+        LlamaTuneProfileStore.Upsert(_settings.Settings, ModelPath, ContextSize, ExtraArgs, GpuLayers, Threads, result);
         return Task.CompletedTask;
-    }
-
-    private void PruneTuneProfiles()
-    {
-        var profiles = _settings.Settings.LlamaTuneProfiles;
-        profiles.RemoveAll(p => !File.Exists(p.ModelPath));
-        if (profiles.Count > MaxTuneProfiles)
-        {
-            var stale = profiles.OrderByDescending(p => p.TunedAtUtc).Skip(MaxTuneProfiles).ToList();
-            foreach (var p in stale)
-                profiles.Remove(p);
-        }
-    }
-
-    private LlamaTuneProfile? FindTuneProfile(string modelPath)
-    {
-        var normalized = ResolveExistingModelPath(modelPath);
-        if (string.IsNullOrWhiteSpace(normalized))
-            return null;
-
-        var file = new FileInfo(normalized);
-        return _settings.Settings.LlamaTuneProfiles.FirstOrDefault(profile =>
-            string.Equals(Path.GetFullPath(profile.ModelPath), normalized, StringComparison.OrdinalIgnoreCase)
-            && profile.ModelSizeBytes == file.Length
-            && profile.ModelModifiedAtUtc == file.LastWriteTimeUtc);
-    }
-
-    private static string ResolveExistingModelPath(string modelPath)
-    {
-        if (string.IsNullOrWhiteSpace(modelPath))
-            return string.Empty;
-
-        var trimmed = modelPath.Trim();
-        if (File.Exists(trimmed))
-            return Path.GetFullPath(trimmed);
-
-        if (!Directory.Exists(trimmed))
-            return string.Empty;
-
-        try
-        {
-            var models = Directory.EnumerateFiles(trimmed, "*.gguf", SearchOption.AllDirectories)
-                .Order(StringComparer.OrdinalIgnoreCase)
-                .Take(2)
-                .ToArray();
-            return models.Length == 1 ? Path.GetFullPath(models[0]) : string.Empty;
-        }
-        catch
-        {
-            return string.Empty;
-        }
     }
 
     private async Task WaitUntilStartedAsync(CancellationToken ct)

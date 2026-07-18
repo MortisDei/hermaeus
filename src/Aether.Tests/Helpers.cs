@@ -26,6 +26,9 @@ namespace Aether.Tests
         public static SettingsViewModel NewSettingsViewModel(ISettingsService settings, ISecretStore secrets) =>
             new(settings, new FakeTts(), new FakeVoiceProviderRegistry(settings), new FakeToasts(), new BackupService(settings), secrets, new XttsProcessManager(), new KokoroProcessManager(), new LocalApiProcessManager(), new LocalAiSetupService(new PythonHealthValidator()), new TrustService());
 
+        public static ServicesViewModel NewServicesViewModel(ISettingsService settings) =>
+            new(settings, new RuntimeProfileService(settings), new FakeToasts(), new RedactionService(), new TrustService(), new RuntimeLogService(settings));
+
         public static async Task ThrowsAsync<T>(Func<Task> action) where T : Exception
         {
             try
@@ -707,6 +710,9 @@ namespace Aether.Tests
                 new ComponentStatus { Name = "Fake component", Status = "Ready", Detail = "test" }
             ]
         });
+
+        public Task<HardwareProfile> GetHardwareProfileAsync(CancellationToken ct = default) =>
+            Task.FromResult(new HardwareProfile(0, 0, null));
     }
 
     sealed class FakeEvalStore : IEvalStore
