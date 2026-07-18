@@ -41,10 +41,10 @@ public sealed class DoctorStatusColorConverter : IValueConverter
     {
         return v switch
         {
-            DoctorCheckStatus.Ready => Brushes.LimeGreen,
-            DoctorCheckStatus.Warning => Brushes.Orange,
-            DoctorCheckStatus.Error => Brushes.IndianRed,
-            _ => Brushes.Gray
+            DoctorCheckStatus.Ready => StatusPalette.Ok,
+            DoctorCheckStatus.Warning => StatusPalette.Warn,
+            DoctorCheckStatus.Error => StatusPalette.Error,
+            _ => StatusPalette.Neutral
         };
     }
 

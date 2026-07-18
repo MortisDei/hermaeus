@@ -457,6 +457,8 @@ public sealed class ChatWorkbenchTests
         public Task MarkRecalledAsync(IEnumerable<string> ids, CancellationToken ct = default) => Task.CompletedTask;
         public Task<int> ArchiveStaleMemoriesAsync(double importanceFloor = 0.05, int unrecalledForDays = 180, CancellationToken ct = default) => Task.FromResult(0);
         public Task RunEmbeddingBackfillAsync(CancellationToken ct = default) => Task.CompletedTask;
+        public Task<int> GetEmbeddingMismatchCountAsync(CancellationToken ct = default) => Task.FromResult(0);
+        public Task<int> ClearMismatchedEmbeddingsAsync(CancellationToken ct = default) => Task.FromResult(0);
     }
 
     private sealed class SearchableMemoryStore(List<Memory> memories) : IMemoryStore
@@ -478,12 +480,16 @@ public sealed class ChatWorkbenchTests
         public Task MarkRecalledAsync(IEnumerable<string> ids, CancellationToken ct = default) => Task.CompletedTask;
         public Task<int> ArchiveStaleMemoriesAsync(double importanceFloor = 0.05, int unrecalledForDays = 180, CancellationToken ct = default) => Task.FromResult(0);
         public Task RunEmbeddingBackfillAsync(CancellationToken ct = default) => Task.CompletedTask;
+        public Task<int> GetEmbeddingMismatchCountAsync(CancellationToken ct = default) => Task.FromResult(0);
+        public Task<int> ClearMismatchedEmbeddingsAsync(CancellationToken ct = default) => Task.FromResult(0);
     }
 
     private sealed class NoOpConversationMemoryService : IConversationMemoryService
     {
         public Task RunAutoSummaryAsync(string conversationId, CancellationToken ct = default) => Task.CompletedTask;
         public Task<string> ApplyInjectedMemoryMarkersAsync(string responseText, IReadOnlyList<string> injectedMemoryIds, CancellationToken ct = default) =>
+            Task.FromResult(responseText);
+        public Task<string> ApplyMemoryMarkersAsync(string responseText, IReadOnlyList<string> injectedMemoryIds, string? conversationId, int maxNewMemories = 3, CancellationToken ct = default) =>
             Task.FromResult(responseText);
     }
 

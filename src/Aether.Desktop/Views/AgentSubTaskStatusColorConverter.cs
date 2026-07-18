@@ -2,7 +2,6 @@ using System;
 using System.Globalization;
 using Aether.Agent.Models;
 using Avalonia.Data.Converters;
-using Avalonia.Media;
 
 namespace Aether.Desktop.Views;
 
@@ -11,11 +10,11 @@ public sealed class AgentSubTaskStatusColorConverter : IValueConverter
 {
     public object Convert(object? v, Type t, object? p, CultureInfo c) => v switch
     {
-        AgentSubTaskStatus.Complete => Brushes.LimeGreen,
-        AgentSubTaskStatus.Failed => Brushes.IndianRed,
-        AgentSubTaskStatus.Running => Brushes.DodgerBlue,
-        AgentSubTaskStatus.Skipped => Brushes.Gray,
-        _ => Brushes.Gray
+        AgentSubTaskStatus.Complete => StatusPalette.Ok,
+        AgentSubTaskStatus.Failed => StatusPalette.Error,
+        AgentSubTaskStatus.Running => StatusPalette.Info,
+        AgentSubTaskStatus.Skipped => StatusPalette.Neutral,
+        _ => StatusPalette.Neutral
     };
 
     public object ConvertBack(object? v, Type t, object? p, CultureInfo c) => Avalonia.AvaloniaProperty.UnsetValue;

@@ -608,6 +608,18 @@ public partial class ServicesViewModel : ViewModelBase
     public event EventHandler? ServerAvailabilityChanged;
     private string? _lastAvailabilityFingerprint;
 
+    /// <summary>
+    /// Live "any managed server running" flag (r16 03-workbench-and-desktop.md
+    /// 3.2), replacing the nav dot's old <c>AnyRunningConverter</c> binding.
+    /// That converter only re-ran when the <see cref="Servers"/> PROPERTY
+    /// changed (a full rebuild), not on a per-item <c>Status</c> transition
+    /// or in-place collection mutation, so Start/Stop/crash left the dot
+    /// showing a stale snapshot - a window r12's rebuild-storm fingerprint
+    /// fix made longer, not shorter. Raised in the same places per-server
+    /// Status changes already flow through.
+    /// </summary>
+    public bool AnyServerRunning => Servers.Any(s => s.Status == ServerStatus.Running);
+
     public RuntimeKind[] RuntimeKinds { get; } =
     [
         RuntimeKind.LlamaCpp,
@@ -703,6 +715,8 @@ public partial class ServicesViewModel : ViewModelBase
         RuntimeProfiles.Clear();
         foreach (var profile in _runtimeProfiles.Profiles)
             RuntimeProfiles.Add(new RuntimeProfileViewModel(profile));
+
+        OnPropertyChanged(nameof(AnyServerRunning));
 
         var fingerprint = BuildAvailabilityFingerprint(configs);
         if (!string.Equals(_lastAvailabilityFingerprint, fingerprint, StringComparison.Ordinal))
@@ -856,6 +870,9 @@ public partial class ServicesViewModel : ViewModelBase
 
     private void OnServerPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
+        if (e.PropertyName == nameof(ServerProcessViewModel.Status))
+            OnPropertyChanged(nameof(AnyServerRunning));
+
         if (e.PropertyName is nameof(ServerProcessViewModel.Status)
             or nameof(ServerProcessViewModel.ModelPath)
             or nameof(ServerProcessViewModel.ExecutablePath)

@@ -2296,4 +2296,353 @@ internal static class AgentTests
     Equal(AgentTaskStatus.Blocked, step.State.Status, "a blocker reported alongside a tool that did not go on to execute should win over a plain WaitingForUser");
     True(step.State.Decisions.Any(d => d.Decision == "cannot proceed without user input"), "the blocker should still be recorded in Decisions");
     }
+
+    // ── r16 01-orchestration-hardening.md ──
+
+    public static async Task AgentTaskIndexTimestampsRoundTripWithUtcKind()
+    {
+    using var temp = new TempDir();
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    await store.InitializeAsync();
+
+    var state = new AgentTaskState
+    {
+        Goal = "Check timestamp kind",
+        Status = AgentTaskStatus.WaitingForUser,
+        ApprovalHistory = [new AgentApprovalRecord("x", true, DateTime.UtcNow)]
+    };
+    await store.SaveAsync(state);
+
+    var recent = await store.ListRecentAsync();
+    var recentItem = recent.Single(i => i.TaskId == state.TaskId);
+    Equal(DateTimeKind.Utc, recentItem.UpdatedAt.Kind, "ListRecentAsync timestamps should parse with UTC kind, not local (1.7)");
+
+    var queue = await store.ListReviewQueueAsync();
+    var queueItem = queue.Single(i => i.TaskId == state.TaskId);
+    Equal(DateTimeKind.Utc, queueItem.UpdatedAt.Kind, "ListReviewQueueAsync timestamps should parse with UTC kind, not local (1.7)");
+    Equal(DateTimeKind.Utc, queueItem.LastApprovalAt!.Value.Kind, "the last-approval timestamp should also parse with UTC kind (1.7)");
+    }
+
+    public static async Task AgentTaskStateRoundTripsWorkspaceRootAndPreR16StateLoadsUnchanged()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    var tools = new AgentWorkspaceTools();
+    var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), new FakeSequencedAgentLlm([]), settings: settings);
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-sequenced-agent");
+
+    var state = await service.CreateTaskAsync("Track my workspace", options);
+    Equal(Path.GetFullPath(root), state.WorkspaceRoot, "creating a task should persist the resolved workspace root (1.4)");
+
+    var reloaded = await store.LoadAsync(state.TaskId);
+    Equal(Path.GetFullPath(root), reloaded!.WorkspaceRoot, "the stored root should round-trip through the store (1.4)");
+
+    // A pre-r16 fixture with no WorkspaceRoot must still deserialize cleanly
+    // (JSON-additive; snake_case matches AgentJson.Options).
+    var legacyJson = """{"task_id":"legacy-task","goal":"pre-r16 task","status":"new"}""";
+    var legacyDir = store.GetTaskDirectory("legacy-task");
+    Directory.CreateDirectory(legacyDir);
+    await File.WriteAllTextAsync(Path.Combine(legacyDir, "task_state.json"), legacyJson);
+    var legacy = await store.LoadAsync("legacy-task");
+    Equal(string.Empty, legacy!.WorkspaceRoot, "a pre-r16 state file with no WorkspaceRoot should load with an empty one, not throw (1.4)");
+    }
+
+    public static async Task AgentApprovalExecutesAgainstTheTasksOwnWorkspaceRootNotTheCallersOptions()
+    {
+    using var temp = new TempDir();
+    var rootA = temp.PathFor("workspace-a");
+    var rootB = temp.PathFor("workspace-b");
+    Directory.CreateDirectory(rootA);
+    Directory.CreateDirectory(rootB);
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    var tools = new AgentWorkspaceTools();
+
+    var createFileRequest = """
+        {
+          "thought_summary": "Creating a file.",
+          "current_step": "Create it.",
+          "next_action": {
+            "type": "tool",
+            "tool_name": "create_file",
+            "arguments": { "relative_path": "output.txt", "content": "hello" },
+            "requires_approval": true,
+            "risk_level": "medium"
+          },
+          "state_update": { "completed": [], "pending": [], "new_facts": [], "blockers": [] },
+          "user_message": "Requesting file creation."
+        }
+        """;
+    var llm = new FakeSequencedAgentLlm([createFileRequest]);
+    var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), llm, settings: settings);
+    var optionsA = new AgentWorkspaceOptions(rootA, ModelId: "fake-sequenced-agent");
+
+    var state = await service.CreateTaskAsync("Create output.txt in workspace A", optionsA);
+    var paused = await service.RunStepAsync(state.TaskId, optionsA);
+    Equal(AgentTaskStatus.WaitingForUser, paused.State.Status, "create_file should pause for approval");
+
+    // Simulate the review queue: approve with options pointed at a DIFFERENT
+    // workspace (B), as would happen if the workbench had workspace B active
+    // while approving a task created in workspace A (1.4 headline fix).
+    var optionsB = new AgentWorkspaceOptions(rootB, ModelId: "fake-sequenced-agent");
+    await service.AppendApprovalAsync(state.TaskId, "review_queue", approved: true, optionsB);
+
+    True(File.Exists(Path.Combine(rootA, "output.txt")), "the approved action should execute against the TASK's own workspace root (A), not the caller's options (B)");
+    False(File.Exists(Path.Combine(rootB, "output.txt")), "the file must not be created in the workspace the caller happened to have active");
+    }
+
+    public static async Task AgentApprovalWithNullOptionsAndNoStoredWorkspaceRootThrowsInsteadOfStranding()
+    {
+    using var temp = new TempDir();
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    await store.InitializeAsync();
+
+    // A pre-r16 task: no stored WorkspaceRoot, a pending action.
+    var state = new AgentTaskState
+    {
+        Goal = "Pre-r16 task",
+        Status = AgentTaskStatus.WaitingForUser,
+        PendingToolAction = new AgentPendingToolAction
+        {
+            ToolName = "create_file",
+            Arguments = new Dictionary<string, object?> { ["relative_path"] = "x.txt", ["content"] = "x" }
+        }
+    };
+    await store.SaveAsync(state);
+
+    var tools = new AgentWorkspaceTools();
+    var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), new FakeSequencedAgentLlm([]), settings: settings);
+
+    var threw = false;
+    try { await service.AppendApprovalAsync(state.TaskId, "review_queue", approved: true, options: null); }
+    catch (InvalidOperationException) { threw = true; }
+    True(threw, "approving with no options and no stored workspace root should throw InvalidOperationException (1.5)");
+
+    var reloaded = await store.LoadAsync(state.TaskId);
+    Equal(AgentTaskStatus.WaitingForUser, reloaded!.Status, "a throw must not silently strand the task Running with a stale pending action (1.5)");
+    True(reloaded.PendingToolAction is not null, "the pending action should remain since nothing executed (1.5)");
+    }
+
+    public static async Task AgentApprovalWithNullOptionsButStoredWorkspaceRootExecutesNormally()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    var tools = new AgentWorkspaceTools();
+
+    var createFileRequest = """
+        {
+          "thought_summary": "Creating a file.",
+          "current_step": "Create it.",
+          "next_action": {
+            "type": "tool",
+            "tool_name": "create_file",
+            "arguments": { "relative_path": "output.txt", "content": "hello" },
+            "requires_approval": true,
+            "risk_level": "medium"
+          },
+          "state_update": { "completed": [], "pending": [], "new_facts": [], "blockers": [] },
+          "user_message": "Requesting file creation."
+        }
+        """;
+    var llm = new FakeSequencedAgentLlm([createFileRequest]);
+    var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), llm, settings: settings);
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-sequenced-agent");
+
+    var state = await service.CreateTaskAsync("Create a file", options);
+    await service.RunStepAsync(state.TaskId, options);
+
+    await service.AppendApprovalAsync(state.TaskId, "review_queue", approved: true, options: null);
+
+    True(File.Exists(Path.Combine(root, "output.txt")), "a null-options approval should fall back to the task's own stored WorkspaceRoot and execute normally (1.5)");
+    var reloaded = await store.LoadAsync(state.TaskId);
+    Equal(AgentTaskStatus.Running, reloaded!.Status, "approval should return the task to Running");
+    }
+
+    public static async Task AgentReviewQueueChildEntriesCarryParentTaskIdAndWorkspaceRoot()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    await store.InitializeAsync();
+
+    var parent = new AgentTaskState { Goal = "Parent goal", Status = AgentTaskStatus.Running, WorkspaceRoot = Path.GetFullPath(root) };
+    await store.SaveAsync(parent);
+
+    var child = new AgentTaskState
+    {
+        Goal = "Child goal",
+        Status = AgentTaskStatus.WaitingForUser,
+        ParentTaskId = parent.TaskId,
+        WorkspaceRoot = Path.GetFullPath(root),
+        PendingToolAction = new AgentPendingToolAction { ToolName = "edit_file" }
+    };
+    await store.SaveAsync(child);
+
+    var queue = await store.ListReviewQueueAsync();
+    var item = queue.Single(q => q.TaskId == child.TaskId);
+    Equal(parent.TaskId, item.ParentTaskId, "a child's review-queue entry should carry the parent's task id so approval can resume the right task (1.1)");
+    Equal(parent.Goal, item.ParentGoal, "a child's review-queue entry should still carry the parent's goal for display");
+    Equal(Path.GetFullPath(root), item.WorkspaceRoot, "a review-queue entry with a pending action should carry the task's own workspace root (1.4)");
+    }
+
+    public static async Task AgentOrchestrationReconcilesAChildCompletedOutsideTheLoop()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    var tools = new AgentWorkspaceTools();
+    var llm = new FakeSequencedAgentLlm([FinalResponseWithMessage("Synthesis report.")]);
+    var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), llm, settings: settings);
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-sequenced-agent");
+
+    var parent = new AgentTaskState
+    {
+        Goal = "Broad goal",
+        Status = AgentTaskStatus.Running,
+        WorkspaceRoot = Path.GetFullPath(root),
+        SubTaskPlan = [new AgentSubTaskSpec { Goal = "First", ProfileName = "general", Status = AgentSubTaskStatus.Running, TaskId = "child-outside-1" }]
+    };
+    await store.SaveAsync(parent);
+
+    // The child reached Complete OUTSIDE the orchestration loop entirely -
+    // opened directly and stepped/run to completion, or resumed via the
+    // review queue while it (not the parent) was the open task (r16
+    // 01-orchestration-hardening.md 1.1, the round's agent headliner).
+    var child = new AgentTaskState
+    {
+        TaskId = "child-outside-1",
+        Goal = "First",
+        Status = AgentTaskStatus.Complete,
+        ParentTaskId = parent.TaskId,
+        Summary = "Finished the first sub-task."
+    };
+    await store.SaveAsync(child);
+
+    var result = await service.RunAsync(parent.TaskId, options);
+
+    Equal(AgentTaskStatus.Complete, result.State.Status, "the parent should reconcile the externally-completed child and proceed to synthesis instead of throwing 'already finished'");
+    Equal(AgentSubTaskStatus.Complete, result.State.SubTaskPlan[0].Status, "the reconcile should mark the externally-completed child's spec terminal");
+    True(result.State.SubTaskPlan[0].ResultSummary.Contains("Finished the first sub-task", StringComparison.Ordinal), "the reconcile should copy the child's summary into the spec");
+    }
+
+    public static async Task AgentRunStepThrowsForAParentWithUnfinishedSubTasks()
+    {
+    using var temp = new TempDir();
+    var llm = new FakeSequencedAgentLlm([PlanTwoSubtasksResponse]);
+    var (store, service, options, state) = await CreateApprovedTwoSubtaskPlanAsync(temp, llm);
+
+    var message = string.Empty;
+    try { await service.RunStepAsync(state.TaskId, options); }
+    catch (InvalidOperationException ex) { message = ex.Message; }
+    True(message.Contains("RunAsync", StringComparison.Ordinal), "the error should tell the caller to use RunAsync instead of stepping the parent directly (1.2)");
+    _ = store;
+    }
+
+    public static async Task AgentPlanSubtasksIsBlockedWhenProposedAgainDuringSynthesis()
+    {
+    using var temp = new TempDir();
+    var llm = new FakeSequencedAgentLlm([
+        PlanTwoSubtasksResponse,
+        FinalResponseWithMessage("First sub-task done."),
+        FinalResponseWithMessage("Second sub-task done."),
+        PlanTwoSubtasksResponse
+    ]);
+    var (store, service, options, state) = await CreateApprovedTwoSubtaskPlanAsync(temp, llm);
+
+    var result = await service.RunAsync(state.TaskId, options);
+
+    Equal(AgentTaskStatus.Complete, result.State.Status, "synthesis falling back after a blocked re-proposal must still end the run Complete, not stranded (1.3)");
+    Equal(2, result.State.SubTaskPlan.Count, "the original plan must survive a blocked re-proposal attempt, not be replaced (1.3)");
+    True(result.State.SubTaskPlan.All(s => s.Status == AgentSubTaskStatus.Complete), "the original two sub-tasks should still show complete");
+    _ = store;
+    }
+
+    public static async Task AgentPlanSubtasksApprovalRejectsWhenTheTaskAlreadyHasAPlan()
+    {
+    using var temp = new TempDir();
+    var llm = new FakeSequencedAgentLlm([PlanTwoSubtasksResponse]);
+    var (store, service, options, state) = await CreateApprovedTwoSubtaskPlanAsync(temp, llm);
+
+    // Simulate a second, stale plan_subtasks approval racing in after the
+    // first one already materialized the plan (r16 01-orchestration-hardening.md 1.3).
+    var loaded = await store.LoadAsync(state.TaskId);
+    var subtasksJson = JsonDocument.Parse("""
+        [ { "goal": "racing-a", "profile": "general", "success_criteria": "a" },
+          { "goal": "racing-b", "profile": "general", "success_criteria": "b" } ]
+        """).RootElement;
+    loaded!.PendingToolAction = new AgentPendingToolAction
+    {
+        ToolName = "plan_subtasks",
+        Arguments = new Dictionary<string, object?> { ["subtasks"] = subtasksJson }
+    };
+    await store.SaveAsync(loaded);
+
+    await service.AppendApprovalAsync(state.TaskId, "plan_subtasks", approved: true, options);
+
+    var reloaded = await store.LoadAsync(state.TaskId);
+    Equal(2, reloaded!.SubTaskPlan.Count, "the existing plan must not be replaced by a stale racing approval");
+    Equal("Fix the bug", reloaded.SubTaskPlan[0].Goal, "the ORIGINAL plan's entries should survive, not the racing one's");
+    }
+
+    public static async Task AgentParentStatusMirrorsPausedChildStatusAndResumesToComplete()
+    {
+    using var temp = new TempDir();
+    Directory.CreateDirectory(temp.PathFor("workspace"));
+    File.WriteAllText(Path.Combine(temp.PathFor("workspace"), "notes.md"), "status: draft");
+
+    var childEditRequest = """
+        {
+          "thought_summary": "Editing notes.md",
+          "current_step": "Apply the edit",
+          "next_action": {
+            "type": "tool",
+            "tool_name": "edit_file",
+            "arguments": { "relative_path": "notes.md", "old_string": "status: draft", "new_string": "status: final" },
+            "requires_approval": true,
+            "risk_level": "medium"
+          },
+          "state_update": { "completed": [], "pending": [], "new_facts": [], "blockers": [] },
+          "user_message": "Requesting edit."
+        }
+        """;
+
+    var llm = new FakeSequencedAgentLlm([
+        PlanTwoSubtasksResponse,
+        childEditRequest,
+        FinalResponseWithMessage("Edit applied."),
+        FinalResponseWithMessage("Second sub-task done."),
+        FinalResponseWithMessage("Synthesis report.")
+    ]);
+    var (store, service, options, state) = await CreateApprovedTwoSubtaskPlanAsync(temp, llm);
+
+    var paused = await service.RunAsync(state.TaskId, options);
+    Equal(AgentTaskStatus.WaitingForUser, paused.State.Status, "the child itself should be WaitingForUser");
+
+    var parentAfterPause = await store.LoadAsync(state.TaskId);
+    Equal(AgentTaskStatus.WaitingForUser, parentAfterPause!.Status, "the parent must truthfully mirror its paused child's status instead of sitting Running forever (1.6)");
+    True(parentAfterPause.ActiveStep.Contains("Waiting on sub-task 1/2", StringComparison.Ordinal), "the parent's ActiveStep should name which sub-task it is waiting on (1.6)");
+
+    await service.AppendApprovalAsync(paused.State.TaskId, "edit_file", approved: true, options);
+    var resumed = await service.RunAsync(state.TaskId, options);
+    Equal(AgentTaskStatus.Complete, resumed.State.Status, "resuming the parent (whose own status was WaitingForUser, not Running) should still complete the run (1.6)");
+    }
 }

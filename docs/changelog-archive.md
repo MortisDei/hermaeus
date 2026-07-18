@@ -2,6 +2,71 @@
 
 The CHANGELOG.md in root only contains the current 10 versions of changelogs. The rest are archived here in line with the 10 version limit in the main changelog.
 
+## [0.12.0-alpha] - 2026-07-15
+
+Implements docs/review r7: the Agent Scenario Suite, a library of small,
+deterministic scenario workspaces that regression-test emergent agent
+behaviour (retrieval, memory, the safety gate, approvals, and lessons
+interacting) instead of testing any one feature in isolation. Every check is
+a pure predicate over recorded artifacts (task status, safety-gate rows,
+file hashes, answer substrings) - no LLM judge.
+
+### Agent Scenario Suite
+
+- **Engine** (`Aether.Agent`). `AgentScenarioManifest`/`AgentScenarioExpectations`
+  model a scenario (goal, max steps, auto-approved tools, seeded memory/lessons,
+  files placed outside the workspace for traversal tests, expectations).
+  `AgentScenarioChecks` is a pure evaluator covering 11 deterministic check
+  types (final status, approval-required/blocked/forbidden-execution per
+  tool, files read/unread, files changed/unchanged, answer must/must-not
+  mention, max new lessons, minimum gated risk, revertible-patch capture).
+  `IAgentScenarioStore` loads built-in scenarios (shipped under
+  `agent-scenarios/` next to the app) plus user scenarios from
+  `{DataRoot}/agent-scenarios`, with user scenarios overriding built-ins by
+  id. `IAgentScenarioRunner` executes a scenario against a real
+  `AgentService` in a fully isolated sandbox: a copied workspace, a
+  throwaway agent data root (its own task store and lesson store), and
+  approvals that only ever grant (per-scenario `auto_approve` list) or are
+  left pending - a scenario run can never deny (which would itself write a
+  rejection lesson) and never runs an unapproved command. The user's real
+  agent data root is untouched by any scenario run.
+- **Library**: ten built-in scenarios, one behaviour each - conflicting
+  documentation, prompt injection in a workspace file, secrets that must
+  stay out of answers, a declared command that still needs approval, an
+  undeclared command family that gets blocked outright, stale remembered
+  context versus current code, a path-traversal read attempt, an
+  approved-and-reverted edit, honest admission of undocumented behaviour,
+  and lesson-store hygiene on a trivial task.
+- **Workbench UI**: a "Scenario Evals" panel on the Agent view runs the
+  suite (or one scenario) against the workbench's selected model with live
+  progress, per-row pass/fail with failed-check detail, and a headline
+  pointing at the exported report (`eval-runs/{suiteId}/report.md` +
+  `run.jsonl`, alongside a new `EvalMode.AgentScenario` projection into the
+  shared eval store).
+
+### Other
+
+- Doctor: llama-server-missing check now offers a "Download llama.cpp" fix
+  action; build-number parsing handles the current `version: NNNN`
+  llama-server output (no `b` prefix); tray-support check distinguishes
+  confirmed Windows/macOS support from advisory-only Linux support.
+- Model Management merges detected local GGUF files with runtime-reported
+  models and shows a Running badge per model.
+- Services: managed llama-server model path gets a detected-model dropdown;
+  saving a managed server's port now syncs `Llm.LlamaCppBaseUrl` /
+  `Rag.EmbeddingBaseUrl` and any linked runtime profile so chat/RAG follow
+  the port instead of silently pointing at a stale one.
+- Chat: forcing a model refresh now invalidates `CompositeLlmService`'s
+  cached model list instead of returning stale data.
+- Memory: `HybridRerankAsync` narrowed its SQLite scan to `id, embedding`
+  and defers loading full high-relevance rows, cutting prompt-prep I/O.
+  Embedding model warms up during app startup to avoid first-message
+  latency. Kokoro phonemizer gained Magic-E vowel shifting, more digraph
+  coverage, rhotic vowel rules, and dedicated affricate phoneme tokens.
+- Fixed a shutdown crash by wrapping the exit handler's `ServiceProvider`
+  disposal in try/catch/finally.
+
+
 ## [0.11.0-alpha] - 2026-07-12
 
 Implements docs/review r6 in full: answerability. A first-time user can now

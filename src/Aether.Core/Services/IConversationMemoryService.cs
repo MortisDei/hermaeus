@@ -21,4 +21,18 @@ public interface IConversationMemoryService
     /// are meant to reach the user.
     /// </summary>
     Task<string> ApplyInjectedMemoryMarkersAsync(string responseText, IReadOnlyList<string> injectedMemoryIds, CancellationToken ct = default);
+
+    /// <summary>
+    /// The full per-turn memory marker pipeline (r16 02-memory-integrity.md
+    /// 2.2): applies [MEMORY_UPDATE: id | ...] / [MEMORY_FORGET: id] markers
+    /// for ids in <paramref name="injectedMemoryIds"/> (same rule as
+    /// <see cref="ApplyInjectedMemoryMarkersAsync"/> - a no-op when nothing
+    /// was injected this turn), extracts and dedupe-saves up to
+    /// <paramref name="maxNewMemories"/> new <c>[MEMORY: ...]</c> blocks
+    /// through the same merge path auto-summary uses, and strips every
+    /// marker (valid, invalid, or unmatched) from the returned text - so raw
+    /// marker syntax never reaches the persisted transcript, whether or not
+    /// anything was injected or extracted this turn.
+    /// </summary>
+    Task<string> ApplyMemoryMarkersAsync(string responseText, IReadOnlyList<string> injectedMemoryIds, string? conversationId, int maxNewMemories = 3, CancellationToken ct = default);
 }

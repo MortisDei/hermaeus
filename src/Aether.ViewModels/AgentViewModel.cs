@@ -40,7 +40,7 @@ public sealed class AgentContextReceiptSectionViewModel
 
 public sealed class AgentReviewQueueItemViewModel
 {
-    public AgentReviewQueueItemViewModel(AgentReviewQueueItem item, string recipePreview = "")
+    public AgentReviewQueueItemViewModel(AgentReviewQueueItem item, string recipePreview = "", string activeWorkspaceRoot = "")
     {
         TaskId = item.TaskId;
         Goal = item.Goal;
@@ -57,14 +57,27 @@ public sealed class AgentReviewQueueItemViewModel
         PendingReason = item.PendingToolAction?.Reason ?? string.Empty;
         RecipePreview = recipePreview;
         ParentGoal = item.ParentGoal ?? string.Empty;
+        ParentTaskId = item.ParentTaskId;
+        WorkspaceRoot = item.WorkspaceRoot ?? string.Empty;
+        DifferentWorkspaceLabel = WorkspaceRoot.Length > 0
+            && !string.Equals(WorkspaceRoot, activeWorkspaceRoot, StringComparison.OrdinalIgnoreCase)
+                ? $"workspace: {Path.GetFileName(WorkspaceRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))}"
+                : string.Empty;
     }
 
     public string TaskId { get; }
     public string Goal { get; }
     /// <summary>The parent task's goal, set only when this entry is a sub-task child (r15 02-orchestration-ui.md 2.3).</summary>
     public string ParentGoal { get; }
+    /// <summary>The parent task's id, set only when this entry is a sub-task child (r16 01-orchestration-hardening.md 1.1).</summary>
+    public string? ParentTaskId { get; }
     public bool IsSubTask => !string.IsNullOrWhiteSpace(ParentGoal);
     public string ParentGoalLabel => IsSubTask ? $"for: {ParentGoal}" : string.Empty;
+    /// <summary>The task's own workspace root (r16 01-orchestration-hardening.md 1.4); empty for pre-r16 tasks.</summary>
+    public string WorkspaceRoot { get; }
+    /// <summary>Non-empty only when this task's workspace differs from the currently active workbench workspace.</summary>
+    public string DifferentWorkspaceLabel { get; }
+    public bool HasDifferentWorkspace => DifferentWorkspaceLabel.Length > 0;
     public AgentTaskStatus Status { get; }
     public DateTime UpdatedAt { get; }
     public string ActiveStep { get; }
@@ -92,6 +105,48 @@ public sealed class AgentReviewQueueItemViewModel
     /// <summary>What a pending run_command approval will actually execute (r6 3.2); empty for non-command tools.</summary>
     public string RecipePreview { get; }
     public bool HasRecipePreview => !string.IsNullOrWhiteSpace(RecipePreview);
+}
+
+/// <summary>
+/// One row of the recent-tasks list (r16 03-workbench-and-desktop.md 3.1) -
+/// the data layer (<see cref="AgentTaskListItem"/>, ParentTaskId column)
+/// shipped in r15 with no view to bind it; this is that view's item shape.
+/// </summary>
+public sealed class AgentTaskListItemViewModel
+{
+    public AgentTaskListItemViewModel(AgentTaskListItem item)
+    {
+        TaskId = item.TaskId;
+        Goal = item.Goal;
+        Status = item.Status;
+        UpdatedAt = item.UpdatedAt;
+        ParentTaskId = item.ParentTaskId;
+    }
+
+    public string TaskId { get; }
+    public string Goal { get; }
+    public AgentTaskStatus Status { get; }
+    public DateTime UpdatedAt { get; }
+    public string? ParentTaskId { get; }
+    public bool IsSubTask => !string.IsNullOrWhiteSpace(ParentTaskId);
+    public string StatusLabel => Status.ToString();
+
+    public string RelativeTimeLabel
+    {
+        get
+        {
+            var elapsed = DateTime.UtcNow - UpdatedAt;
+            if (elapsed < TimeSpan.Zero) elapsed = TimeSpan.Zero;
+            return elapsed switch
+            {
+                { TotalSeconds: < 60 } => "just now",
+                { TotalMinutes: < 60 } => $"{(int)elapsed.TotalMinutes}m ago",
+                { TotalHours: < 24 } => $"{(int)elapsed.TotalHours}h ago",
+                { TotalDays: < 7 } => $"{(int)elapsed.TotalDays}d ago",
+                _ => UpdatedAt.ToLocalTime().ToString("d MMM")
+            };
+        }
+    }
 }
 
 public sealed class AgentWorkspaceMemoryEntryViewModel
@@ -296,7 +351,7 @@ public partial class AgentViewModel : ViewModelBase
 
     public UiBoundCollection<LlmModel> AvailableModels { get; } = [];
     public UiBoundCollection<RagDataset> Datasets { get; } = [];
-    public UiBoundCollection<AgentTaskListItem> RecentTasks { get; } = [];
+    public UiBoundCollection<AgentTaskListItemViewModel> RecentTasks { get; } = [];
     public UiBoundCollection<AgentReviewQueueItemViewModel> ReviewQueue { get; } = [];
     public UiBoundCollection<AgentWorkspaceMemoryEntryViewModel> WorkspaceMemory { get; } = [];
     public UiBoundCollection<AgentLessonViewModel> Lessons { get; } = [];
@@ -342,6 +397,16 @@ public partial class AgentViewModel : ViewModelBase
     /// <summary>An orchestration parent whose synthesis has written report.md (r15 02-orchestration-ui.md 2.4).</summary>
     public bool HasReport => CurrentTask is { SubTaskPlan.Count: > 0 } && File.Exists(ReportPath);
     private string ReportPath => CurrentTask is null ? string.Empty : Path.Combine(_store.GetTaskDirectory(CurrentTask.TaskId), "report.md");
+
+    /// <summary>
+    /// Null-safe replacement for the Sub-tasks border's old
+    /// <c>!!CurrentTask.SubTaskPlan.Count</c> binding (r16
+    /// 03-workbench-and-desktop.md 3.4): a compiled binding with a null
+    /// <c>CurrentTask</c> intermediate produces UnsetValue, which leaves
+    /// IsVisible at its default true - the empty "Sub-tasks" chrome showed
+    /// on a fresh workbench before any task was loaded.
+    /// </summary>
+    public bool HasSubTaskPlan => CurrentTask is { SubTaskPlan.Count: > 0 };
 
     [RelayCommand]
     private void OpenReport()
@@ -582,6 +647,7 @@ public partial class AgentViewModel : ViewModelBase
                 $"Agent started: {GoalText}"));
             CurrentTask = await _agent.CreateTaskAsync(GoalText, BuildOptions(), _cts.Token);
             _openedTaskId = CurrentTask.TaskId;
+            _currentTaskParentGoal = string.Empty;
             Narrate("Agent task started.", VoicePriority.Normal, $"{CurrentTask.TaskId}:started");
             await RunAgentLoopAsync();
             await RefreshRecentAsync();
@@ -628,17 +694,39 @@ public partial class AgentViewModel : ViewModelBase
     [RelayCommand]
     private void Stop() => _cts?.Cancel();
 
+    /// <summary>
+    /// Takes a bare task id, not an item view model (r16
+    /// 03-workbench-and-desktop.md 3.1), so both the recent-tasks list
+    /// (<see cref="AgentTaskListItemViewModel.TaskId"/>) and the review
+    /// queue's Open button (<see cref="AgentReviewQueueItemViewModel.TaskId"/>)
+    /// can invoke this same command.
+    /// </summary>
     [RelayCommand]
-    private async Task LoadTaskAsync(AgentTaskListItem? item)
+    private async Task LoadTaskAsync(string? taskId)
     {
-        if (item is null) return;
-        CurrentTask = await _store.LoadAsync(item.TaskId);
+        if (string.IsNullOrWhiteSpace(taskId)) return;
+        CurrentTask = await _store.LoadAsync(taskId);
         _openedTaskId = CurrentTask?.TaskId;
+
+        // Opening a child directly (recent-tasks list, review queue Open) has
+        // no other cue that it belongs to a parent orchestration run (r16
+        // 03-workbench-and-desktop.md 3.1's "clicking a child shows its
+        // parent context" acceptance) - the review queue's own ParentGoal
+        // column only covers items still in that queue.
+        _currentTaskParentGoal = CurrentTask?.ParentTaskId is { Length: > 0 } parentId
+            ? (await _store.LoadAsync(parentId))?.Goal ?? string.Empty
+            : string.Empty;
+
         RefreshTaskPreview();
         await RefreshQueuedPatchesAsync();
         await RefreshNewLessonsAsync();
         RunStepCommand.NotifyCanExecuteChanged();
     }
+
+    private string _currentTaskParentGoal = string.Empty;
+    /// <summary>"for: &lt;parent goal&gt;" when the open task is a sub-task child, empty otherwise.</summary>
+    public string CurrentTaskParentGoalLabel => _currentTaskParentGoal.Length > 0 ? $"for: {_currentTaskParentGoal}" : string.Empty;
+    public bool HasCurrentTaskParentGoal => _currentTaskParentGoal.Length > 0;
 
     [RelayCommand]
     private async Task RefreshReviewQueueAsync()
@@ -647,8 +735,12 @@ public partial class AgentViewModel : ViewModelBase
         var options = BuildOptions();
         foreach (var item in await _store.ListReviewQueueAsync())
         {
-            var preview = item.PendingToolAction is null ? string.Empty : AgentApprovalPreview.Describe(item.PendingToolAction, options);
-            ReviewQueue.Add(new AgentReviewQueueItemViewModel(item, preview));
+            // The recipe preview describes what a pending run_command would
+            // execute; it must reflect the TASK's own workspace, not the
+            // workbench's active one (r16 01-orchestration-hardening.md 1.4).
+            var previewOptions = item.WorkspaceRoot is { Length: > 0 } root ? options with { WorkspaceRoot = root } : options;
+            var preview = item.PendingToolAction is null ? string.Empty : AgentApprovalPreview.Describe(item.PendingToolAction, previewOptions);
+            ReviewQueue.Add(new AgentReviewQueueItemViewModel(item, preview, WorkspaceRoot));
         }
     }
 
@@ -669,11 +761,12 @@ public partial class AgentViewModel : ViewModelBase
         // A child's approval must resume the PARENT's task id, not the
         // child's - orchestration only advances through AgentService.RunAsync
         // called with the parent id (r15 01-subtask-orchestration.md 1.4
-        // step 4; 02-orchestration-ui.md 2.3).
-        var resumeTaskId = CurrentTask is { } opened && opened.SubTaskPlan.Any(s => s.TaskId == item.TaskId)
-            ? opened.TaskId
-            : item.TaskId;
-        await ResumeAgentLoopIfRunnableAsync(resumeTaskId);
+        // step 4; 02-orchestration-ui.md 2.3). Read directly off the queue
+        // item's own ParentTaskId rather than inferring parenthood from
+        // whatever task happens to be open in the workbench - that
+        // inference silently failed whenever the child itself was the open
+        // task (r16 01-orchestration-hardening.md 1.1).
+        await ResumeAgentLoopIfRunnableAsync(item.ParentTaskId ?? item.TaskId);
     }
 
     [RelayCommand(CanExecute = nameof(CanSendReply))]
@@ -703,12 +796,25 @@ public partial class AgentViewModel : ViewModelBase
     /// Shared by <see cref="ApproveReviewAsync"/> and <see cref="SendReplyAsync"/>:
     /// resumes the autonomous loop for a task that some other action (an
     /// approval, a reply) already returned to <see cref="AgentTaskStatus.Running"/>.
-    /// A no-op if the loop is already running, a different task is open, or
-    /// the task is not actually Running.
+    /// A no-op if the loop is already running or there is nothing left for it
+    /// to do. Unlike before r16, <paramref name="taskId"/> need not be the
+    /// currently open task: approving a CHILD's pending action while the
+    /// child itself is open must still resume the PARENT's orchestration
+    /// loop (r16 01-orchestration-hardening.md 1.1), so this loads the
+    /// target task's own state when it differs from <see cref="CurrentTask"/>.
+    /// An orchestration parent can be resumable while its OWN status reads
+    /// WaitingForUser/Blocked (it now truthfully mirrors its paused child's
+    /// status - 1.6), so a parent with any unfinished sub-task spec is
+    /// treated as runnable too; the orchestration loop itself decides
+    /// whether the next spec is actually ready to advance.
     /// </summary>
     private async Task ResumeAgentLoopIfRunnableAsync(string taskId)
     {
-        if (IsRunning || CurrentTask?.TaskId != taskId || CurrentTask.Status != AgentTaskStatus.Running)
+        if (IsRunning) return;
+
+        var target = CurrentTask?.TaskId == taskId ? CurrentTask : await _store.LoadAsync(taskId);
+        var hasUnfinishedSubTasks = target?.SubTaskPlan.Any(s => s.Status is AgentSubTaskStatus.Pending or AgentSubTaskStatus.Running) ?? false;
+        if (target is null || (target.Status != AgentTaskStatus.Running && !hasUnfinishedSubTasks))
             return;
 
         IsRunning = true;
@@ -716,7 +822,8 @@ public partial class AgentViewModel : ViewModelBase
         _cts = new CancellationTokenSource();
         try
         {
-            await RunAgentLoopAsync();
+            var options = target.WorkspaceRoot is { Length: > 0 } root ? BuildOptions() with { WorkspaceRoot = root } : BuildOptions();
+            await RunAgentLoopAsync(taskId, options);
             await RefreshRecentAsync();
         }
         catch (OperationCanceledException) { StatusMessage = "Agent stopped."; }
@@ -1202,6 +1309,18 @@ public partial class AgentViewModel : ViewModelBase
     private async Task RunCurrentStepAsync()
     {
         if (CurrentTask is null) return;
+
+        // A parent with unfinished sub-tasks can never take a bare parent
+        // model step - AgentService.RunStepAsync throws for it (r16
+        // 01-orchestration-hardening.md 1.2). The Run Step button advances
+        // orchestration instead: one child pause boundary at a time, via
+        // the same loop Start uses.
+        if (CurrentTask.SubTaskPlan.Any(s => s.Status is AgentSubTaskStatus.Pending or AgentSubTaskStatus.Running))
+        {
+            await RunAgentLoopAsync();
+            return;
+        }
+
         StatusMessage = "Building context and asking the agent...";
         var result = await _agent.RunStepAsync(CurrentTask.TaskId, BuildOptions(), _cts?.Token ?? CancellationToken.None);
         ApplyStepResult(result);
@@ -1213,33 +1332,52 @@ public partial class AgentViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Runs the task's autonomous loop (Start, or resuming after an
-    /// approval) instead of a single manual step. Each intermediate step
-    /// still updates the visible task/context state via <see cref="ApplyStepResult"/>
-    /// so the workbench shows live progress, not just the final result.
+    /// Runs the currently-open task's autonomous loop (Start, or resuming
+    /// after an approval on the open task itself).
     /// </summary>
     private async Task RunAgentLoopAsync()
     {
         if (CurrentTask is null) return;
-        var openedTaskId = _openedTaskId = CurrentTask.TaskId;
+        await RunAgentLoopAsync(CurrentTask.TaskId, BuildOptions());
+    }
+
+    /// <summary>
+    /// Core of the autonomous loop, parameterized by task id (r16
+    /// 01-orchestration-hardening.md 1.1) so <see cref="ResumeAgentLoopIfRunnableAsync"/>
+    /// can resume a task other than the one currently open - approving a
+    /// CHILD's pending action while the child itself is open must resume
+    /// the PARENT's orchestration, not silently switch the workbench away
+    /// from the child the user is looking at. Each intermediate step still
+    /// updates the visible task/context state via <see cref="ApplyStepResult"/>
+    /// (which already no-ops for a child step while a different task is
+    /// open, via its own isChildStep check); <see cref="CurrentTask"/> is
+    /// only reassigned at the end if it still points at the resumed task.
+    /// </summary>
+    private async Task RunAgentLoopAsync(string taskId, AgentWorkspaceOptions options)
+    {
+        var openedTaskId = _openedTaskId = taskId;
+        var viewedTaskId = CurrentTask?.TaskId;
         StatusMessage = "Running agent...";
         var result = await _agent.RunAsync(
             openedTaskId,
-            BuildOptions(),
+            options,
             onStep: ApplyStepResult,
             ct: _cts?.Token ?? CancellationToken.None);
 
         // The returned result can describe a paused CHILD task rather than
-        // the parent the user opened, and even the parent's own final
+        // the parent that was resumed, and even the parent's own final
         // synthesis step never flows through ApplyStepResult's onStep
         // (RunSynthesisAsync calls RunStepAsync directly - r15
-        // 01-subtask-orchestration.md 1.6). Re-fetch the opened task itself
+        // 01-subtask-orchestration.md 1.6). Re-fetch the resumed task itself
         // so CurrentTask (and its SubTaskPlan) always reflect the latest
-        // persisted state after the run settles, regardless of which task
-        // it actually stopped on. Harmless for a plain (non-orchestrated)
-        // task, whose in-memory result.State already matches the store.
-        CurrentTask = await _store.LoadAsync(openedTaskId) ?? result.State;
-        RefreshTaskPreview();
+        // persisted state after the run settles - but only when the
+        // workbench was already showing that task (or nothing) before this
+        // call; otherwise the view stays on whatever the user had open.
+        if (viewedTaskId == openedTaskId || viewedTaskId is null)
+        {
+            CurrentTask = await _store.LoadAsync(openedTaskId) ?? result.State;
+            RefreshTaskPreview();
+        }
 
         await RefreshLogAsync();
         await RefreshLessonsAsync();
@@ -1346,8 +1484,16 @@ public partial class AgentViewModel : ViewModelBase
         return string.IsNullOrWhiteSpace(profile?.VoiceId) ? null : profile.VoiceId;
     }
 
+    /// <summary>
+    /// Uses the open task's OWN stored workspace root when it has one
+    /// (r16 01-orchestration-hardening.md 1.4), so resuming a task steps
+    /// against its own workspace even when the workbench's active
+    /// <see cref="WorkspaceRoot"/> currently points somewhere else. Falls
+    /// back to the workbench root for task creation (no task open yet) and
+    /// for pre-r16 task state with no stored root.
+    /// </summary>
     private AgentWorkspaceOptions BuildOptions() => new(
-        WorkspaceRoot,
+        CurrentTask?.WorkspaceRoot is { Length: > 0 } root ? root : WorkspaceRoot,
         SelectedDataset?.Id,
         SelectedModel?.Id ?? string.Empty);
 
@@ -1363,7 +1509,7 @@ public partial class AgentViewModel : ViewModelBase
     {
         RecentTasks.Clear();
         foreach (var task in await _agent.LoadRecentTasksAsync())
-            RecentTasks.Add(task);
+            RecentTasks.Add(new AgentTaskListItemViewModel(task));
     }
 
     private async Task RefreshLogAsync()
@@ -1386,6 +1532,9 @@ public partial class AgentViewModel : ViewModelBase
         OnPropertyChanged(nameof(BlockedPatchCount));
         OnPropertyChanged(nameof(HasQueuedPatches));
         OnPropertyChanged(nameof(HasReport));
+        OnPropertyChanged(nameof(HasSubTaskPlan));
+        OnPropertyChanged(nameof(CurrentTaskParentGoalLabel));
+        OnPropertyChanged(nameof(HasCurrentTaskParentGoal));
 
         if (CurrentTask is null)
         {

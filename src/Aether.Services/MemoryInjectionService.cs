@@ -118,11 +118,20 @@ ignored.
         return Task.FromResult(selected);
     }
 
-    /// <summary>Blends search relevance with the memory's own importance; falls back to importance alone for memories not retrieved via search.</summary>
+    /// <summary>
+    /// Blends search relevance with the memory's DECAYED importance (r16
+    /// 02-memory-integrity.md 2.5) - using raw ImportanceScore here let a
+    /// memory one day from stale-archival still outrank a fresh one at
+    /// injection time, since the archiver already applies
+    /// <see cref="MemoryLifecycle.ComputeEffectiveImportance"/> but this
+    /// selection step did not. Falls back to effective importance alone for
+    /// memories not retrieved via search. Pinned rows are unaffected (decay
+    /// exempts them) and still sort first via the IsPinned ordering above.
+    /// </summary>
     private static double EffectiveScore(Memory memory) =>
         memory.RelevanceScore is { } relevance
-            ? (0.7 * relevance) + (0.3 * memory.ImportanceScore)
-            : memory.ImportanceScore;
+            ? (0.7 * relevance) + (0.3 * MemoryLifecycle.ComputeEffectiveImportance(memory))
+            : MemoryLifecycle.ComputeEffectiveImportance(memory);
 
     private static string FormatCategoryName(string category) =>
         category switch

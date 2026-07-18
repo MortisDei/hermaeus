@@ -97,4 +97,20 @@ public interface IMemoryStore
     /// embedding service is configured.
     /// </summary>
     Task RunEmbeddingBackfillAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Counts memory rows whose stored embedding no longer matches the
+    /// currently configured embedding model's dimensionality (r16
+    /// 02-memory-integrity.md 2.4) - the signal that a model switch has
+    /// silently zeroed their semantic recall score. 0 when no embedding
+    /// service is configured.
+    /// </summary>
+    Task<int> GetEmbeddingMismatchCountAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Clears the embedding on every mismatched row and triggers a
+    /// background re-embed. User-clicked only; never triggered
+    /// automatically by a settings change.
+    /// </summary>
+    Task<int> ClearMismatchedEmbeddingsAsync(CancellationToken ct = default);
 }

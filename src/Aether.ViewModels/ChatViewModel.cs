@@ -562,16 +562,23 @@ public partial class ChatViewModel : ViewModelBase
             }
             else
             {
-                if (injectedMemoryIds.Count > 0)
+                // Always runs when memory is enabled, not just when memories
+                // were injected (r16 02-memory-integrity.md 2.2): a model can
+                // save a NEW [MEMORY: ...] fact on a turn with zero recall
+                // hits, and marker syntax must never reach the persisted
+                // transcript regardless of what ran this turn.
+                if (_settings.Settings.Memory.Enabled)
                 {
                     try
                     {
-                        asst.Content = await _conversationMemory.ApplyInjectedMemoryMarkersAsync(asst.Content, injectedMemoryIds, _cts.Token);
+                        asst.Content = await _conversationMemory.ApplyMemoryMarkersAsync(
+                            asst.Content, injectedMemoryIds, CurrentConversationId, ct: _cts.Token);
+                        await RefreshMemoryStatusAsync();
                     }
                     catch (Exception ex)
                     {
                         _runtimeLogs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Service,
-                            $"Applying memory update/forget markers failed: {ex.Message}"));
+                            $"Applying memory markers failed: {ex.Message}"));
                     }
                 }
 
@@ -1004,6 +1011,14 @@ public partial class ChatViewModel : ViewModelBase
             contextText += await BuildLessonContextAsync(ct);
             lessonMs = sw.ElapsedMilliseconds;
         }
+
+        // The save-marker half of the memory feature (r16
+        // 02-memory-integrity.md 2.2): teaches [MEMORY: ...] regardless of
+        // whether any memories matched this turn - saving must not depend
+        // on recall having hits. ApplyMemoryMarkersAsync (called after the
+        // response completes) is what actually extracts and persists it.
+        if (_memoryInjection is not null)
+            contextText += _memoryInjection.GetMemoryInstructionPrompt();
 
         return (contextText, sources, injectedIds, recallMs, selectMs, lessonMs);
     }

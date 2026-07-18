@@ -2093,6 +2093,58 @@ namespace Aether.Tests
             Equal(0, batch["conv-missing"], "missing conversations should count as zero");
         }
 
+        public static async Task MemorySearchExcludesArchivedRowsFromBothFtsAndLikeFallback()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var store = new MemoryStore(settings);
+            await store.InitializeAsync();
+
+            var archived = new Memory { Id = "archived-1", Content = "Forgotten secret plan.", IsArchived = true };
+            await store.SaveAsync(archived);
+            var visible = new Memory { Id = "visible-1", Content = "Forgotten does not apply here." };
+            await store.SaveAsync(visible);
+
+            // A term long enough to hit the FTS branch (r16 02-memory-integrity.md 2.1).
+            var ftsResults = await store.SearchAsync("Forgotten");
+            False(ftsResults.Any(m => m.Id == "archived-1"), "an archived memory must not be returned by the FTS search branch");
+            True(ftsResults.Any(m => m.Id == "visible-1"), "a non-archived match should still be returned");
+
+            // A single-character term is below BuildFtsQuery's 2-char floor,
+            // so SearchAsync itself routes to the LIKE fallback branch.
+            var likeResults = await store.SearchAsync("F");
+            False(likeResults.Any(m => m.Id == "archived-1"), "an archived memory must not be returned by the LIKE fallback branch either");
+        }
+
+        public static async Task MemoryExpirationDateArchivesAndIsExcludedFromSearchEvenBeforeTheSweep()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var store = new MemoryStore(settings);
+            await store.InitializeAsync();
+
+            var expired = new Memory { Id = "expired-1", Content = "Temporary note about a deadline.", ExpirationDate = DateTime.UtcNow.AddDays(-1) };
+            await store.SaveAsync(expired);
+            var pinnedExpired = new Memory { Id = "expired-pinned", Content = "Pinned deadline note.", ExpirationDate = DateTime.UtcNow.AddDays(-1), IsPinned = true };
+            await store.SaveAsync(pinnedExpired);
+
+            // Belt and braces (2.3): SearchAsync excludes an expired-but-not-yet-
+            // archived row even before ArchiveStaleMemoriesAsync ever runs.
+            var beforeSweep = await store.SearchAsync("deadline");
+            False(beforeSweep.Any(m => m.Id == "expired-1"), "an expired, non-pinned memory should not inject even before the archive sweep");
+            True(beforeSweep.Any(m => m.Id == "expired-pinned"), "pin wins over expiration, consistent with every other lifecycle rule");
+
+            var archivedCount = await store.ArchiveStaleMemoriesAsync();
+            Equal(1, archivedCount, "only the non-pinned expired memory should be archived by the sweep");
+
+            var afterSweep = await store.GetByIdAsync("expired-1");
+            True(afterSweep!.IsArchived, "the expired memory should be archived after the sweep");
+            var pinnedAfterSweep = await store.GetByIdAsync("expired-pinned");
+            False(pinnedAfterSweep!.IsArchived, "a pinned memory with a past expiry should survive the sweep");
+        }
+
         public static async Task MemoryLifecycleDecaysUnrecalledMemoriesAndArchivesBelowFloor()
         {
             using var temp = new TempDir();
@@ -2174,6 +2226,78 @@ namespace Aether.Tests
 
             var pinnedAfter = await store.GetByIdAsync("pinned-injected");
             False(pinnedAfter!.IsArchived, "a pinned memory should never be archived even by a valid forget marker");
+        }
+
+        public static async Task ConversationMemorySavesANewMemoryMarkerEvenWithZeroInjectedMemories()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var store = new MemoryStore(settings);
+            await store.InitializeAsync();
+
+            var logs = new RuntimeLogService(settings);
+            var conversations = new ConversationStore(settings);
+            await conversations.InitializeAsync();
+            var extractor = new MemoryExtractionService();
+            var service = new ConversationMemoryService(settings, conversations, store, extractor, new FakeLlm(), logs);
+
+            // The r16 02-memory-integrity.md 2.2 headline case: saving a NEW
+            // memory must not depend on recall having any hits this turn -
+            // injectedMemoryIds is empty here.
+            var response = "Got it. [MEMORY: User prefers Australian English spelling.]";
+            var cleaned = await service.ApplyMemoryMarkersAsync(response, injectedMemoryIds: [], conversationId: "conv-save");
+
+            False(cleaned.Contains("[MEMORY:", StringComparison.Ordinal), "the marker syntax must never reach the persisted transcript");
+            True(cleaned.Contains("Got it.", StringComparison.Ordinal), "surrounding response text should be preserved");
+
+            var all = await store.GetAllAsync();
+            True(all.Any(m => m.Content == "User prefers Australian English spelling." && m.SourceConversationId == "conv-save"),
+                "the extracted memory should actually be saved, not just parsed");
+        }
+
+        public static async Task ConversationMemoryDedupesTheSameMarkerAcrossTurnsIntoOneRowWithBumpedFrequency()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var store = new MemoryStore(settings);
+            await store.InitializeAsync();
+
+            var logs = new RuntimeLogService(settings);
+            var conversations = new ConversationStore(settings);
+            await conversations.InitializeAsync();
+            var extractor = new MemoryExtractionService();
+            var service = new ConversationMemoryService(settings, conversations, store, extractor, new FakeLlm(), logs);
+
+            const string marker = "[MEMORY: User wants todos auto-continued without prompting.]";
+            await service.ApplyMemoryMarkersAsync(marker, injectedMemoryIds: [], conversationId: "conv-dedupe");
+            await service.ApplyMemoryMarkersAsync(marker, injectedMemoryIds: [], conversationId: "conv-dedupe");
+
+            var all = await store.GetAllAsync();
+            var matches = all.Where(m => m.Content == "User wants todos auto-continued without prompting.").ToList();
+            Equal(1, matches.Count, "the same marker text saved twice across turns should dedupe into a single row, not pile up duplicates");
+            Equal(2, matches[0].FrequencyCount, "the dedupe path should bump FrequencyCount on the second save");
+        }
+
+        public static async Task ConversationMemoryAlwaysStripsMarkersRegardlessOfInjectionOrExtraction()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var store = new MemoryStore(settings);
+            await store.InitializeAsync();
+
+            var logs = new RuntimeLogService(settings);
+            var conversations = new ConversationStore(settings);
+            await conversations.InitializeAsync();
+            var extractor = new MemoryExtractionService();
+            var service = new ConversationMemoryService(settings, conversations, store, extractor, new FakeLlm(), logs);
+
+            // No [MEMORY: ...] block, nothing injected - cleanup must still run
+            // and pass ordinary text through unchanged.
+            var plain = await service.ApplyMemoryMarkersAsync("Just a normal reply.", injectedMemoryIds: [], conversationId: "conv-plain");
+            Equal("Just a normal reply.", plain, "a response with no markers at all should pass through unchanged");
         }
 
         public static async Task MemoryExtractionParsesAndCleansMarkers()

@@ -14,6 +14,22 @@
                 <TextBlock Text="Review, search, pin, and manage stored memories from conversations." FontSize="13" Opacity="0.5" />
             </StackPanel>
 
+            <!-- Embedding mismatch banner (r16 02-memory-integrity.md 2.4) -->
+            <Border Classes="settings-card" Padding="14" IsVisible="{Binding HasEmbeddingMismatch}">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                    <TextBlock Grid.Column="0"
+                               Text="{Binding EmbeddingMismatchLabel}"
+                               FontSize="12" VerticalAlignment="Center"
+                               ToolTip.Tip="These memories were embedded with a different model, so their semantic recall score is 0 until re-embedded." />
+                    <Button Grid.Column="1"
+                            Content="Re-embed memories"
+                            Command="{Binding ReembedMismatchedCommand}"
+                            IsEnabled="{Binding !IsReembedding}"
+                            FontSize="12" Padding="10,8"
+                            ToolTip.Tip="Clears the stale embeddings and re-embeds them with the current model in the background." />
+                </Grid>
+            </Border>
+
             <!-- Search & Filter Bar -->
             <Border Classes="settings-card" Padding="14">
                 <StackPanel Spacing="10">

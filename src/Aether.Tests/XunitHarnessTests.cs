@@ -131,6 +131,11 @@ public static class HarnessCases
         [new HarnessCase("memory lifecycle decays unrecalled memories and archives below floor", ServiceTests.MemoryLifecycleDecaysUnrecalledMemoriesAndArchivesBelowFloor)],
         [new HarnessCase("memory store counts by conversation work", ServiceTests.MemoryStoreCountsByConversationWork)],
         [new HarnessCase("conversation memory applies update and forget markers only for injected ids", ServiceTests.ConversationMemoryAppliesUpdateAndForgetMarkersOnlyForInjectedIds)],
+        [new HarnessCase("memory search excludes archived rows from both fts and like fallback", ServiceTests.MemorySearchExcludesArchivedRowsFromBothFtsAndLikeFallback)],
+        [new HarnessCase("memory expiration date archives and is excluded from search even before the sweep", ServiceTests.MemoryExpirationDateArchivesAndIsExcludedFromSearchEvenBeforeTheSweep)],
+        [new HarnessCase("conversation memory saves a new memory marker even with zero injected memories", ServiceTests.ConversationMemorySavesANewMemoryMarkerEvenWithZeroInjectedMemories)],
+        [new HarnessCase("conversation memory dedupes the same marker across turns into one row with bumped frequency", ServiceTests.ConversationMemoryDedupesTheSameMarkerAcrossTurnsIntoOneRowWithBumpedFrequency)],
+        [new HarnessCase("conversation memory always strips markers regardless of injection or extraction", ServiceTests.ConversationMemoryAlwaysStripsMarkersRegardlessOfInjectionOrExtraction)],
         [new HarnessCase("XTTS API template delegates to generator", ServiceTests.XttsApiTemplateDelegatesToGenerator)],
         [new HarnessCase("extra args parser handles escaped quotes", ServiceTests.ExtraArgsParserHandlesEscapedQuotes)],
         [new HarnessCase("extra args parser preserves bare Windows paths", ServiceTests.ExtraArgsParserPreservesBareWindowsPaths)],
@@ -272,7 +277,18 @@ public static class HarnessCases
         [new HarnessCase("agent context builder includes sub-task reports for an orchestration parent", AgentTests.AgentContextBuilderIncludesSubTaskReportsForAnOrchestrationParent)],
         [new HarnessCase("agent gated action with no registered executor ends blocked instead of stranded", AgentTests.AgentGatedActionWithNoRegisteredExecutorEndsBlockedInsteadOfStranded)],
         [new HarnessCase("agent blocker reported alongside a successful tool execution ends running with progress winning", AgentTests.AgentBlockerReportedAlongsideASuccessfulToolExecutionEndsRunningWithProgressWinning)],
-        [new HarnessCase("agent blocker reported without a successful execution ends blocked", AgentTests.AgentBlockerReportedWithoutASuccessfulExecutionEndsBlocked)]
+        [new HarnessCase("agent blocker reported without a successful execution ends blocked", AgentTests.AgentBlockerReportedWithoutASuccessfulExecutionEndsBlocked)],
+        [new HarnessCase("agent task index timestamps round trip with utc kind", AgentTests.AgentTaskIndexTimestampsRoundTripWithUtcKind)],
+        [new HarnessCase("agent task state round trips workspace root and pre-r16 state loads unchanged", AgentTests.AgentTaskStateRoundTripsWorkspaceRootAndPreR16StateLoadsUnchanged)],
+        [new HarnessCase("agent approval executes against the task's own workspace root not the caller's options", AgentTests.AgentApprovalExecutesAgainstTheTasksOwnWorkspaceRootNotTheCallersOptions)],
+        [new HarnessCase("agent approval with null options and no stored workspace root throws instead of stranding", AgentTests.AgentApprovalWithNullOptionsAndNoStoredWorkspaceRootThrowsInsteadOfStranding)],
+        [new HarnessCase("agent approval with null options but stored workspace root executes normally", AgentTests.AgentApprovalWithNullOptionsButStoredWorkspaceRootExecutesNormally)],
+        [new HarnessCase("agent review queue child entries carry parent task id and workspace root", AgentTests.AgentReviewQueueChildEntriesCarryParentTaskIdAndWorkspaceRoot)],
+        [new HarnessCase("agent orchestration reconciles a child completed outside the loop", AgentTests.AgentOrchestrationReconcilesAChildCompletedOutsideTheLoop)],
+        [new HarnessCase("agent run step throws for a parent with unfinished sub-tasks", AgentTests.AgentRunStepThrowsForAParentWithUnfinishedSubTasks)],
+        [new HarnessCase("agent plan_subtasks is blocked when proposed again during synthesis", AgentTests.AgentPlanSubtasksIsBlockedWhenProposedAgainDuringSynthesis)],
+        [new HarnessCase("agent plan_subtasks approval rejects when the task already has a plan", AgentTests.AgentPlanSubtasksApprovalRejectsWhenTheTaskAlreadyHasAPlan)],
+        [new HarnessCase("agent parent status mirrors paused child status and resumes to complete", AgentTests.AgentParentStatusMirrorsPausedChildStatusAndResumesToComplete)]
     ];
 
     public static IEnumerable<object[]> Mcp =>

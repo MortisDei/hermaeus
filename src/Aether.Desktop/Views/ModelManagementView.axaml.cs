@@ -61,21 +61,14 @@ public partial class ModelManagementView : UserControl
     /// every wheel notch as a spin before it ever reached the outer ScrollViewer - the
     /// owner could never scroll a 32-model list past whatever fit without using the thin
     /// scrollbar. ServicesView/SettingsView hit the same problem with their own
-    /// NumericUpDown-heavy editors and fixed it the same way: intercept the wheel in the
-    /// tunnel phase (runs before any control's own handler) and always drive the page
-    /// ScrollViewer directly, regardless of what is under the pointer.
+    /// NumericUpDown-heavy editors and fixed it the same way (r16
+    /// 03-workbench-and-desktop.md 3.5 consolidated the three copies into
+    /// <see cref="WheelScrollHelper"/>): intercept the wheel in the tunnel
+    /// phase (runs before any control's own handler) and always drive the
+    /// page ScrollViewer directly, regardless of what is under the pointer.
     /// </summary>
-    private void OnPointerWheelChanged(object? sender, PointerWheelEventArgs e)
-    {
-        var max = Math.Max(0, ModelListScrollViewer.Extent.Height - ModelListScrollViewer.Viewport.Height);
-        if (max <= 0) return;
-
-        var next = Math.Clamp(ModelListScrollViewer.Offset.Y - e.Delta.Y * 56, 0, max);
-        if (Math.Abs(next - ModelListScrollViewer.Offset.Y) < 0.1) return;
-
-        ModelListScrollViewer.Offset = new Vector(ModelListScrollViewer.Offset.X, next);
-        e.Handled = true;
-    }
+    private void OnPointerWheelChanged(object? sender, PointerWheelEventArgs e) =>
+        WheelScrollHelper.Handle(ModelListScrollViewer, e);
 }
 
 public class NotEmptyConverter : IValueConverter
@@ -91,27 +84,7 @@ public class ErrorColorConverter : IValueConverter
 {
     public static readonly ErrorColorConverter Instance = new();
     public object Convert(object? v, Type t, object? p, CultureInfo c)
-        => v is true
-            ? (IBrush)new SolidColorBrush(Color.Parse("#EF5350"))
-            : new SolidColorBrush(Color.Parse("#66BB6A"));
-    public object ConvertBack(object? v, Type t, object? p, CultureInfo c)
-        => AvaloniaProperty.UnsetValue;
-}
-
-public class PullingTextConverter : IValueConverter
-{
-    public static readonly PullingTextConverter Instance = new();
-    public object Convert(object? v, Type t, object? p, CultureInfo c)
-        => v is true ? "Pulling..." : "Pull";
-    public object ConvertBack(object? v, Type t, object? p, CultureInfo c)
-        => AvaloniaProperty.UnsetValue;
-}
-
-public class TuningLabelConverter : IValueConverter
-{
-    public static readonly TuningLabelConverter Instance = new();
-    public object Convert(object? v, Type t, object? p, CultureInfo c)
-        => v is true ? "Tuning..." : "Auto tune";
+        => v is true ? StatusPalette.Error : StatusPalette.Ok;
     public object ConvertBack(object? v, Type t, object? p, CultureInfo c)
         => AvaloniaProperty.UnsetValue;
 }
@@ -121,14 +94,14 @@ public class FitTierBrushConverter : IValueConverter
     public static readonly FitTierBrushConverter Instance = new();
     public object Convert(object? v, Type t, object? p, CultureInfo c)
         => v is ModelFitTier tier
-            ? (IBrush)new SolidColorBrush(Color.Parse(tier switch
+            ? tier switch
             {
-                ModelFitTier.FitsGpu => "#4CAF50",
-                ModelFitTier.FitsPartial => "#FF9800",
-                ModelFitTier.TooLarge => "#F44336",
-                _ => "#757575"
-            }))
-            : new SolidColorBrush(Color.Parse("#757575"));
+                ModelFitTier.FitsGpu => StatusPalette.Ok,
+                ModelFitTier.FitsPartial => StatusPalette.Warn,
+                ModelFitTier.TooLarge => StatusPalette.Error,
+                _ => StatusPalette.Neutral
+            }
+            : StatusPalette.Neutral;
     public object ConvertBack(object? v, Type t, object? p, CultureInfo c)
         => AvaloniaProperty.UnsetValue;
 }
@@ -138,23 +111,14 @@ public class UpdateStatusBrushConverter : IValueConverter
     public static readonly UpdateStatusBrushConverter Instance = new();
     public object Convert(object? v, Type t, object? p, CultureInfo c)
         => v is ModelUpdateStatus status
-            ? (IBrush)new SolidColorBrush(Color.Parse(status switch
+            ? status switch
             {
-                ModelUpdateStatus.UpdateAvailable => "#FF9800",
-                ModelUpdateStatus.UpToDate => "#4CAF50",
-                ModelUpdateStatus.NoLongerPublished => "#757575",
-                _ => "#757575"
-            }))
-            : new SolidColorBrush(Color.Parse("#757575"));
-    public object ConvertBack(object? v, Type t, object? p, CultureInfo c)
-        => AvaloniaProperty.UnsetValue;
-}
-
-public class UpdatingLabelConverter : IValueConverter
-{
-    public static readonly UpdatingLabelConverter Instance = new();
-    public object Convert(object? v, Type t, object? p, CultureInfo c)
-        => v is true ? "Updating..." : "Update";
+                ModelUpdateStatus.UpdateAvailable => StatusPalette.Warn,
+                ModelUpdateStatus.UpToDate => StatusPalette.Ok,
+                ModelUpdateStatus.NoLongerPublished => StatusPalette.Neutral,
+                _ => StatusPalette.Neutral
+            }
+            : StatusPalette.Neutral;
     public object ConvertBack(object? v, Type t, object? p, CultureInfo c)
         => AvaloniaProperty.UnsetValue;
 }
@@ -164,15 +128,6 @@ public class RepoLinkLabelConverter : IValueConverter
     public static readonly RepoLinkLabelConverter Instance = new();
     public object Convert(object? v, Type t, object? p, CultureInfo c)
         => v is string s && !string.IsNullOrEmpty(s) ? $"Linked: {s}" : "Link to Hugging Face repo...";
-    public object ConvertBack(object? v, Type t, object? p, CultureInfo c)
-        => AvaloniaProperty.UnsetValue;
-}
-
-public class DownloadingLabelConverter : IValueConverter
-{
-    public static readonly DownloadingLabelConverter Instance = new();
-    public object Convert(object? v, Type t, object? p, CultureInfo c)
-        => v is true ? "Downloading..." : "Download";
     public object ConvertBack(object? v, Type t, object? p, CultureInfo c)
         => AvaloniaProperty.UnsetValue;
 }

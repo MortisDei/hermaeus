@@ -1,17 +1,14 @@
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Data.Converters;
 using Aether.Core.Models;
 using Aether.Core.Services;
 using Aether.Services;
 using Aether.ViewModels;
-using System.Globalization;
 
 namespace Aether.Desktop.Views;
 
 public partial class MainWindow : Window
 {
-    public static readonly IValueConverter AnyRunning = new AnyRunningConverter();
     public DesktopIntegrationService? DesktopIntegration { get; set; }
     public IPatchDiffService? PatchDiffService { get; set; }
 
@@ -26,6 +23,13 @@ public partial class MainWindow : Window
         if (DataContext is MainWindowViewModel vm)
         {
             vm.Agent.RequestDraftPatchPreview = ShowDraftPatchPreviewAsync;
+            vm.RequestDeleteConversationConfirmation = async item =>
+            {
+                var dialog = new ConfirmActionDialog(
+                    "Delete conversation",
+                    $"Permanently delete \"{item.Title}\"? This cannot be undone.");
+                return await dialog.ShowDialog<bool>(this);
+            };
             if (vm.Settings.StartMinimized)
                 WindowState = WindowState.Minimized;
         }
@@ -57,15 +61,4 @@ public partial class MainWindow : Window
         if (DataContext is MainWindowViewModel vm)
             vm.Shutdown();
     }
-}
-
-public sealed class AnyRunningConverter : IValueConverter
-{
-    public object Convert(object? v, Type t, object? p, CultureInfo c)
-    {
-        return v is IEnumerable<ServerProcessViewModel> servers
-            && servers.Any(s => s.Status == ServerStatus.Running);
-    }
-    public object ConvertBack(object? v, Type t, object? p, CultureInfo c)
-        => AvaloniaProperty.UnsetValue;
 }

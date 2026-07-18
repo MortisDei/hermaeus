@@ -44,6 +44,45 @@ public sealed class ConversationMemoryService : IConversationMemoryService
         if (string.IsNullOrEmpty(responseText))
             return responseText;
 
+        await ApplyUpdateForgetMarkersAsync(responseText, injectedMemoryIds, ct);
+        return _extractor.CleanMemoryMarkers(responseText);
+    }
+
+    public async Task<string> ApplyMemoryMarkersAsync(
+        string responseText,
+        IReadOnlyList<string> injectedMemoryIds,
+        string? conversationId,
+        int maxNewMemories = 3,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(responseText))
+            return responseText;
+
+        if (injectedMemoryIds.Count > 0)
+            await ApplyUpdateForgetMarkersAsync(responseText, injectedMemoryIds, ct);
+
+        // The other half of the phantom [MEMORY: ...] feature (r16
+        // 02-memory-integrity.md 2.2): GetMemoryInstructionPrompt teaches
+        // the model this marker, but until now nothing in live chat ever
+        // extracted or saved it - a model that tried got its save silently
+        // deleted (when memories were injected, ApplyInjectedMemoryMarkersAsync's
+        // CleanMemoryMarkers stripped it) or shown raw (when nothing was
+        // injected, nothing ran at all). Saved through the same
+        // MergeAndSaveAsync dedupe auto-summary uses, never raw SaveAsync,
+        // so repeated saves of the same fact reinforce one row instead of
+        // piling up duplicates.
+        var extracted = await _extractor.ExtractMemoriesAsync(responseText, conversationId);
+        if (extracted.Count > 0)
+        {
+            var capped = extracted.Take(Math.Max(0, maxNewMemories)).ToList();
+            await MergeAndSaveAsync(capped, conversationId ?? string.Empty, ct);
+        }
+
+        return _extractor.CleanMemoryMarkers(responseText);
+    }
+
+    private async Task ApplyUpdateForgetMarkersAsync(string responseText, IReadOnlyList<string> injectedMemoryIds, CancellationToken ct)
+    {
         var injected = new HashSet<string>(injectedMemoryIds, StringComparer.Ordinal);
 
         foreach (var (id, newContent) in _extractor.ExtractUpdateMarkers(responseText))
@@ -76,8 +115,6 @@ public sealed class ConversationMemoryService : IConversationMemoryService
             memory.IsArchived = true;
             await _memories.SaveAsync(memory, ct);
         }
-
-        return _extractor.CleanMemoryMarkers(responseText);
     }
 
     public async Task RunAutoSummaryAsync(string conversationId, CancellationToken ct = default)

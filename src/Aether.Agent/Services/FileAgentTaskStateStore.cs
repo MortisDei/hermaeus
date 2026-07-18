@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Aether.Agent.Models;
@@ -104,7 +105,7 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
         cmd.CommandText = @"
             SELECT t.task_id, t.goal, t.status, t.updated_at, t.active_step, t.summary,
                    t.approval_count, t.last_approval_action, t.last_approval_approved, t.last_approval_at,
-                   p.goal
+                   p.goal, t.parent_task_id
             FROM agent_task_index t
             LEFT JOIN agent_task_index p ON p.task_id = t.parent_task_id
             WHERE t.status IN ('WaitingForUser', 'Blocked') OR t.approval_count > 0
@@ -127,7 +128,8 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
                 r.IsDBNull(8) ? null : r.GetInt32(8) != 0,
                 r.IsDBNull(9) ? null : ParseDate(r.GetString(9)),
                 PendingToolAction: null,
-                ParentGoal: r.IsDBNull(10) ? null : r.GetString(10)));
+                ParentGoal: r.IsDBNull(10) ? null : r.GetString(10),
+                ParentTaskId: r.IsDBNull(11) ? null : r.GetString(11)));
         }
 
         // The index table only carries summary columns; a task actually
@@ -135,12 +137,16 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
         // exists in the full per-task state file.
         for (var i = 0; i < queue.Count; i++)
         {
-            if (queue[i].Status != AgentTaskStatus.WaitingForUser)
+            if (queue[i].Status is not (AgentTaskStatus.WaitingForUser or AgentTaskStatus.Blocked))
                 continue;
 
             var full = await LoadAsync(queue[i].TaskId, ct);
-            if (full?.PendingToolAction is not null)
-                queue[i] = queue[i] with { PendingToolAction = full.PendingToolAction };
+            if (full is null) continue;
+            queue[i] = queue[i] with
+            {
+                PendingToolAction = full.PendingToolAction,
+                WorkspaceRoot = full.WorkspaceRoot is { Length: > 0 } ? full.WorkspaceRoot : null
+            };
         }
 
         return queue;
@@ -349,5 +355,7 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
         Enum.TryParse<AgentTaskStatus>(value, ignoreCase: true, out var status) ? status : AgentTaskStatus.New;
 
     private static DateTime ParseDate(string value) =>
-        DateTime.TryParse(value, out var date) ? date : DateTime.MinValue;
+        DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var date)
+            ? date
+            : DateTime.MinValue;
 }

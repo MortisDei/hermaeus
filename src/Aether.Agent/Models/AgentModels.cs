@@ -156,6 +156,16 @@ public sealed class AgentTaskState
     /// </summary>
     public string? ParentTaskId { get; set; }
     /// <summary>
+    /// The workspace root this task was created against, captured once at
+    /// creation time (r16 01-orchestration-hardening.md 1.4). Empty for
+    /// pre-r16 task state files (JSON-additive); a pending approval on such
+    /// a task falls back to the caller-supplied options as before. Approval
+    /// execution and resumed steps use this instead of whatever workspace
+    /// happens to be active in the workbench, so an action always lands
+    /// where the user actually approved it.
+    /// </summary>
+    public string WorkspaceRoot { get; set; } = string.Empty;
+    /// <summary>
     /// Populated only on a parent task, only by an approved <c>plan_subtasks</c>
     /// action. Empty for every ordinary task and for every child task.
     /// </summary>
@@ -266,7 +276,22 @@ public sealed record AgentReviewQueueItem(
     /// </summary>
     AgentPendingToolAction? PendingToolAction = null,
     /// <summary>The parent task's goal, populated only when this entry is a child task (r15 02-orchestration-ui.md 2.3), so the review queue can show "for: &lt;parent goal&gt;".</summary>
-    string? ParentGoal = null);
+    string? ParentGoal = null,
+    /// <summary>
+    /// The parent task's id, populated only when this entry is a child task
+    /// (r16 01-orchestration-hardening.md 1.1). Approving a child's pending
+    /// action resumes this id instead of the child's, so orchestration
+    /// advances even when the child (not the parent) is the task open in
+    /// the workbench.
+    /// </summary>
+    string? ParentTaskId = null,
+    /// <summary>
+    /// The task's stored workspace root (r16 01-orchestration-hardening.md
+    /// 1.4), populated from a full task load for items that carry a pending
+    /// action. Empty for pre-r16 tasks. Lets the review queue show a task's
+    /// workspace folder when it differs from the currently active one.
+    /// </summary>
+    string? WorkspaceRoot = null);
 
 public sealed class AgentWorkspaceMemoryEntry
 {

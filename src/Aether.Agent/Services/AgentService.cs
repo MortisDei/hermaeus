@@ -166,8 +166,9 @@ public sealed class AgentService : IAgentService
         if (string.IsNullOrWhiteSpace(goal))
             throw new InvalidOperationException("Agent goal is required.");
 
-        AgentWorkspaceTools.ResolveWorkspaceRoot(options.WorkspaceRoot);
+        var root = AgentWorkspaceTools.ResolveWorkspaceRoot(options.WorkspaceRoot);
         var state = NewTaskState(goal, BaseTaskConstraints, parentTaskId: null);
+        state.WorkspaceRoot = root;
 
         await _store.SaveAsync(state, ct);
         await _store.AppendLogAsync(state.TaskId, $"created task: {state.Goal}", ct);
@@ -193,6 +194,7 @@ public sealed class AgentService : IAgentService
             : $"{spec.Goal}\nSuccess criteria: {spec.SuccessCriteria}";
         var constraints = BaseTaskConstraints.Concat(AgentSpecialistProfiles.Resolve(spec.ProfileName)).ToList();
         var state = NewTaskState(goal, constraints, parent.TaskId);
+        state.WorkspaceRoot = parent.WorkspaceRoot;
 
         await _store.SaveAsync(state, ct);
         await _store.AppendLogAsync(state.TaskId, $"created sub-task (parent {parent.TaskId}): {state.Goal}", ct);
@@ -219,6 +221,19 @@ public sealed class AgentService : IAgentService
             ?? throw new InvalidOperationException("Agent task was not found.");
         if (state.Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed)
             throw new InvalidOperationException("Agent task is already finished.");
+        if (state.SubTaskPlan.Any(s => s.Status is AgentSubTaskStatus.Pending or AgentSubTaskStatus.Running))
+        {
+            // A parent with an approved, unfinished SubTaskPlan never runs a
+            // bare parent model step (r15 01-subtask-orchestration.md 1.4);
+            // that would let the parent answer "final" with children unrun,
+            // or re-propose plan_subtasks and silently discard the in-flight
+            // plan (r16 01-orchestration-hardening.md 1.2). Callers must go
+            // through RunAsync, which routes to RunOrchestrationAsync
+            // instead. RunSynthesisAsync's own direct RunStepAsync call is
+            // unaffected: it only runs once every spec is terminal.
+            throw new InvalidOperationException(
+                "This task has an unfinished sub-task plan; call RunAsync to advance orchestration instead of stepping the parent directly.");
+        }
 
         state.Status = AgentTaskStatus.Running;
         await _store.SaveAsync(state, ct);
@@ -308,6 +323,16 @@ public sealed class AgentService : IAgentService
                 // model set in requires_approval. This check runs before the
                 // gate call and takes precedence over it.
                 decision = new AgentToolPolicyDecision(AgentToolDisposition.Blocked, AgentRiskLevel.High, "Sub-tasks cannot create sub-tasks (depth limit 1).");
+            }
+            else if (string.Equals(nextTool, "plan_subtasks", StringComparison.OrdinalIgnoreCase) && state.SubTaskPlan.Count > 0)
+            {
+                // Defense in depth alongside RunStepAsync's own guard above
+                // (r16 01-orchestration-hardening.md 1.3): the one path that
+                // still reaches this gate with a non-empty SubTaskPlan is the
+                // synthesis step itself (every spec terminal by then), and a
+                // model that proposes plan_subtasks there must not be allowed
+                // to replace the plan it was just asked to summarize.
+                decision = new AgentToolPolicyDecision(AgentToolDisposition.Blocked, AgentRiskLevel.High, "This task already has a sub-task plan.");
             }
             else if (string.Equals(nextTool, "run_command", StringComparison.OrdinalIgnoreCase))
             {
@@ -615,6 +640,7 @@ public sealed class AgentService : IAgentService
         {
             ct.ThrowIfCancellationRequested();
             parent = await _store.LoadAsync(parent.TaskId, ct) ?? throw new InvalidOperationException("Agent task was not found.");
+            await ReconcileSubTaskPlanAsync(parent, ct);
 
             var next = parent.SubTaskPlan.FirstOrDefault(s => s.Status is AgentSubTaskStatus.Pending or AgentSubTaskStatus.Running);
             if (next is null)
@@ -664,11 +690,46 @@ public sealed class AgentService : IAgentService
             }
 
             // Child paused (WaitingForUser or Blocked): the user acts on the
-            // CHILD task's own approval queue entry; the parent stays as-is
-            // and a later run of the parent resumes this same child.
+            // CHILD task's own approval queue entry, but the PARENT must say
+            // so truthfully too (r16 01-orchestration-hardening.md 1.6) -
+            // otherwise it sits "Running" forever in any list that shows it
+            // even though nothing is actually happening until the user acts.
+            parent.Status = childResult.State.Status;
+            var childIndex = parent.SubTaskPlan.FindIndex(s => s.TaskId == childTaskId);
+            parent.ActiveStep = $"Waiting on sub-task {childIndex + 1}/{parent.SubTaskPlan.Count}: {next.Goal}";
             await _store.SaveAsync(parent, ct);
             return childResult;
         }
+    }
+
+    /// <summary>
+    /// Self-healing reconcile (r16 01-orchestration-hardening.md 1.1): a
+    /// child can reach a terminal state OUTSIDE this loop entirely - opened
+    /// directly in the workbench and stepped/run to completion, or resumed
+    /// via the review queue while it (not the parent) was the open task.
+    /// Without this, the parent's own <see cref="AgentSubTaskSpec"/> stays
+    /// stuck on <see cref="AgentSubTaskStatus.Running"/> forever, and every
+    /// later parent run throws "already finished" trying to <see cref="RunAsync"/>
+    /// a terminal child. Mirrors the terminal-copyback done inline below in
+    /// this class, just triggered by the child's own persisted state
+    /// instead of a <see cref="RunAsync"/> call this loop itself made.
+    /// </summary>
+    private async Task ReconcileSubTaskPlanAsync(AgentTaskState parent, CancellationToken ct)
+    {
+        var changed = false;
+        foreach (var spec in parent.SubTaskPlan.Where(s => s.Status == AgentSubTaskStatus.Running && s.TaskId is not null))
+        {
+            var child = await _store.LoadAsync(spec.TaskId!, ct);
+            if (child is null || child.Status is not (AgentTaskStatus.Complete or AgentTaskStatus.Failed))
+                continue;
+
+            spec.Status = child.Status == AgentTaskStatus.Complete ? AgentSubTaskStatus.Complete : AgentSubTaskStatus.Failed;
+            spec.ResultSummary = child.Summary.Length > 1200 ? child.Summary[..1200] + "..." : child.Summary;
+            changed = true;
+        }
+
+        if (changed)
+            await _store.SaveAsync(parent, ct);
     }
 
     /// <summary>
@@ -759,8 +820,20 @@ public sealed class AgentService : IAgentService
         {
             await ApplyPlanSubtasksApprovalAsync(state, state.PendingToolAction, ct);
         }
-        else if (approved && state.PendingToolAction is not null && options is not null)
+        else if (approved && state.PendingToolAction is not null)
         {
+            // Executes against the task's OWN stored workspace root, not
+            // whatever workspace the workbench currently has active - the
+            // review queue lists tasks across every workspace, so the
+            // caller-supplied options can point somewhere else entirely
+            // (r16 01-orchestration-hardening.md 1.4). A pre-r16 state with
+            // no stored root falls back to the caller's options exactly as
+            // before; if neither is available there is nothing safe to
+            // execute against (1.5), so this throws instead of silently
+            // stranding the task Running with a stale pending action.
+            var effectiveOptions = state.WorkspaceRoot is { Length: > 0 }
+                ? options is not null ? options with { WorkspaceRoot = state.WorkspaceRoot } : new AgentWorkspaceOptions(state.WorkspaceRoot)
+                : options ?? throw new InvalidOperationException("Workspace options are required to execute the pending action.");
             var pending = state.PendingToolAction;
 
             // Mutating tools get a pre-image captured before they run, so a
@@ -774,7 +847,7 @@ public sealed class AgentService : IAgentService
             string? preImage = null;
             if (mutatesFile && _workspaceTools is not null && !string.IsNullOrWhiteSpace(relativePath))
             {
-                try { preImage = await _workspaceTools.ReadFileForRevertAsync(options, relativePath, ct); }
+                try { preImage = await _workspaceTools.ReadFileForRevertAsync(effectiveOptions, relativePath, ct); }
                 catch { mutatesFile = false; /* best effort; skip the revert record, still execute the tool */ }
             }
             else
@@ -785,18 +858,18 @@ public sealed class AgentService : IAgentService
             AgentToolResult result;
             try
             {
-                result = await _toolExecutor.ExecuteAsync(pending.ToolName, pending.Arguments, options, ct);
+                result = await _toolExecutor.ExecuteAsync(pending.ToolName, pending.Arguments, effectiveOptions, ct);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                await RecordLessonEvidenceForToolAsync(state, options, pending.ToolName, pending.Arguments, ex.Message, success: false, ct);
+                await RecordLessonEvidenceForToolAsync(state, effectiveOptions, pending.ToolName, pending.Arguments, ex.Message, success: false, ct);
                 throw;
             }
 
             state.ToolResults.Add(result);
             RememberCommandApprovalIfApplicable(state, pending);
-            await RecordLessonEvidenceForToolAsync(state, options, pending.ToolName, pending.Arguments, result.ResultSummary, success: true, ct, result.ExitCode, result.TimedOut);
-            await RecordApprovalApprovedCounterEvidenceAsync(state, options, pending.ToolName, ct);
+            await RecordLessonEvidenceForToolAsync(state, effectiveOptions, pending.ToolName, pending.Arguments, result.ResultSummary, success: true, ct, result.ExitCode, result.TimedOut);
+            await RecordApprovalApprovedCounterEvidenceAsync(state, effectiveOptions, pending.ToolName, ct);
             // The approved tool's result is what the model most needs to see
             // next (it is why the step paused), so it belongs in the
             // transcript alongside every other executed tool result, not
@@ -806,7 +879,7 @@ public sealed class AgentService : IAgentService
 
             if (mutatesFile && _workspaceTools is not null)
             {
-                var postContent = await _workspaceTools.ReadFileForRevertAsync(options, relativePath, ct) ?? string.Empty;
+                var postContent = await _workspaceTools.ReadFileForRevertAsync(effectiveOptions, relativePath, ct) ?? string.Empty;
                 state.DraftPatches.Add(new AgentDraftPatch
                 {
                     RelativePath = relativePath,
@@ -1336,6 +1409,20 @@ public sealed class AgentService : IAgentService
     {
         var argumentsCopy = new Dictionary<string, object?>(pending.Arguments, StringComparer.OrdinalIgnoreCase);
         state.PendingToolAction = null;
+
+        if (state.SubTaskPlan.Count > 0)
+        {
+            // A stale queued approval must not clobber a plan that already
+            // exists by the time it is actually approved (r16
+            // 01-orchestration-hardening.md 1.3) - the gate check in
+            // RunStepAsync closes the common case, this closes the race.
+            const string duplicatePlanError = "This task already has a sub-task plan; the proposed plan was rejected.";
+            state.Status = AgentTaskStatus.WaitingForUser;
+            state.ToolResults.Add(new AgentToolResult { Tool = "plan_subtasks", Arguments = argumentsCopy, ResultSummary = duplicatePlanError });
+            await _store.AppendTranscriptEntryAsync(state.TaskId, new AgentTranscriptEntry(
+                state.StepCount, "tool", "plan_subtasks", duplicatePlanError, DateTime.UtcNow), ct);
+            return;
+        }
 
         if (!TryParsePlanSubtasks(pending.Arguments, out var specs, out var error))
         {

@@ -11,7 +11,7 @@ namespace Aether.Services;
 /// </summary>
 public sealed class MemoryStore : IMemoryStore
 {
-    private const int SchemaVersion = 4;
+    private const int SchemaVersion = 5;
     private const int MaxBackfillAttemptsPerRow = 5;
     private static readonly TimeSpan QueryEmbedTimeout = TimeSpan.FromSeconds(3);
 
@@ -122,7 +122,8 @@ public sealed class MemoryStore : IMemoryStore
                     changed |= await EnsureColumnAsync(db, "recall_count", "INTEGER DEFAULT 0", token);
                     changed |= await EnsureColumnAsync(db, "last_recalled_at", "TEXT", token);
                     return changed;
-                })
+                }),
+                new SqliteMigration(5, (db, token) => EnsureColumnAsync(db, "embedding_dim", "INTEGER", token))
             ], ct);
             if (!ftsExisted)
                 await RebuildFtsAsync(c, ct);
@@ -241,13 +242,16 @@ public sealed class MemoryStore : IMemoryStore
         // for the full HTTP timeout; the backfill path already handles rows
         // saved without an embedding.
         byte[]? embeddingBlob = null;
+        int? embeddingDim = null;
         if (_embeddings is not null && !string.IsNullOrWhiteSpace(memory.Content))
         {
             try
             {
                 using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 timeoutCts.CancelAfter(QueryEmbedTimeout);
-                embeddingBlob = ToBlob(await _embeddings.EmbedAsync(memory.Content, timeoutCts.Token));
+                var vector = await _embeddings.EmbedAsync(memory.Content, timeoutCts.Token);
+                embeddingBlob = ToBlob(vector);
+                embeddingDim = vector.Length;
             }
             catch { }
         }
@@ -256,8 +260,8 @@ public sealed class MemoryStore : IMemoryStore
         await c.OpenAsync(ct);
         var cmd = c.CreateCommand();
         cmd.CommandText = @"
-            INSERT INTO memories (id,category,content,created_at,updated_at,source_conversation_id,importance_score,tags_json,is_pinned,is_archived,frequency_count,last_merge_time,expiration_date,relationships_json,is_encrypted,scope,scope_id,title,source_json,embedding)
-            VALUES ($id,$cat,$content,$ca,$ua,$src,$imp,$tags,$pin,$arch,$freq,$merge,$exp,$rel,$enc,$scope,$scopeId,$title,$sourceJson,$embedding)
+            INSERT INTO memories (id,category,content,created_at,updated_at,source_conversation_id,importance_score,tags_json,is_pinned,is_archived,frequency_count,last_merge_time,expiration_date,relationships_json,is_encrypted,scope,scope_id,title,source_json,embedding,embedding_dim)
+            VALUES ($id,$cat,$content,$ca,$ua,$src,$imp,$tags,$pin,$arch,$freq,$merge,$exp,$rel,$enc,$scope,$scopeId,$title,$sourceJson,$embedding,$embeddingDim)
             ON CONFLICT(id) DO UPDATE SET
                 category=excluded.category,
                 content=excluded.content,
@@ -275,7 +279,8 @@ public sealed class MemoryStore : IMemoryStore
                 relationships_json=excluded.relationships_json,
                 is_encrypted=excluded.is_encrypted,
                 source_json=excluded.source_json,
-                embedding=COALESCE(excluded.embedding, memories.embedding)";
+                embedding=COALESCE(excluded.embedding, memories.embedding),
+                embedding_dim=COALESCE(excluded.embedding_dim, memories.embedding_dim)";
 
         cmd.Parameters.AddWithValue("$id", memory.Id);
         cmd.Parameters.AddWithValue("$cat", memory.Category);
@@ -297,6 +302,7 @@ public sealed class MemoryStore : IMemoryStore
         cmd.Parameters.AddWithValue("$title", memory.Title);
         cmd.Parameters.AddWithValue("$sourceJson", sourceJson ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("$embedding", (object?)embeddingBlob ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$embeddingDim", (object?)embeddingDim ?? DBNull.Value);
 
         await cmd.ExecuteNonQueryAsync(ct);
         await UpsertFtsAsync(c, memory, tagsJson, ct);
@@ -353,7 +359,7 @@ public sealed class MemoryStore : IMemoryStore
                 SELECT m.*
                 FROM memories m
                 JOIN memories_fts f ON f.id = m.id
-                WHERE memories_fts MATCH $q
+                WHERE memories_fts MATCH $q AND m.is_archived = 0
                 ORDER BY f.rank
                 LIMIT 100";
             cmd.Parameters.AddWithValue("$q", ftsQuery);
@@ -370,6 +376,13 @@ public sealed class MemoryStore : IMemoryStore
                 ftsResults = await SearchLikeAsync(c, q, ct);
             }
         }
+
+        // Belt and braces alongside the archive sweep (r16
+        // 02-memory-integrity.md 2.3): a row whose ExpirationDate has
+        // already passed but has not yet been swept by
+        // ArchiveStaleMemoriesAsync must not inject either.
+        var now = DateTime.UtcNow;
+        ftsResults.RemoveAll(m => !m.IsPinned && m.ExpirationDate is { } expiration && expiration <= now);
 
         if (_embeddings is null || string.IsNullOrWhiteSpace(q))
         {
@@ -424,13 +437,24 @@ public sealed class MemoryStore : IMemoryStore
         // hybrid recall).
         var nonFtsScores = new List<(string Id, double Score)>();
         var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT id, embedding FROM memories WHERE is_archived = 0 AND embedding IS NOT NULL";
+        // Excludes an expired-but-not-yet-archived row too (r16
+        // 02-memory-integrity.md 2.3), pinned rows exempt like everywhere
+        // else in the lifecycle.
+        cmd.CommandText = "SELECT id, embedding FROM memories WHERE is_archived = 0 AND embedding IS NOT NULL AND (is_pinned = 1 OR expiration_date IS NULL OR expiration_date > $now)";
+        cmd.Parameters.AddWithValue("$now", DateTime.UtcNow.ToString("O"));
+        var mismatchCount = 0;
         await using (var rd = await cmd.ExecuteReaderAsync(ct))
         {
             while (await rd.ReadAsync(ct))
             {
                 var id = rd.GetString(0);
                 var vector = FromBlob((byte[])rd[1]);
+                // A dimension mismatch (r16 02-memory-integrity.md 2.4,
+                // usually a switched embedding model) makes CosineSimilarity
+                // silently return 0.0 - indistinguishable from "no semantic
+                // match" unless tracked separately.
+                if (vector.Length != queryVector.Length)
+                    mismatchCount++;
                 var cosine = Math.Max(0.0, CosineSimilarity(queryVector, vector));
 
                 if (candidates.TryGetValue(id, out var m))
@@ -444,6 +468,9 @@ public sealed class MemoryStore : IMemoryStore
                 }
             }
         }
+
+        if (mismatchCount > 0)
+            LogEmbeddingMismatchOnce(mismatchCount);
 
         // Only the ids that could plausibly make the final cut are hydrated,
         // and in a single batched query rather than one round trip per row.
@@ -525,8 +552,9 @@ public sealed class MemoryStore : IMemoryStore
                 {
                     var vector = await _embeddings.EmbedAsync(content, ct);
                     var update = c.CreateCommand();
-                    update.CommandText = "UPDATE memories SET embedding = $embedding WHERE id = $id";
+                    update.CommandText = "UPDATE memories SET embedding = $embedding, embedding_dim = $dim WHERE id = $id";
                     update.Parameters.AddWithValue("$embedding", ToBlob(vector));
+                    update.Parameters.AddWithValue("$dim", vector.Length);
                     update.Parameters.AddWithValue("$id", id);
                     await update.ExecuteNonQueryAsync(ct);
                     _backfillState.Remove(id);
@@ -555,6 +583,93 @@ public sealed class MemoryStore : IMemoryStore
         _queryEmbedFallbackLogged = true;
         _runtimeLogs?.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Rag,
             $"Query embedding at {ResolveEmbeddingEndpoint()} did not complete in time; memory recall falls back to FTS-ranked results ({ex.GetType().Name}: {ex.Message})."));
+    }
+
+    private bool _embeddingMismatchLogged;
+
+    /// <summary>
+    /// One warning per process (r16 02-memory-integrity.md 2.4), same
+    /// pattern as <see cref="LogQueryEmbedFallbackOnce"/>: an embedding
+    /// model switch leaves every old row's vector at the wrong
+    /// dimensionality, silently zeroing its semantic score forever unless
+    /// surfaced somewhere.
+    /// </summary>
+    private void LogEmbeddingMismatchOnce(int mismatchCount)
+    {
+        if (_embeddingMismatchLogged) return;
+        _embeddingMismatchLogged = true;
+        _runtimeLogs?.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Rag,
+            $"{mismatchCount} memory embedding(s) have a different dimensionality than the current embedding model; their semantic recall score is 0 until re-embedded from the Memories page."));
+    }
+
+    /// <summary>
+    /// Counts memory rows whose stored embedding no longer matches the
+    /// currently configured embedding model's dimensionality (r16
+    /// 02-memory-integrity.md 2.4) - the signal that a model switch has
+    /// silently zeroed hybrid recall for those rows. A live probe embed
+    /// determines the current dimensionality; 0 when no embedding service
+    /// is configured or the probe fails.
+    /// </summary>
+    public async Task<int> GetEmbeddingMismatchCountAsync(CancellationToken ct = default)
+    {
+        if (_embeddings is null) return 0;
+        await EnsureInitializedAsync(ct);
+
+        var currentDim = await ProbeCurrentDimensionAsync(ct);
+        if (currentDim is null) return 0;
+
+        await using var c = new SqliteConnection(Cs);
+        await c.OpenAsync(ct);
+        var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT COUNT(1) FROM memories WHERE embedding IS NOT NULL AND length(embedding) != $bytes";
+        cmd.Parameters.AddWithValue("$bytes", currentDim.Value * sizeof(float));
+        var count = Convert.ToInt32(await cmd.ExecuteScalarAsync(ct) ?? 0);
+        if (count > 0)
+            LogEmbeddingMismatchOnce(count);
+        return count;
+    }
+
+    /// <summary>
+    /// Clears the embedding (and its dimension) on every row that mismatches
+    /// the current embedding model, then kicks off a background re-embed.
+    /// User-clicked only from the Memories page (r16 02-memory-integrity.md
+    /// 2.4 explicit rejection: a settings/model change must never trigger
+    /// this automatically). Returns how many rows were cleared.
+    /// </summary>
+    public async Task<int> ClearMismatchedEmbeddingsAsync(CancellationToken ct = default)
+    {
+        if (_embeddings is null) return 0;
+        await EnsureInitializedAsync(ct);
+
+        var currentDim = await ProbeCurrentDimensionAsync(ct);
+        if (currentDim is null) return 0;
+
+        await using var c = new SqliteConnection(Cs);
+        await c.OpenAsync(ct);
+        var cmd = c.CreateCommand();
+        cmd.CommandText = "UPDATE memories SET embedding = NULL, embedding_dim = NULL WHERE embedding IS NOT NULL AND length(embedding) != $bytes";
+        cmd.Parameters.AddWithValue("$bytes", currentDim.Value * sizeof(float));
+        var cleared = await cmd.ExecuteNonQueryAsync(ct);
+
+        if (cleared > 0)
+            _ = Task.Run(() => RunEmbeddingBackfillAsync(CancellationToken.None));
+
+        return cleared;
+    }
+
+    private async Task<int?> ProbeCurrentDimensionAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeoutCts.CancelAfter(QueryEmbedTimeout);
+            var probe = await _embeddings!.EmbedAsync("aether-memory-dimension-probe", timeoutCts.Token);
+            return probe.Length;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private string ResolveEmbeddingEndpoint()
@@ -597,9 +712,19 @@ public sealed class MemoryStore : IMemoryStore
         foreach (var memory in candidates)
         {
             if (memory.IsPinned) continue;
-            var reference = memory.LastRecalledAt ?? memory.UpdatedAt;
-            if ((now - reference).TotalDays < unrecalledForDays) continue;
-            if (MemoryLifecycle.ComputeEffectiveImportance(memory, now) >= importanceFloor) continue;
+
+            // ExpirationDate (r16 02-memory-integrity.md 2.3): set by
+            // auto-summary when Memory.AutoArchiveAfterDays > 0, but never
+            // enforced anywhere before this - a placebo setting. A past
+            // expiry archives regardless of the staleness/importance rule
+            // below, same as every other lifecycle rule pinning overrides.
+            var expired = memory.ExpirationDate is { } expiration && expiration <= now;
+            if (!expired)
+            {
+                var reference = memory.LastRecalledAt ?? memory.UpdatedAt;
+                if ((now - reference).TotalDays < unrecalledForDays) continue;
+                if (MemoryLifecycle.ComputeEffectiveImportance(memory, now) >= importanceFloor) continue;
+            }
 
             // Narrow update (r11 3.5): the full SaveAsync re-embeds unchanged
             // content (one HTTP call per archived row) purely to flip a
@@ -772,7 +897,7 @@ public sealed class MemoryStore : IMemoryStore
     private static async Task<List<Memory>> SearchLikeAsync(SqliteConnection c, string q, CancellationToken ct)
     {
         var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT * FROM memories WHERE content LIKE $q OR category LIKE $q OR tags_json LIKE $q ORDER BY is_pinned DESC, importance_score DESC, updated_at DESC LIMIT 100";
+        cmd.CommandText = "SELECT * FROM memories WHERE (content LIKE $q OR category LIKE $q OR tags_json LIKE $q) AND is_archived = 0 ORDER BY is_pinned DESC, importance_score DESC, updated_at DESC LIMIT 100";
         cmd.Parameters.AddWithValue("$q", $"%{q}%");
         var r = new List<Memory>();
         await using var rd = await cmd.ExecuteReaderAsync(ct);

@@ -27,6 +27,8 @@ public partial class MemoriesViewModel : ViewModelBase
     [ObservableProperty] private ConversationFilterItemViewModel? _selectedConversationFilter;
     [ObservableProperty] private bool _isLoading;
     [ObservableProperty] private int _totalCount;
+    [ObservableProperty] private int _embeddingMismatchCount;
+    [ObservableProperty] private bool _isReembedding;
 
     public List<string> AvailableCategories { get; } = ["All", "facts", "preferences", "learned_behaviors", "interests"];
 
@@ -54,6 +56,54 @@ public partial class MemoriesViewModel : ViewModelBase
 
         await LoadMemoriesAsync();
         await RefreshConversationFiltersAsync();
+        await RefreshEmbeddingMismatchAsync();
+    }
+
+    /// <summary>
+    /// Surfaces the "old vectors after an embedding model switch" gap (r16
+    /// 02-memory-integrity.md 2.4): recall degrades silently to FTS-only
+    /// otherwise, indistinguishable from working. Best-effort; a failed
+    /// probe (no embedding service reachable) just shows no banner.
+    /// </summary>
+    [RelayCommand]
+    public async Task RefreshEmbeddingMismatchAsync()
+    {
+        try { EmbeddingMismatchCount = await _store.GetEmbeddingMismatchCountAsync(); }
+        catch { EmbeddingMismatchCount = 0; }
+    }
+
+    public bool HasEmbeddingMismatch => EmbeddingMismatchCount > 0;
+
+    public string EmbeddingMismatchLabel =>
+        $"{EmbeddingMismatchCount} memor{(EmbeddingMismatchCount == 1 ? "y was" : "ies were")} embedded with a different model.";
+
+    partial void OnEmbeddingMismatchCountChanged(int value) => OnPropertyChanged(nameof(HasEmbeddingMismatch));
+
+    /// <summary>
+    /// User-clicked only (r16 02-memory-integrity.md 2.4 explicit rejection:
+    /// no automatic re-embed on a model switch). Clears the stale vectors
+    /// and kicks off a background backfill; the mismatch count is refreshed
+    /// immediately (it drops to 0 as soon as the clear completes) rather
+    /// than waiting for the backfill to finish.
+    /// </summary>
+    [RelayCommand]
+    public async Task ReembedMismatchedAsync()
+    {
+        IsReembedding = true;
+        try
+        {
+            var cleared = await _store.ClearMismatchedEmbeddingsAsync();
+            await RefreshEmbeddingMismatchAsync();
+            _toasts.Show("Re-embedding started", $"Cleared {cleared} stale embedding(s); they will be re-embedded in the background.", ToastKind.Info);
+        }
+        catch (Exception ex)
+        {
+            _toasts.Show("Error", $"Failed to re-embed memories: {ex.Message}", ToastKind.Error);
+        }
+        finally
+        {
+            IsReembedding = false;
+        }
     }
 
     [RelayCommand]

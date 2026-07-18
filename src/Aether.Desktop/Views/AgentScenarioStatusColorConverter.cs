@@ -1,7 +1,6 @@
 using System;
 using System.Globalization;
 using Avalonia.Data.Converters;
-using Avalonia.Media;
 
 namespace Aether.Desktop.Views;
 
@@ -10,9 +9,9 @@ public sealed class AgentScenarioStatusColorConverter : IValueConverter
 {
     public object Convert(object? v, Type t, object? p, CultureInfo c) => v switch
     {
-        true => Brushes.LimeGreen,
-        false => Brushes.IndianRed,
-        _ => Brushes.Gray
+        true => StatusPalette.Ok,
+        false => StatusPalette.Error,
+        _ => StatusPalette.Neutral
     };
 
     public object ConvertBack(object? v, Type t, object? p, CultureInfo c) => Avalonia.AvaloniaProperty.UnsetValue;

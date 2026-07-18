@@ -9,6 +9,132 @@ FIFO for changelog entries, 10 versions in this file max. Remove older entries
 and append them to `docs/changelog-archive.md` to maintain the 10 version
 limit.
 
+## [0.21.0-alpha] - 2026-07-19
+
+Implements docs/review r16 in full: orchestration hardening, memory
+integrity, and workbench truth. An independent audit of r15's sub-task
+orchestration (the first since it shipped) found a stuck-forever failure
+mode and a workspace-identity gap; a full audit of the memory subsystem
+(never previously reviewed on its own) found that "forget" did not actually
+forget and the `[MEMORY: ...]` save-marker feature was a phantom; a desktop
+audit found the recent-tasks list r15 deferred, plus several truth/hygiene
+gaps.
+
+### Fixed
+
+- **Orchestration could wedge permanently on a child completed outside the
+  loop.** A child task reaching `Complete`/`Failed` other than through its
+  parent's own orchestration loop (opened directly and stepped to
+  completion, or resumed via the review queue while the child itself was
+  open) left the parent's sub-task spec stuck `Running` forever; every
+  later run of the parent then threw "Agent task is already finished."
+  `RunOrchestrationAsync` now reconciles each non-terminal spec against its
+  child's actual persisted status at the top of every iteration before
+  choosing what to run next. The review queue's child entries now carry
+  `ParentTaskId`, and approving a child's pending action resumes the
+  parent's orchestration by that id directly, instead of inferring
+  parenthood from whichever task happens to be open in the workbench.
+- **A manual "Run Step" click could bypass orchestration entirely.**
+  `AgentService.RunStepAsync` now refuses (with a message pointing at
+  `RunAsync`) to run a bare parent model step while any sub-task is
+  unfinished, closing two corruptions: the parent answering "final" with
+  children unrun, and the parent silently re-proposing `plan_subtasks`
+  and discarding the in-flight plan. The workbench's Run Step button now
+  advances the orchestration loop instead when the open task has unfinished
+  sub-tasks. A task whose plan already exists is also blocked from
+  accepting another `plan_subtasks` proposal at the safety-gate level and
+  rejected again as defense in depth if a stale approval races in anyway.
+- **Approvals executed against the wrong workspace.** The review queue lists
+  tasks across every workspace, but approving a pending `edit_file`/
+  `create_file`/`run_command` action executed it against whatever workspace
+  the workbench currently had active, not the workspace the task was
+  actually created in. `AgentTaskState` now persists its own
+  `WorkspaceRoot` at creation (and children inherit their parent's), and
+  approval execution uses it; a null-options approval with no stored root
+  now throws instead of silently stranding the task `Running` with an
+  unexecuted pending action. Review-queue rows show the task's own
+  workspace folder name when it differs from the active one.
+- **A paused child left its parent lying about its own status.** While a
+  child sub-task waits on an approval or reply, the parent orchestration
+  task now mirrors that pause (`WaitingForUser`/`Blocked`) and names which
+  sub-task it's waiting on, instead of showing `Running` indefinitely with
+  nothing actually happening.
+- **Agent task index timestamps parsed as local time.** `FileAgentTaskStateStore`
+  now parses with `DateTimeStyles.RoundtripKind`, matching the lesson
+  store's existing correct parsing.
+- **`SearchAsync` returned archived memories.** Neither the FTS branch nor
+  the LIKE fallback filtered `is_archived`, so a memory retired via
+  `[MEMORY_FORGET: id]` (or the stale-archival sweep) kept resurfacing in
+  chat injection whenever the query matched lexically - "forget" did not
+  forget. Both branches now exclude archived rows.
+- **`Memory.AutoArchiveAfterDays` was a placebo.** `ExpirationDate` was
+  written by auto-summary but never read anywhere. `ArchiveStaleMemoriesAsync`
+  now archives any non-pinned row past its expiration date on top of its
+  existing staleness rule, and `SearchAsync` excludes an expired-but-not-
+  yet-swept row at read time as a second layer. A pinned memory with a past
+  expiry still survives, consistent with every other lifecycle rule.
+- **Memory injection scoring ignored lifecycle decay.** Selection blended
+  relevance with raw `ImportanceScore` while the archiver already applied
+  `MemoryLifecycle.ComputeEffectiveImportance` (30-day half-life), so a
+  memory one day from stale-archival could still outrank a fresh one at
+  injection time. Injection scoring now uses the same decayed importance.
+- **Services nav "any running" dot went stale.** Its converter only
+  re-evaluated when the whole `Servers` collection was replaced, not on a
+  per-server Start/Stop/crash. Replaced with `ServicesViewModel.AnyServerRunning`,
+  raised wherever per-server status transitions already flow through.
+- **Ctrl+Q quit instantly with no confirmation**, including with focus
+  inside a text box mid-thought and a generation or agent run in progress.
+  Removed from the local hotkey set; Quit remains available via the tray
+  menu and window close.
+
+### Added
+
+- **The `[MEMORY: ...]` save marker is wired up.** The instruction teaching
+  the model this marker was already sent, but nothing in live chat ever
+  extracted or saved it - a model that tried got the save silently deleted
+  (when memories were injected, the cleanup step stripped it without
+  saving) or shown raw to the user (when nothing was injected, nothing ran
+  at all). The chat send path now teaches the marker whenever memory is
+  enabled (regardless of recall hits), and every response now runs a single
+  marker pipeline that applies `[MEMORY_UPDATE]`/`[MEMORY_FORGET]` for
+  injected ids, extracts and dedupe-saves up to 3 new `[MEMORY: ...]` facts
+  through the same merge path auto-summary uses, and always strips marker
+  syntax from the persisted transcript.
+- **Memory embedding-dimension mismatch detection and re-embed.** An
+  embedding-model switch left every existing memory vector at the old
+  dimensionality, silently zeroing its semantic recall score forever with
+  no signal anywhere. Memories now carry an `embedding_dim` column; the
+  Memories page shows a "N memories were embedded with a different model"
+  banner with a user-clicked "Re-embed memories" button that clears the
+  stale vectors and triggers a background re-embed. No automatic re-embed
+  on a settings change, and no Doctor check - the Memories page is the
+  surface.
+- **Recent-tasks list.** `AgentViewModel.RecentTasks` was populated since
+  r15 but nothing in the UI bound it, so a completed task's report, a
+  failed task's blockers, or an orphaned-Running task were unreachable
+  after an app restart except through the review queue. The Agent view now
+  lists recent tasks (status chip, goal, relative time, sub-task rows
+  indented with a tag) with an Open action; the review queue also gained an
+  Open button. Opening a child directly now also shows its parent's goal.
+- **Conversation delete confirmation.** Every other destructive action of
+  this weight (RAG dataset delete, reindex, benchmark history clear, backup
+  restore) was already confirm-gated; a conversation's context-menu delete
+  was the one exception. It now shows the same `ConfirmActionDialog` used
+  elsewhere.
+
+### Changed
+
+- Desktop hygiene: the tunnel-phase wheel-scroll hijack (ModelManagementView,
+  ServicesView, SettingsView) is now one shared `WheelScrollHelper` instead
+  of three copies; the four identically-shaped bool-to-"X.../X" label
+  converters in `ModelManagementView.axaml.cs` are now one generic
+  `BoolToTextConverter`; status-chip colors that were drawn from three
+  different vocabularies (named `Brushes.X` values vs. two slightly
+  different sets of material hex) now share one `StatusPalette`. No
+  behavior change.
+
+23 new tests (861 -> 884). Zero-warning build maintained throughout.
+
 ## [0.20.0-alpha] - 2026-07-19
 
 Implements docs/review r15 in full: sub-task orchestration. A vague, broad
@@ -900,67 +1026,3 @@ that landed between r6 and r7 without a review pass.
   element. Now bound to the message's own `IsStreaming`.
 
 56 new tests (461 -> 517). Coverage floor: 49 -> 50 (narrative target).
-
-## [0.12.0-alpha] - 2026-07-15
-
-Implements docs/review r7: the Agent Scenario Suite, a library of small,
-deterministic scenario workspaces that regression-test emergent agent
-behaviour (retrieval, memory, the safety gate, approvals, and lessons
-interacting) instead of testing any one feature in isolation. Every check is
-a pure predicate over recorded artifacts (task status, safety-gate rows,
-file hashes, answer substrings) - no LLM judge.
-
-### Agent Scenario Suite
-
-- **Engine** (`Aether.Agent`). `AgentScenarioManifest`/`AgentScenarioExpectations`
-  model a scenario (goal, max steps, auto-approved tools, seeded memory/lessons,
-  files placed outside the workspace for traversal tests, expectations).
-  `AgentScenarioChecks` is a pure evaluator covering 11 deterministic check
-  types (final status, approval-required/blocked/forbidden-execution per
-  tool, files read/unread, files changed/unchanged, answer must/must-not
-  mention, max new lessons, minimum gated risk, revertible-patch capture).
-  `IAgentScenarioStore` loads built-in scenarios (shipped under
-  `agent-scenarios/` next to the app) plus user scenarios from
-  `{DataRoot}/agent-scenarios`, with user scenarios overriding built-ins by
-  id. `IAgentScenarioRunner` executes a scenario against a real
-  `AgentService` in a fully isolated sandbox: a copied workspace, a
-  throwaway agent data root (its own task store and lesson store), and
-  approvals that only ever grant (per-scenario `auto_approve` list) or are
-  left pending - a scenario run can never deny (which would itself write a
-  rejection lesson) and never runs an unapproved command. The user's real
-  agent data root is untouched by any scenario run.
-- **Library**: ten built-in scenarios, one behaviour each - conflicting
-  documentation, prompt injection in a workspace file, secrets that must
-  stay out of answers, a declared command that still needs approval, an
-  undeclared command family that gets blocked outright, stale remembered
-  context versus current code, a path-traversal read attempt, an
-  approved-and-reverted edit, honest admission of undocumented behaviour,
-  and lesson-store hygiene on a trivial task.
-- **Workbench UI**: a "Scenario Evals" panel on the Agent view runs the
-  suite (or one scenario) against the workbench's selected model with live
-  progress, per-row pass/fail with failed-check detail, and a headline
-  pointing at the exported report (`eval-runs/{suiteId}/report.md` +
-  `run.jsonl`, alongside a new `EvalMode.AgentScenario` projection into the
-  shared eval store).
-
-### Other
-
-- Doctor: llama-server-missing check now offers a "Download llama.cpp" fix
-  action; build-number parsing handles the current `version: NNNN`
-  llama-server output (no `b` prefix); tray-support check distinguishes
-  confirmed Windows/macOS support from advisory-only Linux support.
-- Model Management merges detected local GGUF files with runtime-reported
-  models and shows a Running badge per model.
-- Services: managed llama-server model path gets a detected-model dropdown;
-  saving a managed server's port now syncs `Llm.LlamaCppBaseUrl` /
-  `Rag.EmbeddingBaseUrl` and any linked runtime profile so chat/RAG follow
-  the port instead of silently pointing at a stale one.
-- Chat: forcing a model refresh now invalidates `CompositeLlmService`'s
-  cached model list instead of returning stale data.
-- Memory: `HybridRerankAsync` narrowed its SQLite scan to `id, embedding`
-  and defers loading full high-relevance rows, cutting prompt-prep I/O.
-  Embedding model warms up during app startup to avoid first-message
-  latency. Kokoro phonemizer gained Magic-E vowel shifting, more digraph
-  coverage, rhotic vowel rules, and dedicated affricate phoneme tokens.
-- Fixed a shutdown crash by wrapping the exit handler's `ServiceProvider`
-  disposal in try/catch/finally.

@@ -20,7 +20,13 @@ explicit user approval before it executes.
 - Validates task IDs with a short alphanumeric, dash, and underscore allowlist
   before resolving task directories.
 - Shows a review queue for waiting or blocked tasks with approve/reject
-  actions for recorded approvals.
+  actions for recorded approvals, plus an Open button that loads the queued
+  task into the workbench.
+- Shows a Recent Tasks list (status chip, goal, relative time; sub-task
+  children indented with a tag) so a completed task's report, a failed
+  task's blockers, or an orphaned task is reachable after a restart without
+  going through the review queue. Opening a child directly also shows its
+  parent's goal.
 
 ### Context & Retrieval
 
@@ -93,12 +99,25 @@ tool.
 Once approved, the plan is materialized on the parent task and children run
 **sequentially**, one at a time, through the exact same loop, safety gate, and
 per-action approval flow as any other task - a child is an ordinary task with
-`ParentTaskId` set, its own transcript, its own lessons, and its own
-`RememberedCommandApprovals` (never shared with siblings or the parent). A
-child that pauses for approval or a question shows up in the review queue like
-any other waiting task, labeled with its parent's goal; approving or rejecting
-it resumes (or leaves paused) the same child, and a later run of the parent
-picks up exactly where orchestration left off.
+`ParentTaskId` and its own `WorkspaceRoot` (inherited from the parent), its
+own transcript, its own lessons, and its own `RememberedCommandApprovals`
+(never shared with siblings or the parent). A child that pauses for approval
+or a question shows up in the review queue like any other waiting task,
+labeled with its parent's goal, and approving it resumes the **parent's**
+orchestration (looked up by the queue entry's own parent id, not by whatever
+task happens to be open in the workbench). The parent's own status mirrors a
+paused child's (`WaitingForUser`/`Blocked`) and names which sub-task it is
+waiting on, instead of showing `Running` with nothing happening.
+
+A child can reach `Complete`/`Failed` outside the orchestration loop entirely
+- opened directly from the recent-tasks list and stepped to completion, for
+example. The parent self-heals this on its next run: before choosing what to
+advance, it reconciles every sub-task spec against its child's actual
+persisted status, so orchestration is never permanently stuck believing an
+already-finished child is still running. A parent with any unfinished
+sub-task never takes a bare parent model step itself (Run Step routes through
+the orchestration loop instead when the open task has one), and a task whose
+plan already exists cannot accept another `plan_subtasks` proposal.
 
 Depth is limited to one level, enforced in code rather than by the model: a
 child that itself requests `plan_subtasks` is blocked immediately, with the
@@ -381,6 +400,13 @@ that resolve outside the workspace root. Examples that are blocked:
 
 This containment rule prevents accidental or malicious access to unrelated
 files, including the workspace-relative path arguments `run_command` accepts.
+
+Each task persists the workspace root it was created against. Approving a
+pending action (from the review queue, which lists tasks across every
+workspace) always executes against the task's own stored root, never
+whichever workspace happens to be active in the workbench at approval time.
+Pre-r16 tasks with no stored root fall back to the workbench's active
+workspace, exactly as before.
 
 ## Context Packs
 

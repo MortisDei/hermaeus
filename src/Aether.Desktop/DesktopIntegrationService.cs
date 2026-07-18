@@ -78,6 +78,13 @@ public sealed class DesktopIntegrationService : IDisposable
             SyncTray();
     }
 
+    /// <summary>
+    /// Ctrl+Q is deliberately NOT bound here (r16 03-workbench-and-desktop.md
+    /// 3.6): it used to quit instantly with no confirmation, generation or an
+    /// agent run in progress or not, even with focus inside a TextBox
+    /// mid-thought. Quit remains available via the tray menu and window
+    /// close, both of which go through the existing close/shutdown path.
+    /// </summary>
     private void OnKeyDown(object? sender, KeyEventArgs e)
     {
         if (!_vm.Settings.EnableLocalHotkeys)
@@ -104,13 +111,6 @@ public sealed class DesktopIntegrationService : IDisposable
         {
             ShowAndActivate();
             _vm.OpenServicesPanel();
-            e.Handled = true;
-            return;
-        }
-
-        if (modifiers == KeyModifiers.Control && e.Key == Key.Q)
-        {
-            Quit();
             e.Handled = true;
             return;
         }

@@ -268,9 +268,23 @@ public partial class MainWindowViewModel : ViewModelBase
         await Chat.LoadConversationAsync(item.Id);
     }
 
+    /// <summary>
+    /// Set by the view: shows <c>ConfirmActionDialog</c> with the
+    /// conversation's title (r16 03-workbench-and-desktop.md 3.3). Every
+    /// other destructive action of this weight (RAG dataset delete, reindex,
+    /// benchmark history clear, backup restore) is confirm-gated; a raw
+    /// context-menu click was the one exception.
+    /// </summary>
+    public Func<ConversationItemViewModel, Task<bool>>? RequestDeleteConversationConfirmation { get; set; }
+
     [RelayCommand]
     private async Task DeleteConversationAsync(ConversationItemViewModel item)
     {
+        var confirmed = RequestDeleteConversationConfirmation is not null
+            && await RequestDeleteConversationConfirmation(item);
+        if (!confirmed)
+            return;
+
         await _store.DeleteAsync(item.Id);
         Conversations.Remove(item);
         if (Chat.CurrentConversationId == item.Id) Chat.NewConversation();

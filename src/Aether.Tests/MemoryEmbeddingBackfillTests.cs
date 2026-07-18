@@ -125,7 +125,7 @@ public sealed class MemoryEmbeddingBackfillTests
         Assert.Equal(1, workingEmbeddings.CallCount);
     }
 
-    /// <summary>r11 3.5: ArchiveStaleMemoriesAsync used to flip is_archived through the full SaveAsync, which re-embeds unchanged content (one HTTP call per archived row) purely to persist a status flag. Archiving must perform zero embed calls.</summary>
+    /// <summary>r11 3.5: ArchiveStaleMemoriesAsync used to flip is_archived through the full SaveAsync, which re-embeds unchanged content (one HTTP call per archived row) purely to persist a status flag. Archiving must perform zero embed calls. Also covers r16 02-memory-integrity.md 2.1: SearchAsync must not return archived rows.</summary>
     [Fact]
     public async Task ArchiveStaleMemoriesAsync_performs_zero_embed_calls_and_keeps_rows_searchable()
     {
@@ -156,11 +156,22 @@ public sealed class MemoryEmbeddingBackfillTests
             Assert.True(reloaded!.IsArchived);
         }
 
-        // The FTS row must remain consistent with the archived state: content
-        // untouched by the narrow update, so it is still searchable.
+        // SearchAsync excludes archived rows (r16 02-memory-integrity.md 2.1:
+        // "forget" must actually forget); verify the narrow archive UPDATE
+        // still left the FTS row intact by including archived rows and by
+        // restoring one row to confirm it is searchable again afterward.
         var searchResults = await store.SearchAsync("stale");
-        Assert.Equal(3, searchResults.Count);
-        Assert.All(searchResults, m => Assert.True(m.IsArchived));
+        Assert.Empty(searchResults);
+
+        var allIncludingArchived = await store.GetAllAsync(includeArchived: true);
+        Assert.Equal(3, allIncludingArchived.Count);
+        Assert.All(allIncludingArchived, m => Assert.True(m.IsArchived));
+
+        var restored = allIncludingArchived[0];
+        restored.IsArchived = false;
+        await store.SaveAsync(restored);
+        var afterRestore = await store.SearchAsync("stale");
+        Assert.Contains(afterRestore, m => m.Id == restored.Id);
     }
 
     [Fact]
@@ -281,5 +292,57 @@ public sealed class MemoryEmbeddingBackfillTests
 
         var warnings = runtimeLogs.GetEntries().Where(e => e.Level == RuntimeLogLevel.Warning).ToList();
         Assert.Single(warnings);
+    }
+
+    /// <summary>Embeds with a caller-controlled, switchable dimensionality - simulates an embedding-model switch (r16 02-memory-integrity.md 2.4).</summary>
+    private sealed class SwitchableDimensionEmbeddingService : IEmbeddingService
+    {
+        public int Dimensions { get; set; } = 4;
+
+        public Task<float[]> EmbedAsync(string text, CancellationToken ct = default) =>
+            Task.FromResult(Enumerable.Repeat(0.5f, Dimensions).ToArray());
+
+        public Task<List<float[]>> EmbedBatchAsync(IReadOnlyList<string> texts, CancellationToken ct = default) =>
+            Task.FromResult(texts.Select(_ => Enumerable.Repeat(0.5f, Dimensions).ToArray()).ToList());
+    }
+
+    [Fact]
+    public async Task GetEmbeddingMismatchCountAsync_and_ClearMismatchedEmbeddingsAsync_detect_and_clear_a_dimension_switch()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+
+        var embeddings = new SwitchableDimensionEmbeddingService { Dimensions = 4 };
+        var store = new MemoryStore(settings, embeddings);
+        await store.InitializeAsync();
+        await store.SaveAsync(new Memory { Id = "m1", Content = "embedded at dimension four" });
+        await store.SaveAsync(new Memory { Id = "m2", Content = "also embedded at dimension four" });
+
+        // No mismatch yet: everything was embedded at the current dimension.
+        Assert.Equal(0, await store.GetEmbeddingMismatchCountAsync());
+
+        // Simulate an embedding-model switch: the new save lands at a
+        // different dimensionality than the two rows already on disk.
+        embeddings.Dimensions = 8;
+        await store.SaveAsync(new Memory { Id = "m3", Content = "embedded at dimension eight" });
+
+        var mismatchCount = await store.GetEmbeddingMismatchCountAsync();
+        Assert.Equal(2, mismatchCount);
+
+        var cleared = await store.ClearMismatchedEmbeddingsAsync();
+        Assert.Equal(2, cleared);
+
+        // Immediately after clearing, the mismatch count reads 0 - the stale
+        // vectors are gone (cleared to NULL, which SearchAsync's hybrid scan
+        // already treats as "not yet embedded", not "mismatched").
+        Assert.Equal(0, await store.GetEmbeddingMismatchCountAsync());
+
+        // Explicitly run the backfill (ClearMismatchedEmbeddingsAsync also
+        // fires one in the background, but this makes the assertion
+        // deterministic instead of polling): the cleared rows should
+        // re-embed at the new dimension without throwing.
+        await store.RunEmbeddingBackfillAsync();
+        Assert.Equal(0, await store.GetEmbeddingMismatchCountAsync());
     }
 }

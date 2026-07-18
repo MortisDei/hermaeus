@@ -621,6 +621,53 @@ RAG remain unchanged since `0.9.41-alpha`.
   workspace-relative, so it carries the same path-safety guarantees as every
   other agent-owned file.
 
+### r16: Orchestration Hardening, Memory Integrity, Workbench Truth
+
+- **1.4 narrows where an approved action can land; it does not loosen
+  anything.** Approving a pending `edit_file`/`create_file`/`run_command`
+  action now executes against the task's own persisted `WorkspaceRoot`
+  instead of whatever workspace the caller's options happened to describe
+  (the review queue lists tasks across every workspace, so those could
+  silently disagree). The action was already approved by the user looking
+  at its preview; the fix is executing it where it was actually authorized,
+  never adding a refusal path. A null-options approval with no stored root
+  now throws instead of half-approving (leaving `Running` with an
+  unexecuted `PendingToolAction`), closing a latent stranding path.
+- **2.2 is a new model-authored write path into the memory store, gated and
+  bounded.** The `[MEMORY: ...]` save marker was already taught to the model
+  by the existing injection prompt but never wired up; it now actually
+  saves, but only when `Memory.Enabled`, only through the same
+  `MergeAndSaveAsync` dedupe path auto-summary already uses (never a raw
+  insert), and capped at 3 new memories per turn. No new tool, no new
+  approval surface, no network call - a local SQLite write identical in
+  shape to what auto-summary already performed post-conversation, just
+  triggered per-turn instead.
+- **2.1's archived-row fix and 2.3's expiration enforcement are read-side
+  corrections, not new capability.** `SearchAsync` excluding archived/expired
+  rows and `ArchiveStaleMemoriesAsync` now also sweeping past-expiration rows
+  change what recall returns, not what the store lets anyone write or reach;
+  no new threat surface.
+- **2.4's re-embed action is destructive only to stale vectors, and only on
+  a user click.** `ClearMismatchedEmbeddingsAsync` clears `embedding`/
+  `embedding_dim` on mismatched rows and re-embeds via the existing
+  background backfill; it never runs automatically on a settings or model
+  change, and never touches memory content, only its vector cache.
+- **1.1's reconcile and 1.6's status-mirroring are internal-state
+  corrections with no new execution path.** Reconciling a child's terminal
+  status onto its parent's spec, and mirroring a paused child's status onto
+  the parent, only ever copy already-persisted, already-approval-gated state
+  around; neither can cause an action to execute that would not otherwise
+  have been approved.
+- **3.1's recent-tasks list and review-queue Open button surface existing
+  state, they do not add a new entry point to execute anything.** Opening a
+  task loads its persisted state into the workbench exactly as the existing
+  review queue already did; approvals and replies still go through the same
+  gated paths regardless of how the task was opened.
+- **3.3's conversation-delete confirmation and 3.6's Ctrl+Q removal are
+  pure friction-adding changes**, consistent with every other
+  confirm-gated destructive action in the app; neither has a security
+  implication beyond reducing accidental data loss.
+
 ## Release Gate Status
 
 Security review and threat model refresh was completed for `0.13.0-alpha` as

@@ -106,6 +106,29 @@ public sealed class ServicesViewModelTests
         Assert.True(fired > 0, "changing a managed server's port must fire ServerAvailabilityChanged");
     }
 
+    /// <summary>r16 03-workbench-and-desktop.md 3.2: the nav dot's old converter only re-evaluated on a full Servers rebuild, not a per-item Status transition.</summary>
+    [Fact]
+    public void AnyServerRunning_reflects_a_per_item_status_change_without_a_settings_save()
+    {
+        using var temp = new TempDir();
+        var vm = NewServicesVm(temp, out _);
+        Assert.False(vm.AnyServerRunning);
+
+        var raisedForAnyServerRunning = 0;
+        vm.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(ServicesViewModel.AnyServerRunning))
+                raisedForAnyServerRunning++;
+        };
+
+        vm.Servers[0].Status = ServerStatus.Running;
+        Assert.True(vm.AnyServerRunning, "starting one server should light AnyServerRunning without a settings save/rebuild");
+        Assert.True(raisedForAnyServerRunning > 0, "AnyServerRunning should raise PropertyChanged on a per-server Status transition");
+
+        vm.Servers[0].Status = ServerStatus.Stopped;
+        Assert.False(vm.AnyServerRunning, "stopping the last running server should clear AnyServerRunning");
+    }
+
     [Fact]
     public async Task Rebuild_reuses_the_existing_row_instead_of_replacing_it()
     {

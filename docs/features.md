@@ -64,24 +64,40 @@
   does not complete within 3 seconds. Search never embeds anything but the
   query; rows without their own embedding yet are backfilled by a background
   pass shortly after startup and after memory writes, not on the send path.
+  Archived and expired memories are excluded from search and injection, so a
+  retired or forgotten memory never resurfaces.
 - Relevance-aware injection: memories selected for chat context are ranked by
-  the search's own relevance score blended with importance, not recency-first
-  as before; recency is now only the final tiebreaker.
+  the search's own relevance score blended with **decayed** importance (the
+  same lifecycle decay the archiver uses), not recency-first as before;
+  recency is now only the final tiebreaker.
 - Lifecycle: each memory tracks how many times and when it was actually
   recalled (injected), not just retrieved. Effective importance decays for
   memories that go unused; ones that decay below a floor and stay unrecalled
   long enough are auto-archived (never hard-deleted) the next time the
-  Memories panel opens. Pinned memories never decay.
-- The model can correct or retire a memory it was shown this turn with
-  `[MEMORY_UPDATE: <id> | <content>]` / `[MEMORY_FORGET: <id>]` markers; only
-  ids actually injected into that turn are honored, everything else is
-  ignored and logged.
+  Memories panel opens. Settings > Memory's auto-archive-after-days is
+  enforced the same way: a memory past its expiration date is archived on
+  the next sweep and excluded from search immediately, even before that
+  sweep runs. Pinned memories never decay and never expire.
+- The model can save a new memory anywhere in its response with
+  `[MEMORY: <content>]` (up to 3 per turn, deduplicated against existing
+  memories so a repeated fact reinforces one row instead of piling up), and
+  correct or retire a memory it was shown this turn with
+  `[MEMORY_UPDATE: <id> | <content>]` / `[MEMORY_FORGET: <id>]`; only ids
+  actually injected into that turn are honored for update/forget, everything
+  else is ignored and logged. Marker syntax never reaches the persisted
+  transcript, whether or not anything was actually saved, updated, or
+  forgotten that turn.
 - Auto-summary now asks for structured JSON (content, category, importance,
   tags) instead of parsing `[MEMORY: ...]` markers with keyword heuristics,
   giving model-supplied metadata directly; the marker format remains the
   fallback if a model doesn't follow the JSON instruction.
 - Dedicated Memories panel to review, search, pin, archive, and delete
-  memories, sorted by effective importance and showing recall stats.
+  memories, sorted by effective importance and showing recall stats. When an
+  embedding-model switch leaves older memories at a different vector
+  dimensionality than the current model (silently zeroing their semantic
+  recall score), the panel shows a count and a "Re-embed memories" button
+  that clears the stale vectors and re-embeds them in the background; this
+  never happens automatically on a model switch.
 - Session Usage panel: view per-conversation memory counts and recent activity
   to help triage which conversations have stored memories.
 - Configurable memory controls in Settings: global enable, context injection,
@@ -158,7 +174,11 @@
   safety gate allows.
 - Recent task and review queue lists are backed by a SQLite task index so large
   Agent workspaces do not need to scan every `task_state.json` file to render
-  the queue.
+  the queue. A Recent Tasks list in the workbench (status chip, goal, relative
+  time; sub-task children indented with a tag) makes every task reachable
+  after a restart, not just ones currently waiting in the review queue, which
+  also gained an Open button; opening a child directly shows its parent's
+  goal.
 - The agent panel surfaces a compact summary strip with task state, step
   count, goal, summary, recent task history, review queue counts, workspace
   memory counts, and retrieved context counts for quick scanning.
@@ -193,16 +213,23 @@
   into 2-6 focused sub-tasks (goal, specialist profile, success criteria),
   always approval-gated with a full preview of the proposed plan. Once
   approved, children run sequentially through the same loop, safety gate, and
-  approval flow as any task, each with its own transcript, lessons, and
-  remembered command approvals (never shared with siblings). Depth is limited
-  to one level in code - a child cannot itself propose sub-tasks. A workbench
-  strip shows live sub-task status; a child's pending approval surfaces in
-  the review queue labeled with its parent's goal. Bounded by
-  `Agent.MaxOrchestrationSteps` (default 60) across the whole run, separate
-  from each child's own `Agent.MaxAutoSteps`; hitting it marks remaining
-  sub-tasks `Skipped` and synthesis says so honestly. Once every sub-task is
-  terminal, the parent synthesizes one consolidated report (with a
-  deterministic fallback if synthesis itself fails) and writes it to
+  approval flow as any task, each with its own transcript, lessons, workspace
+  root (inherited from the parent), and remembered command approvals (never
+  shared with siblings). Depth is limited to one level in code - a child
+  cannot itself propose sub-tasks, and a task whose plan already exists
+  cannot accept another proposal. A workbench strip shows live sub-task
+  status; a child's pending approval surfaces in the review queue labeled
+  with its parent's goal, and approving it always resumes the parent's
+  orchestration by id, even if the child itself is the task currently open.
+  The parent's own status honestly mirrors a paused child's instead of
+  showing `Running` with nothing happening, and self-heals if a child
+  reaches a terminal state outside the orchestration loop (e.g. opened
+  directly and stepped to completion) rather than getting permanently stuck.
+  Bounded by `Agent.MaxOrchestrationSteps` (default 60) across the whole run,
+  separate from each child's own `Agent.MaxAutoSteps`; hitting it marks
+  remaining sub-tasks `Skipped` and synthesis says so honestly. Once every
+  sub-task is terminal, the parent synthesizes one consolidated report (with
+  a deterministic fallback if synthesis itself fails) and writes it to
   `report.md` in the task directory, openable from the workbench.
 
 ## Model Management
@@ -434,12 +461,20 @@
   keys, Azure-style key assignments, password parameters, query-string secrets,
   and home paths.
 - Tray integration, minimize-to-tray, local hotkeys, and Windows system-wide
-  hotkeys.
+  hotkeys. Local hotkeys: Ctrl+Space toggles quick chat, Ctrl+N opens a new
+  conversation, Ctrl+Shift+S opens Services, Escape closes quick chat. Quit
+  is available via the tray menu and window close, not a hotkey - an
+  instant, unconfirmed Ctrl+Q quit was removed.
+- Deleting a conversation asks for confirmation first, matching every other
+  destructive action of similar weight (dataset delete, reindex, benchmark
+  history clear, backup restore).
 - Single-instance guard: launching Aether while another instance for the
   same user account is already running exits immediately instead of opening
   a second window, since two processes would otherwise write to the same
   SQLite data root with no coordination between them.
 - Toast notifications throughout the app with opaque popup backgrounds.
+- The Services nav icon's "any server running" indicator updates live on
+  every server start/stop/crash, not just after a settings save.
 - Configurable data root with migration, backup, restore, and conflict refusal.
 - Data-root migration moves everything under the data root through one
   shared manifest (conversations, memories, benchmarks, Agent task state

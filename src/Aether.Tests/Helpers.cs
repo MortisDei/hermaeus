@@ -462,6 +462,8 @@ namespace Aether.Tests
         public Task RunAutoSummaryAsync(string conversationId, CancellationToken ct = default) => Task.CompletedTask;
         public Task<string> ApplyInjectedMemoryMarkersAsync(string responseText, IReadOnlyList<string> injectedMemoryIds, CancellationToken ct = default) =>
             Task.FromResult(responseText);
+        public Task<string> ApplyMemoryMarkersAsync(string responseText, IReadOnlyList<string> injectedMemoryIds, string? conversationId, int maxNewMemories = 3, CancellationToken ct = default) =>
+            Task.FromResult(responseText);
     }
 
     /// <summary>Returns a scripted list of models on every call, optionally gated behind a delay so tests can control interleaving (r12 02-async-and-threading.md 2.5).</summary>

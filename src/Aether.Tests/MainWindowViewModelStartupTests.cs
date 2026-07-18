@@ -21,7 +21,7 @@ namespace Aether.Tests;
 /// </summary>
 public sealed class MainWindowViewModelStartupTests
 {
-    private sealed record Harness(MainWindowViewModel Main, ScriptedModelsLlm Llm, IRuntimeLogService Logs, FakeToasts Toasts);
+    private sealed record Harness(MainWindowViewModel Main, ScriptedModelsLlm Llm, IRuntimeLogService Logs, FakeToasts Toasts, IConversationStore ConvStore);
 
     private static async Task<Harness> NewHarnessAsync(TempDir temp, bool initializeRagStore)
     {
@@ -82,7 +82,7 @@ public sealed class MainWindowViewModelStartupTests
             convStore, chat, agent, settingsVm, models, rag, servicesVm, benchmarks, systemOverview, doctor, memories, logsVm, wizard,
             settings, toasts, logs, new ConversationExportService());
 
-        return new Harness(main, llm, logs, toasts);
+        return new Harness(main, llm, logs, toasts, convStore);
     }
 
     [Fact]
@@ -120,5 +120,38 @@ public sealed class MainWindowViewModelStartupTests
         var sw = System.Diagnostics.Stopwatch.StartNew();
         while (!condition() && sw.ElapsedMilliseconds < timeoutMs)
             await Task.Delay(10);
+    }
+
+    /// <summary>r16 03-workbench-and-desktop.md 3.3: every other destructive action of this weight is confirm-gated; a raw context-menu click was the one exception.</summary>
+    [Fact]
+    public async Task DeleteConversation_does_nothing_when_confirmation_returns_false()
+    {
+        using var temp = new TempDir();
+        var harness = await NewHarnessAsync(temp, initializeRagStore: true);
+        await harness.ConvStore.SaveAsync(new Aether.Core.Models.Conversation { Id = "conv-keep", Title = "Keep me" });
+        var item = new ConversationItemViewModel { Id = "conv-keep", Title = "Keep me", ModelId = "m", UpdatedAt = DateTime.UtcNow, Folder = string.Empty };
+        harness.Main.Conversations.Add(item);
+        harness.Main.RequestDeleteConversationConfirmation = _ => Task.FromResult(false);
+
+        await harness.Main.DeleteConversationCommand.ExecuteAsync(item);
+
+        Assert.Contains(harness.Main.Conversations, c => c.Id == "conv-keep");
+        Assert.NotNull(await harness.ConvStore.GetByIdAsync("conv-keep"));
+    }
+
+    [Fact]
+    public async Task DeleteConversation_deletes_when_confirmation_returns_true()
+    {
+        using var temp = new TempDir();
+        var harness = await NewHarnessAsync(temp, initializeRagStore: true);
+        await harness.ConvStore.SaveAsync(new Aether.Core.Models.Conversation { Id = "conv-remove", Title = "Remove me" });
+        var item = new ConversationItemViewModel { Id = "conv-remove", Title = "Remove me", ModelId = "m", UpdatedAt = DateTime.UtcNow, Folder = string.Empty };
+        harness.Main.Conversations.Add(item);
+        harness.Main.RequestDeleteConversationConfirmation = _ => Task.FromResult(true);
+
+        await harness.Main.DeleteConversationCommand.ExecuteAsync(item);
+
+        Assert.DoesNotContain(harness.Main.Conversations, c => c.Id == "conv-remove");
+        Assert.Null(await harness.ConvStore.GetByIdAsync("conv-remove"));
     }
 }
