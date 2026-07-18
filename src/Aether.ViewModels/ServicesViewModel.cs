@@ -118,10 +118,17 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         DetectedModelPaths.Clear();
         foreach (var path in found)
             DetectedModelPaths.Add(path);
-        // Re-notify SelectedItem binding: ComboBox only highlights the match if the
-        // items collection already contains it by the time the binding evaluates.
-        if (!string.IsNullOrWhiteSpace(current))
-            OnPropertyChanged(nameof(ModelPath));
+        // DetectedModelPaths.Clear() fires a CollectionChanged Reset, which the
+        // ComboBox bound to it (SelectedItem="{Binding ModelPath}", TwoWay by
+        // default) reacts to by resetting its own selection to null - and because
+        // the binding is TwoWay, that null immediately writes back into ModelPath,
+        // before the foreach above ever repopulates the list. A bare
+        // OnPropertyChanged(nameof(ModelPath)) only re-announces whatever ModelPath
+        // holds *now* (already nulled by that point), so it cannot undo the loss.
+        // Re-assigning the value captured before the refresh pushes the real path
+        // back through the binding again, this time against the now-populated list.
+        if (!string.IsNullOrWhiteSpace(current) && ModelPath != current)
+            ModelPath = current;
     }
 
     public ServerProcessViewModel(
