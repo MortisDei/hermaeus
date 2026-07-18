@@ -8,7 +8,7 @@ namespace Aether.Agent.Services;
 
 public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
 {
-    private const int IndexSchemaVersion = 1;
+    private const int IndexSchemaVersion = 2;
     private const int MaxTaskIdLength = 80;
     private static readonly Regex SafeTaskIdRegex = new("^[A-Za-z0-9_-]+$", RegexOptions.Compiled);
     private static readonly HashSet<string> WindowsReservedNames = new(StringComparer.OrdinalIgnoreCase)
@@ -75,7 +75,7 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
         await c.OpenAsync(ct);
         await using var cmd = c.CreateCommand();
         cmd.CommandText = @"
-            SELECT task_id, goal, status, updated_at
+            SELECT task_id, goal, status, updated_at, parent_task_id
             FROM agent_task_index
             ORDER BY updated_at DESC
             LIMIT $limit";
@@ -88,7 +88,8 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
                 r.GetString(0),
                 r.GetString(1),
                 ParseStatus(r.GetString(2)),
-                ParseDate(r.GetString(3))));
+                ParseDate(r.GetString(3)),
+                r.IsDBNull(4) ? null : r.GetString(4)));
         }
 
         return tasks;
@@ -101,11 +102,13 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
         await c.OpenAsync(ct);
         await using var cmd = c.CreateCommand();
         cmd.CommandText = @"
-            SELECT task_id, goal, status, updated_at, active_step, summary,
-                   approval_count, last_approval_action, last_approval_approved, last_approval_at
-            FROM agent_task_index
-            WHERE status IN ('WaitingForUser', 'Blocked') OR approval_count > 0
-            ORDER BY updated_at DESC
+            SELECT t.task_id, t.goal, t.status, t.updated_at, t.active_step, t.summary,
+                   t.approval_count, t.last_approval_action, t.last_approval_approved, t.last_approval_at,
+                   p.goal
+            FROM agent_task_index t
+            LEFT JOIN agent_task_index p ON p.task_id = t.parent_task_id
+            WHERE t.status IN ('WaitingForUser', 'Blocked') OR t.approval_count > 0
+            ORDER BY t.updated_at DESC
             LIMIT $limit";
         cmd.Parameters.AddWithValue("$limit", Math.Max(1, limit));
         var queue = new List<AgentReviewQueueItem>();
@@ -122,7 +125,9 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
                 r.GetInt32(6),
                 r.IsDBNull(7) ? null : r.GetString(7),
                 r.IsDBNull(8) ? null : r.GetInt32(8) != 0,
-                r.IsDBNull(9) ? null : ParseDate(r.GetString(9))));
+                r.IsDBNull(9) ? null : ParseDate(r.GetString(9)),
+                PendingToolAction: null,
+                ParentGoal: r.IsDBNull(10) ? null : r.GetString(10)));
         }
 
         // The index table only carries summary columns; a task actually
@@ -238,7 +243,8 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
                         approval_count INTEGER NOT NULL DEFAULT 0,
                         last_approval_action TEXT,
                         last_approval_approved INTEGER,
-                        last_approval_at TEXT
+                        last_approval_at TEXT,
+                        parent_task_id TEXT
                     );
                     CREATE INDEX IF NOT EXISTS idx_agent_task_index_updated ON agent_task_index(updated_at DESC);
                     CREATE INDEX IF NOT EXISTS idx_agent_task_index_review ON agent_task_index(status, approval_count, updated_at DESC);";
@@ -247,7 +253,8 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
 
             await SqliteMigrationRunner.ApplyAsync(c, "agent_task_index", IndexSchemaVersion,
             [
-                new SqliteMigration(1, (_, _) => Task.FromResult(false))
+                new SqliteMigration(1, (_, _) => Task.FromResult(false)),
+                new SqliteMigration(2, AddParentTaskIdColumnAsync)
             ], ct);
             await ReconcileIndexAsync(c, ct);
 
@@ -257,6 +264,22 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
         {
             _initGate.Release();
         }
+    }
+
+    /// <summary>Additive schema change for r15 sub-task orchestration (doc 01 1.1): a fresh install already gets the column from CREATE TABLE, so this only matters for a pre-r15 index file.</summary>
+    private static async Task<bool> AddParentTaskIdColumnAsync(SqliteConnection c, CancellationToken ct)
+    {
+        await using (var check = c.CreateCommand())
+        {
+            check.CommandText = "SELECT COUNT(*) FROM pragma_table_info('agent_task_index') WHERE name = 'parent_task_id'";
+            var exists = Convert.ToInt64(await check.ExecuteScalarAsync(ct)) > 0;
+            if (exists) return false;
+        }
+
+        await using var alter = c.CreateCommand();
+        alter.CommandText = "ALTER TABLE agent_task_index ADD COLUMN parent_task_id TEXT";
+        await alter.ExecuteNonQueryAsync(ct);
+        return true;
     }
 
     private async Task ReconcileIndexAsync(SqliteConnection c, CancellationToken ct)
@@ -293,10 +316,10 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
         cmd.CommandText = @"
             INSERT INTO agent_task_index (
                 task_id, goal, status, updated_at, active_step, summary,
-                approval_count, last_approval_action, last_approval_approved, last_approval_at)
+                approval_count, last_approval_action, last_approval_approved, last_approval_at, parent_task_id)
             VALUES (
                 $task_id, $goal, $status, $updated_at, $active_step, $summary,
-                $approval_count, $last_action, $last_approved, $last_at)
+                $approval_count, $last_action, $last_approved, $last_at, $parent_task_id)
             ON CONFLICT(task_id) DO UPDATE SET
                 goal = excluded.goal,
                 status = excluded.status,
@@ -306,7 +329,8 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
                 approval_count = excluded.approval_count,
                 last_approval_action = excluded.last_approval_action,
                 last_approval_approved = excluded.last_approval_approved,
-                last_approval_at = excluded.last_approval_at";
+                last_approval_at = excluded.last_approval_at,
+                parent_task_id = excluded.parent_task_id";
         cmd.Parameters.AddWithValue("$task_id", state.TaskId);
         cmd.Parameters.AddWithValue("$goal", state.Goal);
         cmd.Parameters.AddWithValue("$status", state.Status.ToString());
@@ -317,6 +341,7 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
         cmd.Parameters.AddWithValue("$last_action", (object?)last?.Action ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$last_approved", last is null ? DBNull.Value : last.Approved ? 1 : 0);
         cmd.Parameters.AddWithValue("$last_at", last is null ? DBNull.Value : last.Timestamp.ToString("O"));
+        cmd.Parameters.AddWithValue("$parent_task_id", (object?)state.ParentTaskId ?? DBNull.Value);
         await cmd.ExecuteNonQueryAsync(ct);
     }
 

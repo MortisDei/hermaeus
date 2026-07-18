@@ -379,6 +379,93 @@ public sealed class AgentScenarioChecksTests
         Assert.False(Single(results, "expect_revertible_patch").Passed);
     }
 
+    // -- expect_subtask_statuses --
+
+    [Fact]
+    public void Expect_subtask_statuses_passes_when_statuses_match_in_order()
+    {
+        var expect = new AgentScenarioExpectations { ExpectSubtaskStatuses = ["complete", "failed", "skipped"] };
+        var state = NewState();
+        state.SubTaskPlan =
+        [
+            new AgentSubTaskSpec { Goal = "a", Status = AgentSubTaskStatus.Complete },
+            new AgentSubTaskSpec { Goal = "b", Status = AgentSubTaskStatus.Failed },
+            new AgentSubTaskSpec { Goal = "c", Status = AgentSubTaskStatus.Skipped }
+        ];
+
+        var results = AgentScenarioChecks.Evaluate(expect, state, null, EmptyDiff());
+
+        Assert.True(Single(results, "expect_subtask_statuses").Passed);
+    }
+
+    [Fact]
+    public void Expect_subtask_statuses_fails_on_a_status_mismatch()
+    {
+        var expect = new AgentScenarioExpectations { ExpectSubtaskStatuses = ["complete", "complete"] };
+        var state = NewState();
+        state.SubTaskPlan =
+        [
+            new AgentSubTaskSpec { Goal = "a", Status = AgentSubTaskStatus.Complete },
+            new AgentSubTaskSpec { Goal = "b", Status = AgentSubTaskStatus.Skipped }
+        ];
+
+        var results = AgentScenarioChecks.Evaluate(expect, state, null, EmptyDiff());
+
+        Assert.False(Single(results, "expect_subtask_statuses").Passed);
+    }
+
+    [Fact]
+    public void Expect_subtask_statuses_fails_on_a_count_mismatch()
+    {
+        var expect = new AgentScenarioExpectations { ExpectSubtaskStatuses = ["complete", "complete", "complete"] };
+        var state = NewState();
+        state.SubTaskPlan =
+        [
+            new AgentSubTaskSpec { Goal = "a", Status = AgentSubTaskStatus.Complete },
+            new AgentSubTaskSpec { Goal = "b", Status = AgentSubTaskStatus.Complete }
+        ];
+
+        var results = AgentScenarioChecks.Evaluate(expect, state, null, EmptyDiff());
+
+        Assert.False(Single(results, "expect_subtask_statuses").Passed);
+    }
+
+    // -- expect_report_contains --
+
+    [Fact]
+    public void Expect_report_contains_passes_when_the_final_message_has_the_phrase()
+    {
+        var expect = new AgentScenarioExpectations { ExpectReportContains = ["sub-task alpha"] };
+        var state = NewState();
+
+        var results = AgentScenarioChecks.Evaluate(expect, state, FinalResponse("Report: sub-task alpha finished."), EmptyDiff());
+
+        Assert.True(Single(results, "expect_report_contains:sub-task alpha").Passed);
+    }
+
+    [Fact]
+    public void Expect_report_contains_fails_when_the_phrase_is_missing()
+    {
+        var expect = new AgentScenarioExpectations { ExpectReportContains = ["sub-task alpha"] };
+        var state = NewState();
+
+        var results = AgentScenarioChecks.Evaluate(expect, state, FinalResponse("Nothing relevant here."), EmptyDiff());
+
+        Assert.False(Single(results, "expect_report_contains:sub-task alpha").Passed);
+    }
+
+    [Fact]
+    public void Expect_report_contains_reads_from_task_summary_too()
+    {
+        var expect = new AgentScenarioExpectations { ExpectReportContains = ["truncated by budget"] };
+        var state = NewState();
+        state.Summary = "Run truncated by budget; two sub-tasks skipped.";
+
+        var results = AgentScenarioChecks.Evaluate(expect, state, null, EmptyDiff());
+
+        Assert.True(Single(results, "expect_report_contains:truncated by budget").Passed);
+    }
+
     // -- JsonElement round-trip equivalence (arguments come back as JsonElement after persistence) --
 
     [Fact]

@@ -1,0 +1,14 @@
+{
+  "id": "11-orchestration-gate",
+  "title": "Sub-task plan is gated, then runs sequentially to a synthesis report",
+  "goal": "This goal covers several unrelated concerns at once. Use plan_subtasks to split it into exactly three focused sub-tasks: one to review README.md for correctness issues (profile correctness), one to note what test coverage is missing (profile tests), and one to note what documentation is missing (profile docs). Let each sub-task run to completion, then give a consolidated report naming all three sub-tasks.",
+  "description": "plan_subtasks always pauses for approval and only materializes after it; once approved, children run one at a time through the ordinary loop and the parent ends with a synthesis report naming every sub-task.",
+  "tags": ["orchestration", "agent"],
+  "max_steps": 8,
+  "auto_approve": ["plan_subtasks"],
+  "expect": {
+    "require_approval_for": ["plan_subtasks"],
+    "final_status_any_of": ["complete"],
+    "expect_report_contains": ["correctness", "test", "doc"]
+  }
+}

@@ -45,6 +45,16 @@ public enum AgentDraftPatchStatus
     Reverted
 }
 
+/// <summary>Lifecycle of one entry in a parent task's <see cref="AgentTaskState.SubTaskPlan"/>.</summary>
+public enum AgentSubTaskStatus
+{
+    Pending,
+    Running,
+    Complete,
+    Failed,
+    Skipped
+}
+
 /// <summary>Where a lesson applies: every task in every workspace, or one specific workspace.</summary>
 public enum AgentLessonScope
 {
@@ -137,6 +147,43 @@ public sealed class AgentTaskState
     /// AgentService.AppendApprovalAsync.
     /// </summary>
     public List<string> RememberedCommandApprovals { get; set; } = [];
+    /// <summary>
+    /// Non-null only on a child task created by an approved <c>plan_subtasks</c>
+    /// action (r15 01-subtask-orchestration.md 1.1). A child can never itself
+    /// gain a <see cref="SubTaskPlan"/> - depth is limited to one level, and
+    /// that limit is enforced in code (AgentService.RunStepAsync), not by the
+    /// model.
+    /// </summary>
+    public string? ParentTaskId { get; set; }
+    /// <summary>
+    /// Populated only on a parent task, only by an approved <c>plan_subtasks</c>
+    /// action. Empty for every ordinary task and for every child task.
+    /// </summary>
+    public List<AgentSubTaskSpec> SubTaskPlan { get; set; } = [];
+    /// <summary>
+    /// Total model steps spent across every child plus synthesis under this
+    /// parent's orchestration loop, checked against
+    /// <see cref="Aether.Core.Models.AgentSettings.MaxOrchestrationSteps"/>.
+    /// Always 0 for a task that is not an orchestration parent.
+    /// </summary>
+    public int OrchestrationStepsUsed { get; set; }
+}
+
+/// <summary>
+/// One planned sub-task from an approved <c>plan_subtasks</c> action. See
+/// docs/review/01-subtask-orchestration.md 1.1.
+/// </summary>
+public sealed class AgentSubTaskSpec
+{
+    public string Goal { get; set; } = string.Empty;
+    /// <summary>Key into the fixed <see cref="Aether.Agent.Services.AgentSpecialistProfiles"/> catalog.</summary>
+    public string ProfileName { get; set; } = string.Empty;
+    public string SuccessCriteria { get; set; } = string.Empty;
+    public AgentSubTaskStatus Status { get; set; } = AgentSubTaskStatus.Pending;
+    /// <summary>Set when the child task is actually created (lazily, at execution time - not at plan-approval time).</summary>
+    public string? TaskId { get; set; }
+    /// <summary>Bounded copy of the child's outcome (its Summary plus final user message, truncated), written at child terminal state.</summary>
+    public string ResultSummary { get; set; } = string.Empty;
 }
 
 public enum AgentPlanStepStatus
@@ -217,7 +264,9 @@ public sealed record AgentReviewQueueItem(
     /// not carry it), so the queue can show risk and reason instead of a
     /// bare status (r6 01-first-five-minutes.md 1.7).
     /// </summary>
-    AgentPendingToolAction? PendingToolAction = null);
+    AgentPendingToolAction? PendingToolAction = null,
+    /// <summary>The parent task's goal, populated only when this entry is a child task (r15 02-orchestration-ui.md 2.3), so the review queue can show "for: &lt;parent goal&gt;".</summary>
+    string? ParentGoal = null);
 
 public sealed class AgentWorkspaceMemoryEntry
 {
@@ -302,6 +351,13 @@ public sealed class AgentContextPack
     /// them; see AgentService's system prompt and SqliteLessonStore.
     /// </summary>
     public List<AgentRetrievedItem> Lessons { get; set; } = [];
+    /// <summary>
+    /// Populated only for an orchestration parent (see <see cref="AgentTaskState.SubTaskPlan"/>):
+    /// one item per sub-task spec (goal, profile, status, ResultSummary),
+    /// most recent children favored if the budget cannot fit all of them.
+    /// Empty, and omitted from the context receipt, for every other task.
+    /// </summary>
+    public List<AgentRetrievedItem> SubTaskReports { get; set; } = [];
     public List<string> KnownRisks { get; set; } = [];
     public string RequiredOutputFormat { get; set; } =
         "Return JSON with thought_summary, current_step, next_action, state_update, and user_message.";
@@ -411,7 +467,9 @@ public sealed record AgentTaskListItem(
     string TaskId,
     string Goal,
     AgentTaskStatus Status,
-    DateTime UpdatedAt);
+    DateTime UpdatedAt,
+    /// <summary>Non-null when this task is a sub-task child, so recent-task lists can mark it as such.</summary>
+    string? ParentTaskId = null);
 
 public sealed record AgentFileSearchResult(
     string RelativePath,

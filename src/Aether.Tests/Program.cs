@@ -161,6 +161,31 @@ internal static class AgentTests
     return Task.CompletedTask;
     }
 
+    public static async Task AgentApprovalPreviewDescribesTheProposedSubtaskPlan()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    var tools = new AgentWorkspaceTools();
+    var llm = new FakeSequencedAgentLlm([PlanTwoSubtasksResponse]);
+    var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), llm, settings: settings);
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-sequenced-agent");
+
+    var state = await service.CreateTaskAsync("Fix the bug and add coverage", options);
+    var step = await service.RunStepAsync(state.TaskId, options);
+
+    var preview = AgentApprovalPreview.Describe(step.State.PendingToolAction!, options);
+    True(preview.Contains("2 sub-task", StringComparison.Ordinal), "the preview should show the sub-task count");
+    True(preview.Contains("[correctness] Fix the bug", StringComparison.Ordinal), "the preview should show each sub-task's profile and goal");
+    True(preview.Contains("[tests] Add a regression test", StringComparison.Ordinal), "the preview should show each sub-task's profile and goal");
+
+    var malformed = new AgentPendingToolAction { ToolName = "plan_subtasks", Arguments = new Dictionary<string, object?>() };
+    Equal("Could not parse the proposed plan.", AgentApprovalPreview.Describe(malformed, options), "a malformed plan payload should degrade to a clear message");
+    }
+
     public static async Task AgentTaskStateUsesSqliteIndexForLists()
     {
     using var temp = new TempDir();
@@ -188,7 +213,7 @@ internal static class AgentTests
         await c.OpenAsync();
         await using var cmd = c.CreateCommand();
         cmd.CommandText = "SELECT version FROM aether_schema_versions WHERE scope = 'agent_task_index'";
-        Equal(1L, (long)(await cmd.ExecuteScalarAsync() ?? 0L), "agent task index should record schema version");
+        Equal(2L, (long)(await cmd.ExecuteScalarAsync() ?? 0L), "agent task index should record schema version");
     }
 
     File.Delete(Path.Combine(store.GetTaskDirectory("indexed-task"), "task_state.json"));
@@ -1744,5 +1769,531 @@ internal static class AgentTests
 
     True(pack.Lessons.Count >= 2, "both lessons should fit comfortably within the lessons token budget");
     Equal(relevant.Id, pack.Lessons[0].Locator, "the lesson sharing terms with the current goal should rank ahead of an unrelated, higher-confidence lesson");
+    }
+
+    // -- r15 sub-task orchestration --
+
+    public static async Task AgentSubTaskFieldsAreJsonAdditiveAndPreR15StateLoadsUnchanged()
+    {
+    using var temp = new TempDir();
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+
+    var preR15Json = """
+        {
+          "task_id": "legacy-task",
+          "goal": "Old task from before r15",
+          "status": "waiting_for_user",
+          "active_step": "Wait",
+          "constraints": [],
+          "completed_steps": [],
+          "pending_steps": [],
+          "decisions": [],
+          "tool_results": [],
+          "approval_history": [],
+          "draft_patches": [],
+          "summary": "legacy"
+        }
+        """;
+    var dir = store.GetTaskDirectory("legacy-task");
+    Directory.CreateDirectory(dir);
+    await File.WriteAllTextAsync(Path.Combine(dir, "task_state.json"), preR15Json);
+
+    var loaded = await store.LoadAsync("legacy-task");
+    Equal("Old task from before r15", loaded?.Goal, "a pre-r15 task state should still load");
+    True(loaded?.ParentTaskId is null, "a pre-r15 task should default to no parent");
+    True(loaded?.SubTaskPlan.Count == 0, "a pre-r15 task should default to an empty sub-task plan");
+    Equal(0, loaded!.OrchestrationStepsUsed, "a pre-r15 task should default OrchestrationStepsUsed to 0");
+
+    var child = new AgentTaskState
+    {
+        TaskId = "child-task",
+        Goal = "child goal",
+        ParentTaskId = "legacy-task",
+        SubTaskPlan = [new AgentSubTaskSpec { Goal = "g", ProfileName = "general", SuccessCriteria = "c" }]
+    };
+    await store.SaveAsync(child);
+    var reloadedChild = await store.LoadAsync("child-task");
+    Equal("legacy-task", reloadedChild?.ParentTaskId, "ParentTaskId should round trip");
+    Equal(1, reloadedChild?.SubTaskPlan.Count, "SubTaskPlan should round trip");
+    }
+
+    public static Task AgentSpecialistProfilesAreNonEmptyAndUnknownNameFallsBackToGeneral()
+    {
+    foreach (var name in AgentSpecialistProfiles.Names)
+        True(AgentSpecialistProfiles.Resolve(name).Count > 0, $"profile '{name}' should have at least one focus constraint");
+
+    Equal(AgentSpecialistProfiles.Resolve("general"), AgentSpecialistProfiles.Resolve("totally-unknown-profile"), "an unknown profile name should fall back to general's constraints");
+    True(AgentSpecialistProfiles.IsKnown("security"), "security should be a known profile");
+    False(AgentSpecialistProfiles.IsKnown("totally-unknown-profile"), "an unrecognized name should not be known");
+    return Task.CompletedTask;
+    }
+
+    private const string PlanTwoSubtasksResponse = """
+        {
+          "thought_summary": "This goal spans multiple domains.",
+          "current_step": "Propose sub-tasks.",
+          "next_action": {
+            "type": "tool",
+            "tool_name": "plan_subtasks",
+            "arguments": { "subtasks": [
+              { "goal": "Fix the bug", "profile": "correctness", "success_criteria": "the bug is fixed" },
+              { "goal": "Add a regression test", "profile": "tests", "success_criteria": "a test covers the bug" }
+            ] },
+            "requires_approval": true,
+            "risk_level": "medium"
+          },
+          "state_update": { "completed": [], "pending": [], "new_facts": [], "blockers": [] },
+          "user_message": "Proposing a sub-task plan."
+        }
+        """;
+
+    private const string PlanThreeSubtasksResponse = """
+        {
+          "thought_summary": "This goal spans multiple domains.",
+          "current_step": "Propose sub-tasks.",
+          "next_action": {
+            "type": "tool",
+            "tool_name": "plan_subtasks",
+            "arguments": { "subtasks": [
+              { "goal": "Fix the bug", "profile": "correctness", "success_criteria": "the bug is fixed" },
+              { "goal": "Add a regression test", "profile": "tests", "success_criteria": "a test covers the bug" },
+              { "goal": "Update the docs", "profile": "docs", "success_criteria": "docs mention the fix" }
+            ] },
+            "requires_approval": true,
+            "risk_level": "medium"
+          },
+          "state_update": { "completed": [], "pending": [], "new_facts": [], "blockers": [] },
+          "user_message": "Proposing a sub-task plan."
+        }
+        """;
+
+    private const string OneSubtaskResponse = """
+        {
+          "thought_summary": "Just one.",
+          "current_step": "Propose sub-tasks.",
+          "next_action": {
+            "type": "tool",
+            "tool_name": "plan_subtasks",
+            "arguments": { "subtasks": [ { "goal": "Only one", "profile": "general", "success_criteria": "done" } ] },
+            "requires_approval": true,
+            "risk_level": "medium"
+          },
+          "state_update": { "completed": [], "pending": [], "new_facts": [], "blockers": [] },
+          "user_message": "Proposing a sub-task plan."
+        }
+        """;
+
+    private const string PlanSubtasksFromChildResponse = """
+        {
+          "thought_summary": "Trying to delegate further.",
+          "current_step": "Propose sub-tasks.",
+          "next_action": {
+            "type": "tool",
+            "tool_name": "plan_subtasks",
+            "arguments": { "subtasks": [
+              { "goal": "a", "profile": "general", "success_criteria": "a" },
+              { "goal": "b", "profile": "general", "success_criteria": "b" }
+            ] },
+            "requires_approval": true,
+            "risk_level": "medium"
+          },
+          "state_update": { "completed": [], "pending": [], "new_facts": [], "blockers": [] },
+          "user_message": "Trying to delegate."
+        }
+        """;
+
+    private static string FinalResponseWithMessage(string message) => $$"""
+        {
+          "thought_summary": "Done.",
+          "current_step": "Done.",
+          "next_action": { "type": "final", "requires_approval": false, "risk_level": "none" },
+          "state_update": { "completed": [], "pending": [], "new_facts": [], "blockers": [] },
+          "user_message": "{{message}}"
+        }
+        """;
+
+    public static async Task AgentPlanSubtasksAlwaysRequiresApprovalOnRootAndIsBlockedByDepthOnAChild()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    var tools = new AgentWorkspaceTools();
+
+    var gate = new AgentSafetyGate();
+    var decision = gate.Evaluate("plan_subtasks", wouldMutate: false);
+    Equal(AgentToolDisposition.RequiresApproval, decision.Disposition, "plan_subtasks should always require approval");
+    Equal(AgentRiskLevel.Medium, decision.RiskLevel, "plan_subtasks should be Medium risk");
+
+    var llm = new FakeSequencedAgentLlm([PlanSubtasksFromChildResponse]);
+    var service = new AgentService(store, new FakeAgentContextBuilder(), gate, new AgentToolExecutor(tools), llm, settings: settings);
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-sequenced-agent");
+
+    var child = new AgentTaskState { Goal = "child goal", ParentTaskId = "some-parent-id", Status = AgentTaskStatus.New };
+    await store.SaveAsync(child);
+
+    var step = await service.RunStepAsync(child.TaskId, options);
+    Equal(AgentTaskStatus.Blocked, step.State.Status, "a child requesting plan_subtasks should be blocked, not paused for approval");
+    True(step.State.SubTaskPlan.Count == 0, "a blocked plan_subtasks request should never materialize a plan on the child");
+    var gateRow = step.State.ToolResults.Last(t => t.Tool == "safety_gate");
+    Equal("Blocked", AgentToolExecutor.Arg(gateRow.Arguments, "disposition"), "the safety-gate row should record the depth block");
+    }
+
+    private static async Task<(FileAgentTaskStateStore Store, AgentService Service, AgentWorkspaceOptions Options, AgentTaskState State)> CreateApprovedTwoSubtaskPlanAsync(
+        TempDir temp, ILlmService llm, string goal = "Fix the bug and add coverage")
+    {
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    var tools = new AgentWorkspaceTools();
+    var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), llm, settings: settings);
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-sequenced-agent");
+
+    var state = await service.CreateTaskAsync(goal, options);
+    var proposed = await service.RunStepAsync(state.TaskId, options);
+    Equal(AgentTaskStatus.WaitingForUser, proposed.State.Status, "plan_subtasks should always pause for approval");
+    await service.AppendApprovalAsync(state.TaskId, "plan_subtasks", approved: true, options);
+
+    return (store, service, options, state);
+    }
+
+    public static async Task AgentPlanSubtasksApprovalRejectsAnInvalidPlanInstead()
+    {
+    using var temp = new TempDir();
+    var llm = new FakeSequencedAgentLlm([OneSubtaskResponse]);
+    var (store, service, options, state) = await CreateApprovedTwoSubtaskPlanAsync(temp, llm);
+
+    var afterApproval = await store.LoadAsync(state.TaskId);
+    Equal(AgentTaskStatus.WaitingForUser, afterApproval!.Status, "an invalid plan (too few entries) should not materialize and should return to WaitingForUser");
+    True(afterApproval.SubTaskPlan.Count == 0, "an invalid plan should never be materialized");
+    True(afterApproval.PendingToolAction is null, "the rejected pending action should be cleared");
+    True(afterApproval.ToolResults.Any(t => t.Tool == "plan_subtasks" && t.ResultSummary.Contains("between 2 and 6", StringComparison.Ordinal)),
+        "the rejection should explain why via a tool result");
+    }
+
+    public static async Task AgentOrchestrationRunsChildrenSequentiallyThenSynthesizes()
+    {
+    using var temp = new TempDir();
+    var llm = new FakeSequencedAgentLlm([
+        PlanTwoSubtasksResponse,
+        FinalResponseWithMessage("Fixed the bug in Foo.cs."),
+        FinalResponseWithMessage("Added a regression test."),
+        FinalResponseWithMessage("Both sub-tasks completed successfully.")
+    ]);
+    var (store, service, options, state) = await CreateApprovedTwoSubtaskPlanAsync(temp, llm);
+
+    var afterApproval = await store.LoadAsync(state.TaskId);
+    Equal(2, afterApproval!.SubTaskPlan.Count, "approval should materialize the proposed plan");
+    True(afterApproval.SubTaskPlan.All(s => s.Status == AgentSubTaskStatus.Pending), "no child should be created yet at approval time");
+    True(afterApproval.SubTaskPlan.All(s => string.IsNullOrEmpty(s.TaskId)), "no child task id should exist until the orchestration loop actually creates it");
+
+    var result = await service.RunAsync(state.TaskId, options);
+
+    Equal(AgentTaskStatus.Complete, result.State.Status, "the parent should complete once every sub-task and synthesis are done");
+    Equal(2, result.State.SubTaskPlan.Count, "the plan should still have two entries");
+    True(result.State.SubTaskPlan.All(s => s.Status == AgentSubTaskStatus.Complete), "both sub-tasks should be complete");
+    True(result.State.SubTaskPlan.All(s => !string.IsNullOrWhiteSpace(s.ResultSummary)), "both sub-tasks should carry a non-empty result summary");
+    True(result.State.SubTaskPlan.All(s => !string.IsNullOrWhiteSpace(s.TaskId)), "both sub-tasks should have created a real child task");
+    True(result.State.SubTaskPlan.Select(s => s.TaskId).Distinct().Count() == 2, "the two children should be distinct tasks");
+
+    var childState = await store.LoadAsync(result.State.SubTaskPlan[0].TaskId!);
+    Equal(state.TaskId, childState?.ParentTaskId, "the child should carry the parent's task id");
+
+    var reportPath = Path.Combine(store.GetTaskDirectory(state.TaskId), "report.md");
+    True(File.Exists(reportPath), "synthesis should write report.md to the parent's task directory");
+    }
+
+    public static async Task AgentOrchestrationChildApprovalTargetsTheChildAndResumesTheParent()
+    {
+    using var temp = new TempDir();
+    Directory.CreateDirectory(temp.PathFor("workspace"));
+    File.WriteAllText(Path.Combine(temp.PathFor("workspace"), "notes.md"), "status: draft");
+
+    var childEditRequest = """
+        {
+          "thought_summary": "Editing notes.md",
+          "current_step": "Apply the edit",
+          "next_action": {
+            "type": "tool",
+            "tool_name": "edit_file",
+            "arguments": { "relative_path": "notes.md", "old_string": "status: draft", "new_string": "status: final" },
+            "requires_approval": true,
+            "risk_level": "medium"
+          },
+          "state_update": { "completed": [], "pending": [], "new_facts": [], "blockers": [] },
+          "user_message": "Requesting edit."
+        }
+        """;
+
+    var llm = new FakeSequencedAgentLlm([
+        PlanTwoSubtasksResponse,
+        childEditRequest,
+        FinalResponseWithMessage("Edit applied."),
+        FinalResponseWithMessage("Second sub-task done."),
+        FinalResponseWithMessage("Synthesis report.")
+    ]);
+    var (store, service, options, state) = await CreateApprovedTwoSubtaskPlanAsync(temp, llm);
+
+    var paused = await service.RunAsync(state.TaskId, options);
+    Equal(AgentTaskStatus.WaitingForUser, paused.State.Status, "the run should pause when the first child needs approval");
+    NotEqual(state.TaskId, paused.State.TaskId, "the paused result should describe the CHILD task, not the parent");
+    Equal("edit_file", paused.State.PendingToolAction?.ToolName, "the child's pending action should be edit_file");
+
+    await service.AppendApprovalAsync(paused.State.TaskId, "edit_file", approved: true, options);
+
+    var resumed = await service.RunAsync(state.TaskId, options);
+    Equal(AgentTaskStatus.Complete, resumed.State.Status, "resuming the parent should continue the same child and finish the run");
+    True(resumed.State.SubTaskPlan.All(s => s.Status == AgentSubTaskStatus.Complete), "both sub-tasks should end complete after resuming");
+    Equal("status: final", File.ReadAllText(Path.Combine(temp.PathFor("workspace"), "notes.md")), "the child's approved edit should actually apply to the shared workspace");
+    }
+
+    public static async Task AgentOrchestrationRememberedCommandApprovalsAreNotSharedBetweenChildren()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    var manifests = new WorkspaceManifestService();
+    await manifests.SaveAsync(root, new WorkspaceManifest
+    {
+        AllowedCommands = [new WorkspaceCommandRecipe("dotnet build", "Build.", AgentRiskLevel.Low)]
+    });
+
+    var runBuildRequest = """
+        {
+          "thought_summary": "Building.",
+          "current_step": "Run the build.",
+          "next_action": { "type": "tool", "tool_name": "run_command", "arguments": { "command": "dotnet build" }, "requires_approval": true, "risk_level": "medium" },
+          "state_update": { "completed": [], "pending": [], "new_facts": [], "blockers": [] },
+          "user_message": "Requesting build."
+        }
+        """;
+
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    var tools = new AgentWorkspaceTools();
+    var llm = new FakeSequencedAgentLlm([
+        PlanTwoSubtasksResponse,
+        runBuildRequest,
+        FinalResponseWithMessage("Build already approved once; done."),
+        runBuildRequest
+    ]);
+    var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), llm, manifests: manifests, settings: settings);
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-sequenced-agent");
+
+    var state = await service.CreateTaskAsync("Build twice across two sub-tasks", options);
+    await service.RunStepAsync(state.TaskId, options);
+    await service.AppendApprovalAsync(state.TaskId, "plan_subtasks", approved: true, options);
+
+    var firstPause = await service.RunAsync(state.TaskId, options);
+    Equal("run_command", firstPause.State.PendingToolAction?.ToolName, "the first child should need approval for run_command");
+    var firstChildId = firstPause.State.TaskId;
+    await service.AppendApprovalAsync(firstChildId, "run_command", approved: true, options);
+
+    var secondPause = await service.RunAsync(state.TaskId, options);
+    Equal(AgentTaskStatus.WaitingForUser, secondPause.State.Status, "the second child should still need its own approval for the identical command");
+    Equal("run_command", secondPause.State.PendingToolAction?.ToolName, "the second child's run_command should not auto-execute from the first child's approval");
+    NotEqual(firstChildId, secondPause.State.TaskId, "the two children should be different tasks");
+    }
+
+    public static async Task AgentOrchestrationBudgetExhaustionSkipsRemainingSubtasksAndNotesTruncationInTheReport()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    settings.Settings.Agent.MaxOrchestrationSteps = 1;
+    var store = new FileAgentTaskStateStore(settings);
+    var tools = new AgentWorkspaceTools();
+    var llm = new FakeSequencedAgentLlm([
+        PlanThreeSubtasksResponse,
+        FinalResponseWithMessage("First sub-task done."),
+        FinalResponseWithMessage("All requested work is finished.")
+    ]);
+    var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), llm, settings: settings);
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-sequenced-agent");
+
+    var state = await service.CreateTaskAsync("A goal needing three sub-tasks", options);
+    await service.RunStepAsync(state.TaskId, options);
+    await service.AppendApprovalAsync(state.TaskId, "plan_subtasks", approved: true, options);
+
+    var result = await service.RunAsync(state.TaskId, options);
+
+    Equal(AgentTaskStatus.Complete, result.State.Status, "a budget-truncated orchestration should still end Complete");
+    Equal(1, result.State.SubTaskPlan.Count(s => s.Status == AgentSubTaskStatus.Complete), "exactly one sub-task should have completed before the budget was hit");
+    Equal(2, result.State.SubTaskPlan.Count(s => s.Status == AgentSubTaskStatus.Skipped), "the remaining sub-tasks should be marked Skipped");
+    True(result.State.Summary.Contains("budget", StringComparison.OrdinalIgnoreCase), "the synthesis report should note the run was truncated by budget");
+    }
+
+    public static async Task AgentOrchestrationSynthesisFallsBackDeterministicallyWhenTheModelCallFails()
+    {
+    using var temp = new TempDir();
+    var llm = new FakeSequencedThenThrowingAgentLlm([
+        PlanTwoSubtasksResponse,
+        FinalResponseWithMessage("First sub-task done."),
+        FinalResponseWithMessage("Second sub-task done.")
+        // no synthesis response queued: the synthesis call throws
+    ]);
+    var (store, service, options, state) = await CreateApprovedTwoSubtaskPlanAsync(temp, llm);
+
+    var result = await service.RunAsync(state.TaskId, options);
+
+    Equal(AgentTaskStatus.Complete, result.State.Status, "a failed synthesis call must not fail the whole run; the sub-task work already happened");
+    True(result.State.SubTaskPlan.All(s => s.Status == AgentSubTaskStatus.Complete), "both sub-tasks should still show complete");
+    True(result.State.Summary.Contains("Fix the bug", StringComparison.Ordinal), "the deterministic fallback report should list each sub-task's goal");
+    True(result.State.Summary.Contains("Add a regression test", StringComparison.Ordinal), "the deterministic fallback report should list each sub-task's goal");
+    var reportPath = Path.Combine(store.GetTaskDirectory(state.TaskId), "report.md");
+    True(File.Exists(reportPath), "the fallback report should still be written to report.md");
+    }
+
+    public static async Task AgentContextBuilderIncludesSubTaskReportsForAnOrchestrationParent()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var taskStore = new FileAgentTaskStateStore(settings);
+    await taskStore.InitializeAsync();
+    var tools = new AgentWorkspaceTools();
+    var ragStore = new SqliteRagStore(settings);
+    var rag = new RagQueryService(ragStore, new FakeEmbeddingService(), new FakeLlm(), settings, new NoOpReranker());
+    var retrieval = new AgentRetrievalService(rag, ragStore);
+    var activation = new WorkspaceActivationService(new WorkspaceManifestService(), new FileWorkspaceProfileStore(settings));
+    var builder = new AgentContextBuilder(tools, retrieval, new WorkspaceMemoryStore(new MemoryStore(settings), settings), activation, taskStore, settings);
+
+    var state = new AgentTaskState
+    {
+        TaskId = "parent-task",
+        Goal = "Broad goal",
+        Status = AgentTaskStatus.Running,
+        SubTaskPlan =
+        [
+            new AgentSubTaskSpec { Goal = "Fix the bug", ProfileName = "correctness", Status = AgentSubTaskStatus.Complete, ResultSummary = "Bug fixed in Foo.cs" },
+            new AgentSubTaskSpec { Goal = "Add a test", ProfileName = "tests", Status = AgentSubTaskStatus.Pending }
+        ]
+    };
+    await taskStore.SaveAsync(state);
+    var options = new AgentWorkspaceOptions(root);
+
+    var pack = await builder.BuildAsync(state, options);
+
+    Equal(2, pack.SubTaskReports.Count, "one context item per sub-task spec");
+    True(pack.SubTaskReports.Any(i => i.Content.Contains("Bug fixed in Foo.cs", StringComparison.Ordinal)), "the completed sub-task's result summary should be included");
+    }
+
+    public static async Task AgentGatedActionWithNoRegisteredExecutorEndsBlockedInsteadOfStranded()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    var tools = new AgentWorkspaceTools();
+
+    // "mcp:some_tool" is gated (AgentSafetyGate always requires approval for
+    // mcp: tools) but the executor has no bridge registered for it here, so
+    // CanExecute returns false - the r15 3.2 hardening case.
+    var mcpRequest = """
+        {
+          "thought_summary": "Trying an MCP tool.",
+          "current_step": "Call it.",
+          "next_action": { "type": "tool", "tool_name": "mcp:some_tool", "arguments": {}, "requires_approval": false, "risk_level": "none" },
+          "state_update": { "completed": [], "pending": [], "new_facts": [], "blockers": [] },
+          "user_message": "Calling an MCP tool."
+        }
+        """;
+    var llm = new FakeSequencedAgentLlm([mcpRequest]);
+    var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), llm, settings: settings);
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-sequenced-agent");
+
+    var state = await service.CreateTaskAsync("Try an MCP tool", options);
+    var step = await service.RunStepAsync(state.TaskId, options);
+
+    Equal(AgentTaskStatus.Blocked, step.State.Status, "a gated action with no registered executor should end Blocked, not stranded WaitingForUser with nothing to approve");
+    True(step.State.PendingToolAction is null, "there should be nothing pending to approve");
+    True(step.State.ToolResults.Any(t => t.Tool == "mcp:some_tool" && t.ResultSummary.Contains("no local executor", StringComparison.OrdinalIgnoreCase)),
+        "the block should be explained");
+    }
+
+    public static async Task AgentBlockerReportedAlongsideASuccessfulToolExecutionEndsRunningWithProgressWinning()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    var tools = new AgentWorkspaceTools();
+
+    var setPlanWithBlocker = """
+        {
+          "thought_summary": "Updating the plan.",
+          "current_step": "Set the plan.",
+          "next_action": {
+            "type": "tool",
+            "tool_name": "set_plan",
+            "arguments": { "steps": [ { "description": "Step one", "status": "pending" } ] },
+            "requires_approval": false,
+            "risk_level": "none"
+          },
+          "state_update": { "completed": [], "pending": [], "new_facts": [], "blockers": ["missing a required credential"] },
+          "user_message": "Plan updated, but blocked on a credential."
+        }
+        """;
+    var llm = new FakeSequencedAgentLlm([setPlanWithBlocker]);
+    var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), llm, settings: settings);
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-sequenced-agent");
+
+    var state = await service.CreateTaskAsync("Do something needing a credential", options);
+    var step = await service.RunStepAsync(state.TaskId, options);
+
+    Equal(AgentTaskStatus.Running, step.State.Status, "a step that both reports a blocker and successfully executes a tool should end Running - progress wins");
+    True(step.State.Decisions.Any(d => d.Decision == "missing a required credential"), "the blocker should still be recorded in Decisions even though it did not change the status");
+    }
+
+    public static async Task AgentBlockerReportedWithoutASuccessfulExecutionEndsBlocked()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    File.WriteAllText(Path.Combine(root, "notes.md"), "status: draft");
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    var tools = new AgentWorkspaceTools();
+
+    var editWithBlocker = """
+        {
+          "thought_summary": "Wants to edit but reports a blocker.",
+          "current_step": "Request an edit.",
+          "next_action": {
+            "type": "tool",
+            "tool_name": "edit_file",
+            "arguments": { "relative_path": "notes.md", "old_string": "status: draft", "new_string": "status: final" },
+            "requires_approval": true,
+            "risk_level": "medium"
+          },
+          "state_update": { "completed": [], "pending": [], "new_facts": [], "blockers": ["cannot proceed without user input"] },
+          "user_message": "Blocked before the edit could run."
+        }
+        """;
+    var llm = new FakeSequencedAgentLlm([editWithBlocker]);
+    var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), llm, settings: settings);
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-sequenced-agent");
+
+    var state = await service.CreateTaskAsync("Edit notes but something blocks it", options);
+    var step = await service.RunStepAsync(state.TaskId, options);
+
+    Equal(AgentTaskStatus.Blocked, step.State.Status, "a blocker reported alongside a tool that did not go on to execute should win over a plain WaitingForUser");
+    True(step.State.Decisions.Any(d => d.Decision == "cannot proceed without user input"), "the blocker should still be recorded in Decisions");
     }
 }

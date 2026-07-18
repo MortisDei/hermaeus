@@ -7,6 +7,7 @@
              x:DataType="vm:AgentViewModel">
     <UserControl.Resources>
         <views:AgentScenarioStatusColorConverter x:Key="AgentScenarioStatusColor" />
+        <views:AgentSubTaskStatusColorConverter x:Key="AgentSubTaskStatusColor" />
     </UserControl.Resources>
     <Grid RowDefinitions="Auto,*">
         <Border Grid.Row="0" Padding="12,8"
@@ -110,6 +111,33 @@
                                     <StackPanel Orientation="Horizontal" Spacing="8">
                                         <TextBlock Text="•" Opacity="0.55" />
                                         <TextBlock Text="{Binding}" TextWrapping="Wrap" FontSize="11" Opacity="0.78" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+
+                <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="10"
+                        IsVisible="{Binding !!CurrentTask.SubTaskPlan.Count}">
+                    <StackPanel Spacing="6">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock Text="Sub-tasks" FontSize="11" Opacity="0.55" VerticalAlignment="Center" />
+                            <Button Content="Open report"
+                                    Command="{Binding OpenReportCommand}"
+                                    IsVisible="{Binding HasReport}"
+                                    Padding="8,2" CornerRadius="6" FontSize="11" />
+                        </StackPanel>
+                        <ItemsControl ItemsSource="{Binding CurrentTask.SubTaskPlan}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,0,0,2">
+                                        <Border CornerRadius="4" Padding="6,1" MinWidth="70"
+                                                Background="{Binding Status, Converter={StaticResource AgentSubTaskStatusColor}}">
+                                            <TextBlock Text="{Binding Status}" FontSize="10" FontWeight="SemiBold" Foreground="White" HorizontalAlignment="Center" />
+                                        </Border>
+                                        <TextBlock Text="{Binding ProfileName}" FontSize="11" Opacity="0.55" Width="80" />
+                                        <TextBlock Text="{Binding Goal}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" FontSize="12" />
                                     </StackPanel>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
@@ -634,6 +662,12 @@
                                                    FontSize="11"
                                                    Opacity="0.6"
                                                    TextWrapping="Wrap" />
+                                        <TextBlock Text="{Binding ParentGoalLabel}"
+                                                   FontSize="11"
+                                                   FontStyle="Italic"
+                                                   Opacity="0.6"
+                                                   TextWrapping="Wrap"
+                                                   IsVisible="{Binding IsSubTask}" />
                                         <TextBlock Text="{Binding Summary}"
                                                    FontSize="11"
                                                    Opacity="0.5"

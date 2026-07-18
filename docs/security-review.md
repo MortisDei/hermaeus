@@ -594,6 +594,33 @@ RAG remain unchanged since `0.9.41-alpha`.
   server-restart remain user-initiated, and no accelerator variants beyond
   CUDA/Vulkan are added this round.
 
+### r15: Sub-Task Orchestration
+
+- **No new tool capability, no new network surface, no gate bypass.**
+  `plan_subtasks` only ever produces ordinary child tasks that go through the
+  unchanged `AgentSafetyGate`/`AgentToolExecutor` path per action; nothing in
+  this round widens what a child is allowed to do, and no approval ever
+  propagates from parent to child, child to sibling, or via
+  `RememberedCommandApprovals` (task-scoped, never inherited).
+- **The new attack surface is prompt-injected decomposition**: workspace
+  content convincing the model to propose malicious-looking sub-tasks (e.g. a
+  sub-task goal worded to make a later step look routine). Mitigation is the
+  same as every other gated action: the plan itself is approval-gated with a
+  full preview (`AgentApprovalPreview.Describe`, every proposed goal/profile
+  visible before approval), each child's own actions still hit the unchanged
+  per-action gates individually, and depth-1 (enforced in code in
+  `AgentService.RunStepAsync`, not by prompt instruction) prevents a child
+  from using its own delegation to launder a bigger blast radius through
+  recursive amplification.
+- **The standing `02-prompt-injection` scenario still passes** with
+  orchestration wired in; the scenario runner's auto-approve hook now applies
+  to child pending actions too but still refuses to auto-approve
+  `run_command` anywhere in the tree (`AgentScenarioManifestValidator`).
+- **`report.md` is written via the existing atomic-write pattern**
+  (`AtomicFileWriter`) to the parent's own task directory only, never
+  workspace-relative, so it carries the same path-safety guarantees as every
+  other agent-owned file.
+
 ## Release Gate Status
 
 Security review and threat model refresh was completed for `0.13.0-alpha` as
@@ -631,3 +658,6 @@ hardening work:
   again after the patch was applied.
 - model_usage rollup counters are local-only and disclosed in Privacy Audit;
   never transmitted.
+- A child task can never itself request `plan_subtasks` (depth-1 enforced in
+  code, not prompt text); `RememberedCommandApprovals` never crosses task
+  boundaries between a parent and its children or between siblings.

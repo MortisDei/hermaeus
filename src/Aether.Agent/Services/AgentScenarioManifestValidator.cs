@@ -17,8 +17,8 @@ public static class AgentScenarioManifestValidator
     {
         "list_files", "search_files", "glob_files", "read_file", "summarize_file", "draft_patch",
         "inspect_git_diff", "apply_draft_patch", "edit_file", "create_file", "run_command", "set_plan",
-        "delete_file", "install_package", "network_access", "upload", "download", "modify_system_config",
-        "commit", "push", "change_git_history"
+        "plan_subtasks", "delete_file", "install_package", "network_access", "upload", "download",
+        "modify_system_config", "commit", "push", "change_git_history"
     };
 
     public static IReadOnlyList<string> Validate(AgentScenarioManifest manifest, string scenarioLabel)
@@ -48,6 +48,12 @@ public static class AgentScenarioManifestValidator
         {
             if (!IsKnownStatusName(status))
                 warnings.Add($"{scenarioLabel}: final_status_any_of has unknown status '{status}'.");
+        }
+
+        foreach (var status in manifest.Expect.ExpectSubtaskStatuses)
+        {
+            if (!Enum.TryParse<AgentSubTaskStatus>(status, ignoreCase: true, out _))
+                warnings.Add($"{scenarioLabel}: expect_subtask_statuses has unknown status '{status}'.");
         }
 
         if (!string.IsNullOrWhiteSpace(manifest.Expect.PendingRiskAtLeast)

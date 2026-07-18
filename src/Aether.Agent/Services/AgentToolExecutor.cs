@@ -25,7 +25,7 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
 
         return Normalize(toolName) is
             "list_files" or "search_files" or "read_file" or "summarize_file" or "draft_patch" or "inspect_git_diff"
-            or "apply_draft_patch" or "run_command" or "edit_file" or "create_file" or "glob_files";
+            or "apply_draft_patch" or "run_command" or "edit_file" or "create_file" or "glob_files" or "plan_subtasks";
     }
 
     public async Task<AgentToolResult> ExecuteAsync(

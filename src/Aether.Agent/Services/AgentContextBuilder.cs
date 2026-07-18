@@ -13,6 +13,7 @@ public sealed class AgentContextBuilder : IAgentContextBuilder
     private const int RagTokenBudget = 4000;
     private const int InstructionsTokenBudget = 3000;
     private const int LessonsTokenBudget = 1500;
+    private const int SubTaskReportsTokenBudget = 4000;
 
     private readonly IAgentWorkspaceTools _workspaceTools;
     private readonly IAgentRetrievalService _retrieval;
@@ -70,7 +71,35 @@ public sealed class AgentContextBuilder : IAgentContextBuilder
         await AddProjectInstructionsAsync(pack, options, ct);
         await AddTranscriptHistoryAsync(pack, state, ct);
         await AddLessonsAsync(pack, options, ct);
+        AddSubTaskReports(pack, state);
         return pack;
+    }
+
+    /// <summary>
+    /// One item per sub-task spec for an orchestration parent (r15
+    /// 01-subtask-orchestration.md 1.6). No-op for every other task -
+    /// <see cref="AgentTaskState.SubTaskPlan"/> is only ever populated on a
+    /// parent by an approved plan_subtasks action.
+    /// </summary>
+    private static void AddSubTaskReports(AgentContextPack pack, AgentTaskState state)
+    {
+        if (state.SubTaskPlan.Count == 0) return;
+
+        var candidates = state.SubTaskPlan
+            .Select(spec => new ContextPart(
+                "subtask",
+                spec.Goal,
+                $"[{spec.Status}, profile {spec.ProfileName}] {spec.Goal}"
+                    + (string.IsNullOrWhiteSpace(spec.ResultSummary) ? string.Empty : $" -> {spec.ResultSummary}"),
+                Data: spec))
+            .Reverse() // most recent children favored if the budget can't fit all of them
+            .ToList();
+        var packed = ContextPackBuilder.Pack(candidates, SubTaskReportsTokenBudget, maxParts: state.SubTaskPlan.Count);
+        foreach (var part in packed.Parts.AsEnumerable().Reverse())
+        {
+            var spec = (AgentSubTaskSpec)part.Data!;
+            pack.SubTaskReports.Add(new AgentRetrievedItem("subtask", spec.Goal, part.Content, 1.0, Locator: spec.TaskId));
+        }
     }
 
     private async Task AddLessonsAsync(AgentContextPack pack, AgentWorkspaceOptions options, CancellationToken ct)

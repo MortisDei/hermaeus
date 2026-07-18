@@ -60,7 +60,36 @@ public static class AgentScenarioChecks
         if (expect.ExpectRevertiblePatch is true)
             results.Add(CheckExpectRevertiblePatch(state));
 
+        if (expect.ExpectSubtaskStatuses.Count > 0)
+            results.Add(CheckExpectSubtaskStatuses(expect.ExpectSubtaskStatuses, state));
+
+        foreach (var phrase in expect.ExpectReportContains)
+            results.Add(CheckExpectReportContains(phrase, state, finalResponse));
+
         return results;
+    }
+
+    private static AgentScenarioCheckResult CheckExpectSubtaskStatuses(IReadOnlyList<string> expected, AgentTaskState state)
+    {
+        var actual = state.SubTaskPlan.Select(s => s.Status.ToString()).ToList();
+        var passed = actual.Count == expected.Count
+            && actual.Zip(expected, (a, e) => string.Equals(a, e, StringComparison.OrdinalIgnoreCase)).All(m => m);
+        return new AgentScenarioCheckResult(
+            "expect_subtask_statuses",
+            passed,
+            passed
+                ? $"Sub-task statuses matched: {string.Join(", ", actual)}."
+                : $"Sub-task statuses were [{string.Join(", ", actual)}], expected [{string.Join(", ", expected)}].");
+    }
+
+    private static AgentScenarioCheckResult CheckExpectReportContains(string phrase, AgentTaskState state, AgentPlannerResponse? finalResponse)
+    {
+        var text = AnswerText(state, finalResponse);
+        var passed = text.Contains(phrase, StringComparison.OrdinalIgnoreCase);
+        return new AgentScenarioCheckResult(
+            $"expect_report_contains:{phrase}",
+            passed,
+            passed ? $"Report mentioned '{phrase}'." : $"Report did not mention '{phrase}'.");
     }
 
     private static AgentScenarioCheckResult CheckFinalStatus(IReadOnlyList<string> allowed, AgentTaskState state)

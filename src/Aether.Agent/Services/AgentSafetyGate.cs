@@ -38,6 +38,14 @@ public sealed class AgentSafetyGate : IAgentSafetyGate
         if (wouldMutate)
             return new AgentToolPolicyDecision(AgentToolDisposition.RequiresApproval, AgentRiskLevel.Medium, "Local write actions require approval.");
 
+        // Explicit case, not the "apply/create/edit" substring heuristics
+        // below: plan_subtasks never mutates anything itself, but approving
+        // it changes how much autonomous work will run, so it always
+        // requires approval regardless of what the model set in
+        // requires_approval (r15 01-subtask-orchestration.md 1.2).
+        if (string.Equals(toolName, "plan_subtasks", StringComparison.OrdinalIgnoreCase))
+            return new AgentToolPolicyDecision(AgentToolDisposition.RequiresApproval, AgentRiskLevel.Medium, "Delegating the goal to sub-tasks changes how much autonomous work will run and requires approval.");
+
         if (toolName.StartsWith("mcp:", StringComparison.OrdinalIgnoreCase))
             return new AgentToolPolicyDecision(AgentToolDisposition.RequiresApproval, AgentRiskLevel.Medium, "MCP tool calls always require approval, regardless of what the server claims about itself.");
 

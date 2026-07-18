@@ -204,6 +204,7 @@ public static class HarnessCases
         [new HarnessCase("agent review queue reflects approval history", AgentTests.AgentReviewQueueReflectsApprovalHistory)],
         [new HarnessCase("agent review queue includes pending tool action for waiting tasks", AgentTests.AgentReviewQueueIncludesPendingToolActionForWaitingTasks)],
         [new HarnessCase("agent approval preview describes npm script body", AgentTests.AgentApprovalPreviewDescribesNpmScriptBody)],
+        [new HarnessCase("agent approval preview describes the proposed sub-task plan", AgentTests.AgentApprovalPreviewDescribesTheProposedSubtaskPlan)],
         [new HarnessCase("agent task state uses SQLite index for lists", AgentTests.AgentTaskStateUsesSqliteIndexForLists)],
         [new HarnessCase("agent task index reconciles JSON source of truth", AgentTests.AgentTaskIndexReconcilesJsonSourceOfTruth)],
         [new HarnessCase("agent workspace memory persists notes per workspace", AgentTests.AgentWorkspaceMemoryPersistsNotesPerWorkspace)],
@@ -258,7 +259,20 @@ public static class HarnessCases
         [new HarnessCase("agent records task failure lesson with blocker when task fails", AgentTests.AgentRecordsTaskFailureLessonWithBlockerWhenTaskFails)],
         [new HarnessCase("agent tracks new lesson ids only for genuinely new lessons", AgentTests.AgentTracksNewLessonIdsOnlyForGenuinelyNewLessons)],
         [new HarnessCase("agent confirms injected lessons on successful task completion", AgentTests.AgentConfirmsInjectedLessonsOnSuccessfulTaskCompletion)],
-        [new HarnessCase("agent context builder ranks lessons by goal relevance over raw confidence", AgentTests.AgentContextBuilderRanksLessonsByGoalRelevanceOverRawConfidence)]
+        [new HarnessCase("agent context builder ranks lessons by goal relevance over raw confidence", AgentTests.AgentContextBuilderRanksLessonsByGoalRelevanceOverRawConfidence)],
+        [new HarnessCase("agent sub-task fields are JSON-additive and pre-r15 state loads unchanged", AgentTests.AgentSubTaskFieldsAreJsonAdditiveAndPreR15StateLoadsUnchanged)],
+        [new HarnessCase("agent specialist profiles are non-empty and unknown name falls back to general", AgentTests.AgentSpecialistProfilesAreNonEmptyAndUnknownNameFallsBackToGeneral)],
+        [new HarnessCase("agent plan_subtasks always requires approval on root and is blocked by depth on a child", AgentTests.AgentPlanSubtasksAlwaysRequiresApprovalOnRootAndIsBlockedByDepthOnAChild)],
+        [new HarnessCase("agent plan_subtasks approval rejects an invalid plan instead", AgentTests.AgentPlanSubtasksApprovalRejectsAnInvalidPlanInstead)],
+        [new HarnessCase("agent orchestration runs children sequentially then synthesizes", AgentTests.AgentOrchestrationRunsChildrenSequentiallyThenSynthesizes)],
+        [new HarnessCase("agent orchestration child approval targets the child and resumes the parent", AgentTests.AgentOrchestrationChildApprovalTargetsTheChildAndResumesTheParent)],
+        [new HarnessCase("agent orchestration remembered command approvals are not shared between children", AgentTests.AgentOrchestrationRememberedCommandApprovalsAreNotSharedBetweenChildren)],
+        [new HarnessCase("agent orchestration budget exhaustion skips remaining sub-tasks and notes truncation in the report", AgentTests.AgentOrchestrationBudgetExhaustionSkipsRemainingSubtasksAndNotesTruncationInTheReport)],
+        [new HarnessCase("agent orchestration synthesis falls back deterministically when the model call fails", AgentTests.AgentOrchestrationSynthesisFallsBackDeterministicallyWhenTheModelCallFails)],
+        [new HarnessCase("agent context builder includes sub-task reports for an orchestration parent", AgentTests.AgentContextBuilderIncludesSubTaskReportsForAnOrchestrationParent)],
+        [new HarnessCase("agent gated action with no registered executor ends blocked instead of stranded", AgentTests.AgentGatedActionWithNoRegisteredExecutorEndsBlockedInsteadOfStranded)],
+        [new HarnessCase("agent blocker reported alongside a successful tool execution ends running with progress winning", AgentTests.AgentBlockerReportedAlongsideASuccessfulToolExecutionEndsRunningWithProgressWinning)],
+        [new HarnessCase("agent blocker reported without a successful execution ends blocked", AgentTests.AgentBlockerReportedWithoutASuccessfulExecutionEndsBlocked)]
     ];
 
     public static IEnumerable<object[]> Mcp =>

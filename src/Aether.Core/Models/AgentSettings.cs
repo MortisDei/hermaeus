@@ -17,4 +17,13 @@ public class AgentSettings
     /// runaway loops, not a normal stopping condition.
     /// </summary>
     public int MaxAutoSteps { get; set; } = 20;
+
+    /// <summary>
+    /// Total model steps a single orchestrated run (parent plus every child
+    /// plus synthesis) may spend before remaining sub-tasks are marked
+    /// Skipped and synthesis runs early. Per-child runs still respect
+    /// <see cref="MaxAutoSteps"/> individually; this is the outer ceiling
+    /// across the whole orchestration.
+    /// </summary>
+    public int MaxOrchestrationSteps { get; set; } = 60;
 }

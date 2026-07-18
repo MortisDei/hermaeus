@@ -56,10 +56,15 @@ public sealed class AgentReviewQueueItemViewModel
         PendingRiskLevel = item.PendingToolAction?.RiskLevel;
         PendingReason = item.PendingToolAction?.Reason ?? string.Empty;
         RecipePreview = recipePreview;
+        ParentGoal = item.ParentGoal ?? string.Empty;
     }
 
     public string TaskId { get; }
     public string Goal { get; }
+    /// <summary>The parent task's goal, set only when this entry is a sub-task child (r15 02-orchestration-ui.md 2.3).</summary>
+    public string ParentGoal { get; }
+    public bool IsSubTask => !string.IsNullOrWhiteSpace(ParentGoal);
+    public string ParentGoalLabel => IsSubTask ? $"for: {ParentGoal}" : string.Empty;
     public AgentTaskStatus Status { get; }
     public DateTime UpdatedAt { get; }
     public string ActiveStep { get; }
@@ -276,6 +281,14 @@ public partial class AgentViewModel : ViewModelBase
     private readonly ILessonStore? _lessons;
     private readonly IVoiceOrchestrator? _voice;
     private CancellationTokenSource? _cts;
+    /// <summary>
+    /// The task id the user actually opened (Start or LoadTask), independent
+    /// of which task an in-flight orchestrated run's steps currently belong
+    /// to. During orchestration, onStep fires with the running CHILD's step
+    /// results (r15 02-orchestration-ui.md 2.2); CurrentTask must keep
+    /// pointing at this id rather than flip to whichever child is active.
+    /// </summary>
+    private string? _openedTaskId;
     private string _activeWorkspaceVoiceProfile = string.Empty;
     private Task? _loadTask;
     private CancellationTokenSource? _workspaceFileQueryCts;
@@ -320,9 +333,22 @@ public partial class AgentViewModel : ViewModelBase
     public AgentScenarioSuiteViewModel? ScenarioSuite { get; }
 
     public Action? RequestWorkspaceRootPicker { get; set; }
+    /// <summary>Opens a path with the OS default handler (same shape as LogsViewModel.RequestOpenFolder); used here for the synthesis report.md (r15 02-orchestration-ui.md 2.4).</summary>
+    public Action<string>? RequestOpenFolder { get; set; }
 
     /// <summary>Drives the "no workspace selected" empty state (r8 02-onboarding-and-usability.md 2.6).</summary>
     public bool HasWorkspace => !string.IsNullOrWhiteSpace(WorkspaceRoot) && Directory.Exists(WorkspaceRoot);
+
+    /// <summary>An orchestration parent whose synthesis has written report.md (r15 02-orchestration-ui.md 2.4).</summary>
+    public bool HasReport => CurrentTask is { SubTaskPlan.Count: > 0 } && File.Exists(ReportPath);
+    private string ReportPath => CurrentTask is null ? string.Empty : Path.Combine(_store.GetTaskDirectory(CurrentTask.TaskId), "report.md");
+
+    [RelayCommand]
+    private void OpenReport()
+    {
+        if (HasReport)
+            RequestOpenFolder?.Invoke(ReportPath);
+    }
 
     [ObservableProperty] private string _goalText = string.Empty;
     [ObservableProperty] private string _workspaceRoot = string.Empty;
@@ -355,9 +381,27 @@ public partial class AgentViewModel : ViewModelBase
     [ObservableProperty] private string _workspaceVoiceProfileName = string.Empty;
 
     public string CurrentTaskStatusLabel => CurrentTask is null ? "No active task" : CurrentTask.Status.ToString();
-    public string CurrentStepCountLabel => CurrentTask is null
-        ? string.Empty
-        : $"step {CurrentTask.StepCount}/{Math.Max(_settings?.Settings.Agent.MaxAutoSteps ?? 20, 1)}";
+    /// <summary>
+    /// Plain "step N/max" for an ordinary task; "sub-task X/N, step Y" for
+    /// an orchestration parent, sourced from SubTaskPlan and
+    /// OrchestrationStepsUsed rather than the parent's own (low) StepCount,
+    /// which only counts the parent's own propose/synthesis steps
+    /// (r15 02-orchestration-ui.md 2.2).
+    /// </summary>
+    public string CurrentStepCountLabel
+    {
+        get
+        {
+            if (CurrentTask is null) return string.Empty;
+            if (CurrentTask.SubTaskPlan.Count == 0)
+                return $"step {CurrentTask.StepCount}/{Math.Max(_settings?.Settings.Agent.MaxAutoSteps ?? 20, 1)}";
+
+            var specs = CurrentTask.SubTaskPlan;
+            var firstUnfinished = specs.FindIndex(s => s.Status is AgentSubTaskStatus.Pending or AgentSubTaskStatus.Running);
+            var progress = firstUnfinished < 0 ? specs.Count : firstUnfinished + 1;
+            return $"sub-task {progress}/{specs.Count}, step {CurrentTask.OrchestrationStepsUsed}";
+        }
+    }
     public string CurrentTaskGoalLabel => CurrentTask is null || string.IsNullOrWhiteSpace(CurrentTask.Goal) ? "No goal loaded" : CurrentTask.Goal;
     public string CurrentTaskSummaryLabel => CurrentTask is null || string.IsNullOrWhiteSpace(CurrentTask.Summary) ? "No summary yet" : CurrentTask.Summary;
     /// <summary>True when the task is asking a question, not waiting on a tool approval; only then does the reply box apply.</summary>
@@ -537,6 +581,7 @@ public partial class AgentViewModel : ViewModelBase
             _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Agent,
                 $"Agent started: {GoalText}"));
             CurrentTask = await _agent.CreateTaskAsync(GoalText, BuildOptions(), _cts.Token);
+            _openedTaskId = CurrentTask.TaskId;
             Narrate("Agent task started.", VoicePriority.Normal, $"{CurrentTask.TaskId}:started");
             await RunAgentLoopAsync();
             await RefreshRecentAsync();
@@ -588,6 +633,7 @@ public partial class AgentViewModel : ViewModelBase
     {
         if (item is null) return;
         CurrentTask = await _store.LoadAsync(item.TaskId);
+        _openedTaskId = CurrentTask?.TaskId;
         RefreshTaskPreview();
         await RefreshQueuedPatchesAsync();
         await RefreshNewLessonsAsync();
@@ -619,7 +665,15 @@ public partial class AgentViewModel : ViewModelBase
         // user to click Run Step repeatedly. The approval itself already
         // happened above; this only continues a task that approval just
         // returned to Running, it never bypasses a gate on its own.
-        await ResumeAgentLoopIfRunnableAsync(item.TaskId);
+        //
+        // A child's approval must resume the PARENT's task id, not the
+        // child's - orchestration only advances through AgentService.RunAsync
+        // called with the parent id (r15 01-subtask-orchestration.md 1.4
+        // step 4; 02-orchestration-ui.md 2.3).
+        var resumeTaskId = CurrentTask is { } opened && opened.SubTaskPlan.Any(s => s.TaskId == item.TaskId)
+            ? opened.TaskId
+            : item.TaskId;
+        await ResumeAgentLoopIfRunnableAsync(resumeTaskId);
     }
 
     [RelayCommand(CanExecute = nameof(CanSendReply))]
@@ -1167,12 +1221,26 @@ public partial class AgentViewModel : ViewModelBase
     private async Task RunAgentLoopAsync()
     {
         if (CurrentTask is null) return;
+        var openedTaskId = _openedTaskId = CurrentTask.TaskId;
         StatusMessage = "Running agent...";
         var result = await _agent.RunAsync(
-            CurrentTask.TaskId,
+            openedTaskId,
             BuildOptions(),
             onStep: ApplyStepResult,
             ct: _cts?.Token ?? CancellationToken.None);
+
+        // The returned result can describe a paused CHILD task rather than
+        // the parent the user opened, and even the parent's own final
+        // synthesis step never flows through ApplyStepResult's onStep
+        // (RunSynthesisAsync calls RunStepAsync directly - r15
+        // 01-subtask-orchestration.md 1.6). Re-fetch the opened task itself
+        // so CurrentTask (and its SubTaskPlan) always reflect the latest
+        // persisted state after the run settles, regardless of which task
+        // it actually stopped on. Harmless for a plain (non-orchestrated)
+        // task, whose in-memory result.State already matches the store.
+        CurrentTask = await _store.LoadAsync(openedTaskId) ?? result.State;
+        RefreshTaskPreview();
+
         await RefreshLogAsync();
         await RefreshLessonsAsync();
         await RefreshNewLessonsAsync();
@@ -1184,15 +1252,23 @@ public partial class AgentViewModel : ViewModelBase
     /// The per-step UI update shared by a single manual step and every step
     /// of an autonomous run, called synchronously on the UI thread (async
     /// continuations here resume on the same context that awaited the
-    /// agent call, as with the rest of this ViewModel).
+    /// agent call, as with the rest of this ViewModel). During an
+    /// orchestrated run, a step can belong to a running CHILD task rather
+    /// than the parent the user opened; CurrentTask stays pointed at the
+    /// opened task and the step's text is labeled with the child's position
+    /// instead (r15 02-orchestration-ui.md 2.2).
     /// </summary>
     private void ApplyStepResult(AgentStepResult result)
     {
+        var isChildStep = _openedTaskId is not null && result.State.TaskId != _openedTaskId;
+        var label = isChildStep ? BuildSubTaskLabel(result.State.TaskId) : string.Empty;
+
         var previousStatus = CurrentTask?.Status;
-        CurrentTask = result.State;
+        if (!isChildStep)
+            CurrentTask = result.State;
         NarrateStatusTransition(previousStatus, result.State);
-        CurrentStep = result.State.ActiveStep;
-        StatusMessage = result.LogEntry;
+        CurrentStep = label + result.State.ActiveStep;
+        StatusMessage = label + result.LogEntry;
         NextActionPreview = JsonSerializer.Serialize(result.PlannerResponse.NextAction, new JsonSerializerOptions { WriteIndented = true });
         RetrievedContext.Clear();
         foreach (var item in result.ContextPack.RetrievedMemory.Concat(result.ContextPack.RetrievedFiles).Concat(result.ContextPack.ProjectInstructions).Concat(result.ContextPack.Lessons))
@@ -1211,7 +1287,22 @@ public partial class AgentViewModel : ViewModelBase
         foreach (var section in AgentContextReceiptBuilder.Build(result.ContextPack))
             ContextReceipt.Add(new AgentContextReceiptSectionViewModel(section));
 
-        RefreshTaskPreview();
+        if (!isChildStep)
+            RefreshTaskPreview();
+    }
+
+    /// <summary>
+    /// "[sub-task 2/4: security] " style prefix identifying which child a
+    /// step belongs to, looked up from the opened parent's SubTaskPlan
+    /// (r15 02-orchestration-ui.md 2.2). Empty if the child id is not (yet)
+    /// found in CurrentTask's plan, e.g. a stale CurrentTask snapshot.
+    /// </summary>
+    private string BuildSubTaskLabel(string childTaskId)
+    {
+        var specs = CurrentTask?.SubTaskPlan;
+        if (specs is null) return string.Empty;
+        var index = specs.FindIndex(s => s.TaskId == childTaskId);
+        return index < 0 ? string.Empty : $"[sub-task {index + 1}/{specs.Count}: {specs[index].ProfileName}] ";
     }
 
     /// <summary>
@@ -1294,6 +1385,7 @@ public partial class AgentViewModel : ViewModelBase
         OnPropertyChanged(nameof(RejectedPatchCount));
         OnPropertyChanged(nameof(BlockedPatchCount));
         OnPropertyChanged(nameof(HasQueuedPatches));
+        OnPropertyChanged(nameof(HasReport));
 
         if (CurrentTask is null)
         {

@@ -15,6 +15,13 @@ public sealed class AgentScenarioManifest
     public string Description { get; set; } = string.Empty;
     public List<string> Tags { get; set; } = [];
     public int MaxSteps { get; set; } = 8;
+    /// <summary>
+    /// Overrides <see cref="Aether.Core.Models.AgentSettings.MaxOrchestrationSteps"/>
+    /// for this scenario's run only; null keeps the default (r15
+    /// 03-scenarios-and-hardening.md 3.1). Only meaningful for a scenario
+    /// that exercises orchestration.
+    /// </summary>
+    public int? MaxOrchestrationSteps { get; set; }
     /// <summary>Tool names auto-approved when the safety gate would otherwise pause for a human decision.</summary>
     public List<string> AutoApprove { get; set; } = [];
     public List<AgentScenarioSeedMemory> SeedMemory { get; set; } = [];
@@ -64,6 +71,10 @@ public sealed class AgentScenarioExpectations
     /// <summary>"low" | "medium" | "high" (any AgentRiskLevel name); the pending/gated action's risk must be at least this level.</summary>
     public string? PendingRiskAtLeast { get; set; }
     public bool? ExpectRevertiblePatch { get; set; }
+    /// <summary>Ordered list of expected <see cref="AgentSubTaskStatus"/> names for the parent's SubTaskPlan, in spec order.</summary>
+    public List<string> ExpectSubtaskStatuses { get; set; } = [];
+    /// <summary>Substrings that must all appear in the parent's final message (the synthesis report).</summary>
+    public List<string> ExpectReportContains { get; set; } = [];
 }
 
 /// <summary>A loaded scenario: manifest plus the resolved paths the runner copies from.</summary>

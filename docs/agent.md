@@ -80,6 +80,54 @@ approve-and-continue shape as a gated-action approval. A reply is never
 accepted while a tool approval is also pending on the same task - those are
 answered separately, on their own explicit approve/reject path.
 
+## Sub-task Orchestration
+
+For a broad, multi-domain goal, the agent can request `plan_subtasks`: a
+proposal to split the goal into 2 to 6 focused sub-tasks, each with a goal, a
+specialist profile, and success criteria. Like every other gated action, this
+always requires approval - the preview shows the exact sub-tasks (profile and
+goal) you are authorizing before anything runs. `plan_subtasks` is never the
+right tool for a goal that already fits a normal plan; `set_plan` remains that
+tool.
+
+Once approved, the plan is materialized on the parent task and children run
+**sequentially**, one at a time, through the exact same loop, safety gate, and
+per-action approval flow as any other task - a child is an ordinary task with
+`ParentTaskId` set, its own transcript, its own lessons, and its own
+`RememberedCommandApprovals` (never shared with siblings or the parent). A
+child that pauses for approval or a question shows up in the review queue like
+any other waiting task, labeled with its parent's goal; approving or rejecting
+it resumes (or leaves paused) the same child, and a later run of the parent
+picks up exactly where orchestration left off.
+
+Depth is limited to one level, enforced in code rather than by the model: a
+child that itself requests `plan_subtasks` is blocked immediately, with the
+reason recorded on the safety gate, and the run continues with its remaining
+siblings rather than crashing.
+
+The whole orchestrated run (every child's steps plus final synthesis) is
+capped by `Agent.MaxOrchestrationSteps` (Settings; default 60), separate from
+each child's own `Agent.MaxAutoSteps`. If the ceiling is hit, every remaining
+pending sub-task is marked `Skipped` and the run proceeds straight to
+synthesis, which says plainly that the run was truncated by budget rather than
+pretending everything finished.
+
+Once every sub-task is `Complete`, `Failed`, or `Skipped`, the parent runs one
+final model step to synthesize a consolidated report from each child's outcome
+(no child transcript replay - summaries only) and writes it to `report.md` in
+the parent's task directory, openable from the workbench. If that synthesis
+step itself fails or returns something unusable, a deterministic fallback
+report (built from the sub-task specs themselves) takes its place instead of
+failing the whole run - the sub-task work already happened.
+
+Explicit rejections for this round: no parallel child execution (one local
+model, one GPU), no nesting beyond depth 1, no user-editable specialist
+profiles yet (the fixed catalog - `general`, `correctness`, `security`,
+`tests`, `performance`, `docs` - ships first), no per-child model selection
+(children inherit the parent's model and workspace), no approval inheritance
+of any kind, and no background/detached orchestration (the run lives in the
+workbench session like any agent run; a crash-resumable parent is enough).
+
 ## Transcript
 
 Each task keeps a persisted step transcript (`transcript.jsonl`, one line per
@@ -109,6 +157,8 @@ the model sees next step that only the first one ran.
 - `set_plan`: replaces the task's visible plan checklist. Executes
   immediately; it only touches task state, never files or commands, so it
   never requires approval.
+- `plan_subtasks`: proposes splitting a broad goal into 2-6 focused
+  sub-tasks (see Sub-task Orchestration below). Always requires approval.
 - Approval-gated write tools:
   - `edit_file` (relative_path, old_string, new_string) - the primary way to
     change part of an existing file. `old_string` must match the file's

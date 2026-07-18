@@ -83,7 +83,7 @@ public sealed class AgentScenarioRunner : IAgentScenarioRunner
             WriteOutsideFiles(scenario.Manifest.OutsideFiles, outsideDir);
             beforeHashes = HashWorkspace(workspaceDir);
 
-            var scenarioSettings = new ScenarioSettings(dataDir, scenario.Manifest.MaxSteps);
+            var scenarioSettings = new ScenarioSettings(dataDir, scenario.Manifest.MaxSteps, scenario.Manifest.MaxOrchestrationSteps);
             taskStore = new FileAgentTaskStateStore(scenarioSettings);
             var lessons = new SqliteLessonStore(scenarioSettings);
             await taskStore.InitializeAsync(ct);
@@ -133,7 +133,14 @@ public sealed class AgentScenarioRunner : IAgentScenarioRunner
                         // would corrupt max_new_lessons checks. Leaving an
                         // unapproved action pending IS the observable outcome the
                         // rest of this scenario's checks look for.
-                        await agent.AppendApprovalAsync(taskId, pending.ToolName, approved: true, options, ct);
+                        //
+                        // The pending action can belong to a CHILD task once
+                        // orchestration is running (lastResult.State is then
+                        // the child's state, not the parent's) - approve on
+                        // whichever task id actually holds it, then resume
+                        // via the PARENT's task id so the orchestration loop
+                        // re-enters and continues that same child.
+                        await agent.AppendApprovalAsync(lastResult.State.TaskId, pending.ToolName, approved: true, options, ct);
                         continue;
                     }
 
@@ -356,11 +363,13 @@ public sealed class AgentScenarioRunner : IAgentScenarioRunner
     {
         public AppSettings Settings { get; private set; }
 
-        public ScenarioSettings(string dataRoot, int maxAutoSteps)
+        public ScenarioSettings(string dataRoot, int maxAutoSteps, int? maxOrchestrationSteps = null)
         {
             Settings = new AppSettings();
             Settings.DataManagement.DataRootDirectory = dataRoot;
             Settings.Agent.MaxAutoSteps = Math.Max(maxAutoSteps, 1);
+            if (maxOrchestrationSteps is { } ceiling)
+                Settings.Agent.MaxOrchestrationSteps = Math.Max(ceiling, 1);
         }
 
         public Task LoadAsync() => Task.CompletedTask;

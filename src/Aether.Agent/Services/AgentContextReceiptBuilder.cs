@@ -24,6 +24,7 @@ public static class AgentContextReceiptBuilder
         AddSection(sections, "Workspace files", pack.RetrievedFiles);
         AddSection(sections, "Project instructions", pack.ProjectInstructions);
         AddSection(sections, "Lessons", pack.Lessons);
+        AddSection(sections, "Sub-tasks", pack.SubTaskReports);
         return sections;
     }
 

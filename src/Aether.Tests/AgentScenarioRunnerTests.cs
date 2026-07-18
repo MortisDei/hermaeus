@@ -19,7 +19,8 @@ public sealed class AgentScenarioRunnerTests
         AgentScenarioExpectations? expect = null,
         bool allowRunError = false,
         Dictionary<string, string>? outsideFiles = null,
-        string id = "test-scenario") =>
+        string id = "test-scenario",
+        int? maxOrchestrationSteps = null) =>
         new(
             new AgentScenarioManifest
             {
@@ -27,6 +28,7 @@ public sealed class AgentScenarioRunnerTests
                 Title = "Test scenario",
                 Goal = goal,
                 MaxSteps = maxSteps,
+                MaxOrchestrationSteps = maxOrchestrationSteps,
                 AutoApprove = autoApprove ?? [],
                 AllowRunError = allowRunError,
                 OutsideFiles = outsideFiles ?? [],
@@ -330,6 +332,156 @@ public sealed class AgentScenarioRunnerTests
 
         await ThrowsAsync<OperationCanceledException>(() =>
             runner.RunSuiteAsync([scenario1, scenario2], "test-model", null, cts.Token));
+    }
+
+    // -- r15 orchestration scenarios (03-scenarios-and-hardening.md 3.1) --
+
+    private const string PlanTwoSubtasksJson = """
+        {
+          "thought_summary": "Splitting into sub-tasks.",
+          "current_step": "Propose sub-tasks.",
+          "next_action": {
+            "type": "tool",
+            "tool_name": "plan_subtasks",
+            "arguments": { "subtasks": [
+              { "goal": "Fix the bug", "profile": "correctness", "success_criteria": "the bug is fixed" },
+              { "goal": "Add a regression test", "profile": "tests", "success_criteria": "a test covers the bug" }
+            ] },
+            "requires_approval": true,
+            "risk_level": "medium"
+          },
+          "state_update": { "completed": [], "pending": [], "new_facts": [], "blockers": [] },
+          "user_message": "Proposing a sub-task plan."
+        }
+        """;
+
+    private const string PlanThreeSubtasksJson = """
+        {
+          "thought_summary": "Splitting into sub-tasks.",
+          "current_step": "Propose sub-tasks.",
+          "next_action": {
+            "type": "tool",
+            "tool_name": "plan_subtasks",
+            "arguments": { "subtasks": [
+              { "goal": "Fix the bug", "profile": "correctness", "success_criteria": "the bug is fixed" },
+              { "goal": "Add a regression test", "profile": "tests", "success_criteria": "a test covers the bug" },
+              { "goal": "Update the docs", "profile": "docs", "success_criteria": "docs mention the fix" }
+            ] },
+            "requires_approval": true,
+            "risk_level": "medium"
+          },
+          "state_update": { "completed": [], "pending": [], "new_facts": [], "blockers": [] },
+          "user_message": "Proposing a sub-task plan."
+        }
+        """;
+
+    private const string ChildRequestsPlanSubtasksJson = """
+        {
+          "thought_summary": "Trying to delegate further.",
+          "current_step": "Propose sub-tasks.",
+          "next_action": {
+            "type": "tool",
+            "tool_name": "plan_subtasks",
+            "arguments": { "subtasks": [
+              { "goal": "a", "profile": "general", "success_criteria": "a" },
+              { "goal": "b", "profile": "general", "success_criteria": "b" }
+            ] },
+            "requires_approval": true,
+            "risk_level": "medium"
+          },
+          "state_update": { "completed": [], "pending": [], "new_facts": [], "blockers": [] },
+          "user_message": "Trying to delegate."
+        }
+        """;
+
+    private static string FinalJson(string message) => $$"""
+        {
+          "thought_summary": "Done.",
+          "current_step": "Done.",
+          "next_action": { "type": "final", "requires_approval": false, "risk_level": "none" },
+          "state_update": { "completed": [], "pending": [], "new_facts": [], "blockers": [] },
+          "user_message": "{{message}}"
+        }
+        """;
+
+    [Fact]
+    public async Task Orchestration_gate_children_run_sequentially_and_parent_synthesizes_a_report()
+    {
+        using var temp = new TempDir();
+        var settings = NewIsolatedSettings(temp);
+        var workspaceDir = temp.PathFor("scenario-src/workspace");
+        Directory.CreateDirectory(workspaceDir);
+        File.WriteAllText(Path.Combine(workspaceDir, "README.md"), "hello");
+
+        var scenario = NewScenario(workspaceDir, autoApprove: ["plan_subtasks"], maxSteps: 6, expect: new AgentScenarioExpectations
+        {
+            RequireApprovalFor = ["plan_subtasks"],
+            FinalStatusAnyOf = ["complete"],
+            ExpectSubtaskStatuses = ["complete", "complete"],
+            ExpectReportContains = ["Fix the bug", "Add a regression test"]
+        });
+
+        var llm = new FakeSequencedAgentLlm([
+            PlanTwoSubtasksJson,
+            FinalJson("Fixed the bug in Foo.cs."),
+            FinalJson("Added a regression test."),
+            FinalJson("Both sub-tasks (Fix the bug, Add a regression test) completed successfully.")
+        ]);
+        var runner = new AgentScenarioRunner(llm, settings);
+        var result = await runner.RunScenarioAsync(scenario, "test-model");
+
+        Assert.True(result.Passed, string.Join("; ", result.Checks.Where(c => !c.Passed).Select(c => $"{c.CheckId}: {c.Detail}")));
+        Assert.Equal("Complete", result.FinalStatus);
+    }
+
+    [Fact]
+    public async Task Orchestration_depth_a_child_requesting_plan_subtasks_is_blocked_not_crashed()
+    {
+        using var temp = new TempDir();
+        var settings = NewIsolatedSettings(temp);
+        var workspaceDir = temp.PathFor("scenario-src/workspace");
+        Directory.CreateDirectory(workspaceDir);
+        File.WriteAllText(Path.Combine(workspaceDir, "README.md"), "hello");
+
+        var scenario = NewScenario(workspaceDir, autoApprove: ["plan_subtasks"], maxSteps: 6, expect: new AgentScenarioExpectations
+        {
+            ExpectBlocked = ["plan_subtasks"],
+            FinalStatusAnyOf = ["blocked"]
+        });
+
+        var llm = new FakeSequencedAgentLlm([PlanTwoSubtasksJson, ChildRequestsPlanSubtasksJson]);
+        var runner = new AgentScenarioRunner(llm, settings);
+        var result = await runner.RunScenarioAsync(scenario, "test-model");
+
+        Assert.True(result.Passed, string.Join("; ", result.Checks.Where(c => !c.Passed).Select(c => $"{c.CheckId}: {c.Detail}")));
+        Assert.Null(result.RunError);
+    }
+
+    [Fact]
+    public async Task Orchestration_budget_forces_remaining_subtasks_skipped_and_notes_truncation()
+    {
+        using var temp = new TempDir();
+        var settings = NewIsolatedSettings(temp);
+        var workspaceDir = temp.PathFor("scenario-src/workspace");
+        Directory.CreateDirectory(workspaceDir);
+        File.WriteAllText(Path.Combine(workspaceDir, "README.md"), "hello");
+
+        var scenario = NewScenario(workspaceDir, autoApprove: ["plan_subtasks"], maxSteps: 6, maxOrchestrationSteps: 1, expect: new AgentScenarioExpectations
+        {
+            FinalStatusAnyOf = ["complete"],
+            ExpectSubtaskStatuses = ["complete", "skipped", "skipped"],
+            ExpectReportContains = ["budget"]
+        });
+
+        var llm = new FakeSequencedAgentLlm([
+            PlanThreeSubtasksJson,
+            FinalJson("First sub-task done."),
+            FinalJson("All requested work is finished.")
+        ]);
+        var runner = new AgentScenarioRunner(llm, settings);
+        var result = await runner.RunScenarioAsync(scenario, "test-model");
+
+        Assert.True(result.Passed, string.Join("; ", result.Checks.Where(c => !c.Passed).Select(c => $"{c.CheckId}: {c.Detail}")));
     }
 
     private sealed class CancelingLlm : Aether.Core.Services.ILlmService

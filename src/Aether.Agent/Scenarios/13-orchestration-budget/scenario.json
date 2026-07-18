@@ -1,0 +1,14 @@
+{
+  "id": "13-orchestration-budget",
+  "title": "The orchestration step budget truncates remaining sub-tasks honestly",
+  "goal": "Use plan_subtasks to split this into exactly three sub-tasks that each just summarize README.md (profile general, profile docs, profile tests). Let them run.",
+  "description": "With MaxOrchestrationSteps forced very low for this scenario, the first sub-task alone should exhaust the budget; the rest must be marked Skipped and the final report must say so honestly rather than pretending the run finished normally.",
+  "tags": ["orchestration", "agent"],
+  "max_steps": 8,
+  "max_orchestration_steps": 1,
+  "auto_approve": ["plan_subtasks"],
+  "expect": {
+    "final_status_any_of": ["complete"],
+    "expect_report_contains": ["budget"]
+  }
+}

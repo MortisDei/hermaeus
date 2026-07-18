@@ -189,6 +189,21 @@
   analyzes any folder, and writes no workspace memory, until you explicitly
   choose one. Choosing a folder is what turns on file listing and workspace
   analysis for that root.
+- Sub-task orchestration: `plan_subtasks` splits a broad, multi-domain goal
+  into 2-6 focused sub-tasks (goal, specialist profile, success criteria),
+  always approval-gated with a full preview of the proposed plan. Once
+  approved, children run sequentially through the same loop, safety gate, and
+  approval flow as any task, each with its own transcript, lessons, and
+  remembered command approvals (never shared with siblings). Depth is limited
+  to one level in code - a child cannot itself propose sub-tasks. A workbench
+  strip shows live sub-task status; a child's pending approval surfaces in
+  the review queue labeled with its parent's goal. Bounded by
+  `Agent.MaxOrchestrationSteps` (default 60) across the whole run, separate
+  from each child's own `Agent.MaxAutoSteps`; hitting it marks remaining
+  sub-tasks `Skipped` and synthesis says so honestly. Once every sub-task is
+  terminal, the parent synthesizes one consolidated report (with a
+  deterministic fallback if synthesis itself fails) and writes it to
+  `report.md` in the task directory, openable from the workbench.
 
 ## Model Management
 

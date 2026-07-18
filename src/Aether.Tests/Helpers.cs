@@ -63,6 +63,12 @@ namespace Aether.Tests
                 throw new InvalidOperationException($"{message}. Expected '{expected}', got '{actual}'.");
         }
 
+        public static void NotEqual<T>(T notExpected, T actual, string message)
+        {
+            if (EqualityComparer<T>.Default.Equals(notExpected, actual))
+                throw new InvalidOperationException($"{message}. Did not expect '{actual}'.");
+        }
+
         public static void True(bool value, string message)
         {
             if (!value)
@@ -642,6 +648,31 @@ namespace Aether.Tests
               "user_message": "Finished."
             }
             """;
+    }
+
+    /// <summary>Like <see cref="FakeSequencedAgentLlm"/>, but once the scripted queue is exhausted it throws instead of returning a canned final answer - for testing that a step calling into a failed model call is handled, not just a parse failure.</summary>
+    sealed class FakeSequencedThenThrowingAgentLlm : ILlmService
+    {
+        private readonly Queue<string> _responses;
+
+        public FakeSequencedThenThrowingAgentLlm(IEnumerable<string> responses) => _responses = new Queue<string>(responses);
+
+        public string ProviderName => "FakeSequencedThenThrowingAgent";
+        public bool IsConfigured => true;
+        public Task<List<LlmModel>> GetModelsAsync(CancellationToken ct = default) =>
+            Task.FromResult(new List<LlmModel> { new() { Id = "fake-sequenced-then-throwing-agent", Name = "Fake Sequenced Then Throwing Agent", Provider = "Test" } });
+
+        public async IAsyncEnumerable<LlmStreamEvent> StreamChatAsync(
+            string modelId,
+            IReadOnlyList<ChatMessage> messages,
+            LlmChatOptions? options = null,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+        {
+            await Task.Delay(1, ct);
+            if (_responses.Count == 0)
+                throw new InvalidOperationException("Simulated provider failure.");
+            yield return new LlmStreamEvent(_responses.Dequeue());
+        }
     }
 
     /// <summary>Simulates a provider with native tool-calling support: no JSON text, just a structured tool call.</summary>

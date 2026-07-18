@@ -9,10 +9,66 @@ FIFO for changelog entries, 10 versions in this file max. Remove older entries
 and append them to `docs/changelog-archive.md` to maintain the 10 version
 limit.
 
-## [Unreleased]
+## [0.20.0-alpha] - 2026-07-19
+
+Implements docs/review r15 in full: sub-task orchestration. A vague, broad
+goal used to burn the whole transcript budget before the agent got anywhere;
+`plan_subtasks` now lets it split such a goal into focused sub-tasks that
+each run through the exact same loop, safety gate, and approval flow as
+today, sequentially, with a consolidated report at the end.
+
+### Added
+
+- **`plan_subtasks`: approval-gated sub-task orchestration.** A new tool
+  proposes splitting a broad, multi-domain goal into 2-6 focused sub-tasks,
+  each with a goal, a specialist profile (`general`, `correctness`,
+  `security`, `tests`, `performance`, `docs`), and success criteria. Always
+  requires approval, with a full preview of the proposed plan. Once
+  approved, children run sequentially as ordinary tasks (`ParentTaskId` set,
+  own transcript, own lessons, own `RememberedCommandApprovals` - never
+  shared with siblings or the parent) through `AgentService`'s existing
+  loop. Depth is limited to one level in code: a child requesting
+  `plan_subtasks` is blocked immediately, not by prompt instruction. The
+  whole run is capped by `Agent.MaxOrchestrationSteps` (default 60,
+  separate from each child's own `Agent.MaxAutoSteps`); hitting it marks
+  remaining sub-tasks `Skipped` and synthesis says so honestly rather than
+  pretending the run finished normally.
+- **Consolidated synthesis report.** Once every sub-task is terminal, the
+  parent runs one final model step to synthesize a report from each child's
+  outcome and writes it to `report.md` in the task directory. A
+  deterministic fallback (built from the sub-task specs themselves) takes
+  over if that synthesis step fails or returns nothing usable, so a flaky
+  last step never fails a run whose sub-task work already completed.
+- **Workbench orchestration UI.** A sub-task strip shows live status
+  (pending/running/complete/failed/skipped) per sub-task with an "Open
+  report" affordance once synthesis has run. A child's pending approval
+  surfaces in the shared review queue labeled with its parent's goal, and
+  approving it resumes the parent's orchestration rather than stalling.
+  Step/status text is labeled with the active child's sub-task position
+  while an orchestrated run is in progress; the open task in the workbench
+  stays pointed at the parent throughout.
+- **Three new built-in scenarios** (`11-orchestration-gate`,
+  `12-orchestration-depth`, `13-orchestration-budget`) plus two new
+  deterministic scenario check types (`expect_subtask_statuses`,
+  `expect_report_contains`) exercising the gate, the depth block, and
+  budget truncation.
 
 ### Fixed
 
+- **A gated action with no registered executor stranded the task.** When the
+  safety gate required approval for a tool with no local executor (e.g. an
+  `mcp:` tool the bridge isn't wired for), the task landed `WaitingForUser`
+  with nothing to approve - `AppendUserReplyAsync` was the only way out,
+  which a user had no reason to guess. It now lands `Blocked` with an
+  explanatory result, matching the existing allowed-but-unexecutable case.
+- **A model-reported blocker could silently vanish or flip status twice.**
+  `state_update.blockers` set the task `Blocked`, but the blocker text was
+  never recorded anywhere, and if the same response also requested an
+  allowed tool, the later execution path silently overwrote the status back
+  to `Running` with no trace the blocker ever happened. Every blocker is now
+  recorded in `Decisions` regardless of outcome, and `Blocked` only wins
+  when the step's tool did not go on to execute successfully this step
+  (progress wins otherwise) - `ask_user`/`final` handling is unchanged.
 - **Chat responses appeared all at once instead of streaming.** `MarkdownViewer`'s
   75ms render-debounce timer was stopped and restarted on every content
   change; since streamed tokens arrive faster than that, the timer kept
@@ -908,76 +964,3 @@ file hashes, answer substrings) - no LLM judge.
   coverage, rhotic vowel rules, and dedicated affricate phoneme tokens.
 - Fixed a shutdown crash by wrapping the exit handler's `ServiceProvider`
   disposal in try/catch/finally.
-
-## [0.11.0-alpha] - 2026-07-12
-
-Implements docs/review r6 in full: answerability. A first-time user can now
-answer, from visible UI, where their data lives, whether anything leaves the
-machine, which model answered, why files/chunks were selected, why a patch
-was flagged risky, and whether they can undo it.
-
-### Answerability surfaces
-
-- **Local/remote badges.** Chat's model selector shows a "Local"/"Remote"
-  badge (`ChatViewModel.IsSelectedModelRemote`, driven by the shared
-  `CompositeLlmService.Providers` registry, the same source Privacy Audit
-  already used).
-- **Outbound-destinations summary.** System Overview's Privacy Audit is
-  retitled "Privacy audit - what can leave this machine" and gains a
-  one-line count (`PrivacyAuditService.CountOutboundDestinationsAsync`)
-  across remote chat/voice providers, web-ingest-enabled RAG datasets, and
-  MCP servers.
-- **Data root affordances.** Settings > Data gets "Open folder" buttons for
-  the data root and AI assets root (resolved live, not the raw text box),
-  plus a "Your data, your machine" explainer and matching statement in
-  System Overview.
-- **Toolbar labels.** `Ui.ShowNavLabels` (default off) adds text captions
-  next to the 13 previously icon-only toolbar buttons.
-- **Per-message model attribution.** Audited and found already correct
-  end-to-end (`Message.ModelId`/`DurationMs` round-trip through
-  `messages_json`); added a regression test rather than new code.
-- **RAG retrieval breakdown.** `RagTraceChunk` now carries per-signal vector/
-  keyword/rerank scores and a deterministic plain-language summary ("Ranked
-  2nd of 8: strong semantic match, term 'x' matched 3 times, reranker
-  confirmed this ranking"), shown in the RAG source inspector.
-- **Agent risk reasons + recipe transparency.** `AgentPendingToolAction`
-  carries the safety gate's `Reason`; the review queue shows it plus, for a
-  pending `run_command` approval, what it actually executes
-  (`AgentApprovalPreview` - the exact npm script body from package.json, or
-  a fixed provenance note for dotnet/cargo/pytest).
-- **Agent context receipt.** Each step's context pack summarizes per
-  section (Memory/RAG/Workspace files/Project instructions/Lessons) as item
-  count + token estimate (`AgentContextReceiptBuilder`), omitting empty
-  sections rather than showing them blank.
-- **Applied-patch revert.** `AgentDraftPatch` captures a pre-image at apply
-  time (both the manual draft-patch queue and direct `edit_file`/
-  `create_file`/`apply_draft_patch` approvals); Revert restores it or
-  deletes a created file, refusing if the file changed again since.
-- **New-lesson review strip.** A task reaching a terminal state with newly
-  *created* (not merely reinforced) lessons shows them once with Keep/Retire
-  actions, tracked via `AgentTaskState.NewLessonIds`.
-
-### Usage-aware benchmark insights
-
-- **`model_usage` rollup.** `SqliteTraceStore` maintains a durable per-
-  model/day/kind counter table alongside the existing trace log, unaffected
-  by trace pruning. `IModelUsageService` exposes windowed summaries.
-- **Usage insights.** `BenchmarkInsightsMath.BuildReport` takes optional
-  per-kind usage; for any activity (Chat/RAG/Agent) with 20+ calls in 30
-  days it names the dominant model, and recommends a switch only when a
-  real leaderboard entry outranks it by the same 10-point gap threshold as
-  the r5 Doctor advisory. A "Based on your usage" card appears in the
-  Benchmarks Insights tab; the Doctor advisory gets at most one appended
-  usage-aware sentence, Info severity only.
-
-### Platform cleanup
-
-- **Removed `InspectionEngine`/`IInspectionCheckProvider`.** Dead
-  aggregation layer nothing consumed; Doctor/Trust/Privacy Audit already
-  each own their checks and views directly.
-- **Remote voice disclosure.** Settings > Voice shows an inline note per
-  enabled channel when the active provider is remote; Privacy Audit gains a
-  matching item.
-
-Coverage floor raised 47 -> 48.
-

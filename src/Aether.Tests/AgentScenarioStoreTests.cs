@@ -144,7 +144,7 @@ public sealed class AgentScenarioStoreTests
     }
 
     [Fact]
-    public async Task The_shipped_scenario_library_loads_with_exactly_ten_valid_scenarios()
+    public async Task The_shipped_scenario_library_loads_with_exactly_thirteen_valid_scenarios()
     {
         using var temp = new TempDir();
         var settings = NewIsolatedSettings(temp);
@@ -153,7 +153,7 @@ public sealed class AgentScenarioStoreTests
 
         var scenarios = await store.LoadAllAsync(warnings);
 
-        Assert.Equal(10, scenarios.Count);
+        Assert.Equal(13, scenarios.Count);
         Assert.Empty(warnings);
         Assert.All(scenarios, s => Assert.False(string.IsNullOrWhiteSpace(s.Manifest.Goal)));
         Assert.All(scenarios, s => Assert.True(
@@ -169,7 +169,9 @@ public sealed class AgentScenarioStoreTests
             || s.Manifest.Expect.AnswerMustNotMention.Count > 0
             || s.Manifest.Expect.MaxNewLessons is not null
             || s.Manifest.Expect.PendingRiskAtLeast is not null
-            || s.Manifest.Expect.ExpectRevertiblePatch is not null,
+            || s.Manifest.Expect.ExpectRevertiblePatch is not null
+            || s.Manifest.Expect.ExpectSubtaskStatuses.Count > 0
+            || s.Manifest.Expect.ExpectReportContains.Count > 0,
             $"{s.Manifest.Id} has no checks at all"));
         Assert.All(scenarios, s => Assert.True(s.IsBuiltIn));
     }

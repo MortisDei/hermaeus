@@ -18,7 +18,8 @@ public sealed class AgentService : IAgentService
         subdirectory, max_depth), search_files (optional regex, context_lines),
         glob_files (pattern), read_file (optional line_offset, line_limit),
         summarize_file, inspect_git_diff, draft_patch, apply_draft_patch,
-        edit_file, create_file, set_plan, and run_command. Read-only tools
+        edit_file, create_file, set_plan, plan_subtasks, and run_command.
+        Read-only tools
         (list_files, search_files, glob_files, read_file, summarize_file,
         inspect_git_diff, set_plan) execute immediately. Prefer edit_file
         (relative_path, old_string, new_string) for changing part of an
@@ -29,7 +30,13 @@ public sealed class AgentService : IAgentService
         apply_draft_patch, and run_command always require approval. Use
         set_plan (steps: array of {description, status: pending|in_progress|done})
         to keep a visible checklist for multi-step goals; it replaces the
-        whole plan each time. run_command only accepts one of the workspace's
+        whole plan each time. Use plan_subtasks (subtasks: array of 2 to 6
+        {goal, profile, success_criteria}, profile one of general|correctness|
+        security|tests|performance|docs) only for a broad, multi-domain goal
+        that should be split into focused sub-tasks each run through this
+        same loop; never for a goal that fits a normal plan (set_plan is the
+        right tool there). plan_subtasks always requires approval, and a
+        sub-task can never itself request plan_subtasks. run_command only accepts one of the workspace's
         own pre-declared safe recipes (for example "dotnet build" or "dotnet
         test") passed verbatim as the "command" argument; it cannot run
         arbitrary shell text. Network access, installs, commits, pushes,
@@ -100,6 +107,8 @@ public sealed class AgentService : IAgentService
                 Schema("""{"type":"object","properties":{"relative_path":{"type":"string"},"content":{"type":"string"}},"required":["relative_path","content"]}""")),
             new("set_plan", "Replace the task's visible plan checklist. Executes immediately, never requires approval.",
                 Schema("""{"type":"object","properties":{"steps":{"type":"array","items":{"type":"object","properties":{"description":{"type":"string"},"status":{"type":"string","enum":["pending","in_progress","done"]}},"required":["description"]}}},"required":["steps"]}""")),
+            new("plan_subtasks", "Propose splitting the current goal into 2 to 6 focused sub-tasks, each with a goal, a profile from the fixed list (general, correctness, security, tests, performance, docs), and success criteria. Always requires approval; only useful for broad, multi-domain goals, never for goals that fit a normal plan (use set_plan for that).",
+                Schema("""{"type":"object","properties":{"subtasks":{"type":"array","minItems":2,"maxItems":6,"items":{"type":"object","properties":{"goal":{"type":"string"},"profile":{"type":"string","enum":["general","correctness","security","tests","performance","docs"]},"success_criteria":{"type":"string"}},"required":["goal","profile","success_criteria"]}}},"required":["subtasks"]}""")),
             new("run_command", "Run one of the workspace's own pre-declared safe recipes (e.g. \"dotnet build\"). Requires user approval.",
                 Schema("""{"type":"object","properties":{"command":{"type":"string"}},"required":["command"]}"""))
         ];
@@ -140,6 +149,15 @@ public sealed class AgentService : IAgentService
         _workspaceTools = workspaceTools;
     }
 
+    private static readonly IReadOnlyList<string> BaseTaskConstraints =
+    [
+        "local-first",
+        "do not write files without approval",
+        "do not run commands without approval",
+        "use retrieved context before inference",
+        "keep task state explicit"
+    ];
+
     public async Task<AgentTaskState> CreateTaskAsync(
         string goal,
         AgentWorkspaceOptions options,
@@ -149,27 +167,48 @@ public sealed class AgentService : IAgentService
             throw new InvalidOperationException("Agent goal is required.");
 
         AgentWorkspaceTools.ResolveWorkspaceRoot(options.WorkspaceRoot);
-        var state = new AgentTaskState
-        {
-            Goal = goal.Trim(),
-            Status = AgentTaskStatus.New,
-            ActiveStep = "Build an initial plan from the goal and retrieved context.",
-            Constraints =
-            [
-                "local-first",
-                "do not write files without approval",
-                "do not run commands without approval",
-                "use retrieved context before inference",
-                "keep task state explicit"
-            ],
-            PendingSteps = ["Inspect workspace context", "Build plan", "Report next action"],
-            Summary = "Task created. No tool actions have run yet."
-        };
+        var state = NewTaskState(goal, BaseTaskConstraints, parentTaskId: null);
 
         await _store.SaveAsync(state, ct);
         await _store.AppendLogAsync(state.TaskId, $"created task: {state.Goal}", ct);
         return state;
     }
+
+    /// <summary>
+    /// Creates a child task for one approved sub-task spec (r15
+    /// 01-subtask-orchestration.md 1.4): same base constraints as an
+    /// ordinary task, plus the specialist profile's focus constraints, goal
+    /// composed with the spec's success criteria, and <see cref="AgentTaskState.ParentTaskId"/>
+    /// set so the depth-1 check in <see cref="RunStepAsync"/> can block a
+    /// child from requesting plan_subtasks itself.
+    /// </summary>
+    private async Task<AgentTaskState> CreateChildTaskAsync(
+        AgentTaskState parent,
+        AgentSubTaskSpec spec,
+        AgentWorkspaceOptions options,
+        CancellationToken ct)
+    {
+        var goal = string.IsNullOrWhiteSpace(spec.SuccessCriteria)
+            ? spec.Goal
+            : $"{spec.Goal}\nSuccess criteria: {spec.SuccessCriteria}";
+        var constraints = BaseTaskConstraints.Concat(AgentSpecialistProfiles.Resolve(spec.ProfileName)).ToList();
+        var state = NewTaskState(goal, constraints, parent.TaskId);
+
+        await _store.SaveAsync(state, ct);
+        await _store.AppendLogAsync(state.TaskId, $"created sub-task (parent {parent.TaskId}): {state.Goal}", ct);
+        return state;
+    }
+
+    private static AgentTaskState NewTaskState(string goal, IEnumerable<string> constraints, string? parentTaskId) => new()
+    {
+        Goal = goal.Trim(),
+        ParentTaskId = parentTaskId,
+        Status = AgentTaskStatus.New,
+        ActiveStep = "Build an initial plan from the goal and retrieved context.",
+        Constraints = constraints.ToList(),
+        PendingSteps = ["Inspect workspace context", "Build plan", "Report next action"],
+        Summary = "Task created. No tool actions have run yet."
+    };
 
     public async Task<AgentStepResult> RunStepAsync(
         string taskId,
@@ -261,7 +300,16 @@ public sealed class AgentService : IAgentService
         if (response.NextAction.Type == AgentActionKind.Tool)
         {
             AgentToolPolicyDecision decision;
-            if (string.Equals(nextTool, "run_command", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(nextTool, "plan_subtasks", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(state.ParentTaskId))
+            {
+                // Depth limit enforced in code, not prompt text (r15
+                // 01-subtask-orchestration.md 1.2 step 2): a sub-task can
+                // never itself propose sub-tasks, regardless of what the
+                // model set in requires_approval. This check runs before the
+                // gate call and takes precedence over it.
+                decision = new AgentToolPolicyDecision(AgentToolDisposition.Blocked, AgentRiskLevel.High, "Sub-tasks cannot create sub-tasks (depth limit 1).");
+            }
+            else if (string.Equals(nextTool, "run_command", StringComparison.OrdinalIgnoreCase))
             {
                 var requestedCommand = AgentToolExecutor.Arg(response.NextAction.Arguments, "command");
                 var manifest = _manifests is null ? null : await _manifests.LoadAsync(options.WorkspaceRoot, ct);
@@ -285,9 +333,9 @@ public sealed class AgentService : IAgentService
             response.NextAction.RequiresApproval = decision.Disposition != AgentToolDisposition.Allowed;
             if (decision.Disposition == AgentToolDisposition.RequiresApproval)
             {
-                state.Status = AgentTaskStatus.WaitingForUser;
                 if (_toolExecutor.CanExecute(nextTool))
                 {
+                    state.Status = AgentTaskStatus.WaitingForUser;
                     state.PendingToolAction = new AgentPendingToolAction
                     {
                         ToolName = nextTool,
@@ -295,6 +343,23 @@ public sealed class AgentService : IAgentService
                         RiskLevel = decision.RiskLevel,
                         Reason = decision.Reason
                     };
+                }
+                else
+                {
+                    // A gated action with no registered executor has nothing
+                    // to approve; leaving it WaitingForUser with no
+                    // PendingToolAction strands the task (AppendUserReplyAsync
+                    // is the only way out, which the user has no reason to
+                    // guess). Treat it like the allowed-but-unexecutable case
+                    // below: Blocked, with an explanatory result (r15
+                    // 03-scenarios-and-hardening.md 3.2).
+                    state.Status = AgentTaskStatus.Blocked;
+                    state.ToolResults.Add(new AgentToolResult
+                    {
+                        Tool = nextTool,
+                        Arguments = response.NextAction.Arguments,
+                        ResultSummary = "The tool required approval, but no local executor is registered for it."
+                    });
                 }
             }
             if (decision.Disposition == AgentToolDisposition.Blocked)
@@ -356,6 +421,24 @@ public sealed class AgentService : IAgentService
                         ResultSummary = "Supported policy allowed the tool, but no local executor is registered for it."
                     });
                 }
+            }
+
+            // Deterministic precedence for a step that both reports a
+            // blocker and requests a tool: a tool that went on to execute
+            // successfully this step wins (progress wins) and the blocker
+            // is left recorded in Decisions only; any other outcome (gated,
+            // blocked, or unexecutable) makes the blocker the visible
+            // status instead of a plain WaitingForUser (r15
+            // 03-scenarios-and-hardening.md 3.3).
+            if (response.StateUpdate.Blockers.Count > 0 && executedToolResult is null)
+            {
+                state.Status = AgentTaskStatus.Blocked;
+                // Blocked never coexists with something pending approval
+                // elsewhere in this loop (the gate-Blocked and 3.2
+                // unexecutable-gated paths above never set one either); a
+                // blocker overriding WaitingForUser must not leave a stale
+                // approval behind it.
+                state.PendingToolAction = null;
             }
         }
 
@@ -471,6 +554,10 @@ public sealed class AgentService : IAgentService
         Action<AgentStepResult>? onStep = null,
         CancellationToken ct = default)
     {
+        var loaded = await _store.LoadAsync(taskId, ct) ?? throw new InvalidOperationException("Agent task was not found.");
+        if (loaded.SubTaskPlan.Count > 0)
+            return await RunOrchestrationAsync(loaded, options, onStep, ct);
+
         var maxSteps = Math.Max(_settings?.Settings.Agent.MaxAutoSteps ?? 20, 1);
         AgentStepResult result;
         var steps = 0;
@@ -503,6 +590,163 @@ public sealed class AgentService : IAgentService
         return result;
     }
 
+    /// <summary>
+    /// Sequential sub-task orchestration (r15 01-subtask-orchestration.md 1.4):
+    /// a parent with an approved, unfinished <see cref="AgentTaskState.SubTaskPlan"/>
+    /// never runs a parent model step itself while sub-tasks remain; instead
+    /// this advances one child at a time through the ordinary single-task
+    /// <see cref="RunAsync(string,AgentWorkspaceOptions,Action{AgentStepResult}?,CancellationToken)"/>
+    /// loop, then synthesizes once every spec is terminal. Cancellation
+    /// propagates out of the current child's step exactly as it would for a
+    /// plain task; remaining specs are left Pending for the next resume.
+    /// </summary>
+    private async Task<AgentStepResult> RunOrchestrationAsync(
+        AgentTaskState parent,
+        AgentWorkspaceOptions options,
+        Action<AgentStepResult>? onStep,
+        CancellationToken ct)
+    {
+        if (parent.Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed)
+            throw new InvalidOperationException("Agent task is already finished.");
+
+        var maxOrchestrationSteps = Math.Max(_settings?.Settings.Agent.MaxOrchestrationSteps ?? 60, 1);
+
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+            parent = await _store.LoadAsync(parent.TaskId, ct) ?? throw new InvalidOperationException("Agent task was not found.");
+
+            var next = parent.SubTaskPlan.FirstOrDefault(s => s.Status is AgentSubTaskStatus.Pending or AgentSubTaskStatus.Running);
+            if (next is null)
+                return await RunSynthesisAsync(parent, options, budgetTruncated: false, ct);
+
+            if (parent.OrchestrationStepsUsed >= maxOrchestrationSteps)
+            {
+                foreach (var spec in parent.SubTaskPlan.Where(s => s.Status == AgentSubTaskStatus.Pending))
+                    spec.Status = AgentSubTaskStatus.Skipped;
+                parent.Decisions.Add(new AgentDecision(
+                    "Orchestration step budget exhausted",
+                    $"MaxOrchestrationSteps ({maxOrchestrationSteps}) reached; remaining sub-tasks were skipped.",
+                    DateTime.UtcNow));
+                await _store.SaveAsync(parent, ct);
+                await _store.AppendLogAsync(parent.TaskId, "orchestration step budget exhausted; remaining sub-tasks skipped", ct);
+                return await RunSynthesisAsync(parent, options, budgetTruncated: true, ct);
+            }
+
+            if (next.Status == AgentSubTaskStatus.Pending)
+            {
+                var child = await CreateChildTaskAsync(parent, next, options, ct);
+                next.TaskId = child.TaskId;
+                next.Status = AgentSubTaskStatus.Running;
+                await _store.SaveAsync(parent, ct);
+            }
+
+            var childTaskId = next.TaskId!;
+            var childStepsUsed = 0;
+            var childResult = await RunAsync(childTaskId, options, onStep: r =>
+            {
+                childStepsUsed++;
+                onStep?.Invoke(r);
+            }, ct);
+
+            parent = await _store.LoadAsync(parent.TaskId, ct) ?? parent;
+            parent.OrchestrationStepsUsed += childStepsUsed;
+
+            if (childResult.State.Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed)
+            {
+                var spec = parent.SubTaskPlan.First(s => s.TaskId == childTaskId);
+                spec.Status = childResult.State.Status == AgentTaskStatus.Complete ? AgentSubTaskStatus.Complete : AgentSubTaskStatus.Failed;
+                var combined = string.Join(" ", new[] { childResult.State.Summary, childResult.PlannerResponse.UserMessage }
+                    .Where(s => !string.IsNullOrWhiteSpace(s)));
+                spec.ResultSummary = combined.Length > 1200 ? combined[..1200] + "..." : combined;
+                await _store.SaveAsync(parent, ct);
+                continue;
+            }
+
+            // Child paused (WaitingForUser or Blocked): the user acts on the
+            // CHILD task's own approval queue entry; the parent stays as-is
+            // and a later run of the parent resumes this same child.
+            await _store.SaveAsync(parent, ct);
+            return childResult;
+        }
+    }
+
+    /// <summary>
+    /// One final ordinary model step on the parent once every sub-task is
+    /// terminal (r15 01-subtask-orchestration.md 1.6): the model is expected
+    /// to answer "final" with the consolidated report as user_message. A
+    /// model call failure or an unparseable response falls back to a
+    /// deterministic report built from the spec entries themselves - the
+    /// sub-task work already happened, so a flaky synthesis step must not
+    /// fail the whole run.
+    /// </summary>
+    private async Task<AgentStepResult> RunSynthesisAsync(AgentTaskState parent, AgentWorkspaceOptions options, bool budgetTruncated, CancellationToken ct)
+    {
+        parent.ActiveStep = "All sub-tasks are finished. Respond with next_action.type=\"final\" and a consolidated report covering every sub-task's outcome as user_message.";
+        await _store.SaveAsync(parent, ct);
+
+        AgentStepResult? stepResult;
+        try
+        {
+            stepResult = await RunStepAsync(parent.TaskId, options, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            stepResult = null;
+        }
+
+        var state = stepResult?.State ?? await _store.LoadAsync(parent.TaskId, ct) ?? parent;
+        var synthesisSucceeded = stepResult is not null
+            && state.Status == AgentTaskStatus.Complete
+            && !string.IsNullOrWhiteSpace(stepResult.PlannerResponse.UserMessage);
+
+        var report = synthesisSucceeded ? stepResult!.PlannerResponse.UserMessage : BuildFallbackSynthesisReport(state);
+        if (budgetTruncated && !report.Contains("budget", StringComparison.OrdinalIgnoreCase))
+            report += "\n\nNote: this run was truncated by the orchestration step budget; some sub-tasks were skipped.";
+
+        state.Status = AgentTaskStatus.Complete;
+        state.PendingToolAction = null;
+        state.Summary = report;
+        await _store.SaveAsync(state, ct);
+        await _store.AppendTranscriptEntryAsync(state.TaskId, new AgentTranscriptEntry(
+            state.StepCount, "assistant", null, report, DateTime.UtcNow), ct);
+        await WriteReportFileAsync(state, report, ct);
+
+        if (!synthesisSucceeded)
+        {
+            // RunStepAsync's own terminal-lesson capture only fires when it
+            // sees the task end Complete/Failed; a fallback that forces
+            // Complete after the fact never went through that path.
+            await RecordTaskTerminalLessonAsync(state, options, ct);
+        }
+
+        return stepResult is not null && synthesisSucceeded
+            ? stepResult with { State = state }
+            : new AgentStepResult(state, stepResult?.ContextPack ?? new AgentContextPack(), stepResult?.PlannerResponse ?? new AgentPlannerResponse { UserMessage = report }, report);
+    }
+
+    private static string BuildFallbackSynthesisReport(AgentTaskState state)
+    {
+        var lines = new List<string>
+        {
+            $"Sub-task run for \"{state.Goal}\" finished. Synthesis could not be generated automatically; here is a summary of each sub-task:"
+        };
+        foreach (var spec in state.SubTaskPlan)
+        {
+            var summary = string.IsNullOrWhiteSpace(spec.ResultSummary) ? "no result recorded." : spec.ResultSummary;
+            lines.Add($"- [{spec.Status}] ({spec.ProfileName}) {spec.Goal}: {summary}");
+        }
+
+        return string.Join("\n", lines);
+    }
+
+    private async Task WriteReportFileAsync(AgentTaskState state, string report, CancellationToken ct)
+    {
+        var dir = _store.GetTaskDirectory(state.TaskId);
+        Directory.CreateDirectory(dir);
+        await AtomicFileWriter.WriteAllTextAsync(Path.Combine(dir, "report.md"), report, ct);
+    }
+
     public Task<IReadOnlyList<AgentTaskListItem>> LoadRecentTasksAsync(CancellationToken ct = default) =>
         _store.ListRecentAsync(25, ct);
 
@@ -511,7 +755,11 @@ public sealed class AgentService : IAgentService
         var state = await _store.LoadAsync(taskId, ct)
             ?? throw new InvalidOperationException("Agent task was not found.");
         state.ApprovalHistory.Add(new AgentApprovalRecord(action, approved, DateTime.UtcNow));
-        if (approved && state.PendingToolAction is not null && options is not null)
+        if (approved && state.PendingToolAction is not null && string.Equals(state.PendingToolAction.ToolName, "plan_subtasks", StringComparison.OrdinalIgnoreCase))
+        {
+            await ApplyPlanSubtasksApprovalAsync(state, state.PendingToolAction, ct);
+        }
+        else if (approved && state.PendingToolAction is not null && options is not null)
         {
             var pending = state.PendingToolAction;
 
@@ -1067,8 +1315,93 @@ public sealed class AgentService : IAgentService
         state.PendingSteps.RemoveAll(p => state.CompletedSteps.Any(c =>
             string.Equals(c.Trim(), p.Trim(), StringComparison.OrdinalIgnoreCase)));
 
-        if (response.StateUpdate.Blockers.Count > 0)
-            state.Status = AgentTaskStatus.Blocked;
+        // Recorded unconditionally, regardless of what the status ends up
+        // being this step - a blocker that gets superseded by a successful
+        // tool execution (progress wins; see RunStepAsync) must still leave
+        // a trace instead of vanishing (r15 03-scenarios-and-hardening.md 3.3).
+        foreach (var blocker in response.StateUpdate.Blockers.Where(s => !string.IsNullOrWhiteSpace(s)))
+            state.Decisions.Add(new AgentDecision(blocker, "model-reported blocker", DateTime.UtcNow));
+    }
+
+    /// <summary>
+    /// Validates and materializes an approved plan_subtasks action onto the
+    /// parent (r15 01-subtask-orchestration.md 1.2 step 3, 1.4). No child
+    /// task is created here - only the plan itself. An invalid plan (wrong
+    /// entry count, an empty goal, or an unknown profile) rejects instead of
+    /// executing: the pending action is cleared and the task returns to
+    /// WaitingForUser with an explanatory result, exactly as if the tool had
+    /// failed to run.
+    /// </summary>
+    private async Task ApplyPlanSubtasksApprovalAsync(AgentTaskState state, AgentPendingToolAction pending, CancellationToken ct)
+    {
+        var argumentsCopy = new Dictionary<string, object?>(pending.Arguments, StringComparer.OrdinalIgnoreCase);
+        state.PendingToolAction = null;
+
+        if (!TryParsePlanSubtasks(pending.Arguments, out var specs, out var error))
+        {
+            state.Status = AgentTaskStatus.WaitingForUser;
+            state.ToolResults.Add(new AgentToolResult { Tool = "plan_subtasks", Arguments = argumentsCopy, ResultSummary = error });
+            await _store.AppendTranscriptEntryAsync(state.TaskId, new AgentTranscriptEntry(
+                state.StepCount, "tool", "plan_subtasks", error, DateTime.UtcNow), ct);
+            return;
+        }
+
+        state.SubTaskPlan = specs;
+        state.Status = AgentTaskStatus.Running;
+        var summary = $"Approved sub-task plan ({specs.Count}): " + string.Join("; ", specs.Select(s => $"[{s.ProfileName}] {s.Goal}"));
+        state.ToolResults.Add(new AgentToolResult { Tool = "plan_subtasks", Arguments = argumentsCopy, ResultSummary = summary });
+        await _store.AppendTranscriptEntryAsync(state.TaskId, new AgentTranscriptEntry(
+            state.StepCount, "tool", "plan_subtasks", summary, DateTime.UtcNow), ct);
+    }
+
+    /// <summary>
+    /// Parses and validates a plan_subtasks action's "subtasks" argument:
+    /// 2 to 6 entries, each with a non-empty goal and a known specialist
+    /// profile name (r15 01-subtask-orchestration.md 1.2 step 3). An
+    /// unparseable, too-short, too-long, empty-goal, or unknown-profile plan
+    /// fails validation rather than falling back to a default - the
+    /// approving user must see exactly what they authorized.
+    /// </summary>
+    private static bool TryParsePlanSubtasks(Dictionary<string, object?> arguments, out List<AgentSubTaskSpec> specs, out string error)
+    {
+        specs = [];
+        error = string.Empty;
+
+        if (!arguments.TryGetValue("subtasks", out var raw) || raw is not JsonElement { ValueKind: JsonValueKind.Array } array)
+        {
+            error = "Could not parse the proposed sub-task plan: \"subtasks\" was missing or not an array.";
+            return false;
+        }
+
+        foreach (var item in array.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object) continue;
+            var goal = item.TryGetProperty("goal", out var g) ? g.GetString() ?? string.Empty : string.Empty;
+            var profile = item.TryGetProperty("profile", out var p) ? p.GetString() ?? string.Empty : string.Empty;
+            var successCriteria = item.TryGetProperty("success_criteria", out var s) ? s.GetString() ?? string.Empty : string.Empty;
+            specs.Add(new AgentSubTaskSpec { Goal = goal.Trim(), ProfileName = profile.Trim(), SuccessCriteria = successCriteria.Trim() });
+        }
+
+        if (specs.Count is < 2 or > 6)
+        {
+            error = $"Proposed sub-task plan has {specs.Count} entr{(specs.Count == 1 ? "y" : "ies")}; must be between 2 and 6.";
+            return false;
+        }
+
+        if (specs.Any(s => s.Goal.Length == 0))
+        {
+            error = "Proposed sub-task plan has an entry with an empty goal.";
+            return false;
+        }
+
+        var unknown = specs.Select(s => s.ProfileName).FirstOrDefault(p => !AgentSpecialistProfiles.IsKnown(p));
+        if (unknown is not null)
+        {
+            error = $"Proposed sub-task plan references an unknown profile '{unknown}'.";
+            return false;
+        }
+
+        return true;
     }
 
     /// <summary>
