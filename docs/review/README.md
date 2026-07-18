@@ -38,7 +38,7 @@ Headline findings, all verified in code against the log:
   errors for a server the app itself knows is stopped, and triple
   Stopping/Stopped pairs per shutdown.
 
-## Documents
+## Documents (in `archived/r14/`)
 
 - `01-gpu-runtime.md` - variant-aware llama.cpp builds (CUDA/Vulkan/
   CPU by detected GPU), companion CUDA runtime, offload defaults,
