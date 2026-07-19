@@ -19,6 +19,12 @@ context, quantization - never tensor data) makes both honest.
 
 ### GGUF metadata and KV-cache math
 
+- **Sliding-window KV estimates**: GGUF parsing now reads
+  `*.attention.sliding_window` and `*.attention.sliding_window_pattern`, and
+  KV projections charge sliding-window layers at their window size instead of
+  the full configured context. This keeps auto-tune and context-fit warnings
+  from falsely capping long-context models that use interleaved sliding
+  attention.
 - **`GgufMetadataReader`** (`Aether.Services`): a small internal parser for
   the GGUF header's metadata key/value section only. Bounds-checked against
   untrusted downloaded files (64 KiB string cap, 1,000,000 array-element cap,

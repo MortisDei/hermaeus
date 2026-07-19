@@ -12,10 +12,8 @@ public sealed record KvProjection(long WeightsBytes, long KvBytes)
 
 /// <summary>
 /// Deterministic KV-cache-cost estimate, pure and next to <see cref="ModelFitEstimator"/>.
-/// Always an estimate, never a measurement: known overestimate for sliding-window-attention
-/// models (the gemma family), which need less KV than this formula predicts because it
-/// assumes full dense attention across the whole context. Acceptable for a warning threshold
-/// (r17 01-gguf-context-and-tuning.md 1.2).
+/// Always an estimate, never a measurement: uses GGUF sliding-window metadata when present
+/// so interleaved attention is not charged as dense attention on every layer.
 /// </summary>
 public static class KvCacheMath
 {
@@ -49,10 +47,11 @@ public static class KvCacheMath
         };
     }
 
-    /// <summary>Bytes of KV cache per token across every layer, at full offload:
+    /// <summary>Dense-attention bytes of KV cache per token across every layer, at full offload:
     /// block_count * head_count_kv * (key_length * bytesPerElementK + value_length *
     /// bytesPerElementV). Null when the GGUF header lacked the shape facts required
-    /// (block_count, head_count_kv, key_length, value_length all must be &gt; 0).</summary>
+    /// (block_count, head_count_kv, key_length, value_length all must be &gt; 0). This is
+    /// the dense fallback and does not apply sliding-window reductions.</summary>
     public static double? KvBytesPerToken(GgufModelInfo info, double bytesPerElementK, double bytesPerElementV)
     {
         if (info.BlockCount is not > 0 || info.HeadCountKv is not > 0 || info.KeyLength is not > 0 || info.ValueLength is not > 0)
@@ -91,7 +90,33 @@ public static class KvCacheMath
 
         var fraction = info.BlockCount is > 0 ? OffloadFraction(gpuLayers, info.BlockCount.Value) : 1.0;
         var weights = (long)(fileSizeBytes * WeightsMultiplier * fraction);
-        var kv = (long)(kvPerToken.Value * Math.Max(0, contextSize) * fraction);
+        var kv = (long)(ProjectKvBytes(info, kvPerToken.Value, contextSize) * fraction);
         return new KvProjection(weights, kv);
+    }
+
+    private static double ProjectKvBytes(GgufModelInfo info, double denseKvBytesPerToken, int contextSize)
+    {
+        var ctx = Math.Max(0, contextSize);
+        if (ctx == 0)
+            return 0;
+
+        if (info.BlockCount is not > 0 ||
+            info.SlidingWindow is not > 0 ||
+            info.SlidingWindowPattern is not { Count: > 0 } pattern)
+        {
+            return denseKvBytesPerToken * ctx;
+        }
+
+        var layerBytesPerToken = denseKvBytesPerToken / info.BlockCount.Value;
+        var slidingContext = Math.Min(ctx, info.SlidingWindow.Value);
+        double tokenSlots = 0;
+
+        for (var layer = 0; layer < info.BlockCount.Value; layer++)
+        {
+            var isSliding = pattern[layer % pattern.Count];
+            tokenSlots += isSliding ? slidingContext : ctx;
+        }
+
+        return layerBytesPerToken * tokenSlots;
     }
 }

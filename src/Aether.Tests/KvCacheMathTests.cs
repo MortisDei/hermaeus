@@ -103,6 +103,30 @@ public sealed class KvCacheMathTests
     }
 
     [Fact]
+    public void Project_applies_sliding_window_pattern_when_present()
+    {
+        var info = new GgufModelInfo(
+            "gemma3",
+            "Q4_K_M",
+            BlockCount: 6,
+            TrainingContextLength: 131072,
+            EmbeddingLength: 6,
+            HeadCount: 1,
+            HeadCountKv: 1,
+            KeyLength: 1,
+            ValueLength: 1,
+            SlidingWindow: 10,
+            SlidingWindowPattern: [true, true, true, true, true, false]);
+
+        var projection = KvCacheMath.Project(1_000_000, info, contextSize: 100, gpuLayers: -1, 1.0, 1.0);
+
+        Assert.NotNull(projection);
+        // Six dense layers would be 6 * (1 + 1) * 100 = 1200 bytes. The pattern has five
+        // sliding layers capped at 10 tokens and one full layer: (5 * 10 + 100) * 2 = 300.
+        Assert.Equal(300, projection!.KvBytes);
+    }
+
+    [Fact]
     public void Project_scales_both_weights_and_kv_by_the_offload_fraction()
     {
         const long fileSize = 4_000_000_000;

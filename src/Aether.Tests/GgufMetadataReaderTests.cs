@@ -67,6 +67,17 @@ public sealed class GgufMetadataReaderTests
             return this;
         }
 
+        public GgufWriter ArrayBoolValue(string key, bool[] values)
+        {
+            Key(key);
+            _w.Write(TypeArray);
+            _w.Write(TypeBool);
+            _w.Write((ulong)values.Length);
+            foreach (var v in values)
+                _w.Write(v);
+            return this;
+        }
+
         public GgufWriter ArrayStringValue(string key, string[] values)
         {
             Key(key);
@@ -131,6 +142,23 @@ public sealed class GgufMetadataReaderTests
         Assert.Equal(8, info.HeadCountKv);
         Assert.Equal(128, info.KeyLength);
         Assert.Equal(128, info.ValueLength);
+    }
+
+    [Fact]
+    public void Sliding_window_attention_metadata_is_read_when_present()
+    {
+        using var temp = new TempDir();
+        var w = new GgufWriter().Magic().Header(3, tensorCount: 0, kvCount: 11);
+        LlamaShapeKeys(w, arch: "gemma3");
+        w.U32Value("gemma3.attention.sliding_window", 1024);
+        w.ArrayBoolValue("gemma3.attention.sliding_window_pattern", [true, true, true, true, true, false]);
+        var path = w.WriteToTempFile(temp);
+
+        var info = GgufMetadataReader.TryRead(path);
+
+        Assert.NotNull(info);
+        Assert.Equal(1024, info!.SlidingWindow);
+        Assert.Equal([true, true, true, true, true, false], info.SlidingWindowPattern);
     }
 
     [Fact]

@@ -318,11 +318,12 @@
   additional candidate (all layers at the largest context from a fixed ladder
   that still fits, capped at the model's training context) before falling
   back to its usual layer-by-layer descent at the originally configured
-  context. A successful context probe is reflected in the editable fields and
-  the tune-profile save, with the status line stating why (e.g. "configured
-  65,536 does not fit in 8.0 GB VRAM with this model"). This is the only
-  thing in the app that changes a context size automatically, and it only
-  runs from this explicitly user-clicked action.
+  context. The fit estimate honors GGUF sliding-window attention metadata
+  when present, so models with cheaper interleaved KV layouts are not treated
+  as dense-attention models on every layer. A successful context probe is
+  reflected in the editable fields and the tune-profile save. This is the
+  only thing in the app that changes a context size automatically, and it
+  only runs from this explicitly user-clicked action.
 - Fits-on-your-hardware chips (Fits GPU / Partial offload / Too large) on
   Models-page cards are KV-cache-aware for local files: when the GGUF header
   can be read, the fit reason states the weights/KV split at the model's

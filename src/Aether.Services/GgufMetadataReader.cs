@@ -18,7 +18,9 @@ public sealed record GgufModelInfo(
     int? HeadCount,
     int? HeadCountKv,
     int? KeyLength,
-    int? ValueLength);
+    int? ValueLength,
+    int? SlidingWindow = null,
+    IReadOnlyList<bool>? SlidingWindowPattern = null);
 
 /// <summary>
 /// Reads only the metadata key/value section of a GGUF file header; tensor data is never
@@ -104,6 +106,8 @@ public static class GgufMetadataReader
             long? headCountKv = null;
             long? keyLength = null;
             long? valueLength = null;
+            long? slidingWindow = null;
+            IReadOnlyList<bool>? slidingWindowPattern = null;
 
             for (ulong i = 0; i < kvCount; i++)
             {
@@ -132,6 +136,10 @@ public static class GgufMetadataReader
                     keyLength = ToScalarLong(ReadValue(reader, valueType, 0));
                 else if (key.EndsWith(".attention.value_length", StringComparison.Ordinal))
                     valueLength = ToScalarLong(ReadValue(reader, valueType, 0));
+                else if (key.EndsWith(".attention.sliding_window", StringComparison.Ordinal))
+                    slidingWindow = ToScalarLong(ReadValue(reader, valueType, 0));
+                else if (key.EndsWith(".attention.sliding_window_pattern", StringComparison.Ordinal))
+                    slidingWindowPattern = ToBoolList(ReadValue(reader, valueType, 0));
                 else
                     SkipValue(reader, valueType, 0);
             }
@@ -151,7 +159,9 @@ public static class GgufMetadataReader
                 HeadCount: ToInt(headCount),
                 HeadCountKv: ToInt(headCountKv),
                 KeyLength: ToInt(keyLength),
-                ValueLength: ToInt(valueLength));
+                ValueLength: ToInt(valueLength),
+                SlidingWindow: ToInt(slidingWindow),
+                SlidingWindowPattern: slidingWindowPattern);
         }
         catch (EndOfStreamException) { return null; }
         catch (IOException) { return null; }
@@ -184,6 +194,21 @@ public static class GgufMetadataReader
                 return max;
             default: return null;
         }
+    }
+
+    private static IReadOnlyList<bool>? ToBoolList(object? value)
+    {
+        if (value is not List<object?> list || list.Count == 0)
+            return null;
+
+        var result = new bool[list.Count];
+        for (var i = 0; i < list.Count; i++)
+        {
+            if (ToScalarLong(list[i]) is not long v)
+                return null;
+            result[i] = v != 0;
+        }
+        return result;
     }
 
     /// <summary>Reads a value fully into memory. Used for the small, bounded set of keys this

@@ -237,6 +237,31 @@ public sealed class ServerProcessManagerTests
     }
 
     [Fact]
+    public void SuggestContextSize_does_not_downshift_sliding_window_models_that_fit()
+    {
+        var gemmaLike = new Aether.Services.GgufModelInfo(
+            "gemma3",
+            "Q4_K_M",
+            BlockCount: 34,
+            TrainingContextLength: 131072,
+            EmbeddingLength: 2560,
+            HeadCount: 8,
+            HeadCountKv: 4,
+            KeyLength: 256,
+            ValueLength: 256,
+            SlidingWindow: 1024,
+            SlidingWindowPattern: [true, true, true, true, true, false]);
+
+        var result = ServerProcessManager.SuggestContextSize(
+            gemmaLike,
+            fileSizeBytes: 3_900_000_000,
+            vramBytes: 8_000_000_000,
+            configuredContext: 65536);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
     public void SuggestContextSize_is_capped_by_the_models_training_context()
     {
         var trainedShort = Shape() with { TrainingContextLength = 8192 };
