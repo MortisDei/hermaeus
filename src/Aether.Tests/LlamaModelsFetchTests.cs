@@ -23,6 +23,20 @@ public sealed class LlamaModelsFetchTests
         Assert.Contains("\"cache_prompt\":true", json);
     }
 
+    /// <summary>r17 02-benchmark-truth.md 2.6: DisablePromptCache (benchmark-only in practice)
+    /// must flip cache_prompt off; the chat path never sets it, so the default above stays true.</summary>
+    [Fact]
+    public void BuildChatPayload_sets_cache_prompt_false_when_disable_prompt_cache_is_set()
+    {
+        var options = LlmChatOptions.Default with { DisablePromptCache = true };
+        var payload = LlamaCppService.BuildChatPayload("m", [], options, 256);
+        var json = System.Text.Json.JsonSerializer.Serialize(payload, new System.Text.Json.JsonSerializerOptions
+        {
+            PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.SnakeCaseLower
+        });
+        Assert.Contains("\"cache_prompt\":false", json);
+    }
+
     [Fact]
     public async Task GetModelsAsync_logs_once_per_down_state_not_per_call()
     {

@@ -1,7 +1,8 @@
 # Aether Security Review And Threat Model
 
-Last refreshed for `0.19.0-alpha` (see the r14 subsection under Reviewed
-Controls). The `0.10.0-alpha` pass re-verified the
+Last refreshed for `0.22.0-alpha` (see the r17 subsection under Threat
+Scenarios, covering the new GGUF header parser). The `0.10.0-alpha` pass
+re-verified the
 areas that changed in r3-r5 (agent tool execution, run_command recipes,
 lesson store, voice orchestration, benchmark insights) directly against the
 code, and confirmed via git history that the Local API, MCP bridge, secret
@@ -667,6 +668,52 @@ RAG remain unchanged since `0.9.41-alpha`.
   pure friction-adding changes**, consistent with every other
   confirm-gated destructive action in the app; neither has a security
   implication beyond reducing accidental data loss.
+
+### r17: GGUF Header Parser (New Attack Surface Over Untrusted Files)
+
+`GgufMetadataReader` (`Aether.Services/GgufMetadataReader.cs`) is the first
+code in the repo that parses byte content out of a `.gguf` model file rather
+than treating it as an opaque blob. Model files are downloaded from the
+internet (Hugging Face, direct URLs), so a malicious or corrupted file is a
+realistic input, not a hypothetical one.
+
+- **Metadata only, tensor data never read.** The parser stops after the
+  header's key/value metadata section; tensor payloads (which can be tens of
+  gigabytes) are never touched. This bounds the amount of the file that is
+  ever parsed, independent of the file's total size.
+- **Every allocation is capped before it happens.** String lengths (keys and
+  string values) are capped at 64 KiB, array element counts at 1,000,000, and
+  the metadata key/value count at 100,000, each checked against the declared
+  length *before* any buffer is allocated or bytes are read - a file
+  declaring a multi-gigabyte string or a billion-element array is rejected
+  immediately rather than causing a large allocation attempt.
+- **Every read is bounds-checked against the actual file, not the file's own
+  claims.** A declared length longer than the remaining file content raises
+  `EndOfStreamException`/`InvalidDataException` internally rather than
+  reading past the end of the stream or leaving a partially-read state;
+  `BinaryReader.ReadBytes`-style short reads (which return fewer bytes than
+  requested rather than throwing) are explicitly checked and treated as
+  truncation.
+- **Null-on-failure contract, never an escaping exception.** `TryRead`
+  catches every parse failure - bad magic, unsupported version, malformed
+  structure, an oversized declared length, a truncated file - and returns
+  null. Every call site (context-fit warning, fit chips, Auto Tune context
+  suggestion, benchmark quantization metadata) already had to handle "no
+  local file information available" as a pre-existing, tested fallback path,
+  so a hostile or corrupt GGUF file degrades those features to their
+  pre-r17 behavior rather than crashing or hanging the app.
+- **No code execution surface.** The parser only interprets a small, fixed
+  set of integer/string/array value types into fields the app already
+  displays (architecture name, quantization label, layer/head counts); there
+  is no reflection, no dynamic dispatch, and no path derived from parsed
+  content is ever used to read or write a different file.
+- **Test coverage is fixture/fuzz-style**, not just the happy path:
+  `GgufMetadataReaderTests` hand-writes byte fixtures for magic mismatch,
+  rejected versions, truncation at every structural boundary (mid-magic,
+  mid-header, mid-key, mid-value), an oversized declared string length, and
+  an oversized declared key count, alongside valid v2/v3 headers, unknown
+  value types that must be skipped without derailing later keys, and a
+  per-layer array value. No real model files are committed to the repo.
 
 ## Release Gate Status
 

@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using Aether.Core.Models;
 using Aether.Core.Services;
+using Aether.Services;
 
 namespace Aether.Services.ProcessManagement;
 
@@ -162,7 +163,9 @@ public sealed class ServerProcessManager : IDisposable
         ServerConfig cfg,
         IProgress<string>? progress = null,
         CancellationToken ct = default,
-        IPortOwnerLookup? portOwnerLookup = null)
+        IPortOwnerLookup? portOwnerLookup = null,
+        GgufModelInfo? ggufInfo = null,
+        HardwareProfile? hardware = null)
     {
         var baseConfig = NormalizeConfig(new ServerConfig
         {
@@ -197,6 +200,40 @@ public sealed class ServerProcessManager : IDisposable
         }
 
         var threads = ChooseThreadCount(baseConfig.Threads);
+
+        // r17 01-gguf-context-and-tuning.md 1.5: when the configured context cannot fit,
+        // tune it down to something that does instead of only shedding layers. At most one
+        // extra probe (all layers, the suggested context) runs before the existing layer
+        // descent; if it fails for any reason, fall through unchanged.
+        var suggestedContext = ggufInfo is not null && hardware is { MaxGpuVramBytes: > 0 } && File.Exists(baseConfig.ModelPath)
+            ? SuggestContextSize(ggufInfo, new FileInfo(baseConfig.ModelPath).Length, hardware.MaxGpuVramBytes, baseConfig.ContextSize)
+            : null;
+
+        if (suggestedContext is int tunedContext)
+        {
+            progress?.Report($"[aether] Auto-tune: configured context {baseConfig.ContextSize:N0} does not fit this GPU with this model; probing {tunedContext:N0} context with all layers first.");
+            var contextProbe = new ServerConfig
+            {
+                Name           = baseConfig.Name,
+                ExecutablePath = baseConfig.ExecutablePath,
+                ModelPath      = baseConfig.ModelPath,
+                Port           = baseConfig.Port,
+                ContextSize    = tunedContext,
+                GpuLayers      = -1,
+                Threads        = threads,
+                Slots          = baseConfig.Slots,
+                EmbeddingsMode = baseConfig.EmbeddingsMode,
+                AutoStart      = false,
+                ExtraArgs      = baseConfig.ExtraArgs
+            };
+
+            var contextResult = await TryProbeAsync(contextProbe, 999, progress, ct);
+            if (contextResult.Success)
+                return contextResult.TuneResult! with { TunedContextSize = tunedContext };
+
+            progress?.Report($"[aether] Auto-tune: {tunedContext:N0} context probe failed; falling back to layer descent at {baseConfig.ContextSize:N0} context.");
+        }
+
         var candidates = BuildGpuLayerCandidates(baseConfig.GpuLayers);
         var failures = new List<string>();
 
@@ -296,6 +333,47 @@ public sealed class ServerProcessManager : IDisposable
             }
             catch { }
         }
+    }
+
+    private static readonly int[] ContextSizeLadder =
+        [2048, 4096, 8192, 12288, 16384, 24576, 32768, 49152, 65536, 98304, 131072];
+
+    /// <summary>
+    /// Pure helper (r17 01-gguf-context-and-tuning.md 1.5): the largest value from a fixed
+    /// context ladder that is &lt;= min(<paramref name="configuredContext"/>,
+    /// <paramref name="info"/>'s training context) and whose full-offload weights+KV
+    /// projection fits <paramref name="vramBytes"/>. Returns null when the configured context
+    /// already fits (nothing to suggest), when the KV shape facts or VRAM are unavailable, or
+    /// when nothing on the ladder fits. <paramref name="fileSizeBytes"/> is required for the
+    /// weights term of the projection even though it is not itself part of the GGUF header.
+    /// </summary>
+    public static int? SuggestContextSize(GgufModelInfo info, long fileSizeBytes, long vramBytes, int configuredContext)
+    {
+        if (vramBytes <= 0 || fileSizeBytes <= 0 || configuredContext <= 0)
+            return null;
+
+        bool Fits(int ctx)
+        {
+            var bpe = KvCacheMath.DefaultBytesPerElement;
+            var projection = KvCacheMath.Project(fileSizeBytes, info, ctx, gpuLayers: -1, bpe, bpe);
+            return projection is not null && projection.TotalBytes + KvCacheMath.GpuHeadroomBytes <= vramBytes;
+        }
+
+        if (Fits(configuredContext))
+            return null;
+
+        var cap = info.TrainingContextLength is > 0
+            ? Math.Min(configuredContext, info.TrainingContextLength.Value)
+            : configuredContext;
+
+        int? best = null;
+        foreach (var candidate in ContextSizeLadder)
+        {
+            if (candidate > cap) continue;
+            if (Fits(candidate) && (best is null || candidate > best))
+                best = candidate;
+        }
+        return best;
     }
 
     public static IReadOnlyList<int> BuildGpuLayerCandidates(int configuredGpuLayers)
@@ -643,7 +721,8 @@ public sealed record ServerTuneResult(
     int? TotalLayers,
     int Threads,
     string LlamaServerVersion,
-    string RecentLog);
+    string RecentLog,
+    int? TunedContextSize = null);
 
 internal sealed record ProbeResult(bool Success, ServerTuneResult? TuneResult, string Error)
 {

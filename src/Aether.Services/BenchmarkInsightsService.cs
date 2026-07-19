@@ -31,6 +31,7 @@ public sealed class BenchmarkInsightsService : IBenchmarkInsightsService
         var currentSnapshot = await _systemInfo.CaptureAsync(ct);
 
         ResolveTags(runs, suites);
+        NormalizeRuntimeKind(runs);
 
         var comparableRuns = runs
             .Where(r => BenchmarkInsightsMath.IsHardwareComparable(r.HardwareSnapshot, currentSnapshot))
@@ -48,6 +49,30 @@ public sealed class BenchmarkInsightsService : IBenchmarkInsightsService
         }
 
         return BenchmarkInsightsMath.BuildReport(runs, comparableRuns, currentAppVersion, usage: usage);
+    }
+
+    /// <summary>
+    /// Legacy runs recorded before r17 02-benchmark-truth.md 2.4 all stamped
+    /// <c>Metadata.RuntimeKind = "dotnet"</c> regardless of the model, which made the Insights
+    /// grouping key (ModelId|Quantization|RuntimeKind) degenerate. In-memory only - this does
+    /// not write back to the store - map that placeholder onto a best-effort kind derived from
+    /// the run's own <see cref="BenchmarkRun.Provider"/> string, so an old "dotnet" run and a new
+    /// correctly-stamped run of the same model still land in one aggregate group.
+    /// </summary>
+    private static void NormalizeRuntimeKind(IReadOnlyList<BenchmarkRun> runs)
+    {
+        foreach (var run in runs)
+        {
+            if (!string.Equals(run.Metadata.RuntimeKind, "dotnet", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var provider = run.Provider ?? string.Empty;
+            run.Metadata.RuntimeKind =
+                provider.Contains("llama", StringComparison.OrdinalIgnoreCase) || provider.Contains("gguf", StringComparison.OrdinalIgnoreCase) ? "llama.cpp" :
+                provider.Contains("ollama", StringComparison.OrdinalIgnoreCase) ? "ollama" :
+                provider.Contains("openai", StringComparison.OrdinalIgnoreCase) ? "openai-compatible" :
+                provider;
+        }
     }
 
     /// <summary>

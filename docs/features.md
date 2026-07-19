@@ -272,9 +272,18 @@
   appears only when the process's executable exactly matches this server's
   configured binary (re-verified immediately before the process is killed).
   Any other process on the port is reported for information only.
-- A managed server configured with a context size above 16384 shows an
-  inline advisory in the Services view and a matching Doctor advisory: large
-  KV caches can spill out of VRAM and slow prompt processing.
+- The Services view's context-fit advisory is hardware-aware: when Aether can
+  read the local GGUF's header (layer count, KV head count, head dims) and the
+  machine's hardware profile, it estimates the actual weights+KV-cache size at
+  the configured context and GPU-layer offload and warns with the arithmetic
+  spelled out (e.g. "needs ~13.2 GB (weights ~7.5 GB + KV cache ~5.7 GB); this
+  GPU has 8.0 GB"), comparing against VRAM when layers are offloaded or against
+  system RAM when running CPU-only. When the header or hardware profile is
+  unavailable, it falls back to the old flat "above 16384 tokens" rule so the
+  warning never silently disappears. A separate advisory, independent of the
+  fit verdict, notes when the configured context exceeds the model's own
+  training context. Both are informational only: nothing here edits a value
+  or blocks Start.
 - Compare Models provides an in-chat practical comparison path for trying the
   same prompt across multiple visible models before choosing one for normal
   conversation.
@@ -304,10 +313,24 @@
   shows up on both. "Auto-tune all" tunes every local GGUF that is not
   running and does not already have a fresh profile (missing, size/mtime
   drift, or a different llama-server build), sequentially and cancellable.
+- The Services page's Auto Tune also tunes context, not only GPU layers: when
+  the configured context does not fit the GPU at full offload, it probes one
+  additional candidate (all layers at the largest context from a fixed ladder
+  that still fits, capped at the model's training context) before falling
+  back to its usual layer-by-layer descent at the originally configured
+  context. A successful context probe is reflected in the editable fields and
+  the tune-profile save, with the status line stating why (e.g. "configured
+  65,536 does not fit in 8.0 GB VRAM with this model"). This is the only
+  thing in the app that changes a context size automatically, and it only
+  runs from this explicitly user-clicked action.
 - Fits-on-your-hardware chips (Fits GPU / Partial offload / Too large) on
-  Models-page cards, the Hugging Face browser's file list, and the setup
-  wizard's recommended starter model, from a shared rough-headroom estimator
-  and a process-lifetime-cached hardware snapshot.
+  Models-page cards are KV-cache-aware for local files: when the GGUF header
+  can be read, the fit reason states the weights/KV split at the model's
+  configured or default context (e.g. "~4.1 GB weights + ~1.3 GB KV cache at
+  16,384 context vs 8.0 GB VRAM"). The Hugging Face browser's file list and
+  the setup wizard's recommended starter model stay on the simpler
+  size-only estimator, since no local file exists yet to read a header from.
+  All three share a process-lifetime-cached hardware snapshot.
 - "Organize folder..." flattens a Hugging Face hub-cache layout
   (`hub\models--org--repo\snapshots\<sha>\*.gguf`) into a flat
   `Models\LLM\<file>.gguf` folder: plan, preview every move and any name

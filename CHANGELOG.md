@@ -9,6 +9,93 @@ FIFO for changelog entries, 10 versions in this file max. Remove older entries
 and append them to `docs/changelog-archive.md` to maintain the 10 version
 limit.
 
+## [0.22.0-alpha] - 2026-07-19
+
+Implements docs/review r17 in full: hardware-aware context fit and benchmark
+truth. One theme across both fronts: numbers the app shows about models and
+hardware must be measured or derived, not guessed. A new internal GGUF
+header-metadata reader (layer count, KV head count, head dims, training
+context, quantization - never tensor data) makes both honest.
+
+### GGUF metadata and KV-cache math
+
+- **`GgufMetadataReader`** (`Aether.Services`): a small internal parser for
+  the GGUF header's metadata key/value section only. Bounds-checked against
+  untrusted downloaded files (64 KiB string cap, 1,000,000 array-element cap,
+  100,000 metadata-key cap, every read checked against the actual file
+  length); malformed or truncated input returns null rather than throwing.
+  Process-lifetime cached by (path, size, mtime).
+- **`KvCacheMath`** (`Aether.Services`): deterministic
+  `block_count * head_count_kv * (key_length + value_length) * bytesPerElement`
+  KV-cache estimate, with `--cache-type-k`/`--cache-type-v` overrides and
+  offload-fraction scaling for partial GPU layers. A known, documented
+  overestimate for sliding-window-attention models (the gemma family).
+- **`ModelFitEstimator`** gains a KV-cache-aware overload (null GGUF info
+  falls back byte-identically to the existing size-only estimate); the
+  Models page's fit chips now state the weights/KV split at the model's
+  configured or default context for local files.
+- **Services page context-fit warning** replaces the flat "above 16384
+  tokens" rule with hardware-aware VRAM/RAM math (weights + KV cache vs. the
+  detected GPU or system RAM) whenever a local GGUF header and a hardware
+  profile are both available, falling back to the old flat rule otherwise so
+  the warning never silently disappears. A training-context advisory is
+  appended independently when the configured context exceeds what the model
+  was trained at. Both are informational only - nothing here edits a value or
+  blocks Start.
+- **Auto Tune learns about context**: when the configured context does not
+  fit the GPU at full offload, `AutoTuneAsync` probes one additional
+  candidate (all layers at the largest context from a fixed ladder that
+  still fits, capped at the model's training context) before its usual
+  layer-by-layer descent at the originally configured context. This is the
+  only place in the app that changes a context size automatically, and it
+  only runs from the explicitly user-clicked Auto Tune action.
+
+### Benchmark truth
+
+- **Real server timings**: `RunCaseAsync` now streams via `StreamChatAsync`
+  events instead of the text-only stream, capturing llama-server's own
+  prompt/decode timings object. When a provider reports them, tokens/sec is
+  `predicted_n / predicted_ms * 1000` (a measurement) and prompt speed is
+  shown alongside it; each result is labeled `server-timings` or
+  `chars-approx` so measured and estimated numbers are never confused.
+- **Honest fallback math**: the chars/4 estimate (used when a provider
+  reports no timings) now divides by the decode window (total time minus
+  first-token latency) instead of total elapsed time, so a long prompt is no
+  longer counted as slow decode twice.
+- **Neutral resource score**: `ResourceScore` used to be Aether's own process
+  RSS delta - noise for a model running in `llama-server` (a different
+  process) or on a remote endpoint. It is now always neutral (1.0); the
+  before/after memory and VRAM snapshots stay for display.
+- **Honest run metadata**: runs against a managed local GGUF model now carry
+  the real context size/GPU layers/thread count/model path from the managed
+  server actually configured to serve that model, and a real quantization
+  label from the GGUF header, instead of stamping app-process values
+  (`Environment.ProcessorCount` threads, empty quantization) on every run
+  regardless of the model. `RuntimeKind` is derived from the model's own
+  provider tag instead of a hardcoded `"dotnet"`; Insights normalizes legacy
+  `"dotnet"` runs at load time (in memory only) so old and new runs of the
+  same model keep aggregating together.
+- **Rerun fidelity**: `RerunAsync` now resolves the live model instance from
+  the provider first (falling back to a thin reconstruction only if the
+  model no longer exists), so a rerun's metadata is not hollowed out by
+  losing `DefaultContextSize`/tags/profile linkage.
+- **Cold means cold**: since r14 made `cache_prompt: true` unconditional,
+  llama-server could retain a previous request's KV across benchmark runs,
+  letting a "Cold" run's first case get a warm prefill. A new
+  `LlmChatOptions.DisablePromptCache` (honored only by `LlamaCppService`,
+  benchmark-only in practice) is set for each case's iteration 0 and left
+  false for warm iterations; the chat path is untouched and keeps
+  `cache_prompt: true` as its default.
+- **No more dropdown restarts**: selecting a model in the Benchmarks dropdown
+  no longer stops and restarts the live managed chat server (previously a
+  1-2 minute operation on large models) - it only updates a status hint.
+  `RunAsync` already switches the server when actually needed via
+  `PrepareSelectedModelAsync`.
+
+57 new tests (884 -> 941). `docs/security-review.md` gained an r17 subsection
+for the GGUF header parser as untrusted-input surface. `docs/review/`
+archived to `docs/review/archived/r17/`.
+
 ## [0.21.0-alpha] - 2026-07-19
 
 Implements docs/review r16 in full: orchestration hardening, memory
@@ -909,120 +996,3 @@ remaining field issues (send-path latency, orphaned server processes).
   and embedding backfill relocation, job-object child-process containment,
   port preflight and orphan detection, full UI-thread-safety sweep with an
   architecture test.
-
-## [0.13.0-alpha] - 2026-07-15
-
-Implements docs/review r8: voice pronunciation, onboarding, performance, and
-technical debt. Theme: polish what exists rather than add new capability.
-Also reviews and corrects two optimization commits (`ad618da`, `aea2326`)
-that landed between r6 and r7 without a review pass.
-
-### Voice pronunciation
-
-- **Text normalization** (`Aether.Voice/KokoroTextNormalizer.cs`). Numbers,
-  currency, percentages, ordinals, clock times, and a handful of standalone
-  symbols (`&`, `+`, `/`, `@`, `=`) are expanded to plain English words before
-  phonemization. Fixes the bug where digits were silently dropped entirely
-  (`MapLetter` mapped non-letters to empty, and the tokenizer skipped
-  unrecognized characters) - "You have 3 errors" previously spoke as "You
-  have errors".
-- **CMU Pronouncing Dictionary** (`Aether.Voice/CmuPronouncingDictionary.cs`,
-  `ArpabetIpaMap.cs`). The ~250-word inline dictionary and its letter-by-letter
-  rule fallback are replaced as the primary pronunciation source by the
-  ~126,000-word CMUdict (BSD-style CMU license; see `THIRD-PARTY-NOTICES.md`),
-  embedded gzip-compressed. ARPABET phones map to Kokoro's IPA vocabulary with
-  stress marks; unstressed vs. stressed AH (schwa vs. wedge) is handled
-  specially. The rule-based fallback still exists for genuinely unknown words,
-  fixed to no longer emit the vocabulary-unsupported "ɝ" symbol and to read
-  word-initial "gh" as a hard /g/ (ghost) rather than /f/ (a rule meant only
-  for word-final "gh", as in laugh).
-- **User pronunciation lexicon** (`Aether.Voice/KokoroUserLexicon.cs`) at
-  `{DataRoot}/voice/lexicon.txt`, `word = ipa` per line, reloaded when the
-  file changes. Seeded with defaults for words no dictionary would know,
-  including the app's own name ("Aether" was mispronounced before this).
-  Settings > Voice gained an "Open pronunciation lexicon" button.
-- **Suffix morphology**: possessives and common suffixes (`'s`, `s`, `es`,
-  `ed`, `ing`) retry against the lexicon chain with correct voicing rules
-  (e.g. "aether's" resolves via the stem "aether" plus a voiced /z/).
-- **Unknown acronyms** are spelled out by letter name (e.g. "GGUF" as "gee
-  gee you eff") rather than mispronounced as a word; acronyms cmudict
-  already knows (api, cpu, html, usa) use their real dictionary entries.
-- ~20 golden regression sentences assert exact IPA output and zero dropped
-  characters through tokenization.
-
-### Onboarding and usability
-
-- **Guided starter model download** (`Aether.Services/StarterModelCatalog.cs`).
-  The setup wizard's model step offers a hardware-aware download (three
-  VRAM tiers, Qwen2.5 3B/7B/14B Instruct Q4_K_M) alongside the existing
-  manual path picker, with SHA256 verification via the existing
-  `ModelDownloadService`.
-- **Voice install from the wizard**: the Voice step gained an "Install now"
-  button for Kokoro (native) that calls the same `IDoctorService` install
-  path Settings/Doctor already use, so first-run setup can finish chat and
-  voice in one pass instead of requiring a separate trip to Settings.
-- **Markdown tables and clickable links** (`Aether.Desktop.Controls.MarkdownViewer`).
-  Tables (parsed by Markdig but previously unrendered) now render as a grid
-  with a bold header row. Links are clickable (embedded via
-  `InlineUIContainer`, since Avalonia's text-flow `Inline`/`Run`/`Span` have
-  no pointer events) with an https/http-only scheme gate; anything else
-  (`file:`, `javascript:`, `data:`) renders as inert styled text.
-- **Empty states**: Chat gets a distinct "no chat model configured" state
-  with links to the setup wizard and Services (RAG and Memories already had
-  empty states); Agent's workspace field and Benchmark's run history gained
-  matching empty-state guidance.
-- **Tooltip sweep** across the settings sections, Doctor, Memories, Model
-  Management, Logs, and System Overview views that previously had none.
-
-### Performance
-
-- **Startup phase timing**: `App.axaml.cs` logs settings/store-init/voice-probe/
-  viewmodel timings plus a total, so future startup work has a baseline.
-- Embedding-model warm-up moved off the startup critical path (fire-and-forget
-  after the UI is usable, logged separately when it completes) instead of
-  blocking every launch behind an ONNX load.
-- **Memory recall regression fix** (`Aether.Services/MemoryStore.cs`):
-  `aea2326` had restricted hybrid-recall candidates to FTS hits plus a hard
-  cosine > 0.7 threshold, and fetched each non-FTS candidate individually
-  (N+1 queries). Every embedded row is scored again; only the plausible
-  top-K non-FTS ids are hydrated, in one batched `WHERE id IN (...)` query.
-- **Chat pagination**: conversations render only the newest 100 messages
-  (`ChatViewModel.VisibleMessages`), with a "Show earlier messages" button
-  to reveal more. Persistence, memory extraction, and prompt-history
-  truncation still operate on the full message list.
-- **Incremental markdown re-render**: `MarkdownViewer` now reuses each
-  top-level block's existing control when its source text is unchanged
-  between renders, rebuilding only from the first changed block onward,
-  instead of rebuilding the entire document on every streaming debounce tick.
-- Audited every model-restart call site; both existing guards
-  (`ServicesViewModel.SelectModelAndRestartAsync`'s path comparison,
-  `BenchmarkViewModel.PrepareModelAsync`'s model-ID fast-skip) were already
-  correct and are now covered by tests. Chat model switching and
-  `Aether.LocalApi` have no restart call sites.
-
-### Technical debt
-
-- **Harness registration guard** (`HarnessRegistrationGuardTests`): a
-  reflection-based test asserts every public parameterless Task-returning
-  method on the custom harness's test classes is registered in
-  `HarnessCases` exactly once. Immediately caught six previously-dead tests
-  across the codebase (beyond the two r6 already found) that existed but
-  never ran: `AcceptanceTests.AgentUiAcceptance_PatchQueueMetadataIsRendered`,
-  `AcceptanceTests.TraceSchema_FileIsValidAndSampleConforms` (also fixed a
-  broken relative path in the same test), `RagTests.RagDirectoryIngestPersistsCompletedFileBatches`,
-  `ServiceTests.BenchmarkExportAllCreatesBatchFolder`,
-  `ServiceTests.MemoryStoreCountsByConversationWork`, and
-  `TtsTests.VoicePreviewSkipsBlankText`. All six now run and pass.
-- `SettingsSectionViewModels.cs` (881 lines, 11 classes) split one class per
-  file; `DoctorService.cs` (1411 lines) split into partial-class files by
-  domain (Startup, Storage, Runtime, Voice, Rag, System, Benchmarks). Both
-  are pure moves with no logic changes.
-
-### Fixed
-
-- The chat "thinking" pulse animation (`aea2326`) never actually ran: it
-  bound to `IsGenerating` on `MessageViewModel`, which has no such property,
-  and set a `RenderTransform` via both a malformed attribute and a property
-  element. Now bound to the message's own `IsStreaming`.
-
-56 new tests (461 -> 517). Coverage floor: 49 -> 50 (narrative target).

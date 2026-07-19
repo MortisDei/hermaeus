@@ -211,4 +211,70 @@ public sealed class ServerProcessManagerTests
         (CancellationTokenSource?)typeof(ServerProcessManager)
             .GetField("_monitorCts", BindingFlags.NonPublic | BindingFlags.Instance)!
             .GetValue(mgr);
+
+    // r17 01-gguf-context-and-tuning.md 1.5: pure context-suggestion ladder.
+    private static Aether.Services.GgufModelInfo Shape() => new("llama", "Q4_K_M", 32, 131072, 4096, 32, 8, 128, 128);
+
+    [Fact]
+    public void SuggestContextSize_returns_null_when_the_configured_context_already_fits()
+    {
+        // 4 GB weights * 1.05 + tiny KV at 4096 context comfortably fits an 8 GB card.
+        var result = ServerProcessManager.SuggestContextSize(Shape(), fileSizeBytes: 4_000_000_000, vramBytes: 8_000_000_000, configuredContext: 4096);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void SuggestContextSize_picks_the_largest_ladder_value_that_fits()
+    {
+        // 4 GB weights leave roughly 4.2 GB of headroom-adjusted budget for KV at 8 GB VRAM;
+        // 131072 bytes/token means 4096 tokens costs ~537 MB, so a mid-ladder value should win
+        // while the full configured 131072 context (which costs tens of GB of KV) does not fit.
+        var result = ServerProcessManager.SuggestContextSize(Shape(), fileSizeBytes: 4_000_000_000, vramBytes: 8_000_000_000, configuredContext: 131072);
+
+        Assert.NotNull(result);
+        Assert.True(result < 131072);
+    }
+
+    [Fact]
+    public void SuggestContextSize_is_capped_by_the_models_training_context()
+    {
+        var trainedShort = Shape() with { TrainingContextLength = 8192 };
+
+        // 4 GB VRAM: the full 131072 configured context needs ~16 GB of KV alone and does not
+        // fit, forcing a ladder search; the search must not suggest anything above the 8192
+        // training context even though larger ladder values would otherwise fit 4 GB fine.
+        var result = ServerProcessManager.SuggestContextSize(trainedShort, fileSizeBytes: 100_000_000, vramBytes: 4_000_000_000, configuredContext: 131072);
+
+        Assert.NotNull(result);
+        Assert.True(result <= 8192);
+    }
+
+    [Fact]
+    public void SuggestContextSize_returns_null_when_nothing_on_the_ladder_fits()
+    {
+        var result = ServerProcessManager.SuggestContextSize(Shape(), fileSizeBytes: 4_000_000_000, vramBytes: 1_000_000, configuredContext: 131072);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void SuggestContextSize_returns_null_when_shape_facts_are_missing()
+    {
+        var incomplete = new Aether.Services.GgufModelInfo("llama", "Q4_K_M", null, null, null, null, null, null, null);
+
+        var result = ServerProcessManager.SuggestContextSize(incomplete, fileSizeBytes: 4_000_000_000, vramBytes: 64_000_000_000, configuredContext: 131072);
+
+        Assert.Null(result);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void SuggestContextSize_returns_null_when_vram_is_unavailable(long vramBytes)
+    {
+        var result = ServerProcessManager.SuggestContextSize(Shape(), fileSizeBytes: 4_000_000_000, vramBytes: vramBytes, configuredContext: 131072);
+
+        Assert.Null(result);
+    }
 }

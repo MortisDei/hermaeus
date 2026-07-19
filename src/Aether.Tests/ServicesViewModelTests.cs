@@ -17,14 +17,120 @@ public sealed class ServicesViewModelTests
         return new ServerProcessViewModel(config, settings, new RedactionService(), new TrustService(), new FakeToasts(), new RuntimeLogService(settings));
     }
 
+    /// <summary>A tiny but structurally valid llama-shaped GGUF header (block_count 32,
+    /// kv heads 8, key/value 128 dims each): 131072 bytes of KV per token, so 8192 context
+    /// costs ~1 GiB of KV and 65536 context costs ~8 GiB - enough to cross an 8 GB VRAM budget
+    /// without needing an actual multi-gigabyte weights file on disk.</summary>
+    private static string WriteLlamaGgufFixture(TempDir temp, string name = "model.gguf")
+    {
+        using var ms = new MemoryStream();
+        using (var w = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true))
+        {
+            w.Write(System.Text.Encoding.ASCII.GetBytes("GGUF"));
+            w.Write((uint)3);
+            w.Write((ulong)0);
+            w.Write((ulong)9);
+
+            void WriteKey(string key)
+            {
+                var bytes = System.Text.Encoding.UTF8.GetBytes(key);
+                w.Write((ulong)bytes.Length);
+                w.Write(bytes);
+            }
+            void WriteString(string key, string value)
+            {
+                WriteKey(key);
+                w.Write((uint)8);
+                var bytes = System.Text.Encoding.UTF8.GetBytes(value);
+                w.Write((ulong)bytes.Length);
+                w.Write(bytes);
+            }
+            void WriteU32(string key, uint value)
+            {
+                WriteKey(key);
+                w.Write((uint)4);
+                w.Write(value);
+            }
+
+            WriteString("general.architecture", "llama");
+            WriteU32("general.file_type", 15);
+            WriteU32("llama.block_count", 32);
+            WriteU32("llama.context_length", 131072);
+            WriteU32("llama.embedding_length", 4096);
+            WriteU32("llama.attention.head_count", 32);
+            WriteU32("llama.attention.head_count_kv", 8);
+            WriteU32("llama.attention.key_length", 128);
+            WriteU32("llama.attention.value_length", 128);
+        }
+
+        var path = temp.PathFor(name);
+        File.WriteAllBytes(path, ms.ToArray());
+        return path;
+    }
+
+    // ── r17 01-gguf-context-and-tuning.md 1.4/1.6: hardware-aware context-fit warning ──
+
+    [Fact]
+    public async Task Context_fit_warning_is_silent_at_small_context_and_present_at_huge_context()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var modelPath = WriteLlamaGgufFixture(temp);
+        var hw = new HardwareProfile(TotalRamBytes: 64L * 1024 * 1024 * 1024, MaxGpuVramBytes: 8L * 1024 * 1024 * 1024, GpuName: "Test GPU");
+        var config = new ServerConfig { Name = "Chat", ModelPath = modelPath, ContextSize = 8192, GpuLayers = -1 };
+        var vm = new ServerProcessViewModel(config, settings, new RedactionService(), new TrustService(), new FakeToasts(), new RuntimeLogService(settings), hardwareProfile: hw);
+        await Task.Delay(200);
+
+        Assert.False(vm.HasContextFitWarning, vm.ContextFitNote);
+
+        vm.ContextSize = 65536;
+
+        Assert.True(vm.HasContextFitWarning);
+        Assert.Contains("GB", vm.ContextFitNote, StringComparison.Ordinal);
+        Assert.Contains("KV cache", vm.ContextFitNote, StringComparison.Ordinal);
+        Assert.Contains("weights", vm.ContextFitNote, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Context_fit_falls_back_to_the_flat_threshold_when_metadata_is_unavailable()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var hw = new HardwareProfile(TotalRamBytes: 64L * 1024 * 1024 * 1024, MaxGpuVramBytes: 8L * 1024 * 1024 * 1024, GpuName: "Test GPU");
+        // No ModelPath at all, so no GGUF header can be read - the flat 16384 rule must still fire.
+        var config = new ServerConfig { Name = "Chat", ContextSize = 32768, GpuLayers = -1 };
+        var vm = new ServerProcessViewModel(config, settings, new RedactionService(), new TrustService(), new FakeToasts(), new RuntimeLogService(settings), hardwareProfile: hw);
+        await Task.Delay(200);
+
+        Assert.True(vm.HasContextFitWarning);
+        Assert.Contains("32,768", vm.ContextFitNote, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Training_context_advisory_is_appended_independent_of_the_vram_verdict()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var modelPath = WriteLlamaGgufFixture(temp);
+        // Plenty of VRAM so the KV/weights verdict itself never warns; only the
+        // training-context advisory (info.TrainingContextLength = 131072) should fire.
+        var hw = new HardwareProfile(TotalRamBytes: 256L * 1024 * 1024 * 1024, MaxGpuVramBytes: 256L * 1024 * 1024 * 1024, GpuName: "Huge GPU");
+        var config = new ServerConfig { Name = "Chat", ModelPath = modelPath, ContextSize = 200000, GpuLayers = -1 };
+        var vm = new ServerProcessViewModel(config, settings, new RedactionService(), new TrustService(), new FakeToasts(), new RuntimeLogService(settings), hardwareProfile: hw);
+        await Task.Delay(200);
+
+        Assert.True(vm.HasContextFitWarning);
+        Assert.Contains("trained at 131,072 context", vm.ContextFitNote, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Oversized_context_note_visible_above_threshold()
     {
         using var temp = new TempDir();
         var vm = NewServerVm(temp, 32768);
 
-        Assert.True(vm.HasOversizedContext);
-        Assert.Contains("32,768", vm.OversizedContextNote);
+        Assert.True(vm.HasContextFitWarning);
+        Assert.Contains("32,768", vm.ContextFitNote);
     }
 
     [Fact]
@@ -33,7 +139,7 @@ public sealed class ServicesViewModelTests
         using var temp = new TempDir();
         var vm = NewServerVm(temp, 8192);
 
-        Assert.False(vm.HasOversizedContext);
+        Assert.False(vm.HasContextFitWarning);
     }
 
     [Fact]
@@ -41,12 +147,12 @@ public sealed class ServicesViewModelTests
     {
         using var temp = new TempDir();
         var vm = NewServerVm(temp, 8192);
-        Assert.False(vm.HasOversizedContext);
+        Assert.False(vm.HasContextFitWarning);
 
         vm.ContextSize = 32768;
 
-        Assert.True(vm.HasOversizedContext);
-        Assert.Contains("32,768", vm.OversizedContextNote);
+        Assert.True(vm.HasContextFitWarning);
+        Assert.Contains("32,768", vm.ContextFitNote);
     }
 
     private static ServicesViewModel NewServicesVm(TempDir temp, out ISettingsService settings)

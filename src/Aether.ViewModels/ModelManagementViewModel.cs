@@ -144,7 +144,11 @@ public partial class ModelManagementViewModel : ObservableObject
                 var profile = _profiles.GetOrCreate(m.Id, m.Provider);
                 var item = new ModelProfileItemViewModel(m, profile, runningIds.Contains(m.Id));
                 RefreshTuneSummary(item);
-                ApplyFit(item, m.SizeBytes, hardware);
+                var existingTune = LlamaTuneProfileStore.Find(_settings.Settings, item.ModelId);
+                var ggufInfo = item.IsLocalGguf
+                    ? await Task.Run(() => GgufMetadataReader.TryRead(item.ModelId))
+                    : null;
+                ApplyFit(item, m.SizeBytes, hardware, ggufInfo, ResolveProbeContextSize(item, existingTune));
                 ApplyManifestState(item, manifestEntries);
                 _allModels.Add(item);
             }
@@ -183,9 +187,9 @@ public partial class ModelManagementViewModel : ObservableObject
         _toasts.Show("Model profile reset", $"Aether metadata for {item.RawName} was cleared.", ToastKind.Info);
     }
 
-    private static void ApplyFit(ModelProfileItemViewModel item, long sizeBytes, HardwareProfile hardware)
+    private static void ApplyFit(ModelProfileItemViewModel item, long sizeBytes, HardwareProfile hardware, GgufModelInfo? info, int contextSize)
     {
-        var fit = ModelFitEstimator.Estimate(sizeBytes, hardware);
+        var fit = ModelFitEstimator.Estimate(sizeBytes, hardware, info, contextSize);
         item.FitTier = fit.Tier;
         item.FitReason = fit.Reason;
     }

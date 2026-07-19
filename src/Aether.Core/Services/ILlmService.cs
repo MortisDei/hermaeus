@@ -74,6 +74,14 @@ public sealed record LlmChatOptions
     /// </summary>
     public IReadOnlyList<LlmToolDefinition>? Tools { get; init; }
 
+    /// <summary>
+    /// Disables llama-server's prompt-cache reuse for this request (r17 02-benchmark-truth.md
+    /// 2.6). Only <c>LlamaCppService</c> honors this, as <c>cache_prompt = !DisablePromptCache</c>;
+    /// other providers ignore it. Benchmark-only in practice: the chat path never sets this, so
+    /// <c>cache_prompt: true</c> stays the chat default.
+    /// </summary>
+    public bool DisablePromptCache { get; init; }
+
     public static readonly LlmChatOptions Default = new();
 }
 

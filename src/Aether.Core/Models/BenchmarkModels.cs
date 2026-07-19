@@ -132,6 +132,20 @@ public sealed class BenchmarkResult
     public int OutputChars { get; set; }
     public double CharsPerSecond { get; set; }
     public double ApproxTokensPerSecond { get; set; }
+    /// <summary>llama-server's own prompt-processing token count/duration, when the provider
+    /// reported timings (r17 02-benchmark-truth.md 2.1). Null for providers that don't.</summary>
+    public int? PromptTokens { get; set; }
+    public double? PromptMs { get; set; }
+    /// <summary>prompt_n / prompt_ms * 1000, for display alongside <see cref="ApproxTokensPerSecond"/>.</summary>
+    public double? PromptTokensPerSecond { get; set; }
+    /// <summary>llama-server's own decode token count/duration; <see cref="ApproxTokensPerSecond"/>
+    /// is computed from these when present instead of the chars/4 fallback.</summary>
+    public int? GeneratedTokens { get; set; }
+    public double? DecodeMs { get; set; }
+    /// <summary>"server-timings" when <see cref="ApproxTokensPerSecond"/> came from the
+    /// provider's own timings, "chars-approx" when it is the chars/4 estimate. Empty for runs
+    /// recorded before this field existed, which keeps old stored JSON loading cleanly.</summary>
+    public string MeasurementSource { get; set; } = string.Empty;
     public bool KeywordHit { get; set; }
     public bool RegexHit { get; set; }
     public bool RefusalCorrect { get; set; }
@@ -202,6 +216,14 @@ public sealed record HardwareProfile(long TotalRamBytes, long MaxGpuVramBytes, s
 
 public static class BenchmarkScoring
 {
+    /// <summary>
+    /// The <paramref name="resource"/> slot is reserved but currently always neutral (1.0):
+    /// it used to be the Aether process's own RSS delta, which is noise for a model running in
+    /// llama-server (a different process) or on a remote endpoint (r17 02-benchmark-truth.md
+    /// 2.3). Kept in the weighted sum rather than dropped so historical <c>RankingScore</c>
+    /// values (recomputed from stored results at read time) shift minimally; a future round can
+    /// give it a real, honest signal.
+    /// </summary>
     public static double RankingScore(double quality, double tokensPerSecond, double stability, double resource)
     {
         var speed = Math.Clamp(tokensPerSecond / 30d, 0, 1);

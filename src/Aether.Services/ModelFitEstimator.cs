@@ -37,6 +37,45 @@ public static class ModelFitEstimator
         return new ModelFitResult(ModelFitTier.TooLarge, $"~{FormatGb(fileSizeBytes)} model exceeds available VRAM and RAM headroom.");
     }
 
+    /// <summary>
+    /// KV-cache-aware overload (r17 01-gguf-context-and-tuning.md 1.3): when
+    /// <paramref name="info"/> is null (no local GGUF header could be read), this is
+    /// byte-identical to <see cref="Estimate(long, HardwareProfile)"/>. When present, the
+    /// weights+KV projection at <paramref name="contextSize"/> and full offload (this answers
+    /// "could this model fit at all", not "does the currently configured GpuLayers fit" - that
+    /// is a Services-card concern, not a library-card one) replaces the flat 1.2 multiplier,
+    /// and the Reason states the split so users see why a small file can still be too large at
+    /// huge context.
+    /// </summary>
+    public static ModelFitResult Estimate(long fileSizeBytes, HardwareProfile hw, GgufModelInfo? info, int contextSize)
+    {
+        if (info is null)
+            return Estimate(fileSizeBytes, hw);
+
+        if (hw.TotalRamBytes <= 0 && hw.MaxGpuVramBytes <= 0)
+            return new ModelFitResult(ModelFitTier.Unknown, string.Empty);
+
+        var bpe = KvCacheMath.DefaultBytesPerElement;
+        var projection = KvCacheMath.Project(fileSizeBytes, info, contextSize, gpuLayers: -1, bpe, bpe);
+        if (projection is null)
+            return Estimate(fileSizeBytes, hw);
+
+        var weightsGb = FormatGb(projection.WeightsBytes);
+        var kvGb = FormatGb(projection.KvBytes);
+
+        if (hw.MaxGpuVramBytes > 0 && projection.TotalBytes + GpuHeadroomBytes <= hw.MaxGpuVramBytes)
+            return new ModelFitResult(ModelFitTier.FitsGpu, $"~{weightsGb} weights + ~{kvGb} KV cache at {contextSize:N0} context fits {FormatGb(hw.MaxGpuVramBytes)} VRAM.");
+
+        if (hw.TotalRamBytes > 0 && projection.TotalBytes + RamHeadroomBytes <= hw.TotalRamBytes)
+        {
+            return hw.MaxGpuVramBytes > 0
+                ? new ModelFitResult(ModelFitTier.FitsPartial, $"~{weightsGb} weights + ~{kvGb} KV cache at {contextSize:N0} context vs {FormatGb(hw.MaxGpuVramBytes)} VRAM: needs partial CPU offload.")
+                : new ModelFitResult(ModelFitTier.FitsPartial, $"~{weightsGb} weights + ~{kvGb} KV cache at {contextSize:N0} context runs on CPU/RAM only: no GPU detected.");
+        }
+
+        return new ModelFitResult(ModelFitTier.TooLarge, $"~{weightsGb} weights + ~{kvGb} KV cache at {contextSize:N0} context exceeds available VRAM and RAM headroom.");
+    }
+
     private static string FormatGb(long bytes) => $"{bytes / 1024d / 1024 / 1024:0.0} GB";
 
     /// <summary>Short chip text for a tier; empty for Unknown so callers render nothing rather

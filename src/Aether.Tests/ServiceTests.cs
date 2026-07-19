@@ -241,6 +241,193 @@ namespace Aether.Tests
             True(Directory.GetFiles(Path.GetDirectoryName(indexPath)!, "*.md", SearchOption.AllDirectories).Length >= 3, "bulk export should include each run export plus the index");
         }
 
+        /// <summary>r17 02-benchmark-truth.md 2.1: real llama-server timings, not chars/4 over
+        /// total time, drive tok/s and the display fields when a provider reports them.</summary>
+        public static async Task BenchmarkServerTimingsProduceRealTokensPerSecond()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var llm = new FakeCapturingTimingsLlm();
+            var service = new BenchmarkService(settings, llm, new FakeSystemInfo(), new FakeEvalStore());
+
+            var suite = BenchmarkService.StarterSuites().First();
+            suite.MaxCases = 1;
+            var run = await service.RunAsync(suite, new LlmModel { Id = "timings", Name = "Timings", Provider = "Test" });
+
+            var result = run.Results[0];
+            Equal("server-timings", result.MeasurementSource, "a provider reporting timings should be labeled as measured, not estimated");
+            Equal(100d, result.ApproxTokensPerSecond, "predicted_n / predicted_ms * 1000 = 20/200*1000 = 100");
+            Equal(100d, result.PromptTokensPerSecond, "prompt_n / prompt_ms * 1000 = 10/100*1000 = 100");
+            Equal(10, result.PromptTokens, "prompt token count should come from ServerTimings.PromptTokens");
+            Equal(20, result.GeneratedTokens, "generated token count should come from ServerTimings.PredictedTokens");
+        }
+
+        /// <summary>r17 02-benchmark-truth.md 2.1: a fake without timings must keep reproducing
+        /// today's chars/4 numbers, just labeled as an estimate.</summary>
+        public static async Task BenchmarkFallbackWithoutTimingsIsLabeledAsEstimated()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var service = new BenchmarkService(settings, new FakeLlm(), new FakeSystemInfo(), new FakeEvalStore());
+
+            var suite = BenchmarkService.StarterSuites().First();
+            suite.MaxCases = 1;
+            var run = await service.RunAsync(suite, new LlmModel { Id = "fake-agent", Name = "Fake Agent", Provider = "Test" });
+
+            var result = run.Results[0];
+            Equal("chars-approx", result.MeasurementSource, "a provider without timings should be labeled as estimated, not measured");
+            True(result.PromptTokens is null, "no provider timings means no prompt token count");
+            True(result.GeneratedTokens is null, "no provider timings means no generated token count");
+        }
+
+        /// <summary>r17 02-benchmark-truth.md 2.2: the chars/4 fallback used to divide by total
+        /// elapsed time including prompt processing, reporting a long-prefill run as slow twice.
+        /// Exercised directly via reflection (mirrors the existing ToCsv reflection test) since
+        /// FillTiming is private and its inputs need exact control that streaming timing cannot
+        /// give deterministically.</summary>
+        public static Task BenchmarkFallbackTokensPerSecondUsesTheDecodeWindowNotTotalTime()
+        {
+            var method = typeof(BenchmarkService).GetMethod("FillTiming", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
+                ?? throw new InvalidOperationException("FillTiming method not found");
+            var result = new BenchmarkResult { Output = new string('x', 400) };
+
+            method.Invoke(null, [result, 4000L, 5000L, null]);
+
+            // Old behavior (denominator = total 5s): (400/4) / 5 = 20 tok/s.
+            // New behavior (denominator = decode window 1s): (400/4) / 1 = 100 tok/s.
+            Equal(100d, result.ApproxTokensPerSecond, "fallback tok/s should use the decode window (total - first token), not total elapsed time");
+            NotEqual(20d, result.ApproxTokensPerSecond, "the old total-time-denominator bug must not resurface");
+            return Task.CompletedTask;
+        }
+
+        /// <summary>r17 02-benchmark-truth.md 2.3: ResourceScore measured the Aether process's
+        /// own RSS delta, noise for a model running in a different process or remotely - it is
+        /// now always neutral regardless of the observed delta.</summary>
+        public static Task BenchmarkResourceScoreIsAlwaysNeutral()
+        {
+            var method = typeof(BenchmarkService).GetMethod("FillResources", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
+                ?? throw new InvalidOperationException("FillResources method not found");
+            var result = new BenchmarkResult();
+            var before = new SystemSnapshot { ProcessMemoryBytes = 100_000_000 };
+            var after = new SystemSnapshot { ProcessMemoryBytes = 900_000_000 };
+
+            method.Invoke(null, [result, before, after]);
+
+            Equal(1.0, result.ResourceScore, "resource score should be neutral even with a large observed RSS delta");
+            Equal(100_000_000L, result.ProcessMemoryBeforeBytes, "before/after memory snapshots should still be recorded for display");
+            Equal(900_000_000L, result.ProcessMemoryAfterBytes, "after memory snapshot should still be recorded for display");
+            return Task.CompletedTask;
+        }
+
+        /// <summary>r17 02-benchmark-truth.md 2.4: a run against a managed GGUF model should
+        /// carry the server's real context/layers/threads/path and a non-empty quantization,
+        /// not the app-process values every run used to stamp regardless of the model.</summary>
+        public static async Task BenchmarkMetadataCarriesManagedServerConfigAndQuantization()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var modelPath = WriteMinimalLlamaGgufFixture(temp);
+            settings.Settings.ManagedServers.Add(new ServerConfig
+            {
+                Name = "Chat",
+                ModelPath = modelPath,
+                ContextSize = 16384,
+                GpuLayers = 24,
+                Threads = 6
+            });
+            var service = new BenchmarkService(settings, new FakeLlm(), new FakeSystemInfo(), new FakeEvalStore());
+
+            var suite = BenchmarkService.StarterSuites().First();
+            suite.MaxCases = 1;
+            var run = await service.RunAsync(suite, new LlmModel { Id = modelPath, Name = "Local", Provider = "llama.cpp", ProviderTag = "llama.cpp" });
+
+            Equal("llama.cpp", run.Metadata.RuntimeKind, "RuntimeKind should come from the model's ProviderTag");
+            Equal(16384, run.Metadata.ContextSize, "ContextSize should come from the matching managed ServerConfig");
+            Equal(24, run.Metadata.GpuLayers, "GpuLayers should come from the matching managed ServerConfig");
+            Equal(6, run.Metadata.Threads, "Threads should come from the matching managed ServerConfig, not Environment.ProcessorCount");
+            Equal(modelPath, run.Metadata.ModelPath, "ModelPath should come from the matching managed ServerConfig");
+            False(string.IsNullOrEmpty(run.Metadata.Quantization), "a local GGUF model should carry a non-empty quantization label");
+        }
+
+        /// <summary>r17 02-benchmark-truth.md 2.5: RerunAsync used to rebuild the model as a bare
+        /// {Id,Name,Provider}, losing DefaultContextSize and everything else that feeds 2.4's
+        /// metadata. It must resolve the live model instance first when the model still exists.</summary>
+        public static async Task BenchmarkRerunResolvesTheLiveModelInstance()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var service = new BenchmarkService(settings, new UsageLlm(), new FakeSystemInfo(), new FakeEvalStore());
+
+            var suite = BenchmarkService.StarterSuites().First();
+            suite.MaxCases = 1;
+            // Deliberately thin, mirroring what an original run against a since-updated model
+            // profile might have stored - DefaultContextSize is not carried on this instance.
+            var run = await service.RunAsync(suite, new LlmModel { Id = "usage", Name = "Usage", Provider = "Test" });
+            True(run.Metadata.ContextSize is null, "the original thin model instance should not have carried a context size");
+
+            var rerun = await service.RerunAsync(run.Id);
+
+            Equal(100, rerun.Metadata.ContextSize, "rerun should resolve the live model (DefaultContextSize 100 from UsageLlm.GetModelsAsync), not rebuild a hollow one");
+        }
+
+        /// <summary>r17 02-benchmark-truth.md 2.6: cache_prompt must be disabled only on
+        /// iteration 0 (the Cold phase) so a warm KV cache from a prior request cannot make a
+        /// "Cold" run's first case look faster than it genuinely was.</summary>
+        public static async Task BenchmarkDisablesPromptCacheOnlyOnTheColdIteration()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var llm = new FakeCapturingTimingsLlm();
+            var service = new BenchmarkService(settings, llm, new FakeSystemInfo(), new FakeEvalStore());
+
+            var suite = BenchmarkService.StarterSuites().First();
+            suite.MaxCases = 1;
+            suite.IterationsPerCase = 2;
+            await service.RunAsync(suite, new LlmModel { Id = "timings", Name = "Timings", Provider = "Test" });
+
+            Equal(2, llm.CapturedOptions.Count, "one case with two iterations should send exactly two requests");
+            True(llm.CapturedOptions[0].DisablePromptCache, "iteration 0 (Cold) should disable the prompt cache");
+            False(llm.CapturedOptions[1].DisablePromptCache, "iteration 1 (Warm) should keep the prompt cache enabled");
+        }
+
+        private static string WriteMinimalLlamaGgufFixture(TempDir temp)
+        {
+            using var ms = new MemoryStream();
+            using (var w = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true))
+            {
+                w.Write(System.Text.Encoding.ASCII.GetBytes("GGUF"));
+                w.Write((uint)3);
+                w.Write((ulong)0);
+                w.Write((ulong)2);
+
+                void WriteKey(string key)
+                {
+                    var bytes = System.Text.Encoding.UTF8.GetBytes(key);
+                    w.Write((ulong)bytes.Length);
+                    w.Write(bytes);
+                }
+
+                WriteKey("general.architecture");
+                w.Write((uint)8);
+                var arch = System.Text.Encoding.UTF8.GetBytes("llama");
+                w.Write((ulong)arch.Length);
+                w.Write(arch);
+
+                WriteKey("general.file_type");
+                w.Write((uint)4);
+                w.Write((uint)15); // Q4_K_M
+            }
+
+            var path = temp.PathFor("model.gguf");
+            File.WriteAllBytes(path, ms.ToArray());
+            return path;
+        }
+
         public static async Task SystemInfoSafeFallback()
         {
             var snapshot = await new FakeSystemInfo().CaptureAsync();

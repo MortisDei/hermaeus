@@ -134,14 +134,16 @@ public sealed class BenchmarkService
             ModelName = string.IsNullOrWhiteSpace(model.ProfileDisplayName) ? model.Name : model.ProfileDisplayName,
             Provider = model.Provider,
             RuntimeSnapshot = model.Provider,
-            // "Cold" = no prior KV cache state for this prompt.
-            // The llama-server process being already running does not affect this -- the server
-            // being up just means it is accepting requests. What matters is whether the KV cache
-            // contains prefill state from a previous run of the same prompt. With a single
-            // iteration per case that never happens, so every pass is genuinely cold.
+            // "Cold" = no prior KV cache state for this prompt. Since r14 made cache_prompt:
+            // true unconditional, llama-server retains the previous request's KV by default, so
+            // re-running a suite back-to-back could give the first case of a "Cold" run a warm
+            // prefill from an earlier run's tail (r17 02-benchmark-truth.md 2.6). RunCaseAsync
+            // now sets LlmChatOptions.DisablePromptCache on iteration 0 specifically to force a
+            // genuinely cold prefill for that request; iteration 0 of every case is what "Cold"
+            // below refers to.
             // "Warm" only applies when IterationsPerCase > 1, where subsequent passes of the
-            // same prompt can reuse cached prefill state from the first run and produce faster
-            // first-token latency as a result.
+            // same prompt keep cache_prompt enabled and can reuse cached prefill state from the
+            // first run, producing faster first-token latency as a result.
             RunMode = suite.IterationsPerCase <= 1 ? "Cold" : BenchmarkRunMode.ColdWarm.ToString(),
             IterationsPerCase = Math.Max(1, suite.IterationsPerCase),
             Temperature = suite.Temperature,
@@ -218,7 +220,13 @@ public sealed class BenchmarkService
                 Tags = r.Tags.ToList()
             }).ToList()
         };
-        var model = new LlmModel { Id = previous.ModelId, Name = previous.ModelName, Provider = previous.Provider };
+        // r17 02-benchmark-truth.md 2.5: reconstructing a bare {Id,Name,Provider} lost
+        // DefaultContextSize/Tags/ProviderTag/profile linkage, so the rerun's own metadata
+        // (2.4) would be hollow again even though the model still exists. Resolve the live
+        // instance first and only fall back to the thin reconstruction when it no longer does.
+        var liveModels = await _llm.GetModelsAsync(ct);
+        var model = liveModels.FirstOrDefault(m => string.Equals(m.Id, previous.ModelId, StringComparison.OrdinalIgnoreCase))
+            ?? new LlmModel { Id = previous.ModelId, Name = previous.ModelName, Provider = previous.Provider };
         return await RunAsync(suite, model, progress, ct);
     }
 
@@ -332,22 +340,33 @@ public sealed class BenchmarkService
         var sw = Stopwatch.StartNew();
         long firstTokenMs = 0;
         var output = new StringBuilder();
+        ChatServerTimings? serverTimings = null;
 
         try
         {
-            await foreach (var token in _llm.StreamChatTextAsync(
+            // r17 02-benchmark-truth.md 2.1: the text-only stream threw away llama-server's own
+            // timings object; switching to the event stream keeps content accumulation identical
+            // while capturing the last non-null ServerTimings for real tok/s math. 2.6: cache_prompt
+            // is disabled only on iteration 0 (the Cold phase) so a re-run's first case cannot get a
+            // warm prefill from a prior request's retained KV while still being reported as Cold;
+            // Warm iterations (>0) keep the r5 warm-phase semantics by leaving the cache enabled.
+            await foreach (var evt in _llm.StreamChatAsync(
                                model.Id,
                                [new ChatMessage("user", test.Prompt)],
                                new LlmChatOptions
                                {
                                    SystemPrompt = string.IsNullOrWhiteSpace(test.SystemPrompt) ? null : test.SystemPrompt,
-                                   Temperature = suite.Temperature
+                                   Temperature = suite.Temperature,
+                                   DisablePromptCache = iterationIndex == 0
                                },
                                timeout.Token))
             {
-                if (firstTokenMs == 0 && !string.IsNullOrEmpty(token))
+                if (firstTokenMs == 0 && !string.IsNullOrEmpty(evt.ContentDelta))
                     firstTokenMs = sw.ElapsedMilliseconds;
-                output.Append(token);
+                if (!string.IsNullOrEmpty(evt.ContentDelta))
+                    output.Append(evt.ContentDelta);
+                if (evt.ServerTimings is not null)
+                    serverTimings = evt.ServerTimings;
             }
 
             sw.Stop();
@@ -355,7 +374,7 @@ public sealed class BenchmarkService
             result.IterationIndex = iterationIndex;
             result.Phase = phase.ToString();
             ApplyFailureCategory(result);
-            FillTiming(result, firstTokenMs, sw.ElapsedMilliseconds);
+            FillTiming(result, firstTokenMs, sw.ElapsedMilliseconds, serverTimings);
             FillResources(result, before, await _system.CaptureAsync(ct));
             return result;
         }
@@ -366,7 +385,7 @@ public sealed class BenchmarkService
             result.IterationIndex = iterationIndex;
             result.Phase = phase.ToString();
             result.FailureCategory = "timeout";
-            FillTiming(result, firstTokenMs, sw.ElapsedMilliseconds);
+            FillTiming(result, firstTokenMs, sw.ElapsedMilliseconds, serverTimings);
             FillResources(result, before, await _system.CaptureAsync(CancellationToken.None));
             result.HasError = true;
             result.TimedOut = true;
@@ -382,7 +401,7 @@ public sealed class BenchmarkService
             result.IterationIndex = iterationIndex;
             result.Phase = phase.ToString();
             result.FailureCategory = "cancelled";
-            FillTiming(result, firstTokenMs, sw.ElapsedMilliseconds);
+            FillTiming(result, firstTokenMs, sw.ElapsedMilliseconds, serverTimings);
             result.Cancelled = true;
             result.Passed = false;
             result.QualityScore = 0;
@@ -396,7 +415,7 @@ public sealed class BenchmarkService
             result.IterationIndex = iterationIndex;
             result.Phase = phase.ToString();
             result.FailureCategory = ClassifyException(ex, output.ToString());
-            FillTiming(result, firstTokenMs, sw.ElapsedMilliseconds);
+            FillTiming(result, firstTokenMs, sw.ElapsedMilliseconds, serverTimings);
             FillResources(result, before, await _system.CaptureAsync(CancellationToken.None));
             result.HasError = true;
             result.Passed = false;
@@ -756,16 +775,46 @@ public sealed class BenchmarkService
         }
     ];
 
-    private static void FillTiming(BenchmarkResult result, long firstTokenMs, long totalMs)
+    /// <summary>
+    /// r17 02-benchmark-truth.md 2.1/2.2: when the provider reported real prompt/decode
+    /// timings, tok/s comes from predicted_n / predicted_ms - a measurement, not an estimate -
+    /// and prompt speed is stored alongside it. Otherwise the chars/4 fallback's denominator is
+    /// the decode window (total minus first-token latency) rather than total elapsed time, so a
+    /// long prompt is no longer counted as slow decode twice (once in FirstTokenMs, again by
+    /// diluting tok/s). CharsPerSecond keeps total-time semantics; it is labeled as such and
+    /// only the tokens/sec figure changes.
+    /// </summary>
+    private static void FillTiming(BenchmarkResult result, long firstTokenMs, long totalMs, ChatServerTimings? timings)
     {
         result.FirstTokenMs = firstTokenMs;
         result.TotalMs = totalMs;
         result.OutputChars = result.Output.Length;
-        var seconds = Math.Max(totalMs / 1000d, 0.001d);
-        result.CharsPerSecond = Math.Round(result.OutputChars / seconds, 2);
-        result.ApproxTokensPerSecond = Math.Round((result.OutputChars / 4d) / seconds, 2);
+        var totalSeconds = Math.Max(totalMs / 1000d, 0.001d);
+        result.CharsPerSecond = Math.Round(result.OutputChars / totalSeconds, 2);
+
+        if (timings is { PredictedTokens: > 0, PredictedMs: > 0 })
+        {
+            result.PromptTokens = timings.PromptTokens;
+            result.PromptMs = timings.PromptMs;
+            result.GeneratedTokens = timings.PredictedTokens;
+            result.DecodeMs = timings.PredictedMs;
+            result.ApproxTokensPerSecond = Math.Round(timings.PredictedTokens.Value / timings.PredictedMs.Value * 1000d, 2);
+            if (timings is { PromptTokens: > 0, PromptMs: > 0 })
+                result.PromptTokensPerSecond = Math.Round(timings.PromptTokens.Value / timings.PromptMs.Value * 1000d, 2);
+            result.MeasurementSource = "server-timings";
+        }
+        else
+        {
+            var decodeMs = Math.Max(totalMs - firstTokenMs, 1);
+            result.ApproxTokensPerSecond = Math.Round((result.OutputChars / 4d) / (decodeMs / 1000d), 2);
+            result.MeasurementSource = "chars-approx";
+        }
     }
 
+    /// <summary>r17 02-benchmark-truth.md 2.3: ResourceScore used to be the Aether process's own
+    /// RSS delta, noise for a model running in llama-server (a different process) or remotely.
+    /// The before/after memory and VRAM snapshots stay for display; the score itself is now
+    /// always neutral (1.0) rather than invented from a signal that measures the wrong process.</summary>
     private static void FillResources(BenchmarkResult result, SystemSnapshot before, SystemSnapshot after)
     {
         result.ProcessMemoryBeforeBytes = before.ProcessMemoryBytes;
@@ -774,19 +823,36 @@ public sealed class BenchmarkService
         result.ManagedMemoryAfterBytes = after.ManagedMemoryBytes;
         result.VramUsedBeforeBytes = before.Gpus.FirstOrDefault(g => g.MemoryUsedBytes.HasValue)?.MemoryUsedBytes;
         result.VramUsedAfterBytes = after.Gpus.FirstOrDefault(g => g.MemoryUsedBytes.HasValue)?.MemoryUsedBytes;
-        var processDelta = Math.Max(0, result.ProcessMemoryAfterBytes - result.ProcessMemoryBeforeBytes);
-        result.ResourceScore = processDelta <= 0 ? 1 : Math.Clamp(1d - (processDelta / (512d * 1024 * 1024)), 0, 1);
+        result.ResourceScore = 1.0;
     }
 
+    /// <summary>
+    /// r17 02-benchmark-truth.md 2.4: every run used to stamp Quantization="", RuntimeKind=
+    /// "dotnet", GpuLayers=null, ModelPath="", Threads=Environment.ProcessorCount (the app's own
+    /// CPU count, not the server's --threads) regardless of the model - but Insights groups
+    /// aggregates by ModelId|Quantization|RuntimeKind, so the grouping key was degenerate and
+    /// quantization never rendered for a live run. When the model resolves to a local .gguf that
+    /// a managed server is currently configured to serve, context/layers/threads/path come from
+    /// that ServerConfig and quantization comes from the GGUF header; otherwise these stay
+    /// null/empty rather than stamping app-process values that describe nothing about the model.
+    /// </summary>
     private BenchmarkRunMetadata CreateMetadata(BenchmarkSuite suite, LlmModel model, SystemSnapshot snapshot)
     {
+        var isLocalGguf = model.Id.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase) && File.Exists(model.Id);
+        var managedServer = isLocalGguf
+            ? _settings.Settings.ManagedServers.FirstOrDefault(s =>
+                !string.IsNullOrWhiteSpace(s.ModelPath)
+                && string.Equals(Path.GetFullPath(s.ModelPath), Path.GetFullPath(model.Id), StringComparison.OrdinalIgnoreCase))
+            : null;
+        var ggufInfo = isLocalGguf ? GgufMetadataReader.TryRead(model.Id) : null;
+
         return new BenchmarkRunMetadata
         {
             AetherVersion = Assembly.GetEntryAssembly()?.GetName().Version?.ToString() ?? Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? string.Empty,
             Backend = model.Provider,
-            RuntimeKind = "dotnet",
+            RuntimeKind = ResolveRuntimeKind(model),
             RuntimeVersion = Environment.Version.ToString(),
-            ContextSize = model.DefaultContextSize,
+            ContextSize = managedServer?.ContextSize ?? model.DefaultContextSize,
             Temperature = suite.Temperature,
             OS = snapshot.OSDescription,
             CPU = snapshot.CpuName,
@@ -796,18 +862,33 @@ public sealed class BenchmarkService
             RerankerEnabled = null,
             PromptTemplate = string.IsNullOrWhiteSpace(suite.Description) ? suite.Name : suite.Description,
             SamplerSettings = $"temperature={suite.Temperature}",
-            Threads = Environment.ProcessorCount,
+            Threads = managedServer?.Threads,
             BatchSize = null,
             TopP = null,
             TopK = null,
             RepeatPenalty = null,
             Seed = null,
-            GpuLayers = null,
-            ModelPath = string.Empty,
+            GpuLayers = managedServer?.GpuLayers,
+            ModelPath = managedServer?.ModelPath ?? string.Empty,
             ModelHash = string.Empty,
-            Quantization = string.Empty
+            Quantization = ggufInfo?.Quantization ?? string.Empty
         };
     }
+
+    /// <summary>Prefers the model's own ProviderTag ("llama.cpp"/"ollama"/"openai") over the
+    /// display-only Provider string; "openai" is rendered as "openai-compatible" since that tag
+    /// covers both the OpenAI cloud provider and local OpenAI-compatible endpoints. An
+    /// unrecognized-but-present tag is passed through as-is (forward compatible with a future
+    /// provider); a genuinely empty tag falls back to whatever Provider does say rather than
+    /// guessing.</summary>
+    private static string ResolveRuntimeKind(LlmModel model) => model.ProviderTag switch
+    {
+        "llama.cpp" => "llama.cpp",
+        "ollama" => "ollama",
+        "openai" => "openai-compatible",
+        { Length: > 0 } tag => tag,
+        _ => model.Provider
+    };
 
     private static void ApplyFailureCategory(BenchmarkResult result)
     {

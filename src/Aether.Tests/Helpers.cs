@@ -233,6 +233,32 @@ namespace Aether.Tests
         }
     }
 
+    /// <summary>r17 02-benchmark-truth.md 2.1/2.6: emits a final event carrying
+    /// <see cref="ChatServerTimings"/> (predicted 20 tokens / 200 ms, prompt 10 tokens / 100 ms -
+    /// round numbers so tok/s math is exact) and records every call's <see cref="LlmChatOptions"/>
+    /// so tests can assert what each benchmark iteration actually sent.</summary>
+    sealed class FakeCapturingTimingsLlm : ILlmService
+    {
+        public string ProviderName => "FakeTimings";
+        public bool IsConfigured => true;
+        public List<LlmChatOptions> CapturedOptions { get; } = new();
+
+        public Task<List<LlmModel>> GetModelsAsync(CancellationToken ct = default) =>
+            Task.FromResult(new List<LlmModel> { new() { Id = "timings", Name = "Timings", Provider = "Test" } });
+
+        public async IAsyncEnumerable<LlmStreamEvent> StreamChatAsync(
+            string modelId,
+            IReadOnlyList<ChatMessage> messages,
+            LlmChatOptions? options = null,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+        {
+            CapturedOptions.Add(options ?? LlmChatOptions.Default);
+            await Task.Delay(1, ct);
+            yield return new LlmStreamEvent("hello");
+            yield return new LlmStreamEvent(string.Empty, IsFinal: true, ServerTimings: new ChatServerTimings(10, 100, 20, 200));
+        }
+    }
+
     sealed class MemoryMarkerLlm : ILlmService
     {
         private readonly string _response;

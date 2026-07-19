@@ -272,8 +272,11 @@ public sealed class LlamaCppService : IDisposable
             stream_options = new { include_usage = true },
             // r14 2.2: pin the prompt-cache on explicitly rather than relying on
             // llama-server's current default, so a follow-up send reprocesses
-            // only the changed suffix instead of the whole prompt.
-            cache_prompt = true,
+            // only the changed suffix instead of the whole prompt. r17 2.6:
+            // DisablePromptCache (benchmark-only) can turn this off per request so a
+            // "Cold" benchmark iteration cannot get a warm prefill from a prior request's
+            // retained KV; the chat path never sets it, so this stays true by default.
+            cache_prompt = !options.DisablePromptCache,
             temperature = options.Temperature,
             max_tokens = maxTokens,
             top_p = options.TopP,

@@ -40,6 +40,8 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private bool         _hasOrphan;
     [ObservableProperty] private bool         _canStopOrphan;
     [ObservableProperty] private string       _orphanBannerText = string.Empty;
+    [ObservableProperty] private string       _contextFitNote = string.Empty;
+    [ObservableProperty] private bool         _hasContextFitWarning;
 
     public string Id => _config.Id;
     public bool IsRunning  => Status == ServerStatus.Running;
@@ -100,11 +102,11 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     public Func<ServerProcessViewModel, Task>? BeforeStartAsync { get; set; }
 
     private const int LargeContextSizeThreshold = 16384;
+    private const long RamHeadroomBytes = 2_147_483_648; // 2 GiB, matches ModelFitEstimator's RAM headroom
 
-    /// <summary>Drives the inline oversized-context note (r9 01-send-path-latency.md 1.5). Advisory only.</summary>
-    public bool HasOversizedContext => ContextSize > LargeContextSizeThreshold;
-    public string OversizedContextNote =>
-        $"Large context ({ContextSize:N0} tokens) can spill out of VRAM, slowing prompt processing and increasing memory use.";
+    private HardwareProfile? _hardwareProfile;
+    private GgufModelInfo? _ggufInfo;
+    private int _contextFitGeneration;
 
     public UiBoundCollection<string> DetectedModelPaths { get; } = [];
 
@@ -151,7 +153,8 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         TrustService trust,
         IToastService toasts,
         IRuntimeLogService runtimeLogs,
-        OrphanServerDetector? orphanDetector = null)
+        OrphanServerDetector? orphanDetector = null,
+        HardwareProfile? hardwareProfile = null)
     {
         _mgr = new ServerProcessManager(redactor);
         _config   = config;
@@ -160,6 +163,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _toasts = toasts;
         _runtimeLogs = runtimeLogs;
         _orphanDetector = orphanDetector ?? new OrphanServerDetector();
+        _hardwareProfile = hardwareProfile;
 
         _name           = config.Name;
         _executablePath = config.ExecutablePath;
@@ -195,7 +199,146 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         });
 
         RefreshDetectedModels();
+        ScheduleContextFitRefresh();
     }
+
+    /// <summary>Called once by the parent <see cref="ServicesViewModel"/> when its
+    /// process-lifetime hardware fetch completes (r17 01-gguf-context-and-tuning.md 1.4);
+    /// a no-op constructor-time value means the very first render falls back to the flat
+    /// threshold rule until this arrives.</summary>
+    public void SetHardwareProfile(HardwareProfile profile)
+    {
+        _hardwareProfile = profile;
+        ScheduleContextFitRefresh();
+    }
+
+    /// <summary>
+    /// Kicks off (or re-kicks) the background GGUF header read backing
+    /// <see cref="ContextFitNote"/>/<see cref="HasContextFitWarning"/>. A generation counter
+    /// (r12 02-async-and-threading.md 2.3 pattern) discards a slower, older read that completes
+    /// after a newer one was already scheduled, so a rapid second edit never gets overwritten
+    /// by a stale result.
+    /// </summary>
+    private void ScheduleContextFitRefresh()
+    {
+        var generation = ++_contextFitGeneration;
+        var modelPath = ModelPath;
+        _ = RefreshContextFitAsync(generation, modelPath);
+    }
+
+    private async Task RefreshContextFitAsync(int generation, string modelPath)
+    {
+        GgufModelInfo? info = null;
+        if (!string.IsNullOrWhiteSpace(modelPath)
+            && modelPath.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase)
+            && File.Exists(modelPath))
+        {
+            info = await Task.Run(() => GgufMetadataReader.TryRead(modelPath));
+        }
+
+        RunOnUi(() =>
+        {
+            if (generation != _contextFitGeneration)
+                return;
+            _ggufInfo = info;
+            ApplyContextFitNote();
+        });
+    }
+
+    private void ApplyContextFitNote()
+    {
+        var note = ComputeContextFitNote();
+        ContextFitNote = note;
+        HasContextFitWarning = !string.IsNullOrEmpty(note);
+    }
+
+    /// <summary>
+    /// Hardware-aware context-fit assessment (r17 01-gguf-context-and-tuning.md 1.4), replacing
+    /// the old flat <see cref="LargeContextSizeThreshold"/> rule with KV-cache-aware VRAM/RAM
+    /// math whenever a GGUF header and hardware profile are both available. When either is
+    /// unavailable this falls back to the old flat rule and wording so the warning never
+    /// silently disappears on machines this can't do better for. Independent of that verdict,
+    /// a training-context advisory (1.6) is appended whenever the configured context exceeds
+    /// what the model was trained at - advisory only, never blocks Start, never edits the value.
+    /// </summary>
+    private string ComputeContextFitNote()
+    {
+        var hw = _hardwareProfile;
+        var info = _ggufInfo;
+        var flatNote = ContextSize > LargeContextSizeThreshold
+            ? $"Large context ({ContextSize:N0} tokens) can spill out of VRAM, slowing prompt processing and increasing memory use."
+            : string.Empty;
+
+        if (hw is null || info is null)
+            return flatNote;
+
+        var fileSizeBytes = TryGetModelFileSizeBytes();
+        var bpeK = KvCacheMath.ResolveBytesPerElement(ExtraArgs, isKeyCache: true);
+        var bpeV = KvCacheMath.ResolveBytesPerElement(ExtraArgs, isKeyCache: false);
+        var primary = string.Empty;
+
+        if (fileSizeBytes is long size)
+        {
+            if (hw.MaxGpuVramBytes > 0 && GpuLayers != 0)
+            {
+                var projection = KvCacheMath.Project(size, info, ContextSize, GpuLayers, bpeK, bpeV);
+                if (projection is not null)
+                {
+                    var needed = projection.TotalBytes + KvCacheMath.GpuHeadroomBytes;
+                    if (needed > hw.MaxGpuVramBytes)
+                        primary = $"At {ContextSize:N0} context this model needs ~{FormatGb(needed)} (weights ~{FormatGb(projection.WeightsBytes)} + KV cache ~{FormatGb(projection.KvBytes)}); this GPU has {FormatGb(hw.MaxGpuVramBytes)}. Prompt processing will spill to system RAM.";
+                }
+                else
+                {
+                    primary = flatNote;
+                }
+            }
+            else if (GpuLayers == 0)
+            {
+                var projection = KvCacheMath.Project(size, info, ContextSize, gpuLayers: -1, bpeK, bpeV);
+                if (projection is not null && hw.TotalRamBytes > 0)
+                {
+                    var needed = projection.TotalBytes + RamHeadroomBytes;
+                    if (needed > hw.TotalRamBytes)
+                        primary = $"At {ContextSize:N0} context this model needs ~{FormatGb(needed)} of RAM (weights ~{FormatGb(projection.WeightsBytes)} + KV cache ~{FormatGb(projection.KvBytes)}); this machine has {FormatGb(hw.TotalRamBytes)}.";
+                }
+                else
+                {
+                    primary = flatNote;
+                }
+            }
+            else
+            {
+                primary = flatNote;
+            }
+        }
+        else
+        {
+            primary = flatNote;
+        }
+
+        if (info.TrainingContextLength is int trainingCtx && trainingCtx > 0 && ContextSize > trainingCtx)
+        {
+            var advisory = $"This model was trained at {trainingCtx:N0} context; running beyond that can degrade quality.";
+            primary = string.IsNullOrEmpty(primary) ? advisory : $"{primary} {advisory}";
+        }
+
+        return primary;
+    }
+
+    private long? TryGetModelFileSizeBytes()
+    {
+        try
+        {
+            return File.Exists(ModelPath) ? new FileInfo(ModelPath).Length : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string FormatGb(long bytes) => $"{bytes / 1024d / 1024 / 1024:0.0} GB";
 
     /// <summary>
     /// Checks whether this server's configured port is held by a leftover
@@ -336,6 +479,13 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
 
         try
         {
+            // r17 01-gguf-context-and-tuning.md 1.5: a fresh read (cheap - the reader is
+            // process-lifetime-cached) rather than the field this VM keeps for the context-fit
+            // note, so a tune started right after a model-path edit never races that note's
+            // own background refresh.
+            var ggufInfo = File.Exists(ModelPath) ? await Task.Run(() => GgufMetadataReader.TryRead(ModelPath)) : null;
+            var previousContext = ContextSize;
+
             var result = await ServerProcessManager.AutoTuneAsync(
                 BuildConfig(),
                 new Progress<string>(line =>
@@ -343,15 +493,17 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
                     LogOutput = string.IsNullOrEmpty(LogOutput)
                         ? line
                         : $"{LogOutput}\n{line}";
-                }));
+                }),
+                ggufInfo: ggufInfo,
+                hardware: _hardwareProfile);
 
             GpuLayers = result.GpuLayers;
             Threads = result.Threads;
+            if (result.TunedContextSize is int tunedContext)
+                ContextSize = tunedContext;
             await PersistTuneProfileAsync(result);
             await _settings.SaveAsync();
-            AutoTuneStatus = result.TotalLayers is int total
-                ? $"Auto-tune verified {result.GpuLayers}/{total} GPU layers with {result.Threads} thread(s). Save and start the service."
-                : $"Auto-tune verified {result.GpuLayers} GPU layers with {result.Threads} thread(s). Save and start the service.";
+            AutoTuneStatus = BuildAutoTuneStatus(result, previousContext);
         }
         catch (Exception ex)
         {
@@ -363,6 +515,20 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         {
             IsAutoTuning = false;
         }
+    }
+
+    private string BuildAutoTuneStatus(ServerTuneResult result, int previousContext)
+    {
+        if (result.TunedContextSize is int tunedContext)
+        {
+            var layers = result.TotalLayers is int total ? $"all {total} GPU layers" : "all GPU layers";
+            var vram = _hardwareProfile is { MaxGpuVramBytes: > 0 } hw ? $" in {FormatGb(hw.MaxGpuVramBytes)} VRAM" : string.Empty;
+            return $"Auto-tune verified {layers} at {tunedContext:N0} context (configured {previousContext:N0} does not fit{vram} with this model). Save and start the service.";
+        }
+
+        return result.TotalLayers is int totalLayers
+            ? $"Auto-tune verified {result.GpuLayers}/{totalLayers} GPU layers with {result.Threads} thread(s). Save and start the service."
+            : $"Auto-tune verified {result.GpuLayers} GPU layers with {result.Threads} thread(s). Save and start the service.";
     }
 
     [RelayCommand]
@@ -531,18 +697,22 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     }
     partial void OnNameChanged(string value) => OnPropertyChanged(nameof(HasUnsavedChanges));
     partial void OnExecutablePathChanged(string value) => OnPropertyChanged(nameof(HasUnsavedChanges));
-    partial void OnModelPathChanged(string value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnModelPathChanged(string value)
+    {
+        OnPropertyChanged(nameof(HasUnsavedChanges));
+        ScheduleContextFitRefresh();
+    }
     partial void OnPortChanged(int value) => OnPropertyChanged(nameof(HasUnsavedChanges));
     partial void OnContextSizeChanged(int value)
     {
         OnPropertyChanged(nameof(HasUnsavedChanges));
-        OnPropertyChanged(nameof(HasOversizedContext));
-        OnPropertyChanged(nameof(OversizedContextNote));
+        ApplyContextFitNote();
     }
     partial void OnGpuLayersChanged(int value)
     {
         OnPropertyChanged(nameof(HasUnsavedChanges));
         OnPropertyChanged(nameof(EffectiveOffloadLabel));
+        ApplyContextFitNote();
     }
     partial void OnThreadsChanged(int value) => OnPropertyChanged(nameof(HasUnsavedChanges));
     partial void OnSlotsChanged(int value) => OnPropertyChanged(nameof(HasUnsavedChanges));
@@ -552,6 +722,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     {
         OnPropertyChanged(nameof(HasUnsavedChanges));
         OnPropertyChanged(nameof(ExtraArgsTrustWarning));
+        ApplyContextFitNote();
     }
 
     private void WarnForExtraArgs()
@@ -602,6 +773,8 @@ public partial class ServicesViewModel : ViewModelBase
     private readonly TrustService _trust;
     private readonly IRuntimeLogService _runtimeLogs;
     private readonly OrphanServerDetector _orphanDetector;
+    private readonly ISystemInfoService? _systemInfo;
+    private HardwareProfile? _hardwareProfile;
 
     public UiBoundCollection<ServerProcessViewModel> Servers { get; } = [];
     public UiBoundCollection<RuntimeProfileViewModel> RuntimeProfiles { get; } = [];
@@ -634,7 +807,8 @@ public partial class ServicesViewModel : ViewModelBase
         RedactionService redactor,
         TrustService trust,
         IRuntimeLogService runtimeLogs,
-        OrphanServerDetector? orphanDetector = null)
+        OrphanServerDetector? orphanDetector = null,
+        ISystemInfoService? systemInfo = null)
     {
         _settings = settings;
         _runtimeProfiles = runtimeProfiles;
@@ -643,8 +817,26 @@ public partial class ServicesViewModel : ViewModelBase
         _trust = trust;
         _runtimeLogs = runtimeLogs;
         _orphanDetector = orphanDetector ?? new OrphanServerDetector();
+        _systemInfo = systemInfo;
         Rebuild();
         _settings.SettingsChanged += (_, _) => RunOnUi(Rebuild);
+        if (_systemInfo is not null)
+            _ = LoadHardwareProfileAsync();
+    }
+
+    /// <summary>Fetches the process-lifetime <see cref="HardwareProfile"/> once (r13 1.5 cache,
+    /// reused here) and hands it to every server row so each can compute a KV-cache-aware
+    /// context-fit warning (r17 01-gguf-context-and-tuning.md 1.4) instead of the flat
+    /// threshold fallback.</summary>
+    private async Task LoadHardwareProfileAsync()
+    {
+        var profile = await _systemInfo!.GetHardwareProfileAsync();
+        RunOnUi(() =>
+        {
+            _hardwareProfile = profile;
+            foreach (var server in Servers)
+                server.SetHardwareProfile(profile);
+        });
     }
 
     /// <summary>Re-checks every non-Running server's port for a leftover process (r9 02-server-lifecycle.md 2.3). Startup and Services-view-refresh entry point.</summary>
@@ -703,7 +895,7 @@ public partial class ServicesViewModel : ViewModelBase
             }
             else
             {
-                var vm = new ServerProcessViewModel(cfg, _settings, _redactor, _trust, _toasts, _runtimeLogs, _orphanDetector)
+                var vm = new ServerProcessViewModel(cfg, _settings, _redactor, _trust, _toasts, _runtimeLogs, _orphanDetector, _hardwareProfile)
                 {
                     BeforeStartAsync = StopSamePortPeersBeforeStartAsync
                 };

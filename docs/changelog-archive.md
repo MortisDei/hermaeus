@@ -2,6 +2,124 @@
 
 The CHANGELOG.md in root only contains the current 10 versions of changelogs. The rest are archived here in line with the 10 version limit in the main changelog.
 
+## [0.13.0-alpha] - 2026-07-15
+
+Implements docs/review r8: voice pronunciation, onboarding, performance, and
+technical debt. Theme: polish what exists rather than add new capability.
+Also reviews and corrects two optimization commits (`ad618da`, `aea2326`)
+that landed between r6 and r7 without a review pass.
+
+### Voice pronunciation
+
+- **Text normalization** (`Aether.Voice/KokoroTextNormalizer.cs`). Numbers,
+  currency, percentages, ordinals, clock times, and a handful of standalone
+  symbols (`&`, `+`, `/`, `@`, `=`) are expanded to plain English words before
+  phonemization. Fixes the bug where digits were silently dropped entirely
+  (`MapLetter` mapped non-letters to empty, and the tokenizer skipped
+  unrecognized characters) - "You have 3 errors" previously spoke as "You
+  have errors".
+- **CMU Pronouncing Dictionary** (`Aether.Voice/CmuPronouncingDictionary.cs`,
+  `ArpabetIpaMap.cs`). The ~250-word inline dictionary and its letter-by-letter
+  rule fallback are replaced as the primary pronunciation source by the
+  ~126,000-word CMUdict (BSD-style CMU license; see `THIRD-PARTY-NOTICES.md`),
+  embedded gzip-compressed. ARPABET phones map to Kokoro's IPA vocabulary with
+  stress marks; unstressed vs. stressed AH (schwa vs. wedge) is handled
+  specially. The rule-based fallback still exists for genuinely unknown words,
+  fixed to no longer emit the vocabulary-unsupported "ɝ" symbol and to read
+  word-initial "gh" as a hard /g/ (ghost) rather than /f/ (a rule meant only
+  for word-final "gh", as in laugh).
+- **User pronunciation lexicon** (`Aether.Voice/KokoroUserLexicon.cs`) at
+  `{DataRoot}/voice/lexicon.txt`, `word = ipa` per line, reloaded when the
+  file changes. Seeded with defaults for words no dictionary would know,
+  including the app's own name ("Aether" was mispronounced before this).
+  Settings > Voice gained an "Open pronunciation lexicon" button.
+- **Suffix morphology**: possessives and common suffixes (`'s`, `s`, `es`,
+  `ed`, `ing`) retry against the lexicon chain with correct voicing rules
+  (e.g. "aether's" resolves via the stem "aether" plus a voiced /z/).
+- **Unknown acronyms** are spelled out by letter name (e.g. "GGUF" as "gee
+  gee you eff") rather than mispronounced as a word; acronyms cmudict
+  already knows (api, cpu, html, usa) use their real dictionary entries.
+- ~20 golden regression sentences assert exact IPA output and zero dropped
+  characters through tokenization.
+
+### Onboarding and usability
+
+- **Guided starter model download** (`Aether.Services/StarterModelCatalog.cs`).
+  The setup wizard's model step offers a hardware-aware download (three
+  VRAM tiers, Qwen2.5 3B/7B/14B Instruct Q4_K_M) alongside the existing
+  manual path picker, with SHA256 verification via the existing
+  `ModelDownloadService`.
+- **Voice install from the wizard**: the Voice step gained an "Install now"
+  button for Kokoro (native) that calls the same `IDoctorService` install
+  path Settings/Doctor already use, so first-run setup can finish chat and
+  voice in one pass instead of requiring a separate trip to Settings.
+- **Markdown tables and clickable links** (`Aether.Desktop.Controls.MarkdownViewer`).
+  Tables (parsed by Markdig but previously unrendered) now render as a grid
+  with a bold header row. Links are clickable (embedded via
+  `InlineUIContainer`, since Avalonia's text-flow `Inline`/`Run`/`Span` have
+  no pointer events) with an https/http-only scheme gate; anything else
+  (`file:`, `javascript:`, `data:`) renders as inert styled text.
+- **Empty states**: Chat gets a distinct "no chat model configured" state
+  with links to the setup wizard and Services (RAG and Memories already had
+  empty states); Agent's workspace field and Benchmark's run history gained
+  matching empty-state guidance.
+- **Tooltip sweep** across the settings sections, Doctor, Memories, Model
+  Management, Logs, and System Overview views that previously had none.
+
+### Performance
+
+- **Startup phase timing**: `App.axaml.cs` logs settings/store-init/voice-probe/
+  viewmodel timings plus a total, so future startup work has a baseline.
+- Embedding-model warm-up moved off the startup critical path (fire-and-forget
+  after the UI is usable, logged separately when it completes) instead of
+  blocking every launch behind an ONNX load.
+- **Memory recall regression fix** (`Aether.Services/MemoryStore.cs`):
+  `aea2326` had restricted hybrid-recall candidates to FTS hits plus a hard
+  cosine > 0.7 threshold, and fetched each non-FTS candidate individually
+  (N+1 queries). Every embedded row is scored again; only the plausible
+  top-K non-FTS ids are hydrated, in one batched `WHERE id IN (...)` query.
+- **Chat pagination**: conversations render only the newest 100 messages
+  (`ChatViewModel.VisibleMessages`), with a "Show earlier messages" button
+  to reveal more. Persistence, memory extraction, and prompt-history
+  truncation still operate on the full message list.
+- **Incremental markdown re-render**: `MarkdownViewer` now reuses each
+  top-level block's existing control when its source text is unchanged
+  between renders, rebuilding only from the first changed block onward,
+  instead of rebuilding the entire document on every streaming debounce tick.
+- Audited every model-restart call site; both existing guards
+  (`ServicesViewModel.SelectModelAndRestartAsync`'s path comparison,
+  `BenchmarkViewModel.PrepareModelAsync`'s model-ID fast-skip) were already
+  correct and are now covered by tests. Chat model switching and
+  `Aether.LocalApi` have no restart call sites.
+
+### Technical debt
+
+- **Harness registration guard** (`HarnessRegistrationGuardTests`): a
+  reflection-based test asserts every public parameterless Task-returning
+  method on the custom harness's test classes is registered in
+  `HarnessCases` exactly once. Immediately caught six previously-dead tests
+  across the codebase (beyond the two r6 already found) that existed but
+  never ran: `AcceptanceTests.AgentUiAcceptance_PatchQueueMetadataIsRendered`,
+  `AcceptanceTests.TraceSchema_FileIsValidAndSampleConforms` (also fixed a
+  broken relative path in the same test), `RagTests.RagDirectoryIngestPersistsCompletedFileBatches`,
+  `ServiceTests.BenchmarkExportAllCreatesBatchFolder`,
+  `ServiceTests.MemoryStoreCountsByConversationWork`, and
+  `TtsTests.VoicePreviewSkipsBlankText`. All six now run and pass.
+- `SettingsSectionViewModels.cs` (881 lines, 11 classes) split one class per
+  file; `DoctorService.cs` (1411 lines) split into partial-class files by
+  domain (Startup, Storage, Runtime, Voice, Rag, System, Benchmarks). Both
+  are pure moves with no logic changes.
+
+### Fixed
+
+- The chat "thinking" pulse animation (`aea2326`) never actually ran: it
+  bound to `IsGenerating` on `MessageViewModel`, which has no such property,
+  and set a `RenderTransform` via both a malformed attribute and a property
+  element. Now bound to the message's own `IsStreaming`.
+
+56 new tests (461 -> 517). Coverage floor: 49 -> 50 (narrative target).
+
+
 ## [0.12.0-alpha] - 2026-07-15
 
 Implements docs/review r7: the Agent Scenario Suite, a library of small,

@@ -405,7 +405,13 @@ public partial class BenchmarkViewModel : ObservableObject
         if (_isLoading || value is null || !IsManagedLocalGguf(value))
             return;
 
-        _ = AutoSwitchSelectedModelAsync(value);
+        // r17 02-benchmark-truth.md 2.7: merely browsing this dropdown used to stop and
+        // restart the live managed chat server (a 1-2 minute operation on large models)
+        // before Run was ever clicked. RunAsync already calls PrepareSelectedModelAsync at
+        // run time, which performs the same switch when actually needed; selecting a model
+        // now only sets a passive hint when it differs from what is currently served.
+        if (_services is not null && !string.Equals(_settings.Settings.Llm.DefaultModel, value.Id, StringComparison.OrdinalIgnoreCase))
+            Status = $"Will start managed llama.cpp for {value.Name} when the benchmark runs.";
     }
     partial void OnIsRunningChanged(bool value)
     {
@@ -438,21 +444,6 @@ public partial class BenchmarkViewModel : ObservableObject
         suite.TimeoutSeconds = TimeoutSeconds;
         suite.MaxCases = MaxCases;
         return suite;
-    }
-
-    private async Task AutoSwitchSelectedModelAsync(LlmModel model)
-    {
-        try
-        {
-            Status = $"Starting managed llama.cpp for {model.Name}...";
-            await PrepareModelAsync(model, CancellationToken.None);
-            Status = $"Managed llama.cpp ready for {model.Name}.";
-        }
-        catch (Exception ex)
-        {
-            Status = $"Could not start managed llama.cpp: {ex.Message}";
-            _toasts.Show("Model switch failed", ex.Message, ToastKind.Warning, 7000);
-        }
     }
 
     private Task PrepareSelectedModelAsync(CancellationToken ct) =>

@@ -298,8 +298,8 @@
                                                        IsEnabled="{Binding CanEdit}"
                                                        ToolTip.Tip="GPU offload layers. -1 offloads all layers (rendered as --n-gpu-layers 999); 0 keeps inference on the CPU; a positive N offloads exactly N layers." />
                                         <TextBlock Grid.Column="3"
-                                                   Text="{Binding OversizedContextNote}"
-                                                   IsVisible="{Binding HasOversizedContext}"
+                                                   Text="{Binding ContextFitNote}"
+                                                   IsVisible="{Binding HasContextFitWarning}"
                                                    TextWrapping="Wrap"
                                                    VerticalAlignment="Center"
                                                    Opacity="0.7" FontSize="12" />

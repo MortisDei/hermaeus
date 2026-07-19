@@ -85,4 +85,58 @@ public sealed class ModelFitEstimatorTests
         Assert.Equal("Partial offload", ModelFitEstimator.Label(ModelFitTier.FitsPartial));
         Assert.Equal("Too large", ModelFitEstimator.Label(ModelFitTier.TooLarge));
     }
+
+    // r17 01-gguf-context-and-tuning.md 1.3: KV-cache-aware overload.
+    private static GgufModelInfo Shape() => new("llama", "Q4_K_M", 32, 8192, 4096, 32, 8, 128, 128);
+
+    [Fact]
+    public void Estimate_with_null_info_is_byte_identical_to_the_legacy_overload()
+    {
+        var hw = new HardwareProfile(TotalRamBytes: 32 * OneGb, MaxGpuVramBytes: 8 * OneGb, GpuName: "Test GPU");
+
+        var legacy = ModelFitEstimator.Estimate(4 * OneGb, hw);
+        var withNullInfo = ModelFitEstimator.Estimate(4 * OneGb, hw, null, 8192);
+
+        Assert.Equal(legacy, withNullInfo);
+    }
+
+    [Fact]
+    public void Estimate_with_info_fits_gpu_at_small_context_and_not_at_huge_context()
+    {
+        // A 4 GB model on an 8 GB card: comfortable at 8k context, but the KV cache at 65k
+        // context (32 layers * 8 kv heads * 256 dims * 2 bytes/token = 131072 bytes/token)
+        // adds ~8.4 GB on its own, which cannot fit in 8 GB VRAM nor comfortably in RAM headroom
+        // alongside the weights depending on machine RAM - assert only the GPU-fit boundary,
+        // which is unambiguous.
+        var hw = new HardwareProfile(TotalRamBytes: 128 * OneGb, MaxGpuVramBytes: 8 * OneGb, GpuName: "Test GPU");
+        var info = Shape();
+
+        var small = ModelFitEstimator.Estimate(4 * OneGb, hw, info, 8192);
+        var huge = ModelFitEstimator.Estimate(4 * OneGb, hw, info, 65536);
+
+        Assert.Equal(ModelFitTier.FitsGpu, small.Tier);
+        Assert.Contains("KV cache", small.Reason, StringComparison.Ordinal);
+        Assert.NotEqual(ModelFitTier.FitsGpu, huge.Tier);
+        Assert.Contains("KV cache", huge.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Estimate_with_info_falls_back_to_legacy_when_shape_facts_are_missing()
+    {
+        var hw = new HardwareProfile(TotalRamBytes: 32 * OneGb, MaxGpuVramBytes: 8 * OneGb, GpuName: "Test GPU");
+        var incomplete = new GgufModelInfo("llama", "Q4_K_M", null, null, null, null, null, null, null);
+
+        var withIncompleteInfo = ModelFitEstimator.Estimate(4 * OneGb, hw, incomplete, 8192);
+        var legacy = ModelFitEstimator.Estimate(4 * OneGb, hw);
+
+        Assert.Equal(legacy, withIncompleteInfo);
+    }
+
+    [Fact]
+    public void Estimate_with_info_returns_unknown_when_hardware_has_no_data()
+    {
+        var result = ModelFitEstimator.Estimate(4 * OneGb, new HardwareProfile(0, 0, null), Shape(), 8192);
+
+        Assert.Equal(ModelFitTier.Unknown, result.Tier);
+    }
 }

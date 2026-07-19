@@ -16,12 +16,18 @@ Runs record the following metrics and metadata:
 
 - First-token latency
 - Total latency
-- Approximate tokens/sec
+- Tokens/sec, measured from the provider's own prompt/decode timings when it
+	reports them (llama.cpp), or estimated from output length otherwise - each
+	result is labeled `server-measured` or `estimated from characters` so the
+	two are never confused
 - Deterministic quality checks
-- Resource deltas (CPU, memory, storage changes)
+- Resource deltas (CPU, memory, storage changes) for display; the scoring
+	weight for this slot is neutral (reserved, not currently a real signal -
+	see Resource Sampling Notes)
 - Pass rate, failure count, and weighted rankings
-- Run metadata including model identity, backend/runtime, context size,
-	sampler settings, app version, OS, CPU, RAM, and GPU summary
+- Run metadata including model identity, backend/runtime, context size, GPU
+	layers, thread count, model path, and quantization (all sourced from the
+	managed server actually serving a local GGUF model, not app-process values)
 - Suite version, case version, scoring profile, and run mode
 - Cold-only single-iteration runs, or cold and warm phase attempts when suites
 	use repeated iterations per case
@@ -31,9 +37,11 @@ reviewed later.
 
 The default action is a one-click benchmark pass. With **Run all suites**
 enabled, Aether runs every built-in suite for the selected model. Turning it off
-runs only the highlighted suite. Selecting a discovered local GGUF configures
-the managed chat `llama-server`, restarts it when the model changes, and starts
-it when it is stopped.
+runs only the highlighted suite. Selecting a discovered local GGUF model in the
+dropdown only updates a status hint; the managed chat `llama-server` is switched
+to that model (restarted if a different model is currently loaded, started if
+stopped) only when **Run** is actually clicked, so browsing the dropdown never
+triggers a 1-2 minute restart on its own.
 
 ### Reproducibility in Benchmarks
 
@@ -57,9 +65,14 @@ than single-run measurements.
 Benchmarks distinguish cold-start measurements from warm-run measurements where
 possible.
 
-- Cold runs have no prior KV cache state for the prompt.
+- Cold runs have no prior KV cache state for the prompt. Since llama-server
+	keeps prompt-cache reuse on by default (for fast follow-up chat sends),
+	Aether explicitly disables it for each case's first (Cold) iteration so a
+	suite run immediately after a previous one cannot get a warm prefill from
+	leftover KV state while still being reported as Cold.
 - Warm runs are only reported when a suite uses more than one iteration per
-	case, allowing later passes of the same prompt to reuse cached prefill state.
+	case; those later iterations keep the prompt cache enabled and can reuse
+	cached prefill state from the first run.
 - Repeated iterations help separate cache-state effects from steady-state speed.
 
 ### Built-In Starter Suites
@@ -179,8 +192,14 @@ Example:
 
 ### Resource Sampling Notes
 
-Resource deltas are sampled before, during, and after a run. They are best-effort
-and may miss short-lived spikes on some platforms.
+Resource deltas are sampled before, during, and after a run and shown for
+reference. They are best-effort and may miss short-lived spikes on some
+platforms. The model itself runs in a separate process (`llama-server`) or on
+a remote endpoint, so Aether's own process memory delta says nothing about the
+model's actual resource use; the resource term in the weighted ranking score
+is therefore always neutral rather than computed from that delta. The before/
+after memory and VRAM snapshots are still recorded and exported for manual
+inspection.
 
 For GPU-capable systems, record:
 
