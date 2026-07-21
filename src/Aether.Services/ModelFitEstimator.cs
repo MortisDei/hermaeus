@@ -14,7 +14,6 @@ public sealed record ModelFitResult(ModelFitTier Tier, string Reason);
 public static class ModelFitEstimator
 {
     private const double WeightsMultiplier = 1.2;
-    private const long GpuHeadroomBytes = 1_610_612_736; // 1.5 GiB
     private const long RamHeadroomBytes = 2_147_483_648; // 2 GiB
 
     public static ModelFitResult Estimate(long fileSizeBytes, HardwareProfile hw)
@@ -24,7 +23,7 @@ public static class ModelFitEstimator
 
         var weighted = (long)(fileSizeBytes * WeightsMultiplier);
 
-        if (hw.MaxGpuVramBytes > 0 && weighted + GpuHeadroomBytes <= hw.MaxGpuVramBytes)
+        if (hw.MaxGpuVramBytes > 0 && weighted + KvCacheMath.GpuHeadroomBytes <= hw.MaxGpuVramBytes)
             return new ModelFitResult(ModelFitTier.FitsGpu, $"~{FormatGb(fileSizeBytes)} model fits fully in {FormatGb(hw.MaxGpuVramBytes)} VRAM.");
 
         if (hw.TotalRamBytes > 0 && weighted + RamHeadroomBytes <= hw.TotalRamBytes)
@@ -63,7 +62,7 @@ public static class ModelFitEstimator
         var weightsGb = FormatGb(projection.WeightsBytes);
         var kvGb = FormatGb(projection.KvBytes);
 
-        if (hw.MaxGpuVramBytes > 0 && projection.TotalBytes + GpuHeadroomBytes <= hw.MaxGpuVramBytes)
+        if (hw.MaxGpuVramBytes > 0 && projection.TotalBytes + KvCacheMath.GpuHeadroomBytes <= hw.MaxGpuVramBytes)
             return new ModelFitResult(ModelFitTier.FitsGpu, $"~{weightsGb} weights + ~{kvGb} KV cache at {contextSize:N0} context fits {FormatGb(hw.MaxGpuVramBytes)} VRAM.");
 
         if (hw.TotalRamBytes > 0 && projection.TotalBytes + RamHeadroomBytes <= hw.TotalRamBytes)

@@ -32,6 +32,7 @@ public static class LocalAiAssetLocator
         {
             return Directory.EnumerateFiles(layout.ModelsDirectory, "*.gguf", SearchOption.AllDirectories)
                 .Where(path => !IsUnderSpecialModelDirectory(path, layout.ModelsDirectory))
+                .Where(path => !IsCompanionGguf(path))
                 .Order(StringComparer.OrdinalIgnoreCase)
                 .ToList();
         }
@@ -39,6 +40,25 @@ public static class LocalAiAssetLocator
         {
             return [];
         }
+    }
+
+    /// <summary>
+    /// r18 03-model-catalog-and-memory-ui.md 3.2: the reported "small model files &lt; ~500 MB
+    /// cluttering the list" turned out, verified against a real HF hub cache, not to be sharded
+    /// GGUF fragments (no <c>-00001-of-000NN.gguf</c> files were present anywhere) but companion
+    /// files that HF repos ship alongside the real chat model: <c>mmproj*.gguf</c> vision
+    /// projectors (llama.cpp/clip.cpp's own naming convention, consumed via <c>--mmproj</c>, an
+    /// ExtraArgs-only flag with no first-class UI in Aether) and <c>mtp-*.gguf</c>
+    /// multi-token-prediction draft weights (Unsloth's naming convention for a companion
+    /// speculative-decoding file, also unused by Aether - see doc 04 4.4's rejection of
+    /// draft-model speculative decoding this round). Neither is loadable as a standalone chat
+    /// model, so they are excluded here rather than merely labeled.
+    /// </summary>
+    private static bool IsCompanionGguf(string path)
+    {
+        var name = Path.GetFileNameWithoutExtension(path);
+        return name.StartsWith("mmproj", StringComparison.OrdinalIgnoreCase)
+            || name.StartsWith("mtp-", StringComparison.OrdinalIgnoreCase);
     }
 
     public static IReadOnlyList<string> FindEmbeddingModels(string root)

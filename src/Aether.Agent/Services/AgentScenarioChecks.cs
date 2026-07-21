@@ -69,17 +69,28 @@ public static class AgentScenarioChecks
         return results;
     }
 
+    /// <summary>
+    /// r18 02-agents-usability.md 2.1: an exact-length, exact-order match against the manifest's
+    /// hardcoded status list failed whenever a model split a goal into a different number or
+    /// order of sub-tasks than the manifest author guessed - a reasonable thing for a model to
+    /// do, and not evidence orchestration itself misbehaved. Checks only that every distinct
+    /// expected status was reached by at least one sub-task; extra sub-tasks, a different count,
+    /// or a different order no longer fail this check.
+    /// </summary>
     private static AgentScenarioCheckResult CheckExpectSubtaskStatuses(IReadOnlyList<string> expected, AgentTaskState state)
     {
         var actual = state.SubTaskPlan.Select(s => s.Status.ToString()).ToList();
-        var passed = actual.Count == expected.Count
-            && actual.Zip(expected, (a, e) => string.Equals(a, e, StringComparison.OrdinalIgnoreCase)).All(m => m);
+        var distinctExpected = expected.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var missing = distinctExpected
+            .Where(e => !actual.Any(a => string.Equals(a, e, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+        var passed = missing.Count == 0;
         return new AgentScenarioCheckResult(
             "expect_subtask_statuses",
             passed,
             passed
-                ? $"Sub-task statuses matched: {string.Join(", ", actual)}."
-                : $"Sub-task statuses were [{string.Join(", ", actual)}], expected [{string.Join(", ", expected)}].");
+                ? $"Every expected sub-task status was reached at least once: {string.Join(", ", distinctExpected)} (actual: {string.Join(", ", actual)})."
+                : $"Sub-task statuses were [{string.Join(", ", actual)}]; never reached: {string.Join(", ", missing)}.");
     }
 
     private static AgentScenarioCheckResult CheckExpectReportContains(string phrase, AgentTaskState state, AgentPlannerResponse? finalResponse)

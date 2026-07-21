@@ -34,6 +34,14 @@ public sealed class VoiceTempFileCleanupTests
         var result = await provider.GenerateSpeechAsync(new VoiceSynthesisRequest("hello", OutputPath: null, PlayAudio: true));
 
         Assert.False(string.IsNullOrWhiteSpace(result.OutputPath));
+
+        // Poll rather than assert immediately: GenerateSpeechAsync's own delete happens
+        // synchronously after PlayWavFileAsync returns, but a transient OS-level file lock
+        // (antivirus/indexer scanning a file moments after it was written) can delay the
+        // delete becoming visible to this process's own File.Exists check.
+        var deadline = DateTime.UtcNow.AddSeconds(2);
+        while (File.Exists(result.OutputPath) && DateTime.UtcNow < deadline)
+            await Task.Delay(200);
         Assert.False(File.Exists(result.OutputPath), $"temp wav {result.OutputPath} should be deleted after playback");
     }
 

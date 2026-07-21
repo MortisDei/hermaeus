@@ -768,6 +768,30 @@ namespace Aether.Tests
             return Task.CompletedTask;
         }
 
+        /// <summary>r18 03-model-catalog-and-memory-ui.md 3.2: verified against a real HF hub
+        /// cache that the reported small-file clutter was mmproj vision-projector and mtp
+        /// multi-token-prediction draft-weight companion files, not sharded GGUF fragments -
+        /// neither is loadable as a standalone chat model in Aether.</summary>
+        public static Task LocalAiAssetsExcludesCompanionGgufFiles()
+        {
+            using var temp = new TempDir();
+            var root = temp.PathFor("AI");
+            var models = Path.Combine(root, "Models");
+            Directory.CreateDirectory(models);
+            var chat = Path.Combine(models, "gemma-4-E4B-it.gguf");
+            var mmproj = Path.Combine(models, "mmproj-F16.gguf");
+            var mtp = Path.Combine(models, "mtp-gemma-4-E4B-it.gguf");
+            File.WriteAllText(chat, "model");
+            File.WriteAllText(mmproj, "projector");
+            File.WriteAllText(mtp, "draft weights");
+
+            var found = LocalAiAssetLocator.FindGgufModels(root);
+
+            Equal(1, found.Count, "companion GGUF files should not be listed as standalone models");
+            True(found.Contains(chat), "the real chat model should still be discovered");
+            return Task.CompletedTask;
+        }
+
         public static Task LocalAiAssetsListsDiscoveredEmbeddingModels()
         {
             using var temp = new TempDir();

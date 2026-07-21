@@ -399,9 +399,9 @@ public sealed class AgentScenarioChecksTests
     }
 
     [Fact]
-    public void Expect_subtask_statuses_fails_on_a_status_mismatch()
+    public void Expect_subtask_statuses_fails_when_an_expected_status_never_occurs()
     {
-        var expect = new AgentScenarioExpectations { ExpectSubtaskStatuses = ["complete", "complete"] };
+        var expect = new AgentScenarioExpectations { ExpectSubtaskStatuses = ["complete", "failed"] };
         var state = NewState();
         state.SubTaskPlan =
         [
@@ -414,8 +414,10 @@ public sealed class AgentScenarioChecksTests
         Assert.False(Single(results, "expect_subtask_statuses").Passed);
     }
 
+    /// <summary>r18 02-agents-usability.md 2.1: a model splitting work into a different number of
+    /// sub-tasks than the manifest hardcodes must not fail this check on its own.</summary>
     [Fact]
-    public void Expect_subtask_statuses_fails_on_a_count_mismatch()
+    public void Expect_subtask_statuses_passes_with_a_different_subtask_count_as_long_as_every_expected_status_occurs()
     {
         var expect = new AgentScenarioExpectations { ExpectSubtaskStatuses = ["complete", "complete", "complete"] };
         var state = NewState();
@@ -427,7 +429,7 @@ public sealed class AgentScenarioChecksTests
 
         var results = AgentScenarioChecks.Evaluate(expect, state, null, EmptyDiff());
 
-        Assert.False(Single(results, "expect_subtask_statuses").Passed);
+        Assert.True(Single(results, "expect_subtask_statuses").Passed);
     }
 
     // -- expect_report_contains --

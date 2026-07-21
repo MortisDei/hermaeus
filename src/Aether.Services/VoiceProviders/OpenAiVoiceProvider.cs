@@ -73,27 +73,43 @@ public sealed class OpenAiVoiceProvider : ITtsService, IVoiceProvider, IDisposab
 
     public async Task<VoiceSynthesisResult> GenerateSpeechAsync(VoiceSynthesisRequest request, CancellationToken ct = default)
     {
-        var outputPath = string.Empty;
+        string outputPath;
         try
         {
             outputPath = await RenderToFileAsync(request.Text, request.Voice, request.OutputPath, ct);
-            if (request.PlayAudio)
-                await VoiceProviderProcessRunner.PlayWavFileAsync(outputPath, ct);
-            return new VoiceSynthesisResult(true, "OpenAI synthesis complete.", outputPath);
         }
         catch (Exception ex)
         {
             return new VoiceSynthesisResult(false, ex.Message);
         }
-        finally
+
+        var message = "OpenAI synthesis complete.";
+        if (request.PlayAudio)
         {
-            // r11 4.3: see KokoroVoiceProvider.GenerateSpeechAsync.
-            if (request.OutputPath is null && request.PlayAudio && !string.IsNullOrWhiteSpace(outputPath))
+            try
             {
-                try { File.Delete(outputPath); }
-                catch { }
+                await VoiceProviderProcessRunner.PlayWavFileAsync(outputPath, ct);
+            }
+            catch (Exception ex)
+            {
+                // r18 01-finish-the-open-work.md 1.5: synthesis already succeeded by this point
+                // (the file above was written); a playback-only failure (missing/broken OS audio
+                // player, malformed audio) used to be reported as a synthesis failure that also
+                // discarded OutputPath, so a caller had no way to know the file existed - and it
+                // never reached the cleanup below either.
+                message = $"OpenAI synthesis complete; playback failed: {ex.Message}";
             }
         }
+
+        // r11 4.3: when the caller did not request a persisted OutputPath, this synthesized to
+        // a %TEMP% file that must not outlive playback.
+        if (request.OutputPath is null && request.PlayAudio && !string.IsNullOrWhiteSpace(outputPath))
+        {
+            try { File.Delete(outputPath); }
+            catch { }
+        }
+
+        return new VoiceSynthesisResult(true, message, outputPath);
     }
 
     public async Task SpeakAsync(string text, CancellationToken ct = default)

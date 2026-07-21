@@ -154,4 +154,49 @@ public sealed class MainWindowViewModelStartupTests
         Assert.DoesNotContain(harness.Main.Conversations, c => c.Id == "conv-remove");
         Assert.Null(await harness.ConvStore.GetByIdAsync("conv-remove"));
     }
+
+    /// <summary>
+    /// r18 01-finish-the-open-work.md 1.1: every keystroke in the title/folder/tags fields of
+    /// the details flyout used to save immediately and reload the whole Conversations list,
+    /// swapping out every ConversationItemViewModel instance (including the one backing the
+    /// open flyout) mid-edit. Editing must now debounce to a single save after a pause, and the
+    /// same instance must remain in the list throughout.
+    /// </summary>
+    [Fact]
+    public async Task Editing_a_conversation_title_debounces_the_save_and_updates_in_place()
+    {
+        using var temp = new TempDir();
+        var harness = await NewHarnessAsync(temp, initializeRagStore: true);
+        await harness.ConvStore.SaveAsync(new Aether.Core.Models.Conversation { Id = "conv-1", Title = "Original" });
+
+        // Toggling ShowArchivedConversations reloads the list through the real production path
+        // (OnShowArchivedConversationsChanged), populating Conversations with a real item whose
+        // MetadataChanged is wired up exactly like the details flyout would drive it.
+        harness.Main.ShowArchivedConversations = true;
+        await WaitForAsync(() => harness.Main.Conversations.Count > 0);
+        var item = Assert.Single(harness.Main.Conversations);
+
+        item.Title = "F";
+        item.Title = "Fi";
+        item.Title = "First keystroke test";
+
+        // Well before the debounce window elapses, the store must be untouched and the same
+        // instance must still back the list entry.
+        await Task.Delay(150);
+        var midEdit = await harness.ConvStore.GetByIdAsync("conv-1");
+        Assert.Equal("Original", midEdit!.Title);
+        Assert.Same(item, Assert.Single(harness.Main.Conversations));
+
+        Aether.Core.Models.Conversation? saved = null;
+        var deadline = DateTime.UtcNow.AddSeconds(2);
+        while (DateTime.UtcNow < deadline)
+        {
+            saved = await harness.ConvStore.GetByIdAsync("conv-1");
+            if (saved?.Title == "First keystroke test") break;
+            await Task.Delay(50);
+        }
+
+        Assert.Equal("First keystroke test", saved?.Title);
+        Assert.Same(item, Assert.Single(harness.Main.Conversations));
+    }
 }

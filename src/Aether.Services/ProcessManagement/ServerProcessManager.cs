@@ -206,7 +206,14 @@ public sealed class ServerProcessManager : IDisposable
         // extra probe (all layers, the suggested context) runs before the existing layer
         // descent; if it fails for any reason, fall through unchanged.
         var suggestedContext = ggufInfo is not null && hardware is { MaxGpuVramBytes: > 0 } && File.Exists(baseConfig.ModelPath)
-            ? SuggestContextSize(ggufInfo, new FileInfo(baseConfig.ModelPath).Length, hardware.MaxGpuVramBytes, baseConfig.ContextSize)
+            ? SuggestContextSize(
+                ggufInfo,
+                new FileInfo(baseConfig.ModelPath).Length,
+                hardware.MaxGpuVramBytes,
+                baseConfig.ContextSize,
+                KvCacheMath.ResolveBytesPerElement(baseConfig.KvCacheTypeK, baseConfig.ExtraArgs, isKeyCache: true),
+                KvCacheMath.ResolveBytesPerElement(baseConfig.KvCacheTypeV, baseConfig.ExtraArgs, isKeyCache: false),
+                KvCacheMath.HasSwaFull(baseConfig.ExtraArgs))
             : null;
 
         if (suggestedContext is int tunedContext)
@@ -339,32 +346,46 @@ public sealed class ServerProcessManager : IDisposable
         [2048, 4096, 8192, 12288, 16384, 24576, 32768, 49152, 65536, 98304, 131072];
 
     /// <summary>
-    /// Pure helper (r17 01-gguf-context-and-tuning.md 1.5): the largest value from a fixed
-    /// context ladder that is &lt;= min(<paramref name="configuredContext"/>,
-    /// <paramref name="info"/>'s training context) and whose full-offload weights+KV
-    /// projection fits <paramref name="vramBytes"/>. Returns null when the configured context
-    /// already fits (nothing to suggest), when the KV shape facts or VRAM are unavailable, or
-    /// when nothing on the ladder fits. <paramref name="fileSizeBytes"/> is required for the
-    /// weights term of the projection even though it is not itself part of the GGUF header.
+    /// Pure helper (r17 01-gguf-context-and-tuning.md 1.5, revised r18
+    /// 01-finish-the-open-work.md 1.3): the largest value from a fixed context ladder that is
+    /// &lt;= min(131072, <paramref name="info"/>'s training context) and whose full-offload
+    /// weights+KV projection fits <paramref name="vramBytes"/>. Unlike the r17 version, this is
+    /// not bounded above by <paramref name="configuredContext"/>, so the result can suggest
+    /// raising context when there is VRAM headroom, not only downshifting it - the caller must
+    /// compare the result against <paramref name="configuredContext"/> to know which direction
+    /// it is. Returns null when the configured context already fits and no larger ladder value
+    /// also fits (nothing to suggest), when the KV shape facts or VRAM are unavailable, or when
+    /// nothing on the ladder fits. <paramref name="fileSizeBytes"/> is required for the weights
+    /// term of the projection even though it is not itself part of the GGUF header.
+    /// <paramref name="bytesPerElementK"/>/<paramref name="bytesPerElementV"/> default to f16
+    /// (byte-identical to pre-r18 behavior) - pass resolved values from
+    /// <see cref="KvCacheMath.ResolveBytesPerElement(string,string?,bool)"/> so the ladder
+    /// search reflects a configured KV cache type (r18 04-llama-server-engine-options.md 4.2).
     /// </summary>
-    public static int? SuggestContextSize(GgufModelInfo info, long fileSizeBytes, long vramBytes, int configuredContext)
+    public static int? SuggestContextSize(
+        GgufModelInfo info,
+        long fileSizeBytes,
+        long vramBytes,
+        int configuredContext,
+        double? bytesPerElementK = null,
+        double? bytesPerElementV = null,
+        bool swaFull = false)
     {
         if (vramBytes <= 0 || fileSizeBytes <= 0 || configuredContext <= 0)
             return null;
 
+        var bpeK = bytesPerElementK ?? KvCacheMath.DefaultBytesPerElement;
+        var bpeV = bytesPerElementV ?? KvCacheMath.DefaultBytesPerElement;
+
         bool Fits(int ctx)
         {
-            var bpe = KvCacheMath.DefaultBytesPerElement;
-            var projection = KvCacheMath.Project(fileSizeBytes, info, ctx, gpuLayers: -1, bpe, bpe);
+            var projection = KvCacheMath.Project(fileSizeBytes, info, ctx, gpuLayers: -1, bpeK, bpeV, swaFull);
             return projection is not null && projection.TotalBytes + KvCacheMath.GpuHeadroomBytes <= vramBytes;
         }
 
-        if (Fits(configuredContext))
-            return null;
-
         var cap = info.TrainingContextLength is > 0
-            ? Math.Min(configuredContext, info.TrainingContextLength.Value)
-            : configuredContext;
+            ? Math.Min(131072, info.TrainingContextLength.Value)
+            : 131072;
 
         int? best = null;
         foreach (var candidate in ContextSizeLadder)
@@ -373,6 +394,12 @@ public sealed class ServerProcessManager : IDisposable
             if (Fits(candidate) && (best is null || candidate > best))
                 best = candidate;
         }
+
+        // If the configured context already fits, only suggest a change if we found a larger 
+        // candidate on the ladder that also fits.
+        if (Fits(configuredContext) && (best is null || best <= configuredContext))
+            return null;
+
         return best;
     }
 
@@ -518,6 +545,46 @@ public sealed class ServerProcessManager : IDisposable
                 parts.Add("-ub");
                 parts.Add("512");
             }
+        }
+
+        // r18 04-llama-server-engine-options.md 4.1: first-class engine options. Defaults match
+        // today's exact command line (f16 KV cache, auto flash attention, context shift/mlock/
+        // no-mmap all off) so an older saved config launches byte-identically; ExtraArgs always
+        // wins over any of these, exactly like --parallel and --cache-reuse above.
+        if (!string.Equals(cfg.KvCacheTypeK, "f16", StringComparison.OrdinalIgnoreCase) && !HasArg("--cache-type-k"))
+        {
+            parts.Add("--cache-type-k");
+            parts.Add(cfg.KvCacheTypeK);
+        }
+
+        if (!string.Equals(cfg.KvCacheTypeV, "f16", StringComparison.OrdinalIgnoreCase) && !HasArg("--cache-type-v"))
+        {
+            parts.Add("--cache-type-v");
+            parts.Add(cfg.KvCacheTypeV);
+        }
+
+        // "auto" is the server's own default and emits nothing.
+        if (!string.Equals(cfg.FlashAttention, "auto", StringComparison.OrdinalIgnoreCase) && !HasArg("--flash-attn") && !HasArg("-fa"))
+        {
+            parts.Add("--flash-attn");
+            parts.Add(cfg.FlashAttention.ToLowerInvariant());
+        }
+
+        if (cfg.ContextShift && !HasArg("--context-shift") && !HasArg("--no-context-shift"))
+            parts.Add("--context-shift");
+
+        if (cfg.MemoryLock && !HasArg("--mlock"))
+            parts.Add("--mlock");
+
+        if (cfg.NoMemoryMap && !HasArg("--no-mmap") && !HasArg("--mmap"))
+            parts.Add("--no-mmap");
+
+        // r18 04-llama-server-engine-options.md 4.4: zero-VRAM n-gram speculative decoding,
+        // drafts from the prompt/history itself rather than a second model.
+        if (cfg.NgramSpeculative && !HasArg("--spec-type"))
+        {
+            parts.Add("--spec-type");
+            parts.Add("ngram-mod");
         }
 
         if (extraArgs.Count > 0)

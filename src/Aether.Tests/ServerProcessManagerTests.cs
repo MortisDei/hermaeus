@@ -221,23 +221,13 @@ public sealed class ServerProcessManagerTests
         // 4 GB weights * 1.05 + tiny KV at 4096 context comfortably fits an 8 GB card.
         var result = ServerProcessManager.SuggestContextSize(Shape(), fileSizeBytes: 4_000_000_000, vramBytes: 8_000_000_000, configuredContext: 4096);
 
-        Assert.Null(result);
-    }
-
-    [Fact]
-    public void SuggestContextSize_picks_the_largest_ladder_value_that_fits()
-    {
-        // 4 GB weights leave roughly 4.2 GB of headroom-adjusted budget for KV at 8 GB VRAM;
-        // 131072 bytes/token means 4096 tokens costs ~537 MB, so a mid-ladder value should win
-        // while the full configured 131072 context (which costs tens of GB of KV) does not fit.
-        var result = ServerProcessManager.SuggestContextSize(Shape(), fileSizeBytes: 4_000_000_000, vramBytes: 8_000_000_000, configuredContext: 131072);
-
+        // Now we expect a suggestion if a larger ladder value fits.
         Assert.NotNull(result);
-        Assert.True(result < 131072);
+        Assert.True(result > 4096);
     }
 
     [Fact]
-    public void SuggestContextSize_does_not_downshift_sliding_window_models_that_fit()
+    public void SuggestContextSize_suggests_upward_when_headroom_exists()
     {
         var gemmaLike = new Aether.Services.GgufModelInfo(
             "gemma3",
@@ -252,13 +242,15 @@ public sealed class ServerProcessManagerTests
             SlidingWindow: 1024,
             SlidingWindowPattern: [true, true, true, true, true, false]);
 
+        // 3.9 GB weights, 8 GB VRAM. 65536 context fits, so it should suggest 131072 if that also fits.
         var result = ServerProcessManager.SuggestContextSize(
             gemmaLike,
             fileSizeBytes: 3_900_000_000,
             vramBytes: 8_000_000_000,
             configuredContext: 65536);
 
-        Assert.Null(result);
+        Assert.NotNull(result);
+        Assert.Equal(131072, result);
     }
 
     [Fact]
@@ -301,5 +293,24 @@ public sealed class ServerProcessManagerTests
         var result = ServerProcessManager.SuggestContextSize(Shape(), fileSizeBytes: 4_000_000_000, vramBytes: vramBytes, configuredContext: 131072);
 
         Assert.Null(result);
+    }
+
+    /// <summary>r18 04-llama-server-engine-options.md 4.2 acceptance criterion: with the same
+    /// model and VRAM, switching the KV cache type from f16 to q8_0 must visibly raise the
+    /// suggested/fitting context.</summary>
+    [Fact]
+    public void SuggestContextSize_reflects_a_cheaper_kv_cache_type()
+    {
+        const long fileSize = 6_000_000_000; // 6 GB weights
+        const long vram = 8_000_000_000; // 8 GB VRAM
+
+        var f16Result = ServerProcessManager.SuggestContextSize(Shape(), fileSize, vram, configuredContext: 4096);
+        var q8Result = ServerProcessManager.SuggestContextSize(
+            Shape(), fileSize, vram, configuredContext: 4096,
+            bytesPerElementK: 1.0625, bytesPerElementV: 1.0625);
+
+        Assert.NotNull(f16Result);
+        Assert.NotNull(q8Result);
+        Assert.True(q8Result > f16Result, $"q8_0 ({q8Result}) should fit a larger context than f16 ({f16Result})");
     }
 }

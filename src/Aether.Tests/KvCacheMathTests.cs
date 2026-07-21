@@ -19,7 +19,8 @@ public sealed class KvCacheMathTests
     [Fact]
     public void ResolveBytesPerElement_maps_cache_type_overrides_per_side()
     {
-        Assert.Equal(1.0, KvCacheMath.ResolveBytesPerElement("--cache-type-k q8_0", isKeyCache: true));
+        // r18 04-llama-server-engine-options.md 4.2 refines q8_0 from 1.0 to 1.0625 (8.5 bits).
+        Assert.Equal(1.0625, KvCacheMath.ResolveBytesPerElement("--cache-type-k q8_0", isKeyCache: true));
         Assert.Equal(0.5625, KvCacheMath.ResolveBytesPerElement("--cache-type-v q4_0", isKeyCache: false));
         Assert.Equal(0.5625, KvCacheMath.ResolveBytesPerElement("--cache-type-k q4_1", isKeyCache: true));
     }
@@ -33,9 +34,31 @@ public sealed class KvCacheMathTests
     }
 
     [Fact]
-    public void ResolveBytesPerElement_keeps_default_for_unrecognized_values()
+    public void ResolveBytesPerElement_maps_the_full_verified_value_set()
     {
-        Assert.Equal(2.0, KvCacheMath.ResolveBytesPerElement("--cache-type-k f32", isKeyCache: true));
+        // r18 04-llama-server-engine-options.md 4.2: f32 is now a real mapped value (4.0), not
+        // an "unrecognized" fallback to the f16 default.
+        Assert.Equal(4.0, KvCacheMath.ResolveBytesPerElement("--cache-type-k f32", isKeyCache: true));
+        Assert.Equal(2.0, KvCacheMath.ResolveBytesPerElement("--cache-type-k bf16", isKeyCache: true));
+        Assert.Equal(0.6875, KvCacheMath.ResolveBytesPerElement("--cache-type-v q5_0", isKeyCache: false));
+        Assert.Equal(0.6875, KvCacheMath.ResolveBytesPerElement("--cache-type-v q5_1", isKeyCache: false));
+        Assert.Equal(0.5625, KvCacheMath.ResolveBytesPerElement("--cache-type-k iq4_nl", isKeyCache: true));
+        Assert.Equal(2.0, KvCacheMath.ResolveBytesPerElement("--cache-type-k not-a-real-type", isKeyCache: true));
+    }
+
+    [Fact]
+    public void ResolveBytesPerElement_three_arg_overload_prefers_extra_args_over_the_first_class_field()
+    {
+        // Mirrors ServerProcessManager.BuildLaunchArguments' HasArg guard: ExtraArgs already
+        // setting the flag suppresses first-class emission, so the math must agree.
+        Assert.Equal(1.0625, KvCacheMath.ResolveBytesPerElement("q4_0", "--cache-type-k q8_0", isKeyCache: true));
+    }
+
+    [Fact]
+    public void ResolveBytesPerElement_three_arg_overload_falls_back_to_the_first_class_field()
+    {
+        Assert.Equal(0.5625, KvCacheMath.ResolveBytesPerElement("q4_0", extraArgs: null, isKeyCache: true));
+        Assert.Equal(2.0, KvCacheMath.ResolveBytesPerElement("f16", extraArgs: null, isKeyCache: true));
     }
 
     [Fact]
@@ -153,5 +176,36 @@ public sealed class KvCacheMathTests
         var info = new GgufModelInfo("llama", "Q4_K_M", null, 8192, 4096, 32, null, null, null);
 
         Assert.Null(KvCacheMath.Project(4_000_000_000, info, 4096, -1, 2.0, 2.0));
+    }
+
+    /// <summary>r18 04-llama-server-engine-options.md 4.6: --swa-full allocates the full-context
+    /// KV cache for sliding-window layers instead of the sliding-window-sized one.</summary>
+    [Fact]
+    public void Project_swa_full_skips_the_sliding_window_discount()
+    {
+        var info = new GgufModelInfo(
+            "gemma3", "Q4_K_M",
+            BlockCount: 6, TrainingContextLength: 131072, EmbeddingLength: 6, HeadCount: 1,
+            HeadCountKv: 1, KeyLength: 1, ValueLength: 1,
+            SlidingWindow: 10,
+            SlidingWindowPattern: [true, true, true, true, true, false]);
+
+        var withDiscount = KvCacheMath.Project(1_000_000, info, contextSize: 100, gpuLayers: -1, 1.0, 1.0, swaFull: false);
+        var swaFull = KvCacheMath.Project(1_000_000, info, contextSize: 100, gpuLayers: -1, 1.0, 1.0, swaFull: true);
+
+        Assert.NotNull(withDiscount);
+        Assert.NotNull(swaFull);
+        // Six dense layers at full context: 6 * (1 + 1) * 100 = 1200 bytes.
+        Assert.Equal(1200, swaFull!.KvBytes);
+        Assert.True(swaFull.KvBytes > withDiscount!.KvBytes);
+    }
+
+    [Fact]
+    public void HasSwaFull_detects_the_flag_in_extra_args()
+    {
+        Assert.True(KvCacheMath.HasSwaFull("--swa-full"));
+        Assert.True(KvCacheMath.HasSwaFull("--ctx-size 4096 --swa-full"));
+        Assert.False(KvCacheMath.HasSwaFull("--ctx-size 4096"));
+        Assert.False(KvCacheMath.HasSwaFull(null));
     }
 }

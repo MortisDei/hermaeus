@@ -30,4 +30,25 @@ public class ServerConfig
     public bool   EmbeddingsMode { get; set; } = false;
     public bool   AutoStart      { get; set; } = false;
     public string ExtraArgs      { get; set; } = string.Empty;
+
+    /// <summary>
+    /// First-class engine options (r18 04-llama-server-engine-options.md 4.1). All default to
+    /// today's exact command line (additive JSON: an older saved config deserializes to these
+    /// defaults and produces a byte-identical launch). Every option is the user's explicit
+    /// choice; nothing here is ever forced or auto-changed.
+    /// </summary>
+    public string KvCacheTypeK   { get; set; } = "f16";
+    public string KvCacheTypeV   { get; set; } = "f16";
+
+    /// <summary>Tri-state: "auto" (server default, emits nothing), "on", or "off".</summary>
+    public string FlashAttention { get; set; } = "auto";
+    public bool   ContextShift   { get; set; } = false;
+    public bool   MemoryLock     { get; set; } = false;
+    public bool   NoMemoryMap    { get; set; } = false;
+
+    /// <summary>
+    /// N-gram speculative decoding (r18 04-llama-server-engine-options.md 4.4): zero additional
+    /// VRAM, drafts from the prompt/history itself. Emits <c>--spec-type ngram-mod</c> only.
+    /// </summary>
+    public bool   NgramSpeculative { get; set; } = false;
 }

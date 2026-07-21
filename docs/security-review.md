@@ -1,7 +1,8 @@
 # Aether Security Review And Threat Model
 
-Last refreshed for `0.22.0-alpha` (see the r17 subsection under Threat
-Scenarios, covering the new GGUF header parser). The `0.10.0-alpha` pass
+Last refreshed for `0.23.0-alpha` (see the r18 subsection under Threat
+Scenarios, covering first-class llama-server engine options). The prior r17
+pass covered the new GGUF header parser. The `0.10.0-alpha` pass
 re-verified the
 areas that changed in r3-r5 (agent tool execution, run_command recipes,
 lesson store, voice orchestration, benchmark insights) directly against the
@@ -714,6 +715,37 @@ realistic input, not a hypothetical one.
   an oversized declared key count, alongside valid v2/v3 headers, unknown
   value types that must be skipped without derailing later keys, and a
   per-layer array value. No real model files are committed to the repo.
+
+### r18: First-Class llama-server Engine Options
+
+Six new `ServerConfig` fields (`KvCacheTypeK/V`, `FlashAttention`,
+`ContextShift`, `MemoryLock`, `NoMemoryMap`, `NgramSpeculative`) become
+command-line flags passed to the managed `llama-server` process.
+
+- **No new process-launch surface.** Every new flag is appended to the same
+  `ArgumentList`-based launch `ServerProcessManager.BuildLaunchArguments`
+  already builds - no shell string, no new `ProcessStartInfo` path. Values are
+  drawn from a fixed dropdown/checkbox set (`KvCacheTypeOptions`,
+  `FlashAttentionOptions`) or plain booleans, not arbitrary user text.
+- **`--host 127.0.0.1` is untouched.** No new option or preset ever emits or
+  suggests a different bind host; the tuning guide this round was sourced
+  from recommends `--host 0.0.0.0`, and that recommendation was explicitly
+  not adopted (docs/review/archived/r18/04-llama-server-engine-options.md
+  4.5). Still a standing invariant, not something this round could weaken.
+- **`ExtraArgs` always wins.** Every new first-class flag is suppressed
+  whenever the equivalent flag is already present in `ExtraArgs` (the same
+  `HasArg` guard `--parallel`/`--cache-reuse` already used), so a flag is
+  never emitted twice and a value typed into `ExtraArgs` cannot be silently
+  overridden by a first-class control the user did not touch.
+- **No forced or default-on quantization/flags.** Every new field defaults to
+  today's exact behavior (f16 KV cache, auto flash attention, everything else
+  off); "Suggest engine settings" only fills the editable form and never
+  saves without an explicit Save Config click, the same contract Auto Tune
+  already established.
+- **No new network surface.** `--rpc` (remote compute-peer pooling) was
+  explicitly not implemented this round precisely because it is a
+  distributed-systems feature needing its own trust/failure-mode review
+  (docs/review/archived/r18/05-roadmap.md).
 
 ## Release Gate Status
 

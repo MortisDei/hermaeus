@@ -68,7 +68,7 @@ public sealed class ModelFitEstimatorTests
     {
         const long fileSize = 5 * OneGb;
         var weighted = (long)(fileSize * 1.2);
-        var exactVram = weighted + 1_610_612_736; // GpuHeadroomBytes
+        var exactVram = weighted + KvCacheMath.GpuHeadroomBytes;
 
         var fitsExactly = ModelFitEstimator.Estimate(fileSize, new HardwareProfile(0, exactVram, "gpu"));
         var justUnder = ModelFitEstimator.Estimate(fileSize, new HardwareProfile(0, exactVram - 1, "gpu"));

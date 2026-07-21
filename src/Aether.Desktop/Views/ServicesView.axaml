@@ -209,7 +209,7 @@
 
                                 <!-- ── Config grid ───────────────────────── -->
                                 <Grid ColumnDefinitions="100,*,Auto"
-                                      RowDefinitions="Auto,Auto,Auto,Auto,Auto"
+                                      RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto"
                                       RowSpacing="8" ColumnSpacing="10">
 
                                     <!-- Executable -->
@@ -349,7 +349,77 @@
                                              IsEnabled="{Binding CanEdit}"
                                              ToolTip.Tip="Extra llama-server arguments are passed without a shell. Network flags such as --host 0.0.0.0 produce a trust warning. Quote a value containing spaces, e.g. --mmproj &quot;C:\models\a b\proj.gguf&quot;; a backslash is only an escape before a quote or another backslash, so plain Windows paths like C:\models\proj.gguf do not need to be escaped." />
 
+                                    <!-- r18 04-llama-server-engine-options.md 4.1: first-class
+                                         engine options. Defaults (f16/auto/off) are byte-identical
+                                         to pre-r18 launches; nothing here is ever forced. -->
+                                    <TextBlock Grid.Row="5" Grid.Column="0"
+                                               Text="KV cache / engine" VerticalAlignment="Center"
+                                               Opacity="0.6" FontSize="13" />
+                                    <StackPanel Grid.Row="5" Grid.Column="1" Spacing="6">
+                                        <Grid ColumnDefinitions="Auto,110,Auto,110,Auto,140" ColumnSpacing="8">
+                                            <TextBlock Text="K:" VerticalAlignment="Center" Opacity="0.6" FontSize="12" />
+                                            <ComboBox Grid.Column="1"
+                                                      ItemsSource="{Binding KvCacheTypeOptions}"
+                                                      SelectedItem="{Binding KvCacheTypeK}"
+                                                      IsEnabled="{Binding CanEdit}"
+                                                      FontSize="12"
+                                                      ToolTip.Tip="--cache-type-k. f16 is the server default; q8_0/q4_0 shrink KV cache memory at some quality cost." />
+                                            <TextBlock Grid.Column="2" Text="V:" VerticalAlignment="Center" Opacity="0.6" FontSize="12" />
+                                            <ComboBox Grid.Column="3"
+                                                      ItemsSource="{Binding KvCacheTypeOptions}"
+                                                      SelectedItem="{Binding KvCacheTypeV}"
+                                                      IsEnabled="{Binding CanEdit}"
+                                                      FontSize="12"
+                                                      ToolTip.Tip="--cache-type-v. Quantizing V below f16/bf16 needs flash attention on or auto (see the warning below if not)." />
+                                            <TextBlock Grid.Column="4" Text="Flash attn:" VerticalAlignment="Center" Opacity="0.6" FontSize="12" />
+                                            <ComboBox Grid.Column="5"
+                                                      ItemsSource="{Binding FlashAttentionOptions}"
+                                                      SelectedItem="{Binding FlashAttention}"
+                                                      IsEnabled="{Binding CanEdit}"
+                                                      FontSize="12"
+                                                      ToolTip.Tip="--flash-attn. auto (server default) emits nothing; on/off are explicit." />
+                                        </Grid>
+                                        <TextBlock Text="Quantized V cache needs flash attention on or auto - this launches with exactly what you chose, but prompt processing may fail to start."
+                                                   IsVisible="{Binding NeedsFlashAttentionForQuantizedV}"
+                                                   FontSize="11" TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource SystemFillColorCautionBrush}" />
+                                        <CheckBox IsChecked="{Binding ContextShift}"
+                                                  Content="Context shift (rolling context for long agent loops)"
+                                                  FontSize="12"
+                                                  IsEnabled="{Binding CanEdit}" />
+                                    </StackPanel>
+
                                 </Grid>
+
+                                <!-- ── Advanced engine options ───────────── -->
+                                <Expander Header="Advanced engine options" IsExpanded="False">
+                                    <StackPanel Spacing="8" Margin="0,8,0,0">
+                                        <StackPanel Orientation="Horizontal" Spacing="16">
+                                            <CheckBox IsChecked="{Binding MemoryLock}"
+                                                      Content="--mlock (keep model pinned in RAM)"
+                                                      FontSize="12"
+                                                      IsEnabled="{Binding CanEdit}" />
+                                            <CheckBox IsChecked="{Binding NoMemoryMap}"
+                                                      Content="--no-mmap"
+                                                      FontSize="12"
+                                                      IsEnabled="{Binding CanEdit}" />
+                                            <CheckBox IsChecked="{Binding NgramSpeculative}"
+                                                      Content="N-gram speculative decoding (experimental)"
+                                                      FontSize="12"
+                                                      IsEnabled="{Binding CanEdit}"
+                                                      ToolTip.Tip="--spec-type ngram-mod. Zero additional VRAM; drafts from the prompt/history itself." />
+                                        </StackPanel>
+                                        <Button Command="{Binding SuggestEngineSettingsCommand}"
+                                                IsEnabled="{Binding CanEdit}"
+                                                Content="Suggest engine settings"
+                                                Padding="12,5" CornerRadius="6" FontSize="12"
+                                                HorizontalAlignment="Left"
+                                                ToolTip.Tip="Fills Context Size, KV cache type, and Flash Attention with a hardware-tier recommendation. Fills the editor only - nothing is saved until you click Save Config." />
+                                        <TextBlock Text="{Binding SuggestEngineSettingsPreview}"
+                                                   IsVisible="{Binding SuggestEngineSettingsPreview, Converter={x:Static views:NotEmptyConverter.Instance}}"
+                                                   FontSize="12" Opacity="0.75" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Expander>
 
                                 <!-- ── Save config ───────────────────────── -->
                                 <StackPanel Orientation="Horizontal" Spacing="8">

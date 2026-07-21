@@ -43,9 +43,44 @@ public partial class MessageViewModel : ObservableObject
     /// </summary>
     public UiBoundCollection<SourceReference> Sources { get; } = [];
 
+    /// <summary>
+    /// Non-memory citations (RAG chunks today) - shown individually and clickable, unchanged
+    /// from before r18. Derived from <see cref="Sources"/>, split by <see cref="ProvenanceKind"/>.
+    /// </summary>
+    public UiBoundCollection<SourceReference> CitationSources { get; } = [];
+
+    /// <summary>
+    /// r18 03-model-catalog-and-memory-ui.md 3.3: memory-sourced entries used to render as one
+    /// always-visible pill per recalled memory, indistinguishable from RAG citations, reading as
+    /// "all the memories loaded" even though the header line above already collapses this to a
+    /// count. Collapsed behind <see cref="MemorySourceSummary"/> and expanded on click instead.
+    /// </summary>
+    public UiBoundCollection<SourceReference> MemorySources { get; } = [];
+
+    [ObservableProperty] private bool _isMemorySourcesExpanded;
+
+    public bool HasMemorySources => MemorySources.Count > 0;
+    public string MemorySourceSummary => $"Memories used: {MemorySources.Count}";
+
     public MessageViewModel() => Sources.CollectionChanged += OnSourcesChanged;
 
-    private void OnSourcesChanged(object? sender, NotifyCollectionChangedEventArgs e) => HasSources = Sources.Count > 0;
+    private void OnSourcesChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        HasSources = Sources.Count > 0;
+
+        CitationSources.Clear();
+        MemorySources.Clear();
+        foreach (var source in Sources)
+        {
+            if (source.Kind == ProvenanceKind.Memory)
+                MemorySources.Add(source);
+            else
+                CitationSources.Add(source);
+        }
+
+        OnPropertyChanged(nameof(HasMemorySources));
+        OnPropertyChanged(nameof(MemorySourceSummary));
+    }
 
     public string MetaDisplay
     {

@@ -2,6 +2,38 @@
 
 The CHANGELOG.md in root only contains the current 10 versions of changelogs. The rest are archived here in line with the 10 version limit in the main changelog.
 
+## [0.13.1-alpha] - 2026-07-15
+
+Emergency stability fix for a crash found in first sustained field use of
+0.13.0-alpha, plus the r9 review pack (`docs/review/`) covering the two
+remaining field issues (send-path latency, orphaned server processes).
+
+### Fixed
+
+- **Cross-thread UI collection crash.** The app could hard-crash with
+  Avalonia "Collection was modified; enumeration operation may not execute"
+  in `PanelContainerGenerator` during chat use. Root cause: UI-bound
+  `ObservableCollection`s mutated from worker threads. Marshaled the
+  offending writers through the UI thread's `SynchronizationContext`:
+  `ChatViewModel`'s debounced context-usage refresh (ran entirely on a
+  `Task.Run` thread), persisted chat-trace loading, and memory status
+  refresh; `LogsViewModel`'s `LogAdded` handler (rebuilt the visible log
+  list on whichever background thread wrote the log entry).
+
+### Added
+
+- **`UiThreadGuard` / `UiBoundCollection<T>`** (`Aether.ViewModels`).
+  ItemsControl-bound collections in `ChatViewModel` and `LogsViewModel` now
+  throw immediately, with the offending call in the stack, if mutated off
+  the UI thread. Armed once by the Desktop app at framework init; inert in
+  headless tests (xunit's `SynchronizationContext` legitimately hops
+  threads, so the guard deliberately does not arm on context presence).
+  The r9 pack extends this to every ViewModel.
+- **r9 review pack** (`docs/review/`): send-path latency instrumentation
+  and embedding backfill relocation, job-object child-process containment,
+  port preflight and orphan detection, full UI-thread-safety sweep with an
+  architecture test.
+
 ## [0.13.0-alpha] - 2026-07-15
 
 Implements docs/review r8: voice pronunciation, onboarding, performance, and

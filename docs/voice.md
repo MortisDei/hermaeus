@@ -114,7 +114,11 @@ reads naturally instead of being spelled out or mispronounced:
 ## Audio Data and Privacy Lifecycle
 
 - Voice previews use transient generated audio and delete temporary WAV files
-  after playback when a local player needs a file path.
+  after playback when a local player needs a file path. A playback-only
+  failure (a broken or missing OS audio player) no longer masks a synthesis
+  that actually succeeded: `GenerateSpeechAsync` now reports success and the
+  temp file's path whenever rendering the audio worked, even if playing it
+  back failed, across every voice provider (OpenAI, Kokoro, F5-TTS, XTTS).
 - OpenAI voice resolves saved `secret:` API key references through the Aether
   secret store before sending requests.
 - Aether does not cache generated WAV responses.

@@ -52,7 +52,7 @@
                                      IsError="{Binding IsError}"
                                      FontSize="14" />
 
-            <ItemsControl ItemsSource="{Binding Sources}"
+            <ItemsControl ItemsSource="{Binding CitationSources}"
                           IsVisible="{Binding HasSources}"
                           Margin="0,6,0,0">
                 <ItemsControl.ItemsPanel>
@@ -72,6 +72,39 @@
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
+
+            <!-- r18 03-model-catalog-and-memory-ui.md 3.3: memories used this turn collapse
+                 behind a single count pill instead of one always-visible pill per memory. -->
+            <StackPanel IsVisible="{Binding HasMemorySources}" Spacing="4">
+                <ToggleButton IsChecked="{Binding IsMemorySourcesExpanded, Mode=TwoWay}"
+                              HorizontalAlignment="Left"
+                              Padding="8,3"
+                              CornerRadius="10"
+                              Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                              BorderThickness="0">
+                    <TextBlock FontSize="11" Opacity="0.6" Text="{Binding MemorySourceSummary}" />
+                </ToggleButton>
+
+                <ItemsControl ItemsSource="{Binding MemorySources}"
+                              IsVisible="{Binding IsMemorySourcesExpanded}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <WrapPanel />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="core:SourceReference">
+                            <Border CornerRadius="10"
+                                    Margin="0,0,6,4"
+                                    Padding="8,3"
+                                    Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                                    ToolTip.Tip="{Binding Snippet}">
+                                <TextBlock FontSize="11" Opacity="0.6" Text="{Binding Title}" />
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
 
             <Grid Margin="0,4,0,0" ColumnDefinitions="Auto,*">
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="2">

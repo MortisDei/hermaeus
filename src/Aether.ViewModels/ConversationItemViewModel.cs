@@ -12,6 +12,8 @@ public partial class ConversationItemViewModel : ObservableObject
     [ObservableProperty] private bool     _isPinned;
     [ObservableProperty] private bool     _isArchived;
 
+    public event Action<ConversationItemViewModel>? MetadataChanged;
+
     public required string Id  { get; init; }
     public string ModelId      { get; set; } = string.Empty;
     public string SystemPrompt { get; set; } = string.Empty;
@@ -40,12 +42,26 @@ public partial class ConversationItemViewModel : ObservableObject
     }
 
     partial void OnUpdatedAtChanged(DateTime value) => OnPropertyChanged(nameof(TimeDisplay));
-    partial void OnFolderChanged(string value) => OnPropertyChanged(nameof(FolderDisplay));
-    partial void OnIsArchivedChanged(bool value) => OnPropertyChanged(nameof(ArchiveActionLabel));
-    partial void OnIsPinnedChanged(bool value) => OnPropertyChanged(nameof(PinActionLabel));
+    partial void OnTitleChanged(string value) => MetadataChanged?.Invoke(this);
+    partial void OnFolderChanged(string value)
+    {
+        OnPropertyChanged(nameof(FolderDisplay));
+        MetadataChanged?.Invoke(this);
+    }
     partial void OnTagsTextChanged(string value)
     {
         OnPropertyChanged(nameof(Tags));
         OnPropertyChanged(nameof(TagsDisplay));
+        MetadataChanged?.Invoke(this);
+    }
+    partial void OnIsPinnedChanged(bool value)
+    {
+        OnPropertyChanged(nameof(PinActionLabel));
+        MetadataChanged?.Invoke(this);
+    }
+    partial void OnIsArchivedChanged(bool value)
+    {
+        OnPropertyChanged(nameof(ArchiveActionLabel));
+        MetadataChanged?.Invoke(this);
     }
 }

@@ -273,6 +273,42 @@
                                TextTrimming="CharacterEllipsis" />
                 </StackPanel>
 
+                <!-- r18 02-agents-usability.md 2.2: the agent's current response used to be
+                     squeezed into an 11px truncated header label with no wrapping and no room,
+                     while the fuller state lived far down a long scroll region. This panel is
+                     always expanded, wraps, and gets real height; CurrentStep in the header
+                     above stays as the short supplementary status phrase, not a replacement. -->
+                <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="12">
+                    <StackPanel Spacing="6">
+                        <TextBlock Text="Agent response" FontSize="12" FontWeight="SemiBold" Opacity="0.7" />
+                        <ScrollViewer MaxHeight="320" VerticalScrollBarVisibility="Auto">
+                            <SelectableTextBlock Text="{Binding CurrentTaskSummaryLabel}"
+                                                  FontSize="13"
+                                                  TextWrapping="Wrap"
+                                                  MinHeight="220" />
+                        </ScrollViewer>
+                    </StackPanel>
+                </Border>
+
+                <Grid ColumnDefinitions="*,*" ColumnSpacing="12" HorizontalAlignment="Stretch">
+                    <Expander Grid.Column="0" Header="Task State" IsExpanded="True">
+                        <SelectableTextBlock Text="{Binding TaskStatePreview}"
+                                             FontFamily="Consolas,monospace"
+                                             FontSize="11"
+                                             MinHeight="150"
+                                             TextWrapping="Wrap"
+                                             Margin="0,8,0,0" />
+                    </Expander>
+                    <Expander Grid.Column="1" Header="Next Action" IsExpanded="True">
+                        <SelectableTextBlock Text="{Binding NextActionPreview}"
+                                             FontFamily="Consolas,monospace"
+                                             FontSize="11"
+                                             MinHeight="150"
+                                             TextWrapping="Wrap"
+                                             Margin="0,8,0,0" />
+                    </Expander>
+                </Grid>
+
                 <Border IsVisible="{Binding IsWaitingForReply}"
                         Background="{DynamicResource SubtleFillColorSecondaryBrush}"
                         CornerRadius="8"
@@ -549,25 +585,6 @@
                         </ItemsControl>
                     </StackPanel>
                 </Expander>
-
-                <Grid ColumnDefinitions="*,*" ColumnSpacing="12" HorizontalAlignment="Stretch">
-                    <Expander Grid.Column="0" Header="Task State" IsExpanded="True">
-                        <SelectableTextBlock Text="{Binding TaskStatePreview}"
-                                             FontFamily="Consolas,monospace"
-                                             FontSize="11"
-                                             MinHeight="150"
-                                             TextWrapping="Wrap"
-                                             Margin="0,8,0,0" />
-                    </Expander>
-                    <Expander Grid.Column="1" Header="Next Action" IsExpanded="True">
-                        <SelectableTextBlock Text="{Binding NextActionPreview}"
-                                             FontFamily="Consolas,monospace"
-                                             FontSize="11"
-                                             MinHeight="150"
-                                             TextWrapping="Wrap"
-                                             Margin="0,8,0,0" />
-                    </Expander>
-                </Grid>
 
                 <Expander Header="Draft Patch Decisions" HorizontalAlignment="Stretch" IsExpanded="True">
                     <ItemsControl ItemsSource="{Binding QueuedPatches}" Margin="0,8,0,0">

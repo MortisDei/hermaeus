@@ -1,5 +1,4 @@
 using Avalonia.Controls;
-using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Aether.ViewModels;
@@ -22,13 +21,6 @@ public partial class ConversationListView : UserControl
 
     private void OnTitleLostFocus(object? sender, RoutedEventArgs e) => CommitRename(sender);
     private void OnMetadataLostFocus(object? sender, RoutedEventArgs e) => CommitMetadata(sender);
-
-    private void OnDetailsSaveClick(object? sender, RoutedEventArgs e)
-    {
-        CommitMetadata(sender);
-        if (sender is Control control)
-            FlyoutBase.GetAttachedFlyout(control)?.Hide();
-    }
 
     private void OnDetailsPinClick(object? sender, RoutedEventArgs e)
     {

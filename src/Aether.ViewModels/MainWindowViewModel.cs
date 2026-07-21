@@ -16,6 +16,8 @@ public partial class MainWindowViewModel : ViewModelBase
     private readonly ISettingsService _settingsService;
     private bool _refreshingFolderFilters;
     private bool _postSetupInitialized;
+    private readonly Dictionary<string, CancellationTokenSource> _pendingMetadataSaves = new();
+    private static readonly TimeSpan MetadataSaveDebounce = TimeSpan.FromMilliseconds(500);
 
     public ChatViewModel            Chat     { get; }
     public AgentViewModel           Agent    { get; }
@@ -211,7 +213,43 @@ public partial class MainWindowViewModel : ViewModelBase
 
         Conversations.Clear();
         foreach (var c in convs)
-            Conversations.Add(ToItem(c));
+        {
+            var item = ToItem(c);
+            item.MetadataChanged += OnConversationMetadataChanged;
+            Conversations.Add(item);
+        }
+    }
+
+    /// <summary>
+    /// Debounces per-keystroke edits in the conversation details flyout (title/folder/tags
+    /// text boxes are TwoWay/PropertyChanged) so the store is written once after a pause in
+    /// typing, not on every character (r18 01-finish-the-open-work.md 1.1).
+    /// </summary>
+    private void OnConversationMetadataChanged(ConversationItemViewModel item)
+    {
+        if (_pendingMetadataSaves.Remove(item.Id, out var existing))
+            existing.Cancel();
+
+        var cts = new CancellationTokenSource();
+        _pendingMetadataSaves[item.Id] = cts;
+        _ = DebouncedSaveMetadataAsync(item, cts.Token);
+    }
+
+    private async Task DebouncedSaveMetadataAsync(ConversationItemViewModel item, CancellationToken token)
+    {
+        try
+        {
+            await Task.Delay(MetadataSaveDebounce, token);
+        }
+        catch (TaskCanceledException)
+        {
+            return;
+        }
+
+        if (token.IsCancellationRequested)
+            return;
+
+        await SaveConversationMetadataAsync(item, showToast: false);
     }
 
     private void RefreshFolderFilters(IEnumerable<Aether.Core.Models.Conversation> convs)
@@ -320,6 +358,9 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private async Task SaveConversationMetadataAsync(ConversationItemViewModel item, bool showToast)
     {
+        if (_pendingMetadataSaves.Remove(item.Id, out var pending))
+            pending.Cancel();
+
         var conv = await _store.GetByIdAsync(item.Id);
         if (conv is null) return;
 
@@ -330,9 +371,17 @@ public partial class MainWindowViewModel : ViewModelBase
         conv.IsArchived = item.IsArchived;
         await _store.SaveAsync(conv);
 
+        // In-place update only: a full LoadConversationsAsync() reload here would replace every
+        // ConversationItemViewModel instance out from under the open details flyout on each save
+        // (r18 01-finish-the-open-work.md 1.1). Reserve the full reload for actions that change
+        // list membership or ordering (delete, new conversation, search/filter changes).
         item.Title = conv.Title;
+        item.Folder = conv.Folder;
+        item.TagsText = string.Join(", ", conv.Tags);
+        item.IsPinned = conv.IsPinned;
+        item.IsArchived = conv.IsArchived;
         item.UpdatedAt = conv.UpdatedAt;
-        await LoadConversationsAsync();
+
         if (showToast)
             _toasts.Show("Conversation details saved", $"Updated \"{conv.Title}\".", ToastKind.Success);
     }
@@ -342,6 +391,9 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         item.IsPinned = !item.IsPinned;
         await SaveConversationMetadataAsync(item, showToast: false);
+        // Pinning changes ordering, so this is one of the membership/ordering actions that
+        // still warrants a full reload (r18 01-finish-the-open-work.md 1.1).
+        await LoadConversationsAsync();
         _toasts.Show(item.IsPinned ? "Conversation pinned" : "Conversation unpinned",
             $"\"{item.Title}\" was {(item.IsPinned ? "pinned" : "unpinned")}.",
             ToastKind.Info);
@@ -354,6 +406,9 @@ public partial class MainWindowViewModel : ViewModelBase
         if (item.IsArchived)
             item.IsPinned = false;
         await SaveConversationMetadataAsync(item, showToast: false);
+        // Archiving changes list membership when archived conversations are hidden, so this
+        // still warrants a full reload (r18 01-finish-the-open-work.md 1.1).
+        await LoadConversationsAsync();
         _toasts.Show(item.IsArchived ? "Conversation archived" : "Conversation restored",
             $"\"{item.Title}\" was {(item.IsArchived ? "archived" : "restored")}.",
             ToastKind.Info);

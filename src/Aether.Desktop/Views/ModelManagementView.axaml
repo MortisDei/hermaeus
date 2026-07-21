@@ -85,50 +85,54 @@
                            IsVisible="{Binding HfBrowserStatus, Converter={x:Static views:NotEmptyConverter.Instance}}"
                            FontSize="12" Opacity="0.65" />
 
-                <ItemsControl ItemsSource="{Binding HfSearchResults}" MaxHeight="180">
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate DataType="vm:HfRepoResultViewModel">
-                            <Button Content="{Binding RepoId}"
-                                    Command="{Binding $parent[ItemsControl].DataContext.SelectHfRepoCommand}"
-                                    CommandParameter="{Binding}"
-                                    HorizontalAlignment="Stretch"
-                                    HorizontalContentAlignment="Left"
-                                    Background="Transparent"
-                                    BorderThickness="0"
-                                    Padding="6,4"
-                                    ToolTip.Tip="{Binding Downloads, StringFormat='{}{0:N0} downloads'}" />
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
+                <ScrollViewer MaxHeight="280" VerticalScrollBarVisibility="Auto">
+                    <ItemsControl ItemsSource="{Binding HfSearchResults}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:HfRepoResultViewModel">
+                                <Button Content="{Binding RepoId}"
+                                        Command="{Binding $parent[ItemsControl].DataContext.SelectHfRepoCommand}"
+                                        CommandParameter="{Binding}"
+                                        HorizontalAlignment="Stretch"
+                                        HorizontalContentAlignment="Left"
+                                        Background="Transparent"
+                                        BorderThickness="0"
+                                        Padding="6,4"
+                                        ToolTip.Tip="{Binding Downloads, StringFormat='{}{0:N0} downloads'}" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
 
                 <StackPanel Spacing="6" IsVisible="{Binding SelectedHfRepo, Converter={x:Static conv:ObjectConverters.IsNotNull}}">
                     <TextBlock FontSize="13" FontWeight="SemiBold">
                         <Run Text="Files in" /> <Run Text="{Binding SelectedHfRepo.RepoId}" /> <Run Text="(license:" /> <Run Text="{Binding SelectedHfRepo.License}" /> <Run Text=")" />
                     </TextBlock>
-                    <ItemsControl ItemsSource="{Binding HfFiles}">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate DataType="vm:HfFileResultViewModel">
-                                <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="10" Margin="0,4">
-                                    <TextBlock Grid.Column="0" Text="{Binding FileName}" VerticalAlignment="Center" TextWrapping="Wrap" />
-                                    <TextBlock Grid.Column="1" Text="{Binding SizeDisplay}" FontSize="11" Opacity="0.5" VerticalAlignment="Center" />
-                                    <Border Grid.Column="2" CornerRadius="4" Padding="6,1"
-                                            VerticalAlignment="Center"
-                                            IsVisible="{Binding FitLabel, Converter={x:Static views:NotEmptyConverter.Instance}}"
-                                            Background="{Binding FitTier, Converter={x:Static views:FitTierBrushConverter.Instance}}"
-                                            ToolTip.Tip="{Binding FitReason}">
-                                        <TextBlock Text="{Binding FitLabel}" FontSize="10" FontWeight="SemiBold" />
-                                    </Border>
-                                    <Button Grid.Column="3"
-                                            Content="{Binding IsDownloading, Converter={x:Static views:BoolToTextConverter.Instance}, ConverterParameter='Downloading...|Download'}"
-                                            Command="{Binding $parent[ItemsControl].DataContext.DownloadHfFileCommand}"
-                                            CommandParameter="{Binding}"
-                                            IsEnabled="{Binding !IsDownloading}"
-                                            FontSize="12" Padding="10,4" CornerRadius="6"
-                                            ToolTip.Tip="Downloads to Models\LLM\, SHA256-verified against the repo before use." />
-                                </Grid>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
+                    <ScrollViewer MaxHeight="280" VerticalScrollBarVisibility="Auto">
+                        <ItemsControl ItemsSource="{Binding HfFiles}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="vm:HfFileResultViewModel">
+                                    <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="10" Margin="0,4">
+                                        <TextBlock Grid.Column="0" Text="{Binding FileName}" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                        <TextBlock Grid.Column="1" Text="{Binding SizeDisplay}" FontSize="11" Opacity="0.5" VerticalAlignment="Center" />
+                                        <Border Grid.Column="2" CornerRadius="4" Padding="6,1"
+                                                VerticalAlignment="Center"
+                                                IsVisible="{Binding FitLabel, Converter={x:Static views:NotEmptyConverter.Instance}}"
+                                                Background="{Binding FitTier, Converter={x:Static views:FitTierBrushConverter.Instance}}"
+                                                ToolTip.Tip="{Binding FitReason}">
+                                            <TextBlock Text="{Binding FitLabel}" FontSize="10" FontWeight="SemiBold" />
+                                        </Border>
+                                        <Button Grid.Column="3"
+                                                Content="{Binding IsDownloading, Converter={x:Static views:BoolToTextConverter.Instance}, ConverterParameter='Downloading...|Download'}"
+                                                Command="{Binding $parent[ItemsControl].DataContext.DownloadHfFileCommand}"
+                                                CommandParameter="{Binding}"
+                                                IsEnabled="{Binding !IsDownloading}"
+                                                FontSize="12" Padding="10,4" CornerRadius="6"
+                                                ToolTip.Tip="Downloads to Models\LLM\, SHA256-verified against the repo before use." />
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
                 </StackPanel>
             </StackPanel>
         </Expander>

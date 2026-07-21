@@ -129,30 +129,42 @@ public sealed class KokoroVoiceProvider : ITtsService, IVoiceProvider
 
     public async Task<VoiceSynthesisResult> GenerateSpeechAsync(VoiceSynthesisRequest request, CancellationToken ct = default)
     {
-        var outputPath = string.Empty;
+        string outputPath;
         try
         {
             outputPath = await RenderToFileAsync(request.Text, request.Voice, request.OutputPath, ct);
-            if (request.PlayAudio)
-                await VoiceProviderProcessRunner.PlayWavFileAsync(outputPath, ct);
-            return new VoiceSynthesisResult(true, "Kokoro synthesis complete.", outputPath);
         }
         catch (Exception ex)
         {
             return new VoiceSynthesisResult(false, ex.Message);
         }
-        finally
+
+        var message = "Kokoro synthesis complete.";
+        if (request.PlayAudio)
         {
-            // r11 4.3: when the caller did not request a persisted OutputPath,
-            // this synthesized to a %TEMP% file and never deleted it.
-            // VoiceOrchestrator.PlayAsync always calls GenerateSpeechAsync with
-            // no OutputPath, so every spoken chat reply leaked one wav.
-            if (request.OutputPath is null && request.PlayAudio && !string.IsNullOrWhiteSpace(outputPath))
+            try
             {
-                try { File.Delete(outputPath); }
-                catch { }
+                await VoiceProviderProcessRunner.PlayWavFileAsync(outputPath, ct);
+            }
+            catch (Exception ex)
+            {
+                // r18 01-finish-the-open-work.md 1.5: see OpenAiVoiceProvider.GenerateSpeechAsync
+                // - a playback-only failure must not discard a synthesis that already succeeded.
+                message = $"Kokoro synthesis complete; playback failed: {ex.Message}";
             }
         }
+
+        // r11 4.3: when the caller did not request a persisted OutputPath,
+        // this synthesized to a %TEMP% file and never deleted it.
+        // VoiceOrchestrator.PlayAsync always calls GenerateSpeechAsync with
+        // no OutputPath, so every spoken chat reply leaked one wav.
+        if (request.OutputPath is null && request.PlayAudio && !string.IsNullOrWhiteSpace(outputPath))
+        {
+            try { File.Delete(outputPath); }
+            catch { }
+        }
+
+        return new VoiceSynthesisResult(true, message, outputPath);
     }
 
     public async Task SpeakAsync(string text, CancellationToken ct = default)

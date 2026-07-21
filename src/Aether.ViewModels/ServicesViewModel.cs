@@ -31,6 +31,26 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private bool         _embeddingsMode;
     [ObservableProperty] private bool         _autoStart;
     [ObservableProperty] private string       _extraArgs = string.Empty;
+
+    // r18 04-llama-server-engine-options.md 4.1: first-class engine options, editable-form
+    // fields on the server editor next to Context Size/GPU Layers/Threads/Slots.
+    [ObservableProperty] private string       _kvCacheTypeK = "f16";
+    [ObservableProperty] private string       _kvCacheTypeV = "f16";
+    [ObservableProperty] private string       _flashAttention = "auto";
+    [ObservableProperty] private bool         _contextShift;
+    [ObservableProperty] private bool         _memoryLock;
+    [ObservableProperty] private bool         _noMemoryMap;
+    [ObservableProperty] private bool         _ngramSpeculative;
+    [ObservableProperty] private string       _suggestEngineSettingsPreview = string.Empty;
+
+    /// <summary>Verified accepted value set minus f32 (r18 04-llama-server-engine-options.md
+    /// 4.0/4.1): f32 only wastes VRAM relative to f16/bf16 for the same precision class, so it
+    /// is not offered as a first-class recommendation.</summary>
+    public static IReadOnlyList<string> KvCacheTypeOptions { get; } =
+        ["f16", "bf16", "q8_0", "q5_1", "q5_0", "q4_1", "q4_0", "iq4_nl"];
+
+    public static IReadOnlyList<string> FlashAttentionOptions { get; } = ["auto", "on", "off"];
+
     [ObservableProperty] private ServerStatus _status    = ServerStatus.Stopped;
     [ObservableProperty] private string       _logOutput = string.Empty;
     [ObservableProperty] private string       _errorMessage = string.Empty;
@@ -60,7 +80,14 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _config.Slots != Slots ||
         _config.EmbeddingsMode != EmbeddingsMode ||
         _config.AutoStart != AutoStart ||
-        _config.ExtraArgs != ExtraArgs;
+        _config.ExtraArgs != ExtraArgs ||
+        _config.KvCacheTypeK != KvCacheTypeK ||
+        _config.KvCacheTypeV != KvCacheTypeV ||
+        _config.FlashAttention != FlashAttention ||
+        _config.ContextShift != ContextShift ||
+        _config.MemoryLock != MemoryLock ||
+        _config.NoMemoryMap != NoMemoryMap ||
+        _config.NgramSpeculative != NgramSpeculative;
 
     /// <summary>
     /// Human-readable effective GPU offload for the Services card (r14 1.3):
@@ -176,6 +203,13 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _embeddingsMode = config.EmbeddingsMode;
         _autoStart      = config.AutoStart;
         _extraArgs      = config.ExtraArgs;
+        _kvCacheTypeK   = config.KvCacheTypeK;
+        _kvCacheTypeV   = config.KvCacheTypeV;
+        _flashAttention = config.FlashAttention;
+        _contextShift   = config.ContextShift;
+        _memoryLock     = config.MemoryLock;
+        _noMemoryMap    = config.NoMemoryMap;
+        _ngramSpeculative = config.NgramSpeculative;
 
         _mgr.StatusChanged += s => RunOnUi(() =>
         {
@@ -273,15 +307,16 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
             return flatNote;
 
         var fileSizeBytes = TryGetModelFileSizeBytes();
-        var bpeK = KvCacheMath.ResolveBytesPerElement(ExtraArgs, isKeyCache: true);
-        var bpeV = KvCacheMath.ResolveBytesPerElement(ExtraArgs, isKeyCache: false);
+        var bpeK = KvCacheMath.ResolveBytesPerElement(KvCacheTypeK, ExtraArgs, isKeyCache: true);
+        var bpeV = KvCacheMath.ResolveBytesPerElement(KvCacheTypeV, ExtraArgs, isKeyCache: false);
+        var swaFull = KvCacheMath.HasSwaFull(ExtraArgs);
         var primary = string.Empty;
 
         if (fileSizeBytes is long size)
         {
             if (hw.MaxGpuVramBytes > 0 && GpuLayers != 0)
             {
-                var projection = KvCacheMath.Project(size, info, ContextSize, GpuLayers, bpeK, bpeV);
+                var projection = KvCacheMath.Project(size, info, ContextSize, GpuLayers, bpeK, bpeV, swaFull);
                 if (projection is not null)
                 {
                     var needed = projection.TotalBytes + KvCacheMath.GpuHeadroomBytes;
@@ -295,7 +330,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
             }
             else if (GpuLayers == 0)
             {
-                var projection = KvCacheMath.Project(size, info, ContextSize, gpuLayers: -1, bpeK, bpeV);
+                var projection = KvCacheMath.Project(size, info, ContextSize, gpuLayers: -1, bpeK, bpeV, swaFull);
                 if (projection is not null && hw.TotalRamBytes > 0)
                 {
                     var needed = projection.TotalBytes + RamHeadroomBytes;
@@ -517,13 +552,63 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         }
     }
 
+    /// <summary>
+    /// r18 04-llama-server-engine-options.md 4.3: hardware-tier recommendation for Context Size,
+    /// KV cache type, and Flash Attention. Same contract as <see cref="AutoTuneAsync"/>'s result:
+    /// fills the editable form only, describes what changed, and saves nothing until the user
+    /// clicks Save Config.
+    /// </summary>
+    [RelayCommand]
+    private void SuggestEngineSettings()
+    {
+        if (!CanEdit) return;
+
+        var hw = _hardwareProfile;
+        if (hw is null || hw.MaxGpuVramBytes <= 0)
+        {
+            SuggestEngineSettingsPreview = "No GPU VRAM detected; nothing to suggest.";
+            return;
+        }
+
+        var preset = EngineOptionPresets.Recommend(hw.MaxGpuVramBytes, _ggufInfo?.TrainingContextLength);
+
+        var changes = new List<string>();
+        if (ContextSize != preset.ContextSize)
+            changes.Add($"Context Size {ContextSize:N0} -> {preset.ContextSize:N0}");
+        if (!string.Equals(KvCacheTypeK, preset.KvCacheType, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(KvCacheTypeV, preset.KvCacheType, StringComparison.OrdinalIgnoreCase))
+            changes.Add($"KV cache {KvCacheTypeK}/{KvCacheTypeV} -> {preset.KvCacheType}");
+        if (!string.Equals(FlashAttention, "auto", StringComparison.OrdinalIgnoreCase))
+            changes.Add($"Flash Attention {FlashAttention} -> auto");
+
+        if (changes.Count == 0)
+        {
+            SuggestEngineSettingsPreview = $"Already at the suggested settings for {FormatGb(hw.MaxGpuVramBytes)} VRAM.";
+            return;
+        }
+
+        ContextSize = preset.ContextSize;
+        KvCacheTypeK = preset.KvCacheType;
+        KvCacheTypeV = preset.KvCacheType;
+        FlashAttention = "auto";
+
+        var kvNote = string.Equals(preset.KvCacheType, "f16", StringComparison.OrdinalIgnoreCase)
+            ? string.Empty
+            : $" {preset.KvCacheType.ToUpperInvariant()} KV cache halves-to-quarters context memory, near-lossless; keep f16 if you prefer.";
+        SuggestEngineSettingsPreview = $"Suggested for {FormatGb(hw.MaxGpuVramBytes)} VRAM: {string.Join("; ", changes)}. Not saved until you click Save Config.{kvNote}";
+    }
+
     private string BuildAutoTuneStatus(ServerTuneResult result, int previousContext)
     {
         if (result.TunedContextSize is int tunedContext)
         {
             var layers = result.TotalLayers is int total ? $"all {total} GPU layers" : "all GPU layers";
             var vram = _hardwareProfile is { MaxGpuVramBytes: > 0 } hw ? $" in {FormatGb(hw.MaxGpuVramBytes)} VRAM" : string.Empty;
-            return $"Auto-tune verified {layers} at {tunedContext:N0} context (configured {previousContext:N0} does not fit{vram} with this model). Save and start the service.";
+            // r18 01-finish-the-open-work.md 1.3: SuggestContextSize can now suggest raising
+            // context, not just downshifting it, so the status must read correctly either way.
+            return tunedContext > previousContext
+                ? $"Auto-tune found headroom for a larger context: raised to {tunedContext:N0}{vram} (configured was {previousContext:N0}). Save and start the service."
+                : $"Auto-tune verified {layers} at {tunedContext:N0} context (configured {previousContext:N0} does not fit{vram} with this model). Save and start the service.";
         }
 
         return result.TotalLayers is int totalLayers
@@ -638,6 +723,13 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _config.EmbeddingsMode = EmbeddingsMode;
         _config.AutoStart      = AutoStart;
         _config.ExtraArgs      = ExtraArgs;
+        _config.KvCacheTypeK   = KvCacheTypeK;
+        _config.KvCacheTypeV   = KvCacheTypeV;
+        _config.FlashAttention = FlashAttention;
+        _config.ContextShift   = ContextShift;
+        _config.MemoryLock     = MemoryLock;
+        _config.NoMemoryMap    = NoMemoryMap;
+        _config.NgramSpeculative = NgramSpeculative;
         OnPropertyChanged(nameof(HasUnsavedChanges));
         OnPropertyChanged(nameof(EffectiveOffloadLabel));
         OnPropertyChanged(nameof(ExtraArgsTrustWarning));
@@ -676,7 +768,14 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         Slots          = Slots,
         EmbeddingsMode = EmbeddingsMode,
         AutoStart      = AutoStart,
-        ExtraArgs      = ExtraArgs
+        ExtraArgs      = ExtraArgs,
+        KvCacheTypeK   = KvCacheTypeK,
+        KvCacheTypeV   = KvCacheTypeV,
+        FlashAttention = FlashAttention,
+        ContextShift   = ContextShift,
+        MemoryLock     = MemoryLock,
+        NoMemoryMap    = NoMemoryMap,
+        NgramSpeculative = NgramSpeculative
     };
 
     private void NotifyStatusProps()
@@ -724,6 +823,39 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(ExtraArgsTrustWarning));
         ApplyContextFitNote();
     }
+
+    // r18 04-llama-server-engine-options.md 4.2: KV cache type changes the fit-math answer, so
+    // the context-fit note must recompute when either dropdown changes, same as ExtraArgs above.
+    partial void OnKvCacheTypeKChanged(string value)
+    {
+        OnPropertyChanged(nameof(HasUnsavedChanges));
+        ApplyContextFitNote();
+    }
+    partial void OnKvCacheTypeVChanged(string value)
+    {
+        OnPropertyChanged(nameof(HasUnsavedChanges));
+        OnPropertyChanged(nameof(NeedsFlashAttentionForQuantizedV));
+        ApplyContextFitNote();
+    }
+    partial void OnFlashAttentionChanged(string value)
+    {
+        OnPropertyChanged(nameof(HasUnsavedChanges));
+        OnPropertyChanged(nameof(NeedsFlashAttentionForQuantizedV));
+    }
+    partial void OnContextShiftChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnMemoryLockChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnNoMemoryMapChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnNgramSpeculativeChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+
+    /// <summary>
+    /// r18 04-llama-server-engine-options.md 4.0: llama.cpp historically requires flash
+    /// attention enabled to use a quantized V cache. Inform-only - never auto-changes either
+    /// field; the user can launch with exactly what they chose regardless.
+    /// </summary>
+    public bool NeedsFlashAttentionForQuantizedV =>
+        !string.Equals(KvCacheTypeV, "f16", StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(KvCacheTypeV, "bf16", StringComparison.OrdinalIgnoreCase)
+        && string.Equals(FlashAttention, "off", StringComparison.OrdinalIgnoreCase);
 
     private void WarnForExtraArgs()
     {

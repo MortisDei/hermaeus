@@ -186,6 +186,12 @@ public sealed class ChatWorkbenchTests
         Assert.Contains(assistantMessage.Sources, s => s.Locator == "conv-1");
         Assert.NotNull(capturing.LastOptions?.SystemPrompt);
         Assert.Contains("concise summaries", capturing.LastOptions!.SystemPrompt, StringComparison.OrdinalIgnoreCase);
+
+        // r18 03-model-catalog-and-memory-ui.md 3.3: a recalled memory must land in
+        // MemorySources (collapsed-by-default pill), not the always-visible CitationSources list.
+        Assert.True(assistantMessage.HasMemorySources);
+        Assert.Contains(assistantMessage.MemorySources, s => s.Locator == "conv-1");
+        Assert.DoesNotContain(assistantMessage.CitationSources, s => s.Locator == "conv-1");
     }
 
     [Fact]

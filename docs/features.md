@@ -6,6 +6,10 @@
   pins, archive, and direct file context injection for selected text/code files.
 - Conversation management via right-click context menu with delete, archive,
   export, and pin options for convenient quick access.
+- The conversation details flyout (title/folder/tags) auto-saves as you type,
+  debounced to a single save per pause in typing rather than on every
+  keystroke; there is no separate Save button. Pin and archive still take
+  effect immediately.
 - Chat context usage indicator with provider-reported usage where available and
   local estimates before send.
 - Context Inspector panel shows the exact context pack before send when opened:
@@ -231,6 +235,17 @@
   sub-task is terminal, the parent synthesizes one consolidated report (with
   a deterministic fallback if synthesis itself fails) and writes it to
   `report.md` in the task directory, openable from the workbench.
+- The agent's current response gets its own always-expanded panel (wraps,
+  scrolls internally past ~320px) near the top of the workbench, above the
+  Task State/Next Action detail and the reference panels (workspace profile,
+  files, retrieved context) checked less often once a run is going. The
+  header's short status phrase next to Run Step/Stop is unchanged and stays
+  supplementary to the response panel, not a replacement for it.
+- The built-in Agent Scenario Suite's sub-task status check now passes for any
+  plan whose sub-tasks reached every expected status at least once, rather
+  than requiring the exact same number and order of sub-tasks the manifest
+  hardcodes - a model reasonably splitting work differently no longer fails
+  the check on its own.
 
 ## Model Management
 
@@ -313,17 +328,22 @@
   shows up on both. "Auto-tune all" tunes every local GGUF that is not
   running and does not already have a fresh profile (missing, size/mtime
   drift, or a different llama-server build), sequentially and cancellable.
-- The Services page's Auto Tune also tunes context, not only GPU layers: when
-  the configured context does not fit the GPU at full offload, it probes one
-  additional candidate (all layers at the largest context from a fixed ladder
-  that still fits, capped at the model's training context) before falling
-  back to its usual layer-by-layer descent at the originally configured
-  context. The fit estimate honors GGUF sliding-window attention metadata
-  when present, so models with cheaper interleaved KV layouts are not treated
-  as dense-attention models on every layer. A successful context probe is
-  reflected in the editable fields and the tune-profile save. This is the
-  only thing in the app that changes a context size automatically, and it
-  only runs from this explicitly user-clicked action.
+- The Services page's Auto Tune also tunes context, not only GPU layers: it
+  probes one additional candidate (all layers at the largest context from a
+  fixed ladder that fits, capped at the model's training context) before
+  falling back to its usual layer-by-layer descent at the originally
+  configured context. This can suggest raising context when there is VRAM
+  headroom, not only downshifting it when the configured value does not fit -
+  the status message reads correctly either way ("found headroom for a larger
+  context" vs. "configured does not fit"). The fit estimate honors GGUF
+  sliding-window attention metadata when present, so models with cheaper
+  interleaved KV layouts are not treated as dense-attention models on every
+  layer. A successful context probe is reflected in the editable fields and
+  the tune-profile save. This is the only thing in the app that changes a
+  context size automatically, and it only runs from this explicitly
+  user-clicked action. The compute-buffer/display-overhead headroom used by
+  every fit/context calculation in the app is 512 MiB (corrected from an
+  earlier 1.5 GiB rough estimate against a real false-warning report).
 - Fits-on-your-hardware chips (Fits GPU / Partial offload / Too large) on
   Models-page cards are KV-cache-aware for local files: when the GGUF header
   can be read, the fit reason states the weights/KV split at the model's
@@ -348,10 +368,39 @@
   per repo); "Update" downloads, hash-verifies, and atomically swaps in the
   new file, flagging the card "re-tune recommended" afterward. A collapsed
   "Get models from Hugging Face" section on the Models page searches GGUF
-  repos and downloads straight into the flat models folder. All Hugging
-  Face access is anonymous, HTTPS-only, and manual-button-triggered - never
-  on startup or a timer - and is disclosed in the Privacy Audit whenever a
-  model is repo-linked.
+  repos and downloads straight into the flat models folder; both the search
+  results list and the per-repo file list scroll internally instead of
+  clipping when there are more entries than fit. All Hugging Face access is
+  anonymous, HTTPS-only, and manual-button-triggered - never on startup or a
+  timer - and is disclosed in the Privacy Audit whenever a model is
+  repo-linked.
+- The local models list excludes companion files that ship alongside a real
+  model in the same Hugging Face repo but are not themselves a loadable chat
+  model: `mmproj*.gguf` vision-projector files and `mtp-*.gguf`
+  multi-token-prediction draft-weight files. Neither has a first-class use in
+  Aether today (multimodal and draft-model speculative decoding are both
+  out of scope), so they no longer clutter the list as unexplained
+  sub-500 MB "models".
+- The Services card's server editor exposes first-class llama-server engine
+  options next to Context Size/GPU Layers/Threads/Slots: KV cache type (K and
+  V independently, f16/bf16/q8_0/q5_1/q5_0/q4_1/q4_0/iq4_nl), Flash Attention
+  (auto/on/off), and Context Shift (rolling context for long agent loops), plus
+  an "Advanced engine options" section for `--mlock`, `--no-mmap`, and an
+  experimental N-gram speculative decoding checkbox (zero additional VRAM,
+  drafts from the prompt/history itself). Every default matches the pre-r18
+  command line exactly (f16 KV cache, auto flash attention, everything else
+  off) - nothing is ever forced, and a value typed into Extra args always wins
+  over the equivalent first-class control. A quantized V cache combined with
+  flash attention off shows an inline warning (llama.cpp needs flash attention
+  for a quantized V cache) but still launches with exactly what was chosen. A
+  "Suggest engine settings" button fills Context Size, KV cache type, and
+  Flash Attention with a hardware-tier recommendation (from the cached VRAM
+  profile and, when available, the model's training context) into the
+  editable form only - nothing is saved or applied until Save Config, the same
+  contract as Auto Tune. The KV cache type also feeds every context-fit
+  calculation in the app (Services card warning, Auto Tune's context ladder),
+  so switching from f16 to q8_0/q4_0 visibly raises how much context fits the
+  same VRAM.
 
 ## RAG
 
@@ -588,11 +637,14 @@ model IDs, error or incomplete markers, and attached file paths. JSON preserves
 the stored conversation shape for local migration or inspection.
 
 Chat now injects relevant stored memories into each turn's system prompt when
-Memory is enabled (Settings > Memory), and shows which memories were actually
-used as a small Sources panel under the assistant's reply, each with the
-memory's content as a tooltip. This closes a gap from the original memory
-feature: memory injection existed as a service but nothing in chat ever
-called it.
+Memory is enabled (Settings > Memory). RAG citations still render as
+individually visible, clickable pills under the assistant's reply; memories
+actually used that turn instead collapse behind a single "Memories used: N"
+pill that expands to the individual memory pills (each with the memory's
+content as a tooltip) on click, so a reply grounded in several memories does
+not read as a wall of always-visible pills. This closes a gap from the
+original memory feature: memory injection existed as a service but nothing in
+chat ever called it.
 
 ### Model and Dataset Lifecycle
 

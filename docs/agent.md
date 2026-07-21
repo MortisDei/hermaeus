@@ -506,6 +506,16 @@ Review items (patches) use these states:
 Recording these states in `task_state.json` and traces simplifies UI logic and
 automated testing.
 
+## Scenario Suite Checks
+
+The built-in Agent Scenario Suite (`src/Aether.Agent/Scenarios/`) grades a real
+run's transcript against each manifest's `expect` block. The
+`expect_subtask_statuses` check (used by orchestration scenarios) checks only
+that every distinct expected status was reached by at least one sub-task, not
+that the model produced the exact same number and order of sub-tasks the
+manifest happens to hardcode - a model that reasonably splits a goal
+differently is not itself a failure of orchestration.
+
 ## Manual Verification
 
 The agent can now build and test its own work through the fixed `run_command`
