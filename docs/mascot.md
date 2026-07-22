@@ -103,3 +103,14 @@ accent next to the two states in the concept notes that map cleanly to existing 
 the agent task busy indicator and the shared error/status banner. This is a
 placeholder built to the icon spec above, not final illustrated art - replace with
 real illustration once one exists, keeping the same 16x16 silhouette rules.
+
+The window/taskbar icon (`Assets/hermaeus.ico`), the Linux desktop icon
+(`Assets/hermaeus-app.png`), and the system tray icon (`Assets/hermaeus-tray.png`,
+plus the unused `hermaeus-tray-dark.png`/`hermaeus-tray-light.png`) render the
+same shapes and colors as `MossIcon.axaml`, generated programmatically at each
+target resolution. Small sizes (<=32px) drop the dark lens-housing ring - the
+full four-ring goggle stack anti-aliases into mud below that size - so the eye
+reads as one clean glowing circle instead. `docs/hermaeus-branding.png` (an
+illustrated marketing mockup sheet, not referenced by any code or the README)
+still shows the old Aether "A" mark and wordmark text baked into the pixels;
+replacing it needs real illustration work, not a programmatic redraw.

@@ -49,6 +49,11 @@ public sealed class NamingConsistencyTests
             "old `Aether` service name",
             "Rename Aether to Hermaeus",
         ],
+
+        // docs/hermaeus-branding.png is a flagged-but-not-yet-fixed follow-up
+        // (illustrated mockup, needs real art, not a programmatic redraw);
+        // the note describing it necessarily names the old mark.
+        ["docs/mascot.md"] = ["old Aether \"A\" mark"],
     };
 
     private static readonly HashSet<string> AllowlistedPaths = new(StringComparer.OrdinalIgnoreCase)

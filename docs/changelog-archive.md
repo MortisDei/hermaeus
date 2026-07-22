@@ -2,6 +2,132 @@
 
 The CHANGELOG.md in root only contains the current 10 versions of changelogs. The rest are archived here in line with the 10 version limit in the main changelog.
 
+## [0.17.0-alpha] - 2026-07-18
+
+Implements docs/review r12 in full: the first dedicated audit of
+Aether.ViewModels (37 files, ~10k lines). Two systemic patterns anchor the
+round - the live `ISettingsService.Settings` object is a shared mutable
+global written outside the apply/save path, and fire-and-forget async work
+around UI-bound state races its own later completion.
+
+### Fixed
+
+- **Finishing (or skipping) the setup wizard on first run left the app on a
+  dead chat panel.** `MainWindowViewModel.InitializeAsync` returned early to
+  show the wizard; the `WizardCompleted` handler only navigated to chat, so
+  no servers auto-started and no models/RAG/agent/benchmark data loaded
+  until a restart. The post-wizard sequence is now a named, reusable step
+  (`CompletePostSetupInitializationAsync`) called from both the normal init
+  path and the wizard-completed handler, guarded against double-running.
+  Each step is isolated so one failing store cannot silently skip the rest.
+- **Re-running the wizard and changing the data root bypassed migration.**
+  `SetupWizardViewModel`'s data-root step called a plain `SaveAsync()`,
+  which never migrates - the same "conversations lost" symptom the r11
+  wizard-singleton fix addressed, through a second door. It now previews
+  conflicts (same message the Settings page shows) and migrates through the
+  same path Settings uses, with the same toast.
+- **`SettingsViewModel.SaveAsync` mutated the live settings object before
+  validation, and rolled back only the data root on failure.** Every tab's
+  edits now apply onto a deep copy; a new `ISettingsService.SaveAsync(AppSettings, ...)`
+  overload only swaps the copy in once the save (including migration)
+  actually succeeds, so a failed save leaves every other in-flight edit
+  exactly as it was, not persisted by some later, unrelated save.
+- **Selecting a chat model overwrote `Settings.Llm.MaxTokens` globally**,
+  changing what Benchmark/Agent/RAG sends saw as the cap. `ChatViewModel`
+  now keeps a local `MaxTokens` field like `Temperature`/`TopP`.
+- **A background model-list refresh reset user-tuned sampling parameters.**
+  Model instances are recreated on every fetch, so re-matching by id still
+  reassigned `SelectedModel` to a different object, re-applying profile
+  defaults over a temperature the user had just changed. Refreshes that
+  resolve to the same logical model now update the reference without
+  re-applying defaults; a genuine model switch resets every non-profiled
+  parameter to the settings default instead of leaking the previous model's
+  tuning forward. `AgentViewModel.LoadAsync` had the same stale-reference gap
+  for `SelectedModel`/`SelectedDataset` (a `??=` never re-matched after a
+  refresh) and is fixed the same way.
+- **Every settings save triggered a Services rebuild storm.** `SettingsChanged`
+  fires after every save; `ServicesViewModel.Rebuild` cleared and re-added
+  every server row regardless of what changed, force-invalidating the model
+  cache and refetching models over HTTP, plus a synchronous orphan port scan
+  on the UI thread - on saving anything, including unrelated tabs. `Rebuild`
+  now diffs by config id (reusing unchanged rows, disposing dropped ones)
+  and only fires `ServerAvailabilityChanged`/runs orphan detection when the
+  server set, ports, or paths actually changed; orphan detection moved off
+  the UI thread.
+- **Trust rescans and the Local AI setup scan wrote unsaved edit-box values
+  into live settings.** A trust rescan never even saved, so the mutation
+  lingered until an unrelated save persisted it. Both now build a
+  scan-scoped copy instead of touching the live settings object; the setup
+  flow's genuine persist-before-running-an-action need goes through the
+  real full apply/save, not a partial side-channel write.
+- **Toast history could resurrect cleared/dismissed toasts, or lose the
+  newest one.** `RunOnUi` posted unconditionally even from the UI thread, so
+  code after it ran before the posted mutation - clearing history then
+  immediately serializing it wrote the pre-clear list to disk. `RunOnUi`/
+  `RunOnUiAsync` now execute inline when already on the captured context;
+  toast-history mutation and its save are further bundled into one posted
+  unit so a background-thread toast can never race its own save.
+- **`ChatViewModel.SendAsync` had no exception handling.** Any throw after
+  streaming started (a locked conversation database, an unexpected
+  memory-marker error) left the assistant bubble stuck at `IsStreaming = true`
+  forever with no visible error. A catch now marks the message as failed (or
+  removes it if empty), logs, and toasts.
+- **Per-keystroke searches had no debounce or cancellation.** Memories'
+  search box and the Agent workspace file query each fired a fresh
+  DB/filesystem query per character, with unordered completion interleaving
+  `Clear`/`Add` on the bound list; both now reuse the existing 300 ms + CTS
+  debounce shape. The Agent workspace-file selection loader gained a
+  generation counter so a slower, older read/summarize can no longer
+  overwrite a newer selection's preview.
+- **`LogsViewModel` rebuilt its entire visible list on every log line**,
+  O(n) work per line during a llama-server startup burst. Entries are now
+  appended incrementally when they pass the current filter, with bursts
+  coalesced behind a pending-refresh flag so one post handles many lines;
+  full rebuilds remain for filter changes and Clear.
+- **Concurrent `LoadModelsAsync`/`LoadAsync` calls duplicated models.**
+  `ChatViewModel`, `AgentViewModel`, and `BenchmarkViewModel` now share one
+  in-flight load task instead of each running its own Clear/re-add pass.
+- **The agent's default workspace was the whole user profile**, enumerated
+  and analyzed at every startup, writing a "Workspace profile" workspace
+  memory entry for a folder the user never chose. `WorkspaceRoot` now
+  defaults to empty; the existing empty-state UI handles it.
+- **RAG "Add to dataset" ignored a renamed dataset name.** Editing the
+  dataset-name box after clicking "Add to dataset" silently still ingested
+  into the original target. The target now clears as soon as the box no
+  longer matches it, so the next ingest creates a new dataset under the
+  edited name.
+- **Reindex flipped the dataset's recorded embedding model before the
+  pipeline committed anything.** A cancelled or failed reindex left the
+  live, UI-bound dataset instance claiming the new model while vectors were
+  still old, defeating the r10 mismatch guard. Reindex now works on a clone;
+  the live instance is only ever refreshed from what the pipeline actually
+  persisted.
+- **Benchmark `RerunAsync` had no `IsRunning` guard**; a second click during
+  a run overwrote the run's `CancellationTokenSource`, leaking the first.
+  `RerunFromInsightsAsync` also bypassed `CanExecute` by calling `RunAsync()`
+  directly. Both now route through the guarded `RunCommand`/share `CanRun`.
+- Small fixes: `ModelCompareOrchestrator.ToResult` no longer throws on an
+  empty `CaseResults` list (returns an error row); a dead
+  `!string.IsNullOrWhiteSpace(item.Folder)` check right after setting
+  `Folder = string.Empty` is removed; `ChatViewModel.ClearChat` resets
+  `SystemPrompt` like `NewConversation` does; `RemoveContextAttachment`
+  recomputes the "N files ready" status instead of leaving it stale;
+  `DoctorViewModel.RunFix`'s four copy-pasted install blocks are one shared
+  helper that also disposes its `CancellationTokenSource`; embedding-download
+  progress logging is serialized instead of one fire-and-forget file append
+  per line; the setup wizard's model-folder step surfaces a toast when no
+  managed server exists instead of silently no-op-ing;
+  `McpServerConfigViewModel.ToConfig` now honors quoted arguments containing
+  spaces instead of splitting on every space; a dead `IsReference` guard on
+  `Tts.PythonPath` (paths are never stored as secrets) is removed;
+  `SettingsViewModel.Reload()` now clears stale Trust/LocalAiSetup error
+  text; `SaveAsync` no longer keeps the save command "executing" for an
+  artificial 2 s tail.
+
+37 new tests (688 total). docs/security-review.md gains an r12 subsection
+(the agent no longer treats the user profile as an implicit workspace;
+trust scans are read-only with respect to settings). Archived at
+docs/review/archived/r12/.
 ## [0.16.0-alpha] - 2026-07-16
 
 Implements docs/review r11 in full: the first dedicated audit of
