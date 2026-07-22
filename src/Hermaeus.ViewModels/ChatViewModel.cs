@@ -254,6 +254,14 @@ public partial class ChatViewModel : ViewModelBase
     private static readonly System.Text.RegularExpressions.Regex FirstHeadingPattern =
         new(@"(?m)^#{1,6}[ \t]+(.+?)\s*$", System.Text.RegularExpressions.RegexOptions.Compiled);
 
+    /// <summary>Matches a trailing file-extension-shaped suffix (e.g. the ".cs" in a
+    /// heading the model wrote as the literal filename, "# calculator.cs") so
+    /// DeriveArtifactStem doesn't hand back a stem that already has one; otherwise
+    /// SaveCodeBlockAsync appends the language extension on top and produces
+    /// "calculator.cs.cs".</summary>
+    private static readonly System.Text.RegularExpressions.Regex TrailingExtensionPattern =
+        new(@"\.[A-Za-z0-9]{1,6}$", System.Text.RegularExpressions.RegexOptions.Compiled);
+
     private async Task SaveCodeBlockAsync(string? language, string code, string messageMarkdown)
     {
         if (_artifacts is null || string.IsNullOrWhiteSpace(code)) return;
@@ -262,7 +270,7 @@ public partial class ChatViewModel : ViewModelBase
 
         try
         {
-            var artifact = await _artifacts.SaveAsync(conversationId, fileName, code);
+            var artifact = await _artifacts.SaveAsync(conversationId, fileName, code, conversationTitle: ConversationTitle);
             RunOnUi(() =>
             {
                 Artifacts.Insert(0, new ChatArtifactViewModel(artifact));
@@ -283,6 +291,10 @@ public partial class ChatViewModel : ViewModelBase
     {
         var heading = FirstHeadingPattern.Match(messageMarkdown ?? string.Empty);
         var raw = heading.Success ? heading.Groups[1].Value : conversationTitle;
+        if (string.IsNullOrWhiteSpace(raw))
+            return "artifact";
+
+        raw = TrailingExtensionPattern.Replace(raw, string.Empty);
         if (string.IsNullOrWhiteSpace(raw))
             return "artifact";
 
@@ -312,7 +324,7 @@ public partial class ChatViewModel : ViewModelBase
     private void OpenArtifactsFolder()
     {
         if (_artifacts is null) return;
-        var dir = _artifacts.GetConversationDirectory(string.IsNullOrWhiteSpace(CurrentConversationId) ? "unsaved" : CurrentConversationId);
+        var dir = _artifacts.GetConversationDirectory(string.IsNullOrWhiteSpace(CurrentConversationId) ? "unsaved" : CurrentConversationId, ConversationTitle);
         RequestOpenArtifactsFolder?.Invoke(dir);
     }
 

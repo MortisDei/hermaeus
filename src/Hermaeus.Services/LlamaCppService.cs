@@ -239,12 +239,37 @@ public sealed class LlamaCppService : IDisposable
             var req = new HttpRequestMessage(HttpMethod.Post, $"{Base}/v1/chat/completions")
                 { Content = JsonContent.Create(payload, options: JsonOpts) };
             var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
-            resp.EnsureSuccessStatusCode();
+            if (!resp.IsSuccessStatusCode)
+            {
+                // EnsureSuccessStatusCode's own message is just the status code and
+                // reason phrase; llama.cpp's error body (e.g. a mismatched --mmproj
+                // for the loaded model, or a context/image-decode failure) is the
+                // actually useful part and would otherwise be discarded unread.
+                var body = await ReadBoundedErrorBodyAsync(resp, ct);
+                resp.Dispose();
+                var detail = string.IsNullOrWhiteSpace(body) ? string.Empty : $" - {body}";
+                return (false, null, $"\n\n*llama.cpp error: {(int)resp.StatusCode} {resp.ReasonPhrase}{detail}*");
+            }
             return (true, resp, string.Empty);
         }
         catch (Exception ex)
         {
             return (false, null, $"\n\n*llama.cpp error: {ex.Message}*");
+        }
+    }
+
+    private const int MaxErrorBodyChars = 500;
+
+    private static async Task<string> ReadBoundedErrorBodyAsync(HttpResponseMessage resp, CancellationToken ct)
+    {
+        try
+        {
+            var body = await resp.Content.ReadAsStringAsync(ct);
+            return body.Length > MaxErrorBodyChars ? body[..MaxErrorBodyChars] + "..." : body;
+        }
+        catch
+        {
+            return string.Empty;
         }
     }
 

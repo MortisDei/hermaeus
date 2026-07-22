@@ -767,12 +767,17 @@ path, relocated diagnostic logging, and a new outbound payload shape.
   silently substituted with empty content.
 - **Chat artifacts write to a bounded, per-conversation folder.**
   `ChatArtifactService.SaveAsync` writes only under
-  `{DataRoot}/chat-artifacts/{conversationId}/`: the conversation id is
-  sanitized before it becomes a path segment, the suggested filename is
-  stripped of path separators and traversal sequences before
-  `ResolveSafePath` re-validates the final resolved path still sits under
-  that conversation's folder, and a name collision dedupes with a `(2)`
-  suffix rather than overwriting. Writes are atomic (temp file + move), the
+  `{DataRoot}/chat-artifacts/{sanitized conversation title, or id}/`: the
+  title (or id, when no title is available yet) is sanitized before it
+  becomes a path segment, folder identity for lookup is tracked via a hidden
+  marker file (not the folder name itself, which can legitimately collide
+  across conversations and gets deduped with a `(2)` suffix) so renaming a
+  conversation never causes a path to resolve outside its own folder, the
+  suggested filename is stripped of path separators and traversal sequences
+  before `ResolveSafePath` re-validates the final resolved path still sits
+  under that conversation's folder, and a filename collision within a folder
+  dedupes with a `(2)` suffix rather than overwriting. Writes are atomic
+  (temp file + move), the
   same pattern `SettingsService`/`BackupService` already use.
 - **Crash log relocated under the data root, not somewhere less scoped.**
   `Program.cs`'s unhandled-exception log now writes under

@@ -57,18 +57,29 @@
   configured (Services > Vision projector, `--mmproj`), or when the selected
   model routes through the OpenAI provider (its API accepts the same
   `image_url` content part natively, no local projector needed); they ride
-  the same attach button and render a thumbnail chip. Without either, an
-  attached image is Skipped with an honest reason instead of silently
-  degrading to text-only, and images never count against the text context
-  budget.
+  the same attach button and render a thumbnail chip, or can be pasted
+  directly into the message box (Ctrl+V, or right-click Paste) from anything
+  that copies a PNG to the clipboard, such as Snipping Tool. Without either
+  vision path configured, an attached image is Skipped with an honest reason
+  instead of silently degrading to text-only, and images never count against
+  the text context budget. The attach button's file picker defaults to
+  showing every supported type (text/code, `.docx`/`.pdf`, images) at once
+  rather than defaulting to a narrower filter that hides the others.
 - Attachment file paths are also persisted with each user message so regenerate
   can reattach context files after an app restart when those files still exist.
 - Every fenced code block in a rendered assistant reply has a Save button that
   writes it to that conversation's artifacts folder
-  (`{DataRoot}/chat-artifacts/{conversationId}/`); a collapsed "Artifacts: N"
-  strip above the input bar expands to a list with Open/Reveal-in-folder
-  actions per file and a button to open the conversation's artifacts folder
-  directly.
+  (`{DataRoot}/chat-artifacts/{sanitized conversation title}/`, falling back
+  to the conversation id when the conversation has no title yet; a hidden
+  marker file keeps the folder stable if the conversation is renamed later,
+  so browsing chat-artifacts in a file manager means something instead of
+  showing a bare GUID); a collapsed "Artifacts: N" strip above the input bar
+  expands to a list with Open/Reveal-in-folder actions per file and a button
+  to open the conversation's artifacts folder directly. The saved filename is
+  derived from the reply's first markdown heading (falling back to the
+  conversation title, then "artifact"), stripping a trailing extension the
+  heading may already carry (e.g. a "# calculator.cs" heading) before adding
+  the language's own extension, so it never doubles up as `calculator.cs.cs`.
 - A reply cut off by the configured max-tokens cap (the provider reports
   `finish_reason: length`) shows a "Continue" affordance instead of quietly
   reading as a complete answer.

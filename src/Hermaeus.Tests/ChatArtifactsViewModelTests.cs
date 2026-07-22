@@ -50,6 +50,22 @@ public sealed class ChatArtifactsViewModelTests
     }
 
     [Fact]
+    public async Task Saving_a_code_block_does_not_double_up_the_extension_when_the_heading_already_names_the_file()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        var artifacts = new ChatArtifactService(settings);
+        var vm = NewChatViewModel(settings, artifacts, new ThrowingSaveConversationStore());
+        vm.CurrentConversationId = "conv-under-test";
+
+        vm.SaveCodeBlockAction("csharp", "class Calculator {}", "# calculator.cs\n\nHere it is.");
+        await WaitForAsync(() => vm.Artifacts.Count > 0);
+
+        Assert.Equal("calculator.cs", Assert.Single(vm.Artifacts).FileName);
+    }
+
+    [Fact]
     public async Task Loading_a_different_conversation_shows_only_that_conversations_artifacts()
     {
         using var temp = new TempDir();
@@ -98,6 +114,7 @@ public sealed class ChatArtifactsViewModelTests
     [InlineData("No heading at all here", "Fallback Title", "Fallback-Title")]
     [InlineData("", "", "artifact")]
     [InlineData("## Multi   Space   Heading", "", "Multi-Space-Heading")]
+    [InlineData("# calculator.cs\n\nbody", "", "calculator")]
     public void DeriveArtifactStem_prefers_the_first_heading_then_the_conversation_title_then_a_fallback(
         string markdown, string conversationTitle, string expected)
     {

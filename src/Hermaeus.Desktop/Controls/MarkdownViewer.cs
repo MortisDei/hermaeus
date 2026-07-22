@@ -478,6 +478,7 @@ public sealed class MarkdownViewer : ContentControl, IDisposable
         header.Children.Add(saveButton);
 
         var codeFontSize = FontSize - 1;
+        const double maxEditorHeight = 420;
         var minHeight = Math.Max(28, (FontSize + 4) * Math.Max(1, lineCount));
 
         // AvaloniaEdit's TextEditor is used strictly read-only, and only when there's
@@ -495,9 +496,14 @@ public sealed class MarkdownViewer : ContentControl, IDisposable
                 Background = Brushes.Transparent,
                 Foreground = Brushes.WhiteSmoke,
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-                VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
-                MinHeight = minHeight,
-                MaxHeight = 420
+                // Was Disabled with an unbounded MinHeight fighting a 420px MaxHeight -
+                // long blocks (calculator.cs-length code) either grew far past the
+                // visible viewport with no way to scroll to the Save button, or got
+                // silently clipped. Capping MinHeight to the same bound as MaxHeight
+                // and enabling the scrollbar lets the block scroll internally instead.
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                MinHeight = Math.Min(minHeight, maxEditorHeight),
+                MaxHeight = maxEditorHeight
             }
             : new SelectableTextBlock
             {

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Hermaeus.Core.Services;
@@ -27,6 +28,14 @@ public partial class ChatView : UserControl
     public ChatView()
     {
         InitializeComponent();
+
+        // Ctrl+V (or right-click Paste) with an image on the clipboard attaches it the
+        // same way a dragged-in or browsed-for image file would, instead of doing
+        // nothing - TextBox only ever knew how to paste text, so a copied screenshot
+        // silently went nowhere. Attached once here since InputBox itself never
+        // changes, only its DataContext.
+        if (this.FindControl<TextBox>("InputBox") is { } inputBox)
+            inputBox.AddHandler(TextBox.PastingFromClipboardEvent, OnInputPastingFromClipboard);
 
         DataContextChanged += (_, _) =>
         {
@@ -85,24 +94,33 @@ public partial class ChatView : UserControl
                 var top = TopLevel.GetTopLevel(this);
                 if (top is null) return;
 
+                var textAndCodePatterns = new[]
+                {
+                    "*.txt", "*.md", "*.cs", "*.fs", "*.vb", "*.csproj", "*.props", "*.json",
+                    "*.xml", "*.xaml", "*.axaml", "*.yaml", "*.yml", "*.toml", "*.sh", "*.ps1",
+                    "*.py", "*.js", "*.jsx", "*.ts", "*.tsx", "*.css", "*.html", "*.razor",
+                    "*.sql", "*.rs", "*.go", "*.java", "*.c", "*.h", "*.cpp", "*.hpp"
+                };
+                var documentPatterns = new[] { "*.docx", "*.pdf" };
+                var imagePatterns = new[] { "*.png", "*.jpg", "*.jpeg", "*.webp" };
+
                 var files = await top.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
                 {
                     Title = "Attach files as chat context",
                     AllowMultiple = true,
                     FileTypeFilter =
                     [
-                        new FilePickerFileType("Text and code files")
+                        // The OS dialog defaults to whichever filter is listed first, so
+                        // every supported type needs to be in that first entry - otherwise
+                        // e.g. images are invisible until the user manually switches the
+                        // dropdown, which read as "attaching images doesn't work".
+                        new FilePickerFileType("All supported files")
                         {
-                            Patterns =
-                            [
-                                "*.txt", "*.md", "*.cs", "*.fs", "*.vb", "*.csproj", "*.props", "*.json",
-                                "*.xml", "*.xaml", "*.axaml", "*.yaml", "*.yml", "*.toml", "*.sh", "*.ps1",
-                                "*.py", "*.js", "*.jsx", "*.ts", "*.tsx", "*.css", "*.html", "*.razor",
-                                "*.sql", "*.rs", "*.go", "*.java", "*.c", "*.h", "*.cpp", "*.hpp"
-                            ]
+                            Patterns = [.. textAndCodePatterns, .. documentPatterns, .. imagePatterns]
                         },
-                        new FilePickerFileType("Documents") { Patterns = ["*.docx", "*.pdf"] },
-                        new FilePickerFileType("Images") { Patterns = ["*.png", "*.jpg", "*.jpeg", "*.webp"] },
+                        new FilePickerFileType("Text and code files") { Patterns = textAndCodePatterns },
+                        new FilePickerFileType("Documents") { Patterns = documentPatterns },
+                        new FilePickerFileType("Images") { Patterns = imagePatterns },
                         new FilePickerFileType("All files") { Patterns = ["*"] }
                     ]
                 });
@@ -258,6 +276,46 @@ public partial class ChatView : UserControl
             if (_vm.SendCommand.CanExecute(null))
                 _vm.SendCommand.Execute(null);
         }
+    }
+
+    /// <summary>
+    /// TextBox's own paste handling only ever knew how to insert text, so a copied
+    /// screenshot silently did nothing. Handled always (Handled = true up front,
+    /// before any await) because Avalonia checks Handled synchronously right after
+    /// raising this event - an async handler that only sets it after the first
+    /// await would already be too late, letting the default (text-only) paste run
+    /// regardless of what this handler later decides. When there's no image on the
+    /// clipboard, or reading it fails, the suppressed default is replayed manually
+    /// via SelectedText so plain text paste keeps working exactly as before.
+    /// </summary>
+    private async void OnInputPastingFromClipboard(object? sender, RoutedEventArgs e)
+    {
+        if (_vm is null || sender is not TextBox textBox) return;
+        e.Handled = true;
+
+        var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+        if (clipboard is null) return;
+
+        try
+        {
+            var formats = await clipboard.GetFormatsAsync();
+            var imageFormat = formats.FirstOrDefault(f => f.Contains("png", StringComparison.OrdinalIgnoreCase));
+            if (imageFormat is not null && await clipboard.GetDataAsync(imageFormat) is byte[] { Length: > 0 } bytes)
+            {
+                var tempPath = Path.Combine(Path.GetTempPath(), $"hermaeus-paste-{Guid.NewGuid():N}.png");
+                await File.WriteAllBytesAsync(tempPath, bytes);
+                await _vm.AddContextFilesAsync([tempPath]);
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Clipboard image paste failed: {ex.Message}");
+        }
+
+        var text = await clipboard.GetTextAsync();
+        if (!string.IsNullOrEmpty(text))
+            textBox.SelectedText = text;
     }
 
     private void OnContextDragOver(object? sender, DragEventArgs e)

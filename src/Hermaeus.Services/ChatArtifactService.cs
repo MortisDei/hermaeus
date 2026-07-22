@@ -12,22 +12,65 @@ public sealed record ChatArtifact(string FileName, string FullPath, long SizeByt
 /// </summary>
 public sealed class ChatArtifactService
 {
+    private const string MarkerFileName = ".conversation-id";
+
     private readonly ISettingsService _settings;
 
     public ChatArtifactService(ISettingsService settings) => _settings = settings;
 
     private string RootDirectory => Path.Combine(SettingsService.ResolveDataRoot(_settings.Settings), "chat-artifacts");
 
-    public string GetConversationDirectory(string conversationId) =>
-        Path.Combine(RootDirectory, SanitizeConversationId(conversationId));
+    /// <summary>Finds this conversation's existing artifacts folder, if any, without creating
+    /// one. Folders created by <see cref="GetOrCreateConversationDirectory"/> carry a hidden
+    /// <c>.conversation-id</c> marker so lookup survives the folder being named after a chat
+    /// title that later changed; a bare id-named folder (pre-title-naming data) is also
+    /// recognized so existing artifacts aren't orphaned by this lookup change.</summary>
+    private string? TryGetConversationDirectory(string conversationId)
+    {
+        if (!Directory.Exists(RootDirectory))
+            return null;
+
+        foreach (var dir in Directory.GetDirectories(RootDirectory))
+        {
+            var markerPath = Path.Combine(dir, MarkerFileName);
+            if (File.Exists(markerPath) && File.ReadAllText(markerPath).Trim() == conversationId)
+                return dir;
+        }
+
+        var legacyDir = Path.Combine(RootDirectory, SanitizeConversationId(conversationId));
+        return Directory.Exists(legacyDir) ? legacyDir : null;
+    }
+
+    /// <summary>Backing folder name defaults to a sanitized, deduped conversation title (so
+    /// browsing chat-artifacts in a file manager means something) rather than the raw
+    /// conversation id; falls back to the id when no title is available. Stays put once
+    /// created even if the conversation is later renamed - see <see cref="TryGetConversationDirectory"/>.</summary>
+    private string GetOrCreateConversationDirectory(string conversationId, string? conversationTitle)
+    {
+        var existing = TryGetConversationDirectory(conversationId);
+        if (existing is not null)
+            return existing;
+
+        Directory.CreateDirectory(RootDirectory);
+        var baseName = SanitizeFolderName(conversationTitle) ?? SanitizeConversationId(conversationId);
+        var dir = Path.Combine(RootDirectory, DedupeDirectoryName(RootDirectory, baseName));
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, MarkerFileName), conversationId);
+        return dir;
+    }
+
+    /// <summary>Resolves the given conversation's artifacts folder, creating it (title-named
+    /// when available) if it doesn't exist yet - used by explicit user actions like "open
+    /// artifacts folder" that need somewhere real to point at.</summary>
+    public string GetConversationDirectory(string conversationId, string? conversationTitle = null) =>
+        GetOrCreateConversationDirectory(conversationId, conversationTitle);
 
     /// <summary>Writes <paramref name="content"/> under the conversation's artifacts folder,
     /// sanitizing <paramref name="suggestedFileName"/> (strips any path, rejects traversal,
     /// dedupes an existing name with a " (2)", " (3)", ... suffix), and returns where it landed.</summary>
-    public async Task<ChatArtifact> SaveAsync(string conversationId, string suggestedFileName, string content, CancellationToken ct = default)
+    public async Task<ChatArtifact> SaveAsync(string conversationId, string suggestedFileName, string content, string? conversationTitle = null, CancellationToken ct = default)
     {
-        var dir = GetConversationDirectory(conversationId);
-        Directory.CreateDirectory(dir);
+        var dir = GetOrCreateConversationDirectory(conversationId, conversationTitle);
 
         var fileName = SanitizeFileName(suggestedFileName);
         var path = ResolveSafePath(dir, DedupeFileName(dir, fileName));
@@ -39,12 +82,13 @@ public sealed class ChatArtifactService
 
     public Task<IReadOnlyList<ChatArtifact>> ListAsync(string conversationId, CancellationToken ct = default)
     {
-        var dir = GetConversationDirectory(conversationId);
-        if (!Directory.Exists(dir))
+        var dir = TryGetConversationDirectory(conversationId);
+        if (dir is null)
             return Task.FromResult<IReadOnlyList<ChatArtifact>>([]);
 
         IReadOnlyList<ChatArtifact> list = new DirectoryInfo(dir)
             .GetFiles()
+            .Where(f => !string.Equals(f.Name, MarkerFileName, StringComparison.Ordinal))
             .OrderByDescending(f => f.LastWriteTimeUtc)
             .Select(f => new ChatArtifact(f.Name, f.FullName, f.Length, f.LastWriteTimeUtc))
             .ToList();
@@ -122,6 +166,37 @@ public sealed class ChatArtifactService
         {
             var candidate = $"{stem} ({i}){ext}";
             if (!File.Exists(Path.Combine(dir, candidate)))
+                return candidate;
+        }
+    }
+
+    /// <summary>Conversation title to a filesystem-safe folder name (invalid characters and
+    /// spaces become '-', collapsed and trimmed, capped at 60 chars); null for blank input so
+    /// callers can fall back to the conversation id.</summary>
+    private static string? SanitizeFolderName(string? title)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+            return null;
+
+        var invalid = Path.GetInvalidFileNameChars();
+        var name = new string(title.Select(c => invalid.Contains(c) || c == ' ' ? '-' : c).ToArray());
+        while (name.Contains("--", StringComparison.Ordinal))
+            name = name.Replace("--", "-");
+        name = name.Trim('-', '.');
+        if (name.Length > 60)
+            name = name[..60].Trim('-');
+        return string.IsNullOrWhiteSpace(name) ? null : name;
+    }
+
+    private static string DedupeDirectoryName(string parentDir, string name)
+    {
+        if (!Directory.Exists(Path.Combine(parentDir, name)))
+            return name;
+
+        for (var i = 2; ; i++)
+        {
+            var candidate = $"{name} ({i})";
+            if (!Directory.Exists(Path.Combine(parentDir, candidate)))
                 return candidate;
         }
     }

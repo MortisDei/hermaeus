@@ -389,7 +389,7 @@
             <ScrollViewer x:Name="MessagesScroll"
                           VerticalScrollBarVisibility="Auto"
                           HorizontalScrollBarVisibility="Disabled"
-                          Padding="16,8">
+                          Padding="16,8,16,28">
                 <StackPanel>
                     <Button Content="Show earlier messages"
                             Command="{Binding ShowEarlierMessagesCommand}"

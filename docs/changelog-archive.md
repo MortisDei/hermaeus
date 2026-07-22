@@ -2,6 +2,104 @@
 
 The CHANGELOG.md in root only contains the current 10 versions of changelogs. The rest are archived here in line with the 10 version limit in the main changelog.
 
+## [0.18.0-alpha] - 2026-07-18
+
+Implements docs/review r13 in full: "usability is what is going to decide
+whether this app sinks or swims." The System page now tells the truth about
+Windows hardware, the Models page grows from a metadata editor into an
+actual library (compact cards, a real scroll fix, auto-tune from the page,
+fits-on-your-hardware chips, a flat-folder organizer), local models can be
+linked to their Hugging Face origin and checked/updated in place, and the
+orphan chat Temp spinner becomes a full sampling flyout.
+
+### Fixed
+
+- **Windows System Overview lied about RAM, OS version, CPU name, and GPU.**
+  `SystemInfoService` returned 0 for available RAM on Windows, reported the
+  raw `10.0.NNNNN` kernel string as the OS name (Windows 11 self-describes as
+  Windows 10), returned the process architecture as the CPU *name*, and
+  probed GPUs via `nvidia-smi`/Linux DRM only, so a Windows machine without
+  the NVIDIA CLI showed no GPU and no VRAM at all. RAM now comes from a
+  `GlobalMemoryStatusEx` P/Invoke, the OS name from a pure build-number
+  mapper (`OsNameFormatter`) plus the registry `DisplayVersion`, the CPU name
+  from `HKLM\HARDWARE\DESCRIPTION\System\CentralProcessor\0`, and GPU/VRAM
+  from a registry fallback over the display adapter class key when
+  `nvidia-smi` finds nothing. A new cached `ISystemInfoService.GetHardwareProfileAsync`
+  gives the fits-check and HF browser cheap repeated access without
+  re-spawning processes per row. `StarterModelCatalog.Recommend` now sees
+  real VRAM on non-NVIDIA-CLI Windows machines instead of always falling
+  back to the smallest tier.
+- **The Models page could not be scrolled to the bottom.** Each of 32+ model
+  cards rendered 8 always-expanded `NumericUpDown`s that captured every
+  mouse wheel notch before it reached the outer `ScrollViewer`. Cards are
+  now collapsed by default (one line: name, running badge, provider, size,
+  tags, fits/update chips, tune summary, modified date) with a filter box
+  above the list; the wheel-capture fix mirrors the same tunnel-phase
+  handler ServicesView/SettingsView already use to force wheel scroll onto
+  the page regardless of what is under the pointer.
+- **Auto-tune only existed on the Services page**, even though the Models
+  page lists every GGUF on disk. The tune-profile upsert logic is lifted out
+  of `ServicesViewModel` into a shared `LlamaTuneProfileStore` (both pages
+  now read/write the same store); the Models page gained a per-model
+  "Auto tune" button and a sequential "Auto-tune all" that skips
+  already-fresh profiles via a pure staleness predicate (missing, size
+  drift, mtime drift, or llama-server build drift).
+
+### Added
+
+- **Fits-on-your-hardware chips.** `ModelFitEstimator` estimates FitsGpu /
+  FitsPartial / TooLarge / Unknown from a file size and the cached hardware
+  profile (deliberate rough headroom constants, documented as such); shown
+  on Models-page cards, the HF browser's file list, and next to the wizard's
+  recommended starter model.
+- **"Organize folder..."** flattens the Hugging Face hub-cache maze
+  (`hub\models--org--repo\snapshots\<sha>\*.gguf`) into
+  `<ModelsDirectory>\LLM\<file>.gguf`. Plan -> preview dialog (every
+  "from -> to" move, collision skips, provenance-record count) -> confirm ->
+  execute: same-volume rename or copy+verify+delete across volumes, never
+  renames a file (the name is the HF update-matching identity), skips name
+  collisions instead of overwriting, moves multi-part sets atomically,
+  rewrites every stored reference (`ServerConfig.ModelPath`,
+  `LlamaTuneProfile.ModelPath`, `ModelProfile` keys) in one settings save,
+  and offers a separately-confirmed empty-directory cleanup that only
+  removes directories still empty at removal time.
+- **Hugging Face integration**, anonymous/HTTPS/huggingface.co-only, every
+  call manual-button-triggered (never on startup or a timer): a
+  `model-manifest.json` provenance store records which local file came from
+  which repo (written by the folder organizer's migration path, the HF
+  browser, and a new manual "Link to Hugging Face repo..." card action that
+  validates against the model-card API before saving); "Check for updates"
+  batches by repo (one tree call each) and compares the tree's `lfs.oid`
+  against the stored hash, hashing migration-linked files once on first
+  check; a per-card "Update" button downloads to `<file>.update.tmp`,
+  verifies the hash, then atomically swaps (move-to-`.previous`,
+  move-into-place, delete `.previous` only after both moves succeed;
+  restores the original on any failure) and flags the card "re-tune
+  recommended" afterward. A new collapsed "Get models from Hugging Face"
+  expander on the Models page searches GGUF repos, lists a selected repo's
+  single-file GGUFs (multi-part sets are hidden this round, not
+  half-supported) with a fits chip each, and downloads straight into
+  `Models\LLM\`. The Privacy Audit's outbound-destination count and item
+  list now disclose this surface whenever any model is repo-linked.
+- **Chat header sampling flyout.** The orphan "Temp" spinner (temperature
+  editable, nothing else was) is now a compact "T 0.7" button opening a
+  flyout with all eight sampling parameters (temperature, top-p, top-k,
+  min-p, repeat/frequency/presence penalty, max tokens) using the same
+  ranges/tooltips as the Models page editor, plus "Reset to model defaults"
+  sharing the exact fallback chain `OnSelectedModelChanged` already used
+  (extracted into `ApplyModelProfileDefaults`, called by both). Still
+  VM-local only - never written to `ISettingsService.Settings`.
+
+### Docs
+
+- `docs/security-review.md` gains an r13 subsection: new outbound surface
+  (huggingface.co, manual-only, disclosed in the Privacy Audit), download
+  integrity posture (origin-integrity via the tree API's `lfs.oid`, same
+  stance as the starter-model catalog), the organizer/updater's
+  data-mutation safety properties, and the read-only registry queries added
+  for system truth.
+
+99 new tests (688->787), zero warnings.
 ## [0.17.0-alpha] - 2026-07-18
 
 Implements docs/review r12 in full: the first dedicated audit of

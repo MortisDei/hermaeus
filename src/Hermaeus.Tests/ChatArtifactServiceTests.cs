@@ -110,4 +110,69 @@ public sealed class ChatArtifactServiceTests
         var only = Assert.Single(listA);
         Assert.Equal("a.txt", only.FileName);
     }
+
+    // ── Title-based folder naming ───────────────────────────────────────────
+
+    [Fact]
+    public async Task SaveAsync_names_the_folder_after_the_conversation_title_not_the_raw_id()
+    {
+        using var temp = new TempDir();
+        var service = NewService(temp);
+
+        var artifact = await service.SaveAsync("e5ac6911-314e-4bd5-9d41-2e5fa6b09ec9", "notes.txt", "hi", conversationTitle: "Vanguard of Chaos");
+
+        Assert.Contains(Path.Combine("chat-artifacts", "Vanguard-of-Chaos"), artifact.FullPath);
+        Assert.DoesNotContain("e5ac6911", artifact.FullPath, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SaveAsync_reuses_the_same_folder_for_later_saves_even_without_a_title()
+    {
+        using var temp = new TempDir();
+        var service = NewService(temp);
+
+        var first = await service.SaveAsync("conv-1", "a.txt", "a", conversationTitle: "My Chat");
+        var second = await service.SaveAsync("conv-1", "b.txt", "b");
+
+        Assert.Equal(Path.GetDirectoryName(first.FullPath), Path.GetDirectoryName(second.FullPath));
+    }
+
+    [Fact]
+    public async Task SaveAsync_dedupes_two_conversations_that_share_a_title()
+    {
+        using var temp = new TempDir();
+        var service = NewService(temp);
+
+        var first = await service.SaveAsync("conv-a", "a.txt", "a", conversationTitle: "New Conversation");
+        var second = await service.SaveAsync("conv-b", "b.txt", "b", conversationTitle: "New Conversation");
+
+        Assert.NotEqual(Path.GetDirectoryName(first.FullPath), Path.GetDirectoryName(second.FullPath));
+        Assert.Contains(Path.Combine("chat-artifacts", "New-Conversation"), first.FullPath);
+        Assert.Contains(Path.Combine("chat-artifacts", "New-Conversation (2)"), second.FullPath);
+    }
+
+    [Fact]
+    public async Task ListAsync_still_finds_artifacts_after_the_conversation_is_renamed()
+    {
+        using var temp = new TempDir();
+        var service = NewService(temp);
+        await service.SaveAsync("conv-1", "a.txt", "a", conversationTitle: "Old Title");
+
+        var list = await service.ListAsync("conv-1");
+
+        Assert.Single(list);
+    }
+
+    [Fact]
+    public async Task SaveAsync_keeps_the_folder_in_place_across_a_conversation_rename()
+    {
+        using var temp = new TempDir();
+        var service = NewService(temp);
+        var first = await service.SaveAsync("conv-1", "a.txt", "a", conversationTitle: "Old Title");
+
+        var second = await service.SaveAsync("conv-1", "b.txt", "b", conversationTitle: "New Title");
+
+        Assert.Equal(Path.GetDirectoryName(first.FullPath), Path.GetDirectoryName(second.FullPath));
+        Assert.Contains(Path.Combine("chat-artifacts", "Old-Title"), second.FullPath);
+    }
 }
