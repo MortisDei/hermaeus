@@ -423,8 +423,8 @@
   (auto/on/off), and Context Shift (rolling context for long agent loops), plus
   an "Advanced engine options" section for `--mlock`, `--no-mmap`, and an
   experimental N-gram speculative decoding checkbox (zero additional VRAM,
-  drafts from the prompt/history itself). Every default matches the pre-r18
-  command line exactly (f16 KV cache, auto flash attention, everything else
+  drafts from the prompt/history itself). Every default matches the prior
+  hand-typed command line exactly (f16 KV cache, auto flash attention, everything else
   off) - nothing is ever forced, and a value typed into Extra args always wins
   over the equivalent first-class control. A quantized V cache combined with
   flash attention off shows an inline warning (llama.cpp needs flash attention
@@ -715,7 +715,7 @@ providers, features that may send data remotely, exposed local servers, secret
 health, log redaction status, and data-root backup status.
 
 Planned work such as a Doctor Fixes queue and safe command recipe cards is
-tracked in [docs/review/03-next-level-roadmap.md](review/03-next-level-roadmap.md),
+tracked in [docs/review/archived/r2/03-next-level-roadmap.md](review/archived/r2/03-next-level-roadmap.md),
 not documented here as existing behaviour.
 
 ### Local API

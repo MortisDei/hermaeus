@@ -1,9 +1,9 @@
 # Aether Security Review And Threat Model
 
-Last refreshed for `0.23.0-alpha` (see the r18 subsection under Threat
-Scenarios, covering first-class llama-server engine options). The prior r17
-pass covered the new GGUF header parser. The `0.10.0-alpha` pass
-re-verified the
+Last refreshed for `0.24.0-alpha` (see the r19 subsection under Threat
+Scenarios, covering chat attachments, chat artifacts, and crash logs). The
+prior r18 pass covered first-class llama-server engine options, and r17
+covered the new GGUF header parser. The `0.10.0-alpha` pass re-verified the
 areas that changed in r3-r5 (agent tool execution, run_command recipes,
 lesson store, voice orchestration, benchmark insights) directly against the
 code, and confirmed via git history that the Local API, MCP bridge, secret
@@ -367,7 +367,7 @@ launched.
   reassigned to a different process, or whose executable no longer matches,
   refuses the stop instead of killing the wrong process.
 
-Explicitly rejected for this round (see `docs/review/04-roadmap.md`):
+Explicitly rejected for this round (see `docs/review/archived/r9/04-roadmap.md`):
 auto-killing an unrecognized process on a conflicting port, and any
 synchronization-based alternative to UI-thread marshaling for the unrelated
 `UiBoundCollection<T>` guard work landing in the same release.
@@ -417,7 +417,7 @@ change. No new network surface.
   allowlist, so the next async-only service added to the DI graph fails the
   build instead of silently reintroducing this crash.
 
-Explicitly rejected for this round (see `docs/review/04-roadmap.md`):
+Explicitly rejected for this round (see `docs/review/archived/r10/04-roadmap.md`):
 auto-reindexing a dataset when the embedding model changes, auto-removing
 missing-source chunks during ingest, a vector database or persisted
 ANN/inverted index dependency, LLM-based query expansion on the query path, a
@@ -808,9 +808,11 @@ path, relocated diagnostic logging, and a new outbound payload shape.
 
 ## Release Gate Status
 
-Security review and threat model refresh was completed for `0.13.0-alpha` as
-an engineering documentation gate. The following items remain public-release
-hardening work:
+The initial security review and threat model refresh was completed for
+`0.13.0-alpha` as an engineering documentation gate; subsequent rounds (r14
+through r19, see Threat Scenarios above) have each re-reviewed the surface
+they touched. The following items from the original gate remain public-release
+hardening work not yet addressed by a later round:
 
 - Optional blocking policy for network-affecting `llama-server` flags.
 - Stronger RAG file-size enforcement and broader text sanitization.

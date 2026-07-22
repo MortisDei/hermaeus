@@ -1,10 +1,12 @@
 # Aether
 
+[![CI](https://github.com/MortisDei/aether/actions/workflows/ci.yml/badge.svg)](https://github.com/MortisDei/aether/actions/workflows/ci.yml)
+
 Aether is a native, local-first AI workspace for developers and power users.
 
 Rather than being another chat client, Aether combines conversations, long-term memory, local retrieval, supervised agents, model management, benchmarking, diagnostics, and pluggable voice services into a single desktop application where every action is transparent, reviewable, and under the user's control.
 
-Built with **Avalonia UI** and **.NET 10** for Linux (Wayland/X11) and Windows.
+Built with **Avalonia UI** and **.NET 10**. Tested on Windows and on Pop!_OS (Wayland); other Linux environments should work but are less exercised.
 
 ---
 
@@ -120,13 +122,15 @@ Includes:
 
 # Quick Start
 
+**Prerequisites:** [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0). A local model runtime (managed `llama.cpp`, Ollama, or an OpenAI-compatible endpoint) is configured later, in-app, via the setup wizard — nothing else needs to be installed up front.
+
 ```bash
 git clone https://github.com/MortisDei/aether.git
-cd Aether
+cd aether
 dotnet run --project src/Aether.Desktop
 ```
 
-Open **Services**, configure a runtime, select a model, then start the Chat service.
+Open **Services**, configure a runtime, select a model, then start the Chat service. If you have no runtime set up yet, the in-app setup wizard walks through downloading a starter model.
 
 ---
 
@@ -173,7 +177,17 @@ Highlights include:
 - Data migration validation
 - Security review and documented threat model
 
-See **docs/security-review.md** for the complete engineering review.
+See **docs/security-review.md** for the complete engineering review, and **SECURITY.md** to report a vulnerability.
+
+An automated regression suite of **1,090 tests** runs on every commit across Windows and Linux, with warnings treated as build errors.
+
+---
+
+# Known Issues / Alpha Status
+
+Aether is alpha software, developed and tested primarily on Windows. Linux (Pop!_OS, Wayland) has been run and works, but is less exercised than Windows and more likely to surface rough edges. Prebuilt binaries are not code-signed; Windows SmartScreen will warn on first run (verify the published SHA256 instead of dismissing it blindly). See `CHANGELOG.md` for the pace of fixes and new features.
+
+Aether has one maintainer. Issues get a best-effort response; pull requests must follow `CONTRIBUTING.md`.
 
 ---
 
@@ -249,13 +263,15 @@ See:
 
 Aether is **not** an OSI-approved open source project.
 
+For commercial licensing requests, see the Contact section of COMMERCIAL.md.
+
 ---
 
 # Current Status
 
-Current release target:
+Current version:
 
-**0.10.0-alpha**
+**0.24.0-alpha**
 
 Major systems currently implemented include:
 
@@ -270,4 +286,4 @@ Major systems currently implemented include:
 - Doctor diagnostics
 - Security review and threat model
 
-Public release hardening continues in the areas of installer signing, OCR support, additional security tightening, and Linux global hotkeys.
+Aether is alpha software. See [Known Issues](#known-issues--alpha-status) below and `CHANGELOG.md` for the current state and improvement cadence. Public release hardening continues in the areas of installer signing, OCR support, additional security tightening, and Linux global hotkeys.

@@ -1,0 +1,86 @@
+name: Bug Report
+description: Report a problem with Aether
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Aether is a solo-maintained project; local-AI setups vary a lot by
+        GPU, driver, and model. The fields below help narrow that down fast.
+
+  - type: input
+    id: version
+    attributes:
+      label: Aether version
+      description: Current Status section in the README, or Help/About if present.
+      placeholder: 0.24.0-alpha
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - Linux
+    validations:
+      required: true
+
+  - type: input
+    id: os-details
+    attributes:
+      label: OS details
+      description: Windows build, or Linux distro + desktop/display server (e.g. Pop!_OS, Wayland).
+    validations:
+      required: true
+
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU and VRAM
+      description: Include "none / CPU only" if applicable.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: runtime
+    attributes:
+      label: How is the model served?
+      options:
+        - Managed llama.cpp
+        - Ollama
+        - OpenAI-compatible endpoint
+        - Not sure / not applicable
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Aether Doctor output
+      description: Open Doctor in-app and paste the relevant findings, if the bug is runtime/environment related.
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs actual behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Redact any personal paths, API keys, or model content before pasting.

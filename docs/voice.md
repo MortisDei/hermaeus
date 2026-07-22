@@ -8,13 +8,22 @@ test.
 
 Supported providers:
 
-- **Kokoro** - default ultra-fast local readback for standard use.
+- **Kokoro (native)** - default. Fully in-process Kokoro: no Python
+  subprocess, ONNX inference runs directly in Aether. English voices only;
+  downloads its model once via the Doctor install action, then runs fully
+  offline.
+- **Kokoro (Python)** - the original fast local readback path, run as a
+  managed Python subprocess. Kept as an advanced fallback now that Kokoro
+  (native) is the default; still useful if you need its specific voice set.
 - **F5-TTS** - advanced local voice cloning with high fidelity, heavy resource
   demands, and a dedicated Python venv requirement.
 - **XTTS v2** - legacy Coqui-compatible cloning retained for existing user
   workflows that already depend on it.
 - **OpenAI** - remote voice synthesis through a cloud API with no local model
   footprint.
+
+Kokoro (Python), F5-TTS, and XTTS v2 are grouped under **Advanced** in
+**Settings -> Voice providers**; Kokoro (native) is **Recommended**.
 
 ## Local Environment and Hardware Setup
 
@@ -39,14 +48,17 @@ installs or playback.
 
 ## Kokoro Setup
 
-Kokoro is recommended as the default voice provider. The first-run Setup Wizard
-shows Kokoro onboarding details in the voice step, including the install plan
-and risk notes before you continue.
+Kokoro (native) is the default voice provider. It runs fully in-process with no
+Python subprocess: the Doctor install action downloads its ONNX model once,
+after which it runs fully offline. The first-run Setup Wizard shows Kokoro
+onboarding details in the voice step, including the install plan and risk
+notes before you continue.
 
-Aether can detect available hardware backends when creating a Python venv and
-will suggest a device (`cuda`, `rocm`, `mps`, or `cpu`) to use for TTS
-inference. You can still override the selected device in
-**Settings -> Voice providers** after setup.
+The Kokoro (Python) fallback, along with F5-TTS and XTTS v2, run as managed
+Python subprocesses. For those, Aether can detect available hardware backends
+when creating a Python venv and will suggest a device (`cuda`, `rocm`, `mps`,
+or `cpu`) to use for TTS inference. You can still override the selected
+device in **Settings -> Voice providers** after setup.
 
 TTS speed is configurable per-provider and persisted in settings.
 

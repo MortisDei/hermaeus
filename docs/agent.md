@@ -148,7 +148,7 @@ step itself fails or returns something unusable, a deterministic fallback
 report (built from the sub-task specs themselves) takes its place instead of
 failing the whole run - the sub-task work already happened.
 
-Explicit rejections for this round: no parallel child execution (one local
+Explicit design limitations: no parallel child execution (one local
 model, one GPU), no nesting beyond depth 1, no user-editable specialist
 profiles yet (the fixed catalog - `general`, `correctness`, `security`,
 `tests`, `performance`, `docs` - ships first), no per-child model selection
@@ -414,8 +414,8 @@ Each task persists the workspace root it was created against. Approving a
 pending action (from the review queue, which lists tasks across every
 workspace) always executes against the task's own stored root, never
 whichever workspace happens to be active in the workbench at approval time.
-Pre-r16 tasks with no stored root fall back to the workbench's active
-workspace, exactly as before.
+Older tasks created before this behavior shipped, with no stored root, fall
+back to the workbench's active workspace, exactly as before.
 
 ## Context Packs
 

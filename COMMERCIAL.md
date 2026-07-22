@@ -29,6 +29,12 @@ deployment rights are handled separately in writing.
 
 Until a commercial license is signed, commercial use is not granted.
 
+## Contact
+
+To request a commercial license, open a GitHub issue on this repository with
+the `commercial` label and a short description of the intended use. This
+project has one maintainer; expect best-effort response times.
+
 ## Legal Review
 
 This document is product and licensing intent, not legal advice. Final public

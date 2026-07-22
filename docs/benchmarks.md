@@ -17,9 +17,10 @@ Runs record the following metrics and metadata:
 - First-token latency
 - Total latency
 - Tokens/sec, measured from the provider's own prompt/decode timings when it
-	reports them (llama.cpp), or estimated from output length otherwise - each
-	result is labeled `server-measured` or `estimated from characters` so the
-	two are never confused
+	reports them (llama.cpp), or estimated from output length otherwise. The
+	distinction is recorded per result (`server-timings` vs `chars-approx`)
+	but not yet surfaced in the UI itself - treat displayed tok/s as
+	provider-measured only when you know the provider reports real timings.
 - Deterministic quality checks
 - Resource deltas (CPU, memory, storage changes) for display; the scoring
 	weight for this slot is neutral (reserved, not currently a real signal -
