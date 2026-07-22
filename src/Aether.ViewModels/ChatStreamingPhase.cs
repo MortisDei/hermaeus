@@ -12,16 +12,34 @@ public static class ChatStreamingPhase
     public const long GraceMs = 2_000;
 
     /// <summary>
-    /// Returns the placeholder text ("Reading prompt... 5s" / "Thinking...
-    /// 12s"), or empty when a visible token has arrived or the grace threshold
-    /// has not been crossed. Pure so it is testable without a live send.
+    /// r19 6.4: rotating status words for the "thinking" gap, where nothing
+    /// concrete is known. "Reading prompt" is left alone below - it IS
+    /// concrete phase information, so it always wins over whimsy. "Thinking"
+    /// stays first in the list so the default (<paramref name="whimsyIndex"/>
+    /// = 0) reproduces the original steady text exactly.
     /// </summary>
-    public static string Describe(long elapsedMs, bool sawFirstEvent, bool sawContent)
+    public static readonly IReadOnlyList<string> WhimsyWords =
+    [
+        "Thinking", "Pondering", "Herding tokens", "Warming the cache",
+        "Consulting the weights", "Brewing", "Untangling", "Sharpening pencils"
+    ];
+
+    /// <summary>
+    /// Returns the placeholder text ("Reading prompt... 5s" / "Pondering...
+    /// 12s"), or empty when a visible token has arrived or the grace
+    /// threshold has not been crossed. Pure so it is testable without a live
+    /// send or a real timer; <paramref name="whimsyIndex"/> selects the
+    /// rotating word deterministically (the caller advances it, e.g. once
+    /// per 2.5s of elapsed time) rather than this method owning a timer.
+    /// </summary>
+    public static string Describe(long elapsedMs, bool sawFirstEvent, bool sawContent, int whimsyIndex = 0)
     {
         if (sawContent || elapsedMs < GraceMs)
             return string.Empty;
         var seconds = elapsedMs / 1_000;
-        var phase = sawFirstEvent ? "Thinking" : "Reading prompt";
-        return $"{phase}... {seconds}s";
+        if (!sawFirstEvent)
+            return $"Reading prompt... {seconds}s";
+        var index = ((whimsyIndex % WhimsyWords.Count) + WhimsyWords.Count) % WhimsyWords.Count;
+        return $"{WhimsyWords[index]}... {seconds}s";
     }
 }

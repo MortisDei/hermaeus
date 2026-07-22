@@ -213,7 +213,7 @@ internal static class AgentTests
         await c.OpenAsync();
         await using var cmd = c.CreateCommand();
         cmd.CommandText = "SELECT version FROM aether_schema_versions WHERE scope = 'agent_task_index'";
-        Equal(2L, (long)(await cmd.ExecuteScalarAsync() ?? 0L), "agent task index should record schema version");
+        Equal(3L, (long)(await cmd.ExecuteScalarAsync() ?? 0L), "agent task index should record schema version");
     }
 
     File.Delete(Path.Combine(store.GetTaskDirectory("indexed-task"), "task_state.json"));

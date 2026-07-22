@@ -109,7 +109,11 @@
                             <Grid ColumnDefinitions="140,Auto,*" ColumnSpacing="12">
                                 <CheckBox Grid.Column="0" IsChecked="{Binding Enabled}" Content="{Binding DisplayName}" FontSize="13" />
                                 <TextBlock Grid.Column="1" Text="Profile" VerticalAlignment="Center" Opacity="0.6" FontSize="12" />
-                                <TextBox Grid.Column="2" Text="{Binding ProfileName}" Watermark="Default voice" FontSize="12" CornerRadius="6" Padding="8,4" />
+                                <ComboBox Grid.Column="2"
+                                          ItemsSource="{Binding $parent[ItemsControl].DataContext.ProfileNameOptions}"
+                                          SelectedItem="{Binding ProfileNameDisplay, Mode=TwoWay}"
+                                          FontSize="12"
+                                          HorizontalAlignment="Stretch" />
                             </Grid>
                             <TextBlock Text="Spoken text is sent to the remote voice provider."
                                        FontSize="11" Opacity="0.55" Foreground="Orange" Margin="152,2,0,0"
@@ -128,7 +132,19 @@
                     <DataTemplate DataType="vm:VoiceProfileEditViewModel">
                         <Grid ColumnDefinitions="*,*,90,Auto" ColumnSpacing="8" Margin="0,4">
                             <TextBox Grid.Column="0" Text="{Binding Name}" Watermark="Profile name" FontSize="12" CornerRadius="6" Padding="8,4" />
-                            <TextBox Grid.Column="1" Text="{Binding VoiceId}" Watermark="Provider voice id" FontSize="12" CornerRadius="6" Padding="8,4" />
+                            <!-- r19 4.3: lists the active provider's own voices (the same
+                                 seam RefreshTtsVoicesCommand already populates TtsVoices from).
+                                 Avalonia's ComboBox has no free-text entry mode; AutoCompleteBox
+                                 is the native editable-with-suggestions control, so typed text
+                                 that matches nothing still works for providers that cannot
+                                 enumerate voices (TtsVoices then holds just "default"). -->
+                            <AutoCompleteBox Grid.Column="1"
+                                             ItemsSource="{Binding $parent[ItemsControl].DataContext.TtsVoices}"
+                                             Text="{Binding VoiceId, Mode=TwoWay}"
+                                             FilterMode="Contains"
+                                             Watermark="Provider voice id"
+                                             FontSize="12"
+                                             HorizontalAlignment="Stretch" />
                             <NumericUpDown Grid.Column="2" Value="{Binding Speed}" Minimum="0.5" Maximum="2.0" Increment="0.1" FontSize="12" />
                             <Button Grid.Column="3" Classes="icon-btn" Command="{Binding $parent[ItemsControl].DataContext.RemoveVoiceProfileCommand}"
                                     CommandParameter="{Binding}" ToolTip.Tip="Remove profile">

@@ -70,12 +70,17 @@ public partial class BenchmarkViewModel : ObservableObject
         _voice = voice;
         InsightsUsage.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasInsightsUsage));
         Runs.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasRuns));
+        RankedRuns.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasComparableRankings));
     }
 
     public bool HasInsightsUsage => InsightsUsage.Count > 0;
 
     /// <summary>Drives the "no runs yet" empty state (r8 02-onboarding-and-usability.md 2.6).</summary>
     public bool HasRuns => Runs.Count > 0;
+
+    /// <summary>r19 6.6: a lonely ranked row reveals nothing by comparison; the Rankings tab
+    /// asks for a second model instead of rendering a table of one.</summary>
+    public bool HasComparableRankings => RankedRuns.Count >= 2;
 
     /// <summary>
     /// Re-entrancy-safe (r12 02-async-and-threading.md 2.5): overlapping
@@ -375,10 +380,12 @@ public partial class BenchmarkViewModel : ObservableObject
                              .Select(g => g.OrderByDescending(r => r.StartedAt).First());
 
         var ranked = _benchmarks.Rank(candidates);
+        var rank = 0;
         foreach (var run in ranked)
         {
+            rank++;
             counts.TryGetValue(GetRankingGroupKey(run), out var count);
-            RankedRuns.Add(new BenchmarkRunViewModel(run, Math.Max(1, count)));
+            RankedRuns.Add(new BenchmarkRunViewModel(run, Math.Max(1, count)) { Rank = rank });
         }
     }
 
@@ -517,12 +524,16 @@ public sealed class BenchmarkRunViewModel
 {
     public BenchmarkRun Run { get; }
     public int RunCount { get; }
+    /// <summary>1-based position in RankedRuns order (r19 6.6); 0 (unset) outside a ranked context.</summary>
+    public int Rank { get; set; }
     public string Id => Run.Id;
     public string Title => $"{Run.SuiteName} · {Run.ModelName}";
     public string Model => string.IsNullOrWhiteSpace(Run.Provider) ? Run.ModelName : $"{Run.ModelName} [{Run.Provider}]";
     public string Status => Run.Status;
     public string Started => Run.StartedAt.ToLocalTime().ToString("g");
     public string Score => $"{Run.RankingScore:P0}";
+    /// <summary>0-100 fill for the Rankings score bar (r19 6.6); RankingScore is a 0-1 fraction.</summary>
+    public double ScorePercent => Math.Clamp(Run.RankingScore * 100, 0, 100);
     public string PassRate => $"{Run.PassRate:P0}";
     public string Speed => $"median {Run.MedianApproxTokensPerSecond:F1} tok/s";
     public string FirstToken => $"median {Run.MedianFirstTokenMs:F0} ms";

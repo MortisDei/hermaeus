@@ -20,6 +20,14 @@ public partial class App : Application
 {
     private ServiceProvider? _services;
     private DesktopIntegrationService? _desktopIntegration;
+    // r19 1.4: Avalonia raises Window.Opened every time the window is shown,
+    // and DesktopIntegrationService re-shows it on every tray restore, which
+    // used to re-run the entire InitializeAppAsync (including
+    // AppLifecycleJournalService.RecordStartup) on every restore. That made
+    // RecordStartup install the CURRENT session, mid-run, as PreviousSession -
+    // the root cause of a false "did not shut down cleanly" warning naming
+    // whatever startup breadcrumb happened to be last.
+    private int _initialized;
 
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
 
@@ -44,7 +52,11 @@ public partial class App : Application
             window.DesktopIntegration = _desktopIntegration;
             _desktopIntegration.Attach(window);
             desktop.MainWindow = window;
-            window.Opened += async (_, _) => await InitializeAppAsync(sp, vm);
+            window.Opened += async (_, _) =>
+            {
+                if (Interlocked.Exchange(ref _initialized, 1) != 0) return;
+                await InitializeAppAsync(sp, vm);
+            };
             desktop.Exit += (_, _) =>
             {
                 try
@@ -133,6 +145,12 @@ public partial class App : Application
                 RuntimeLogLevel.Info,
                 RuntimeLogCategory.Startup,
                 StartupTimingFormatter.Format(phases)));
+
+            // r19 1.5: brackets the risky startup window tightly so a crash
+            // hours later blames "running" (no specific operation in
+            // flight) instead of misleadingly naming whatever ONNX loader
+            // happened to run at startup.
+            sp.GetRequiredService<AppLifecycleJournalService>().RecordOperation("running");
 
             // Warm up the embedding model to prevent "cold-start" delay on
             // first chat, but off the critical path: conversations and

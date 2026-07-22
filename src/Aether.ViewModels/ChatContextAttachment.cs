@@ -1,3 +1,5 @@
+using Aether.Rag.Pipeline;
+using Aether.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace Aether.ViewModels;
@@ -7,6 +9,14 @@ public enum ChatContextAttachmentStatus
     Ready,
     Skipped,
     Error
+}
+
+/// <summary>r19 5.3: an Image attachment never counts against the text prompt budget and
+/// carries a pre-encoded data URI instead of text Content.</summary>
+public enum ChatContextAttachmentKind
+{
+    Text,
+    Image
 }
 
 public sealed partial class ChatContextAttachment : ObservableObject
@@ -23,6 +33,28 @@ public sealed partial class ChatContextAttachment : ObservableObject
         ".cpp", ".hpp", ".swift", ".kt", ".kts", ".php", ".rb", ".lua", ".Dockerfile"
     };
 
+    /// <summary>r19 5.1/5.2: these extensions never pass through the plain-text/LooksBinary
+    /// path - their raw bytes are always binary. Text is pulled out first, and the extracted
+    /// text's byte count (not the raw file size) is what counts against the prompt budget.</summary>
+    private static readonly HashSet<string> ExtractThenAttachExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".docx", ".pdf"
+    };
+
+    /// <summary>r19 5.2: a .pdf is read whole by PdfPig (already a dependency of this
+    /// solution via Aether.Rag's ingest pipeline - reused here rather than a hand-rolled
+    /// BCL-only parser, since it is not actually a new package), so oversized files are
+    /// refused before that read instead of after.</summary>
+    private const long MaxPdfFileBytes = 20 * 1024 * 1024;
+
+    /// <summary>r19 5.3: extensions accepted as vision content parts, not text.</summary>
+    private static readonly HashSet<string> ImageExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".png", ".jpg", ".jpeg", ".webp"
+    };
+    private const long MaxImageFileBytes = 8 * 1024 * 1024;
+    private const int MaxImagesPerSend = 4;
+
     public string FileName { get; init; } = string.Empty;
     public string FullPath { get; init; } = string.Empty;
     public long SizeBytes { get; init; }
@@ -30,15 +62,25 @@ public sealed partial class ChatContextAttachment : ObservableObject
     public string Preview { get; init; } = string.Empty;
     public ChatContextAttachmentStatus Status { get; init; }
     public string StatusMessage { get; init; } = string.Empty;
+    public ChatContextAttachmentKind Kind { get; init; } = ChatContextAttachmentKind.Text;
+
+    /// <summary>Populated only for <see cref="ChatContextAttachmentKind.Image"/>: a complete
+    /// <c>data:&lt;mediaType&gt;;base64,...</c> string ready to send as-is.</summary>
+    public string ImageDataUri { get; init; } = string.Empty;
     public bool IsReady => Status == ChatContextAttachmentStatus.Ready;
+    public bool IsImage => Kind == ChatContextAttachmentKind.Image;
     public string SizeLabel => FormatBytes(SizeBytes);
     public string ChipText => $"{FileName} ({SizeLabel})";
 
-    public static async Task<IReadOnlyList<ChatContextAttachment>> LoadFilesAsync(IEnumerable<string> paths, CancellationToken ct = default)
+    /// <summary>r19 5.3: <paramref name="visionAvailable"/> reflects whether the server the
+    /// active chat model would run against has a vision projector configured; when false, any
+    /// image is refused with an honest reason instead of silently degrading to text-only.</summary>
+    public static async Task<IReadOnlyList<ChatContextAttachment>> LoadFilesAsync(IEnumerable<string> paths, bool visionAvailable = true, CancellationToken ct = default)
     {
         var result = new List<ChatContextAttachment>();
         var seen = new HashSet<string>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
         long total = 0;
+        var imageCount = 0;
 
         foreach (var raw in paths.Where(p => !string.IsNullOrWhiteSpace(p)))
         {
@@ -47,9 +89,12 @@ public sealed partial class ChatContextAttachment : ObservableObject
             if (!seen.Add(path))
                 continue;
 
-            var attachment = await LoadOneAsync(path, total, ct);
+            var attachment = await LoadOneAsync(path, total, imageCount, visionAvailable, ct);
             if (attachment.IsReady)
-                total += attachment.SizeBytes;
+            {
+                if (attachment.IsImage) imageCount++;
+                else total += attachment.SizeBytes;
+            }
             result.Add(attachment);
         }
 
@@ -58,7 +103,8 @@ public sealed partial class ChatContextAttachment : ObservableObject
 
     public static string BuildPrompt(string userText, IEnumerable<ChatContextAttachment> attachments)
     {
-        var ready = attachments.Where(a => a.IsReady).ToList();
+        // Images never enter the text prompt - they ride ChatMessage.Images instead.
+        var ready = attachments.Where(a => a.IsReady && a.Kind == ChatContextAttachmentKind.Text).ToList();
         if (ready.Count == 0)
             return userText.Trim();
 
@@ -98,14 +144,24 @@ public sealed partial class ChatContextAttachment : ObservableObject
         return sb.ToString().Trim();
     }
 
-    private static async Task<ChatContextAttachment> LoadOneAsync(string path, long currentTotal, CancellationToken ct)
+    private static async Task<ChatContextAttachment> LoadOneAsync(string path, long currentTotal, int currentImageCount, bool visionAvailable, CancellationToken ct)
     {
         try
         {
             if (!File.Exists(path))
                 return Skipped(path, "File not found.");
-            if (!SupportedExtensions.Contains(Path.GetExtension(path)) && !Path.GetFileName(path).Equals("Dockerfile", StringComparison.OrdinalIgnoreCase))
+
+            var ext = Path.GetExtension(path);
+            if (ImageExtensions.Contains(ext))
+                return await LoadImageAsync(path, ext, currentImageCount, visionAvailable, ct);
+
+            var isDockerfile = Path.GetFileName(path).Equals("Dockerfile", StringComparison.OrdinalIgnoreCase);
+            var isExtractThenAttach = ExtractThenAttachExtensions.Contains(ext);
+            if (!SupportedExtensions.Contains(ext) && !isDockerfile && !isExtractThenAttach)
                 return Skipped(path, "Unsupported file type for direct chat context.");
+
+            if (isExtractThenAttach)
+                return await LoadExtractedAsync(path, ext, currentTotal, ct);
 
             var info = new FileInfo(path);
             if (info.Length > MaxFileBytes)
@@ -139,6 +195,102 @@ public sealed partial class ChatContextAttachment : ObservableObject
                 StatusMessage = ex.Message
             };
         }
+    }
+
+    /// <summary>r19 5.1/5.2: .docx/.pdf never pass LooksBinary (their raw bytes always look
+    /// binary); text is extracted first, and the extracted text's byte count - not the raw
+    /// file size, which is meaningless to the prompt budget - is what the caps below apply to.</summary>
+    private static async Task<ChatContextAttachment> LoadExtractedAsync(string path, string ext, long currentTotal, CancellationToken ct)
+    {
+        FileTextExtractionResult result;
+        if (ext.Equals(".docx", StringComparison.OrdinalIgnoreCase))
+        {
+            result = await Task.Run(() =>
+            {
+                using var stream = File.OpenRead(path);
+                return DocxTextExtractor.Extract(stream);
+            }, ct);
+        }
+        else if (ext.Equals(".pdf", StringComparison.OrdinalIgnoreCase))
+        {
+            if (new FileInfo(path).Length > MaxPdfFileBytes)
+                return Skipped(path, $"File is over {FormatBytes(MaxPdfFileBytes)}.");
+
+            try
+            {
+                var pdf = await PdfTextExtractor.ExtractAsync(path, ct);
+                result = pdf.HasText
+                    ? FileTextExtractionResult.Ok(pdf.Text)
+                    : FileTextExtractionResult.Skip("Could not extract text (likely scanned or uses embedded font encodings).");
+            }
+            catch (Exception ex)
+            {
+                result = FileTextExtractionResult.Skip($"Could not read this PDF: {ex.Message}");
+            }
+        }
+        else
+        {
+            result = FileTextExtractionResult.Skip("Unsupported extraction type.");
+        }
+
+        if (result.Status != FileTextExtractionStatus.Success)
+            return Skipped(path, result.Reason);
+
+        var textBytes = System.Text.Encoding.UTF8.GetByteCount(result.Text);
+        if (textBytes == 0)
+            return Skipped(path, "No text could be extracted from this file.");
+        if (textBytes > MaxFileBytes)
+            return Skipped(path, $"Extracted text is over {FormatBytes(MaxFileBytes)}.");
+        if (currentTotal + textBytes > MaxTotalBytes)
+            return Skipped(path, $"Combined context is over {FormatBytes(MaxTotalBytes)}.");
+
+        return new ChatContextAttachment
+        {
+            FileName = Path.GetFileName(path),
+            FullPath = path,
+            SizeBytes = textBytes,
+            Content = result.Text,
+            Preview = result.Text.Replace('\r', ' ').Replace('\n', ' ').Trim(),
+            Status = ChatContextAttachmentStatus.Ready,
+            StatusMessage = "Ready"
+        };
+    }
+
+    /// <summary>r19 5.3: refuses with an honest reason rather than silently dropping to
+    /// text-only when the active server has no vision projector, or when the per-send image
+    /// cap/size cap is exceeded.</summary>
+    private static async Task<ChatContextAttachment> LoadImageAsync(string path, string ext, int currentImageCount, bool visionAvailable, CancellationToken ct)
+    {
+        if (!visionAvailable)
+            return Skipped(path, "This server has no vision projector configured (Services > Vision projector).");
+        if (currentImageCount >= MaxImagesPerSend)
+            return Skipped(path, $"Only {MaxImagesPerSend} images can be attached per message.");
+
+        var info = new FileInfo(path);
+        if (info.Length > MaxImageFileBytes)
+            return Skipped(path, $"Image is over {FormatBytes(MaxImageFileBytes)}.");
+
+        var bytes = await File.ReadAllBytesAsync(path, ct);
+        var mediaType = ext.ToLowerInvariant() switch
+        {
+            ".png" => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".webp" => "image/webp",
+            _ => "application/octet-stream"
+        };
+        var dataUri = $"data:{mediaType};base64,{Convert.ToBase64String(bytes)}";
+
+        return new ChatContextAttachment
+        {
+            FileName = Path.GetFileName(path),
+            FullPath = path,
+            SizeBytes = info.Length,
+            Kind = ChatContextAttachmentKind.Image,
+            ImageDataUri = dataUri,
+            Preview = "Image",
+            Status = ChatContextAttachmentStatus.Ready,
+            StatusMessage = "Ready"
+        };
     }
 
     private static ChatContextAttachment Skipped(string path, string message) => new()

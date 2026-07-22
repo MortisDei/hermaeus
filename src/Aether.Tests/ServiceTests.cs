@@ -928,6 +928,100 @@ namespace Aether.Tests
                 "the warning detail should name the last recorded operation");
         }
 
+        // ── r19 1.4/1.5: tray-restore double-init and the honesty of the last-operation warning ──
+
+        public static Task RecordStartupCalledTwiceDoesNotOverwritePreviousSession()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+
+            var firstRun = new AppLifecycleJournalService(settings);
+            firstRun.RecordStartup();
+            firstRun.RecordOperation("some earlier operation");
+
+            var secondRun = new AppLifecycleJournalService(settings);
+            var previous = secondRun.RecordStartup();
+            True(previous is not null, "the second journal's first RecordStartup should read back the first session");
+
+            // Simulate App.axaml.cs re-raising window.Opened (a tray restore)
+            // without the one-shot guard: RecordStartup called again on the
+            // SAME instance must not clobber PreviousSession with the
+            // current, still-running session.
+            var againStartedAtUtc = previous!.StartedAtUtc;
+            var second = secondRun.RecordStartup();
+            Equal(previous.StartedAtUtc, second!.StartedAtUtc, "a repeated RecordStartup call must not overwrite the already-captured PreviousSession");
+            Equal(againStartedAtUtc, secondRun.PreviousSession!.StartedAtUtc, "PreviousSession itself must be unchanged after a second RecordStartup call");
+            return Task.CompletedTask;
+        }
+
+        public static async Task DoctorUsesNeutralWordingWhenNoRiskyOperationWasInFlight()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+
+            var crashedRun = new AppLifecycleJournalService(settings);
+            crashedRun.RecordStartup();
+            crashedRun.RecordOperation("running");
+            // No RecordCleanExit(): simulates a crash with no risky operation in flight.
+
+            var currentRun = new AppLifecycleJournalService(settings);
+            currentRun.RecordStartup();
+
+            var doctor = new DoctorService(
+                settings,
+                new RuntimeProfileService(settings),
+                new FakeVoiceProviderRegistry(settings),
+                new FakeSecretStore(),
+                new SqliteRagStore(settings),
+                new ThrowingEmbeddingService(),
+                new FakeSystemInfo(),
+                new PythonHealthValidator(),
+                new NoOpReranker(),
+                lifecycleJournal: currentRun);
+
+            var report = await doctor.ScanAsync();
+            var check = report.Checks.Single(c => c.Key == "clean-shutdown");
+            Equal(DoctorCheckStatus.Warning, check.Status, "Doctor should still warn about the unclean exit");
+            False(check.Detail.Contains("last recorded operation was", StringComparison.Ordinal),
+                "a neutral 'running' breadcrumb must not be presented as a named operation in flight");
+            True(check.Detail.Contains("No risky operation", StringComparison.Ordinal),
+                "the detail should say plainly that nothing risky was in flight");
+        }
+
+        public static async Task DoctorStillNamesARealInFlightOperation()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+
+            var crashedRun = new AppLifecycleJournalService(settings);
+            crashedRun.RecordStartup();
+            crashedRun.RecordOperation("loading Kokoro native ONNX session (EnsureLoadedAsync)");
+            // No matching "... session loaded" breadcrumb: the load itself crashed.
+
+            var currentRun = new AppLifecycleJournalService(settings);
+            currentRun.RecordStartup();
+
+            var doctor = new DoctorService(
+                settings,
+                new RuntimeProfileService(settings),
+                new FakeVoiceProviderRegistry(settings),
+                new FakeSecretStore(),
+                new SqliteRagStore(settings),
+                new ThrowingEmbeddingService(),
+                new FakeSystemInfo(),
+                new PythonHealthValidator(),
+                new NoOpReranker(),
+                lifecycleJournal: currentRun);
+
+            var report = await doctor.ScanAsync();
+            var check = report.Checks.Single(c => c.Key == "clean-shutdown");
+            True(check.Detail.Contains("loading Kokoro native ONNX session (EnsureLoadedAsync)", StringComparison.Ordinal),
+                "a genuinely in-flight operation must still be named");
+        }
+
         public static async Task DoctorDoesNotTreatChatGgufAsEmbeddingModel()
         {
             using var temp = new TempDir();

@@ -37,9 +37,9 @@ internal static class VoiceTests
         True(chunks.Count > 0, "Non-empty phonemes should produce at least one chunk.");
         foreach (var chunk in chunks)
         {
-            Equal(KokoroVocab.PadTokenId, chunk[0], "Each chunk must start with the pad token.");
-            Equal(KokoroVocab.PadTokenId, chunk[^1], "Each chunk must end with the pad token.");
-            True(chunk.Length <= KokoroVocab.MaxSequenceTokens + 2, "Chunk length must respect Kokoro's context window plus the two pad tokens.");
+            Equal(KokoroVocab.PadTokenId, chunk.Ids[0], "Each chunk must start with the pad token.");
+            Equal(KokoroVocab.PadTokenId, chunk.Ids[^1], "Each chunk must end with the pad token.");
+            True(chunk.Ids.Length <= KokoroVocab.MaxSequenceTokens + 2, "Chunk length must respect Kokoro's context window plus the two pad tokens.");
         }
 
         return Task.CompletedTask;

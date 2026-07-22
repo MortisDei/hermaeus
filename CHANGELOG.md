@@ -9,6 +9,104 @@ FIFO for changelog entries, 10 versions in this file max. Remove older entries
 and append them to `docs/changelog-archive.md` to maintain the 10 version
 limit.
 
+## [0.24.0-alpha] - 2026-07-22
+
+Implements docs/review r19 in full: the "daily-driver truth" pack covering
+stability/honest failure reporting, services and model management friction,
+agent task continuity, voice chunk-boundary quality, chat attachments
+(.docx/.pdf/images) and artifacts, and a UI-truth/polish sweep.
+
+### Stability and truthful failure
+
+- **Markdown render crash containment** (`MarkdownViewer`): a malformed
+  document now falls back to a plain selectable text block and logs the
+  failure instead of taking the chat view down with it.
+- **Truncated replies are visible, not silent**: a reply cut off by the
+  configured token cap (`finish_reason: length`) now shows a "Continue"
+  affordance instead of reading as a naturally finished answer.
+- **Crash log surfaced on next launch**: an unhandled-exception log from the
+  previous session (now written under `{DataRoot}/logs/`) is read back by
+  Doctor's clean-shutdown check and shown with real detail instead of a
+  generic "did not shut down cleanly" message.
+- **Duplicate startup-window guard**: a double-fired `window.Opened` event
+  could double-run app initialization; now guarded to run exactly once.
+
+### Services and model management
+
+- **Model path field is a real ComboBox again** for detected models, with
+  out-of-root browsed/saved paths repaired back into the list instead of
+  rendering blank.
+- **LLM folder casing** (`llm` vs `LLM`) is now probed against what already
+  exists on disk instead of hardcoded, for both browsing and organizing
+  downloaded models.
+- **llama.cpp update no longer fights a running server**: `Doctor`'s update
+  flow now stops managed servers using the binary being updated before the
+  update, and restarts them afterward (always, even on failure).
+- **CUDA runtime reuse**: a llama.cpp update that only changes the CPU/GPU
+  backend binary can now reuse an already-downloaded matching CUDA runtime
+  instead of re-downloading it.
+
+### Agent task continuity
+
+- **Continue a finished task**: a task that reached a terminal state
+  prematurely (e.g. the model stopped before finishing the plan) now shows a
+  note explaining why, plus a "New Task" button and a Continue box that
+  resumes the same task with added instructions instead of forcing a new one.
+- **Pending step counts** are now tracked and displayed per task in the
+  recent-tasks list (`agent_task_index` schema v3, additive migration).
+
+### Voice
+
+- **Chunk-boundary quality**: the phonemizer/tokenizer chunk text at real
+  sentence/clause boundaries instead of blind length cuts, with silence
+  inserted between chunks (120ms at a sentence boundary, 60ms otherwise) so
+  stitched playback doesn't run words together.
+- **Stop button and speaking state**: a global stop-speaking control and a
+  per-message speak/stop icon swap driven by a new
+  `IVoiceOrchestrator.IsSpeaking` / `UtteranceCompleted` event.
+- **Voice id field**: replaced with an editable, suggestion-filtered field
+  (Avalonia has no editable stock ComboBox) instead of a fixed dropdown.
+
+### Chat attachments and artifacts
+
+- **Attach files as direct chat context**: `.txt`/code files as before, plus
+  new `.docx` (own minimal OOXML paragraph extractor) and `.pdf` (reuses the
+  PdfPig-based extractor `Aether.Rag` already ships for ingest, rather than a
+  second hand-rolled parser) support. Files that can't be read cleanly are
+  Skipped with the reason shown, never silently dropped.
+- **Image attachments for vision models**: `.png`/`.jpg`/`.jpeg`/`.webp` (up
+  to 8 MB each, 4 per send) attach as OpenAI-style `image_url` content parts
+  when the active chat server has a Vision projector (`--mmproj`) configured
+  in Services, or when the selected model routes through the OpenAI provider
+  (no local projector needed there); otherwise the image is Skipped with an
+  honest reason instead of silently degrading to text-only. Services gets a
+  "Vision projector" picker beside the model row that auto-suggests a lone
+  `mmproj-*.gguf` found next to the selected model.
+- **Chat artifacts**: every fenced code block in a rendered reply gets a Save
+  button that writes it to a per-conversation artifacts folder
+  (`{DataRoot}/chat-artifacts/{conversationId}/`); an Artifacts strip above
+  the input bar lists saved files with Open/Reveal actions.
+
+### UI truth and polish
+
+- System Overview reorders GPU/Components above the Privacy Audit.
+- Assistant chat bubbles get a visible border; the per-message memory pill is
+  now a proper flyout.
+- Chat auto-scroll only snaps to the bottom when already pinned there, so
+  scrolling up to read history during a stream no longer gets yanked back
+  down.
+- The streaming "thinking" placeholder rotates through a small set of status
+  words on a deterministic elapsed-time schedule.
+- Benchmark Rankings tab shows a rank, a score bar, and a Details button per
+  run instead of a bare table.
+- A memory pill on an assistant message can now jump straight to that memory
+  in the Memories view.
+
+### Docs
+
+- docs/features.md, docs/agent.md, docs/voice.md, docs/benchmarks.md, and
+  docs/security-review.md updated for all of the above.
+
 ## [0.23.0-alpha] - 2026-07-21
 
 Implements docs/review r18 in full: closes out nine files of uncommitted r17
@@ -1019,59 +1117,3 @@ three residual field-report issues from 0.14.0-alpha's first real use.
 
 - docs/rag.md, docs/voice.md, docs/features.md, and docs/security-review.md
   updated for all of the above.
-
-## [0.14.0-alpha] - 2026-07-15
-
-Implements docs/review r9 in full: the send-path latency and orphaned-server
-issues that shipped as documentation-only alongside the 0.13.1-alpha crash
-fix are now implemented, plus the full UI-thread-safety sweep the crash fix
-started.
-
-### Fixed
-
-- **HTTP timeout misreported as a user cancel.** `ServerProcessManager`'s
-  health-check poll used a 2 s `HttpClient` timeout; that timeout throws
-  `OperationCanceledException` too, indistinguishable by type from a real
-  caller cancellation, so a slow (not dead) health check could silently
-  overwrite an already-diagnosed Error status with an unexplained Stopped.
-  Only a genuinely cancelled token now escapes the retry loop.
-- **Untuned `Task.Run` wrapper caused a benchmark-history race.**
-  `BenchmarkViewModel`'s suite-change handler wrapped an already-`await`-based
-  reload in `Task.Run`, mutating UI-bound collections off the UI thread.
-
-### Added
-
-- **Send-path instrumentation** (`ChatSendTiming`). Every send now measures
-  memory recall, injection selection, lesson context, prompt build, and
-  first-token wait, surfaced in `PerformanceLog` and persisted on the chat
-  trace.
-- **Embedding backfill moved off the send path** (`MemoryStore.
-  RunEmbeddingBackfillAsync`). `SearchAsync` embeds only the query now;
-  backfill runs from a background pass at startup and after writes, with a
-  per-row cooldown and attempt cap so a down embedding endpoint cannot tax
-  every send.
-- **Fast-fail query embedding.** A 3 s timeout on the query embed falls back
-  to FTS-ranked recall instead of inheriting the embedding HTTP client's 60 s
-  timeout; the fallback logs once per process.
-- **Embedding endpoint fallback visibility.** A blank `Rag.EmbeddingBaseUrl`
-  falling back to the chat server now logs once and raises a Doctor advisory.
-- **Oversized-context advisory.** Services view and Doctor both flag managed
-  servers configured with `ContextSize` above 16384.
-- **Job-object process containment** (`ProcessJobObject`). Managed servers,
-  auto-tune probes, and voice-engine (XTTS/Kokoro) children join one Windows
-  job object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, so they die with the
-  app however it dies.
-- **Port preflight with a named owner** (`PortOwnerLookup`). A conflicting
-  port fails instantly, naming the port and (best-effort) its owning process,
-  instead of launching a doomed process.
-- **Orphan detection with an explicit Stop** (`OrphanServerDetector`). A
-  leftover server from a previous session is identified by an exact
-  executable-path match and offered a Stop button; anything else is reported
-  only. Stopping re-verifies the PID and executable immediately before
-  killing it.
-- **`ViewModelBase`** (`Aether.ViewModels`). One `RunOnUi`/`RunOnUiAsync`
-  implementation, replacing three private copies plus `TtsSettingsViewModel`'s
-  bespoke `SynchronizationContext` usage.
-- **Architecture test**: any public `ObservableCollection<T>` property on a
-  ViewModel now fails the build; every ViewModel collection is
-  `UiBoundCollection<T>`.

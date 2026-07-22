@@ -69,10 +69,11 @@ public partial class ServicesView : UserControl
             var top = TopLevel.GetTopLevel(this);
             if (top is null) return;
 
-            var isExe   = propertyName == nameof(ServerProcessViewModel.ExecutablePath);
+            var isExe    = propertyName == nameof(ServerProcessViewModel.ExecutablePath);
+            var isMmproj = propertyName == nameof(ServerProcessViewModel.MmprojPath);
             var options = new FilePickerOpenOptions
             {
-                Title         = isExe ? "Select llama-server executable" : "Select model (.gguf)",
+                Title         = isExe ? "Select llama-server executable" : isMmproj ? "Select vision projector (mmproj)" : "Select model (.gguf)",
                 AllowMultiple = false,
                 FileTypeFilter = isExe
                     ? [new FilePickerFileType("Executable") { Patterns = ["*"] }]
@@ -91,8 +92,9 @@ public partial class ServicesView : UserControl
             if (files.Count == 0) return;
 
             var path = files[0].Path.LocalPath;
-            if (isExe) srv.ExecutablePath = path;
-            else       srv.ModelPath      = path;
+            if (isExe)         srv.ExecutablePath = path;
+            else if (isMmproj) srv.MmprojPath      = path;
+            else               srv.ModelPath       = path;
         };
     }
 }

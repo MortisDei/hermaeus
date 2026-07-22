@@ -55,16 +55,49 @@ public sealed partial class DoctorService
                 "Startup");
         }
 
+        var crashNote = string.Empty;
+        if (_runtimeLogs is not null)
+        {
+            try
+            {
+                var dir = _runtimeLogs.GetLogDirectory();
+                var entry = CrashLogReader.FindNewestEntry(
+                    [Path.Combine(dir, "aether_unhandled.log"), Path.Combine(dir, "aether_unobserved.log")],
+                    previous.StartedAtUtc);
+                if (entry is not null)
+                    crashNote = $" The exception that likely caused it: {entry.FirstLine} (logged {entry.TimestampUtc:u}). Full details in {dir}.";
+            }
+            catch
+            {
+                // Best-effort enrichment only; the plain unclean-shutdown warning still stands.
+            }
+        }
+
+        var detail = IsNeutralBreadcrumb(previous.LastOperation)
+            ? "No risky operation was in progress when it stopped." + (string.IsNullOrEmpty(crashNote) ? $" If this repeats, check the crash logs in {_runtimeLogs?.GetLogDirectory() ?? "{DataRoot}/logs"}." : crashNote)
+            : $"The last recorded operation was \"{previous.LastOperation}\" at {previous.LastOperationAtUtc:u}. " +
+              "If Aether crashed or was force-closed around then, that operation is where to start looking." + crashNote;
+
         return BuildCheck(
             "clean-shutdown",
             "Previous session exited cleanly",
             DoctorCheckStatus.Warning,
             "Aether did not shut down cleanly last time",
-            $"The last recorded operation was \"{previous.LastOperation}\" at {previous.LastOperationAtUtc:u}. " +
-            "If Aether crashed or was force-closed around then, that operation is where to start looking.",
+            detail,
             string.Empty,
             false,
             $"StartedAtUtc={previous.StartedAtUtc:O}; LastOperation={previous.LastOperation}; LastOperationAtUtc={previous.LastOperationAtUtc:O}",
             "Startup");
     }
+
+    /// <summary>
+    /// "running" is the general post-startup breadcrumb; a "... session
+    /// loaded" breadcrumb means the risky load already finished
+    /// successfully. Neither names an operation that was actually in
+    /// flight when a later crash happened, so blaming either would mislead
+    /// (r19 1.5 - this was the owner's literal complaint: every unclean
+    /// shutdown named the Kokoro startup probe even hours later).
+    /// </summary>
+    private static bool IsNeutralBreadcrumb(string operation) =>
+        operation == "running" || operation.EndsWith("session loaded", StringComparison.Ordinal);
 }

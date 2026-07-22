@@ -21,6 +21,39 @@ public sealed class ChatSamplingFlyoutTests
             new FakeConversationMemoryService(), new RuntimeLogService(settings), new ConversationExportService());
     }
 
+    // ── r19 6.1: memory pill flyout "Open in Memories" ──────────────────────────
+
+    [Fact]
+    public void OpenMemoryInMemories_navigates_with_the_memory_title()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var vm = NewChatViewModel(settings, new CapturingLlm());
+
+        string? navigatedTitle = null;
+        vm.RequestNavigateToMemory = title => navigatedTitle = title;
+
+        var source = new SourceReference(ProvenanceKind.Memory, "Owner prefers dark mode", Snippet: "The owner said they prefer dark mode in every app.");
+        vm.OpenMemoryInMemoriesCommand.Execute(source);
+
+        Assert.Equal("Owner prefers dark mode", navigatedTitle);
+    }
+
+    [Fact]
+    public void OpenMemoryInMemories_does_nothing_for_a_null_source()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var vm = NewChatViewModel(settings, new CapturingLlm());
+
+        var navigated = false;
+        vm.RequestNavigateToMemory = _ => navigated = true;
+
+        vm.OpenMemoryInMemoriesCommand.Execute(null);
+
+        Assert.False(navigated);
+    }
+
     [Fact]
     public async Task Send_after_editing_TopK_and_MinP_carries_the_edited_values_through()
     {

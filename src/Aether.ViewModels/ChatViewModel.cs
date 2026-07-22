@@ -11,6 +11,24 @@ using CommunityToolkit.Mvvm.Input;
 
 namespace Aether.ViewModels;
 
+/// <summary>r19 5.4: one file saved from a chat code block, shown in the Artifacts strip.</summary>
+public sealed class ChatArtifactViewModel
+{
+    public ChatArtifactViewModel(ChatArtifact artifact)
+    {
+        FileName = artifact.FileName;
+        FullPath = artifact.FullPath;
+        SizeBytes = artifact.SizeBytes;
+        SavedAtUtc = artifact.SavedAtUtc;
+    }
+
+    public string FileName { get; }
+    public string FullPath { get; }
+    public long SizeBytes { get; }
+    public DateTime SavedAtUtc { get; }
+    public string SizeLabel => SizeBytes < 1024 ? $"{SizeBytes} B" : $"{SizeBytes / 1024.0:F1} KB";
+}
+
 public sealed class ChatContextPartViewModel
 {
     public string Kind { get; init; } = string.Empty;
@@ -97,6 +115,7 @@ public partial class ChatViewModel : ViewModelBase
     private readonly MemoryInjectionService? _memoryInjection;
     private readonly ILessonStore? _lessons;
     private readonly IVoiceOrchestrator? _voice;
+    private readonly ChatArtifactService? _artifacts;
     private CancellationTokenSource? _cts;
     private CancellationTokenSource? _ttsCts;
     private CancellationTokenSource? _contextUsageCts;
@@ -135,9 +154,17 @@ public partial class ChatViewModel : ViewModelBase
     public UiBoundCollection<CompareModelOptionViewModel> CompareModels { get; } = [];
     public UiBoundCollection<ModelCompareResultViewModel> CompareResults { get; } = [];
 
+    /// <summary>r19 5.4: files saved from this conversation's code blocks, under
+    /// {DataRoot}/chat-artifacts/{conversationId}/. Populated on conversation switch.</summary>
+    public UiBoundCollection<ChatArtifactViewModel> Artifacts { get; } = [];
+
     [ObservableProperty] private string    _inputText = string.Empty;
     [ObservableProperty] private bool      _isGenerating;
     [ObservableProperty] private LlmModel? _selectedModel;
+
+    /// <summary>r19 4.4: true while any Chat-channel utterance is actively playing; drives the
+    /// speak/stop icon swap (per-message and the one global stop for streamed auto-speech).</summary>
+    [ObservableProperty] private bool      _isVoicePlaying;
 
     /// <summary>
     /// Whether the active chat model's provider sends prompts off this
@@ -207,6 +234,100 @@ public partial class ChatViewModel : ViewModelBase
     public bool HasContextAttachments => ContextAttachments.Count > 0;
     public Action<string>? RequestNavigate { get; set; }
 
+    /// <summary>r19 6.1: "Open in Memories" from a memory pill's flyout - navigates to the
+    /// Memories panel with the search box prefilled with the memory's title.</summary>
+    public Action<string>? RequestNavigateToMemory { get; set; }
+
+    // ── r19 5.4: chat artifacts (saving a code block to a real file) ────────
+
+    /// <summary>Bound to MarkdownViewer.RequestSaveCodeBlock; a plain delegate (not a
+    /// RelayCommand) since MarkdownViewer's code-built Save button invokes it directly.</summary>
+    public Action<string?, string, string> SaveCodeBlockAction { get; }
+    public Action<string>? RequestOpenFile { get; set; }
+    public Action<string>? RequestRevealInFolder { get; set; }
+    public Action<string>? RequestOpenArtifactsFolder { get; set; }
+
+    [ObservableProperty] private bool _isArtifactsExpanded;
+    public bool HasArtifacts => Artifacts.Count > 0;
+    public string ArtifactsSummary => $"Artifacts: {Artifacts.Count}";
+
+    private static readonly System.Text.RegularExpressions.Regex FirstHeadingPattern =
+        new(@"(?m)^#{1,6}[ \t]+(.+?)\s*$", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    private async Task SaveCodeBlockAsync(string? language, string code, string messageMarkdown)
+    {
+        if (_artifacts is null || string.IsNullOrWhiteSpace(code)) return;
+        var conversationId = string.IsNullOrWhiteSpace(CurrentConversationId) ? "unsaved" : CurrentConversationId;
+        var fileName = DeriveArtifactStem(messageMarkdown) + ChatArtifactService.ExtensionForLanguage(language);
+
+        try
+        {
+            var artifact = await _artifacts.SaveAsync(conversationId, fileName, code);
+            RunOnUi(() =>
+            {
+                Artifacts.Insert(0, new ChatArtifactViewModel(artifact));
+                OnPropertyChanged(nameof(HasArtifacts));
+                OnPropertyChanged(nameof(ArtifactsSummary));
+            });
+            _toasts.Show("Artifact saved", artifact.FullPath, ToastKind.Success, 6000);
+        }
+        catch (Exception ex)
+        {
+            _toasts.Show("Save failed", ex.Message, ToastKind.Error, 7000);
+        }
+    }
+
+    /// <summary>Filename stem for a saved artifact: the code block's message's first
+    /// markdown heading, else the conversation title, else a plain fallback.</summary>
+    public static string DeriveArtifactStem(string messageMarkdown, string conversationTitle = "")
+    {
+        var heading = FirstHeadingPattern.Match(messageMarkdown ?? string.Empty);
+        var raw = heading.Success ? heading.Groups[1].Value : conversationTitle;
+        if (string.IsNullOrWhiteSpace(raw))
+            return "artifact";
+
+        var invalid = Path.GetInvalidFileNameChars();
+        var stem = new string(raw.Select(c => invalid.Contains(c) || c == ' ' ? '-' : c).ToArray());
+        while (stem.Contains("--", StringComparison.Ordinal))
+            stem = stem.Replace("--", "-");
+        stem = stem.Trim('-');
+        if (stem.Length > 60)
+            stem = stem[..60].Trim('-');
+        return string.IsNullOrWhiteSpace(stem) ? "artifact" : stem;
+    }
+
+    [RelayCommand]
+    private void OpenArtifact(ChatArtifactViewModel? artifact)
+    {
+        if (artifact is not null) RequestOpenFile?.Invoke(artifact.FullPath);
+    }
+
+    [RelayCommand]
+    private void RevealArtifact(ChatArtifactViewModel? artifact)
+    {
+        if (artifact is not null) RequestRevealInFolder?.Invoke(artifact.FullPath);
+    }
+
+    [RelayCommand]
+    private void OpenArtifactsFolder()
+    {
+        if (_artifacts is null) return;
+        var dir = _artifacts.GetConversationDirectory(string.IsNullOrWhiteSpace(CurrentConversationId) ? "unsaved" : CurrentConversationId);
+        RequestOpenArtifactsFolder?.Invoke(dir);
+    }
+
+    private async Task RefreshArtifactsAsync()
+    {
+        Artifacts.Clear();
+        if (_artifacts is not null && !string.IsNullOrWhiteSpace(CurrentConversationId))
+        {
+            foreach (var artifact in await _artifacts.ListAsync(CurrentConversationId))
+                Artifacts.Add(new ChatArtifactViewModel(artifact));
+        }
+        OnPropertyChanged(nameof(HasArtifacts));
+        OnPropertyChanged(nameof(ArtifactsSummary));
+    }
+
     public ChatViewModel(
         ILlmService llm,
         IConversationStore store,
@@ -224,8 +345,11 @@ public partial class ChatViewModel : ViewModelBase
         MemoryInjectionService? memoryInjection = null,
         ILessonStore? lessons = null,
         IVoiceOrchestrator? voice = null,
-        ISystemInfoService? systemInfo = null)
+        ISystemInfoService? systemInfo = null,
+        ChatArtifactService? artifacts = null)
     {
+        _artifacts = artifacts;
+        SaveCodeBlockAction = (lang, code, markdown) => _ = SaveCodeBlockAsync(lang, code, markdown);
         _llm = llm; _store = store; _settings = settings; _tts = tts; _profiles = profiles; _toasts = toasts;
         _systemInfo = systemInfo;
         _memoryStore = memoryStore;
@@ -236,6 +360,19 @@ public partial class ChatViewModel : ViewModelBase
         _memoryInjection = memoryInjection;
         _lessons = lessons;
         _voice = voice;
+        if (_voice is not null)
+        {
+            // r19 4.4: the speak icon becomes a stop icon while playing, both
+            // per-message and as one global stop for streamed auto-speech.
+            _voice.UtteranceStarted += (channel, _) =>
+            {
+                if (channel == VoiceChannel.Chat) RunOnUi(() => IsVoicePlaying = true);
+            };
+            _voice.UtteranceCompleted += channel =>
+            {
+                if (channel == VoiceChannel.Chat) RunOnUi(() => IsVoicePlaying = false);
+            };
+        }
         _evalEngine = evalEngine ?? new EvalEngine(llm);
         _workspaceActivation = workspaceActivation;
         _temperature  = settings.Settings.Llm.Temperature;
@@ -402,7 +539,8 @@ public partial class ChatViewModel : ViewModelBase
                 OriginalContent = msg.OriginalContent,
                 IsError = msg.IsError,
                 ModelId = msg.ModelId,
-                DurationMs = msg.DurationMs
+                DurationMs = msg.DurationMs,
+                WasTruncated = msg.WasTruncated
             };
 
             foreach (var path in msg.AttachedFilePaths.Where(p => !string.IsNullOrWhiteSpace(p)))
@@ -412,6 +550,7 @@ public partial class ChatViewModel : ViewModelBase
         }
         ScrollToBottom?.Invoke(this, EventArgs.Empty);
         await RefreshMemoryStatusAsync();
+        await RefreshArtifactsAsync();
     }
 
     public void NewConversation()
@@ -420,6 +559,9 @@ public partial class ChatViewModel : ViewModelBase
         ConversationTitle     = "New Conversation";
         SystemPrompt          = _settings.Settings.Llm.DefaultSystemPrompt;
         Messages.Clear();
+        Artifacts.Clear();
+        OnPropertyChanged(nameof(HasArtifacts));
+        OnPropertyChanged(nameof(ArtifactsSummary));
         _ = Task.Run(RefreshMemoryStatusAsync);
     }
 
@@ -476,7 +618,16 @@ public partial class ChatViewModel : ViewModelBase
                 systemPromptTokens,
                 Math.Max(0, snapshot.EstimatedTokens - snapshot.HistoryTokens - systemPromptTokens));
             if (history.Count > 0 && history[^1].Role == "user")
-                history[^1] = history[^1] with { Content = promptText };
+            {
+                var images = attachments.Where(a => a.IsReady && a.IsImage)
+                    .Select(a => new ChatMessageImage(a.FileName, a.ImageDataUri))
+                    .ToList();
+                history[^1] = history[^1] with
+                {
+                    Content = promptText,
+                    Images = images.Count > 0 ? images : null
+                };
+            }
             var promptBuildMs = promptBuildSw.ElapsedMilliseconds;
 
             // r14 4.2: drive a lightweight "reading prompt / thinking" placeholder
@@ -562,6 +713,10 @@ public partial class ChatViewModel : ViewModelBase
             }
             else
             {
+                asst.WasTruncated = result.FinishReason == "length";
+                if (asst.WasTruncated && MaxTokens > 0)
+                    asst.TruncatedAtTokens = MaxTokens;
+
                 // Always runs when memory is enabled, not just when memories
                 // were injected (r16 02-memory-integrity.md 2.2): a model can
                 // save a NEW [MEMORY: ...] fact on a turn with zero recall
@@ -641,6 +796,11 @@ public partial class ChatViewModel : ViewModelBase
         _voice?.StopChannel(VoiceChannel.Chat);
     }
 
+    /// <summary>r19 4.4: stops voice playback only, without cancelling generation - the
+    /// speak/stop icon toggle and the header's global stop both use this.</summary>
+    [RelayCommand]
+    private void StopSpeaking() => _voice?.StopChannel(VoiceChannel.Chat);
+
     [RelayCommand]
     private void AttachContextFiles() => RequestContextFilePicker?.Invoke();
 
@@ -695,6 +855,7 @@ public partial class ChatViewModel : ViewModelBase
                 IsError = m.IsError,
                 ModelId = m.ModelId,
                 DurationMs = m.DurationMs,
+                WasTruncated = m.WasTruncated,
                 AttachedFilePaths = m.AttachedFilePaths.ToList()
             }).ToList()
         };
@@ -713,11 +874,30 @@ public partial class ChatViewModel : ViewModelBase
 
     public async Task AddContextFilesAsync(IEnumerable<string> paths, CancellationToken ct = default)
     {
-        var loaded = await ChatContextAttachment.LoadFilesAsync(paths, ct);
+        var loaded = await ChatContextAttachment.LoadFilesAsync(paths, CurrentModelAcceptsVisionAttachments(), ct);
         foreach (var item in loaded)
             ContextAttachments.Add(item);
 
         RefreshAttachmentStatus();
+    }
+
+    /// <summary>r19 5.3/5.3-followup: an image attachment is only usable when something on
+    /// the receiving end can actually see it - either the local chat server's own
+    /// <c>--mmproj</c> configuration (a model that merely supports vision upstream does
+    /// nothing if the running llama-server process was not launched with a projector), or
+    /// the selected model routing through the OpenAI provider, which accepts the same
+    /// <c>image_url</c> content-part shape natively with no local projector involved
+    /// (<see cref="OpenAiCompatibleToolWire.BuildMessages"/> is the same builder either
+    /// way). Picking a non-vision OpenAI model is the user's own explicit choice, same as
+    /// picking an mmproj path - Aether does not second-guess either.</summary>
+    private bool CurrentModelAcceptsVisionAttachments()
+    {
+        if (string.Equals(SelectedModel?.ProviderTag, "openai", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        var chatServer = _settings.Settings.ManagedServers.FirstOrDefault(s => !s.EmbeddingsMode)
+            ?? _settings.Settings.ManagedServers.FirstOrDefault();
+        return !string.IsNullOrWhiteSpace(chatServer?.MmprojPath);
     }
 
     [RelayCommand]
@@ -760,6 +940,12 @@ public partial class ChatViewModel : ViewModelBase
     private void CopyMessage(MessageViewModel? msg)
     {
         if (msg is not null) RequestCopyToClipboard?.Invoke(msg.Content);
+    }
+
+    [RelayCommand]
+    private void OpenMemoryInMemories(SourceReference? source)
+    {
+        if (source is not null) RequestNavigateToMemory?.Invoke(source.Title);
     }
 
     [RelayCommand]
@@ -826,6 +1012,19 @@ public partial class ChatViewModel : ViewModelBase
             catch { }
         }
 
+        await SendAsync();
+    }
+
+    /// <summary>
+    /// r19 1.2: a response that hit the token cap offers this instead of
+    /// requiring the user to notice and retype it. Rides the normal send
+    /// path, so history/persistence/memory behave exactly as any other turn.
+    /// </summary>
+    [RelayCommand]
+    private async Task ContinueTruncatedAsync()
+    {
+        if (IsGenerating) return;
+        InputText = "Continue exactly where you left off.";
         await SendAsync();
     }
 
@@ -1220,7 +1419,12 @@ public partial class ChatViewModel : ViewModelBase
         {
             while (!ct.IsCancellationRequested && !sawContent())
             {
-                asst.StreamingStatus = ChatStreamingPhase.Describe(clock.ElapsedMilliseconds, sawFirstEvent(), sawContent());
+                var elapsed = clock.ElapsedMilliseconds;
+                // r19 6.4: rotate every 2.5s of elapsed time, deterministically
+                // (not a separate timer) so the same whimsy word is picked
+                // regardless of exactly when this 1s poll happens to land.
+                var whimsyIndex = (int)(elapsed / 2_500);
+                asst.StreamingStatus = ChatStreamingPhase.Describe(elapsed, sawFirstEvent(), sawContent(), whimsyIndex);
                 await Task.Delay(1_000, ct);
             }
         }
@@ -1304,6 +1508,7 @@ public partial class ChatViewModel : ViewModelBase
                 IsError = m.IsError,
                 ModelId = m.ModelId,
                 DurationMs = m.DurationMs,
+                WasTruncated = m.WasTruncated,
                 AttachedFilePaths = m.AttachedFilePaths
                     .Where(p => !string.IsNullOrWhiteSpace(p))
                     .Distinct(StringComparer.OrdinalIgnoreCase)

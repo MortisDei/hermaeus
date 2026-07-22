@@ -930,6 +930,42 @@ public sealed class AgentService : IAgentService
         await _store.AppendLogAsync(taskId, "user reply recorded", ct);
     }
 
+    private const string DefaultContinueInstruction = "Continue with the remaining pending steps.";
+
+    public async Task<AgentTaskState> ContinueTaskAsync(string taskId, string instruction, AgentWorkspaceOptions options, CancellationToken ct = default)
+    {
+        var state = await _store.LoadAsync(taskId, ct)
+            ?? throw new InvalidOperationException("Agent task was not found.");
+
+        if (!string.IsNullOrWhiteSpace(state.ParentTaskId))
+            throw new InvalidOperationException("This task is a sub-task; continue the parent instead.");
+        if (state.Status == AgentTaskStatus.Running)
+            throw new InvalidOperationException("This task is already running.");
+        if (state.PendingToolAction is not null)
+            throw new InvalidOperationException("A tool approval is pending; approve or reject it from the review queue instead of continuing.");
+
+        var trimmedInstruction = string.IsNullOrWhiteSpace(instruction) ? DefaultContinueInstruction : instruction.Trim();
+
+        await _store.AppendTranscriptEntryAsync(taskId, new AgentTranscriptEntry(
+            state.StepCount, "user", null, $"continue: {trimmedInstruction}", DateTime.UtcNow), ct);
+
+        // Reconcile child statuses first (r16 01-orchestration-hardening.md
+        // 1.1) so a resumed orchestration parent advances the next PENDING
+        // sub-task rather than re-running one that already finished outside
+        // this loop.
+        if (state.SubTaskPlan.Count > 0)
+        {
+            await ReconcileSubTaskPlanAsync(state, ct);
+            state = await _store.LoadAsync(taskId, ct) ?? state;
+        }
+
+        state.Status = AgentTaskStatus.Running;
+        state.ConsecutiveStepErrors = 0;
+        await _store.SaveAsync(state, ct);
+        await _store.AppendLogAsync(taskId, $"continued: {trimmedInstruction}", ct);
+        return state;
+    }
+
     /// <summary>
     /// Deterministic, evidence-backed capture for the lesson store: a
     /// command's exit status, or a patch/edit/create tool's success or

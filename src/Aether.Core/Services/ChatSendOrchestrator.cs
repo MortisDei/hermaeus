@@ -12,7 +12,10 @@ public sealed record ChatSendResult(
     // r14 4.1: the first streamed event of any kind (reasoning/tool deltas,
     // buffering) vs the first visible content token. The gap is time the user
     // spent staring at a blank bubble that "before first token" used to hide.
-    long FirstEventMs = 0);
+    long FirstEventMs = 0,
+    // r19 1.2: "length" means the provider cut generation off at the
+    // configured token cap, not that the model finished naturally.
+    string? FinishReason = null);
 
 /// <summary>
 /// Drives one streamed chat completion and reports timing/usage, leaving all
@@ -38,6 +41,7 @@ public static class ChatSendOrchestrator
         long? firstEventMs = null;
         ChatTokenUsage? usage = null;
         ChatServerTimings? serverTimings = null;
+        string? finishReason = null;
         try
         {
             await foreach (var evt in llm.StreamChatAsync(modelId, history, options, ct))
@@ -61,6 +65,9 @@ public static class ChatSendOrchestrator
                 if (evt.ServerTimings is not null)
                     serverTimings = evt.ServerTimings;
 
+                if (evt.FinishReason is not null)
+                    finishReason = evt.FinishReason;
+
                 if (!string.IsNullOrEmpty(evt.ContentDelta))
                 {
                     firstTokenMs ??= clock.ElapsedMilliseconds;
@@ -68,7 +75,7 @@ public static class ChatSendOrchestrator
                 }
             }
 
-            return new ChatSendResult(firstTokenMs ?? 0, clock.ElapsedMilliseconds, usage, Cancelled: false, Error: null, ServerTimings: serverTimings, FirstEventMs: firstEventMs ?? firstTokenMs ?? 0);
+            return new ChatSendResult(firstTokenMs ?? 0, clock.ElapsedMilliseconds, usage, Cancelled: false, Error: null, ServerTimings: serverTimings, FirstEventMs: firstEventMs ?? firstTokenMs ?? 0, FinishReason: finishReason);
         }
         catch (OperationCanceledException)
         {

@@ -1,5 +1,6 @@
 using Aether.Agent.Services;
 using Aether.Core.Models;
+using Aether.Core.Services;
 using Aether.Services;
 using Aether.Services.ProcessManagement;
 using Aether.ViewModels;
@@ -118,6 +119,97 @@ public sealed class VoiceSettingsTests
 
         var reloaded = await service.LoadAsync(workspace);
         Assert.Equal("narrator", reloaded!.VoiceProfileName);
+    }
+
+    // ── r19 4.3: dropdowns instead of free-text for channel profile / voice id ──
+
+    [Fact]
+    public void ProfileNameOptions_starts_with_the_default_entry_and_gains_added_profiles()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var vm = NewTtsVm(settings);
+
+        Assert.Equal([VoiceChannelSettingViewModel.DefaultVoiceLabel], vm.ProfileNameOptions);
+
+        vm.AddVoiceProfileCommand.Execute(null);
+        var profile = vm.VoiceProfiles.Single();
+        profile.Name = "narrator";
+
+        Assert.Equal([VoiceChannelSettingViewModel.DefaultVoiceLabel, "narrator"], vm.ProfileNameOptions);
+    }
+
+    [Fact]
+    public void ProfileNameOptions_updates_on_rename_and_removal()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var vm = NewTtsVm(settings);
+        vm.AddVoiceProfileCommand.Execute(null);
+        var profile = vm.VoiceProfiles.Single();
+        profile.Name = "narrator";
+        Assert.Contains("narrator", vm.ProfileNameOptions);
+
+        profile.Name = "renamed";
+        Assert.DoesNotContain("narrator", vm.ProfileNameOptions);
+        Assert.Contains("renamed", vm.ProfileNameOptions);
+
+        vm.RemoveVoiceProfileCommand.Execute(profile);
+        Assert.DoesNotContain("renamed", vm.ProfileNameOptions);
+        Assert.Equal([VoiceChannelSettingViewModel.DefaultVoiceLabel], vm.ProfileNameOptions);
+    }
+
+    [Fact]
+    public void ProfileNameDisplay_shows_the_default_label_for_an_empty_profile_name_and_round_trips()
+    {
+        var channel = new VoiceChannelSettingViewModel(VoiceChannel.Chat, "Chat");
+        Assert.Equal(VoiceChannelSettingViewModel.DefaultVoiceLabel, channel.ProfileNameDisplay);
+
+        channel.ProfileNameDisplay = "narrator";
+        Assert.Equal("narrator", channel.ProfileName);
+
+        channel.ProfileNameDisplay = VoiceChannelSettingViewModel.DefaultVoiceLabel;
+        Assert.Equal(string.Empty, channel.ProfileName);
+    }
+
+    [Fact]
+    public async Task RefreshTtsVoices_populates_TtsVoices_from_the_active_providers_list()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var vm = new TtsSettingsViewModel(new ScriptedTts(["voice-a", "voice-b", "voice-c"]), new FakeVoiceProviderRegistry(settings), new FakeToasts(),
+            new XttsProcessManager(), new KokoroProcessManager(), new FakeSecretStore(), settings);
+
+        await vm.RefreshTtsVoicesCommand.ExecuteAsync(null);
+
+        Assert.Equal(["voice-a", "voice-b", "voice-c"], vm.TtsVoices);
+    }
+
+    [Fact]
+    public async Task A_provider_that_cannot_enumerate_voices_leaves_manual_entry_working()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var vm = new TtsSettingsViewModel(new ScriptedTts([]), new FakeVoiceProviderRegistry(settings), new FakeToasts(),
+            new XttsProcessManager(), new KokoroProcessManager(), new FakeSecretStore(), settings);
+
+        await vm.RefreshTtsVoicesCommand.ExecuteAsync(null);
+        Assert.Empty(vm.TtsVoices);
+
+        vm.AddVoiceProfileCommand.Execute(null);
+        var profile = vm.VoiceProfiles.Single();
+        // AutoCompleteBox.Text still binds VoiceId directly regardless of ItemsSource being empty.
+        profile.VoiceId = "hand-typed-voice-id";
+        Assert.Equal("hand-typed-voice-id", profile.VoiceId);
+    }
+
+    private sealed class ScriptedTts(IReadOnlyList<string> voices) : ITtsService
+    {
+        public Task SpeakAsync(string text, CancellationToken ct = default) => Task.CompletedTask;
+        public Task PreviewVoiceAsync(string speaker, string text, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<string> ImportVoiceSampleAsync(string sourcePath, string displayName, CancellationToken ct = default) =>
+            Task.FromResult(displayName);
+        public Task<IReadOnlyList<string>> GetVoicesAsync(CancellationToken ct = default) => Task.FromResult(voices);
     }
 
     private static TtsSettingsViewModel NewTtsVm(SettingsService settings) =>

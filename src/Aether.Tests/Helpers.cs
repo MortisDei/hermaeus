@@ -151,23 +151,26 @@ namespace Aether.Tests
             if (!Directory.Exists(_root))
                 return;
 
-            // Pooled SQLite connections keep file handles open on Windows;
-            // clear pools so temp databases can be deleted, and retry once
-            // to absorb slow handle release.
-            SqliteConnection.ClearAllPools();
-            try
+            // Pooled SQLite connections keep file handles open on Windows, and a
+            // fire-and-forget background task a test never awaited (e.g.
+            // ChatViewModel's memory-status refresh) can still be mid-query
+            // against a db under this root when the test method returns.
+            // ClearAllPools() only releases idle pooled connections, not one
+            // actively in use, so a single retry is not always enough under
+            // full-suite thread-pool contention - retry a few times with a
+            // growing backoff before giving up for real.
+            for (var attempt = 1; ; attempt++)
             {
-                Directory.Delete(_root, recursive: true);
-            }
-            catch (IOException)
-            {
-                Thread.Sleep(150);
-                Directory.Delete(_root, recursive: true);
-            }
-            catch (UnauthorizedAccessException)
-            {
-                Thread.Sleep(150);
-                Directory.Delete(_root, recursive: true);
+                SqliteConnection.ClearAllPools();
+                try
+                {
+                    Directory.Delete(_root, recursive: true);
+                    return;
+                }
+                catch (Exception ex) when ((ex is IOException or UnauthorizedAccessException) && attempt < 5)
+                {
+                    Thread.Sleep(75 * attempt);
+                }
             }
         }
     }
@@ -492,6 +495,42 @@ namespace Aether.Tests
             Task.FromResult(responseText);
     }
 
+    /// <summary>
+    /// In-memory <see cref="IMemoryStore"/> for tests that construct a
+    /// <see cref="ChatViewModel"/> but do not exercise memory persistence
+    /// itself. A real <c>MemoryStore</c> opens a SQLite connection to
+    /// memories.db from ChatViewModel's fire-and-forget
+    /// <c>RefreshMemoryStatusAsync</c> background task (constructor,
+    /// NewConversation, LoadConversationAsync); that task is never awaited
+    /// by design (a status label should not block UI actions), so a test's
+    /// own <see cref="TempDir"/> can be disposed while it is still mid-flight,
+    /// racing SQLite's pooled file handle against the temp directory delete.
+    /// Using this fake instead removes that race at the source rather than
+    /// papering over it with longer retries.
+    /// </summary>
+    sealed class FakeMemoryStore : IMemoryStore
+    {
+        public Task InitializeAsync(CancellationToken ct = default) => Task.CompletedTask;
+        public Task<List<Memory>> GetAllAsync(bool includeArchived = false, CancellationToken ct = default) => Task.FromResult(new List<Memory>());
+        public Task<Memory?> GetByIdAsync(string id, CancellationToken ct = default) => Task.FromResult<Memory?>(null);
+        public Task<List<Memory>> GetByCategoryAsync(string category, CancellationToken ct = default) => Task.FromResult(new List<Memory>());
+        public Task<List<Memory>> GetByScopeAsync(MemoryScope scope, string? scopeId = null, bool includeArchived = false, CancellationToken ct = default) => Task.FromResult(new List<Memory>());
+        public Task SaveAsync(Memory memory, CancellationToken ct = default) => Task.CompletedTask;
+        public Task DeleteAsync(string id, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<List<Memory>> SearchAsync(string query, CancellationToken ct = default) => Task.FromResult(new List<Memory>());
+        public Task<List<Memory>> GetByImportanceAsync(double minScore, CancellationToken ct = default) => Task.FromResult(new List<Memory>());
+        public Task<List<Memory>> GetRecentAsync(int limit = 10, CancellationToken ct = default) => Task.FromResult(new List<Memory>());
+        public Task<List<Memory>> GetRecentByConversationAsync(string conversationId, int limit = 10, CancellationToken ct = default) => Task.FromResult(new List<Memory>());
+        public Task<int> GetCountByConversationAsync(string conversationId, bool includeArchived = false, CancellationToken ct = default) => Task.FromResult(0);
+        public Task<Dictionary<string, int>> GetCountsByConversationAsync(IEnumerable<string> conversationIds, bool includeArchived = false, CancellationToken ct = default) =>
+            Task.FromResult(conversationIds.ToDictionary(id => id, _ => 0));
+        public Task MarkRecalledAsync(IEnumerable<string> ids, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<int> ArchiveStaleMemoriesAsync(double importanceFloor = 0.05, int unrecalledForDays = 180, CancellationToken ct = default) => Task.FromResult(0);
+        public Task RunEmbeddingBackfillAsync(CancellationToken ct = default) => Task.CompletedTask;
+        public Task<int> GetEmbeddingMismatchCountAsync(CancellationToken ct = default) => Task.FromResult(0);
+        public Task<int> ClearMismatchedEmbeddingsAsync(CancellationToken ct = default) => Task.FromResult(0);
+    }
+
     /// <summary>Returns a scripted list of models on every call, optionally gated behind a delay so tests can control interleaving (r12 02-async-and-threading.md 2.5).</summary>
     sealed class ScriptedModelsLlm : ILlmService
     {
@@ -542,17 +581,33 @@ namespace Aether.Tests
         public List<VoiceUtterance> Enqueued { get; } = [];
         public List<VoiceChannel> StoppedChannels { get; } = [];
         public bool IsMuted { get; set; }
+        public bool IsSpeaking { get; set; }
         public event Action<VoiceChannel, string>? UtteranceStarted;
+        public event Action<VoiceChannel>? UtteranceCompleted;
 
         public Task EnqueueAsync(VoiceUtterance utterance, CancellationToken ct = default)
         {
             Enqueued.Add(utterance);
+            IsSpeaking = true;
             UtteranceStarted?.Invoke(utterance.Channel, utterance.Text);
             return Task.CompletedTask;
         }
 
-        public void StopChannel(VoiceChannel channel) => StoppedChannels.Add(channel);
-        public void StopAll() { }
+        public void StopChannel(VoiceChannel channel)
+        {
+            StoppedChannels.Add(channel);
+            IsSpeaking = false;
+            UtteranceCompleted?.Invoke(channel);
+        }
+
+        public void StopAll() => IsSpeaking = false;
+
+        /// <summary>Test hook: simulates the orchestrator finishing an utterance on its own (not via StopChannel).</summary>
+        public void RaiseUtteranceCompleted(VoiceChannel channel)
+        {
+            IsSpeaking = false;
+            UtteranceCompleted?.Invoke(channel);
+        }
     }
 
     sealed class FakeSecretStore : ISecretStore

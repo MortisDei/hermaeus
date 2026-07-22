@@ -111,6 +111,29 @@ reads naturally instead of being spelled out or mispronounced:
 - The user pronunciation lexicon (`{DataRoot}/voice/lexicon.txt`) always
   takes priority and is reloaded automatically when the file changes.
 
+## Chunking and Playback Control
+
+Kokoro synthesizes long replies in chunks rather than one pass, so chunk
+boundaries matter for how natural the stitched playback sounds:
+
+- The tokenizer splits chunks at real sentence/clause boundaries (period,
+  question mark, exclamation point, semicolon, comma) with a fallback to the
+  nearest earlier word break, instead of a blind character-length cut that
+  could land mid-word.
+- Silence is inserted between stitched chunks: 120ms after a sentence-ending
+  boundary, 60ms after a clause-level one, none when a chunk had to be cut at
+  a plain word break. This keeps stitched playback from running the end of
+  one chunk into the start of the next.
+- Paragraph breaks in the source text get their own pause via the same
+  boundary-aware phonemizer path, before word-splitting.
+
+Playback exposes explicit state instead of only start events:
+`IVoiceOrchestrator.IsSpeaking` and an `UtteranceCompleted` event fire
+alongside the existing `UtteranceStarted`, so the UI can show a stop control
+and swap a message's speak icon to a stop icon for exactly as long as that
+utterance is actually playing. Chat has a global stop-speaking control plus
+a per-message speak/stop icon swap wired to this.
+
 ## Audio Data and Privacy Lifecycle
 
 - Voice previews use transient generated audio and delete temporary WAV files

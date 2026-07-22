@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -13,6 +14,15 @@ public partial class ChatView : UserControl
     private ChatViewModel? _vm;
     private EventHandler? _scrollHandler;
     private EventHandler? _settingsChangedHandler;
+    private EventHandler<ScrollChangedEventArgs>? _scrollChangedHandler;
+    // r19 6.3: content (action row, sources, memory pills, the incremental
+    // MarkdownViewer re-render timer) keeps materializing AFTER the VM's last
+    // ScrollToBottom raise, so a single programmatic scroll always lands
+    // short of the true final extent. Pinning re-snaps to the bottom on every
+    // extent growth while pinned, and un-pins the instant the user scrolls
+    // away, so their position is never fought mid-stream.
+    private bool _pinnedToBottom = true;
+    private const double BottomPinThreshold = 40;
 
     public ChatView()
     {
@@ -24,6 +34,8 @@ public partial class ChatView : UserControl
                 _vm.ScrollToBottom -= _scrollHandler;
             if (_vm is not null && _settingsChangedHandler is not null)
                 _vm.Settings.SettingsChanged -= _settingsChangedHandler;
+            if (_scrollChangedHandler is not null && this.FindControl<ScrollViewer>("MessagesScroll") is { } previousScroll)
+                previousScroll.ScrollChanged -= _scrollChangedHandler;
             if (_vm is not null)
             {
                 _vm.RequestCopyToClipboard = null;
@@ -36,6 +48,7 @@ public partial class ChatView : UserControl
                 _vm = null;
                 _scrollHandler = null;
                 _settingsChangedHandler = null;
+                _scrollChangedHandler = null;
                 return;
             }
 
@@ -45,15 +58,21 @@ public partial class ChatView : UserControl
             vm.Settings.SettingsChanged += _settingsChangedHandler;
             ApplyAcceptsReturn();
 
+            _pinnedToBottom = true;
             _scrollHandler = (_, _) =>
-                Dispatcher.UIThread.Post(() =>
-                {
-                    if (this.FindControl<ScrollViewer>("MessagesScroll") is { } scroll)
-                    {
-                        scroll.Offset = new Vector(scroll.Offset.X, scroll.Extent.Height);
-                    }
-                }, DispatcherPriority.Background);
+            {
+                // Sending (or resuming) a message re-pins even if the user had
+                // scrolled up to read earlier history.
+                _pinnedToBottom = true;
+                Dispatcher.UIThread.Post(() => SnapToBottomIfPinned(force: true), DispatcherPriority.Background);
+            };
             vm.ScrollToBottom += _scrollHandler;
+
+            if (this.FindControl<ScrollViewer>("MessagesScroll") is { } scroll)
+            {
+                _scrollChangedHandler = OnMessagesScrollChanged;
+                scroll.ScrollChanged += _scrollChangedHandler;
+            }
 
             vm.RequestCopyToClipboard = async text =>
             {
@@ -82,6 +101,8 @@ public partial class ChatView : UserControl
                                 "*.sql", "*.rs", "*.go", "*.java", "*.c", "*.h", "*.cpp", "*.hpp"
                             ]
                         },
+                        new FilePickerFileType("Documents") { Patterns = ["*.docx", "*.pdf"] },
+                        new FilePickerFileType("Images") { Patterns = ["*.png", "*.jpg", "*.jpeg", "*.webp"] },
                         new FilePickerFileType("All files") { Patterns = ["*"] }
                     ]
                 });
@@ -109,8 +130,107 @@ public partial class ChatView : UserControl
                 });
                 return file?.Path.LocalPath;
             };
+
+            // r19 5.4: chat artifacts - open with the OS default handler, reveal in
+            // the file manager, or open the conversation's whole artifacts folder.
+            vm.RequestOpenFile = path =>
+            {
+                if (string.IsNullOrWhiteSpace(path)) return;
+                try
+                {
+                    _ = Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"Failed to open artifact '{path}': {ex.Message}");
+                }
+            };
+
+            vm.RequestRevealInFolder = path =>
+            {
+                if (string.IsNullOrWhiteSpace(path)) return;
+                try
+                {
+                    if (OperatingSystem.IsWindows())
+                    {
+                        var psi = new ProcessStartInfo { FileName = "explorer", UseShellExecute = true };
+                        psi.ArgumentList.Add($"/select,{path}");
+                        _ = Process.Start(psi);
+                    }
+                    else if (OperatingSystem.IsMacOS())
+                    {
+                        var psi = new ProcessStartInfo { FileName = "open", UseShellExecute = true };
+                        psi.ArgumentList.Add("-R");
+                        psi.ArgumentList.Add(path);
+                        _ = Process.Start(psi);
+                    }
+                    else
+                    {
+                        var psi = new ProcessStartInfo { FileName = "xdg-open", UseShellExecute = true };
+                        psi.ArgumentList.Add(Path.GetDirectoryName(path) ?? path);
+                        _ = Process.Start(psi);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"Failed to reveal artifact '{path}': {ex.Message}");
+                }
+            };
+
+            vm.RequestOpenArtifactsFolder = path =>
+            {
+                if (string.IsNullOrWhiteSpace(path)) return;
+                try
+                {
+                    Directory.CreateDirectory(path);
+                    var psi = new ProcessStartInfo
+                    {
+                        FileName = OperatingSystem.IsWindows() ? "explorer" : OperatingSystem.IsMacOS() ? "open" : "xdg-open",
+                        UseShellExecute = true
+                    };
+                    psi.ArgumentList.Add(path);
+                    _ = Process.Start(psi);
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"Failed to open artifacts folder '{path}': {ex.Message}");
+                }
+            };
         };
     }
+
+    /// <summary>
+    /// While pinned, any extent growth (new content materializing - a render
+    /// batch, the action row, sources, memory pills) snaps the offset to the
+    /// new bottom instead of leaving it wherever the last programmatic scroll
+    /// landed. A user-driven scroll away from the bottom unpins; scrolling
+    /// back within <see cref="BottomPinThreshold"/> px re-pins - this keeps
+    /// the existing "don't fight the user mid-stream" behavior while fixing
+    /// the case where the true final extent was never actually reached.
+    /// </summary>
+    private void OnMessagesScrollChanged(object? sender, ScrollChangedEventArgs e)
+    {
+        if (sender is not ScrollViewer scroll) return;
+
+        if (e.ExtentDelta.Y != 0 && _pinnedToBottom)
+        {
+            SnapToBottomIfPinned(force: true);
+            return;
+        }
+
+        _pinnedToBottom = DistanceFromBottom(scroll) <= BottomPinThreshold;
+    }
+
+    private void SnapToBottomIfPinned(bool force = false)
+    {
+        if (!force && !_pinnedToBottom) return;
+        if (this.FindControl<ScrollViewer>("MessagesScroll") is not { } scroll) return;
+        var maxOffsetY = Math.Max(0, scroll.Extent.Height - scroll.Viewport.Height);
+        scroll.Offset = new Vector(scroll.Offset.X, maxOffsetY);
+    }
+
+    private static double DistanceFromBottom(ScrollViewer scroll) =>
+        Math.Max(0, scroll.Extent.Height - scroll.Viewport.Height - scroll.Offset.Y);
 
     /// <summary>
     /// AcceptsReturn must reflect Ui.CtrlEnterToSend: when it's true (plain

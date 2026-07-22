@@ -587,6 +587,13 @@ public sealed class ServerProcessManager : IDisposable
             parts.Add("ngram-mod");
         }
 
+        // r19 5.3: enables llama-server's multimodal chat mode (image content parts).
+        if (!string.IsNullOrWhiteSpace(cfg.MmprojPath) && !HasArg("--mmproj"))
+        {
+            parts.Add("--mmproj");
+            parts.Add(cfg.MmprojPath);
+        }
+
         if (extraArgs.Count > 0)
             parts.AddRange(extraArgs);
 

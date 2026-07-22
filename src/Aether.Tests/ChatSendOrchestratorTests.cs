@@ -33,6 +33,22 @@ public sealed class ChatSendOrchestratorTests
     }
 
     [Fact]
+    public async Task StreamAsync_captures_length_finish_reason()
+    {
+        var llm = new ScriptedLlm(
+            new LlmStreamEvent("hi"),
+            new LlmStreamEvent(Usage: new ChatTokenUsage(10, 4096, 4106), IsFinal: true, FinishReason: "length"));
+
+        var result = await ChatSendOrchestrator.StreamAsync(
+            llm, "model-a", [new ChatMessage("user", "hi")], LlmChatOptions.Default,
+            onToken: _ => { },
+            onUsage: _ => { },
+            CancellationToken.None);
+
+        Assert.Equal("length", result.FinishReason);
+    }
+
+    [Fact]
     public async Task StreamAsync_reports_cancellation_without_throwing()
     {
         var llm = new ScriptedLlm(throwCancelled: true);

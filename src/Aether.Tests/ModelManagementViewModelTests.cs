@@ -380,7 +380,7 @@ public sealed class ModelManagementViewModelTests
 
         await vm.DownloadHfFileCommand.ExecuteAsync(file);
 
-        var destination = Path.Combine(modelsRoot, "Models", "LLM", "tiny.gguf");
+        var destination = Path.Combine(modelsRoot, "Models", "llm", "tiny.gguf");
         Assert.True(File.Exists(destination));
         var entry = await manifest.FindAsync(destination);
         Assert.NotNull(entry);

@@ -747,6 +747,65 @@ command-line flags passed to the managed `llama-server` process.
   distributed-systems feature needing its own trust/failure-mode review
   (docs/review/archived/r18/05-roadmap.md).
 
+### r19: Chat Attachments (.docx/.pdf/images), Chat Artifacts, Crash Logs
+
+Four new surfaces this round touch untrusted file parsing, a new local write
+path, relocated diagnostic logging, and a new outbound payload shape.
+
+- **`.docx`/`.pdf` parsing of untrusted files.** `DocxTextExtractor`
+  (`Aether.Services`) reads a user-selected `.docx` as a `ZipArchive` and
+  pulls text out of `word/document.xml` only; a non-zip file, a zip missing
+  that entry, or malformed XML is caught and returned as a structured Skip
+  result, never an escaping exception. `.pdf` extraction reuses
+  `Aether.Rag.Pipeline.PdfTextExtractor` (the PdfPig-backed parser
+  `Aether.Rag`'s own ingest pipeline already depends on and already has test
+  coverage for) rather than adding a second, hand-rolled parser for the same
+  file format - one reviewed PDF-parsing surface instead of two. Both paths
+  are capped before the expensive part happens (20 MB file cap for PDFs,
+  extracted-text byte caps shared with the plain-text attachment path) and a
+  file that fails to parse is Skipped with a reason shown to the user, never
+  silently substituted with empty content.
+- **Chat artifacts write to a bounded, per-conversation folder.**
+  `ChatArtifactService.SaveAsync` writes only under
+  `{DataRoot}/chat-artifacts/{conversationId}/`: the conversation id is
+  sanitized before it becomes a path segment, the suggested filename is
+  stripped of path separators and traversal sequences before
+  `ResolveSafePath` re-validates the final resolved path still sits under
+  that conversation's folder, and a name collision dedupes with a `(2)`
+  suffix rather than overwriting. Writes are atomic (temp file + move), the
+  same pattern `SettingsService`/`BackupService` already use.
+- **Crash log relocated under the data root, not somewhere less scoped.**
+  `Program.cs`'s unhandled-exception log now writes under
+  `{DataRoot}/logs/` (resolved via a minimal settings read that runs before
+  full DI is available) instead of the previous fixed location, keeping the
+  crash log inside the same backup/export/migration boundary as every other
+  piece of app state. `CrashLogReader` only ever reads this file back for
+  display in Doctor; it is not uploaded or transmitted anywhere.
+- **Vision payloads embed local file bytes into the request body.** An
+  attached image is read once, base64-encoded into a `data:` URI
+  client-side, and sent as an OpenAI-style `image_url` content part
+  (`OpenAiCompatibleToolWire.BuildContent`) - the same mechanism as prompt
+  text, just a different content-part type, and it only ever reaches a
+  request when the user explicitly attached the image to that message.
+  Images are gated on either the active managed server having an explicit
+  `MmprojPath` configured (Services > Vision projector), or the selected
+  model routing through the OpenAI provider (`ChatViewModel.
+  CurrentModelAcceptsVisionAttachments`); with neither, an attached image is
+  Skipped with an honest reason rather than silently degrading to a
+  text-only send. The OpenAI path trusts the user's own model choice the
+  same way the mmproj path trusts their own picker choice - Aether does not
+  probe whether the specific selected OpenAI model actually supports vision,
+  the same posture it already takes for llama.cpp. The Privacy Audit's
+  remote-provider disclosure and "features that may send data remotely" item
+  both name images explicitly, so a remote chat configuration's audit entry
+  is not silently stale now that images are in play there too.
+- **`--mmproj` is a launch-argument addition, not a new launch surface.**
+  Like every r18 engine-option flag, it is appended to the same
+  `ArgumentList`-based `ServerProcessManager.BuildLaunchArguments` call - no
+  shell string, no new `ProcessStartInfo` path - and is suppressed whenever
+  `--mmproj` is already present in `ExtraArgs`, following the same
+  never-emit-twice guard those flags established.
+
 ## Release Gate Status
 
 Security review and threat model refresh was completed for `0.13.0-alpha` as

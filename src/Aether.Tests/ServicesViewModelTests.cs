@@ -173,8 +173,23 @@ public sealed class ServicesViewModelTests
     private static async Task WaitForAsync(Func<bool> condition, int timeoutMs = 2000)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        while (!condition() && sw.ElapsedMilliseconds < timeoutMs)
+        // r19 field report: a Post-ed Rebuild() can still be mid-mutation on
+        // another thread (see the doc comment above) exactly when a poll
+        // lands, so a momentary "Collection was modified" from condition()
+        // itself means "not settled yet", not a real failure - retry instead
+        // of letting it escape and fail the test.
+        while (sw.ElapsedMilliseconds < timeoutMs)
+        {
+            try
+            {
+                if (condition()) return;
+            }
+            catch (InvalidOperationException)
+            {
+                // Collection mutated mid-enumeration; treat as not-yet-settled.
+            }
             await Task.Delay(10);
+        }
     }
 
     // ── r12 01-settings-lifecycle.md 1.4: Rebuild must diff, not churn ──
@@ -263,6 +278,11 @@ public sealed class ServicesViewModelTests
         settings.Settings.ManagedServers.Add(new ServerConfig { Name = "Chat", Port = 39201 });
         await settings.SaveAsync();
         await WaitForAsync(() => chatRow.IsDisposed);
+        // Disposal happens after Servers.Remove() within the same Rebuild() pass, but
+        // under xUnit's AsyncTestSyncContext that pass can still be finishing up on
+        // another thread the instant IsDisposed flips - wait for the collection itself
+        // to settle too before enumerating it directly below.
+        await WaitForAsync(() => !vm.Servers.Any(s => s.Id == chatRow.Id));
 
         Assert.True(chatRow.IsDisposed, "a row whose config was removed must be disposed, not just dropped");
         Assert.DoesNotContain(vm.Servers, s => s.Id == chatRow.Id);

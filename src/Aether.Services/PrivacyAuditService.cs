@@ -101,7 +101,7 @@ public sealed class PrivacyAuditService
             anyRemote ? "Review" : "Local",
             anyRemote
                 ? string.Join(" ", remoteChatProviders
-                    .Select(p => $"{p.DisplayName} chat endpoint configured at {settings.Llm.OpenAiBaseUrl}. Prompts may leave the machine when selected.")
+                    .Select(p => $"{p.DisplayName} chat endpoint configured at {settings.Llm.OpenAiBaseUrl}. Prompts, and any images attached to a chat message, may leave the machine when selected.")
                     .Concat(voiceRemote ? [$"Voice provider {activeVoiceProvider!.Name} sends audio off the machine."] : []))
                 : "No enabled remote chat or voice provider detected in settings."));
 
@@ -171,7 +171,7 @@ public sealed class PrivacyAuditService
         items.Add(new PrivacyAuditItem(
             "Features that may send data remotely",
             anyRemote ? "Review" : "Local",
-            "Remote chat/voice providers can send prompt, document, or voice data outside the local machine when explicitly configured. RAG web ingest remains dataset-scoped and approval driven."));
+            "Remote chat/voice providers can send prompt, document, image, or voice data outside the local machine when explicitly configured. RAG web ingest remains dataset-scoped and approval driven."));
 
         return items;
     }

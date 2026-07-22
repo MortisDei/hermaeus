@@ -192,10 +192,11 @@ public sealed class OpenAiService : IDisposable
         var usage = chunk?.Usage is null
             ? null
             : new ChatTokenUsage(chunk.Usage.PromptTokens, chunk.Usage.CompletionTokens, chunk.Usage.TotalTokens);
-        var isFinal = usage is not null || chunk?.Choices?.FirstOrDefault()?.FinishReason is not null;
+        var finishReason = chunk?.Choices?.FirstOrDefault()?.FinishReason;
+        var isFinal = usage is not null || finishReason is not null;
         if (string.IsNullOrEmpty(c) && usage is null && !isFinal)
             return null;
-        return new LlmStreamEvent(c, usage, isFinal);
+        return new LlmStreamEvent(c, usage, isFinal, FinishReason: finishReason);
     }
 
     private static async IAsyncEnumerable<LlmStreamEvent> YieldEventError(string message)

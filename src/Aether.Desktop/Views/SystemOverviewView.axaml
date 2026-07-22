@@ -45,48 +45,8 @@
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
 
-            <Expander Header="Privacy audit - what can leave this machine" IsExpanded="True">
-                <StackPanel Spacing="10">
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                        <TextBlock Grid.Column="0"
-                                   Text="Local-first posture, remote data paths, secret storage, and exposed services"
-                                   FontSize="12"
-                                   Opacity="0.62"
-                                   TextWrapping="Wrap" />
-                        <Button Grid.Column="1"
-                                Content="Refresh"
-                                Command="{Binding RefreshPrivacyAuditCommand}"
-                                IsEnabled="{Binding !IsRefreshing}"
-                                ToolTip.Tip="Re-scans for remote providers, exposed local services, and other data-leaving-this-machine risks." />
-                    </Grid>
-                    <TextBlock Text="{Binding PrivacyAuditSummary}" FontSize="13" FontWeight="SemiBold" />
-                    <ItemsControl ItemsSource="{Binding PrivacyAuditItems}">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate DataType="vm:PrivacyAuditItemViewModel">
-                                <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
-                                        BorderThickness="0,0,0,1"
-                                        Padding="0,8">
-                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                                        <StackPanel Grid.Column="0" Spacing="3">
-                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
-                                            <TextBlock Text="{Binding Detail}"
-                                                       TextWrapping="Wrap"
-                                                       FontSize="12"
-                                                       Opacity="0.62" />
-                                        </StackPanel>
-                                        <TextBlock Grid.Column="1"
-                                                   Text="{Binding Status}"
-                                                   FontWeight="SemiBold"
-                                                   FontSize="12"
-                                                   VerticalAlignment="Top" />
-                                    </Grid>
-                                </Border>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                </StackPanel>
-            </Expander>
-
+            <!-- r19 6.2: hardware (GPU/VRAM, Components) reads before the privacy
+                 audit, not buried under it. -->
             <Grid ColumnDefinitions="*,*" ColumnSpacing="16">
                 <Border Grid.Column="0"
                         Padding="14"
@@ -148,6 +108,48 @@
                     </StackPanel>
                 </Border>
             </Grid>
+
+            <Expander Header="Privacy audit - what can leave this machine" IsExpanded="True">
+                <StackPanel Spacing="10">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                        <TextBlock Grid.Column="0"
+                                   Text="Local-first posture, remote data paths, secret storage, and exposed services"
+                                   FontSize="12"
+                                   Opacity="0.62"
+                                   TextWrapping="Wrap" />
+                        <Button Grid.Column="1"
+                                Content="Refresh"
+                                Command="{Binding RefreshPrivacyAuditCommand}"
+                                IsEnabled="{Binding !IsRefreshing}"
+                                ToolTip.Tip="Re-scans for remote providers, exposed local services, and other data-leaving-this-machine risks." />
+                    </Grid>
+                    <TextBlock Text="{Binding PrivacyAuditSummary}" FontSize="13" FontWeight="SemiBold" />
+                    <ItemsControl ItemsSource="{Binding PrivacyAuditItems}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:PrivacyAuditItemViewModel">
+                                <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                        BorderThickness="0,0,0,1"
+                                        Padding="0,8">
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                        <StackPanel Grid.Column="0" Spacing="3">
+                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                            <TextBlock Text="{Binding Detail}"
+                                                       TextWrapping="Wrap"
+                                                       FontSize="12"
+                                                       Opacity="0.62" />
+                                        </StackPanel>
+                                        <TextBlock Grid.Column="1"
+                                                   Text="{Binding Status}"
+                                                   FontWeight="SemiBold"
+                                                   FontSize="12"
+                                                   VerticalAlignment="Top" />
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Expander>
         </StackPanel>
     </ScrollViewer>
 </UserControl>

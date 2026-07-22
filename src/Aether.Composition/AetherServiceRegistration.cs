@@ -46,6 +46,7 @@ public static class AetherServiceRegistration
         s.AddSingleton<ChatTraceService>();
         s.AddSingleton<IConversationStore, ConversationStore>();
         s.AddSingleton<ConversationExportService>();
+        s.AddSingleton<ChatArtifactService>();
         s.AddSingleton<IMemoryStore, MemoryStore>();
         s.AddSingleton<MemoryExtractionService>();
         s.AddSingleton<MemoryInjectionService>();

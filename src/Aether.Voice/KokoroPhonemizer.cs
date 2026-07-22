@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text;
+using System.Text.RegularExpressions;
 using Aether.Core.Models;
 using Aether.Core.Services;
 
@@ -24,6 +25,7 @@ internal static class KokoroPhonemizer
             return string.Empty;
 
         var normalized = KokoroTextNormalizer.Normalize(text);
+        normalized = InjectParagraphPauses(normalized);
         var sb = new StringBuilder();
         var words = normalized.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
         for (var i = 0; i < words.Length; i++)
@@ -59,6 +61,28 @@ internal static class KokoroPhonemizer
     }
 
     private static bool IsSentencePunctuation(char c) => c is '.' or ',' or '!' or '?' or ';' or ':';
+
+    // ── Paragraph pauses (r19 4.2) ──────────────────────────────────────────
+    // The word-splitter below treats a paragraph break the same as a single
+    // space (it splits on ALL whitespace), so "\n\n" between paragraphs used
+    // to contribute no pause at all. A blank line (two or more newlines,
+    // with optional surrounding horizontal whitespace) becomes a sentence
+    // pause here, before the split, unless the text already ends in
+    // sentence punctuation right before the break.
+    private static readonly Regex ParagraphBreakPattern =
+        new(@"[ \t]*\r?\n[ \t]*\r?\n[ \t\r\n]*", RegexOptions.Compiled);
+
+    private static string InjectParagraphPauses(string text)
+    {
+        return ParagraphBreakPattern.Replace(text, match =>
+        {
+            var k = match.Index - 1;
+            while (k >= 0 && char.IsWhiteSpace(text[k]))
+                k--;
+            var needsPause = k < 0 || !IsSentencePunctuation(text[k]);
+            return needsPause ? ". " : " ";
+        });
+    }
 
     private static string ResolveCore(string core, string? userLexiconPath, IRuntimeLogService? logs)
     {

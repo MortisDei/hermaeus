@@ -134,4 +134,35 @@ internal static class MarkdownViewerTests
         True(totalReused > totalBlocks / 2, $"Expected the majority of blocks to be reused across an append-only stream; reused {totalReused} of {totalBlocks}.");
         return Task.CompletedTask;
     }
+
+    // ── r19 1.1: truncated code fences must never crash the renderer ──────────
+
+    public static Task TruncatedCodeFenceJoinsWithoutThrowing()
+    {
+        // A response cut off mid-fence (token-cap truncation, or the render
+        // timer ticking right after a fence opens) can leave Markdig with a
+        // FencedCodeBlock whose Lines.Lines is null; JoinLines must degrade
+        // to an empty string instead of throwing ArgumentNullException.
+        var sources = new[]
+        {
+            "Here is some code:\n\n```csharp\nvar x = 1;",
+            "```csharp"
+        };
+        foreach (var source in sources)
+        {
+            var doc = Markdig.Markdown.Parse(source, Pipeline);
+            foreach (var block in doc)
+            {
+                if (block is Markdig.Syntax.LeafBlock leaf)
+                    MarkdownViewer.JoinLines(leaf);
+            }
+        }
+        return Task.CompletedTask;
+    }
+
+    public static Task JoinLinesReturnsEmptyForNullLeafBlock()
+    {
+        Equal(string.Empty, MarkdownViewer.JoinLines(null), "A null block must join to an empty string, not throw.");
+        return Task.CompletedTask;
+    }
 }

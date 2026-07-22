@@ -79,6 +79,9 @@ public static class HarnessCases
         [new HarnessCase("RAG settings discover and select installed reranker", ServiceTests.RagSettingsDiscoversAndSelectsInstalledReranker)],
         [new HarnessCase("app lifecycle journal tracks clean and unclean exits", ServiceTests.AppLifecycleJournalTracksCleanAndUncleanExits)],
         [new HarnessCase("Doctor warns when previous session did not exit cleanly", ServiceTests.DoctorWarnsWhenPreviousSessionDidNotExitCleanly)],
+        [new HarnessCase("RecordStartup called twice does not overwrite PreviousSession", ServiceTests.RecordStartupCalledTwiceDoesNotOverwritePreviousSession)],
+        [new HarnessCase("Doctor uses neutral wording when no risky operation was in flight", ServiceTests.DoctorUsesNeutralWordingWhenNoRiskyOperationWasInFlight)],
+        [new HarnessCase("Doctor still names a real in-flight operation", ServiceTests.DoctorStillNamesARealInFlightOperation)],
         [new HarnessCase("Doctor does not treat chat GGUF as embedding model", ServiceTests.DoctorDoesNotTreatChatGgufAsEmbeddingModel)],
         [new HarnessCase("Doctor warns for untuned local GGUF models", ServiceTests.DoctorWarnsForUntunedLocalGgufModels)],
         [new HarnessCase("Doctor startup scan raises problem toast", ServiceTests.DoctorStartupScanRaisesProblemToast)],
@@ -411,7 +414,9 @@ public static class HarnessCases
         [new HarnessCase("reuse prefix never treats empty source text as a match", MarkdownViewerTests.ReusePrefixNeverTreatsEmptySourceTextAsAMatch)],
         [new HarnessCase("reuse prefix handles shrinking or growing block counts", MarkdownViewerTests.ReusePrefixHandlesShrinkingOrGrowingBlockCounts)],
         [new HarnessCase("incremental parsing converges to the same blocks as one-shot rendering", MarkdownViewerTests.IncrementalParsingConvergesToTheSameBlocksAsOneShotRendering)],
-        [new HarnessCase("streaming append-only document reuses the majority of blocks", MarkdownViewerTests.StreamingAppendOnlyDocumentReusesTheMajorityOfBlocks)]
+        [new HarnessCase("streaming append-only document reuses the majority of blocks", MarkdownViewerTests.StreamingAppendOnlyDocumentReusesTheMajorityOfBlocks)],
+        [new HarnessCase("truncated code fence joins without throwing", MarkdownViewerTests.TruncatedCodeFenceJoinsWithoutThrowing)],
+        [new HarnessCase("JoinLines returns empty for null leaf block", MarkdownViewerTests.JoinLinesReturnsEmptyForNullLeafBlock)]
     ];
 }
 

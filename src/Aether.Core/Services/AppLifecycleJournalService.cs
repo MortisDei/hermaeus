@@ -32,6 +32,7 @@ public sealed class AppLifecycleJournalService
     private const string FileName = "lifecycle.json";
     private readonly ISettingsService _settings;
     private readonly object _sync = new();
+    private bool _startupRecorded;
 
     public AppLifecycleJournalService(ISettingsService settings)
     {
@@ -62,16 +63,25 @@ public sealed class AppLifecycleJournalService
     /// <summary>
     /// Reads the previous session's record (if any) into
     /// <see cref="PreviousSession"/> and starts a fresh one for the current
-    /// session. Call exactly once, early at app startup.
+    /// session. Call exactly once, early at app startup. Defense in depth
+    /// beyond the caller's own one-shot guard (r19 1.4: Avalonia's
+    /// Window.Opened re-fires on every tray restore): a second call on the
+    /// same instance is a no-op that returns the already-captured
+    /// <see cref="PreviousSession"/> instead of overwriting it with the
+    /// current, still-running session.
     /// </summary>
     public AppLifecycleRecord? RecordStartup()
     {
         lock (_sync)
         {
+            if (_startupRecorded)
+                return PreviousSession;
+
             var path = JournalPath;
             var previous = TryRead(path);
             PreviousSession = previous;
             TryWrite(path, new AppLifecycleRecord(DateTime.UtcNow, CleanExit: false, "startup", DateTime.UtcNow));
+            _startupRecorded = true;
             return previous;
         }
     }

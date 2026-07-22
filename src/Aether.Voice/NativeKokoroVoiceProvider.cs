@@ -201,15 +201,24 @@ public sealed class NativeKokoroVoiceProvider : ITtsService, IVoiceProvider, IDi
             {
                 var lexiconPath = ResolveUserLexiconPath(_settings.Settings);
                 var phonemes = KokoroPhonemizer.ToPhonemes(text, lexiconPath, _runtimeLogs);
-                var chunks = KokoroTokenizer.Encode(phonemes);
+                var chunks = KokoroTokenizer.Encode(phonemes, _runtimeLogs);
                 if (chunks.Count == 0)
                     throw new InvalidOperationException("Input text produced no phonemes to synthesize.");
 
                 var samples = new List<float>();
-                foreach (var chunk in chunks)
+                for (var i = 0; i < chunks.Count; i++)
                 {
                     ct.ThrowIfCancellationRequested();
-                    samples.AddRange(_model.Synthesize(chunk, voice, speed));
+                    samples.AddRange(_model.Synthesize(chunks[i].Ids, voice, speed));
+
+                    // r19 4.1: a seam landing exactly at a splice reads as a
+                    // clipped/garbled word; a short silence at natural
+                    // boundaries (sentence/clause/space) reads as a pause
+                    // instead. A forced hard cut (pathological unbroken run)
+                    // gets none - padding a mid-word split would make the
+                    // audible seam worse, not better.
+                    if (i < chunks.Count - 1)
+                        samples.AddRange(SilenceSamples(chunks[i].Boundary));
                 }
 
                 WavFile.Write(output, samples.ToArray(), KokoroOnnxModel.SampleRate);
@@ -221,6 +230,22 @@ public sealed class NativeKokoroVoiceProvider : ITtsService, IVoiceProvider, IDi
         {
             _synthesisGate.Release();
         }
+    }
+
+    private const int SentenceBreakSilenceMs = 120;
+    private const int ClauseOrSpaceSilenceMs = 60;
+
+    /// <summary>r19 4.1: silence inserted between two stitched chunks, sized by how natural
+    /// the boundary between them is. Pure/testable independent of a live ONNX session.</summary>
+    internal static float[] SilenceSamples(PhonemeChunkBoundary boundary)
+    {
+        var ms = boundary switch
+        {
+            PhonemeChunkBoundary.SentenceBreak => SentenceBreakSilenceMs,
+            PhonemeChunkBoundary.ClauseOrSpace => ClauseOrSpaceSilenceMs,
+            _ => 0
+        };
+        return ms == 0 ? [] : new float[KokoroOnnxModel.SampleRate * ms / 1000];
     }
 
     private static string NormalizeVoice(string? speaker)

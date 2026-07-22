@@ -12,4 +12,11 @@ public class Message
     public string ModelId { get; set; } = string.Empty;
     public long DurationMs { get; set; }
     public List<string> AttachedFilePaths { get; set; } = [];
+
+    /// <summary>
+    /// True when generation stopped because the configured max-token cap was
+    /// hit ("length" finish reason), not because the model finished
+    /// naturally. Additive (r19 1.2); absent/false for pre-existing messages.
+    /// </summary>
+    public bool WasTruncated { get; set; }
 }

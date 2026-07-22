@@ -15,4 +15,12 @@ public interface IVoiceOrchestrator
     void StopAll();
     bool IsMuted { get; set; }
     event Action<VoiceChannel, string>? UtteranceStarted;
+
+    /// <summary>r19 4.4: thread-safe "something is playing right now" flag driving the
+    /// speak/stop icon swap; true whenever an utterance is actively being synthesized or played.</summary>
+    bool IsSpeaking { get; }
+
+    /// <summary>Fires once per utterance dequeue, on finish, stop (StopChannel/StopAll/preemption), or
+    /// synthesis failure - always exactly once, from the worker loop's finally (r19 4.4).</summary>
+    event Action<VoiceChannel>? UtteranceCompleted;
 }

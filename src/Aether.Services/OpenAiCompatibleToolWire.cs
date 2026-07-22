@@ -16,12 +16,28 @@ internal static class OpenAiCompatibleToolWire
     {
         var msgs = messages.Select(m => (object)new OutgoingMessage(
             m.Role,
-            m.Content,
+            BuildContent(m),
             m.ToolCallId,
             m.ToolCalls?.Select(tc => new OutgoingToolCall(tc.Id, "function", new OutgoingFunctionCall(tc.Name, tc.ArgumentsJson))).ToList())).ToList();
         if (!string.IsNullOrWhiteSpace(systemPrompt))
             msgs.Insert(0, new OutgoingMessage("system", systemPrompt, null, null));
         return msgs;
+    }
+
+    /// <summary>r19 5.3: a message with no images sends unchanged as a plain string (byte-identical
+    /// to every non-vision path today); one WITH images becomes an OpenAI-style content-part array
+    /// (llama-server's multimodal mode and the OpenAI provider both accept this same shape).</summary>
+    private static object BuildContent(ChatMessage m)
+    {
+        if (m.Images is not { Count: > 0 })
+            return m.Content;
+
+        var parts = new List<object>();
+        if (!string.IsNullOrEmpty(m.Content))
+            parts.Add(new OutgoingTextPart("text", m.Content));
+        foreach (var image in m.Images)
+            parts.Add(new OutgoingImagePart("image_url", new OutgoingImageUrl(image.DataUri)));
+        return parts;
     }
 
     public static List<object>? BuildTools(IReadOnlyList<LlmToolDefinition>? tools)
@@ -105,9 +121,12 @@ internal static class OpenAiCompatibleToolWire
         }
     }
 
-    private sealed record OutgoingMessage(string role, string? content, string? tool_call_id, List<OutgoingToolCall>? tool_calls);
+    private sealed record OutgoingMessage(string role, object? content, string? tool_call_id, List<OutgoingToolCall>? tool_calls);
     private sealed record OutgoingToolCall(string id, string type, OutgoingFunctionCall function);
     private sealed record OutgoingFunctionCall(string name, string arguments);
     private sealed record OutgoingTool(string type, OutgoingFunctionSpec function);
     private sealed record OutgoingFunctionSpec(string name, string description, JsonElement parameters);
+    private sealed record OutgoingTextPart(string type, string text);
+    private sealed record OutgoingImagePart(string type, OutgoingImageUrl image_url);
+    private sealed record OutgoingImageUrl(string url);
 }

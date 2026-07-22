@@ -309,10 +309,11 @@ public sealed class LlamaCppService : IDisposable
         var serverTimings = chunk?.Timings is null
             ? null
             : new ChatServerTimings(chunk.Timings.PromptN, chunk.Timings.PromptMs, chunk.Timings.PredictedN, chunk.Timings.PredictedMs);
-        var isFinal = usage is not null || chunk?.Choices?.FirstOrDefault()?.FinishReason is not null;
+        var finishReason = chunk?.Choices?.FirstOrDefault()?.FinishReason;
+        var isFinal = usage is not null || finishReason is not null;
         if (string.IsNullOrEmpty(c) && usage is null && serverTimings is null && !isFinal)
             return null;
-        return new LlmStreamEvent(c, usage, isFinal, ServerTimings: serverTimings);
+        return new LlmStreamEvent(c, usage, isFinal, ServerTimings: serverTimings, FinishReason: finishReason);
     }
 
     public void Dispose()

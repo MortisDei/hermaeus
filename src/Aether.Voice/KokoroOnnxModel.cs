@@ -79,6 +79,7 @@ internal sealed class KokoroOnnxModel : IDisposable
             _journal?.RecordOperation("loading Kokoro native ONNX session (EnsureLoadedAsync)");
             _session = new InferenceSession(modelPath, BuildSessionOptions());
             _loadedAssetsRoot = AssetsRoot;
+            _journal?.RecordOperation("Kokoro native ONNX session loaded");
             return true;
         }
         catch
@@ -140,6 +141,7 @@ internal sealed class KokoroOnnxModel : IDisposable
             _session = new InferenceSession(ModelPath(AssetsRoot), BuildSessionOptions());
             _loadedAssetsRoot = AssetsRoot;
             _unavailable = false;
+            _journal?.RecordOperation("Kokoro native ONNX session loaded");
             progress?.Report("Kokoro native voice assets installed.");
         }
         catch (Exception ex)

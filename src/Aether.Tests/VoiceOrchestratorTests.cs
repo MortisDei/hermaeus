@@ -176,6 +176,51 @@ public sealed class VoiceOrchestratorTests
         Assert.Empty(provider.Calls);
     }
 
+    // ── r19 4.4: IsSpeaking / UtteranceCompleted (stop affordance) ─────────────
+
+    [Fact]
+    public async Task StopChannel_fires_UtteranceCompleted_and_leaves_IsSpeaking_false()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var provider = new RecordingVoiceProvider { DelayMs = 300 };
+        using var orchestrator = new VoiceOrchestrator(settings, new SingleProviderRegistry(provider), new FakeToasts());
+
+        var completedChannels = new List<VoiceChannel>();
+        orchestrator.UtteranceCompleted += ch => completedChannels.Add(ch);
+
+        await orchestrator.EnqueueAsync(new VoiceUtterance("first chat message", VoiceChannel.Chat));
+        await WaitUntilAsync(() => orchestrator.IsSpeaking, TimeSpan.FromSeconds(2));
+        await orchestrator.EnqueueAsync(new VoiceUtterance("second chat message", VoiceChannel.Chat));
+
+        orchestrator.StopChannel(VoiceChannel.Chat);
+
+        await WaitUntilAsync(() => completedChannels.Count >= 1, TimeSpan.FromSeconds(2));
+        await Task.Delay(100);
+
+        Assert.Contains(VoiceChannel.Chat, completedChannels);
+        Assert.False(orchestrator.IsSpeaking, "IsSpeaking must be false once playback is stopped");
+        Assert.Empty(provider.Calls);
+    }
+
+    [Fact]
+    public async Task IsSpeaking_is_true_while_playing_and_false_once_finished()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var provider = new RecordingVoiceProvider { DelayMs = 80 };
+        using var orchestrator = new VoiceOrchestrator(settings, new SingleProviderRegistry(provider), new FakeToasts());
+
+        Assert.False(orchestrator.IsSpeaking);
+
+        await orchestrator.EnqueueAsync(new VoiceUtterance("plays briefly", VoiceChannel.Chat));
+        await WaitUntilAsync(() => orchestrator.IsSpeaking, TimeSpan.FromSeconds(2));
+        Assert.True(orchestrator.IsSpeaking);
+
+        await WaitUntilAsync(() => !orchestrator.IsSpeaking, TimeSpan.FromSeconds(2));
+        Assert.False(orchestrator.IsSpeaking);
+    }
+
     /// <summary>r11 4.6: _toastedProviderFailures never reset, so after one failure toast for a provider, a later distinct failure stayed silent for the app's lifetime. A success in between must reset the key so the next failure toasts again.</summary>
     [Fact]
     public async Task Failure_toasts_once_per_episode_reset_by_an_intervening_success()

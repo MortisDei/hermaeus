@@ -31,6 +31,12 @@ public sealed class VoiceOrchestrator : IVoiceOrchestrator, IDisposable
 
     public bool IsMuted { get; set; }
     public event Action<VoiceChannel, string>? UtteranceStarted;
+    public event Action<VoiceChannel>? UtteranceCompleted;
+
+    public bool IsSpeaking
+    {
+        get { lock (_gate) return _currentChannel is not null; }
+    }
 
     public VoiceOrchestrator(ISettingsService settings, IVoiceProviderRegistry voiceProviders, IToastService toasts)
     {
@@ -170,6 +176,7 @@ public sealed class VoiceOrchestrator : IVoiceOrchestrator, IDisposable
                         _playbackCts = null;
                     _currentChannel = null;
                 }
+                UtteranceCompleted?.Invoke(next.Utterance.Channel);
             }
         }
     }

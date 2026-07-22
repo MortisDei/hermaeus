@@ -16,7 +16,7 @@
                 BorderThickness="0,0,0,1"
                 BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
             <StackPanel Spacing="8">
-                <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="8">
+                <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="8">
                     <TextBlock Grid.Column="0"
                                Text="Agent"
                                FontSize="14"
@@ -28,12 +28,20 @@
                                Opacity="0.5"
                                VerticalAlignment="Center"
                                TextTrimming="CharacterEllipsis" />
+                    <!-- r19 3.2: once a task is loaded the workbench reads as owned by it;
+                         this makes "you can just type a new goal" explicit instead of implied. -->
                     <Button Grid.Column="2"
+                            Command="{Binding NewTaskCommand}"
+                            IsVisible="{Binding CanShowNewTaskButton}"
+                            Content="New task"
+                            Padding="12,6"
+                            CornerRadius="6" />
+                    <Button Grid.Column="3"
                             Command="{Binding RunStepCommand}"
                             Content="Run Step"
                             Padding="12,6"
                             CornerRadius="6" />
-                    <Button Grid.Column="3"
+                    <Button Grid.Column="4"
                             Command="{Binding StopCommand}"
                             Content="Stop"
                             Padding="12,6"
@@ -49,6 +57,10 @@
                             <TextBlock Text="{Binding CurrentTaskGoalLabel}" FontSize="11" Opacity="0.7" TextTrimming="CharacterEllipsis" />
                             <TextBlock Text="{Binding CurrentTaskParentGoalLabel}" FontSize="10" FontStyle="Italic" Opacity="0.6"
                                        TextTrimming="CharacterEllipsis" IsVisible="{Binding HasCurrentTaskParentGoal}" />
+                            <!-- r19 3.3: a terminal task whose own plan still lists pending
+                                 steps declared victory prematurely; say so beside the status. -->
+                            <TextBlock Text="{Binding PrematureCompleteNote}" FontSize="10" Foreground="#FFB74D"
+                                       TextWrapping="Wrap" IsVisible="{Binding HasPrematureCompleteNote}" />
                         </StackPanel>
                     </Border>
                     <Border Grid.Column="1" Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="10">
@@ -327,6 +339,33 @@
                             <Button Grid.Column="1"
                                     Command="{Binding SendReplyCommand}"
                                     Content="Send"
+                                    VerticalAlignment="Bottom"
+                                    Padding="14,8"
+                                    CornerRadius="6" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <!-- r19 3.1: a finished/failed/blocked task can be reopened with a new
+                     instruction instead of only being restartable as a brand new task. -->
+                <Border IsVisible="{Binding IsTaskTerminal}"
+                        Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                        CornerRadius="8"
+                        Padding="12">
+                    <StackPanel Spacing="8">
+                        <TextBlock Text="Continue task"
+                                   FontWeight="SemiBold"
+                                   FontSize="12" />
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                            <TextBox Grid.Column="0"
+                                     Text="{Binding ContinueInstructionText}"
+                                     Watermark="What should it do next? Leave empty for: finish the remaining planned steps"
+                                     AcceptsReturn="True"
+                                     MinHeight="56"
+                                     TextWrapping="Wrap" />
+                            <Button Grid.Column="1"
+                                    Command="{Binding ContinueTaskCommand}"
+                                    Content="Continue"
                                     VerticalAlignment="Bottom"
                                     Padding="14,8"
                                     CornerRadius="6" />
@@ -677,7 +716,12 @@
                                                 IsVisible="{Binding IsSubTask}">
                                             <TextBlock Text="sub-task" FontSize="10" Opacity="0.6" />
                                         </Border>
-                                        <TextBlock Grid.Column="2" Text="{Binding Goal}" FontSize="12" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                        <StackPanel Grid.Column="2" VerticalAlignment="Center" Spacing="1">
+                                            <TextBlock Text="{Binding Goal}" FontSize="12" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                                            <!-- r19 3.3: a half-done task should be recognizable at a glance in this list too. -->
+                                            <TextBlock Text="{Binding PrematureCompleteNote}" FontSize="10" Foreground="#FFB74D"
+                                                       IsVisible="{Binding IsPrematureComplete}" />
+                                        </StackPanel>
                                         <TextBlock Grid.Column="3" Text="{Binding RelativeTimeLabel}" FontSize="11" Opacity="0.5" VerticalAlignment="Center" />
                                         <Button Grid.Column="4" Content="Open"
                                                 Command="{Binding DataContext.LoadTaskCommand, ElementName=Root}"

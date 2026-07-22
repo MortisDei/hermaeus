@@ -22,6 +22,20 @@ public partial class MessageViewModel : ObservableObject
     [ObservableProperty] private long   _durationMs;
     [ObservableProperty] private bool   _hasSources;
 
+    /// <summary>
+    /// r19 1.2: generation stopped because the max-token cap was hit, not
+    /// because the model finished naturally. Drives a truncation notice and
+    /// Continue affordance on the message.
+    /// </summary>
+    [ObservableProperty] private bool _wasTruncated;
+
+    /// <summary>The configured max-token cap in effect when this message was generated, for the truncation notice. 0 when unknown.</summary>
+    [ObservableProperty] private int _truncatedAtTokens;
+
+    public string TruncationNotice => TruncatedAtTokens > 0
+        ? $"Stopped at the response token limit ({TruncatedAtTokens} tokens)."
+        : "Stopped at the response token limit.";
+
     public required string Role { get; init; }
     public bool IsUser      => Role == "user";
     public bool IsAssistant => Role == "assistant";

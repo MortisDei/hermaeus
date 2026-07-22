@@ -56,6 +56,33 @@ public sealed class ChatSendLatencyTests
         Assert.Equal(string.Empty, ChatStreamingPhase.Describe(12_000, sawFirstEvent: true, sawContent: true));
     }
 
+    // ── r19 6.4: rotating "thinking" status words ──────────────────────────────
+
+    [Fact]
+    public void StreamingPhase_rotates_the_whimsy_word_over_time_while_thinking()
+    {
+        Assert.Equal("Thinking... 12s", ChatStreamingPhase.Describe(12_000, sawFirstEvent: true, sawContent: false, whimsyIndex: 0));
+        Assert.Equal("Pondering... 12s", ChatStreamingPhase.Describe(12_000, sawFirstEvent: true, sawContent: false, whimsyIndex: 1));
+        // Cycles back around once the index exceeds the word list length.
+        Assert.Equal("Thinking... 12s", ChatStreamingPhase.Describe(12_000, sawFirstEvent: true, sawContent: false, whimsyIndex: ChatStreamingPhase.WhimsyWords.Count));
+    }
+
+    [Fact]
+    public void StreamingPhase_freezes_and_clears_the_label_once_content_arrives()
+    {
+        Assert.Equal("Pondering... 3s", ChatStreamingPhase.Describe(3_000, sawFirstEvent: true, sawContent: false, whimsyIndex: 1));
+        // Content arriving clears the label regardless of whimsyIndex.
+        Assert.Equal(string.Empty, ChatStreamingPhase.Describe(3_000, sawFirstEvent: true, sawContent: true, whimsyIndex: 1));
+    }
+
+    [Fact]
+    public void StreamingPhase_concrete_reading_prompt_text_wins_over_whimsy()
+    {
+        // Still reading the prompt (no event yet) is concrete, known information;
+        // whimsy must never override it even if a whimsyIndex is supplied.
+        Assert.Equal("Reading prompt... 5s", ChatStreamingPhase.Describe(5_000, sawFirstEvent: false, sawContent: false, whimsyIndex: 3));
+    }
+
     [Fact]
     public async Task StreamAsync_fires_onFirstEvent_once_before_content()
     {

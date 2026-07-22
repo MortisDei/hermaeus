@@ -230,13 +230,30 @@ public sealed class LlamaServerSetupService
             // CUDA builds link against the toolkit runtime shipped separately
             // (r14 1.2): extract it into the same versioned directory first so
             // the DLLs sit beside llama-server.exe before it is located/started.
+            // r19 2.3: the companion asset only changes when llama.cpp bumps its
+            // CUDA toolkit version, so a previous version directory's identical,
+            // verified copy is reused instead of re-downloading several hundred
+            // MB on every single update.
             if (!string.IsNullOrWhiteSpace(release.CompanionAssetName) && !string.IsNullOrWhiteSpace(release.CompanionUrl))
             {
-                var companion = await DownloadAndExtractArchiveAsync(
-                    versionedInstallPath, release.CompanionUrl!, release.CompanionAssetName!,
-                    $"CUDA runtime ({release.CompanionAssetName})", progress, ct);
-                if (!companion.Success)
-                    return companion;
+                var reusedFrom = CudaRuntimeReuse.TryReuse(installPath, versionedInstallPath, release.CompanionAssetName!);
+                if (reusedFrom is not null)
+                {
+                    progress?.Report($"Reusing CUDA runtime from {reusedFrom}");
+                }
+                else
+                {
+                    var companion = await DownloadAndExtractArchiveAsync(
+                        versionedInstallPath, release.CompanionUrl!, release.CompanionAssetName!,
+                        $"CUDA runtime ({release.CompanionAssetName})", progress, ct);
+                    if (!companion.Success)
+                        return companion;
+
+                    var extractedFiles = Directory.Exists(versionedInstallPath)
+                        ? Directory.EnumerateFiles(versionedInstallPath, "*", SearchOption.AllDirectories)
+                        : [];
+                    CudaRuntimeReuse.WriteMarker(versionedInstallPath, release.CompanionAssetName!, extractedFiles);
+                }
             }
 
             return await DownloadExtractAndLocateAsync(

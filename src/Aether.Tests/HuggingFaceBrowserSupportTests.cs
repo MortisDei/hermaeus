@@ -17,11 +17,17 @@ public sealed class HuggingFaceBrowserSupportTests
     }
 
     [Fact]
-    public void PlanDestination_uses_the_flat_LLM_folder_and_discards_repo_subfolders()
+    public void PlanDestination_uses_the_flat_llm_folder_and_discards_repo_subfolders()
     {
-        var (destination, collides) = HuggingFaceBrowserSupport.PlanDestination(@"C:\AI\Models", "subfolder/model.gguf");
+        // A nonexistent directory (rather than a real path like C:\AI\Models)
+        // so Resolve()'s on-disk casing probe (r19 2.4) cannot be affected by
+        // whatever happens to already exist on the machine running the test.
+        using var temp = new TempDir();
+        var modelsDir = temp.PathFor("Models");
 
-        Assert.Equal(Path.Combine(@"C:\AI\Models", "LLM", "model.gguf"), destination);
+        var (destination, collides) = HuggingFaceBrowserSupport.PlanDestination(modelsDir, "subfolder/model.gguf");
+
+        Assert.Equal(Path.Combine(modelsDir, "llm", "model.gguf"), destination);
         Assert.False(collides);
     }
 
@@ -30,7 +36,7 @@ public sealed class HuggingFaceBrowserSupportTests
     {
         using var temp = new TempDir();
         var modelsDir = temp.PathFor("Models");
-        var llmDir = Path.Combine(modelsDir, "LLM");
+        var llmDir = Path.Combine(modelsDir, "llm");
         Directory.CreateDirectory(llmDir);
         File.WriteAllText(Path.Combine(llmDir, "model.gguf"), "existing");
 
@@ -38,5 +44,17 @@ public sealed class HuggingFaceBrowserSupportTests
 
         Assert.True(collides);
         Assert.Equal("existing", File.ReadAllText(destination));
+    }
+
+    [Fact]
+    public void PlanDestination_reuses_a_pre_existing_LLM_directory_instead_of_creating_a_second_llm_one()
+    {
+        using var temp = new TempDir();
+        var modelsDir = temp.PathFor("Models");
+        Directory.CreateDirectory(Path.Combine(modelsDir, "LLM"));
+
+        var (destination, _) = HuggingFaceBrowserSupport.PlanDestination(modelsDir, "model.gguf");
+
+        Assert.Equal(Path.Combine(modelsDir, "LLM", "model.gguf"), destination);
     }
 }

@@ -121,6 +121,7 @@ public sealed class AgentTaskListItemViewModel
         Status = item.Status;
         UpdatedAt = item.UpdatedAt;
         ParentTaskId = item.ParentTaskId;
+        PendingStepCount = item.PendingStepCount;
     }
 
     public string TaskId { get; }
@@ -128,8 +129,17 @@ public sealed class AgentTaskListItemViewModel
     public AgentTaskStatus Status { get; }
     public DateTime UpdatedAt { get; }
     public string? ParentTaskId { get; }
+    public int PendingStepCount { get; }
     public bool IsSubTask => !string.IsNullOrWhiteSpace(ParentTaskId);
     public string StatusLabel => Status.ToString();
+
+    /// <summary>r19 3.3: a terminal task (Complete/Failed/Blocked) whose own plan still lists
+    /// pending steps declared victory prematurely; flag it at a glance in the recent-tasks list.</summary>
+    public bool IsPrematureComplete =>
+        PendingStepCount > 0 && Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed or AgentTaskStatus.Blocked;
+    public string PrematureCompleteNote => IsPrematureComplete
+        ? $"Finished with {PendingStepCount} planned step{(PendingStepCount == 1 ? "" : "s")} not run."
+        : string.Empty;
 
     public string RelativeTimeLabel
     {
@@ -469,6 +479,18 @@ public partial class AgentViewModel : ViewModelBase
     }
     public string CurrentTaskGoalLabel => CurrentTask is null || string.IsNullOrWhiteSpace(CurrentTask.Goal) ? "No goal loaded" : CurrentTask.Goal;
     public string CurrentTaskSummaryLabel => CurrentTask is null || string.IsNullOrWhiteSpace(CurrentTask.Summary) ? "No summary yet" : CurrentTask.Summary;
+
+    /// <summary>r19 3.1/3.3: a task that will not resume its own loop without user action - the
+    /// Continue affordance and New task button both key off this.</summary>
+    public bool IsTaskTerminal => CurrentTask?.Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed or AgentTaskStatus.Blocked;
+
+    /// <summary>r19 3.3: presentation only - a terminal task whose own plan still lists pending
+    /// steps declared victory prematurely; pairs with the Continue box (3.1) to answer
+    /// "it stopped halfway, now what".</summary>
+    public string PrematureCompleteNote => CurrentTask is { } t && IsTaskTerminal && t.PendingSteps.Count > 0
+        ? $"Finished with {t.PendingSteps.Count} planned step{(t.PendingSteps.Count == 1 ? "" : "s")} not run."
+        : string.Empty;
+    public bool HasPrematureCompleteNote => !string.IsNullOrEmpty(PrematureCompleteNote);
     /// <summary>True when the task is asking a question, not waiting on a tool approval; only then does the reply box apply.</summary>
     public bool IsWaitingForReply => CurrentTask is { Status: AgentTaskStatus.WaitingForUser, PendingToolAction: null };
     public int RecentTaskCount => RecentTasks.Count;
@@ -695,6 +717,29 @@ public partial class AgentViewModel : ViewModelBase
     private void Stop() => _cts?.Cancel();
 
     /// <summary>
+    /// r19 3.2: once a task is loaded the workbench is visually and mentally
+    /// owned by it and nothing said "you can just type a new goal" - the
+    /// owner read that as impossible. Clears composer/preview state only;
+    /// never touches the persisted task (Recent tasks still resumes it
+    /// exactly as before) and never clears the review queue.
+    /// </summary>
+    public bool CanShowNewTaskButton => !IsRunning && CurrentTask is not null;
+    private bool CanNewTask() => CanShowNewTaskButton;
+
+    [RelayCommand(CanExecute = nameof(CanNewTask))]
+    private void NewTask()
+    {
+        CurrentTask = null;
+        _openedTaskId = null;
+        _currentTaskParentGoal = string.Empty;
+        GoalText = string.Empty;
+        ReplyText = string.Empty;
+        StatusMessage = string.Empty;
+        IsError = false;
+        RefreshTaskPreview();
+    }
+
+    /// <summary>
     /// Takes a bare task id, not an item view model (r16
     /// 03-workbench-and-desktop.md 3.1), so both the recent-tasks list
     /// (<see cref="AgentTaskListItemViewModel.TaskId"/>) and the review
@@ -791,6 +836,34 @@ public partial class AgentViewModel : ViewModelBase
     }
 
     private bool CanSendReply() => !IsRunning && IsWaitingForReply && !string.IsNullOrWhiteSpace(ReplyText);
+
+    /// <summary>Bound to the "Continue task" instruction box (r19 3.1); placeholder text
+    /// covers the empty-input default, so this stays literally empty until the user types.</summary>
+    [ObservableProperty] private string _continueInstructionText = string.Empty;
+
+    [RelayCommand(CanExecute = nameof(CanContinueTask))]
+    private async Task ContinueTaskAsync()
+    {
+        if (CurrentTask is null) return;
+        var taskId = CurrentTask.TaskId;
+        try
+        {
+            var options = CurrentTask.WorkspaceRoot is { Length: > 0 } root ? BuildOptions() with { WorkspaceRoot = root } : BuildOptions();
+            await _agent.ContinueTaskAsync(taskId, ContinueInstructionText, options);
+            ContinueInstructionText = string.Empty;
+            await LoadTaskIfOpenAsync(taskId);
+            // Same approve-and-continue shape as ApproveReviewAsync/SendReplyAsync:
+            // a reopened task that AgentService just returned to Running should
+            // resume the loop instead of requiring a separate manual step.
+            await ResumeAgentLoopIfRunnableAsync(taskId);
+        }
+        catch (Exception ex)
+        {
+            SetError(ex.Message);
+        }
+    }
+
+    private bool CanContinueTask() => !IsRunning && IsTaskTerminal;
 
     /// <summary>
     /// Shared by <see cref="ApproveReviewAsync"/> and <see cref="SendReplyAsync"/>:
@@ -1602,8 +1675,20 @@ public partial class AgentViewModel : ViewModelBase
     {
         RunStepCommand.NotifyCanExecuteChanged();
         SendReplyCommand.NotifyCanExecuteChanged();
+        NewTaskCommand.NotifyCanExecuteChanged();
+        ContinueTaskCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(IsWaitingForReply));
+        OnPropertyChanged(nameof(CanShowNewTaskButton));
+        OnPropertyChanged(nameof(IsTaskTerminal));
+        OnPropertyChanged(nameof(PrematureCompleteNote));
+        OnPropertyChanged(nameof(HasPrematureCompleteNote));
         _ = RefreshQueuedPatchesAsync();
     }
     partial void OnReplyTextChanged(string value) => SendReplyCommand.NotifyCanExecuteChanged();
+    partial void OnIsRunningChanged(bool value)
+    {
+        NewTaskCommand.NotifyCanExecuteChanged();
+        ContinueTaskCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(CanShowNewTaskButton));
+    }
 }

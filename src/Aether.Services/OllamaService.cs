@@ -186,7 +186,7 @@ public sealed class OllamaService : IDisposable
                     // OpenAI-compatible servers do, so no accumulator is needed.
                     var toolCalls = ToToolCalls(chunk);
                     var usage = ToUsage(chunk);
-                    yield return new LlmStreamEvent(Usage: usage, IsFinal: true, ToolCalls: toolCalls);
+                    yield return new LlmStreamEvent(Usage: usage, IsFinal: true, ToolCalls: toolCalls, FinishReason: chunk.DoneReason);
                     yield break;
                 }
             }
@@ -266,7 +266,8 @@ public sealed class OllamaService : IDisposable
         [property: JsonPropertyName("message")] ChatMessageChunk? Message,
         [property: JsonPropertyName("done")] bool Done,
         [property: JsonPropertyName("prompt_eval_count")] int? PromptEvalCount,
-        [property: JsonPropertyName("eval_count")] int? EvalCount);
+        [property: JsonPropertyName("eval_count")] int? EvalCount,
+        [property: JsonPropertyName("done_reason")] string? DoneReason);
     private sealed record ChatMessageChunk(
         [property: JsonPropertyName("content")] string Content,
         [property: JsonPropertyName("tool_calls")] List<OllamaToolCallChunk>? ToolCalls);

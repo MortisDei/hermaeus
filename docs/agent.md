@@ -22,11 +22,20 @@ explicit user approval before it executes.
 - Shows a review queue for waiting or blocked tasks with approve/reject
   actions for recorded approvals, plus an Open button that loads the queued
   task into the workbench.
-- Shows a Recent Tasks list (status chip, goal, relative time; sub-task
-  children indented with a tag) so a completed task's report, a failed
-  task's blockers, or an orphaned task is reachable after a restart without
-  going through the review queue. Opening a child directly also shows its
-  parent's goal.
+- Shows a Recent Tasks list (status chip, goal, relative time, pending step
+  count; sub-task children indented with a tag) so a completed task's
+  report, a failed task's blockers, or an orphaned task is reachable after a
+  restart without going through the review queue. Opening a child directly
+  also shows its parent's goal.
+- A task that reached a terminal state before its own plan actually
+  finished (the model stopped short, or the run hit `Agent.MaxAutoSteps`)
+  shows a note naming why, alongside a Continue box: typed instructions call
+  `ContinueTaskAsync`, which resets the task back to a runnable state and
+  reconciles any sub-task plan, rather than requiring a brand new task for
+  what is really unfinished work. `ContinueTaskAsync` refuses with an
+  explanation when the task is a sub-task (continue the parent instead), is
+  already running, or has a tool approval pending. A "New Task" button next
+  to Start always starts an actual fresh task.
 
 ### Context & Retrieval
 

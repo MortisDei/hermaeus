@@ -44,6 +44,16 @@ public partial class DoctorViewModel : ObservableObject
     /// </summary>
     public Func<string, string, Task<bool>>? RequestConfirmAsync { get; set; }
 
+    /// <summary>
+    /// r19 2.2: set by MainWindowViewModel to bridge to ServicesViewModel
+    /// (Doctor has no server-process knowledge of its own). Stops every
+    /// running llama-server ahead of an update and returns the ids to
+    /// restart afterward; restarting re-syncs each server's executable path
+    /// from the just-updated config first.
+    /// </summary>
+    public Func<IReadOnlyList<string>>? RequestStopRunningLlamaServersForUpdate { get; set; }
+    public Func<IReadOnlyList<string>, Task>? RequestRestartServers { get; set; }
+
     public DoctorViewModel(IDoctorService doctor, IToastService toasts, ISettingsService settings, IVoiceOrchestrator? voice = null)
     {
         _doctor = doctor;
@@ -290,16 +300,26 @@ public partial class DoctorViewModel : ObservableObject
 
     /// <summary>
     /// Updates llama.cpp via the detailed path so the flow can offer to prune
-    /// superseded version directories (r14 3.2) and hint that running servers
-    /// need a restart to pick up the new binary (r14 3.3).
+    /// superseded version directories (r14 3.2). r19 2.2: running servers are
+    /// stopped before the update and restarted against the new binary
+    /// afterward (or the unchanged one, on failure) rather than left on the
+    /// old build until the user notices and restarts them manually.
     /// </summary>
     private async Task RunLlamaUpdateAsync()
     {
         if (IsInstallingLlamaServer) return;
         IsInstallingLlamaServer = true;
         _installCts = new CancellationTokenSource();
+        var stoppedServerIds = Array.Empty<string>() as IReadOnlyList<string>;
         try
         {
+            if (RequestStopRunningLlamaServersForUpdate is not null)
+            {
+                stoppedServerIds = RequestStopRunningLlamaServersForUpdate();
+                if (stoppedServerIds.Count > 0)
+                    LlamaServerProgress = $"Stopping {stoppedServerIds.Count} running server(s) for update...";
+            }
+
             var progress = new Progress<string>(s => LlamaServerProgress = s);
             var outcome = await _doctor.InstallLlamaServerUpdateDetailedAsync(progress, _installCts.Token);
             if (!outcome.Success)
@@ -309,7 +329,9 @@ public partial class DoctorViewModel : ObservableObject
             }
 
             _toasts.Show("llama.cpp updated",
-                "Running servers keep the old build until you restart them from Services.",
+                stoppedServerIds.Count > 0
+                    ? "Restarting the servers that were stopped for the update."
+                    : "No running servers needed to be stopped.",
                 ToastKind.Success, 8000);
 
             if (outcome.PrunableVersionDirectories.Count > 0 && RequestConfirmAsync is not null)
@@ -337,6 +359,14 @@ public partial class DoctorViewModel : ObservableObject
         }
         finally
         {
+            if (stoppedServerIds.Count > 0 && RequestRestartServers is not null)
+            {
+                try { await RequestRestartServers(stoppedServerIds); }
+                catch (Exception ex)
+                {
+                    _toasts.Show("Could not restart a server", ex.Message, ToastKind.Warning, 7000);
+                }
+            }
             LlamaServerProgress = string.Empty;
             IsInstallingLlamaServer = false;
             _installCts?.Dispose();

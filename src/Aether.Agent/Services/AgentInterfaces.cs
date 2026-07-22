@@ -112,6 +112,19 @@ public interface IAgentService
     /// a substitute for an explicit approval decision.
     /// </summary>
     Task AppendUserReplyAsync(string taskId, string reply, CancellationToken ct = default);
+
+    /// <summary>
+    /// r19 3.1: reopens a terminal or stalled task with a user instruction,
+    /// so a task that finished (prematurely or not), failed, or got blocked
+    /// can keep going without the user retyping the whole goal as a brand
+    /// new task. Never auto-approves anything - a reopened task that
+    /// proposes a gated action still goes through the review queue exactly
+    /// like a fresh one. Refuses (no state change) when the task is
+    /// actively <see cref="Aether.Agent.Models.AgentTaskStatus.Running"/> or
+    /// has a pending tool approval (the review queue is for that), and when
+    /// the task is a sub-task child (continue the parent instead).
+    /// </summary>
+    Task<AgentTaskState> ContinueTaskAsync(string taskId, string instruction, AgentWorkspaceOptions options, CancellationToken ct = default);
 }
 
 public interface IWorkspaceProfileStore

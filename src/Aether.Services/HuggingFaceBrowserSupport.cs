@@ -19,7 +19,7 @@ public static class HuggingFaceBrowserSupport
     public static (string DestinationPath, bool Collides) PlanDestination(string modelsDirectory, string repoFilePath)
     {
         var fileName = Path.GetFileName(repoFilePath);
-        var destination = Path.Combine(modelsDirectory, "LLM", fileName);
+        var destination = Path.Combine(modelsDirectory, LlmFolderName.Resolve(modelsDirectory), fileName);
         return (destination, File.Exists(destination));
     }
 }

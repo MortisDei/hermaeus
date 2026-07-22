@@ -46,7 +46,7 @@ public static class ModelFolderOrganizer
     /// needs to re-check that exclusion because those files are never in its input.</summary>
     public static ModelOrganizePlan Plan(string modelsDirectory, IReadOnlyList<string> ggufPaths, bool moveRootLevelFiles = true)
     {
-        var destination = Path.Combine(modelsDirectory, "LLM");
+        var destination = Path.Combine(modelsDirectory, LlmFolderName.Resolve(modelsDirectory));
         var moves = new List<ModelMoveItem>();
         var skips = new List<ModelMoveSkip>();
         var usedDestinations = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

@@ -260,7 +260,7 @@ internal static class VoicePronunciationTests
         {
             var phonemes = KokoroPhonemizer.ToPhonemes(sentence);
             var chunks = KokoroTokenizer.Encode(phonemes);
-            var totalTokens = chunks.Sum(c => c.Length) - (chunks.Count * 2); // minus the two pad tokens per chunk
+            var totalTokens = chunks.Sum(c => c.Ids.Length) - (chunks.Count * 2); // minus the two pad tokens per chunk
             Equal(phonemes.Length, totalTokens, $"'{sentence}' phonemized to {phonemes.Length} chars but only {totalTokens} were tokenized; some characters were silently dropped.");
         }
         return Task.CompletedTask;
@@ -341,7 +341,7 @@ internal static class VoicePronunciationTests
             var phonemes = KokoroPhonemizer.ToPhonemes(sentence);
             True(phonemes.Length > 0, $"'{sentence}' must produce non-empty phonemes.");
             var chunks = KokoroTokenizer.Encode(phonemes);
-            var totalTokens = chunks.Sum(c => c.Length) - (chunks.Count * 2); // minus the two pad tokens per chunk
+            var totalTokens = chunks.Sum(c => c.Ids.Length) - (chunks.Count * 2); // minus the two pad tokens per chunk
             Equal(phonemes.Length, totalTokens, $"'{sentence}' phonemized to {phonemes.Length} chars but only {totalTokens} were tokenized; some characters were silently dropped.");
         }
         return Task.CompletedTask;

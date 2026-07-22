@@ -10,7 +10,19 @@ namespace Aether.Core.Services;
 /// <see cref="ToolCalls"/>, and the corresponding tool-result turn (Role
 /// "tool") carries <see cref="ToolCallId"/>. Plain chat messages leave both null.
 /// </summary>
-public record ChatMessage(string Role, string Content, string? ToolCallId = null, IReadOnlyList<LlmToolCallRequest>? ToolCalls = null);
+/// <param name="Images">r19 5.3: images attached to this turn, already encoded as data: URIs so
+/// the wire-format builder that consumes this stays pure (no file IO / re-encoding per send).</param>
+public record ChatMessage(
+    string Role,
+    string Content,
+    string? ToolCallId = null,
+    IReadOnlyList<LlmToolCallRequest>? ToolCalls = null,
+    IReadOnlyList<ChatMessageImage>? Images = null);
+
+/// <summary>One image attached to a chat turn (r19 5.3). <see cref="DataUri"/> is a complete
+/// <c>data:&lt;mediaType&gt;;base64,...</c> string, ready to embed directly in an OpenAI-style
+/// image_url content part.</summary>
+public sealed record ChatMessageImage(string FileName, string DataUri);
 
 public sealed record ChatTokenUsage(int PromptTokens, int CompletionTokens, int TotalTokens);
 
@@ -33,12 +45,19 @@ public sealed record ChatServerTimings(
     int? PredictedTokens,
     double? PredictedMs);
 
+/// <param name="FinishReason">
+/// Provider-reported reason the stream ended (e.g. "stop", "length",
+/// "tool_calls"). "length" means generation was cut off by the configured
+/// token cap, not that the model finished naturally. Null when the
+/// provider does not report one.
+/// </param>
 public sealed record LlmStreamEvent(
     string ContentDelta = "",
     ChatTokenUsage? Usage = null,
     bool IsFinal = false,
     IReadOnlyList<LlmToolCallRequest>? ToolCalls = null,
-    ChatServerTimings? ServerTimings = null)
+    ChatServerTimings? ServerTimings = null,
+    string? FinishReason = null)
 {
     public static LlmStreamEvent Error(string message) => new(message, IsFinal: true);
 }

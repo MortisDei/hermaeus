@@ -494,7 +494,10 @@ public sealed record AgentTaskListItem(
     AgentTaskStatus Status,
     DateTime UpdatedAt,
     /// <summary>Non-null when this task is a sub-task child, so recent-task lists can mark it as such.</summary>
-    string? ParentTaskId = null);
+    string? ParentTaskId = null,
+    /// <summary>r19 3.3: PendingSteps.Count as of the last save, so the recent-tasks list can flag a
+    /// terminal task that declared victory with its own plan still open, without loading the full state.</summary>
+    int PendingStepCount = 0);
 
 public sealed record AgentFileSearchResult(
     string RelativePath,

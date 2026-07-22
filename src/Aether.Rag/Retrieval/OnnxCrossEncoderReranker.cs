@@ -100,6 +100,7 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
             _tokenizer = BertTokenizer.Create(vocabPath);
             _journal?.RecordOperation("loading reranker ONNX session (EnsureLoadedAsync)");
             _session = new InferenceSession(modelPath);
+            _journal?.RecordOperation("reranker ONNX session loaded");
             return true;
         }
         catch
@@ -138,6 +139,7 @@ public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
             _journal?.RecordOperation("loading reranker ONNX session (InstallAssetsAsync)");
             _session = new InferenceSession(modelPath);
             _unavailable = false;
+            _journal?.RecordOperation("reranker ONNX session loaded");
             progress?.Report("Reranker installed");
             return true;
         }

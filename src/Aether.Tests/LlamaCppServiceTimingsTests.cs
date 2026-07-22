@@ -34,4 +34,28 @@ public sealed class LlamaCppServiceTimingsTests
         Assert.Null(evt!.ServerTimings);
         Assert.Equal("hi", evt.ContentDelta);
     }
+
+    // ── r19 1.2: max-token truncation must be visible, not silently discarded ──
+
+    [Fact]
+    public void ParseStreamEvent_reports_length_finish_reason()
+    {
+        const string json = """{"choices":[{"delta":{},"finish_reason":"length"}],"usage":{"prompt_tokens":10,"completion_tokens":4096,"total_tokens":4106}}""";
+
+        var evt = LlamaCppService.ParseStreamEvent(json);
+
+        Assert.NotNull(evt);
+        Assert.Equal("length", evt!.FinishReason);
+    }
+
+    [Fact]
+    public void ParseStreamEvent_reports_stop_finish_reason_distinctly()
+    {
+        const string json = """{"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":20,"total_tokens":30}}""";
+
+        var evt = LlamaCppService.ParseStreamEvent(json);
+
+        Assert.NotNull(evt);
+        Assert.Equal("stop", evt!.FinishReason);
+    }
 }

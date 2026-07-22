@@ -17,12 +17,16 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     private readonly IToastService         _toasts;
     private readonly IRuntimeLogService    _runtimeLogs;
     private readonly OrphanServerDetector  _orphanDetector;
+    private readonly ModelProfileService?  _modelProfiles;
     private readonly ServerConfig          _config;
     private OrphanServerInfo? _orphanInfo;
+    private string? _lastModelPathForDefaults;
 
     [ObservableProperty] private string       _name;
     [ObservableProperty] private string       _executablePath;
     [ObservableProperty] private string       _modelPath;
+    /// <summary>r19 5.3: optional vision projector (--mmproj); empty means text-only.</summary>
+    [ObservableProperty] private string       _mmprojPath = string.Empty;
     [ObservableProperty] private int          _port;
     [ObservableProperty] private int          _contextSize;
     [ObservableProperty] private int          _gpuLayers;
@@ -63,6 +67,11 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private string       _contextFitNote = string.Empty;
     [ObservableProperty] private bool         _hasContextFitWarning;
 
+    /// <summary>r19 2.1: names where the current Context Size value came from ("Context from model card" / "Context from Auto Tune"), empty when the user set it directly.</summary>
+    [ObservableProperty] private string       _contextSourceLabel = string.Empty;
+    public bool HasContextSourceLabel => !string.IsNullOrEmpty(ContextSourceLabel);
+    partial void OnContextSourceLabelChanged(string value) => OnPropertyChanged(nameof(HasContextSourceLabel));
+
     public string Id => _config.Id;
     public bool IsRunning  => Status == ServerStatus.Running;
     public bool IsStopped  => Status is ServerStatus.Stopped or ServerStatus.Error;
@@ -73,6 +82,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _config.Name != Name ||
         _config.ExecutablePath != ExecutablePath ||
         _config.ModelPath != ModelPath ||
+        _config.MmprojPath != MmprojPath ||
         _config.Port != Port ||
         _config.ContextSize != ContextSize ||
         _config.GpuLayers != GpuLayers ||
@@ -136,6 +146,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     private int _contextFitGeneration;
 
     public UiBoundCollection<string> DetectedModelPaths { get; } = [];
+    public UiBoundCollection<string> DetectedMmprojPaths { get; } = [];
 
     /// <summary>Folder a model-path file picker should open in: the embeddings subfolder for the embeddings server, otherwise the models folder.</summary>
     public string SuggestedModelBrowseDirectory
@@ -160,6 +171,12 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         DetectedModelPaths.Clear();
         foreach (var path in found)
             DetectedModelPaths.Add(path);
+        // r19 2.5: a model path browsed (or previously saved) from outside
+        // the scanned assets root never appears in `found`; without the
+        // manual free-text fallback box this round removed, the ComboBox
+        // would otherwise render blank for it after every rescan.
+        if (!string.IsNullOrWhiteSpace(current) && !DetectedModelPaths.Contains(current, StringComparer.OrdinalIgnoreCase))
+            DetectedModelPaths.Insert(0, current);
         // DetectedModelPaths.Clear() fires a CollectionChanged Reset, which the
         // ComboBox bound to it (SelectedItem="{Binding ModelPath}", TwoWay by
         // default) reacts to by resetting its own selection to null - and because
@@ -173,6 +190,34 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
             ModelPath = current;
     }
 
+    /// <summary>r19 5.3: rescans for `mmproj-*.gguf` files beside the selected model whenever
+    /// it changes, auto-filling the sole candidate when the field is still empty (never
+    /// overwrites an explicit choice, following the same repair-on-Clear() pattern as
+    /// <see cref="RefreshDetectedModels"/>).</summary>
+    private void RefreshDetectedMmprojPaths(string modelPath)
+    {
+        var current = MmprojPath;
+        DetectedMmprojPaths.Clear();
+
+        if (!string.IsNullOrWhiteSpace(modelPath))
+        {
+            var dir = Path.GetDirectoryName(modelPath);
+            if (!string.IsNullOrWhiteSpace(dir) && Directory.Exists(dir))
+            {
+                foreach (var file in Directory.EnumerateFiles(dir, "mmproj-*.gguf").OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
+                    DetectedMmprojPaths.Add(file);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(current) && !DetectedMmprojPaths.Contains(current, StringComparer.OrdinalIgnoreCase))
+            DetectedMmprojPaths.Insert(0, current);
+
+        if (string.IsNullOrWhiteSpace(current) && DetectedMmprojPaths.Count == 1)
+            MmprojPath = DetectedMmprojPaths[0];
+        else if (!string.IsNullOrWhiteSpace(current) && MmprojPath != current)
+            MmprojPath = current;
+    }
+
     public ServerProcessViewModel(
         ServerConfig config,
         ISettingsService settings,
@@ -181,7 +226,8 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         IToastService toasts,
         IRuntimeLogService runtimeLogs,
         OrphanServerDetector? orphanDetector = null,
-        HardwareProfile? hardwareProfile = null)
+        HardwareProfile? hardwareProfile = null,
+        ModelProfileService? modelProfiles = null)
     {
         _mgr = new ServerProcessManager(redactor);
         _config   = config;
@@ -191,10 +237,13 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _runtimeLogs = runtimeLogs;
         _orphanDetector = orphanDetector ?? new OrphanServerDetector();
         _hardwareProfile = hardwareProfile;
+        _modelProfiles = modelProfiles;
 
         _name           = config.Name;
         _executablePath = config.ExecutablePath;
         _modelPath      = config.ModelPath;
+        _mmprojPath     = config.MmprojPath;
+        _lastModelPathForDefaults = string.IsNullOrWhiteSpace(config.ModelPath) ? null : config.ModelPath;
         _port           = config.Port;
         _contextSize    = config.ContextSize;
         _gpuLayers      = config.GpuLayers;
@@ -233,6 +282,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         });
 
         RefreshDetectedModels();
+        RefreshDetectedMmprojPaths(ModelPath);
         ScheduleContextFitRefresh();
     }
 
@@ -502,6 +552,12 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     }
 
     [RelayCommand]
+    private void BrowseMmproj()
+    {
+        RequestFilePicker?.Invoke(nameof(MmprojPath));
+    }
+
+    [RelayCommand]
     private async Task AutoTuneAsync()
     {
         if (!CanEdit) return;
@@ -635,6 +691,17 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
 
     public void StopIfRunning() => _mgr.Stop();
 
+    /// <summary>
+    /// r19 2.2: after an llama.cpp update rewrites <c>ExecutablePath</c>
+    /// directly on the underlying <see cref="ServerConfig"/> (a live
+    /// in-place mutation, not a settings reload), this VM's own bound
+    /// property is stale until re-synced - and <see cref="StartCoreAsync"/>
+    /// would otherwise overwrite the fresh config value right back to the
+    /// stale one via <c>SyncToConfig()</c> before ever starting. Call this
+    /// before restarting a server programmatically after such a mutation.
+    /// </summary>
+    public void SyncExecutablePathFromConfig() => ExecutablePath = _config.ExecutablePath;
+
     public async Task SelectModelAndRestartAsync(string modelPath, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(modelPath))
@@ -664,11 +731,11 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
             throw new InvalidOperationException(ErrorMessage);
     }
 
-    private void ApplyTuneProfileIfAvailable()
+    private bool ApplyTuneProfileIfAvailable()
     {
         var profile = LlamaTuneProfileStore.Find(_settings.Settings, ModelPath);
         if (profile is null)
-            return;
+            return false;
 
         GpuLayers = profile.GpuLayers;
         Threads = profile.Threads;
@@ -676,6 +743,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
             ContextSize = profile.ContextSize;
         if (!string.IsNullOrWhiteSpace(profile.ExtraArgs))
             ExtraArgs = profile.ExtraArgs;
+        return true;
     }
 
     private Task PersistTuneProfileAsync(ServerTuneResult? result = null)
@@ -715,6 +783,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _config.Name           = Name;
         _config.ExecutablePath = ExecutablePath;
         _config.ModelPath      = ModelPath;
+        _config.MmprojPath     = MmprojPath;
         _config.Port           = Port;
         _config.ContextSize    = ContextSize;
         _config.GpuLayers      = GpuLayers;
@@ -761,6 +830,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         Name           = Name,
         ExecutablePath = ExecutablePath,
         ModelPath      = ModelPath,
+        MmprojPath     = MmprojPath,
         Port           = Port,
         ContextSize    = ContextSize,
         GpuLayers      = GpuLayers,
@@ -800,6 +870,62 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     {
         OnPropertyChanged(nameof(HasUnsavedChanges));
         ScheduleContextFitRefresh();
+        RepairDetectedModelPathsIfBrowsedOutsideRoot(value);
+        ApplyModelDefaultsIfPathActuallyChanged(value);
+        RefreshDetectedMmprojPaths(value);
+    }
+    partial void OnMmprojPathChanged(string value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+
+    /// <summary>
+    /// r19 2.5: the ComboBox's SelectedItem binding can only display a value
+    /// present in its ItemsSource. A path browsed (or previously saved) from
+    /// outside the detected-models scan would otherwise render blank once
+    /// the free-text fallback TextBox was removed.
+    /// </summary>
+    private void RepairDetectedModelPathsIfBrowsedOutsideRoot(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return;
+        if (!DetectedModelPaths.Contains(value, StringComparer.OrdinalIgnoreCase))
+            DetectedModelPaths.Insert(0, value);
+    }
+
+    /// <summary>
+    /// r19 2.1: applies precedence tune-profile &gt; model-card default &gt;
+    /// leave-as-is when the selected model actually changes to a different
+    /// file. <see cref="RefreshDetectedModels"/> re-assigns <see cref="ModelPath"/>
+    /// back to its own current value to repair the ComboBox binding after a
+    /// list rebuild; that reassignment must never re-apply defaults on top
+    /// of values the user already edited.
+    /// </summary>
+    private void ApplyModelDefaultsIfPathActuallyChanged(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            _lastModelPathForDefaults = value;
+            return;
+        }
+        if (string.Equals(value, _lastModelPathForDefaults, StringComparison.OrdinalIgnoreCase))
+            return;
+        _lastModelPathForDefaults = value;
+
+        if (ApplyTuneProfileIfAvailable())
+        {
+            ContextSourceLabel = "Context from Auto Tune";
+            return;
+        }
+
+        var card = _modelProfiles?.Get(value)
+            ?? _modelProfiles?.Profiles.FirstOrDefault(p =>
+                string.Equals(Path.GetFileName(p.ModelId), Path.GetFileName(value), StringComparison.OrdinalIgnoreCase));
+        if (card is { DefaultContextSize: > 0 })
+        {
+            ContextSize = card.DefaultContextSize.Value;
+            ContextSourceLabel = "Context from model card";
+        }
+        else
+        {
+            ContextSourceLabel = string.Empty;
+        }
     }
     partial void OnPortChanged(int value) => OnPropertyChanged(nameof(HasUnsavedChanges));
     partial void OnContextSizeChanged(int value)
@@ -906,6 +1032,7 @@ public partial class ServicesViewModel : ViewModelBase
     private readonly IRuntimeLogService _runtimeLogs;
     private readonly OrphanServerDetector _orphanDetector;
     private readonly ISystemInfoService? _systemInfo;
+    private readonly ModelProfileService _modelProfiles;
     private HardwareProfile? _hardwareProfile;
 
     public UiBoundCollection<ServerProcessViewModel> Servers { get; } = [];
@@ -940,7 +1067,8 @@ public partial class ServicesViewModel : ViewModelBase
         TrustService trust,
         IRuntimeLogService runtimeLogs,
         OrphanServerDetector? orphanDetector = null,
-        ISystemInfoService? systemInfo = null)
+        ISystemInfoService? systemInfo = null,
+        ModelProfileService? modelProfiles = null)
     {
         _settings = settings;
         _runtimeProfiles = runtimeProfiles;
@@ -950,6 +1078,7 @@ public partial class ServicesViewModel : ViewModelBase
         _runtimeLogs = runtimeLogs;
         _orphanDetector = orphanDetector ?? new OrphanServerDetector();
         _systemInfo = systemInfo;
+        _modelProfiles = modelProfiles ?? new ModelProfileService(settings);
         Rebuild();
         _settings.SettingsChanged += (_, _) => RunOnUi(Rebuild);
         if (_systemInfo is not null)
@@ -1027,7 +1156,7 @@ public partial class ServicesViewModel : ViewModelBase
             }
             else
             {
-                var vm = new ServerProcessViewModel(cfg, _settings, _redactor, _trust, _toasts, _runtimeLogs, _orphanDetector, _hardwareProfile)
+                var vm = new ServerProcessViewModel(cfg, _settings, _redactor, _trust, _toasts, _runtimeLogs, _orphanDetector, _hardwareProfile, _modelProfiles)
                 {
                     BeforeStartAsync = StopSamePortPeersBeforeStartAsync
                 };
@@ -1053,6 +1182,46 @@ public partial class ServicesViewModel : ViewModelBase
 
     private static string BuildAvailabilityFingerprint(IEnumerable<ServerConfig> configs) =>
         string.Join("|", configs.Select(c => $"{c.Id}:{c.Port}:{c.ExecutablePath}:{c.ModelPath}"));
+
+    /// <summary>
+    /// r19 2.2: stops every currently-Running managed server whose executable
+    /// looks like a llama-server binary, ahead of an in-place llama.cpp
+    /// update, so the update flow can restart precisely that set afterward
+    /// (and so a superseded version directory becomes prunable immediately
+    /// instead of staying locked until the next app restart). Returns the
+    /// stopped servers' ids.
+    /// </summary>
+    public IReadOnlyList<string> StopRunningLlamaServersForUpdate()
+    {
+        var stopped = new List<string>();
+        foreach (var server in Servers)
+        {
+            if (server.Status == ServerStatus.Running && LooksLikeLlamaServerExecutable(server.ExecutablePath))
+            {
+                server.StopIfRunning();
+                stopped.Add(server.Id);
+            }
+        }
+        return stopped;
+    }
+
+    /// <summary>Restarts exactly the servers named by id (r19 2.2), re-syncing each from its
+    /// possibly just-updated <see cref="ServerConfig.ExecutablePath"/> first. Safe to call with
+    /// ids for servers that no longer exist or are already running; both are no-ops.</summary>
+    public async Task RestartServersAsync(IReadOnlyList<string> serverIds)
+    {
+        foreach (var id in serverIds)
+        {
+            var server = Servers.FirstOrDefault(s => s.Id == id);
+            if (server is null || !server.IsStopped) continue;
+            server.SyncExecutablePathFromConfig();
+            await server.StartCommand.ExecuteAsync(null);
+        }
+    }
+
+    private static bool LooksLikeLlamaServerExecutable(string executablePath) =>
+        !string.IsNullOrWhiteSpace(executablePath)
+        && Path.GetFileName(executablePath.Trim()).Contains("llama-server", StringComparison.OrdinalIgnoreCase);
 
     [RelayCommand]
     private async Task AddRuntimeProfileAsync()

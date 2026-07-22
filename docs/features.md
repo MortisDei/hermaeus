@@ -45,12 +45,39 @@
   same ranges and descriptions as the Models page editor, plus a "Reset to
   model defaults" button. These values remain conversation-local and are
   never written back to settings.
-- Chat can attach selected local text/code files directly to the next message.
-  Use the attach button or drop files on the input. Aether reads each file once at
-  send time, prepends a bounded context block to the model prompt, and stores only
-  an attachment summary in conversation history.
+- Chat can attach selected local text/code files, `.docx`, and `.pdf` files
+  directly to the next message. Use the attach button or drop files on the
+  input. Aether reads each file once at send time, extracting text first for
+  `.docx`/`.pdf` (a scanned PDF or one with no extractable text is Skipped
+  with the reason shown, not silently dropped), prepends a bounded context
+  block to the model prompt, and stores only an attachment summary in
+  conversation history.
+- Chat can also attach up to 4 images (`.png`/`.jpg`/`.jpeg`/`.webp`, 8 MB
+  each) per message when the active chat server has a Vision projector
+  configured (Services > Vision projector, `--mmproj`), or when the selected
+  model routes through the OpenAI provider (its API accepts the same
+  `image_url` content part natively, no local projector needed); they ride
+  the same attach button and render a thumbnail chip. Without either, an
+  attached image is Skipped with an honest reason instead of silently
+  degrading to text-only, and images never count against the text context
+  budget.
 - Attachment file paths are also persisted with each user message so regenerate
   can reattach context files after an app restart when those files still exist.
+- Every fenced code block in a rendered assistant reply has a Save button that
+  writes it to that conversation's artifacts folder
+  (`{DataRoot}/chat-artifacts/{conversationId}/`); a collapsed "Artifacts: N"
+  strip above the input bar expands to a list with Open/Reveal-in-folder
+  actions per file and a button to open the conversation's artifacts folder
+  directly.
+- A reply cut off by the configured max-tokens cap (the provider reports
+  `finish_reason: length`) shows a "Continue" affordance instead of quietly
+  reading as a complete answer.
+- A malformed assistant reply that would break Markdown rendering falls back
+  to plain selectable text instead of taking the whole chat view down with
+  it.
+- The message list only auto-scrolls to a new streamed token when it was
+  already pinned to the bottom; scrolling up to reread earlier messages
+  during a stream no longer gets yanked back down.
 - The chat bar shows current context usage against the selected context window.
   It uses provider-reported token usage when available and falls back to a
   local estimate for draft input, visible history, system prompt, and ready file
@@ -131,6 +158,11 @@
   20) - which now hands the task back for review with a note instead of
   leaving it looking silently active. Live progress and Stop remain
   available; a manual single-step advance is still available too.
+- A task that reached a terminal state before its plan actually finished
+  (e.g. the model stopped short, or hit the step cap) shows a note
+  explaining why next to a Continue box: typed instructions resume that same
+  task instead of forcing a new one to be started from scratch. A "New Task"
+  button next to Start is always available for the actual fresh-start case.
 - Reply channel: a task waiting on `ask_user` shows a reply box; answering it
   appends the reply to the transcript and resumes the run. A reply is
   refused while a tool approval is also pending on that task - approvals and
@@ -179,10 +211,10 @@
 - Recent task and review queue lists are backed by a SQLite task index so large
   Agent workspaces do not need to scan every `task_state.json` file to render
   the queue. A Recent Tasks list in the workbench (status chip, goal, relative
-  time; sub-task children indented with a tag) makes every task reachable
-  after a restart, not just ones currently waiting in the review queue, which
-  also gained an Open button; opening a child directly shows its parent's
-  goal.
+  time, pending step count; sub-task children indented with a tag) makes every
+  task reachable after a restart, not just ones currently waiting in the
+  review queue, which also gained an Open button; opening a child directly
+  shows its parent's goal.
 - The agent panel surfaces a compact summary strip with task state, step
   count, goal, summary, recent task history, review queue counts, workspace
   memory counts, and retrieved context counts for quick scanning.
@@ -268,9 +300,13 @@
   a pinned embeddings batch pair that silences llama.cpp's clamp warning.
 - Updating llama.cpp installs to the resolved install root instead of nesting
   a new version directory inside the previous one, preserves the configured
-  runtime variant, notes that running servers keep the old build until
-  restarted, and offers to prune superseded version directories (single
-  confirm; current and previous kept).
+  runtime variant, and offers to prune superseded version directories (single
+  confirm; current and previous kept). Any managed server running on the
+  binary being updated is stopped before the update and restarted afterward
+  automatically (restart always runs, even if the update itself fails), so
+  running servers no longer silently keep the old build until manually
+  restarted. When only the backend binary changes (not the CUDA version), an
+  already-downloaded matching CUDA runtime is reused instead of re-downloaded.
 - Managed Chat and Embeddings cards are normalized so duplicate default cards
   are removed. Starting a managed server stops any running peer on the same
   port first, allowing Chat and Embeddings to share a port when only one is
@@ -303,11 +339,11 @@
   same prompt across multiple visible models before choosing one for normal
   conversation.
 - Model benchmarks with GGUF discovery, one-click full-suite runs, saved run
-  history, deterministic quality checks, rankings that group runs by model,
-  column headers and tabular display, test info modal for case details,
-  reruns, and Markdown/JSON/CSV export. Rerun is disabled while a run is
-  already in progress, so a second click can no longer interrupt and leak
-  the first run's state.
+  history, deterministic quality checks, rankings that group runs by model
+  with a rank, a proportional score bar, and a Details button per run, test
+  info modal for case details, reruns, and Markdown/JSON/CSV export. Rerun is
+  disabled while a run is already in progress, so a second click can no
+  longer interrupt and leak the first run's state.
 - Benchmark views expose the test-details modal from both the per-result list
   and the best-run ranking rows, and saved benchmark history can be exported
   in bulk as one timestamped folder.
@@ -401,6 +437,14 @@
   calculation in the app (Services card warning, Auto Tune's context ladder),
   so switching from f16 to q8_0/q4_0 visibly raises how much context fits the
   same VRAM.
+- The Services card's server editor also exposes an optional "Vision
+  projector" picker beside the model row: a `mmproj-*.gguf` file that sits
+  alone next to the selected model auto-fills, otherwise it lists every
+  `mmproj-*.gguf` found there for manual choice. Setting one launches the
+  server with `--mmproj <path>`, enabling image attachments in chat for that
+  server. A model path browsed or previously saved from outside the scanned
+  assets root, and the models folder's own casing (`llm` vs `LLM`), are both
+  detected against what actually exists on disk rather than assumed.
 
 ## RAG
 
@@ -506,9 +550,13 @@
 - Doctor reports whether the previous session exited cleanly, using a small
   local-only lifecycle journal (no telemetry, nothing leaves the machine).
   If Aether did not shut down cleanly last time (a crash or force-close), the
-  warning names the last recorded operation, so a native-level crash that
-  bypasses all managed error handling still leaves a starting point for
-  diagnosis instead of no trace at all.
+  warning names the last recorded operation, and if an unhandled-exception
+  crash log exists from that session (written under `{DataRoot}/logs/`) its
+  detail is read back and shown too, so a native-level crash that bypasses
+  all managed error handling still leaves a real starting point for
+  diagnosis instead of a generic message. Neutral breadcrumbs ("running", a
+  completed session load) are not mistaken for the operation that was
+  actually in flight when a crash happened.
 
 ## System Integration
 
@@ -518,7 +566,9 @@
   abandoned to the existing job-object cleanup after a bounded 5-second wait
   rather than blocking exit indefinitely.
 - System overview for app version, CPU, RAM, storage, databases, managed
-  components, and GPU/VRAM visibility. On Windows this now reports real
+  components, and GPU/VRAM visibility (GPU/Components shown before the
+  Privacy Audit, since hardware is what most people check first). On
+  Windows this now reports real
   available/total RAM (not the GC's view), an honest OS name and build
   (Windows 11 detected by build number, not the kernel string's misleading
   "10.0.x"), the marketing CPU name from the registry, and GPU name/VRAM
@@ -526,7 +576,8 @@
 - Privacy Audit dashboard connects local-first posture into one view covering
   configured remote providers, local providers, network-facing managed server
   flags, secret backend health, runtime log redaction, data-root backup status,
-  and features that may send data remotely.
+  and features that may send data remotely, including images attached to a
+  chat message when a remote chat provider is selected.
 - Runtime logs with filters, copy, and redacted diagnostics export.
 - Runtime log entries are redacted before disk persistence and archive
   rotation avoids overwriting archives created in the same second. Redaction
@@ -640,9 +691,9 @@ Chat now injects relevant stored memories into each turn's system prompt when
 Memory is enabled (Settings > Memory). RAG citations still render as
 individually visible, clickable pills under the assistant's reply; memories
 actually used that turn instead collapse behind a single "Memories used: N"
-pill that expands to the individual memory pills (each with the memory's
-content as a tooltip) on click, so a reply grounded in several memories does
-not read as a wall of always-visible pills. This closes a gap from the
+pill that opens a flyout listing the individual memories (each with its
+content as a tooltip); clicking one jumps straight to it in the Memories
+view. This closes a gap from the
 original memory feature: memory injection existed as a service but nothing in
 chat ever called it.
 

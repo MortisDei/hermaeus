@@ -51,4 +51,12 @@ public class ServerConfig
     /// VRAM, drafts from the prompt/history itself. Emits <c>--spec-type ngram-mod</c> only.
     /// </summary>
     public bool   NgramSpeculative { get; set; } = false;
+
+    /// <summary>
+    /// r19 5.3: path to a vision projector (mmproj-*.gguf) companion file,
+    /// enabling llama-server's multimodal chat mode. Empty (default) means
+    /// text-only, byte-identical to today's launch command; set means
+    /// <c>--mmproj &lt;path&gt;</c> is appended.
+    /// </summary>
+    public string MmprojPath { get; set; } = string.Empty;
 }

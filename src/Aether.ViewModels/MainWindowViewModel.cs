@@ -108,6 +108,16 @@ public partial class MainWindowViewModel : ViewModelBase
         Benchmarks = benchmarks; SystemOverview = systemOverview; Doctor = doctor; Memories = memories; Logs = logs; Wizard = wizard;
         Doctor.RequestNavigate = panel => ActivePanel = panel;
         Chat.RequestNavigate = panel => ActivePanel = panel;
+        // r19 6.1: memory pill flyout's "Open in Memories" navigates and prefills search.
+        Chat.RequestNavigateToMemory = title =>
+        {
+            ActivePanel = "memories";
+            Memories.SearchText = title;
+        };
+        // r19 2.2: Doctor has no server-process knowledge of its own; bridge
+        // the llama.cpp update flow's stop-before/restart-after to Services.
+        Doctor.RequestStopRunningLlamaServersForUpdate = Services.StopRunningLlamaServersForUpdate;
+        Doctor.RequestRestartServers = Services.RestartServersAsync;
         // Keep toolbar doctor badge in sync with doctor checks
         Doctor.Checks.CollectionChanged += (_, _) => UpdateDoctorStatus();
         UpdateDoctorStatus();

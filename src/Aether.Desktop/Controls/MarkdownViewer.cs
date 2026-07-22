@@ -11,10 +11,13 @@ using Avalonia.Threading;
 using Avalonia.VisualTree;
 using AvaloniaEdit;
 using AvaloniaEdit.Highlighting;
+using CommunityToolkit.Mvvm.DependencyInjection;
 using Markdig;
 using Markdig.Extensions.Tables;
 using Markdig.Syntax;
 using Markdig.Syntax.Inlines;
+using Aether.Core.Models;
+using Aether.Core.Services;
 
 namespace Aether.Desktop.Controls;
 
@@ -31,6 +34,21 @@ public sealed class MarkdownViewer : ContentControl, IDisposable
 
     public static readonly StyledProperty<bool> IsErrorProperty =
         AvaloniaProperty.Register<MarkdownViewer, bool>(nameof(IsError));
+
+    /// <summary>
+    /// r19 5.4: lets a fenced code block's Save button reach the owning
+    /// ChatViewModel. MarkdownViewer stays a dumb, reusable renderer -
+    /// (language, code, this viewer's full markdown text) is reported
+    /// as-is; naming/writing policy lives entirely in the caller.
+    /// </summary>
+    public static readonly StyledProperty<Action<string?, string, string>?> RequestSaveCodeBlockProperty =
+        AvaloniaProperty.Register<MarkdownViewer, Action<string?, string, string>?>(nameof(RequestSaveCodeBlock));
+
+    public Action<string?, string, string>? RequestSaveCodeBlock
+    {
+        get => GetValue(RequestSaveCodeBlockProperty);
+        set => SetValue(RequestSaveCodeBlockProperty, value);
+    }
 
     private static readonly MarkdownPipeline Pipeline =
         new MarkdownPipelineBuilder().UseAdvancedExtensions().Build();
@@ -252,7 +270,38 @@ public sealed class MarkdownViewer : ContentControl, IDisposable
         if (version != _renderVersion)
             return;
 
-        Render(doc, md);
+        try
+        {
+            Render(doc, md);
+        }
+        catch (Exception ex)
+        {
+            LogRenderFailure(ex);
+            Content = new SelectableTextBlock
+            {
+                Text = md,
+                TextWrapping = TextWrapping.Wrap,
+                FontSize = FontSize
+            };
+            _lastRenderedBlocks.Clear();
+        }
+    }
+
+    // A markdown rendering bug must never be fatal to the whole app; this is
+    // a last-resort net around any future RenderBlock defect, not a
+    // substitute for fixing the specific defect it catches.
+    private static void LogRenderFailure(Exception ex)
+    {
+        try
+        {
+            var log = Ioc.Default.GetService<IRuntimeLogService>();
+            log?.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Error, RuntimeLogCategory.Service,
+                $"MarkdownViewer render failed: {ex.GetType().Name}: {ex.Message}"));
+        }
+        catch
+        {
+            // Best-effort logging only; never let the fallback path itself throw.
+        }
     }
 
     private void Render(MarkdownDocument doc, string sourceText)
@@ -366,11 +415,22 @@ public sealed class MarkdownViewer : ContentControl, IDisposable
         Margin = new Thickness(0, 1)
     };
 
+    /// <summary>
+    /// A code fence cut off mid-stream (truncated at the token cap, or a
+    /// fence opened right as the render timer ticks) can leave Markdig with
+    /// a line group whose Lines array is null; joining that as text must
+    /// never throw.
+    /// </summary>
+    internal static string JoinLines(LeafBlock? block)
+    {
+        if (block?.Lines.Lines is not { } lines)
+            return string.Empty;
+        return string.Join("\n", lines.Take(block.Lines.Count).Select(l => l.ToString()));
+    }
+
     private Control RenderFallback(Block block)
     {
-        var raw = block is LeafBlock lb
-            ? string.Join("\n", lb.Lines.Lines.Take(lb.Lines.Count).Select(l => l.ToString()))
-            : string.Empty;
+        var raw = block is LeafBlock lb ? JoinLines(lb) : string.Empty;
         return new SelectableTextBlock
         {
             Text = raw,
@@ -379,34 +439,43 @@ public sealed class MarkdownViewer : ContentControl, IDisposable
         };
     }
 
-    private Border RenderFencedCode(FencedCodeBlock c)
-    {
-        var code = string.Join("\n",
-            c.Lines.Lines.Take(c.Lines.Count).Select(l => l.ToString()));
-        return CodeBorder(code, c.Info);
-    }
+    private Border RenderFencedCode(FencedCodeBlock c) => CodeBorder(JoinLines(c), c.Info);
 
-    private Border RenderCodeBlock(CodeBlock c)
-    {
-        var code = string.Join("\n",
-            c.Lines.Lines.Take(c.Lines.Count).Select(l => l.ToString()));
-        return CodeBorder(code, null);
-    }
+    private Border RenderCodeBlock(CodeBlock c) => CodeBorder(JoinLines(c), null);
 
     private Border CodeBorder(string code, string? lang)
     {
         var lineCount = code.Split('\n').Length;
         var normalizedLanguage = NormalizeFenceLanguage(lang);
-        var header = !string.IsNullOrWhiteSpace(lang)
-            ? new TextBlock
+
+        // r19 5.4: every code block gets a Save button, not just labeled
+        // ones, so the header row is always built now (it used to be null
+        // for an unlabeled fence).
+        var header = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(0, 0, 0, 6) };
+        if (!string.IsNullOrWhiteSpace(lang))
+        {
+            header.Children.Add(new TextBlock
             {
                 Text = lang,
                 FontSize = 11,
                 Opacity = 0.5,
-                Margin = new Thickness(0, 0, 0, 6),
-                FontFamily = MonoFamily
-            }
-            : null;
+                FontFamily = MonoFamily,
+                VerticalAlignment = VerticalAlignment.Center
+            });
+        }
+
+        var saveButton = new Button
+        {
+            Content = "Save",
+            FontSize = 10,
+            Padding = new Thickness(6, 1),
+            Opacity = 0.55
+        };
+        // Bound imperatively (not via a XAML binding) since this control tree is
+        // built entirely in code; RequestSaveCodeBlock is read live at click
+        // time so it reflects whatever the host currently has wired up.
+        saveButton.Click += (_, _) => RequestSaveCodeBlock?.Invoke(lang, code, Markdown ?? string.Empty);
+        header.Children.Add(saveButton);
 
         var codeFontSize = FontSize - 1;
         var minHeight = Math.Max(28, (FontSize + 4) * Math.Max(1, lineCount));
@@ -440,9 +509,7 @@ public sealed class MarkdownViewer : ContentControl, IDisposable
                 MinHeight = minHeight
             };
 
-        Control child = header is not null
-            ? new StackPanel { Spacing = 0, Children = { header, codeBlock } }
-            : codeBlock;
+        Control child = new StackPanel { Spacing = 0, Children = { header, codeBlock } };
 
         return new Border
         {

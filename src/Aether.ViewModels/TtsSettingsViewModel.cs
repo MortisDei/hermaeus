@@ -15,6 +15,10 @@ namespace Aether.ViewModels;
 /// <summary>One row of the per-channel voice settings editor (Settings > Voice).</summary>
 public partial class VoiceChannelSettingViewModel : ObservableObject
 {
+    /// <summary>r19 4.3: display sentinel for "no profile" in the Profile dropdown; never
+    /// itself stored - <see cref="ProfileNameDisplay"/> maps it to/from an empty <see cref="ProfileName"/>.</summary>
+    public const string DefaultVoiceLabel = "(Default voice)";
+
     public VoiceChannel Channel { get; }
     public string DisplayName { get; }
 
@@ -28,6 +32,16 @@ public partial class VoiceChannelSettingViewModel : ObservableObject
     /// <summary>True when this channel is enabled and the active provider sends spoken text off-machine.</summary>
     public bool ShowsRemoteNotice => Enabled && RemoteProviderActive;
 
+    /// <summary>r19 4.3: the Profile dropdown's bound value - matches a profile name option,
+    /// or <see cref="DefaultVoiceLabel"/> for the leading "use the default voice" entry. A
+    /// profile renamed or removed out from under this channel no longer matches any option,
+    /// so the ComboBox correctly renders unselected instead of silently keeping the stale name.</summary>
+    public string ProfileNameDisplay
+    {
+        get => string.IsNullOrEmpty(ProfileName) ? DefaultVoiceLabel : ProfileName;
+        set => ProfileName = value == DefaultVoiceLabel ? string.Empty : value;
+    }
+
     public VoiceChannelSettingViewModel(VoiceChannel channel, string displayName)
     {
         Channel = channel;
@@ -36,6 +50,7 @@ public partial class VoiceChannelSettingViewModel : ObservableObject
 
     partial void OnEnabledChanged(bool value) => OnPropertyChanged(nameof(ShowsRemoteNotice));
     partial void OnRemoteProviderActiveChanged(bool value) => OnPropertyChanged(nameof(ShowsRemoteNotice));
+    partial void OnProfileNameChanged(string value) => OnPropertyChanged(nameof(ProfileNameDisplay));
 }
 
 /// <summary>One editable named voice/speed combination (Settings > Voice > Profiles).</summary>
@@ -60,6 +75,10 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
 
     public UiBoundCollection<VoiceChannelSettingViewModel> VoiceChannels { get; } = [];
     public UiBoundCollection<VoiceProfileEditViewModel> VoiceProfiles { get; } = [];
+
+    /// <summary>r19 4.3: Channel "Profile" dropdown options - kept live as profiles are
+    /// added/renamed/removed, so the ComboBox never lags behind <see cref="VoiceProfiles"/>.</summary>
+    public UiBoundCollection<string> ProfileNameOptions { get; } = [VoiceChannelSettingViewModel.DefaultVoiceLabel];
 
     [ObservableProperty] private bool _autoSpeakChatReplies;
     [ObservableProperty] private bool _streamingChatSpeech;
@@ -190,6 +209,33 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
         _voice = voiceOrchestrator;
         _xttsProcess.StatusChanged += OnXttsStatusChanged;
         _kokoroProcess.StatusChanged += OnXttsStatusChanged;
+        VoiceProfiles.CollectionChanged += (_, e) =>
+        {
+            if (e.NewItems is not null)
+                foreach (VoiceProfileEditViewModel added in e.NewItems)
+                    added.PropertyChanged += OnVoiceProfilePropertyChanged;
+            if (e.OldItems is not null)
+                foreach (VoiceProfileEditViewModel removed in e.OldItems)
+                    removed.PropertyChanged -= OnVoiceProfilePropertyChanged;
+            RefreshProfileNameOptions();
+        };
+    }
+
+    private void OnVoiceProfilePropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(VoiceProfileEditViewModel.Name))
+            RefreshProfileNameOptions();
+    }
+
+    /// <summary>r19 4.3: recomputes the Channel Profile dropdown's options from the current
+    /// <see cref="VoiceProfiles"/> list; a channel whose ProfileName no longer matches any
+    /// entry here (renamed/removed) correctly renders unselected rather than stale.</summary>
+    private void RefreshProfileNameOptions()
+    {
+        ProfileNameOptions.Clear();
+        ProfileNameOptions.Add(VoiceChannelSettingViewModel.DefaultVoiceLabel);
+        foreach (var name in VoiceProfiles.Select(p => p.Name.Trim()).Where(n => n.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase))
+            ProfileNameOptions.Add(name);
     }
 
     private static readonly VoiceChannel[] AllChannels =

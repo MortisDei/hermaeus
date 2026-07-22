@@ -234,6 +234,10 @@ provider.
 - Export all runs into a timestamped folder index or a single zip archive
 - Run info dialog: view run-level summary, metrics, and export from a dialog window
 - Ranking timeframe filters: view All runs, Latest per model, or Last N runs
+- The Rankings tab shows each run's rank and a proportional score bar
+  (relative to the top score in the current filter) alongside a Details
+  button that opens the same run-info dialog used elsewhere, instead of a
+  bare table
 
 ## System Overview
 
