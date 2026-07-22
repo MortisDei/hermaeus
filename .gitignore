@@ -10,8 +10,10 @@
 *.userosscache
 *.sln.docstates
 
-# VS Code
-.vscode/
+# VS Code (launch.json/tasks.json are shared repo config, tracked on purpose)
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
 
 # NuGet
 *.nupkg

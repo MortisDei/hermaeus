@@ -1,0 +1,46 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "build",
+            "command": "dotnet",
+            "type": "process",
+            "args": [
+                "build",
+                "Hermaeus.sln"
+            ],
+            "problemMatcher": "$msbuild",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "build (Release)",
+            "command": "dotnet",
+            "type": "process",
+            "args": [
+                "build",
+                "Hermaeus.sln",
+                "-c",
+                "Release"
+            ],
+            "problemMatcher": "$msbuild",
+            "group": "build"
+        },
+        {
+            "label": "test",
+            "command": "dotnet",
+            "type": "process",
+            "args": [
+                "test",
+                "src/Hermaeus.Tests/Hermaeus.Tests.csproj"
+            ],
+            "problemMatcher": "$msbuild",
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            }
+        }
+    ]
+}
