@@ -2,6 +2,114 @@
 
 The CHANGELOG.md in root only contains the current 10 versions of changelogs. The rest are archived here in line with the 10 version limit in the main changelog.
 
+## [0.15.0-alpha] - 2026-07-16
+
+Implements docs/review r10 in full: the first dedicated RAG deep-dive (a
+broken parent-child retrieval mode, a dataset-delete leak, a stale query
+cache, an embedding-model mismatch guard, an embedding-input clamp that cut
+off the back half of default-sized chunks, an inconsistent boost scale, a
+3x-per-query BM25 re-tokenization cost, and eval harness gaps), plus the
+three residual field-report issues from 0.14.0-alpha's first real use.
+
+### Fixed
+
+- **Shutdown crash with an MCP session open.** `App.axaml.cs` disposed the DI
+  container synchronously; `McpToolBridge` is `IAsyncDisposable`-only, so
+  `ServiceProvider.Dispose()` threw an unhandled `InvalidOperationException`
+  from the window-close path. Shutdown now awaits `DisposeAsync()` with a
+  bounded 5 s wait, and a guard test enumerates every singleton registration
+  to catch the next async-only service before it reintroduces this.
+- **Parent-child retrieval returned nothing.** `GetChunksAsync` filtered on
+  `parent_id IS NULL`, which excludes every embedded child chunk instead of
+  the unembedded parent bodies; with `UseParentChild` enabled, semantic scan
+  saw zero candidates and BM25 scored only parent bodies. An explicit
+  `is_parent` column (additive migration, backfilled from existing
+  `parent_id` references) replaces the inverted filter.
+- **Deleting a dataset leaked every chunk row.** `DeleteDatasetAsync` relied
+  on `ON DELETE CASCADE`, but no connection ever enabled SQLite foreign-key
+  enforcement, so chunks and BM25 stats for a deleted dataset stayed in
+  `conversations.db` forever. Deletes are now explicit and transactional;
+  store initialization also does a one-time sweep for rows already orphaned
+  by the old behavior.
+- **Re-ingest served stale results until restart.** Adding documents to an
+  already-queried dataset never cleared `RagQueryService`'s in-memory chunk
+  cache. Ingest, reindex, and remove-missing-sources now all clear it.
+- **Embedding-model mismatch surfaced as a raw exception or silent garbage
+  rankings.** Querying a dataset with a different current embedding model now
+  skips semantic search and falls back to BM25-only with a planner note;
+  ingest refuses to mix models into one dataset. `CosineScan` also filters to
+  matching embedding lengths as a belt-and-braces guard.
+- **A file removed from the ingest folder stayed in the dataset forever.**
+  There was no way to act on the `MissingFiles` health signal. A user-clicked
+  "Remove missing sources" action (never automatic) now exists.
+- **Dry-run ingest wrote to the database.** The initial `SaveDatasetAsync`
+  call ran regardless of `DryRun`, so a dry run created a zero-chunk dataset
+  row. It's now skipped for dry runs.
+- **`LastIngestPath`/`LastIngestUtc` were never persisted.** They only lived
+  in memory, so the Add-to-dataset folder pre-fill worked only within one
+  session. Both are now columns, set on first ingest as well as re-ingest.
+- **Embeddings saw only the first ~192 tokens (roughly half) of a default
+  1600-char chunk.** The metadata header (title/path/heading) was prepended
+  inside the same tiny budget with no cap of its own. The clamp is raised to
+  512 tokens (retry ladder 512/256/128) and the header is capped at 48
+  tokens, truncating an oversized source path (keeping its distinctive tail)
+  rather than the chunk content.
+- **The refusal preflight scored the wrong thing.** It measured
+  question-vs-context token overlap, so a question phrased in different
+  vocabulary than the corpus got refused even when semantic retrieval found
+  the right chunks with a strong cosine score. It now refuses only when
+  retrieval itself found nothing (best semantic score below threshold AND no
+  BM25 term match). A refusal now also emits the closest sources it
+  considered instead of a bare sentence. The dead `SemanticPlaceholder`
+  grounding mode is deleted (post-answer grounding stays token overlap).
+- **Structural boosts could outrank a clear semantic winner.** The same
+  small constants were added directly to both raw BM25 scores (1-10, making
+  them a no-op there) and RRF fusion scores (~0.01, where they dominated).
+  The metadata boost inside `Bm25Scorer` is deleted; `HybridRetriever`'s
+  fusion boost is now a capped proportional multiplier that can only break
+  ties and lift near-ties.
+- **BM25 re-tokenized the whole corpus up to 3x per query.** Each of up to 3
+  query variants re-tokenized every candidate chunk's full content. TF is now
+  computed once per query and reused across variants.
+- **Dataset health loaded every chunk's full content on every refresh.**
+  `RefreshDatasetManagerAsync` runs after every ingest, delete, and app load;
+  it now loads only the source path/chunk index/modified-timestamp columns
+  health actually needs.
+- **Retrieval-only eval mode could never pass a `should_refuse` case.**
+  `Passed` required both a retrieval hit and `!ShouldRefuse`, which is never
+  true when a case expects a refusal. It now evaluates the same
+  retrieval-strength gate the live query path uses.
+- **Evals were uncancellable from the UI.** `RunEvalAsync` passed
+  `CancellationToken.None`; a Stop button and wired cancellation token now
+  match the pattern ingest already had. A cancelled eval never reaches the
+  export step, so no partial run is written.
+- **Voice: a dictionary miss gained a spoken trailing "e".** The
+  letter-fallback's Magic-E rule checked the wrong side of the trailing "e"
+  (silent only when the *preceding* character was a vowel, backwards from
+  English's actual vowel-consonant-e pattern), so any out-of-dictionary word
+  like "joke" spoke as "jok-e". Typographic characters LLM output produces
+  constantly (curly quotes, em/en dashes, ellipsis) were not stripped either,
+  which is why capitalized/quoted words missed the dictionary in the first
+  place. Both are fixed; every word that reaches the fallback is now logged
+  once per session for the next pronunciation report.
+
+### Added
+
+- **Reindex action.** Re-embeds every stored chunk of a dataset with the
+  current embedding model, from stored content only (no source files
+  required), then rebuilds BM25 stats and the query cache.
+- **llama-server prompt-processing timings on the chat trace.** When
+  llama.cpp reports its own `timings` object, the send trace now shows
+  `server prompt N tok / X ms` alongside the existing pre-stream breakdown,
+  decomposing a large first-token wait into request-queue time versus actual
+  prompt evaluation. A send whose pre-first-token wait exceeds 10 s logs a
+  runtime warning with the full breakdown.
+
+### Docs
+
+- docs/rag.md, docs/voice.md, docs/features.md, and docs/security-review.md
+  updated for all of the above.
+
 ## [0.14.0-alpha] - 2026-07-15
 
 Implements docs/review r9 in full: the send-path latency and orphaned-server

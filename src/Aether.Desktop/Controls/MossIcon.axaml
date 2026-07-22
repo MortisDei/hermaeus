@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Aether.Desktop.Controls.MossIcon"
+             Width="16" Height="16">
+  <!--
+    Icon-scale rendering of the "Moss" mascot per docs/mascot.md: face
+    silhouette, goggles, one glowing eye, small ear tuft. Plain vector
+    shapes only (no image/SVG dependency) so it scales cleanly at any
+    size this control is placed at.
+  -->
+  <Viewbox Stretch="Uniform">
+    <Canvas Width="24" Height="24">
+      <Ellipse Canvas.Left="3" Canvas.Top="5" Width="18" Height="16" Fill="#5B7A4E" />
+      <Polygon Points="10,6 12,1 14,6" Fill="#33362F" />
+      <Rectangle Canvas.Left="2" Canvas.Top="10.5" Width="20" Height="3"
+                 RadiusX="1.5" RadiusY="1.5" Fill="#2B2B28" />
+      <Ellipse Canvas.Left="6.5" Canvas.Top="7.5" Width="11" Height="11" Fill="#B87333" />
+      <Ellipse Canvas.Left="8" Canvas.Top="9" Width="8" Height="8" Fill="#26261F" />
+      <Ellipse Canvas.Left="9.5" Canvas.Top="10.5" Width="5" Height="5" Fill="#F2A63D" />
+      <Ellipse Canvas.Left="10.5" Canvas.Top="11.3" Width="1.8" Height="1.8" Fill="#FCE2AE" />
+    </Canvas>
+  </Viewbox>
+</UserControl>

@@ -744,3 +744,11 @@ Endpoints:
 - `POST /v1/embeddings` - one vector per input string, using the app's
   configured embedding provider.
 - `GET /v1/memory/query`, `POST /v1/rag/query`, `GET /v1/models`.
+
+## Mascot
+
+Aether's mascot is Moss, a small workshop tinkerer (not the AI itself); full
+identity, personality, and visual spec live in [docs/mascot.md](mascot.md). A
+flat-vector icon-scale rendering (`Controls/MossIcon`) currently appears next
+to the Services error banner and the RAG ingest-progress line as a
+placeholder built to the icon spec, pending real illustration.

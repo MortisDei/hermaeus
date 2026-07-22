@@ -122,7 +122,7 @@ Includes:
 
 # Quick Start
 
-**Prerequisites:** [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0). A local model runtime (managed `llama.cpp`, Ollama, or an OpenAI-compatible endpoint) is configured later, in-app, via the setup wizard — nothing else needs to be installed up front.
+**Prerequisites:** [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0). A local model runtime (managed `llama.cpp`, Ollama, or an OpenAI-compatible endpoint) is configured later, in-app, via the setup wizard - nothing else needs to be installed up front.
 
 ```bash
 git clone https://github.com/MortisDei/aether.git

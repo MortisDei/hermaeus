@@ -492,11 +492,14 @@
 
                             <!-- Progress -->
                             <StackPanel IsVisible="{Binding IsIngesting}" Spacing="4">
-                                <Grid ColumnDefinitions="*,Auto">
-                                    <TextBlock Grid.Column="0"
+                                <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="6">
+                                    <controls:MossIcon Grid.Column="0" Width="14" Height="14"
+                                                        VerticalAlignment="Center"
+                                                        ToolTip.Tip="Moss is stacking documents into piles." />
+                                    <TextBlock Grid.Column="1"
                                                Text="{Binding IngestStage}"
                                                FontSize="12" Opacity="0.6" />
-                                    <TextBlock Grid.Column="1"
+                                    <TextBlock Grid.Column="2"
                                                Text="{Binding IngestProgressLabel}"
                                                FontSize="12" Opacity="0.5" />
                                 </Grid>
