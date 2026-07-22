@@ -1,13 +1,13 @@
 ---
 name: storage-and-data-root
-description: Rules for Aether's SQLite stores, schema migrations, data root layout, backup/restore, and atomic file writes. Use for any change that reads or writes persistent state.
+description: Rules for Hermaeus's SQLite stores, schema migrations, data root layout, backup/restore, and atomic file writes. Use for any change that reads or writes persistent state.
 ---
 
 # Storage and the data root
 
 ## Data root
 
-- Linux `~/.local/share/Aether/`, Windows `%LOCALAPPDATA%\Aether\`;
+- Linux `~/.local/share/Hermaeus/`, Windows `%LOCALAPPDATA%\Hermaeus\`;
   user-configurable with migration support (`BackupService`, data-root
   migration). Agent state lives under `agent/` inside it.
 - Any new persistent artifact must live under the data root (or the
@@ -20,7 +20,7 @@ description: Rules for Aether's SQLite stores, schema migrations, data root layo
 
 - `Microsoft.Data.Sqlite` directly; no ORM, no repository abstraction.
 - Every store records a schema version; changes are **additive migrations**
-  through `SqliteMigrationRunner` (`src/Aether.Services`). Never modify or
+  through `SqliteMigrationRunner` (`src/Hermaeus.Services`). Never modify or
   reorder an existing migration; never write destructive migrations.
 - Derived indexes (like `agent/task_index.db`) must be rebuildable from their
   source of truth (`task_state.json` files). If you add an index store, add

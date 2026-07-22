@@ -1,0 +1,60 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Hermaeus.Desktop.Views.BenchmarkRunInfoDialog"
+        Title="Benchmark run"
+        Width="700"
+        Height="560"
+        WindowStartupLocation="CenterOwner"
+        CanResize="True">
+    <Border Padding="18">
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel Spacing="12">
+                <StackPanel Spacing="6">
+                    <TextBlock Text="{Binding Title}" FontSize="18" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding Summary}" FontSize="12" Opacity="0.6" />
+                </StackPanel>
+
+                <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+                    <StackPanel Grid.Column="0" Spacing="6">
+                        <TextBlock Text="Started" Opacity="0.6" FontSize="11" />
+                        <TextBlock Text="{Binding Started}" />
+                        <TextBlock Text="Status" Opacity="0.6" FontSize="11" Margin="0,8,0,0" />
+                        <TextBlock Text="{Binding Status}" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Spacing="6">
+                        <TextBlock Text="Metrics" Opacity="0.6" FontSize="11" />
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <TextBlock Text="Score:" Opacity="0.6" />
+                            <TextBlock Text="{Binding Score}" FontWeight="SemiBold" />
+                            <TextBlock Text="Pass rate:" Opacity="0.6" />
+                            <TextBlock Text="{Binding PassRate}" FontWeight="SemiBold" />
+                            <TextBlock Text="Speed:" Opacity="0.6" />
+                            <TextBlock Text="{Binding Speed}" FontWeight="SemiBold" />
+                        </StackPanel>
+                    </StackPanel>
+                    <StackPanel Grid.Column="2" HorizontalAlignment="Right">
+                        <Button Content="Export" Click="OnExportClick" MinWidth="100" />
+                    </StackPanel>
+                </Grid>
+
+                <TextBlock Text="Results" FontWeight="SemiBold" />
+                <ItemsControl ItemsSource="{Binding ResultSummaries}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="0,0,0,1" Padding="8,6">
+                                <StackPanel>
+                                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                                    <TextBlock Text="{Binding Timings}" FontSize="11" Opacity="0.6" />
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <StackPanel HorizontalAlignment="Right" Orientation="Horizontal" Spacing="8" Margin="0,6,0,0">
+                    <Button Content="Close" MinWidth="100" Click="OnCloseClick" />
+                </StackPanel>
+            </StackPanel>
+        </ScrollViewer>
+    </Border>
+</Window>

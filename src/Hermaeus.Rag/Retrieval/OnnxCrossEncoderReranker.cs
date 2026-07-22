@@ -1,0 +1,312 @@
+using Hermaeus.Core.Models;
+using Hermaeus.Core.Services;
+using Hermaeus.Rag.Models;
+using Microsoft.ML.OnnxRuntime;
+using Microsoft.ML.OnnxRuntime.Tensors;
+using Microsoft.ML.Tokenizers;
+using System.Security.Cryptography;
+
+namespace Hermaeus.Rag.Retrieval;
+
+public sealed class OnnxCrossEncoderReranker : IReranker, IDisposable
+{
+    private const string ModelCommit = "eeed17e3bfc6fa06a790f2d12a9501fec587fccf";
+    private const string ModelUrl = $"https://huggingface.co/cross-encoder/ms-marco-MiniLM-L6-v2/resolve/{ModelCommit}/onnx/model_O4.onnx";
+    private const string VocabUrl = $"https://huggingface.co/cross-encoder/ms-marco-MiniLM-L6-v2/resolve/{ModelCommit}/vocab.txt";
+    private const string ModelFileName = "model_O4.onnx";
+    private const string VocabFileName = "vocab.txt";
+    public const string ModelSha256 = "b232c2eeedd97a593edc177e3ce4cbd1d6c8f6d8f61a5c201cd0cdeb8134da18";
+    public const string VocabSha256 = "07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3";
+
+    private static readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(10) };
+    private readonly ISettingsService _settings;
+    private readonly AppLifecycleJournalService? _journal;
+    private readonly SemaphoreSlim _gate = new(1, 1);
+    private InferenceSession? _session;
+    private BertTokenizer? _tokenizer;
+    private bool _unavailable;
+
+    public OnnxCrossEncoderReranker(ISettingsService settings, AppLifecycleJournalService? journal = null)
+    {
+        _settings = settings;
+        _journal = journal;
+    }
+
+    public async Task<List<ScoredChunk>> RerankAsync(
+        string query,
+        IReadOnlyList<ScoredChunk> candidates,
+        int topK,
+        CancellationToken ct = default)
+    {
+        if (!_settings.Settings.Rag.RerankerEnabled || _unavailable || candidates.Count == 0)
+            return candidates.Take(topK).ToList();
+
+        var loaded = await EnsureLoadedAsync(ct);
+        if (!loaded || _session is null || _tokenizer is null)
+            return candidates.Take(topK).ToList();
+
+        var maxCandidates = Math.Clamp(_settings.Settings.Rag.RerankerMaxCandidates, topK, 100);
+        var maxLength = Math.Clamp(_settings.Settings.Rag.RerankerMaxLength, 64, 512);
+        var reranked = new List<ScoredChunk>();
+
+        foreach (var candidate in candidates.Take(maxCandidates))
+        {
+            ct.ThrowIfCancellationRequested();
+            var score = ScorePair(query, candidate.Chunk.Content, maxLength);
+            reranked.Add(candidate with { Score = score, Source = ScoreSource.Reranker });
+        }
+
+        var originalRanks = candidates
+            .Select((candidate, index) => new { candidate.Chunk.Id, index })
+            .ToDictionary(x => x.Id, x => x.index);
+
+        return reranked
+            .OrderByDescending(x => x.Score)
+            .ThenBy(x => originalRanks.GetValueOrDefault(x.Chunk.Id, int.MaxValue))
+            .Take(topK)
+            .ToList();
+    }
+
+    private async Task<bool> EnsureLoadedAsync(CancellationToken ct)
+    {
+        if (_session is not null && _tokenizer is not null)
+            return true;
+
+        await _gate.WaitAsync(ct);
+        try
+        {
+            if (_session is not null && _tokenizer is not null)
+                return true;
+
+            var modelDir = ResolveModelDirectory(_settings.Settings);
+            var modelPath = Path.Combine(modelDir, ModelFileName);
+            var vocabPath = Path.Combine(modelDir, VocabFileName);
+
+            // Do not perform heavy downloads during query path. Only initialize if assets already exist.
+            if (!File.Exists(modelPath) || !File.Exists(vocabPath))
+            {
+                _unavailable = true;
+                return false;
+            }
+
+            if (!await VerifyFileSha256Async(modelPath, ModelSha256, ct)
+                || !await VerifyFileSha256Async(vocabPath, VocabSha256, ct))
+            {
+                _unavailable = true;
+                return false;
+            }
+
+            // assets present - load tokenizer and session
+            _tokenizer = BertTokenizer.Create(vocabPath);
+            _journal?.RecordOperation("loading reranker ONNX session (EnsureLoadedAsync)");
+            _session = new InferenceSession(modelPath);
+            _journal?.RecordOperation("reranker ONNX session loaded");
+            return true;
+        }
+        catch
+        {
+            _unavailable = true;
+            _session?.Dispose();
+            _session = null;
+            _tokenizer = null;
+            return false;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    // Install model assets explicitly. This method performs heavy downloads and should be
+    // invoked from a setup or doctor action rather than the query path.
+    public async Task<bool> InstallAssetsAsync(IProgress<string>? progress = null, CancellationToken ct = default)
+    {
+        await _gate.WaitAsync(ct);
+        try
+        {
+            var modelDir = ResolveModelDirectory(_settings.Settings);
+            var modelPath = Path.Combine(modelDir, ModelFileName);
+            var vocabPath = Path.Combine(modelDir, VocabFileName);
+            Directory.CreateDirectory(modelDir);
+            progress?.Report("Downloading reranker model...");
+            await DownloadIfMissingAsync(modelPath, ModelUrl, ModelSha256, progress, ct);
+            progress?.Report("Downloading reranker vocabulary...");
+            await DownloadIfMissingAsync(vocabPath, VocabUrl, VocabSha256, progress, ct);
+            progress?.Report("Loading reranker model...");
+            // load after download
+            _tokenizer = BertTokenizer.Create(vocabPath);
+            _session?.Dispose();
+            _journal?.RecordOperation("loading reranker ONNX session (InstallAssetsAsync)");
+            _session = new InferenceSession(modelPath);
+            _unavailable = false;
+            _journal?.RecordOperation("reranker ONNX session loaded");
+            progress?.Report("Reranker installed");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            progress?.Report($"Reranker install failed: {ex.Message}");
+            _unavailable = true;
+            _session?.Dispose();
+            _session = null;
+            _tokenizer = null;
+            return false;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    private float ScorePair(string query, string passage, int maxLength)
+    {
+        var encoded = EncodePair(query, passage, maxLength);
+        var shape = new[] { 1, maxLength };
+        var inputs = new List<NamedOnnxValue>
+        {
+            NamedOnnxValue.CreateFromTensor("input_ids", new DenseTensor<long>(encoded.InputIds, shape)),
+            NamedOnnxValue.CreateFromTensor("attention_mask", new DenseTensor<long>(encoded.AttentionMask, shape)),
+            NamedOnnxValue.CreateFromTensor("token_type_ids", new DenseTensor<long>(encoded.TokenTypeIds, shape))
+        };
+
+        using var results = _session!.Run(inputs);
+        var output = results.First().AsEnumerable<float>().FirstOrDefault();
+        return Sigmoid(output);
+    }
+
+    private EncodedPair EncodePair(string query, string passage, int maxLength)
+    {
+        var tokenizer = _tokenizer!;
+        var queryBudget = Math.Min(64, maxLength / 3);
+        var passageBudget = Math.Max(8, maxLength - queryBudget - 3);
+        var queryIds = tokenizer.EncodeToIds(query, queryBudget, addSpecialTokens: false, out _, out _).ToArray();
+        var passageIds = tokenizer.EncodeToIds(passage, passageBudget, addSpecialTokens: false, out _, out _).ToArray();
+
+        var inputIds = new long[maxLength];
+        var attentionMask = new long[maxLength];
+        var tokenTypeIds = new long[maxLength];
+        var pos = 0;
+
+        Add(tokenizer.ClassificationTokenId, segment: 0);
+        foreach (var id in queryIds) Add(id, segment: 0);
+        Add(tokenizer.SeparatorTokenId, segment: 0);
+        foreach (var id in passageIds) Add(id, segment: 1);
+        Add(tokenizer.SeparatorTokenId, segment: 1);
+
+        return new EncodedPair(inputIds, attentionMask, tokenTypeIds);
+
+        void Add(int id, int segment)
+        {
+            if (pos >= maxLength)
+                return;
+
+            inputIds[pos] = id;
+            attentionMask[pos] = 1;
+            tokenTypeIds[pos] = segment;
+            pos++;
+        }
+    }
+
+    private async Task DownloadIfMissingAsync(string path, string url, string expectedSha256, IProgress<string>? progress, CancellationToken ct)
+    {
+        if (File.Exists(path) && await VerifyFileSha256Async(path, expectedSha256, ct))
+            return;
+
+        var temp = $"{path}.download";
+        progress?.Report($"Starting download: {Path.GetFileName(path)}");
+        using var response = await _http.GetAsync(url, ct);
+        response.EnsureSuccessStatusCode();
+        await using (var source = await response.Content.ReadAsStreamAsync(ct))
+        await using (var target = File.Create(temp))
+            await source.CopyToAsync(target, ct);
+        if (!await VerifyFileSha256Async(temp, expectedSha256, ct))
+        {
+            File.Delete(temp);
+            if (File.Exists(path))
+                File.Delete(path);
+            throw new InvalidOperationException($"{Path.GetFileName(path)} failed SHA256 verification.");
+        }
+        progress?.Report($"Downloaded: {Path.GetFileName(path)}");
+
+        File.Move(temp, path, overwrite: true);
+    }
+
+    public static async Task<bool> VerifyFileSha256Async(string path, string expectedSha256, CancellationToken ct = default)
+    {
+        if (!File.Exists(path))
+            return false;
+
+        await using var stream = File.OpenRead(path);
+        var hash = await SHA256.HashDataAsync(stream, ct);
+        var actual = Convert.ToHexString(hash).ToLowerInvariant();
+        return string.Equals(actual, expectedSha256, StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static string ResolveModelDirectory(AppSettings settings)
+    {
+        if (!string.IsNullOrWhiteSpace(settings.Rag.RerankerModelPath))
+            return Path.GetFullPath(settings.Rag.RerankerModelPath);
+
+        var configured = settings.DataManagement.LocalAiAssetsRoot?.Trim();
+        var root = string.IsNullOrWhiteSpace(configured)
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Hermaeus")
+            : Path.GetFullPath(configured);
+        var models = ResolveModelsDirectory(root);
+        return Path.Combine(models, "rerank", "ms-marco-MiniLM-L6-v2");
+    }
+
+    private static string ResolveModelsDirectory(string root)
+    {
+        var candidates = new[]
+        {
+            Path.Combine(root, "Models"),
+            Path.Combine(root, "models"),
+            Path.Combine(root, "gguf")
+        };
+
+        var withGguf = candidates
+            .Where(Directory.Exists)
+            .Select(path => new { Path = path, Count = CountGgufFiles(path) })
+            .Where(x => x.Count > 0)
+            .OrderByDescending(x => x.Count)
+            .ThenBy(x => string.Equals(Path.GetFileName(x.Path), "Models", StringComparison.Ordinal) ? 0 : 1)
+            .FirstOrDefault();
+
+        return withGguf?.Path
+            ?? candidates.FirstOrDefault(Directory.Exists)
+            ?? Path.Combine(root, "Models");
+    }
+
+    private static int CountGgufFiles(string path)
+    {
+        try
+        {
+            return Directory.EnumerateFiles(path, "*.gguf", SearchOption.AllDirectories).Count();
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    private static float Sigmoid(float value)
+    {
+        if (value >= 0)
+        {
+            var z = MathF.Exp(-value);
+            return 1f / (1f + z);
+        }
+
+        var neg = MathF.Exp(value);
+        return neg / (1f + neg);
+    }
+
+    public void Dispose()
+    {
+        _session?.Dispose();
+        _gate.Dispose();
+        // HttpClient is static and shared; do not dispose
+    }
+
+    private sealed record EncodedPair(long[] InputIds, long[] AttentionMask, long[] TokenTypeIds);
+}

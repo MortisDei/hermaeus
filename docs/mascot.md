@@ -1,6 +1,6 @@
 # Mascot: Moss
 
-Aether's mascot. This document is the source of truth for identity, personality,
+Hermaeus's mascot. This document is the source of truth for identity, personality,
 and visual spec. It exists so future art (illustration, animation, marketing) stays
 consistent, and so any in-app use of the character matches the brand intent.
 
@@ -35,7 +35,7 @@ Not:
 > "Magical AI assistant that knows everything."
 
 He is the workshop, not the oracle. Local-first, provider-agnostic, and hands-on
-are all traits Aether already has as a product; Moss is the character that carries
+are all traits Hermaeus already has as a product; Moss is the character that carries
 that tone into anything visual.
 
 ## Visual style
@@ -58,7 +58,7 @@ would put on stickers.
 
 Workshop hoodie/jacket with utility pockets, tools hanging from a belt, circuit
 board patches, tiny SSDs and cables as accessories. Optional: a small badge with
-the Aether logo.
+the Hermaeus logo.
 
 ### Signature items
 
@@ -97,7 +97,7 @@ Must read clearly at 16x16, 32x32, and desktop icon size.
 ## Current in-app usage
 
 A simple flat-vector approximation of the icon version (goggles, glowing eye,
-ear tuft) is implemented as `Controls/MossIcon.axaml` in `Aether.Desktop`, built
+ear tuft) is implemented as `Controls/MossIcon.axaml` in `Hermaeus.Desktop`, built
 from plain Avalonia shapes (no new rendering dependency). It appears as a small
 accent next to the two states in the concept notes that map cleanly to existing UI:
 the agent task busy indicator and the shared error/status banner. This is a

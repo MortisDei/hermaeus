@@ -9,12 +9,12 @@ for the containment rationale.
 
 All five Avalonia packages (`Avalonia`, `Avalonia.Desktop`,
 `Avalonia.Themes.Fluent`, `Avalonia.Fonts.Inter`, `Avalonia.AvaloniaEdit`) are
-pinned to the same exact version in `src/Aether.Desktop/Aether.Desktop.csproj`
+pinned to the same exact version in `src/Hermaeus.Desktop/Hermaeus.Desktop.csproj`
 (no wildcard, no floating minor). They must always move together.
 
 ## When to upgrade
 
-- A patch release (`11.3.x`) fixing a bug Aether actually hits: low risk, can
+- A patch release (`11.3.x`) fixing a bug Hermaeus actually hits: low risk, can
   land in a normal PR with the checklist below.
 - A minor release (`11.x`): review the Avalonia changelog for styling/theming
   breaking changes before touching the pin; budget a dedicated PR.
@@ -24,11 +24,11 @@ pinned to the same exact version in `src/Aether.Desktop/Aether.Desktop.csproj`
 
 ## Checklist for any pin bump
 
-1. Bump all five `Avalonia*` package versions in `Aether.Desktop.csproj` to
+1. Bump all five `Avalonia*` package versions in `Hermaeus.Desktop.csproj` to
    the same new version in one commit. Never let them drift apart.
-2. `dotnet build Aether.sln -v q --nologo` clean, zero warnings
+2. `dotnet build Hermaeus.sln -v q --nologo` clean, zero warnings
    (`TreatWarningsAsErrors` is on solution-wide).
-3. `dotnet test tests/Aether.Tests/Aether.Tests.csproj -v q --nologo` green.
+3. `dotnet test tests/Hermaeus.Tests/Hermaeus.Tests.csproj -v q --nologo` green.
 4. Manually exercise, on both Windows and Linux if possible: chat rendering
    (virtualized long conversations, fenced code blocks via AvaloniaEdit),
    theme switching (Fluent light/dark), the tray icon and hotkeys (Windows;

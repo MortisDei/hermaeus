@@ -1,0 +1,144 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Hermaeus.ViewModels"
+             xmlns:m="using:Hermaeus.Core.Models"
+             xmlns:views="using:Hermaeus.Desktop.Views"
+             x:Class="Hermaeus.Desktop.Views.DoctorView"
+             x:DataType="vm:DoctorViewModel">
+
+    <UserControl.Resources>
+        <views:DoctorStatusColorConverter x:Key="DoctorStatusColor" />
+        <views:DoctorFixLabelConverter x:Key="DoctorFixLabel" />
+    </UserControl.Resources>
+
+    <Grid>
+        <ScrollViewer VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled">
+            <StackPanel MaxWidth="780" Margin="24" Spacing="16">
+            <StackPanel Spacing="6">
+                <TextBlock Text="Hermaeus Doctor" FontSize="22" FontWeight="SemiBold" />
+                <TextBlock Text="Scan the local environment and services for issues." FontSize="13" Opacity="0.5" />
+            </StackPanel>
+
+            <Border Classes="settings-card" Padding="14">
+                <StackPanel Spacing="10">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                        <StackPanel Grid.Column="0" Spacing="4">
+                            <TextBlock Text="{Binding Summary}" FontSize="13" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding LastScanned}" FontSize="11" Opacity="0.5" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                            <Button Command="{Binding ScanCommand}"
+                                    IsEnabled="{Binding !IsScanning}"
+                                    Content="Run Doctor"
+                                    Padding="12,6"
+                                    CornerRadius="6"
+                                    ToolTip.Tip="Re-runs every check below now." />
+                            <Button Command="{Binding CopyAllDiagnosticsCommand}"
+                                    Content="Copy Diagnostics"
+                                    Padding="12,6"
+                                    CornerRadius="6"
+                                    ToolTip.Tip="Copies every check's status and detail to the clipboard, ready to paste into a bug report." />
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <ItemsControl ItemsSource="{Binding Checks}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="m:DoctorCheck">
+                        <Border CornerRadius="8"
+                                Padding="12"
+                                Margin="0,0,0,8"
+                                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                BorderThickness="1">
+                            <StackPanel Spacing="8">
+                                <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+                                    <Border Width="10" Height="10" CornerRadius="5"
+                                            VerticalAlignment="Center"
+                                            Background="{Binding Status, Converter={StaticResource DoctorStatusColor}}" />
+                                    <StackPanel Grid.Column="1" Spacing="2">
+                                        <TextBlock Text="{Binding Title}" FontSize="13" FontWeight="SemiBold" />
+                                        <TextBlock Text="{Binding Summary}" FontSize="12" Opacity="0.6" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+                                        <Button Content="{Binding FixLabel, Converter={StaticResource DoctorFixLabel}}"
+                                                IsEnabled="{Binding CanFix}"
+                                                Command="{Binding $parent[ItemsControl].DataContext.RunFixCommand}"
+                                                CommandParameter="{Binding}"
+                                                Padding="10,5" CornerRadius="6"
+                                                ToolTip.Tip="Runs the suggested fix for this specific check." />
+                                        <Button Content="Copy"
+                                                Command="{Binding $parent[ItemsControl].DataContext.CopyDiagnosticsCommand}"
+                                                CommandParameter="{Binding}"
+                                                Padding="10,5" CornerRadius="6"
+                                                ToolTip.Tip="Copies this one check's status and detail to the clipboard." />
+                                    </StackPanel>
+                                </Grid>
+                                <TextBlock Text="{Binding Detail}" FontSize="12" Opacity="0.5" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </StackPanel>
+        </ScrollViewer>
+
+        <!-- Reranker install modal overlay -->
+        <Grid IsVisible="{Binding IsInstallingReranker}" Background="#80000000">
+        <Border HorizontalAlignment="Center" VerticalAlignment="Center" Background="{DynamicResource BackgroundBrush}" Padding="20" CornerRadius="8">
+            <StackPanel Spacing="12" Width="520">
+                <TextBlock Text="Installing Reranker" FontSize="16" FontWeight="SemiBold" />
+                <TextBlock Text="This will download and load the ONNX reranker model. You can cancel at any time." Opacity="0.7" TextWrapping="Wrap" />
+                <ProgressBar IsIndeterminate="True" Height="12" />
+                <TextBlock Text="{Binding RerankerProgress}" Opacity="0.9" />
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+                    <Button Content="Cancel" Command="{Binding CancelInstallCommand}" Padding="10,6" />
+                </StackPanel>
+            </StackPanel>
+        </Border>
+        </Grid>
+        <!-- Kokoro (native) install modal overlay -->
+        <Grid IsVisible="{Binding IsInstallingNativeKokoro}" Background="#80000000">
+        <Border HorizontalAlignment="Center" VerticalAlignment="Center" Background="{DynamicResource BackgroundBrush}" Padding="20" CornerRadius="8">
+            <StackPanel Spacing="12" Width="520">
+                <TextBlock Text="Installing Kokoro (native)" FontSize="16" FontWeight="SemiBold" />
+                <TextBlock Text="This will download and verify the Kokoro ONNX model and built-in voice files. You can cancel at any time." Opacity="0.7" TextWrapping="Wrap" />
+                <ProgressBar IsIndeterminate="True" Height="12" />
+                <TextBlock Text="{Binding NativeKokoroProgress}" Opacity="0.9" />
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+                    <Button Content="Cancel" Command="{Binding CancelInstallCommand}" Padding="10,6" />
+                </StackPanel>
+            </StackPanel>
+        </Border>
+        </Grid>
+        <!-- llama.cpp install modal overlay -->
+        <Grid IsVisible="{Binding IsInstallingLlamaServer}" Background="#80000000">
+        <Border HorizontalAlignment="Center" VerticalAlignment="Center" Background="{DynamicResource BackgroundBrush}" Padding="20" CornerRadius="8">
+            <StackPanel Spacing="12" Width="520">
+                <TextBlock Text="Updating llama.cpp" FontSize="16" FontWeight="SemiBold" />
+                <TextBlock Text="This will download the latest matching llama-server asset and replace the managed binary. You can cancel at any time." Opacity="0.7" TextWrapping="Wrap" />
+                <ProgressBar IsIndeterminate="True" Height="12" />
+                <TextBlock Text="{Binding LlamaServerProgress}" Opacity="0.9" TextWrapping="Wrap" />
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+                    <Button Content="Cancel" Command="{Binding CancelInstallCommand}" Padding="10,6" />
+                </StackPanel>
+            </StackPanel>
+        </Border>
+        </Grid>
+        <!-- Embedding model install modal overlay -->
+        <Grid IsVisible="{Binding IsInstallingEmbeddingModel}" Background="#80000000">
+        <Border HorizontalAlignment="Center" VerticalAlignment="Center" Background="{DynamicResource BackgroundBrush}" Padding="20" CornerRadius="8">
+            <StackPanel Spacing="12" Width="520">
+                <TextBlock Text="Installing Embedding Model" FontSize="16" FontWeight="SemiBold" />
+                <TextBlock Text="This will download the default embedding model (nomic-embed-text-v1.5-Q4_K_M.gguf). You can cancel at any time." Opacity="0.7" TextWrapping="Wrap" />
+                <ProgressBar IsIndeterminate="{Binding EmbeddingModelProgressIsIndeterminate}" Value="{Binding EmbeddingModelProgressPercent}" Maximum="100" Height="12" />
+                <TextBlock Text="{Binding EmbeddingModelProgress}" Opacity="0.9" TextWrapping="Wrap" />
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+                    <Button Content="Cancel" Command="{Binding CancelInstallCommand}" Padding="10,6" />
+                </StackPanel>
+            </StackPanel>
+        </Border>
+        </Grid>
+    </Grid>
+</UserControl>

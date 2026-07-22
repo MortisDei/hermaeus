@@ -1,0 +1,170 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Hermaeus.ViewModels"
+             x:Class="Hermaeus.Desktop.Views.MemoriesView"
+             x:DataType="vm:MemoriesViewModel">
+
+    <ScrollViewer Padding="24"
+                  VerticalScrollBarVisibility="Auto"
+                  HorizontalScrollBarVisibility="Disabled">
+        <StackPanel MaxWidth="900" Spacing="16">
+            <!-- Header -->
+            <StackPanel Spacing="6">
+                <TextBlock Text="Chat Memories" FontSize="22" FontWeight="SemiBold" />
+                <TextBlock Text="Review, search, pin, and manage stored memories from conversations." FontSize="13" Opacity="0.5" />
+            </StackPanel>
+
+            <!-- Embedding mismatch banner (r16 02-memory-integrity.md 2.4) -->
+            <Border Classes="settings-card" Padding="14" IsVisible="{Binding HasEmbeddingMismatch}">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                    <TextBlock Grid.Column="0"
+                               Text="{Binding EmbeddingMismatchLabel}"
+                               FontSize="12" VerticalAlignment="Center"
+                               ToolTip.Tip="These memories were embedded with a different model, so their semantic recall score is 0 until re-embedded." />
+                    <Button Grid.Column="1"
+                            Content="Re-embed memories"
+                            Command="{Binding ReembedMismatchedCommand}"
+                            IsEnabled="{Binding !IsReembedding}"
+                            FontSize="12" Padding="10,8"
+                            ToolTip.Tip="Clears the stale embeddings and re-embeds them with the current model in the background." />
+                </Grid>
+            </Border>
+
+            <!-- Search & Filter Bar -->
+            <Border Classes="settings-card" Padding="14">
+                <StackPanel Spacing="10">
+                    <Grid ColumnDefinitions="*,180" ColumnSpacing="12">
+                        <!-- Search Input -->
+                        <StackPanel Grid.Column="0" Orientation="Vertical" Spacing="6">
+                            <TextBlock Text="Search memories" FontSize="12" Opacity="0.6" />
+                            <TextBox Text="{Binding SearchText}"
+                                     Watermark="Search by content, tags, category..."
+                                     FontSize="12" Padding="10,8"
+                                     ToolTip.Tip="Matches memory content, tags, and category as you type." />
+                        </StackPanel>
+
+                        <!-- Category Filter -->
+                        <StackPanel Grid.Column="1" Orientation="Vertical" Spacing="6">
+                            <TextBlock Text="Filter by category" FontSize="12" Opacity="0.6" />
+                            <ComboBox ItemsSource="{Binding AvailableCategories}"
+                                      SelectedItem="{Binding SelectedCategory}"
+                                      FontSize="12"
+                                      ToolTip.Tip="Shows only memories saved under this category." />
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- Conversation Filter (per-conversation memory triage) -->
+                    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12">
+                        <StackPanel Grid.Column="0" Orientation="Vertical" Spacing="6">
+                            <TextBlock Text="Filter by conversation" FontSize="12" Opacity="0.6" />
+                            <ComboBox ItemsSource="{Binding ConversationFilters}"
+                                      SelectedItem="{Binding SelectedConversationFilter}"
+                                      PlaceholderText="All conversations"
+                                      FontSize="12" HorizontalAlignment="Stretch"
+                                      ToolTip.Tip="Shows only memories created from this conversation.">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate DataType="vm:ConversationFilterItemViewModel">
+                                        <TextBlock Text="{Binding Display}" />
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Orientation="Vertical" Spacing="6" VerticalAlignment="Bottom">
+                            <Button Content="Clear"
+                                    Command="{Binding ClearConversationFilterCommand}"
+                                    FontSize="12" Padding="10,8"
+                                    ToolTip.Tip="Resets the conversation filter to show memories from every conversation." />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Orientation="Vertical" Spacing="6" VerticalAlignment="Bottom">
+                            <Button Content="Export CSV"
+                                    Command="{Binding ExportConversationCsvCommand}"
+                                    FontSize="12" Padding="10,8"
+                                    ToolTip.Tip="Exports the currently filtered memories to a CSV file." />
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- Status -->
+                    <TextBlock Text="{Binding TotalCount, StringFormat='Total memories: {0}'}"
+                               FontSize="11" Opacity="0.5" />
+                </StackPanel>
+            </Border>
+
+            <!-- Memories List -->
+            <Border CornerRadius="8" BorderThickness="1"
+                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                    Background="{DynamicResource SubtleFillColorSecondaryBrush}">
+                <ScrollViewer MaxHeight="600" VerticalScrollBarVisibility="Auto">
+                    <ItemsControl ItemsSource="{Binding Memories}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:MemoryItemViewModel">
+                                <Border Padding="12" BorderThickness="0,0,0,1"
+                                        BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
+                                    <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="*,Auto" RowSpacing="8" ColumnSpacing="12">
+                                        <!-- Content Section -->
+                                        <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Vertical" Spacing="4">
+                                            <!-- Category & Created -->
+                                            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                                                <TextBlock Grid.Column="0"
+                                                           Text="{Binding CategoryDisplay}"
+                                                           FontSize="11" FontWeight="SemiBold"
+                                                           Opacity="0.7" />
+                                                <TextBlock Grid.Column="1"
+                                                           Text="{Binding ImportanceDisplay}"
+                                                           FontSize="11"
+                                                           Opacity="0.5" />
+                                                <TextBlock Grid.Column="2"
+                                                           Text="{Binding CreatedDisplay}"
+                                                           FontSize="10"
+                                                           Opacity="0.4" />
+                                            </Grid>
+
+                                            <!-- Memory Content -->
+                                            <TextBlock Text="{Binding Content}"
+                                                       FontSize="13" TextWrapping="Wrap"
+                                                       Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+
+                                            <!-- Tags -->
+                                            <TextBlock Text="{Binding Tags}"
+                                                       FontSize="10" Opacity="0.5" />
+
+                                            <!-- Recall stats -->
+                                            <TextBlock Text="{Binding RecallDisplay}"
+                                                       FontSize="10" Opacity="0.4" />
+                                        </StackPanel>
+
+                                        <!-- Action Buttons -->
+                                        <StackPanel Grid.Row="0" Grid.Column="1" Grid.RowSpan="2"
+                                                    Orientation="Horizontal" Spacing="6"
+                                                    VerticalAlignment="Center">
+                                            <!-- Pin Button -->
+                                            <Button x:Name="PinButton"
+                                                    Command="{Binding #MemoriesView.DataContext.TogglePinCommand}"
+                                                    CommandParameter="{Binding Id}"
+                                                    Content="{Binding PinButtonLabel}"
+                                                    FontSize="11" Padding="8,5" CornerRadius="6"
+                                                    ToolTip.Tip="Pinned memories are weighted higher and are never auto-archived." />
+
+                                            <!-- Delete Button -->
+                                            <Button Command="{Binding #MemoriesView.DataContext.DeleteMemoryCommand}"
+                                                    CommandParameter="{Binding Id}"
+                                                    Content="Delete"
+                                                    FontSize="11" Padding="8,5" CornerRadius="6"
+                                                    ToolTip.Tip="Permanently deletes this memory. This cannot be undone." />
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </Border>
+
+            <!-- Empty State -->
+            <StackPanel Spacing="8" HorizontalAlignment="Center" VerticalAlignment="Center"
+                        IsVisible="{Binding HasNoMemories}">
+                <TextBlock Text="No memories yet" FontSize="16" FontWeight="SemiBold" Opacity="0.5" HorizontalAlignment="Center" />
+                <TextBlock Text="Memories will appear here as the agent learns about you." FontSize="12" Opacity="0.4" HorizontalAlignment="Center" />
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

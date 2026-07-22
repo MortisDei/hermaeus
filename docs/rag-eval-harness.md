@@ -1,6 +1,6 @@
 # RAG Eval Harness Plan
 
-Aether should inherit Oghma Infinium's habit of proving retrieval quality with
+Hermaeus should inherit Oghma Infinium's habit of proving retrieval quality with
 repeatable question sets, then make that native and visible in the app.
 
 ## Eval Artifacts

@@ -1,0 +1,636 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Hermaeus.ViewModels"
+             xmlns:controls="using:Hermaeus.Desktop.Controls"
+             xmlns:views="using:Hermaeus.Desktop.Views"
+             x:Class="Hermaeus.Desktop.Views.ChatView"
+             x:DataType="vm:ChatViewModel">
+
+    <UserControl.Styles>
+        <Style Selector="Border.context-drop-active">
+            <Setter Property="Background" Value="{DynamicResource SubtleFillColorTertiaryBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+        </Style>
+        <Style Selector="TextBlock.context-usage-warning">
+            <Setter Property="Foreground" Value="#FFD166" />
+        </Style>
+        <Style Selector="TextBlock.context-usage-critical">
+            <Setter Property="Foreground" Value="#EF5350" />
+        </Style>
+
+        <Style Selector="PathIcon.thinking-pulse">
+            <Style.Animations>
+                <Animation Duration="0:0:1.5" IterationCount="Infinite">
+                    <KeyFrame Cue="0%">
+                        <Setter Property="ScaleTransform.ScaleX" Value="1.0" />
+                        <Setter Property="ScaleTransform.ScaleY" Value="1.0" />
+                        <Setter Property="Opacity" Value="0.45" />
+                    </KeyFrame>
+                    <KeyFrame Cue="50%">
+                        <Setter Property="ScaleTransform.ScaleX" Value="1.2" />
+                        <Setter Property="ScaleTransform.ScaleY" Value="1.2" />
+                        <Setter Property="Opacity" Value="0.8" />
+                    </KeyFrame>
+                    <KeyFrame Cue="100%">
+                        <Setter Property="ScaleTransform.ScaleX" Value="1.0" />
+                        <Setter Property="ScaleTransform.ScaleY" Value="1.0" />
+                        <Setter Property="Opacity" Value="0.45" />
+                    </KeyFrame>
+                </Animation>
+            </Style.Animations>
+        </Style>
+    </UserControl.Styles>
+
+    <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
+
+        <!-- ── Model / options bar ────────────────────────────────────────── -->
+        <Border Grid.Row="0"
+                Padding="12,6"
+                BorderThickness="0,0,0,1"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
+
+                <TextBlock Grid.Column="0" Text="Model"
+                           VerticalAlignment="Center" Opacity="0.5" FontSize="12" />
+
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" HorizontalAlignment="Left">
+                    <ComboBox ItemsSource="{Binding AvailableModels}"
+                              SelectedItem="{Binding SelectedModel}"
+                              MaxWidth="300"
+                              FontSize="13">
+                        <ComboBox.SelectionBoxItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding DisplayName}"
+                                           TextTrimming="CharacterEllipsis" />
+                            </DataTemplate>
+                        </ComboBox.SelectionBoxItemTemplate>
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding DisplayName}"
+                                           TextTrimming="CharacterEllipsis" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                    <StackPanel Orientation="Horizontal" Spacing="6" IsVisible="{Binding HasSelectedModel}">
+                        <Border CornerRadius="4" Padding="6,2" VerticalAlignment="Center"
+                                IsVisible="{Binding !IsSelectedModelRemote}"
+                                Background="#4CAF50"
+                                ToolTip.Tip="This model runs on your machine; prompts do not leave it.">
+                            <TextBlock Text="Local" FontSize="10" FontWeight="SemiBold" Foreground="White" />
+                        </Border>
+                        <Border CornerRadius="4" Padding="6,2" VerticalAlignment="Center"
+                                IsVisible="{Binding IsSelectedModelRemote}"
+                                Background="#FF9800"
+                                ToolTip.Tip="This model calls a remote endpoint; prompts leave this machine.">
+                            <TextBlock Text="Remote" FontSize="10" FontWeight="SemiBold" Foreground="White" />
+                        </Border>
+                    </StackPanel>
+                </StackPanel>
+
+                <Button Grid.Column="2"
+                        Classes="icon-btn"
+                        Content="{Binding Temperature, StringFormat='T {0:F1}'}"
+                        ToolTip.Tip="Sampling settings for this conversation"
+                        Padding="8,4">
+                    <Button.Flyout>
+                        <Flyout Placement="Bottom">
+                            <StackPanel Width="360" Spacing="12">
+                                <TextBlock Text="Sampling settings" FontSize="14" FontWeight="SemiBold" />
+
+                                <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="12" RowSpacing="10">
+                                    <StackPanel Grid.Row="0" Grid.Column="0" Spacing="4">
+                                        <TextBlock Text="Temperature" FontSize="11" Opacity="0.6" />
+                                        <NumericUpDown Value="{Binding Temperature}"
+                                                       Minimum="0" Maximum="2" Increment="0.1" FormatString="F1"
+                                                       ToolTip.Tip="Sampling temperature for this conversation, overriding the global Settings > LLM value." />
+                                    </StackPanel>
+                                    <StackPanel Grid.Row="0" Grid.Column="1" Spacing="4">
+                                        <TextBlock Text="Top P" FontSize="11" Opacity="0.6" />
+                                        <NumericUpDown Value="{Binding TopP}"
+                                                       Minimum="0" Maximum="1" Increment="0.05" FormatString="F2"
+                                                       Watermark="provider default"
+                                                       ToolTip.Tip="Nucleus sampling override for this conversation. Leave blank to use the provider's own default." />
+                                    </StackPanel>
+
+                                    <StackPanel Grid.Row="1" Grid.Column="0" Spacing="4">
+                                        <TextBlock Text="Top K" FontSize="11" Opacity="0.6" />
+                                        <NumericUpDown Value="{Binding TopK}"
+                                                       Minimum="0" Maximum="500" Increment="1"
+                                                       Watermark="provider default"
+                                                       ToolTip.Tip="Top-K sampling override for this conversation. llama.cpp/Ollama only." />
+                                    </StackPanel>
+                                    <StackPanel Grid.Row="1" Grid.Column="1" Spacing="4">
+                                        <TextBlock Text="Min P" FontSize="11" Opacity="0.6" />
+                                        <NumericUpDown Value="{Binding MinP}"
+                                                       Minimum="0" Maximum="1" Increment="0.01" FormatString="F2"
+                                                       Watermark="provider default"
+                                                       ToolTip.Tip="Min-P sampling override for this conversation. llama.cpp/Ollama only." />
+                                    </StackPanel>
+
+                                    <StackPanel Grid.Row="2" Grid.Column="0" Spacing="4">
+                                        <TextBlock Text="Repeat penalty" FontSize="11" Opacity="0.6" />
+                                        <NumericUpDown Value="{Binding RepeatPenalty}"
+                                                       Minimum="0.5" Maximum="2" Increment="0.05" FormatString="F2"
+                                                       Watermark="provider default"
+                                                       ToolTip.Tip="Repeat penalty override for this conversation. 1.0 is no penalty." />
+                                    </StackPanel>
+                                    <StackPanel Grid.Row="2" Grid.Column="1" Spacing="4">
+                                        <TextBlock Text="Frequency penalty" FontSize="11" Opacity="0.6" />
+                                        <NumericUpDown Value="{Binding FrequencyPenalty}"
+                                                       Minimum="-2" Maximum="2" Increment="0.1" FormatString="F1"
+                                                       Watermark="provider default"
+                                                       ToolTip.Tip="Frequency penalty override for this conversation. OpenAI-compatible endpoints only." />
+                                    </StackPanel>
+
+                                    <StackPanel Grid.Row="3" Grid.Column="0" Spacing="4">
+                                        <TextBlock Text="Presence penalty" FontSize="11" Opacity="0.6" />
+                                        <NumericUpDown Value="{Binding PresencePenalty}"
+                                                       Minimum="-2" Maximum="2" Increment="0.1" FormatString="F1"
+                                                       Watermark="provider default"
+                                                       ToolTip.Tip="Presence penalty override for this conversation. OpenAI-compatible endpoints only." />
+                                    </StackPanel>
+                                    <StackPanel Grid.Row="3" Grid.Column="1" Spacing="4">
+                                        <TextBlock Text="Max tokens" FontSize="11" Opacity="0.6" />
+                                        <NumericUpDown Value="{Binding MaxTokens}"
+                                                       Minimum="0" Maximum="262144" Increment="256"
+                                                       ToolTip.Tip="Maximum reply length in tokens for this conversation, overriding the global default." />
+                                    </StackPanel>
+                                </Grid>
+
+                                <Button Content="Reset to model defaults"
+                                        Command="{Binding ResetSamplingToModelDefaultsCommand}"
+                                        HorizontalAlignment="Left"
+                                        FontSize="12" Padding="10,5" CornerRadius="6" />
+
+                                <TextBlock Text="Applies to this conversation only."
+                                           FontSize="11" Opacity="0.55" FontStyle="Italic" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Flyout>
+                    </Button.Flyout>
+                </Button>
+
+                <Button Grid.Column="3" Classes="icon-btn"
+                        Command="{Binding ToggleSystemPromptCommand}"
+                        ToolTip.Tip="System prompt">
+                    <PathIcon Data="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 9h12v2H6V9zm8 5H6v-2h8v2zm4-6H6V6h12v2z"
+                              Width="16" Height="16" />
+                </Button>
+
+                <Button Grid.Column="4" Classes="icon-btn"
+                        Command="{Binding ClearChatCommand}"
+                        ToolTip.Tip="Clear chat">
+                    <PathIcon Data="M12 2C6.47 2 2 6.47 2 12s4.47 10 10 10 10-4.47 10-10S17.53 2 12 2zm5 13.59L15.59 17 12 13.41 8.41 17 7 15.59 10.59 12 7 8.41 8.41 7 12 10.59 15.59 7 17 8.41 13.41 12 17 15.59z"
+                              Width="16" Height="16" />
+                </Button>
+
+                <Button Grid.Column="5" Classes="icon-btn"
+                        Command="{Binding ToggleContextInspectorCommand}"
+                        ToolTip.Tip="Context inspector">
+                    <PathIcon Data="M3 4h18v2H3V4zm0 5h18v2H3V9zm0 5h12v2H3v-2zm0 5h8v2H3v-2z"
+                              Width="16" Height="16" />
+                </Button>
+
+                <Button Grid.Column="6" Classes="icon-btn"
+                        Command="{Binding ToggleChatTracesCommand}"
+                        ToolTip.Tip="Chat traces">
+                    <PathIcon Data="M12 2a10 10 0 1 0 10 10h-2a8 8 0 1 1-2.34-5.66L14 10h8V2l-2.93 2.93A9.96 9.96 0 0 0 12 2z"
+                              Width="16" Height="16" />
+                </Button>
+
+                <Button Grid.Column="7" Classes="icon-btn"
+                        Command="{Binding ToggleCompareModelsCommand}"
+                        ToolTip.Tip="Compare models">
+                    <PathIcon Data="M4 5h7v14H4V5zm9 0h7v14h-7V5zM6 7v10h3V7H6zm9 0v10h3V7h-3z"
+                              Width="16" Height="16" />
+                </Button>
+
+                <Button Grid.Column="8" Classes="icon-btn"
+                        Command="{Binding ExportMarkdownCommand}"
+                        ToolTip.Tip="Export conversation as Markdown">
+                    <PathIcon Data="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zM13 9V3.5L18.5 9H13zM8 13h8v2H8v-2zm0 4h8v2H8v-2z"
+                              Width="16" Height="16" />
+                </Button>
+
+                <Button Grid.Column="9" Classes="icon-btn"
+                        Command="{Binding ExportJsonCommand}"
+                        ToolTip.Tip="Export conversation as JSON">
+                    <PathIcon Data="M5 3h14v18H5V3zm2 2v14h10V5H7zm2 3h2v2H9V8zm4 0h2v2h-2V8zm-4 4h2v2H9v-2zm4 0h2v2h-2v-2z"
+                              Width="16" Height="16" />
+                </Button>
+
+                <!-- r19 4.4: global stop for streamed auto-speech, which queues many
+                     chunks - StopChannel clears the whole queue, not just what is
+                     currently playing. -->
+                <Button Grid.Column="10" Classes="icon-btn"
+                        Command="{Binding StopSpeakingCommand}"
+                        IsVisible="{Binding IsVoicePlaying}"
+                        ToolTip.Tip="Stop voice playback">
+                    <PathIcon Data="M6 6h12v12H6z"
+                              Width="16" Height="16" />
+                </Button>
+            </Grid>
+        </Border>
+
+        <StackPanel Grid.Row="1" Margin="16,6,16,0" Spacing="2">
+            <TextBlock Text="{Binding PerformanceLog}"
+                       IsVisible="{Binding PerformanceLog, Converter={x:Static views:NotEmptyConverter.Instance}}"
+                       FontSize="11"
+                       Opacity="0.42" />
+            <TextBlock Text="{Binding MemoryStatus}"
+                       IsVisible="{Binding MemoryStatus, Converter={x:Static views:NotEmptyConverter.Instance}}"
+                       FontSize="11"
+                       Opacity="0.48" />
+        </StackPanel>
+
+        <!-- ── System prompt (collapsible) ───────────────────────────────── -->
+        <Border Grid.Row="2"
+                IsVisible="{Binding ShowSystemPrompt}"
+                Padding="16,8"
+                BorderThickness="0,0,0,1"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
+            <StackPanel Spacing="8">
+                <TextBlock FontSize="10"
+                           Classes="sidebar-section-header"
+                           Text="{Binding Source=System prompt, Converter={StaticResource UppercaseConverter}}" />
+                <TextBox Text="{Binding SystemPrompt}"
+                         Watermark="You are a helpful assistant..."
+                         AcceptsReturn="True" TextWrapping="Wrap"
+                         FontSize="13" CornerRadius="6"
+                         Padding="10,6" MinHeight="40" MaxHeight="100" />
+            </StackPanel>
+        </Border>
+
+        <Border Grid.Row="2"
+                IsVisible="{Binding ShowContextInspector}"
+                Padding="16,8"
+                BorderThickness="0,0,0,1"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
+            <Expander Header="Context Inspector" IsExpanded="True">
+                <StackPanel Spacing="8" Margin="0,8,0,0">
+                    <TextBlock Text="{Binding ContextPreviewSummary}" FontSize="12" Opacity="0.65" />
+                    <ItemsControl ItemsSource="{Binding ContextPreviewParts}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:ChatContextPartViewModel">
+                                <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="6"
+                                        Padding="8"
+                                        Margin="0,0,0,6">
+                                    <StackPanel Spacing="3">
+                                        <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+                                            <TextBlock Grid.Column="0" Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Grid.Column="1" Text="{Binding Kind}" FontSize="11" Opacity="0.55" />
+                                            <TextBlock Grid.Column="2" Text="{Binding TokenLabel}" FontSize="11" Opacity="0.55" />
+                                        </Grid>
+                                        <SelectableTextBlock Text="{Binding Content}" FontSize="11" TextWrapping="Wrap" MaxHeight="120" />
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <Expander Header="Raw model context">
+                        <SelectableTextBlock Text="{Binding ContextPreviewRaw}"
+                                             FontFamily="Consolas,monospace"
+                                             FontSize="11"
+                                             TextWrapping="Wrap"
+                                             MaxHeight="180" />
+                    </Expander>
+                </StackPanel>
+            </Expander>
+        </Border>
+
+        <Border Grid.Row="2"
+                IsVisible="{Binding ShowChatTraces}"
+                Padding="16,8"
+                BorderThickness="0,0,0,1"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
+            <Expander Header="Chat Trace Viewer" IsExpanded="True">
+                <Grid ColumnDefinitions="320,*" ColumnSpacing="12" Margin="0,8,0,0" MaxHeight="260">
+                    <ListBox Grid.Column="0"
+                             ItemsSource="{Binding ChatTraces}"
+                             SelectedItem="{Binding SelectedChatTrace}">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate DataType="vm:ChatTraceViewModel">
+                                <StackPanel Spacing="2" Margin="6">
+                                    <TextBlock Text="{Binding Summary}" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                    <TextBlock Text="{Binding UsageLabel}" FontSize="11" Opacity="0.55" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                    <StackPanel Grid.Column="1" Spacing="5">
+                            <TextBlock Text="{Binding SelectedChatTrace.ModelId, FallbackValue='N/A'}" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding SelectedChatTrace.Provider, StringFormat='Provider: {0}', FallbackValue='Provider: N/A'}" FontSize="11" Opacity="0.65" />
+                            <TextBlock Text="{Binding SelectedChatTrace.Runtime, StringFormat='Runtime: {0}', FallbackValue='Runtime: N/A'}" FontSize="11" Opacity="0.65" />
+                            <TextBlock Text="{Binding SelectedChatTrace.FirstTokenMs, StringFormat='First token: {0} ms', FallbackValue='First token: N/A'}" FontSize="11" Opacity="0.65" />
+                            <TextBlock Text="{Binding SelectedChatTrace.TotalLatencyMs, StringFormat='Total latency: {0} ms', FallbackValue='Total latency: N/A'}" FontSize="11" Opacity="0.65" />
+                            <TextBlock Text="{Binding SelectedChatTrace.AttachmentCount, StringFormat='Attachments: {0}', FallbackValue='Attachments: N/A'}" FontSize="11" Opacity="0.65" />
+                            <TextBlock Text="{Binding SelectedChatTrace.EstimatedTokens, StringFormat='Estimated tokens: {0}', FallbackValue='Estimated tokens: N/A'}" FontSize="11" Opacity="0.65" />
+                            <SelectableTextBlock Text="{Binding SelectedChatTrace.ErrorDetails, FallbackValue='No errors'}" FontSize="11" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Grid>
+            </Expander>
+        </Border>
+
+        <Border Grid.Row="2"
+                IsVisible="{Binding ShowCompareModels}"
+                Padding="16,8"
+                BorderThickness="0,0,0,1"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
+            <Expander Header="Compare Models" IsExpanded="True">
+                <StackPanel Spacing="8" Margin="0,8,0,0">
+                    <ItemsControl ItemsSource="{Binding CompareModels}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:CompareModelOptionViewModel">
+                                <CheckBox Content="{Binding DisplayName}"
+                                          IsChecked="{Binding IsSelected}"
+                                          Margin="0,0,12,6"
+                                          FontSize="12" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button Content="Compare"
+                                Command="{Binding CompareSelectedModelsCommand}"
+                                IsEnabled="{Binding !IsComparingModels}"
+                                Padding="12,6" />
+                        <TextBlock Text="{Binding CompareStatus}" FontSize="12" Opacity="0.65" VerticalAlignment="Center" />
+                    </StackPanel>
+                    <ItemsControl ItemsSource="{Binding CompareResults}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:ModelCompareResultViewModel">
+                                <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="6"
+                                        Padding="10"
+                                        Margin="0,0,0,8">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" />
+                                        <TextBlock Text="{Binding LatencyLabel}" FontSize="11" Opacity="0.65" />
+                                        <TextBlock Text="{Binding UsageLabel}" FontSize="11" Opacity="0.55" />
+                                        <TextBlock Text="{Binding QualityNotes}" FontSize="11" Opacity="0.55" />
+                                        <SelectableTextBlock Text="{Binding Answer}" TextWrapping="Wrap" FontSize="12" MaxHeight="150" />
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Expander>
+        </Border>
+
+        <!-- ── Messages ───────────────────────────────────────────────────── -->
+        <Grid Grid.Row="3">
+            <ScrollViewer x:Name="MessagesScroll"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled"
+                          Padding="16,8">
+                <StackPanel>
+                    <Button Content="Show earlier messages"
+                            Command="{Binding ShowEarlierMessagesCommand}"
+                            IsVisible="{Binding HasEarlierMessages}"
+                            HorizontalAlignment="Center"
+                            Margin="0,0,0,10"
+                            ToolTip.Tip="Loads 100 more older messages from this conversation." />
+                    <ItemsControl x:Name="MessagesList"
+                                  ItemsSource="{Binding VisibleMessages}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:MessageViewModel">
+                                <controls:MessageControl OpenMemoryCommand="{Binding $parent[ItemsControl].DataContext.OpenMemoryInMemoriesCommand}" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </ScrollViewer>
+
+            <StackPanel IsVisible="{Binding !HasMessages}"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Top"
+                        Margin="0,80,0,0"
+                        Spacing="10">
+                <StackPanel IsVisible="{Binding !HasNoAvailableModels}" Spacing="10">
+                    <PathIcon Data="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"
+                              Width="52" Height="52" Opacity="0.12"
+                              HorizontalAlignment="Center" />
+                    <TextBlock Text="Start a conversation"
+                               HorizontalAlignment="Center"
+                               FontSize="17" Opacity="0.25" />
+                    <TextBlock Text="Select a model above then type below"
+                               HorizontalAlignment="Center"
+                               FontSize="13" Opacity="0.18" />
+                </StackPanel>
+
+                <StackPanel IsVisible="{Binding HasNoAvailableModels}" Spacing="10">
+                    <PathIcon Data="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"
+                              Width="52" Height="52" Opacity="0.18"
+                              HorizontalAlignment="Center" />
+                    <TextBlock Text="No chat model is set up yet"
+                               HorizontalAlignment="Center"
+                               FontSize="17" Opacity="0.4" />
+                    <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
+                        <Button Content="Open setup wizard"
+                                Command="{Binding OpenSetupWizardFromEmptyStateCommand}"
+                                ToolTip.Tip="Walks you through choosing or downloading a model, a runtime, and voice." />
+                        <Button Content="Open Services"
+                                Command="{Binding OpenServicesFromEmptyStateCommand}"
+                                ToolTip.Tip="Manage and start the local model server directly." />
+                    </StackPanel>
+                </StackPanel>
+            </StackPanel>
+        </Grid>
+
+        <!-- ── Input bar ──────────────────────────────────────────────────── -->
+        <Border Grid.Row="4"
+                Padding="16,10"
+                BorderThickness="0,1,0,0"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                Classes.context-drop-active="{Binding IsContextDragOver}"
+                DragDrop.AllowDrop="True"
+                DragDrop.DragOver="OnContextDragOver"
+                DragDrop.DragLeave="OnContextDragLeave"
+                DragDrop.Drop="OnContextDrop">
+            <StackPanel Spacing="8">
+                <!-- r19 5.4: chat artifacts - files saved from this conversation's code blocks. -->
+                <StackPanel IsVisible="{Binding HasArtifacts}" Spacing="4">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <ToggleButton IsChecked="{Binding IsArtifactsExpanded, Mode=TwoWay}"
+                                      HorizontalAlignment="Left"
+                                      Padding="8,3"
+                                      CornerRadius="10"
+                                      Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                                      BorderThickness="0">
+                            <TextBlock FontSize="11" Opacity="0.6" Text="{Binding ArtifactsSummary}" />
+                        </ToggleButton>
+                        <Button Content="Open folder"
+                                Command="{Binding OpenArtifactsFolderCommand}"
+                                FontSize="11"
+                                Padding="8,3"
+                                IsVisible="{Binding IsArtifactsExpanded}" />
+                    </StackPanel>
+
+                    <ItemsControl ItemsSource="{Binding Artifacts}" IsVisible="{Binding IsArtifactsExpanded}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:ChatArtifactViewModel">
+                                <Border CornerRadius="6"
+                                        Margin="0,0,8,6"
+                                        Padding="8,5"
+                                        Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                                        BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                        BorderThickness="1"
+                                        ToolTip.Tip="{Binding FullPath}">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <StackPanel Spacing="1">
+                                            <TextBlock Text="{Binding FileName}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" MaxWidth="200" />
+                                            <TextBlock Text="{Binding SizeLabel}" FontSize="10" Opacity="0.55" />
+                                        </StackPanel>
+                                        <Button Classes="icon-btn"
+                                                Opacity="0.6"
+                                                ToolTip.Tip="Open"
+                                                Command="{Binding $parent[ItemsControl].DataContext.OpenArtifactCommand}"
+                                                CommandParameter="{Binding}">
+                                            <PathIcon Data="M14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3z M5 5h5V3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-5h-2v5H5V5z"
+                                                          Width="12" Height="12" />
+                                        </Button>
+                                        <Button Classes="icon-btn"
+                                                Opacity="0.6"
+                                                ToolTip.Tip="Reveal in folder"
+                                                Command="{Binding $parent[ItemsControl].DataContext.RevealArtifactCommand}"
+                                                CommandParameter="{Binding}">
+                                            <PathIcon Data="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z"
+                                                      Width="12" Height="12" />
+                                        </Button>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+
+                <ItemsControl ItemsSource="{Binding ContextAttachments}"
+                              IsVisible="{Binding HasContextAttachments}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <WrapPanel />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="vm:ChatContextAttachment">
+                            <Border CornerRadius="6"
+                                    Margin="0,0,8,6"
+                                    Padding="8,5"
+                                    Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                    BorderThickness="1"
+                                    ToolTip.Tip="{Binding StatusMessage}">
+                                <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="6">
+                                    <Border Grid.Column="0"
+                                            Width="28" Height="28"
+                                            CornerRadius="4"
+                                            ClipToBounds="True"
+                                            IsVisible="{Binding IsImage}">
+                                        <Image Source="{Binding ImageDataUri, Converter={x:Static views:DataUriToBitmapConverter.Instance}}"
+                                               Stretch="UniformToFill"
+                                               Width="28" Height="28" />
+                                    </Border>
+                                    <StackPanel Grid.Column="1" Spacing="1">
+                                        <TextBlock Text="{Binding ChipText}"
+                                                   FontSize="12"
+                                                   FontWeight="SemiBold"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   MaxWidth="240" />
+                                        <TextBlock Text="{Binding StatusMessage}"
+                                                   FontSize="10"
+                                                   Opacity="0.55"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   MaxWidth="240" />
+                                    </StackPanel>
+                                    <Button Grid.Column="2"
+                                            Classes="icon-btn"
+                                            Command="{Binding $parent[ItemsControl].DataContext.RemoveContextAttachmentCommand}"
+                                            CommandParameter="{Binding}"
+                                            ToolTip.Tip="Remove attached context">
+                                        <PathIcon Data="M18.3 5.71 16.89 4.3 12 9.17 7.11 4.3 5.7 5.71 10.59 10.6 5.7 15.49 7.11 16.9 12 12.01 16.89 16.9 18.3 15.49 13.41 10.6z"
+                                                  Width="11" Height="11" />
+                                    </Button>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <Grid ColumnDefinitions="*,Auto"
+                      IsVisible="{Binding AttachmentStatus, Converter={x:Static views:NotEmptyConverter.Instance}}">
+                    <TextBlock Grid.Column="0"
+                               Text="{Binding AttachmentStatus}"
+                               FontSize="11"
+                               Opacity="0.55"
+                               VerticalAlignment="Center" />
+                    <Button Grid.Column="1"
+                            Command="{Binding ClearContextAttachmentsCommand}"
+                            Content="Clear attachments"
+                            FontSize="11"
+                            Padding="8,4" />
+                </Grid>
+                <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="8">
+                    <Button Grid.Column="0" Classes="icon-btn"
+                            Command="{Binding AttachContextFilesCommand}"
+                            ToolTip.Tip="Attach text/code files as direct context">
+                        <PathIcon Data="M16.5 6.5v8.25a4.75 4.75 0 0 1-9.5 0V5.5a3.5 3.5 0 0 1 7 0v8.5a2.25 2.25 0 0 1-4.5 0V6h2v8a.25.25 0 0 0 .5 0V5.5a1.5 1.5 0 0 0-3 0v9.25a2.75 2.75 0 0 0 5.5 0V6.5h2z"
+                                  Width="16" Height="16" />
+                    </Button>
+
+                    <TextBox Grid.Column="1"
+                             x:Name="InputBox"
+                             Classes="chat-input"
+                             Text="{Binding InputText}"
+                             Watermark="Message or drop text/code files here..."
+                             KeyDown="OnInputKeyDown" />
+
+                    <TextBlock Grid.Column="2"
+                               Text="{Binding ContextUsageLabel}"
+                               ToolTip.Tip="{Binding ContextUsageTooltip}"
+                               Classes.context-usage-warning="{Binding IsContextUsageWarning}"
+                               Classes.context-usage-critical="{Binding IsContextUsageCritical}"
+                               FontSize="11"
+                               Opacity="0.72"
+                               VerticalAlignment="Center"
+                               MinWidth="112"
+                               TextAlignment="Right" />
+
+                    <Button Grid.Column="3" Classes="send-btn"
+                            Command="{Binding SendCommand}"
+                            IsVisible="{Binding !IsGenerating}"
+                            Content="Send" />
+
+                    <Button Grid.Column="3" Classes="send-btn"
+                            Command="{Binding StopCommand}"
+                            IsVisible="{Binding IsGenerating}"
+                            Content="Stop" />
+
+                    <Button Grid.Column="4" Classes="icon-btn"
+                            Command="{Binding RegenerateCommand}"
+                            IsEnabled="{Binding !IsGenerating}"
+                            IsVisible="{Binding HasMessages}"
+                            ToolTip.Tip="Regenerate last response">
+                        <PathIcon Data="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"
+                                  Width="16" Height="16" />
+                    </Button>
+                </Grid>
+            </StackPanel>
+        </Border>
+    </Grid>
+</UserControl>

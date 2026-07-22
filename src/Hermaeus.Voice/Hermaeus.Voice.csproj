@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Hermaeus.Voice</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.25.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Hermaeus.Core/Hermaeus.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Hermaeus.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\cmudict.txt.gz" LogicalName="Hermaeus.Voice.Assets.cmudict.txt.gz" />
+  </ItemGroup>
+</Project>

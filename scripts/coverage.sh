@@ -3,7 +3,7 @@ set -euo pipefail
 
 THRESHOLD="${1:-47}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PROJECT="$ROOT_DIR/src/Aether.Tests/Aether.Tests.csproj"
+PROJECT="$ROOT_DIR/src/Hermaeus.Tests/Hermaeus.Tests.csproj"
 RESULTS_DIR="$ROOT_DIR/dist/.coverage"
 
 rm -rf "$RESULTS_DIR"

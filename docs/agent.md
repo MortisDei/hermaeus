@@ -13,7 +13,7 @@ explicit user approval before it executes.
 
 - Builds explicit task state and compact context packs.
 - Records `task_state.json`, `agent.log`, `agent.trace.jsonl`, and
-  `transcript.jsonl` under the Aether data root.
+  `transcript.jsonl` under the Hermaeus data root.
 - Maintains `agent/task_index.db` as a SQLite catalog for recent-task and review
   queue lists, with `task_state.json` remaining the source of truth for full
   task state. Initialization reconciles JSON task files back into the index.
@@ -201,7 +201,7 @@ the model sees next step that only the first one ran.
   `npm test`, `npm run <script>` where the script must already exist in the
   workspace's own `package.json`, `cargo build`, `cargo test`, `pytest` with
   an optional path), and only when the workspace itself declared that family
-  safe in `.aether/workspace.json`. Optional path arguments go through the
+  safe in `.hermaeus/workspace.json`. Optional path arguments go through the
   same containment checks as every other workspace file path. Always requires
   approval, even for a declared-safe family. After the user approves a given
   command string once in a task, an identical repeat of that exact string may
@@ -294,7 +294,7 @@ store.
 
 ## Workspace Memory
 
-Aether Agent includes a workspace memory panel for saving and reusing notes tied
+Hermaeus Agent includes a workspace memory panel for saving and reusing notes tied
 to a specific workspace root. This allows you to maintain persistent context
 across task sessions.
 
@@ -473,7 +473,7 @@ This keeps the user informed and provides practical remediation guidance.
 
 ## Privacy Caveat
 
-Aether performs agent workspace operations locally. Data only leaves the
+Hermaeus performs agent workspace operations locally. Data only leaves the
 machine if the user configures a remote model, embedding provider, or other
 external service. The default local-first setup does not upload workspace files.
 
@@ -517,7 +517,7 @@ automated testing.
 
 ## Scenario Suite Checks
 
-The built-in Agent Scenario Suite (`src/Aether.Agent/Scenarios/`) grades a real
+The built-in Agent Scenario Suite (`src/Hermaeus.Agent/Scenarios/`) grades a real
 run's transcript against each manifest's `expect` block. The
 `expect_subtask_statuses` check (used by orchestration scenarios) checks only
 that every distinct expected status was reached by at least one sub-task, not

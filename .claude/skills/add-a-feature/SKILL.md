@@ -1,31 +1,31 @@
 ---
 name: add-a-feature
-description: The end-to-end pattern for adding a feature to Aether across Core, Services, ViewModels, and Desktop, including DI registration and settings. Use when creating a new service, panel, or user-facing capability.
+description: The end-to-end pattern for adding a feature to Hermaeus across Core, Services, ViewModels, and Desktop, including DI registration and settings. Use when creating a new service, panel, or user-facing capability.
 ---
 
-# Adding a feature to Aether
+# Adding a feature to Hermaeus
 
 Follow the dependency flow: Desktop → ViewModels → (Services/Agent/Rag) → Core.
 
 ## Steps
 
-1. **Contract and models** in `src/Aether.Core`: records/POCOs under
+1. **Contract and models** in `src/Hermaeus.Core`: records/POCOs under
    `Models/`, and a service interface under `Services/` **only if** more than
    one implementation is plausible (providers, backends, checks). Otherwise a
-   concrete class in `Aether.Services` is preferred; do not add ceremony
+   concrete class in `Hermaeus.Services` is preferred; do not add ceremony
    interfaces.
-2. **Implementation** in `src/Aether.Services` (or `Aether.Rag`/`Aether.Agent`
+2. **Implementation** in `src/Hermaeus.Services` (or `Hermaeus.Rag`/`Hermaeus.Agent`
    if it belongs to those domains). Follow existing patterns: constructor
    injection, `sealed` class, async with `CancellationToken` parameters,
    atomic writes for files, `RedactionService` before persisting any log text.
-3. **DI registration** in the Desktop composition root (`src/Aether.Desktop`,
+3. **DI registration** in the Desktop composition root (`src/Hermaeus.Desktop`,
    `App.axaml.cs` / service collection setup). Register alongside similar
    services; singletons are the norm here.
-4. **ViewModel** in `src/Aether.ViewModels` using CommunityToolkit.Mvvm
+4. **ViewModel** in `src/Hermaeus.ViewModels` using CommunityToolkit.Mvvm
    (`[ObservableProperty]`, `[RelayCommand]`). ViewModels must not reference
    `Avalonia.*` — marshal to the UI thread via the patterns already used
    (dispatcher abstractions), not `Avalonia.Threading` directly.
-5. **View** in `src/Aether.Desktop/Views` as `.axaml` + minimal code-behind.
+5. **View** in `src/Hermaeus.Desktop/Views` as `.axaml` + minimal code-behind.
    Reuse styles from `Styles/`; match existing spacing and toast/notification
    patterns. Wire navigation via `MainWindowViewModel`.
 6. **Settings**, if needed: add a property to the matching domain section
@@ -38,7 +38,7 @@ Follow the dependency flow: Desktop → ViewModels → (Services/Agent/Rag) → 
    migrations. Never edit an existing migration.
 8. **Docs and changelog**: update `docs/features.md`, the relevant workflow
    doc, and `CHANGELOG.md`. Describe only what is actually implemented.
-9. **Tests**: add cases to the harness in `src/Aether.Tests` (see
+9. **Tests**: add cases to the harness in `src/Hermaeus.Tests` (see
    build-and-verify skill for how to run it).
 
 ## Anti-patterns to avoid

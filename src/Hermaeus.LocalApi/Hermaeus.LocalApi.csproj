@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Hermaeus.LocalApi</RootNamespace>
+    <AssemblyName>Hermaeus.LocalApi</AssemblyName>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Hermaeus.Composition/Hermaeus.Composition.csproj" />
+    <ProjectReference Include="../Hermaeus.Rag/Hermaeus.Rag.csproj" />
+  </ItemGroup>
+</Project>

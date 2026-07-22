@@ -1,6 +1,6 @@
 # Contributing
 
-Aether is currently a source-available product project, not an open-governance
+Hermaeus is currently a source-available product project, not an open-governance
 open-source project. Contributions are welcome only when they align with the
 project direction and licensing model.
 
@@ -11,21 +11,21 @@ By submitting a contribution, you certify that:
 - you have the right to submit the contribution
 - the contribution is your own work or is submitted with permission
 - the contribution does not knowingly include code, assets, models, prompts, or
-  data that conflict with Aether's licensing model
+  data that conflict with Hermaeus's licensing model
 - you grant the project owner the right to use, modify, distribute, sublicense,
-  and commercially license the contribution as part of Aether
+  and commercially license the contribution as part of Hermaeus
 
-This dual-use contribution grant is required because Aether is free for private
+This dual-use contribution grant is required because Hermaeus is free for private
 and noncommercial use but may also be commercially licensed.
 
 ## Development Expectations
 
-- Keep Aether native, local-first, and desktop-focused.
-- Keep public docs focused on Aether's own product identity.
+- Keep Hermaeus native, local-first, and desktop-focused.
+- Keep public docs focused on Hermaeus's own product identity.
 - Do not add hosted-service dependencies by default.
 - Prefer optional integrations over hard dependencies.
-- Run `dotnet build Aether.sln` before submitting changes.
-- Run `dotnet run --project src/Aether.Tests/Aether.Tests.csproj` when changes
+- Run `dotnet build Hermaeus.sln` before submitting changes.
+- Run `dotnet run --project src/Hermaeus.Tests/Hermaeus.Tests.csproj` when changes
   affect storage, settings, security, RAG, backup, restore, or runtime launch.
 
 ## Vocabulary
@@ -54,7 +54,7 @@ introducing a fifth meaning for any of these words.
 
 ## Explicit non-goals
 
-The following are deliberately not part of Aether's design, decided during
+The following are deliberately not part of Hermaeus's design, decided during
 the 2026-07 architecture review (see `docs/review/02`, `03`, `08` for the
 reasoning behind each): hosted services, user accounts, telemetry, an
 in-process plugin API, provider failover (silently answering with a

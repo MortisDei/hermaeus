@@ -25,10 +25,10 @@ jobs:
           dotnet-version: '10.0.x'
 
       - name: Restore
-        run: dotnet restore Aether.sln
+        run: dotnet restore Hermaeus.sln
 
       - name: Build (zero warnings enforced)
-        run: dotnet build Aether.sln --no-restore -c Release
+        run: dotnet build Hermaeus.sln --no-restore -c Release
 
       - name: Test
-        run: dotnet test src/Aether.Tests/Aether.Tests.csproj --no-restore -c Release -v normal --nologo
+        run: dotnet test src/Hermaeus.Tests/Hermaeus.Tests.csproj --no-restore -c Release -v normal --nologo

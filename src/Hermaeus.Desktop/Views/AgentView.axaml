@@ -1,0 +1,998 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Hermaeus.ViewModels"
+             xmlns:views="using:Hermaeus.Desktop.Views"
+             x:Name="Root"
+             x:Class="Hermaeus.Desktop.Views.AgentView"
+             x:DataType="vm:AgentViewModel">
+    <UserControl.Resources>
+        <views:AgentScenarioStatusColorConverter x:Key="AgentScenarioStatusColor" />
+        <views:AgentSubTaskStatusColorConverter x:Key="AgentSubTaskStatusColor" />
+        <views:AgentTaskStatusColorConverter x:Key="AgentTaskStatusColor" />
+        <views:BoolToIndentMarginConverter x:Key="BoolToIndentMargin" />
+    </UserControl.Resources>
+    <Grid RowDefinitions="Auto,*">
+        <Border Grid.Row="0" Padding="12,8"
+                BorderThickness="0,0,0,1"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
+            <StackPanel Spacing="8">
+                <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="8">
+                    <TextBlock Grid.Column="0"
+                               Text="Agent"
+                               FontSize="14"
+                               FontWeight="SemiBold"
+                               VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="1"
+                               Text="{Binding CurrentStep}"
+                               FontSize="12"
+                               Opacity="0.5"
+                               VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                    <!-- r19 3.2: once a task is loaded the workbench reads as owned by it;
+                         this makes "you can just type a new goal" explicit instead of implied. -->
+                    <Button Grid.Column="2"
+                            Command="{Binding NewTaskCommand}"
+                            IsVisible="{Binding CanShowNewTaskButton}"
+                            Content="New task"
+                            Padding="12,6"
+                            CornerRadius="6" />
+                    <Button Grid.Column="3"
+                            Command="{Binding RunStepCommand}"
+                            Content="Run Step"
+                            Padding="12,6"
+                            CornerRadius="6" />
+                    <Button Grid.Column="4"
+                            Command="{Binding StopCommand}"
+                            Content="Stop"
+                            Padding="12,6"
+                            CornerRadius="6" />
+                </Grid>
+
+                <Grid ColumnDefinitions="*,*,*,*" ColumnSpacing="8">
+                    <Border Grid.Column="0" Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="10">
+                        <StackPanel Spacing="2">
+                            <TextBlock Text="Task state" FontSize="11" Opacity="0.55" />
+                            <TextBlock Text="{Binding CurrentTaskStatusLabel}" FontSize="13" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding CurrentStepCountLabel}" FontSize="11" Opacity="0.6" />
+                            <TextBlock Text="{Binding CurrentTaskGoalLabel}" FontSize="11" Opacity="0.7" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Text="{Binding CurrentTaskParentGoalLabel}" FontSize="10" FontStyle="Italic" Opacity="0.6"
+                                       TextTrimming="CharacterEllipsis" IsVisible="{Binding HasCurrentTaskParentGoal}" />
+                            <!-- r19 3.3: a terminal task whose own plan still lists pending
+                                 steps declared victory prematurely; say so beside the status. -->
+                            <TextBlock Text="{Binding PrematureCompleteNote}" FontSize="10" Foreground="#FFB74D"
+                                       TextWrapping="Wrap" IsVisible="{Binding HasPrematureCompleteNote}" />
+                        </StackPanel>
+                    </Border>
+                    <Border Grid.Column="1" Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="10">
+                        <StackPanel Spacing="2">
+                            <TextBlock Text="Task history" FontSize="11" Opacity="0.55" />
+                            <TextBlock Text="{Binding RecentTaskCount, StringFormat={}{0} recent tasks}" FontSize="13" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding ReviewQueueCount, StringFormat={}{0} queued reviews}" FontSize="11" Opacity="0.7" />
+                        </StackPanel>
+                    </Border>
+                    <Border Grid.Column="2" Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="10">
+                        <StackPanel Spacing="2">
+                            <TextBlock Text="Workspace memory" FontSize="11" Opacity="0.55" />
+                            <TextBlock Text="{Binding WorkspaceMemoryCount, StringFormat={}{0} saved notes}" FontSize="13" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding RetrievedContextCount, StringFormat={}{0} context items}" FontSize="11" Opacity="0.7" />
+                        </StackPanel>
+                    </Border>
+                    <Border Grid.Column="3" Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="10">
+                        <StackPanel Spacing="2">
+                            <TextBlock Text="Summary" FontSize="11" Opacity="0.55" />
+                            <TextBlock Text="{Binding CurrentTaskSummaryLabel}" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Text="{Binding PendingPatchCount, StringFormat={}{0} pending patches}" FontSize="11" Opacity="0.7" />
+                            <TextBlock Text="{Binding BlockedPatchCount, StringFormat={}{0} blocked patches}" FontSize="11" Opacity="0.55" />
+                            <TextBlock Text="{Binding StatusMessage}" FontSize="11" Opacity="0.7" TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                    </Border>
+                </Grid>
+
+                <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="10"
+                        IsVisible="{Binding HasNewLessons}">
+                    <StackPanel Spacing="6">
+                        <TextBlock Text="New lessons from this task" FontSize="12" FontWeight="SemiBold" />
+                        <ItemsControl ItemsSource="{Binding NewLessons}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="vm:AgentLessonViewModel">
+                                    <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                            BorderThickness="1" CornerRadius="6" Padding="8" Margin="0,0,0,6">
+                                        <StackPanel Spacing="4">
+                                            <TextBlock Text="{Binding Claim}" FontSize="12" TextWrapping="Wrap" />
+                                            <TextBlock Text="{Binding Guidance}" FontSize="11" Opacity="0.6" TextWrapping="Wrap"
+                                                       IsVisible="{Binding HasGuidance}" />
+                                            <TextBlock Text="{Binding ConfidenceLabel}" FontSize="10" Opacity="0.5" />
+                                            <StackPanel Orientation="Horizontal" Spacing="8" x:CompileBindings="False">
+                                                <Button Content="Keep"
+                                                        Command="{Binding DataContext.DismissNewLessonCommand, ElementName=Root}"
+                                                        CommandParameter="{Binding}" />
+                                                <Button Content="Retire"
+                                                        Command="{Binding DataContext.RetireLessonCommand, ElementName=Root}"
+                                                        CommandParameter="{Binding}" />
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+
+                <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="10">
+                    <StackPanel Spacing="6">
+                        <TextBlock Text="{Binding CapabilityLabel}" FontSize="11" Opacity="0.55" />
+                        <ItemsControl ItemsSource="{Binding CapabilityNotes}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <TextBlock Text="•" Opacity="0.55" />
+                                        <TextBlock Text="{Binding}" TextWrapping="Wrap" FontSize="11" Opacity="0.78" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+
+                <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="10"
+                        IsVisible="{Binding HasSubTaskPlan}">
+                    <StackPanel Spacing="6">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock Text="Sub-tasks" FontSize="11" Opacity="0.55" VerticalAlignment="Center" />
+                            <Button Content="Open report"
+                                    Command="{Binding OpenReportCommand}"
+                                    IsVisible="{Binding HasReport}"
+                                    Padding="8,2" CornerRadius="6" FontSize="11" />
+                        </StackPanel>
+                        <ItemsControl ItemsSource="{Binding CurrentTask.SubTaskPlan}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,0,0,2">
+                                        <Border CornerRadius="4" Padding="6,1" MinWidth="70"
+                                                Background="{Binding Status, Converter={StaticResource AgentSubTaskStatusColor}}">
+                                            <TextBlock Text="{Binding Status}" FontSize="10" FontWeight="SemiBold" Foreground="White" HorizontalAlignment="Center" />
+                                        </Border>
+                                        <TextBlock Text="{Binding ProfileName}" FontSize="11" Opacity="0.55" Width="80" />
+                                        <TextBlock Text="{Binding Goal}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" FontSize="12" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+
+                <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="10">
+                    <StackPanel Spacing="6">
+                        <TextBlock Text="Plan" FontSize="11" Opacity="0.55" />
+                        <ItemsControl ItemsSource="{Binding CurrentTask.Plan}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <TextBlock Text="{Binding Status}" FontSize="11" Opacity="0.55" Width="80" />
+                                        <TextBlock Text="{Binding Description}" TextWrapping="Wrap" FontSize="12" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </Border>
+
+        <ScrollViewer Grid.Row="1" Padding="24,16">
+            <StackPanel Spacing="16" MaxWidth="980" HorizontalAlignment="Stretch">
+                <Grid ColumnDefinitions="110,*,Auto" RowDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="12" RowSpacing="8"
+                      HorizontalAlignment="Stretch">
+                    <TextBlock Grid.Row="0" Grid.Column="0"
+                               Text="Goal"
+                               VerticalAlignment="Top"
+                               Opacity="0.6" />
+                    <TextBox Grid.Row="0" Grid.Column="1"
+                             Text="{Binding GoalText}"
+                             Watermark="Describe the task for Hermaeus Agent..."
+                             AcceptsReturn="True"
+                             MinHeight="82"
+                             MaxHeight="120"
+                             TextWrapping="Wrap"
+                             IsEnabled="{Binding !IsRunning}" />
+
+                        <TextBlock Grid.Row="1" Grid.Column="0"
+                               Text="Workspace"
+                               VerticalAlignment="Center"
+                               Opacity="0.6" />
+                        <StackPanel Grid.Row="1" Grid.Column="1" Spacing="2">
+                            <TextBox Text="{Binding WorkspaceRoot}"
+                                 Watermark="/path/to/project"
+                                 IsEnabled="{Binding !IsRunning}"
+                                 ToolTip.Tip="The folder the agent can read and edit. Nothing outside it is touched." />
+                            <TextBlock Text="No workspace selected. Choose a folder so the agent has somewhere to work."
+                                       FontSize="11" Opacity="0.5" TextWrapping="Wrap"
+                                       IsVisible="{Binding !HasWorkspace}" />
+                        </StackPanel>
+                        <Button Grid.Row="1" Grid.Column="2"
+                            Command="{Binding BrowseWorkspaceRootCommand}"
+                            Content="Browse"
+                            Padding="8,4"
+                            CornerRadius="6"
+                            VerticalAlignment="Top" />
+
+                    <TextBlock Grid.Row="2" Grid.Column="0"
+                               Text="Model"
+                               VerticalAlignment="Center"
+                               Opacity="0.6" />
+                    <ComboBox Grid.Row="2" Grid.Column="1"
+                              ItemsSource="{Binding AvailableModels}"
+                              SelectedItem="{Binding SelectedModel}"
+                              IsEnabled="{Binding !IsRunning}"
+                              MaxWidth="360"
+                              HorizontalAlignment="Left">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding Name}" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+
+                    <TextBlock Grid.Row="3" Grid.Column="0"
+                               Text="RAG dataset"
+                               VerticalAlignment="Center"
+                               Opacity="0.6" />
+                    <ComboBox Grid.Row="3" Grid.Column="1"
+                              ItemsSource="{Binding Datasets}"
+                              SelectedItem="{Binding SelectedDataset}"
+                              IsEnabled="{Binding !IsRunning}"
+                              MaxWidth="360"
+                              HorizontalAlignment="Left"
+                              PlaceholderText="Optional retrieval dataset">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding Name}" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                </Grid>
+
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button Command="{Binding StartCommand}"
+                            Content="Start Agent"
+                            Padding="14,8"
+                            CornerRadius="6" />
+                    <Button Command="{Binding RefreshReviewQueueCommand}"
+                        Content="Refresh Queue"
+                        Padding="14,8"
+                        CornerRadius="6" />
+                    <Button Command="{Binding RefreshWorkspaceMemoryCommand}"
+                        Content="Refresh Memory"
+                        Padding="14,8"
+                        CornerRadius="6" />
+                    <Button Command="{Binding SaveWorkspaceMemoryCommand}"
+                        Content="Save Memory"
+                        Padding="14,8"
+                        CornerRadius="6" />
+                    <Button Command="{Binding ExplainWorkspaceCommand}"
+                        Content="Explain Workspace"
+                        Padding="14,8"
+                        CornerRadius="6" />
+                    <Button Command="{Binding SaveWorkspaceManifestCommand}"
+                        Content="Save as Workspace Defaults"
+                        ToolTip.Tip="Writes the selected model, dataset, and instruction files to .hermaeus/workspace.json so they activate for anyone who opens this workspace."
+                        Padding="14,8"
+                        CornerRadius="6" />
+                    <TextBlock Text="{Binding StatusMessage}"
+                               VerticalAlignment="Center"
+                               FontSize="12"
+                               Opacity="0.75"
+                               TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+
+                <!-- r18 02-agents-usability.md 2.2: the agent's current response used to be
+                     squeezed into an 11px truncated header label with no wrapping and no room,
+                     while the fuller state lived far down a long scroll region. This panel is
+                     always expanded, wraps, and gets real height; CurrentStep in the header
+                     above stays as the short supplementary status phrase, not a replacement. -->
+                <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="12">
+                    <StackPanel Spacing="6">
+                        <TextBlock Text="Agent response" FontSize="12" FontWeight="SemiBold" Opacity="0.7" />
+                        <ScrollViewer MaxHeight="320" VerticalScrollBarVisibility="Auto">
+                            <SelectableTextBlock Text="{Binding CurrentTaskSummaryLabel}"
+                                                  FontSize="13"
+                                                  TextWrapping="Wrap"
+                                                  MinHeight="220" />
+                        </ScrollViewer>
+                    </StackPanel>
+                </Border>
+
+                <Grid ColumnDefinitions="*,*" ColumnSpacing="12" HorizontalAlignment="Stretch">
+                    <Expander Grid.Column="0" Header="Task State" IsExpanded="True">
+                        <SelectableTextBlock Text="{Binding TaskStatePreview}"
+                                             FontFamily="Consolas,monospace"
+                                             FontSize="11"
+                                             MinHeight="150"
+                                             TextWrapping="Wrap"
+                                             Margin="0,8,0,0" />
+                    </Expander>
+                    <Expander Grid.Column="1" Header="Next Action" IsExpanded="True">
+                        <SelectableTextBlock Text="{Binding NextActionPreview}"
+                                             FontFamily="Consolas,monospace"
+                                             FontSize="11"
+                                             MinHeight="150"
+                                             TextWrapping="Wrap"
+                                             Margin="0,8,0,0" />
+                    </Expander>
+                </Grid>
+
+                <Border IsVisible="{Binding IsWaitingForReply}"
+                        Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                        CornerRadius="8"
+                        Padding="12">
+                    <StackPanel Spacing="8">
+                        <TextBlock Text="The agent is waiting for your reply"
+                                   FontWeight="SemiBold"
+                                   FontSize="12" />
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                            <TextBox Grid.Column="0"
+                                     Text="{Binding ReplyText}"
+                                     Watermark="Answer the agent's question..."
+                                     AcceptsReturn="True"
+                                     MinHeight="56"
+                                     TextWrapping="Wrap" />
+                            <Button Grid.Column="1"
+                                    Command="{Binding SendReplyCommand}"
+                                    Content="Send"
+                                    VerticalAlignment="Bottom"
+                                    Padding="14,8"
+                                    CornerRadius="6" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <!-- r19 3.1: a finished/failed/blocked task can be reopened with a new
+                     instruction instead of only being restartable as a brand new task. -->
+                <Border IsVisible="{Binding IsTaskTerminal}"
+                        Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                        CornerRadius="8"
+                        Padding="12">
+                    <StackPanel Spacing="8">
+                        <TextBlock Text="Continue task"
+                                   FontWeight="SemiBold"
+                                   FontSize="12" />
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                            <TextBox Grid.Column="0"
+                                     Text="{Binding ContinueInstructionText}"
+                                     Watermark="What should it do next? Leave empty for: finish the remaining planned steps"
+                                     AcceptsReturn="True"
+                                     MinHeight="56"
+                                     TextWrapping="Wrap" />
+                            <Button Grid.Column="1"
+                                    Command="{Binding ContinueTaskCommand}"
+                                    Content="Continue"
+                                    VerticalAlignment="Bottom"
+                                    Padding="14,8"
+                                    CornerRadius="6" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <Expander Header="Workspace Profile" HorizontalAlignment="Stretch" IsExpanded="True">
+                    <StackPanel Margin="0,8,0,0" Spacing="10">
+                        <Grid ColumnDefinitions="*,*,*" ColumnSpacing="8">
+                            <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="10">
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="Repository" FontSize="11" Opacity="0.55" />
+                                    <TextBlock Text="{Binding WorkspaceRepoType}" FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                    <TextBlock Text="{Binding WorkspaceLanguages}" FontSize="11" Opacity="0.7" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+                            <Border Grid.Column="1" Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="10">
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="Frameworks" FontSize="11" Opacity="0.55" />
+                                    <TextBlock Text="{Binding WorkspaceFrameworks}" FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                    <TextBlock Text="{Binding WorkspaceImportantFiles}" FontSize="11" Opacity="0.7" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+                            <Border Grid.Column="2" Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="10">
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="Profile" FontSize="11" Opacity="0.55" />
+                                    <TextBlock Text="{Binding WorkspaceProfileSummary}" FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                    <TextBlock Text="{Binding WorkspaceRiskCount, StringFormat={}{0} risk notes}" FontSize="11" Opacity="0.7" />
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+
+                        <TextBlock Text="{Binding WorkspaceRagIngestPlan}" FontSize="12" Opacity="0.75" TextWrapping="Wrap" />
+
+                        <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+                            <Expander Grid.Column="0" Header="Project Instructions" IsExpanded="True">
+                                <StackPanel Spacing="8" Margin="0,8,0,0">
+                                    <ItemsControl ItemsSource="{Binding InstructionWarnings}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding}" FontSize="11" Opacity="0.75" TextWrapping="Wrap" />
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <ItemsControl ItemsSource="{Binding ProjectInstructions}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate DataType="vm:ProjectInstructionFileViewModel">
+                                                <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                                        BorderThickness="1"
+                                                        CornerRadius="6"
+                                                        Padding="10"
+                                                        Margin="0,0,0,6">
+                                                    <StackPanel Spacing="3">
+                                                        <Grid ColumnDefinitions="*,Auto">
+                                                            <TextBlock Grid.Column="0" Text="{Binding RelativePath}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                            <TextBlock Grid.Column="1" Text="{Binding PriorityLabel}" FontSize="11" Opacity="0.55" />
+                                                        </Grid>
+                                                        <TextBlock Text="{Binding Summary}" FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
+                                                    </StackPanel>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </Expander>
+
+                            <Expander Grid.Column="1" Header="Command Recipes" IsExpanded="True">
+                                <ItemsControl ItemsSource="{Binding CommandRecipes}" Margin="0,8,0,0">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate DataType="vm:WorkspaceCommandRecipeViewModel">
+                                            <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="6"
+                                                    Padding="10"
+                                                    Margin="0,0,0,6">
+                                                <StackPanel Spacing="3">
+                                                    <Grid ColumnDefinitions="*,Auto">
+                                                        <SelectableTextBlock Grid.Column="0" Text="{Binding Command}" FontFamily="Consolas,monospace" FontWeight="SemiBold" />
+                                                        <Border Grid.Column="1" CornerRadius="4" Padding="6,2"
+                                                                IsVisible="{Binding IsElevatedRisk}"
+                                                                Background="#FF9800">
+                                                            <TextBlock Text="{Binding RiskLabel}" FontSize="10" FontWeight="SemiBold" Foreground="White" />
+                                                        </Border>
+                                                        <TextBlock Grid.Column="1" Text="{Binding RiskLabel}" FontSize="11" Opacity="0.55"
+                                                                   IsVisible="{Binding !IsElevatedRisk}" />
+                                                    </Grid>
+                                                    <TextBlock Text="{Binding Why}" FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
+                                                </StackPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </Expander>
+                        </Grid>
+
+                        <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+                            <Expander Grid.Column="0" Header="Workspace Risks">
+                                <ItemsControl ItemsSource="{Binding WorkspaceRisks}" Margin="0,8,0,0">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding}" FontSize="11" Opacity="0.7" TextWrapping="Wrap" Margin="0,0,0,4" />
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </Expander>
+                            <Expander Grid.Column="1" Header="Suggested AGENTS.md">
+                                <SelectableTextBlock Text="{Binding SuggestedAgentsMd}"
+                                                     FontFamily="Consolas,monospace"
+                                                     FontSize="11"
+                                                     TextWrapping="Wrap"
+                                                     Margin="0,8,0,0" />
+                            </Expander>
+                        </Grid>
+                    </StackPanel>
+                </Expander>
+
+                <Expander Header="Workspace Files" HorizontalAlignment="Stretch" IsExpanded="True">
+                    <StackPanel Margin="0,8,0,0" Spacing="10">
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                            <TextBox Grid.Column="0"
+                                     Text="{Binding WorkspaceFileQuery}"
+                                     Watermark="Search workspace files by path or content..."
+                                     IsEnabled="{Binding !IsRunning}" />
+                            <Button Grid.Column="1"
+                                    Command="{Binding RefreshWorkspaceFilesCommand}"
+                                    Content="Refresh"
+                                    Padding="12,6"
+                                    CornerRadius="6" />
+                        </Grid>
+
+                        <TextBlock Text="{Binding WorkspaceFileCount, StringFormat={}{0} files available}" FontSize="11" Opacity="0.55" />
+
+                        <Grid ColumnDefinitions="320,*" ColumnSpacing="12" MinHeight="220">
+                            <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="6">
+                                <ListBox ItemsSource="{Binding WorkspaceFiles}"
+                                         SelectedItem="{Binding SelectedWorkspaceFile}"
+                                         BorderThickness="0"
+                                         Background="Transparent">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <StackPanel Spacing="2" Margin="8,6">
+                                                <TextBlock Text="{Binding RelativePath}" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                <TextBlock Text="{Binding Snippet}" FontSize="10" Opacity="0.6" TextWrapping="Wrap" />
+                                                <TextBlock Text="{Binding ModifiedLabel}" FontSize="10" Opacity="0.45" />
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </Border>
+
+                            <StackPanel Grid.Column="1" Spacing="8">
+                                <TextBlock Text="{Binding SelectedWorkspaceFile.RelativePath, TargetNullValue=Select a file to preview}" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding WorkspaceFileSummary, StringFormat=Summary: {0}}" FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
+                                <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="6"
+                                        Padding="10"
+                                        Background="{DynamicResource SubtleFillColorSecondaryBrush}">
+                                    <SelectableTextBlock Text="{Binding WorkspaceFilePreview}"
+                                                         FontFamily="Consolas,monospace"
+                                                         FontSize="11"
+                                                         TextWrapping="Wrap"
+                                                         MinHeight="180" />
+                                </Border>
+                                <Expander Header="Draft Patch" IsExpanded="False" Margin="0,8,0,0">
+                                    <StackPanel Spacing="8">
+                                        <TextBox Text="{Binding DraftRationale}"
+                                                 Watermark="Rationale for this patch..."
+                                                 AcceptsReturn="True"
+                                                 MinHeight="56"
+                                                 TextWrapping="Wrap" />
+                                        <TextBox Text="{Binding DraftProposedContent}"
+                                                 Watermark="Proposed file content..."
+                                                 AcceptsReturn="True"
+                                                 MinHeight="120"
+                                                 TextWrapping="Wrap"
+                                                 FontFamily="Consolas,monospace"
+                                                 FontSize="11" />
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <Button Content="Generate Draft Patch"
+                                                    Command="{Binding GenerateDraftPatchCommand}"
+                                                    Padding="10,6"
+                                                    CornerRadius="6" />
+                                            <Button Content="Queue for Review"
+                                                    Command="{Binding QueueDraftPatchCommand}"
+                                                    Padding="10,6"
+                                                    CornerRadius="6" />
+                                        </StackPanel>
+                                        <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="6"
+                                                Padding="10"
+                                                Background="{DynamicResource SubtleFillColorSecondaryBrush}">
+                                            <SelectableTextBlock Text="{Binding DraftPreview}"
+                                                                 FontFamily="Consolas,monospace"
+                                                                 FontSize="11"
+                                                                 TextWrapping="Wrap"
+                                                                 MinHeight="100" />
+                                        </Border>
+                                    </StackPanel>
+                                </Expander>
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </Expander>
+
+                <Expander Header="Retrieved Context" IsExpanded="True" HorizontalAlignment="Stretch">
+                    <StackPanel Spacing="8">
+                        <ItemsControl ItemsSource="{Binding ContextReceipt}" Margin="0,8,0,0">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="vm:AgentContextReceiptSectionViewModel">
+                                    <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,0,2">
+                                        <TextBlock Text="{Binding Summary}" FontSize="11" FontWeight="SemiBold" Opacity="0.75" />
+                                        <TextBlock Text="{Binding Identifiers}" FontSize="11" Opacity="0.5" TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <ItemsControl ItemsSource="{Binding RetrievedContext}" Margin="0,8,0,0">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="vm:AgentContextItemViewModel">
+                                    <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="6"
+                                            Padding="10"
+                                            Margin="0,0,0,6">
+                                        <StackPanel Spacing="3">
+                                            <Grid ColumnDefinitions="*,Auto">
+                                                <TextBlock Grid.Column="0"
+                                                           Text="{Binding Title}"
+                                                           FontWeight="SemiBold"
+                                                           FontSize="13" />
+                                                <TextBlock Grid.Column="1"
+                                                           Text="{Binding Source}"
+                                                           FontSize="11"
+                                                           Opacity="0.5" />
+                                            </Grid>
+                                            <TextBlock Text="{Binding Content}"
+                                                       TextWrapping="Wrap"
+                                                       FontSize="12"
+                                                       Opacity="0.65"
+                                                       MaxHeight="92" />
+                                            <TextBlock Text="{Binding Locator}"
+                                                       IsVisible="{Binding HasLocator}"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       FontSize="10"
+                                                       FontFamily="Consolas,monospace"
+                                                       Opacity="0.5" />
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Expander>
+
+                <Expander Header="Draft Patch Decisions" HorizontalAlignment="Stretch" IsExpanded="True">
+                    <ItemsControl ItemsSource="{Binding QueuedPatches}" Margin="0,8,0,0">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="6"
+                                        Padding="10"
+                                        Margin="0,0,0,6">
+                                    <StackPanel Spacing="3">
+                                        <Grid ColumnDefinitions="*,Auto">
+                                            <TextBlock Grid.Column="0"
+                                                       Text="{Binding RelativePath}"
+                                                       FontWeight="SemiBold"
+                                                       FontSize="13"
+                                                       TextWrapping="Wrap" />
+                                            <TextBlock Grid.Column="1"
+                                                       Text="{Binding StatusLabel}"
+                                                       FontSize="11"
+                                                       Opacity="0.5" />
+                                        </Grid>
+                                        <TextBlock Text="{Binding CreatedLabel}"
+                                                   FontSize="10"
+                                                   Opacity="0.45" />
+                                        <TextBlock Text="{Binding Rationale}"
+                                                   FontSize="11"
+                                                   Opacity="0.65"
+                                                   TextWrapping="Wrap"
+                                                   MaxHeight="60" />
+                                        <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="4"
+                                                Padding="8"
+                                                Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                                                Margin="0,4,0,0">
+                                            <SelectableTextBlock Text="{Binding ProposedContent}"
+                                                                 FontFamily="Consolas,monospace"
+                                                                 FontSize="10"
+                                                                 TextWrapping="Wrap"
+                                                                 MinHeight="80"
+                                                                 MaxHeight="140" />
+                                        </Border>
+                                        <TextBlock Text="{Binding OutcomeLabel}"
+                                                   FontSize="10"
+                                                   Opacity="0.5"
+                                                   TextWrapping="Wrap" />
+                                        <StackPanel Orientation="Horizontal" Spacing="8" x:CompileBindings="False"
+                                                    IsVisible="{Binding CanReview}">
+                                            <Button Content="Approve"
+                                                    Command="{Binding DataContext.ApprovePatchCommand, ElementName=Root}"
+                                                    CommandParameter="{Binding}" />
+                                            <Button Content="Reject"
+                                                    Command="{Binding DataContext.RejectPatchCommand, ElementName=Root}"
+                                                    CommandParameter="{Binding}" />
+                                            <Button Content="Block"
+                                                    Command="{Binding DataContext.BlockPatchCommand, ElementName=Root}"
+                                                    CommandParameter="{Binding}" />
+                                        </StackPanel>
+                                        <StackPanel Orientation="Horizontal" Spacing="8" x:CompileBindings="False"
+                                                    IsVisible="{Binding CanRevert}">
+                                            <Button Content="Revert"
+                                                    ToolTip.Tip="Restore the file to its content before this patch was applied. Refuses if the file changed again since."
+                                                    Command="{Binding DataContext.RevertPatchCommand, ElementName=Root}"
+                                                    CommandParameter="{Binding}" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </Expander>
+
+                <Expander Header="Recent Tasks" HorizontalAlignment="Stretch" IsExpanded="True">
+                  <StackPanel>
+                    <ItemsControl ItemsSource="{Binding RecentTasks}" Margin="0,8,0,0">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:AgentTaskListItemViewModel">
+                                <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="6"
+                                        Padding="10"
+                                        Margin="{Binding IsSubTask, Converter={StaticResource BoolToIndentMargin}}">
+                                    <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto" ColumnSpacing="8">
+                                        <Border Grid.Column="0" CornerRadius="4" Padding="6,1" MinWidth="90"
+                                                Background="{Binding Status, Converter={StaticResource AgentTaskStatusColor}}">
+                                            <TextBlock Text="{Binding StatusLabel}" FontSize="10" FontWeight="SemiBold" Foreground="White" HorizontalAlignment="Center" />
+                                        </Border>
+                                        <Border Grid.Column="1" CornerRadius="4" Padding="6,1" Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                                                IsVisible="{Binding IsSubTask}">
+                                            <TextBlock Text="sub-task" FontSize="10" Opacity="0.6" />
+                                        </Border>
+                                        <StackPanel Grid.Column="2" VerticalAlignment="Center" Spacing="1">
+                                            <TextBlock Text="{Binding Goal}" FontSize="12" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                                            <!-- r19 3.3: a half-done task should be recognizable at a glance in this list too. -->
+                                            <TextBlock Text="{Binding PrematureCompleteNote}" FontSize="10" Foreground="#FFB74D"
+                                                       IsVisible="{Binding IsPrematureComplete}" />
+                                        </StackPanel>
+                                        <TextBlock Grid.Column="3" Text="{Binding RelativeTimeLabel}" FontSize="11" Opacity="0.5" VerticalAlignment="Center" />
+                                        <Button Grid.Column="4" Content="Open"
+                                                Command="{Binding DataContext.LoadTaskCommand, ElementName=Root}"
+                                                CommandParameter="{Binding TaskId}"
+                                                Padding="8,3" CornerRadius="6" FontSize="11" />
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBlock Text="No tasks yet. Start one above." FontSize="12" Opacity="0.5"
+                               IsVisible="{Binding !HasTaskHistory}" Margin="0,8,0,0" />
+                  </StackPanel>
+                </Expander>
+
+                <Expander Header="Review Queue" HorizontalAlignment="Stretch" IsExpanded="True">
+                    <ItemsControl ItemsSource="{Binding ReviewQueue}" Margin="0,8,0,0">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="6"
+                                        Padding="10"
+                                        Margin="0,0,0,6">
+                                    <StackPanel Spacing="3">
+                                        <Grid ColumnDefinitions="*,Auto">
+                                            <TextBlock Grid.Column="0"
+                                                       Text="{Binding Goal}"
+                                                       FontWeight="SemiBold"
+                                                       FontSize="13"
+                                                       TextWrapping="Wrap" />
+                                            <TextBlock Grid.Column="1"
+                                                       Text="{Binding StatusLabel}"
+                                                       FontSize="11"
+                                                       Opacity="0.5" />
+                                        </Grid>
+                                        <TextBlock Text="{Binding ActiveStep}"
+                                                   FontSize="11"
+                                                   Opacity="0.6"
+                                                   TextWrapping="Wrap" />
+                                        <TextBlock Text="{Binding ParentGoalLabel}"
+                                                   FontSize="11"
+                                                   FontStyle="Italic"
+                                                   Opacity="0.6"
+                                                   TextWrapping="Wrap"
+                                                   IsVisible="{Binding IsSubTask}" />
+                                        <TextBlock Text="{Binding Summary}"
+                                                   FontSize="11"
+                                                   Opacity="0.5"
+                                                   TextWrapping="Wrap" />
+                                        <TextBlock Text="{Binding ApprovalLabel}"
+                                                   FontSize="11"
+                                                   Opacity="0.55" />
+                                        <TextBlock Text="{Binding LatestApprovalLabel}"
+                                                   FontSize="11"
+                                                   Opacity="0.45" />
+                                        <StackPanel Spacing="2" IsVisible="{Binding HasPendingAction}">
+                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                <Border CornerRadius="4" Padding="6,1" Background="{DynamicResource SubtleFillColorSecondaryBrush}">
+                                                    <TextBlock Text="{Binding PendingToolName}" FontSize="10" FontFamily="Consolas,monospace" />
+                                                </Border>
+                                                <Border CornerRadius="4" Padding="6,1" Background="{DynamicResource SubtleFillColorSecondaryBrush}">
+                                                    <TextBlock Text="{Binding PendingRiskLabel}" FontSize="10" FontWeight="SemiBold" />
+                                                </Border>
+                                            </StackPanel>
+                                            <TextBlock Text="{Binding PendingReason}" FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
+                                            <TextBlock Text="{Binding RecipePreview}" FontSize="11" Opacity="0.75" TextWrapping="Wrap"
+                                                       FontFamily="Consolas,monospace" IsVisible="{Binding HasRecipePreview}" />
+                                        </StackPanel>
+                                        <TextBlock Text="{Binding DifferentWorkspaceLabel}"
+                                                   FontSize="10"
+                                                   Opacity="0.5"
+                                                   IsVisible="{Binding HasDifferentWorkspace}"
+                                                   ToolTip.Tip="This task's own workspace, shown because it differs from the active one. Approvals execute against the task's workspace, not the active one." />
+                                        <StackPanel Orientation="Horizontal" Spacing="8" x:CompileBindings="False">
+                                            <Button Content="Approve"
+                                                    Command="{Binding DataContext.ApproveReviewCommand, ElementName=Root}"
+                                                    CommandParameter="{Binding}" />
+                                            <Button Content="Reject"
+                                                    Command="{Binding DataContext.RejectReviewCommand, ElementName=Root}"
+                                                    CommandParameter="{Binding}" />
+                                            <Button Content="Open"
+                                                    Command="{Binding DataContext.LoadTaskCommand, ElementName=Root}"
+                                                    CommandParameter="{Binding TaskId}"
+                                                    ToolTip.Tip="Loads this task into the workbench above (its own goal, plan, and reply box)." />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </Expander>
+
+                <Expander Header="Scenario Evals" HorizontalAlignment="Stretch" IsExpanded="False">
+                    <StackPanel Spacing="8" Margin="0,8,0,0">
+                        <TextBlock Text="Deterministic behaviour checks run in an isolated sandbox; the agent's safety gate applies unchanged."
+                                   FontSize="11" Opacity="0.55" TextWrapping="Wrap" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="Run suite"
+                                    Command="{Binding ScenarioSuite.RunSuiteCommand}"
+                                    Padding="12,6" CornerRadius="6" />
+                            <Button Content="Cancel"
+                                    Command="{Binding ScenarioSuite.CancelSuiteCommand}"
+                                    IsVisible="{Binding ScenarioSuite.IsRunning}"
+                                    Padding="12,6" CornerRadius="6" />
+                            <TextBlock Text="{Binding ScenarioSuite.StatusMessage}"
+                                       FontSize="11" Opacity="0.6" VerticalAlignment="Center"
+                                       TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                        <TextBlock Text="{Binding ScenarioSuite.HeadlineResult}"
+                                   FontSize="12" FontWeight="SemiBold"
+                                   IsVisible="{Binding !!ScenarioSuite.HeadlineResult.Length}"
+                                   TextWrapping="Wrap" />
+                        <ItemsControl ItemsSource="{Binding ScenarioSuite.Scenarios}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="6"
+                                            Padding="10"
+                                            Margin="0,0,0,6">
+                                        <StackPanel Spacing="3">
+                                            <Grid ColumnDefinitions="*,Auto,Auto">
+                                                <TextBlock Grid.Column="0"
+                                                           Text="{Binding Title}"
+                                                           FontWeight="SemiBold"
+                                                           FontSize="13"
+                                                           TextWrapping="Wrap" />
+                                                <Border Grid.Column="1" CornerRadius="4" Padding="6,1" Margin="0,0,6,0"
+                                                        Background="{DynamicResource SubtleFillColorSecondaryBrush}">
+                                                    <TextBlock Text="{Binding SourceLabel}" FontSize="10" Opacity="0.7" />
+                                                </Border>
+                                                <Border Grid.Column="2" CornerRadius="4" Padding="6,1"
+                                                        Background="{Binding Passed, Converter={StaticResource AgentScenarioStatusColor}}">
+                                                    <TextBlock Text="{Binding StatusLabel}" FontSize="10" FontWeight="SemiBold" Foreground="White" />
+                                                </Border>
+                                            </Grid>
+                                            <TextBlock Text="{Binding Id}" FontSize="11" Opacity="0.45" FontFamily="Consolas,monospace" />
+                                            <TextBlock Text="{Binding Tags}" FontSize="11" Opacity="0.5" IsVisible="{Binding !!Tags.Length}" />
+                                            <TextBlock Text="{Binding FailedCheckSummary}"
+                                                       FontSize="11" Opacity="0.7" TextWrapping="Wrap"
+                                                       IsVisible="{Binding HasFailure}" />
+                                            <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding !!DurationDisplay.Length}">
+                                                <TextBlock Text="{Binding Steps, StringFormat='{}{0} step(s)'}" FontSize="11" Opacity="0.5" />
+                                                <TextBlock Text="{Binding DurationDisplay}" FontSize="11" Opacity="0.5" />
+                                            </StackPanel>
+                                            <Button Content="Run"
+                                                    Command="{Binding DataContext.ScenarioSuite.RunScenarioCommand, ElementName=Root}"
+                                                    CommandParameter="{Binding}"
+                                                    Padding="10,4" CornerRadius="6" HorizontalAlignment="Left"
+                                                    x:CompileBindings="False" />
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Expander>
+
+                <Expander Header="Workspace Memory" HorizontalAlignment="Stretch" IsExpanded="True">
+                    <ItemsControl ItemsSource="{Binding WorkspaceMemory}" Margin="0,8,0,0">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="6"
+                                        Padding="10"
+                                        Margin="0,0,0,6">
+                                    <StackPanel Spacing="3">
+                                        <Grid ColumnDefinitions="*,Auto">
+                                            <TextBlock Grid.Column="0"
+                                                       Text="{Binding Title}"
+                                                       FontWeight="SemiBold"
+                                                       FontSize="13"
+                                                       TextWrapping="Wrap" />
+                                            <TextBlock Grid.Column="1"
+                                                       Text="{Binding UpdatedAt, StringFormat={}{0:yyyy-MM-dd HH:mm}}"
+                                                       FontSize="11"
+                                                       Opacity="0.5" />
+                                        </Grid>
+                                        <TextBlock Text="{Binding Body}"
+                                                   FontSize="11"
+                                                   Opacity="0.55"
+                                                   TextWrapping="Wrap" />
+                                        <TextBlock Text="{Binding Tags}"
+                                                   FontSize="11"
+                                                   Opacity="0.4" />
+                                        <Button Content="Delete"
+                                                HorizontalAlignment="Left"
+                                            x:CompileBindings="False"
+                                                Command="{Binding DataContext.DeleteWorkspaceMemoryCommand, ElementName=Root}"
+                                                CommandParameter="{Binding}" />
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </Expander>
+
+                <Expander Header="Lessons (self-learning)" HorizontalAlignment="Stretch">
+                    <StackPanel Margin="0,8,0,0" Spacing="6">
+                        <TextBlock Text="Deterministic, evidence-backed observations about what works or fails in this workspace. They inform the agent; they never authorize anything on their own."
+                                   FontSize="11" Opacity="0.55" TextWrapping="Wrap" />
+                        <Button Content="Refresh"
+                                HorizontalAlignment="Left"
+                                Command="{Binding RefreshLessonsCommand}" />
+                        <ItemsControl ItemsSource="{Binding Lessons}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="6"
+                                            Padding="10"
+                                            Margin="0,0,0,6">
+                                        <StackPanel Spacing="3">
+                                            <Grid ColumnDefinitions="*,Auto">
+                                                <TextBlock Grid.Column="0"
+                                                           Text="{Binding ScopeLabel}"
+                                                           FontWeight="SemiBold"
+                                                           FontSize="12" />
+                                                <TextBlock Grid.Column="1"
+                                                           Text="{Binding StatusLabel}"
+                                                           FontSize="11"
+                                                           Opacity="0.5" />
+                                            </Grid>
+                                            <TextBox Text="{Binding Claim}"
+                                                     FontSize="12"
+                                                     TextWrapping="Wrap"
+                                                     AcceptsReturn="True" />
+                                            <TextBox Text="{Binding Guidance}"
+                                                     FontSize="11"
+                                                     Opacity="0.75"
+                                                     TextWrapping="Wrap"
+                                                     Watermark="Guidance (optional)" />
+                                            <TextBlock Text="{Binding ConfidenceLabel}"
+                                                       FontSize="11"
+                                                       Opacity="0.5" />
+                                            <StackPanel Orientation="Horizontal" Spacing="8" x:CompileBindings="False">
+                                                <Button Content="Save"
+                                                        Command="{Binding DataContext.UpdateLessonCommand, ElementName=Root}"
+                                                        CommandParameter="{Binding}" />
+                                                <Button Content="Pin/Unpin"
+                                                        Command="{Binding DataContext.PinLessonCommand, ElementName=Root}"
+                                                        CommandParameter="{Binding}" />
+                                                <Button Content="Retire"
+                                                        Command="{Binding DataContext.RetireLessonCommand, ElementName=Root}"
+                                                        CommandParameter="{Binding}" />
+                                                <Button Content="Reactivate"
+                                                        Command="{Binding DataContext.ReactivateLessonCommand, ElementName=Root}"
+                                                        CommandParameter="{Binding}" />
+                                                <Button Content="Delete"
+                                                        Command="{Binding DataContext.DeleteLessonCommand, ElementName=Root}"
+                                                        CommandParameter="{Binding}" />
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Expander>
+
+                <Expander Header="Agent Log" HorizontalAlignment="Stretch">
+                    <SelectableTextBlock Text="{Binding LogPreview}"
+                                         FontFamily="Consolas,monospace"
+                                         FontSize="11"
+                                         MinHeight="120"
+                                         TextWrapping="Wrap"
+                                         Margin="0,8,0,0" />
+                </Expander>
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</UserControl>

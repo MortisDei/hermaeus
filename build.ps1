@@ -11,8 +11,8 @@ if ($PSVersionTable.PSVersion.Major -ge 7) {
 }
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$project = Join-Path $root "src/Aether.Desktop/Aether.Desktop.csproj"
-$localApiProject = Join-Path $root "src/Aether.LocalApi/Aether.LocalApi.csproj"
+$project = Join-Path $root "src/Hermaeus.Desktop/Hermaeus.Desktop.csproj"
+$localApiProject = Join-Path $root "src/Hermaeus.LocalApi/Hermaeus.LocalApi.csproj"
 $dist = Join-Path $root "dist"
 $propsPath = Join-Path $root "Directory.Build.props"
 $props = [xml](Get-Content -Raw $propsPath)
@@ -29,7 +29,7 @@ if (-not [string]::IsNullOrWhiteSpace($versionSuffix)) {
 }
 
 $selfContainedValue = if ($SelfContained) { "true" } else { "false" }
-$packageName = "aether-$version-$Runtime"
+$packageName = "hermaeus-$version-$Runtime"
 $packageDir = Join-Path $dist $packageName
 $publishDir = Join-Path $dist ".publish-$Runtime"
 $localApiPublishDir = Join-Path $dist ".publish-localapi-$Runtime"
@@ -80,20 +80,20 @@ Copy-Item (Join-Path $root "README.md") (Join-Path $docDir "README.md") -Force
 Copy-Item (Join-Path $root "LICENSE.md") (Join-Path $docDir "LICENSE.md") -Force
 Copy-Item (Join-Path $root "NOTICE.md") (Join-Path $docDir "NOTICE.md") -Force
 Copy-Item (Join-Path $root "COMMERCIAL.md") (Join-Path $docDir "COMMERCIAL.md") -Force
-Get-ChildItem (Join-Path $root "docs") -Filter "aether-branding.*" -File -ErrorAction SilentlyContinue |
+Get-ChildItem (Join-Path $root "docs") -Filter "hermaeus-branding.*" -File -ErrorAction SilentlyContinue |
     Copy-Item -Destination $docDir -Force
-Copy-Item (Join-Path $root "src/Aether.Desktop/Assets/aether.ico") (Join-Path $packageDir "aether.ico") -Force
-Copy-Item (Join-Path $root "src/Aether.Desktop/Assets/aether-app.png") (Join-Path $packageDir "aether-app.png") -Force
-Copy-Item (Join-Path $root "src/Aether.Desktop/Assets/aether-tray.png") (Join-Path $packageDir "aether-tray.png") -Force
-Copy-Item (Join-Path $root "src/Aether.Desktop/Assets/aether-tray-dark.png") (Join-Path $packageDir "aether-tray-dark.png") -Force
-Copy-Item (Join-Path $root "src/Aether.Desktop/Assets/aether-tray-light.png") (Join-Path $packageDir "aether-tray-light.png") -Force
+Copy-Item (Join-Path $root "src/Hermaeus.Desktop/Assets/hermaeus.ico") (Join-Path $packageDir "hermaeus.ico") -Force
+Copy-Item (Join-Path $root "src/Hermaeus.Desktop/Assets/hermaeus-app.png") (Join-Path $packageDir "hermaeus-app.png") -Force
+Copy-Item (Join-Path $root "src/Hermaeus.Desktop/Assets/hermaeus-tray.png") (Join-Path $packageDir "hermaeus-tray.png") -Force
+Copy-Item (Join-Path $root "src/Hermaeus.Desktop/Assets/hermaeus-tray-dark.png") (Join-Path $packageDir "hermaeus-tray-dark.png") -Force
+Copy-Item (Join-Path $root "src/Hermaeus.Desktop/Assets/hermaeus-tray-light.png") (Join-Path $packageDir "hermaeus-tray-light.png") -Force
 
 @'
 @echo off
 setlocal
 cd /d "%~dp0"
-start "" "%~dp0Aether.Desktop.exe"
-'@ | Set-Content -NoNewline -Encoding ASCII (Join-Path $packageDir "Launch-Aether.cmd")
+start "" "%~dp0Hermaeus.Desktop.exe"
+'@ | Set-Content -NoNewline -Encoding ASCII (Join-Path $packageDir "Launch-Hermaeus.cmd")
 
 Remove-Item -Recurse -Force $publishDir, $localApiPublishDir
 

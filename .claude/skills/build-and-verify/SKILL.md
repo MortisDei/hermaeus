@@ -1,16 +1,16 @@
 ---
 name: build-and-verify
-description: How to build, test, and run Aether correctly, including the custom test runner and zero-warning policy. Use before completing any code change in this repo.
+description: How to build, test, and run Hermaeus correctly, including the custom test runner and zero-warning policy. Use before completing any code change in this repo.
 ---
 
-# Build and verify Aether
+# Build and verify Hermaeus
 
 ## Commands
 
 ```bash
-dotnet build Aether.sln
-dotnet test src/Aether.Tests/Aether.Tests.csproj
-dotnet run --project src/Aether.Desktop        # manual/visual verification
+dotnet build Hermaeus.sln
+dotnet test src/Hermaeus.Tests/Hermaeus.Tests.csproj
+dotnet run --project src/Hermaeus.Desktop        # manual/visual verification
 ```
 
 ## Critical facts
@@ -36,4 +36,4 @@ console at runtime — check for `Avalonia` binding warnings there.
 For storage/schema changes, run the data-safety tests
 (`BackupMigrationTests`, migration-related cases in `ServiceTests`) and
 verify a fresh data root initializes cleanly by launching with a temp
-`%LOCALAPPDATA%\Aether` / `~/.local/share/Aether` moved aside.
+`%LOCALAPPDATA%\Hermaeus` / `~/.local/share/Hermaeus` moved aside.

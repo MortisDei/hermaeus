@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:Hermaeus.ViewModels"
+             xmlns:conv="clr-namespace:Hermaeus.Desktop.Controls"
+             x:Class="Hermaeus.Desktop.Controls.DiffView">
+  <UserControl.Resources>
+    <conv:DiffTypeToBrushConverter x:Key="DiffBrush" />
+  </UserControl.Resources>
+  <ScrollViewer>
+    <StackPanel>
+      <!-- Header row -->
+      <Border Background="{DynamicResource SubtleFillColorTertiaryBrush}" Padding="8" BorderThickness="0,0,0,1" BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
+        <Grid ColumnDefinitions="50,*,50,*">
+          <TextBlock Text="Old Line" FontWeight="SemiBold" FontSize="12" HorizontalAlignment="Center" />
+          <TextBlock Grid.Column="1" Text="Old Content" FontWeight="SemiBold" FontSize="12" Margin="6,0" />
+          <TextBlock Grid.Column="2" Text="New Line" FontWeight="SemiBold" FontSize="12" HorizontalAlignment="Center" />
+          <TextBlock Grid.Column="3" Text="New Content" FontWeight="SemiBold" FontSize="12" Margin="6,0" />
+        </Grid>
+      </Border>
+      <ItemsControl ItemsSource="{Binding Lines}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate>
+            <Border BorderThickness="0,0,0,1" BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" 
+                    Background="{Binding Type, Converter={StaticResource DiffBrush}}" Opacity="0.15" Padding="8">
+              <Grid ColumnDefinitions="50,*,50,*">
+                <TextBlock Text="{Binding OldLineNumber}" HorizontalAlignment="Right" FontFamily="Courier New" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                <TextBlock Grid.Column="1" Text="{Binding OldText}" Margin="6,0" FontFamily="Courier New" FontSize="11" />
+                <TextBlock Grid.Column="2" Text="{Binding NewLineNumber}" HorizontalAlignment="Right" FontFamily="Courier New" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                <TextBlock Grid.Column="3" Text="{Binding NewText}" Margin="6,0" FontFamily="Courier New" FontSize="11" />
+              </Grid>
+            </Border>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

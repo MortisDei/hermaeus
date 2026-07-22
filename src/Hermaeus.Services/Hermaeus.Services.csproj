@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Hermaeus.Services</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.9" />
+    <!-- Pins the patched native SQLite; Microsoft.Data.Sqlite 9.0.x still pulls the vulnerable 2.1.10 (GHSA-2m69-gcr7-jv3q) -->
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Hermaeus.Core/Hermaeus.Core.csproj" />
+    <ProjectReference Include="../Hermaeus.Rag/Hermaeus.Rag.csproj" />
+    <ProjectReference Include="../Hermaeus.Voice/Hermaeus.Voice.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Resources/Python/*.py" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Hermaeus.Tests" />
+  </ItemGroup>
+</Project>

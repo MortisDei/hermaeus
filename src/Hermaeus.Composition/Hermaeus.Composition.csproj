@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Hermaeus.Composition</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.4" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Hermaeus.Core/Hermaeus.Core.csproj" />
+    <ProjectReference Include="../Hermaeus.Services/Hermaeus.Services.csproj" />
+    <ProjectReference Include="../Hermaeus.Agent/Hermaeus.Agent.csproj" />
+    <ProjectReference Include="../Hermaeus.Rag/Hermaeus.Rag.csproj" />
+    <ProjectReference Include="../Hermaeus.Mcp/Hermaeus.Mcp.csproj" />
+    <ProjectReference Include="../Hermaeus.Voice/Hermaeus.Voice.csproj" />
+  </ItemGroup>
+</Project>

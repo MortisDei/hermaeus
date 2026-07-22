@@ -3,7 +3,7 @@
 ## Benchmarks
 
 The **Benchmarks** workspace runs local prompt suites against selected models and
-stores immutable run history under the Aether data root. It discovers running
+stores immutable run history under the Hermaeus data root. It discovers running
 provider models and GGUF files under the configured AI assets root so users do
 not need to paste each local model path by hand.
 
@@ -37,7 +37,7 @@ Runs are exported to JSON, Markdown, and CSV so the full metadata set can be
 reviewed later.
 
 The default action is a one-click benchmark pass. With **Run all suites**
-enabled, Aether runs every built-in suite for the selected model. Turning it off
+enabled, Hermaeus runs every built-in suite for the selected model. Turning it off
 runs only the highlighted suite. Selecting a discovered local GGUF model in the
 dropdown only updates a status hint; the managed chat `llama-server` is switched
 to that model (restarted if a different model is currently loaded, started if
@@ -49,7 +49,7 @@ triggers a 1-2 minute restart on its own.
 Benchmarks are designed for repeatable, practical comparison across models,
 runtimes, and hardware profiles.
 
-Aether records run metadata such as model identity, quantisation, runtime,
+Hermaeus records run metadata such as model identity, quantisation, runtime,
 sampler settings, context size, hardware summary, app version, and suite
 version so results can be compared fairly over time.
 
@@ -68,7 +68,7 @@ possible.
 
 - Cold runs have no prior KV cache state for the prompt. Since llama-server
 	keeps prompt-cache reuse on by default (for fast follow-up chat sends),
-	Aether explicitly disables it for each case's first (Cold) iteration so a
+	Hermaeus explicitly disables it for each case's first (Cold) iteration so a
 	suite run immediately after a previous one cannot get a warm prefill from
 	leftover KV state while still being reported as Cold.
 - Warm runs are only reported when a suite uses more than one iteration per
@@ -78,7 +78,7 @@ possible.
 
 ### Built-In Starter Suites
 
-Aether includes starter suites covering:
+Hermaeus includes starter suites covering:
 
 - Speed smoke tests for latency and throughput
 - Instruction following for formatting and direct instruction adherence
@@ -90,7 +90,7 @@ Aether includes starter suites covering:
 - Code generation checks for structurally plausible function output
 - Structured output stress checks for nested JSON and enumerated formats
 - Multi-step reasoning checks for intermediate working and final answers
-- Aether workflow checks for summary, memory marker, and system prompt tasks
+- Hermaeus workflow checks for summary, memory marker, and system prompt tasks
 - Hallucination resistance checks for uncertainty on fictional or unverifiable
 	claims
 
@@ -160,10 +160,10 @@ The starter suites are organised by purpose:
 	unsupported, source faithfulness
 - Coding suites: patch explanation, small bug diagnosis, config troubleshooting,
 	command suggestion safety, structural code generation
-- Aether workflow suites: conversation summarisation, memory marker extraction,
+- Hermaeus workflow suites: conversation summarisation, memory marker extraction,
 	and assistant system prompt generation
 
-For Aether specifically, a local dev assistant suite should also cover log,
+For Hermaeus specifically, a local dev assistant suite should also cover log,
 config, and code excerpt analysis with safe next-step suggestions and no
 invented APIs.
 
@@ -196,7 +196,7 @@ Example:
 Resource deltas are sampled before, during, and after a run and shown for
 reference. They are best-effort and may miss short-lived spikes on some
 platforms. The model itself runs in a separate process (`llama-server`) or on
-a remote endpoint, so Aether's own process memory delta says nothing about the
+a remote endpoint, so Hermaeus's own process memory delta says nothing about the
 model's actual resource use; the resource term in the weighted ranking score
 is therefore always neutral rather than computed from that delta. The before/
 after memory and VRAM snapshots are still recorded and exported for manual
@@ -215,7 +215,7 @@ For GPU-capable systems, record:
 ### Benchmark Data Retention
 
 Benchmark run history stores prompts, outputs, scores, and runtime metadata
-under the Aether data root. Users can export individual runs, delete individual
+under the Hermaeus data root. Users can export individual runs, delete individual
 runs, or clear all saved run history from the workspace after confirmation.
 
 When benchmarking a remote provider, prompt content is sent to that configured
@@ -266,7 +266,7 @@ The Services auto-tune action now probes descending GPU layer candidates and
 keeps the highest candidate that starts and reaches `/health`, with CPU fallback
 as the final candidate. Successful tune results are saved per GGUF model file
 with model size and modified-time metadata. When that model is selected again,
-Aether reapplies the saved GPU layer, thread, context, and extra-argument
+Hermaeus reapplies the saved GPU layer, thread, context, and extra-argument
 profile before starting the managed server.
 
 Doctor alerts when local GGUF models do not have matching tuned profiles. It

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Aether includes a local RAG: structure-aware chunking, query planning,
+Hermaeus includes a local RAG: structure-aware chunking, query planning,
 hybrid retrieval, ONNX reranking, budget-aware context packing, citations,
 traces, versioned SQLite schema migrations, and native eval support.
 
@@ -20,7 +20,7 @@ traces, versioned SQLite schema migrations, and native eval support.
 
 ### Embedding Model Setup
 
-- Aether requires an embedding model to run the embedding server. If none is found, the
+- Hermaeus requires an embedding model to run the embedding server. If none is found, the
   **Doctor** panel can automatically download the recommended model (nomic-embed-text-v1.5-Q4_K_M)
   from a pinned Hugging Face commit and verify its SHA256 before configuring
   the embedding server.
@@ -32,7 +32,7 @@ traces, versioned SQLite schema migrations, and native eval support.
 - Chat or code GGUF files are not treated as embedding models. Doctor will skip
   embedding backend health until a dedicated embedding model is installed or
   selected, avoiding connection-refused noise before setup is complete.
-- The embedding model is critical for large ingests. **During ingest, Aether automatically
+- The embedding model is critical for large ingests. **During ingest, Hermaeus automatically
   pauses other LLM servers and TTS services** to reduce memory pressure, starts
   the managed embedding server if needed, then restores suspended services after
   ingestion completes.
@@ -102,9 +102,9 @@ app restart.
 ### Web Loading
 
 - The optional web loader is off by default.
-- When enabled for a dataset, Aether fetches only the HTTP(S) pages explicitly
+- When enabled for a dataset, Hermaeus fetches only the HTTP(S) pages explicitly
   listed in the ingest panel.
-- Aether does not crawl links or use a remote scraping service.
+- Hermaeus does not crawl links or use a remote scraping service.
 
 ### PDF Support
 
@@ -188,7 +188,7 @@ completes).
 
 ## Model Sources
 
-Aether recommends using the Hugging Face Model Hub to obtain ONNX and tokenizer
+Hermaeus recommends using the Hugging Face Model Hub to obtain ONNX and tokenizer
 files for optional components like the reranker and small local LLMs.
 
 Hugging Face provides a model hub to browse and download model artifacts; many

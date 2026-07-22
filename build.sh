@@ -2,8 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT="$ROOT_DIR/src/Aether.Desktop/Aether.Desktop.csproj"
-LOCALAPI_PROJECT="$ROOT_DIR/src/Aether.LocalApi/Aether.LocalApi.csproj"
+PROJECT="$ROOT_DIR/src/Hermaeus.Desktop/Hermaeus.Desktop.csproj"
+LOCALAPI_PROJECT="$ROOT_DIR/src/Hermaeus.LocalApi/Hermaeus.LocalApi.csproj"
 DIST_DIR="$ROOT_DIR/dist"
 RUNTIME="linux-x64"
 CONFIGURATION="Release"
@@ -66,7 +66,7 @@ if [[ -n "$version_suffix" ]]; then
   VERSION="$VERSION-$version_suffix"
 fi
 
-PACKAGE_NAME="aether-$VERSION-$RUNTIME"
+PACKAGE_NAME="hermaeus-$VERSION-$RUNTIME"
 PACKAGE_DIR="$DIST_DIR/$PACKAGE_NAME"
 PUBLISH_DIR="$DIST_DIR/.publish-$RUNTIME"
 LOCALAPI_PUBLISH_DIR="$DIST_DIR/.publish-localapi-$RUNTIME"
@@ -117,28 +117,28 @@ cp "$ROOT_DIR/README.md" "$DOC_DIR/README.md"
 cp "$ROOT_DIR/LICENSE.md" "$DOC_DIR/LICENSE.md"
 cp "$ROOT_DIR/NOTICE.md" "$DOC_DIR/NOTICE.md"
 cp "$ROOT_DIR/COMMERCIAL.md" "$DOC_DIR/COMMERCIAL.md"
-cp "$ROOT_DIR/src/Aether.Desktop/Assets/aether.ico" "$PACKAGE_DIR/aether.ico"
-cp "$ROOT_DIR/src/Aether.Desktop/Assets/aether-app.png" "$PACKAGE_DIR/aether-app.png"
-cp "$ROOT_DIR/src/Aether.Desktop/Assets/aether-tray.png" "$PACKAGE_DIR/aether-tray.png"
-cp "$ROOT_DIR/src/Aether.Desktop/Assets/aether-tray-dark.png" "$PACKAGE_DIR/aether-tray-dark.png"
-cp "$ROOT_DIR/src/Aether.Desktop/Assets/aether-tray-light.png" "$PACKAGE_DIR/aether-tray-light.png"
+cp "$ROOT_DIR/src/Hermaeus.Desktop/Assets/hermaeus.ico" "$PACKAGE_DIR/hermaeus.ico"
+cp "$ROOT_DIR/src/Hermaeus.Desktop/Assets/hermaeus-app.png" "$PACKAGE_DIR/hermaeus-app.png"
+cp "$ROOT_DIR/src/Hermaeus.Desktop/Assets/hermaeus-tray.png" "$PACKAGE_DIR/hermaeus-tray.png"
+cp "$ROOT_DIR/src/Hermaeus.Desktop/Assets/hermaeus-tray-dark.png" "$PACKAGE_DIR/hermaeus-tray-dark.png"
+cp "$ROOT_DIR/src/Hermaeus.Desktop/Assets/hermaeus-tray-light.png" "$PACKAGE_DIR/hermaeus-tray-light.png"
 
-for branding in "$ROOT_DIR"/docs/aether-branding.*; do
+for branding in "$ROOT_DIR"/docs/hermaeus-branding.*; do
   if [[ -f "$branding" ]]; then
     cp "$branding" "$DOC_DIR/"
   fi
 done
 
-cat > "$PACKAGE_DIR/aether.desktop" <<'DESKTOP'
+cat > "$PACKAGE_DIR/hermaeus.desktop" <<'DESKTOP'
 [Desktop Entry]
 Type=Application
-Name=Aether
+Name=Hermaeus
 Comment=Local-first AI workspace
-Exec=sh -c 'appdir=$(dirname "$1"); cd "$appdir"; exec "$appdir/Aether.Desktop"' sh %k
-Icon=aether
+Exec=sh -c 'appdir=$(dirname "$1"); cd "$appdir"; exec "$appdir/Hermaeus.Desktop"' sh %k
+Icon=hermaeus
 Terminal=false
 Categories=Utility;Development;
-StartupWMClass=Aether
+StartupWMClass=Hermaeus
 DESKTOP
 
 cat > "$PACKAGE_DIR/install-desktop.sh" <<'INSTALL'
@@ -147,7 +147,7 @@ set -euo pipefail
 
 SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PACKAGE_ID="$(basename "$SOURCE_DIR")"
-APP_EXEC="$SOURCE_DIR/Aether.Desktop"
+APP_EXEC="$SOURCE_DIR/Hermaeus.Desktop"
 
 if [[ ! -x "$APP_EXEC" ]]; then
   echo "Missing executable: $APP_EXEC" >&2
@@ -155,12 +155,12 @@ if [[ ! -x "$APP_EXEC" ]]; then
 fi
 
 DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
-APP_BASE="$DATA_HOME/aether"
+APP_BASE="$DATA_HOME/hermaeus"
 INSTALL_DIR="$APP_BASE/$PACKAGE_ID"
 APPLICATIONS_DIR="$DATA_HOME/applications"
 PNG_ICON_DIR="$DATA_HOME/icons/hicolor/256x256/apps"
-DESKTOP_FILE="$APPLICATIONS_DIR/aether.desktop"
-PNG_ICON_FILE="$PNG_ICON_DIR/aether.png"
+DESKTOP_FILE="$APPLICATIONS_DIR/hermaeus.desktop"
+PNG_ICON_FILE="$PNG_ICON_DIR/hermaeus.png"
 
 mkdir -p "$APP_BASE" "$APPLICATIONS_DIR" "$PNG_ICON_DIR"
 
@@ -170,19 +170,19 @@ if [[ "$SOURCE_DIR" != "$INSTALL_DIR" ]]; then
   cp -a "$SOURCE_DIR"/. "$INSTALL_DIR"/
 fi
 
-chmod +x "$INSTALL_DIR/Aether.Desktop" "$INSTALL_DIR/install-desktop.sh" "$INSTALL_DIR/uninstall-desktop.sh"
-cp "$INSTALL_DIR/aether-app.png" "$PNG_ICON_FILE"
+chmod +x "$INSTALL_DIR/Hermaeus.Desktop" "$INSTALL_DIR/install-desktop.sh" "$INSTALL_DIR/uninstall-desktop.sh"
+cp "$INSTALL_DIR/hermaeus-app.png" "$PNG_ICON_FILE"
 
 cat > "$DESKTOP_FILE" <<DESKTOP
 [Desktop Entry]
 Type=Application
-Name=Aether
+Name=Hermaeus
 Comment=Local-first AI workspace
-Exec=$INSTALL_DIR/Aether.Desktop
-Icon=aether
+Exec=$INSTALL_DIR/Hermaeus.Desktop
+Icon=hermaeus
 Terminal=false
 Categories=Utility;Development;
-StartupWMClass=Aether
+StartupWMClass=Hermaeus
 DESKTOP
 
 chmod 0644 "$DESKTOP_FILE" "$PNG_ICON_FILE"
@@ -195,8 +195,8 @@ if command -v gtk-update-icon-cache >/dev/null 2>&1; then
   gtk-update-icon-cache "$DATA_HOME/icons/hicolor" >/dev/null 2>&1 || true
 fi
 
-echo "Installed Aether desktop launcher to $DESKTOP_FILE"
-echo "Installed Aether package to $INSTALL_DIR"
+echo "Installed Hermaeus desktop launcher to $DESKTOP_FILE"
+echo "Installed Hermaeus package to $INSTALL_DIR"
 INSTALL
 
 cat > "$PACKAGE_DIR/uninstall-desktop.sh" <<'UNINSTALL'
@@ -206,9 +206,9 @@ set -euo pipefail
 SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PACKAGE_ID="$(basename "$SOURCE_DIR")"
 DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
-INSTALL_DIR="$DATA_HOME/aether/$PACKAGE_ID"
-DESKTOP_FILE="$DATA_HOME/applications/aether.desktop"
-PNG_ICON_FILE="$DATA_HOME/icons/hicolor/256x256/apps/aether.png"
+INSTALL_DIR="$DATA_HOME/hermaeus/$PACKAGE_ID"
+DESKTOP_FILE="$DATA_HOME/applications/hermaeus.desktop"
+PNG_ICON_FILE="$DATA_HOME/icons/hicolor/256x256/apps/hermaeus.png"
 
 rm -f "$DESKTOP_FILE" "$PNG_ICON_FILE"
 
@@ -227,7 +227,7 @@ if command -v gtk-update-icon-cache >/dev/null 2>&1; then
   gtk-update-icon-cache "$DATA_HOME/icons/hicolor" >/dev/null 2>&1 || true
 fi
 
-echo "Removed Aether desktop launcher and installed package."
+echo "Removed Hermaeus desktop launcher and installed package."
 UNINSTALL
 
 chmod +x "$PACKAGE_DIR/install-desktop.sh" "$PACKAGE_DIR/uninstall-desktop.sh"

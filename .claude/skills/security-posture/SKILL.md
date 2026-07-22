@@ -1,11 +1,11 @@
 ---
 name: security-posture
-description: Aether's security invariants for process launching, secrets, downloads, path handling, network binding, and agent safety gates. Use for any change touching processes, files from user input, network, secrets, or the Agent.
+description: Hermaeus's security invariants for process launching, secrets, downloads, path handling, network binding, and agent safety gates. Use for any change touching processes, files from user input, network, secrets, or the Agent.
 ---
 
 # Security posture (invariants, not suggestions)
 
-Aether's brand is local-first trustworthiness. These rules are enforced by
+Hermaeus's brand is local-first trustworthiness. These rules are enforced by
 review and by the Trust & Safety / security docs (`docs/security-review.md`).
 
 ## Processes

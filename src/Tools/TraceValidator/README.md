@@ -1,6 +1,6 @@
 # TraceValidator
 
-Small CLI tool to validate Aether `agent.trace.jsonl` event lines against `docs/schemas/agent_trace.schema.json` using `Json.Schema`.
+Small CLI tool to validate Hermaeus `agent.trace.jsonl` event lines against `docs/schemas/agent_trace.schema.json` using `Json.Schema`.
 
 Usage:
 

@@ -1,0 +1,155 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Hermaeus.ViewModels"
+             x:Class="Hermaeus.Desktop.Views.SystemOverviewView"
+             x:DataType="vm:SystemOverviewViewModel">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="24" Spacing="16">
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                <StackPanel Grid.Column="0" Spacing="2">
+                    <TextBlock Text="System Overview" FontSize="22" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding Status}" FontSize="12" Opacity="0.55" />
+                </StackPanel>
+                <Button Grid.Column="1"
+                        Content="Refresh"
+                        Command="{Binding RefreshCommand}"
+                        IsEnabled="{Binding !IsRefreshing}"
+                        VerticalAlignment="Center"
+                        ToolTip.Tip="Re-reads CPU, memory, GPU, and component status now." />
+            </Grid>
+
+            <ItemsControl ItemsSource="{Binding Metrics}">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <WrapPanel Orientation="Horizontal" />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="vm:SystemMetricViewModel">
+                        <Border Width="270"
+                                MinHeight="86"
+                                Margin="0,0,10,10"
+                                Padding="14"
+                                CornerRadius="8"
+                                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                BorderThickness="1">
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="{Binding Name}" FontSize="11" Opacity="0.55" />
+                                <TextBlock Text="{Binding Value}"
+                                           TextWrapping="Wrap"
+                                           FontWeight="SemiBold"
+                                           FontSize="13" />
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <!-- r19 6.2: hardware (GPU/VRAM, Components) reads before the privacy
+                 audit, not buried under it. -->
+            <Grid ColumnDefinitions="*,*" ColumnSpacing="16">
+                <Border Grid.Column="0"
+                        Padding="14"
+                        CornerRadius="8"
+                        BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                        BorderThickness="1">
+                    <StackPanel Spacing="10">
+                        <TextBlock Text="GPU / VRAM" FontSize="16" FontWeight="SemiBold" />
+                        <ItemsControl ItemsSource="{Binding Gpus}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="vm:GpuInfoViewModel">
+                                    <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                            BorderThickness="0,0,0,1"
+                                            Padding="0,8">
+                                        <StackPanel Spacing="2">
+                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                            <TextBlock Text="{Binding Memory}" FontSize="12" Opacity="0.65" />
+                                            <TextBlock Text="{Binding Provider}" FontSize="11" Opacity="0.4" />
+                                            <TextBlock Text="{Binding Status}" FontSize="11" Opacity="0.4" />
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Column="1"
+                        Padding="14"
+                        CornerRadius="8"
+                        BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                        BorderThickness="1">
+                    <StackPanel Spacing="10">
+                        <TextBlock Text="Components" FontSize="16" FontWeight="SemiBold" />
+                        <ItemsControl ItemsSource="{Binding Components}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="vm:ComponentStatusViewModel">
+                                    <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                            BorderThickness="0,0,0,1"
+                                            Padding="0,8">
+                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                                            <StackPanel Grid.Column="0" Spacing="2">
+                                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                                <TextBlock Text="{Binding Detail}"
+                                                           TextWrapping="Wrap"
+                                                           FontSize="11"
+                                                           Opacity="0.45" />
+                                            </StackPanel>
+                                            <TextBlock Grid.Column="1"
+                                                       Text="{Binding Status}"
+                                                       FontSize="12"
+                                                       FontWeight="SemiBold"
+                                                       VerticalAlignment="Top" />
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <Expander Header="Privacy audit - what can leave this machine" IsExpanded="True">
+                <StackPanel Spacing="10">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                        <TextBlock Grid.Column="0"
+                                   Text="Local-first posture, remote data paths, secret storage, and exposed services"
+                                   FontSize="12"
+                                   Opacity="0.62"
+                                   TextWrapping="Wrap" />
+                        <Button Grid.Column="1"
+                                Content="Refresh"
+                                Command="{Binding RefreshPrivacyAuditCommand}"
+                                IsEnabled="{Binding !IsRefreshing}"
+                                ToolTip.Tip="Re-scans for remote providers, exposed local services, and other data-leaving-this-machine risks." />
+                    </Grid>
+                    <TextBlock Text="{Binding PrivacyAuditSummary}" FontSize="13" FontWeight="SemiBold" />
+                    <ItemsControl ItemsSource="{Binding PrivacyAuditItems}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:PrivacyAuditItemViewModel">
+                                <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                        BorderThickness="0,0,0,1"
+                                        Padding="0,8">
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                        <StackPanel Grid.Column="0" Spacing="3">
+                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                            <TextBlock Text="{Binding Detail}"
+                                                       TextWrapping="Wrap"
+                                                       FontSize="12"
+                                                       Opacity="0.62" />
+                                        </StackPanel>
+                                        <TextBlock Grid.Column="1"
+                                                   Text="{Binding Status}"
+                                                   FontWeight="SemiBold"
+                                                   FontSize="12"
+                                                   VerticalAlignment="Top" />
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Expander>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

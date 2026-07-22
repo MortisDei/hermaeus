@@ -1,0 +1,160 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:m="using:Hermaeus.Core.Models"
+             xmlns:vm="using:Hermaeus.ViewModels"
+             x:Class="Hermaeus.Desktop.Views.SettingsVoiceSectionView"
+             x:DataType="vm:TtsSettingsViewModel">
+    <StackPanel>
+    <Border Classes="settings-card">
+        <StackPanel Spacing="12">
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
+                    <CheckBox IsChecked="{Binding TtsEnabled}" />
+                    <TextBlock Text="Voice providers" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center" />
+                </StackPanel>
+                <Button Grid.Column="1" Classes="icon-btn" Command="{Binding RefreshTtsVoicesCommand}" ToolTip.Tip="Refresh voices for the active provider">
+                    <PathIcon Data="M17.65 6.35C16.2 4.9 14.21 4 12 4a8 8 0 0 0-8 8h2.5l-3.5 3.5L-.5 12H2a10 10 0 0 1 17.07-7.07l-1.42 1.42zM6.35 17.65C7.8 19.1 9.79 20 12 20a8 8 0 0 0 8-8h-2.5l3.5-3.5 3.5 3.5H22a10 10 0 0 1-17.07 7.07l1.42-1.42z"
+                              Width="15" Height="15" />
+                </Button>
+            </Grid>
+            <Grid ColumnDefinitions="110,*" ColumnSpacing="12">
+                <TextBlock Grid.Column="0" Text="Provider" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
+                <ComboBox Grid.Column="1" ItemsSource="{Binding VoiceProviders}" SelectedValueBinding="{Binding Name}"
+                          SelectedValue="{Binding SelectedVoiceProvider}" FontSize="13">
+                    <ComboBox.ItemTemplate>
+                        <DataTemplate DataType="m:VoiceProviderInfo">
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="{Binding Name}" FontSize="13" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding CategoryLabel}" FontSize="11" Opacity="0.65" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                </ComboBox>
+            </Grid>
+
+            <Grid ColumnDefinitions="110,*,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
+                  RowSpacing="8" ColumnSpacing="12">
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="Base URL" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
+                <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding TtsServiceUrl}" Watermark="http://127.0.0.1:8020"
+                         FontSize="13" CornerRadius="6" Padding="10,6" />
+                <StackPanel Grid.Row="0" Grid.Column="2" Orientation="Horizontal" Spacing="8">
+                    <Button Command="{Binding StartTtsCommand}" IsEnabled="{Binding !IsTtsRunning}" Content="Start" FontSize="12" Padding="12,5" CornerRadius="6" />
+                    <Button Command="{Binding StopTtsCommand}" IsEnabled="{Binding IsTtsRunning}" Content="Stop" FontSize="12" Padding="12,5" CornerRadius="6" />
+                </StackPanel>
+                <TextBlock Grid.Row="1" Grid.Column="0" Text="Voice" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
+                <ComboBox Grid.Row="1" Grid.Column="1" ItemsSource="{Binding TtsVoices}" SelectedItem="{Binding TtsSpeaker}" FontSize="13" />
+                <TextBlock Grid.Row="2" Grid.Column="0" Text="Device" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
+                <ComboBox Grid.Row="2" Grid.Column="1" ItemsSource="{Binding TtsDevices}" SelectedItem="{Binding TtsDevice}" FontSize="13" />
+                <CheckBox Grid.Row="2" Grid.Column="2" IsChecked="{Binding TtsPreload}" Content="Preload" FontSize="12" VerticalAlignment="Center" />
+                <TextBlock Grid.Row="3" Grid.Column="0" Text="Speed" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
+                <Slider Grid.Row="3" Grid.Column="1" Minimum="0.5" Maximum="2.0" TickFrequency="0.1"
+                        IsSnapToTickEnabled="True" Value="{Binding TtsSpeed}" VerticalAlignment="Center" />
+                <TextBlock Grid.Row="3" Grid.Column="2" Text="{Binding TtsSpeed, StringFormat={}{0:F1}x}" VerticalAlignment="Center" Opacity="0.6" FontSize="12" />
+                <TextBlock Grid.Row="4" Grid.Column="0" Text="XTTS version" VerticalAlignment="Center" Opacity="0.6" FontSize="13" IsVisible="{Binding ShowsXttsFields}" />
+                <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding TtsModelVersion}" Watermark="2.0.3" FontSize="13" CornerRadius="6" Padding="10,6" IsVisible="{Binding ShowsXttsFields}" />
+                <TextBlock Grid.Row="5" Grid.Column="0" Text="Python" VerticalAlignment="Center" Opacity="0.6" FontSize="13" IsVisible="{Binding ShowsPythonFields}" />
+                <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding TtsPythonPath, UpdateSourceTrigger=PropertyChanged}" Watermark="/path/to/venv/bin/python" FontSize="13" CornerRadius="6" Padding="10,6" IsVisible="{Binding ShowsPythonFields}" />
+                <Button Grid.Row="5" Grid.Column="2" Classes="icon-btn" Command="{Binding BrowseTtsPythonCommand}" ToolTip.Tip="Choose venv Python" IsVisible="{Binding ShowsPythonFields}">
+                    <PathIcon Data="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z" Width="15" Height="15" />
+                </Button>
+                <TextBlock Grid.Row="6" Grid.Column="0" Text="XTTS script" VerticalAlignment="Center" Opacity="0.6" FontSize="13" IsVisible="{Binding ShowsXttsFields}" />
+                <TextBox Grid.Row="6" Grid.Column="1" Text="{Binding TtsScriptPath, UpdateSourceTrigger=PropertyChanged}" Watermark="/path/to/xtts_api_server.py" FontSize="13" CornerRadius="6" Padding="10,6" IsVisible="{Binding ShowsXttsFields}" />
+                <Button Grid.Row="6" Grid.Column="2" Classes="icon-btn" Command="{Binding BrowseTtsScriptCommand}" ToolTip.Tip="Choose XTTS script" IsVisible="{Binding ShowsXttsFields}">
+                    <PathIcon Data="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z" Width="15" Height="15" />
+                </Button>
+                <TextBlock Grid.Row="7" Grid.Column="0" Text="XTTS model" VerticalAlignment="Center" Opacity="0.6" FontSize="13" IsVisible="{Binding ShowsXttsFields}" />
+                <TextBox Grid.Row="7" Grid.Column="1" Text="{Binding TtsModelDirectory, UpdateSourceTrigger=PropertyChanged}" Watermark="XTTS v2 model folder" FontSize="13" CornerRadius="6" Padding="10,6" IsVisible="{Binding ShowsXttsFields}" />
+                <Button Grid.Row="7" Grid.Column="2" Classes="icon-btn" Command="{Binding BrowseTtsModelDirectoryCommand}" ToolTip.Tip="Choose model folder" IsVisible="{Binding ShowsXttsFields}">
+                    <PathIcon Data="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z" Width="15" Height="15" />
+                </Button>
+                <TextBlock Grid.Row="8" Grid.Column="0" Text="Output" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
+                <TextBox Grid.Row="8" Grid.Column="1" Text="{Binding TtsOutputDirectory, UpdateSourceTrigger=PropertyChanged}" Watermark="Default Hermaeus XTTS folder" FontSize="13" CornerRadius="6" Padding="10,6" />
+                <Button Grid.Row="8" Grid.Column="2" Classes="icon-btn" Command="{Binding BrowseTtsOutputCommand}" ToolTip.Tip="Choose output folder">
+                    <PathIcon Data="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z" Width="15" Height="15" />
+                </Button>
+                <TextBlock Grid.Row="9" Grid.Column="0" Text="Voice samples" VerticalAlignment="Center" Opacity="0.6" FontSize="13" IsVisible="{Binding ShowsVoiceSampleFields}" />
+                <TextBox Grid.Row="9" Grid.Column="1" Text="{Binding TtsVoiceDirectory, UpdateSourceTrigger=PropertyChanged}" Watermark="Default Hermaeus voice folder" FontSize="13" CornerRadius="6" Padding="10,6" IsVisible="{Binding ShowsVoiceSampleFields}" />
+                <Button Grid.Row="9" Grid.Column="2" Classes="icon-btn" Command="{Binding BrowseTtsVoiceDirectoryCommand}" ToolTip.Tip="Choose voice sample folder" IsVisible="{Binding ShowsVoiceSampleFields}">
+                    <PathIcon Data="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z" Width="15" Height="15" />
+                </Button>
+                <TextBlock Grid.Row="10" Grid.Column="0" Text="Preview" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
+                <TextBox Grid.Row="10" Grid.Column="1" Text="{Binding TtsPreviewText}" Watermark="Preview sentence" FontSize="13" CornerRadius="6" Padding="10,6" />
+                <StackPanel Grid.Row="10" Grid.Column="2" Orientation="Horizontal" Spacing="8">
+                    <Button Command="{Binding PreviewTtsVoiceCommand}" Content="Play" FontSize="12" Padding="10,5" CornerRadius="6" />
+                    <Button Command="{Binding ImportTtsVoiceSampleCommand}" Content="Import" FontSize="12" Padding="10,5" CornerRadius="6" IsVisible="{Binding ShowsVoiceSampleFields}" />
+                </StackPanel>
+            </Grid>
+            <TextBlock Text="{Binding TtsStatus}" FontSize="12" Opacity="0.6" />
+            <TextBlock Text="Audio is held in memory and piped to the system player; Hermaeus does not keep generated WAV files."
+                       FontSize="11" Opacity="0.45" TextWrapping="Wrap" />
+        </StackPanel>
+    </Border>
+    <Border Classes="settings-card" Margin="0,12,0,0">
+        <StackPanel Spacing="12">
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                <TextBlock Grid.Column="0" Text="Voice orchestration" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center" />
+                <CheckBox Grid.Column="1" IsChecked="{Binding IsVoiceMuted}" Content="Mute all voice" FontSize="12" />
+            </Grid>
+            <TextBlock Text="Hermaeus's voice now has other consumers besides the chat speak button: agent narration, Doctor warnings, benchmark completion, and system notifications. Each channel below is opt-in."
+                       FontSize="11" Opacity="0.55" TextWrapping="Wrap" />
+            <CheckBox IsChecked="{Binding AutoSpeakChatReplies}" Content="Automatically speak chat replies" FontSize="13" />
+            <CheckBox IsChecked="{Binding StreamingChatSpeech}" IsEnabled="{Binding AutoSpeakChatReplies}"
+                      Content="Experimental: speak replies sentence-by-sentence while generating" FontSize="13" />
+
+            <TextBlock Text="Channels" FontSize="13" FontWeight="SemiBold" Opacity="0.8" Margin="0,4,0,0" />
+            <ItemsControl ItemsSource="{Binding VoiceChannels}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="vm:VoiceChannelSettingViewModel">
+                        <StackPanel Margin="0,4">
+                            <Grid ColumnDefinitions="140,Auto,*" ColumnSpacing="12">
+                                <CheckBox Grid.Column="0" IsChecked="{Binding Enabled}" Content="{Binding DisplayName}" FontSize="13" />
+                                <TextBlock Grid.Column="1" Text="Profile" VerticalAlignment="Center" Opacity="0.6" FontSize="12" />
+                                <ComboBox Grid.Column="2"
+                                          ItemsSource="{Binding $parent[ItemsControl].DataContext.ProfileNameOptions}"
+                                          SelectedItem="{Binding ProfileNameDisplay, Mode=TwoWay}"
+                                          FontSize="12"
+                                          HorizontalAlignment="Stretch" />
+                            </Grid>
+                            <TextBlock Text="Spoken text is sent to the remote voice provider."
+                                       FontSize="11" Opacity="0.55" Foreground="Orange" Margin="152,2,0,0"
+                                       IsVisible="{Binding ShowsRemoteNotice}" />
+                        </StackPanel>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8" Margin="0,4,0,0">
+                <TextBlock Grid.Column="0" Text="Voice profiles" FontSize="13" FontWeight="SemiBold" Opacity="0.8" VerticalAlignment="Center" />
+                <Button Grid.Column="1" Command="{Binding AddVoiceProfileCommand}" Content="Add profile" FontSize="12" Padding="10,5" CornerRadius="6" />
+            </Grid>
+            <ItemsControl ItemsSource="{Binding VoiceProfiles}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="vm:VoiceProfileEditViewModel">
+                        <Grid ColumnDefinitions="*,*,90,Auto" ColumnSpacing="8" Margin="0,4">
+                            <TextBox Grid.Column="0" Text="{Binding Name}" Watermark="Profile name" FontSize="12" CornerRadius="6" Padding="8,4" />
+                            <!-- r19 4.3: lists the active provider's own voices (the same
+                                 seam RefreshTtsVoicesCommand already populates TtsVoices from).
+                                 Avalonia's ComboBox has no free-text entry mode; AutoCompleteBox
+                                 is the native editable-with-suggestions control, so typed text
+                                 that matches nothing still works for providers that cannot
+                                 enumerate voices (TtsVoices then holds just "default"). -->
+                            <AutoCompleteBox Grid.Column="1"
+                                             ItemsSource="{Binding $parent[ItemsControl].DataContext.TtsVoices}"
+                                             Text="{Binding VoiceId, Mode=TwoWay}"
+                                             FilterMode="Contains"
+                                             Watermark="Provider voice id"
+                                             FontSize="12"
+                                             HorizontalAlignment="Stretch" />
+                            <NumericUpDown Grid.Column="2" Value="{Binding Speed}" Minimum="0.5" Maximum="2.0" Increment="0.1" FontSize="12" />
+                            <Button Grid.Column="3" Classes="icon-btn" Command="{Binding $parent[ItemsControl].DataContext.RemoveVoiceProfileCommand}"
+                                    CommandParameter="{Binding}" ToolTip.Tip="Remove profile">
+                                <PathIcon Data="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" Width="13" Height="13" />
+                            </Button>
+                        </Grid>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </StackPanel>
+    </Border>
+    </StackPanel>
+</UserControl>

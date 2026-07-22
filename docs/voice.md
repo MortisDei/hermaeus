@@ -2,14 +2,14 @@
 
 ## Voice Architecture and Providers
 
-Aether uses a pluggable voice layer managed by `TtsSettingsViewModel`.
+Hermaeus uses a pluggable voice layer managed by `TtsSettingsViewModel`.
 Settings bind through `Tts.*` so provider state stays isolated and easier to
 test.
 
 Supported providers:
 
 - **Kokoro (native)** - default. Fully in-process Kokoro: no Python
-  subprocess, ONNX inference runs directly in Aether. English voices only;
+  subprocess, ONNX inference runs directly in Hermaeus. English voices only;
   downloads its model once via the Doctor install action, then runs fully
   offline.
 - **Kokoro (Python)** - the original fast local readback path, run as a
@@ -43,7 +43,7 @@ F5-TTS and XTTS v2 have different, sensitive PyTorch and CUDA dependency
 requirements. Installing them into the same venv can break one or both
 providers.
 
-Aether Doctor validates configured Python paths and voice backend health before
+Hermaeus Doctor validates configured Python paths and voice backend health before
 installs or playback.
 
 ## Kokoro Setup
@@ -55,7 +55,7 @@ onboarding details in the voice step, including the install plan and risk
 notes before you continue.
 
 The Kokoro (Python) fallback, along with F5-TTS and XTTS v2, run as managed
-Python subprocesses. For those, Aether can detect available hardware backends
+Python subprocesses. For those, Hermaeus can detect available hardware backends
 when creating a Python venv and will suggest a device (`cuda`, `rocm`, `mps`,
 or `cpu`) to use for TTS inference. You can still override the selected
 device in **Settings -> Voice providers** after setup.
@@ -90,8 +90,8 @@ Missing setup actions are approval-gated and show:
 - Risk assessment
 - Expected result
 
-If no GGUF models are found, Aether can offer the default Phi-4 mini reasoning
-download. If `llama-server` is not available, Aether can offer a matching
+If no GGUF models are found, Hermaeus can offer the default Phi-4 mini reasoning
+download. If `llama-server` is not available, Hermaeus can offer a matching
 binary download for the current platform.
 
 ## Pronunciation and Text Normalization
@@ -154,8 +154,8 @@ a per-message speak/stop icon swap wired to this.
   that actually succeeded: `GenerateSpeechAsync` now reports success and the
   temp file's path whenever rendering the audio worked, even if playing it
   back failed, across every voice provider (OpenAI, Kokoro, F5-TTS, XTTS).
-- OpenAI voice resolves saved `secret:` API key references through the Aether
+- OpenAI voice resolves saved `secret:` API key references through the Hermaeus
   secret store before sending requests.
-- Aether does not cache generated WAV responses.
+- Hermaeus does not cache generated WAV responses.
 - Imported clone samples are copied only when explicitly imported.
 - Voice sample import is available in Settings under TTS configuration.

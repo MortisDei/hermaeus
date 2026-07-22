@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Hermaeus.ViewModels"
+             xmlns:controls="using:Hermaeus.Desktop.Controls"
+             x:Class="Hermaeus.Desktop.Views.DraftPatchPreviewView"
+             x:DataType="vm:DraftPatchDiffViewModel">
+
+  <Grid RowDefinitions="Auto,*,Auto" Margin="12" RowSpacing="12">
+    <StackPanel Orientation="Vertical" Spacing="6">
+      <StackPanel Orientation="Horizontal" Spacing="8">
+        <TextBlock Text="Draft patch preview" FontWeight="SemiBold" FontSize="16" />
+        <TextBlock Text=" - " Opacity="0.7" />
+        <TextBlock Text="{Binding RelativePath}" FontFamily="Courier New" Opacity="0.8" />
+      </StackPanel>
+      <TextBlock Text="Review the proposed changes before applying. Lines highlighted in green are additions, red are removals." FontSize="12" Opacity="0.7" TextWrapping="Wrap" />
+    </StackPanel>
+
+    <Border Grid.Row="1" BorderThickness="1" BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" CornerRadius="6" Padding="0" Margin="0">
+      <controls:DiffView DataContext="{Binding}" />
+    </Border>
+
+    <Grid Grid.Row="2" ColumnDefinitions="*,Auto" ColumnSpacing="8">
+      <TextBlock Grid.Column="0" Text="{Binding Lines.Count, StringFormat='Total changes: {0} lines'}" VerticalAlignment="Center" Opacity="0.7" FontSize="12" />
+      <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+        <Button Content="Cancel" Command="{Binding CancelCommand}" Padding="12,8" />
+        <Button Content="Apply patch" Command="{Binding ApplyCommand}" Classes="primary-btn" Padding="16,8" />
+      </StackPanel>
+    </Grid>
+  </Grid>
+
+</UserControl>

@@ -47,7 +47,7 @@
   never written back to settings.
 - Chat can attach selected local text/code files, `.docx`, and `.pdf` files
   directly to the next message. Use the attach button or drop files on the
-  input. Aether reads each file once at send time, extracting text first for
+  input. Hermaeus reads each file once at send time, extracting text first for
   `.docx`/`.pdf` (a scanned PDF or one with no extractable text is Skipped
   with the reason shown, not silently dropped), prepends a bounded context
   block to the model prompt, and stores only an attachment summary in
@@ -81,7 +81,7 @@
 - The chat bar shows current context usage against the selected context window.
   It uses provider-reported token usage when available and falls back to a
   local estimate for draft input, visible history, system prompt, and ready file
-  attachments. At high usage, Aether warns so a fresh conversation can avoid
+  attachments. At high usage, Hermaeus warns so a fresh conversation can avoid
   quality loss.
 
 ## Memory
@@ -227,7 +227,7 @@
   content, and generate a side-by-side diff preview before queueing. The preview
   shows line-by-line changes with colour highlights (green for additions, red
   for removals) and line numbers for easy review in an approval modal. After
-  approval, Aether writes the proposed content to the workspace file and
+  approval, Hermaeus writes the proposed content to the workspace file and
   refreshes the preview.
 - Queued patches expander shows all draft patch decisions with rationale,
   proposed content, and outcome labels, allowing approve, reject, and block
@@ -323,7 +323,7 @@
   appears only when the process's executable exactly matches this server's
   configured binary (re-verified immediately before the process is killed).
   Any other process on the port is reported for information only.
-- The Services view's context-fit advisory is hardware-aware: when Aether can
+- The Services view's context-fit advisory is hardware-aware: when Hermaeus can
   read the local GGUF's header (layer count, KV head count, head dims) and the
   machine's hardware profile, it estimates the actual weights+KV-cache size at
   the configured context and GPU-layer offload and warns with the arithmetic
@@ -414,7 +414,7 @@
   model in the same Hugging Face repo but are not themselves a loadable chat
   model: `mmproj*.gguf` vision-projector files and `mtp-*.gguf`
   multi-token-prediction draft-weight files. Neither has a first-class use in
-  Aether today (multimodal and draft-model speculative decoding are both
+  Hermaeus today (multimodal and draft-model speculative decoding are both
   out of scope), so they no longer clutter the list as unexplained
   sub-500 MB "models".
 - The Services card's server editor exposes first-class llama-server engine
@@ -497,7 +497,7 @@
   archive for your platform, extracts it with a zip-slip guard, and locates
   the executable inside (Windows resolution also tries `.exe`, so a fresh
   Windows install's default managed servers are startable out of the box).
-  Model downloads verify a SHA256 hash when Aether has trusted hash metadata
+  Model downloads verify a SHA256 hash when Hermaeus has trusted hash metadata
   for that exact URL.
 - Local AI setup scans are voice-provider aware. Kokoro setup checks Kokoro
   Python imports and does not show XTTS script or model actions unless XTTS v2
@@ -510,9 +510,9 @@
   AMD/ROCm, `mps` for Apple Silicon, or `cpu`) to use for TTS/model inference.
   You can still override the selected device in **Settings -> Voice providers**
   after setup.
-- First-run Setup Wizard: on first launch Aether runs a guided 6-step
+- First-run Setup Wizard: on first launch Hermaeus runs a guided 6-step
   setup wizard to select the data root, local AI assets root, chat backend,
-  model folder, voice provider, and to run the Aether Doctor for a quick
+  model folder, voice provider, and to run the Hermaeus Doctor for a quick
   health check before you start using the app. The wizard can be skipped
   or re-run from the Settings panel.
 - Finishing or skipping the wizard immediately starts configured servers and
@@ -524,13 +524,13 @@
   root. A target folder that already has conflicting data files is refused
   with an explanation, and the current data root is left untouched.
 
-## Aether Doctor
+## Hermaeus Doctor
 
-- Aether Doctor checks for storage, runtimes, voice, RAG, GPU, and secrets.
-- Aether runs Doctor in the background after launch and raises a notification
+- Hermaeus Doctor checks for storage, runtimes, voice, RAG, GPU, and secrets.
+- Hermaeus runs Doctor in the background after launch and raises a notification
   when errors or warnings are found, so startup problems are visible before the
   Doctor panel is opened.
-- Aether Doctor now validates the configured Python and voice backend
+- Hermaeus Doctor now validates the configured Python and voice backend
   health before installs or playback.
 - Doctor labels the Python check with the selected voice provider's actual
   requirement, such as Python 3.12+ for Kokoro or Python 3.9-11 for XTTS v2,
@@ -549,7 +549,7 @@
   llama-server.
 - Doctor reports whether the previous session exited cleanly, using a small
   local-only lifecycle journal (no telemetry, nothing leaves the machine).
-  If Aether did not shut down cleanly last time (a crash or force-close), the
+  If Hermaeus did not shut down cleanly last time (a crash or force-close), the
   warning names the last recorded operation, and if an unhandled-exception
   crash log exists from that session (written under `{DataRoot}/logs/`) its
   detail is read back and shown too, so a native-level crash that bypasses
@@ -592,7 +592,7 @@
 - Deleting a conversation asks for confirmation first, matching every other
   destructive action of similar weight (dataset delete, reindex, benchmark
   history clear, backup restore).
-- Single-instance guard: launching Aether while another instance for the
+- Single-instance guard: launching Hermaeus while another instance for the
   same user account is already running exits immediately instead of opening
   a second window, since two processes would otherwise write to the same
   SQLite data root with no coordination between them.
@@ -611,7 +611,7 @@
   use atomic replacement writes, and an unreadable `settings.json` is copied
   aside before defaults are loaded.
 - Configurable local AI assets root for models, XTTS, venvs, and encoders.
-  When both `Models` and `models` exist, Aether prefers the folder containing
+  When both `Models` and `models` exist, Hermaeus prefers the folder containing
   GGUF files for model and reranker defaults.
 - Trust & Safety scan for configured local tools, hashes, AI-root scope, and
   network exposure warnings, including equals-style host override flags such as
@@ -631,7 +631,7 @@
 
 ## Workbench Glue
 
-Aether connects its local-first systems around a workspace root so chat, RAG,
+Hermaeus connects its local-first systems around a workspace root so chat, RAG,
 agent state, project instructions, and local safety checks can share context.
 
 ### Workspace Profiles
@@ -720,8 +720,8 @@ not documented here as existing behaviour.
 
 ### Local API
 
-An optional, off-by-default loopback HTTP host (`Aether.LocalApi`) that lets
-other local processes (editor extensions, scripts) reuse Aether's chat,
+An optional, off-by-default loopback HTTP host (`Hermaeus.LocalApi`) that lets
+other local processes (editor extensions, scripts) reuse Hermaeus's chat,
 memory, and RAG query surface without the desktop UI. Enabled and configured
 from Settings > Local API: a checkbox, a port (127.0.0.1 only), and any
 number of named per-app bearer tokens (add one, name it, copy the generated
@@ -729,7 +729,7 @@ value; revoke any one individually without affecting the others). The host
 refuses every request with a 503 until at least one token exists. Settings
 shows a live host status label (Running/Stopped/etc.) next to the checkbox.
 Every call is logged to the shared trace store keyed by the verified token
-name that authenticated it (the caller-supplied `X-Aether-Client` header is
+name that authenticated it (the caller-supplied `X-Hermaeus-Client` header is
 also recorded, but only as an unverified display hint), and Privacy Audit's
 "Local API activity" item shows which per-app tokens have been calling in.
 
@@ -747,7 +747,7 @@ Endpoints:
 
 ## Mascot
 
-Aether's mascot is Moss, a small workshop tinkerer (not the AI itself); full
+Hermaeus's mascot is Moss, a small workshop tinkerer (not the AI itself); full
 identity, personality, and visual spec live in [docs/mascot.md](mascot.md). A
 flat-vector icon-scale rendering (`Controls/MossIcon`) currently appears next
 to the Services error banner and the RAG ingest-progress line as a

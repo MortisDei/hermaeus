@@ -1,0 +1,262 @@
+using Hermaeus.Core.Models;
+using Hermaeus.Core.Services;
+using System.Threading;
+
+namespace Hermaeus.Services;
+
+public sealed class CompositeLlmService : ILlmService, IDisposable
+{
+    private readonly LlamaCppService _llamaCpp;
+    private readonly OpenAiService _openAi;
+    private readonly OllamaService _ollama;
+    private readonly ISettingsService _settings;
+    private readonly RuntimeProfileService _runtimeProfiles;
+    private delegate IAsyncEnumerable<LlmStreamEvent> StreamChatDelegate(
+        string modelId, IReadOnlyList<ChatMessage> messages, LlmChatOptions? options, CancellationToken ct);
+
+    private readonly Dictionary<string, StreamChatDelegate> _streamByTag;
+    private readonly List<LlmModel> _cachedModels = [];
+
+    /// <summary>
+    /// Id-&gt;provider-tag memory that outlives the 300 s model cache (r11 2.4):
+    /// upserted on every successful scan, never cleared, so a model id whose
+    /// tag was learned once still routes correctly after the cache expires or
+    /// a later scan finds every provider unreachable (which caches nothing
+    /// under the old clear-then-rebuild scheme).
+    /// </summary>
+    private readonly Dictionary<string, string> _providerTagsByModelId = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ReaderWriterLockSlim _cacheLock = new();
+    private DateTime _cacheUntilUtc = DateTime.MinValue;
+    private static readonly TimeSpan PositiveCacheTtl = TimeSpan.FromSeconds(300);
+
+    /// <summary>
+    /// When every provider scan comes back empty, still cache that (short)
+    /// result so a chat view repeatedly calling GetModelsAsync doesn't turn
+    /// into a fresh 5 s-per-provider probe storm on every call while
+    /// everything is down (r11 2.4).
+    /// </summary>
+    private static readonly TimeSpan NegativeCacheTtl = TimeSpan.FromSeconds(15);
+
+    public string ProviderName => "Composite";
+    public bool   IsConfigured => _llamaCpp.IsConfigured || _openAi.IsConfigured
+                                   || _runtimeProfiles.Profiles.Any(p => p.Enabled && p.Kind == RuntimeKind.Ollama);
+
+    /// <summary>All providers this composite can route to, with capabilities.</summary>
+    public static IReadOnlyList<ProviderDescriptor> Providers { get; } =
+    [
+        LlamaCppService.Descriptor,
+        OllamaService.Descriptor,
+        OpenAiService.Descriptor
+    ];
+
+    /// <summary>Maps a runtime profile's kind to the provider descriptor it corresponds
+    /// to, so UI display strings come from one registry instead of a duplicated switch.</summary>
+    public static ProviderDescriptor DescriptorFor(RuntimeKind kind) => kind switch
+    {
+        RuntimeKind.LlamaCpp => LlamaCppService.Descriptor,
+        RuntimeKind.Ollama => OllamaService.Descriptor,
+        _ => OpenAiService.Descriptor
+    };
+
+    /// <summary>
+    /// The single source of truth for "is this provider enabled," so the
+    /// per-provider settings flags aren't matched against a provider tag in
+    /// more than one place (docs/review/archived/r1/06-technical-debt.md item 4).
+    /// </summary>
+    public static bool IsProviderEnabled(string tag, AppSettings settings) => tag switch
+    {
+        "openai" => settings.Llm.OpenAiEnabled,
+        "llama.cpp" => settings.Llm.LlamaCppEnabled,
+        "ollama" => settings.RuntimeProfiles.Any(p => p.Enabled && p.Kind == RuntimeKind.Ollama),
+        _ => false
+    };
+
+    /// <summary>Describes the provider a model id routes to.</summary>
+    public ProviderDescriptor DescribeModel(string modelId)
+    {
+        var tag = ResolveProviderTag(modelId);
+        if (tag is null && OllamaService.IsOllamaModelId(modelId))
+            tag = OllamaService.Descriptor.Tag;
+        return Providers.FirstOrDefault(p => string.Equals(p.Tag, tag, StringComparison.OrdinalIgnoreCase))
+               ?? LlamaCppService.Descriptor;
+    }
+
+    public CompositeLlmService(
+        LlamaCppService llamaCpp,
+        OpenAiService openAi,
+        OllamaService ollama,
+        ISettingsService settings,
+        RuntimeProfileService runtimeProfiles)
+    {
+        _llamaCpp = llamaCpp; _openAi = openAi; _ollama = ollama; _settings = settings; _runtimeProfiles = runtimeProfiles;
+        _streamByTag = new(StringComparer.OrdinalIgnoreCase)
+        {
+            [LlamaCppService.Descriptor.Tag] = llamaCpp.StreamChatAsync,
+            [OllamaService.Descriptor.Tag] = ollama.StreamChatAsync,
+            [OpenAiService.Descriptor.Tag] = openAi.StreamChatAsync
+        };
+    }
+
+    public void InvalidateModelCache()
+    {
+        _cacheLock.EnterWriteLock();
+        try
+        {
+            _cacheUntilUtc = DateTime.MinValue;
+        }
+        finally
+        {
+            _cacheLock.ExitWriteLock();
+        }
+    }
+
+    public async Task<List<LlmModel>> GetModelsAsync(CancellationToken ct = default)
+    {
+        _cacheLock.EnterReadLock();
+        try
+        {
+            // No Count > 0 gate (r11 2.4): an empty result is itself cached for
+            // NegativeCacheTtl, so an all-providers-down scan does not re-probe
+            // on every call.
+            if (DateTime.UtcNow < _cacheUntilUtc)
+                return _cachedModels.Select(Clone).ToList();
+        }
+        finally
+        {
+            _cacheLock.ExitReadLock();
+        }
+
+        var all = new List<LlmModel>();
+        var loads = new List<Task<List<LlmModel>>>();
+        if (IsProviderEnabled(LlamaCppService.Descriptor.Tag, _settings.Settings))
+            loads.Add(GetWithTimeoutAsync(_llamaCpp.GetModelsAsync, ct));
+        if (IsProviderEnabled(OpenAiService.Descriptor.Tag, _settings.Settings) && _openAi.IsConfigured)
+            loads.Add(GetWithTimeoutAsync(_openAi.GetModelsAsync, ct));
+        loads.Add(GetWithTimeoutAsync(_ollama.GetModelsAsync, ct));
+
+        var results = await Task.WhenAll(loads);
+        foreach (var models in results)
+            all.AddRange(models);
+
+        _cacheLock.EnterWriteLock();
+        try
+        {
+            _cachedModels.Clear();
+            _cachedModels.AddRange(all.Select(Clone));
+            // _providerTagsByModelId is intentionally never cleared here; see
+            // its declaration.
+            foreach (var model in _cachedModels)
+            {
+                if (!string.IsNullOrWhiteSpace(model.ProviderTag))
+                    _providerTagsByModelId[model.Id] = model.ProviderTag;
+            }
+            _cacheUntilUtc = DateTime.UtcNow.Add(all.Count > 0 ? PositiveCacheTtl : NegativeCacheTtl);
+        }
+        finally
+        {
+            _cacheLock.ExitWriteLock();
+        }
+
+        return all;
+    }
+
+    private static async Task<List<LlmModel>> GetWithTimeoutAsync(
+        Func<CancellationToken, Task<List<LlmModel>>> load,
+        CancellationToken ct)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(TimeSpan.FromSeconds(5));
+        try
+        {
+            return await load(timeout.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // Provider took too long to respond; return empty list gracefully
+            return [];
+        }
+        catch
+        {
+            // Other errors (connection issues, etc.) also return empty list
+            return [];
+        }
+    }
+
+    private static LlmModel Clone(LlmModel model) => new()
+    {
+        Id = model.Id,
+        Name = model.Name,
+        Provider = model.Provider,
+        ProviderTag = model.ProviderTag,
+        SizeBytes = model.SizeBytes,
+        ModifiedAt = model.ModifiedAt,
+        ProfileDisplayName = model.ProfileDisplayName,
+        Description = model.Description,
+        Tags = model.Tags.ToList(),
+        DefaultTemperature = model.DefaultTemperature,
+        DefaultContextSize = model.DefaultContextSize,
+        DefaultMaxTokens = model.DefaultMaxTokens,
+        DefaultTopP = model.DefaultTopP,
+        DefaultTopK = model.DefaultTopK,
+        DefaultMinP = model.DefaultMinP,
+        DefaultRepeatPenalty = model.DefaultRepeatPenalty,
+        DefaultFrequencyPenalty = model.DefaultFrequencyPenalty,
+        DefaultPresencePenalty = model.DefaultPresencePenalty,
+        ProbedContextLength = model.ProbedContextLength,
+        IsVisible = model.IsVisible,
+        Avatar = model.Avatar
+    };
+
+    public IAsyncEnumerable<LlmStreamEvent> StreamChatAsync(
+        string modelId, IReadOnlyList<ChatMessage> messages,
+        LlmChatOptions? options = null,
+        CancellationToken ct = default)
+    {
+        var tag = ResolveProviderTag(modelId);
+        if (tag is null && OllamaService.IsOllamaModelId(modelId))
+            tag = OllamaService.Descriptor.Tag;
+
+        // r11 2.4: a model id with no known provider tag must not silently
+        // route to llama.cpp - that posted whatever conversation the user was
+        // having with a remote model to the local server the moment the model
+        // cache expired or a refresh failed. Ambiguity is reported, never
+        // guessed.
+        if (tag is null)
+            return YieldRoutingError(modelId);
+
+        var stream = _streamByTag.TryGetValue(tag, out var fn) ? fn : _llamaCpp.StreamChatAsync;
+        return stream(modelId, messages, options, ct);
+    }
+
+    private static async IAsyncEnumerable<LlmStreamEvent> YieldRoutingError(string modelId)
+    {
+        yield return LlmStreamEvent.Error(
+            $"*Could not determine which provider serves model '{modelId}'. Refresh the model list and try again.*");
+        await Task.CompletedTask;
+    }
+
+    private string? ResolveProviderTag(string modelId)
+    {
+        _cacheLock.EnterReadLock();
+        try
+        {
+            if (_providerTagsByModelId.TryGetValue(modelId, out var tag) && !string.IsNullOrWhiteSpace(tag))
+                return tag;
+
+            var model = _cachedModels.FirstOrDefault(m => string.Equals(m.Id, modelId, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(model?.ProviderTag))
+                return model.ProviderTag;
+
+            return null;
+        }
+        finally
+        {
+            _cacheLock.ExitReadLock();
+        }
+    }
+
+    public void Dispose()
+    {
+        _cacheLock?.Dispose();
+    }
+}

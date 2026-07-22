@@ -1,20 +1,20 @@
-# Aether
+# Hermaeus
 
-[![CI](https://github.com/MortisDei/aether/actions/workflows/ci.yml/badge.svg)](https://github.com/MortisDei/aether/actions/workflows/ci.yml)
+[![CI](https://github.com/MortisDei/hermaeus/actions/workflows/ci.yml/badge.svg)](https://github.com/MortisDei/hermaeus/actions/workflows/ci.yml)
 
-Aether is a native, local-first AI workspace for developers and power users.
+Hermaeus is a native, local-first AI workspace for developers and power users.
 
-Rather than being another chat client, Aether combines conversations, long-term memory, local retrieval, supervised agents, model management, benchmarking, diagnostics, and pluggable voice services into a single desktop application where every action is transparent, reviewable, and under the user's control.
+Rather than being another chat client, Hermaeus combines conversations, long-term memory, local retrieval, supervised agents, model management, benchmarking, diagnostics, and pluggable voice services into a single desktop application where every action is transparent, reviewable, and under the user's control.
 
 Built with **Avalonia UI** and **.NET 10**. Tested on Windows and on Pop!_OS (Wayland); other Linux environments should work but are less exercised.
 
 ---
 
-## Why Aether?
+## Why Hermaeus?
 
 Most AI desktop applications focus on chat.
 
-Aether treats chat as just one part of a larger local AI workspace.
+Hermaeus treats chat as just one part of a larger local AI workspace.
 
 Core design principles:
 
@@ -110,7 +110,7 @@ Built-in tooling for running local AI reliably.
 
 Includes:
 
-- Aether Doctor
+- Hermaeus Doctor
 - Trust & Safety checks
 - Runtime health
 - GPU detection
@@ -125,9 +125,9 @@ Includes:
 **Prerequisites:** [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0). A local model runtime (managed `llama.cpp`, Ollama, or an OpenAI-compatible endpoint) is configured later, in-app, via the setup wizard - nothing else needs to be installed up front.
 
 ```bash
-git clone https://github.com/MortisDei/aether.git
-cd aether
-dotnet run --project src/Aether.Desktop
+git clone https://github.com/MortisDei/hermaeus.git
+cd hermaeus
+dotnet run --project src/Hermaeus.Desktop
 ```
 
 Open **Services**, configure a runtime, select a model, then start the Chat service. If you have no runtime set up yet, the in-app setup wizard walks through downloading a starter model.
@@ -156,13 +156,13 @@ Managed locally through the Services workspace.
 
 Supports any provider exposing the standard OpenAI Chat Completions API.
 
-API keys are stored as secure Aether secret references.
+API keys are stored as secure Hermaeus secret references.
 
 ---
 
 # Security
 
-Aether is designed around a local-first security model.
+Hermaeus is designed around a local-first security model.
 
 Highlights include:
 
@@ -185,9 +185,9 @@ An automated regression suite of **1,090 tests** runs on every commit across Win
 
 # Known Issues / Alpha Status
 
-Aether is alpha software, developed and tested primarily on Windows. Linux (Pop!_OS, Wayland) has been run and works, but is less exercised than Windows and more likely to surface rough edges. Prebuilt binaries are not code-signed; Windows SmartScreen will warn on first run (verify the published SHA256 instead of dismissing it blindly). See `CHANGELOG.md` for the pace of fixes and new features.
+Hermaeus is alpha software, developed and tested primarily on Windows. Linux (Pop!_OS, Wayland) has been run and works, but is less exercised than Windows and more likely to surface rough edges. Prebuilt binaries are not code-signed; Windows SmartScreen will warn on first run (verify the published SHA256 instead of dismissing it blindly). See `CHANGELOG.md` for the pace of fixes and new features.
 
-Aether has one maintainer. Issues get a best-effort response; pull requests must follow `CONTRIBUTING.md`.
+Hermaeus has one maintainer. Issues get a best-effort response; pull requests must follow `CONTRIBUTING.md`.
 
 ---
 
@@ -218,13 +218,13 @@ See:
 
 ```
 src/
-├── Aether.Core/
-├── Aether.Agent/
-├── Aether.Rag/
-├── Aether.Services/
-├── Aether.ViewModels/
-├── Aether.Desktop/
-└── Aether.Tests/
+├── Hermaeus.Core/
+├── Hermaeus.Agent/
+├── Hermaeus.Rag/
+├── Hermaeus.Services/
+├── Hermaeus.ViewModels/
+├── Hermaeus.Desktop/
+└── Hermaeus.Tests/
 
 docs/
 ```
@@ -234,9 +234,9 @@ docs/
 # Building
 
 ```bash
-dotnet build Aether.sln
+dotnet build Hermaeus.sln
 
-dotnet test src/Aether.Tests/Aether.Tests.csproj
+dotnet test src/Hermaeus.Tests/Hermaeus.Tests.csproj
 
 ./build.sh --skip-restore
 
@@ -249,7 +249,7 @@ Packaging scripts create Linux `.tar.gz` and Windows `.zip` archives under `dist
 
 # License
 
-Aether is source-available.
+Hermaeus is source-available.
 
 Private and non-commercial use is licensed under the **PolyForm Noncommercial License 1.0.0**.
 
@@ -261,7 +261,7 @@ See:
 - COMMERCIAL.md
 - NOTICE.md
 
-Aether is **not** an OSI-approved open source project.
+Hermaeus is **not** an OSI-approved open source project.
 
 For commercial licensing requests, see the Contact section of COMMERCIAL.md.
 
@@ -286,4 +286,4 @@ Major systems currently implemented include:
 - Doctor diagnostics
 - Security review and threat model
 
-Aether is alpha software. See [Known Issues](#known-issues--alpha-status) below and `CHANGELOG.md` for the current state and improvement cadence. Public release hardening continues in the areas of installer signing, OCR support, additional security tightening, and Linux global hotkeys.
+Hermaeus is alpha software. See [Known Issues](#known-issues--alpha-status) below and `CHANGELOG.md` for the current state and improvement cadence. Public release hardening continues in the areas of installer signing, OCR support, additional security tightening, and Linux global hotkeys.

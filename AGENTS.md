@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Aether is a native, local-first AI workstation: Avalonia UI + .NET 10, Windows and Linux. Chat, local RAG, an approval-gated agent workbench, managed llama.cpp/Ollama/OpenAI-compatible runtimes, local memory, and voice.
+Hermaeus is a native, local-first AI workstation: Avalonia UI + .NET 10, Windows and Linux. Chat, local RAG, an approval-gated agent workbench, managed llama.cpp/Ollama/OpenAI-compatible runtimes, local memory, and voice.
 
 ## Non-negotiable principles
 
@@ -14,13 +14,13 @@ Aether is a native, local-first AI workstation: Avalonia UI + .NET 10, Windows a
 
 | Project | Role | Rules |
 | --- | --- | --- |
-| `src/Aether.Core` | Models + service contracts | No new package refs. No UI types. |
-| `src/Aether.Services` | Runtime, storage, settings, secrets, voice, doctor | SQLite via `Microsoft.Data.Sqlite`; schema changes go through `SqliteMigrationRunner` (additive only). |
-| `src/Aether.Rag` | Ingest, retrieval, rerank, citations, traces, evals | ONNX Runtime types must not leak out of this project. |
-| `src/Aether.Agent` | Task state, context packs, risk gates, patch queue | `task_state.json` is source of truth; `agent/task_index.db` is a rebuildable index. Risk classification is deterministic; never bypass it. |
-| `src/Aether.ViewModels` | MVVM state/commands (CommunityToolkit.Mvvm) | Must never reference `Avalonia.*`. |
-| `src/Aether.Desktop` | Avalonia views, styles, entry point, DI root | Views bind to ViewModels; no business logic in code-behind. |
-| `src/Aether.Tests` | xunit regression suite (`dotnet test`) | Tests run sequentially (shared temp data roots and SQLite pools); do not re-enable parallelization. |
+| `src/Hermaeus.Core` | Models + service contracts | No new package refs. No UI types. |
+| `src/Hermaeus.Services` | Runtime, storage, settings, secrets, voice, doctor | SQLite via `Microsoft.Data.Sqlite`; schema changes go through `SqliteMigrationRunner` (additive only). |
+| `src/Hermaeus.Rag` | Ingest, retrieval, rerank, citations, traces, evals | ONNX Runtime types must not leak out of this project. |
+| `src/Hermaeus.Agent` | Task state, context packs, risk gates, patch queue | `task_state.json` is source of truth; `agent/task_index.db` is a rebuildable index. Risk classification is deterministic; never bypass it. |
+| `src/Hermaeus.ViewModels` | MVVM state/commands (CommunityToolkit.Mvvm) | Must never reference `Avalonia.*`. |
+| `src/Hermaeus.Desktop` | Avalonia views, styles, entry point, DI root | Views bind to ViewModels; no business logic in code-behind. |
+| `src/Hermaeus.Tests` | xunit regression suite (`dotnet test`) | Tests run sequentially (shared temp data roots and SQLite pools); do not re-enable parallelization. |
 
 Dependency direction: Desktop → ViewModels → (Services, Agent, Rag) → Core.
 Never add a reference against that flow.
@@ -28,9 +28,9 @@ Never add a reference against that flow.
 ## Build, test, run
 
 ```bash
-dotnet build Aether.sln                                  # zero warnings enforced (TreatWarningsAsErrors)
-dotnet test src/Aether.Tests/Aether.Tests.csproj         # standard xunit; all tests must pass
-dotnet run --project src/Aether.Desktop                  # launch the app
+dotnet build Hermaeus.sln                                  # zero warnings enforced (TreatWarningsAsErrors)
+dotnet test src/Hermaeus.Tests/Hermaeus.Tests.csproj         # standard xunit; all tests must pass
+dotnet run --project src/Hermaeus.Desktop                  # launch the app
 ./build.sh --skip-restore    # or: pwsh ./build.ps1 -SkipRestore   # packaging
 ./scripts/coverage.sh        # or: pwsh ./scripts/coverage.ps1     # line-coverage ratchet (floor: 45%)
 ```
@@ -57,7 +57,7 @@ Any compiler warning fails the build. Fix the warning; do not suppress it withou
 - If you find a bug or unsafe pattern: fix it if in scope, otherwise record it and mention it in your final response.
 
 Before finishing any task:
-1. `dotnet build Aether.sln` and run the test harness.
+1. `dotnet build Hermaeus.sln` and run the test harness.
 2. Update docs if behaviour, commands, setup, or features changed.
 3. Commit; push only after build/tests pass and docs are truthful.
 4. If any step was impossible, say exactly what and why.

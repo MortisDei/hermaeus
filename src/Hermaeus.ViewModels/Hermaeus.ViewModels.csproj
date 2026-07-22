@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Hermaeus.ViewModels</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.3.2" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Hermaeus.Core/Hermaeus.Core.csproj" />
+    <ProjectReference Include="../Hermaeus.Agent/Hermaeus.Agent.csproj" />
+    <ProjectReference Include="../Hermaeus.Services/Hermaeus.Services.csproj" />
+    <ProjectReference Include="../Hermaeus.Rag/Hermaeus.Rag.csproj" />
+  </ItemGroup>
+</Project>

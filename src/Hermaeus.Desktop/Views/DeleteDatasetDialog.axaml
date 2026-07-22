@@ -1,0 +1,33 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Hermaeus.Desktop.Views.DeleteDatasetDialog"
+        Title="Delete Dataset"
+        Width="480"
+        Height="240"
+        WindowStartupLocation="CenterOwner"
+        CanResize="False">
+    <Border Padding="18">
+        <StackPanel Spacing="14">
+            <TextBlock Text="{Binding Header}"
+                       FontSize="16"
+                       FontWeight="SemiBold" />
+            <TextBlock Text="{Binding Message}"
+                       TextWrapping="Wrap" />
+            <TextBlock Text="This action cannot be undone."
+                       TextWrapping="Wrap"
+                       Foreground="Red"
+                       Opacity="0.8" />
+            <StackPanel Orientation="Horizontal"
+                        HorizontalAlignment="Right"
+                        Spacing="8">
+                <Button Content="Cancel"
+                        MinWidth="90"
+                        Click="OnCancelClick" />
+                <Button Content="Delete"
+                        MinWidth="90"
+                        Foreground="Red"
+                        Click="OnDeleteClick" />
+            </StackPanel>
+        </StackPanel>
+    </Border>
+</Window>

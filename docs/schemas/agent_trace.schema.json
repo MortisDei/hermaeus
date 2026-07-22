@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://aether.local/schemas/agent_trace.schema.json",
-  "title": "Aether Agent Trace Event",
+  "$id": "https://hermaeus.local/schemas/agent_trace.schema.json",
+  "title": "Hermaeus Agent Trace Event",
   "type": "object",
   "required": ["timestamp", "taskId", "event", "status"],
   "properties": {

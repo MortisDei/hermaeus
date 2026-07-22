@@ -1,0 +1,197 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Hermaeus.ViewModels"
+             xmlns:controls="using:Hermaeus.Desktop.Controls"
+             xmlns:core="using:Hermaeus.Core.Models"
+             x:Class="Hermaeus.Desktop.Controls.MessageControl"
+             x:Name="Root"
+             x:DataType="vm:MessageViewModel">
+
+    <Grid>
+        <!-- ── User bubble ────────────────────────────────────────────────── -->
+        <Border IsVisible="{Binding IsUser}"
+                HorizontalAlignment="Right"
+                MaxWidth="680"
+                CornerRadius="14,14,2,14"
+                Padding="14,10"
+                Background="{DynamicResource AccentFillColorDefaultBrush}"
+                Margin="60,0,0,0">
+            <SelectableTextBlock Text="{Binding Content}"
+                                 TextWrapping="Wrap"
+                                 FontSize="14"
+                                 LineHeight="22"
+                                 Foreground="{DynamicResource TextOnAccentFillColorPrimaryBrush}" />
+        </Border>
+
+        <!-- ── Assistant message ─────────────────────────────────────────── -->
+        <StackPanel IsVisible="{Binding IsAssistant}"
+                    HorizontalAlignment="Left"
+                    MaxWidth="780"
+                    Margin="0,0,60,0">
+
+            <!-- r19 6.5: the assistant side previously had no visible container at
+                 all (flat text floating in the transcript); this border is kept
+                 transparent so it reads as a subtle outline, not a second bubble
+                 style competing with the user's filled one. The copy/speak/meta
+                 row below stays OUTSIDE so 6.3's stick-to-bottom math is unaffected. -->
+            <Border CornerRadius="10"
+                    BorderThickness="1"
+                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                    Background="Transparent"
+                    Padding="14,10">
+                <StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,0,4">
+                        <PathIcon Data="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v1a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-1H1a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2M7.5 13A2.5 2.5 0 0 0 5 15.5A2.5 2.5 0 0 0 7.5 18a2.5 2.5 0 0 0 2.5-2.5A2.5 2.5 0 0 0 7.5 13m9 0a2.5 2.5 0 0 0-2.5 2.5a2.5 2.5 0 0 0 2.5 2.5a2.5 2.5 0 0 0 2.5-2.5A2.5 2.5 0 0 0 16.5 13z"
+                              Width="13" Height="13"
+                              Classes.thinking-pulse="{Binding IsStreaming}">
+                            <PathIcon.RenderTransform>
+                                <ScaleTransform ScaleX="1" ScaleY="1" />
+                            </PathIcon.RenderTransform>
+                        </PathIcon>
+                        <TextBlock Text="Assistant" FontSize="11" Opacity="0.4"
+                                   FontWeight="Medium" VerticalAlignment="Center" />
+                        <TextBlock IsVisible="{Binding IsStreaming}"
+                                   Text="●" FontSize="9"
+                                   Opacity="0.6"
+                                   VerticalAlignment="Center" />
+                        <TextBlock IsVisible="{Binding HasStreamingStatus}"
+                                   Text="{Binding StreamingStatus}"
+                                   FontSize="11" Opacity="0.5"
+                                   VerticalAlignment="Center" />
+                    </StackPanel>
+
+                    <controls:MarkdownViewer Markdown="{Binding Content}"
+                                             IsError="{Binding IsError}"
+                                             RequestSaveCodeBlock="{Binding $parent[ItemsControl].DataContext.SaveCodeBlockAction}"
+                                             FontSize="14" />
+
+                    <!-- r19 1.2: generation stopped at the token cap, not because the
+                         model finished naturally; say so and offer to keep going. -->
+                    <StackPanel IsVisible="{Binding WasTruncated}"
+                                Orientation="Horizontal"
+                                Spacing="8"
+                                Margin="0,4,0,0">
+                        <TextBlock Text="{Binding TruncationNotice}"
+                                   FontSize="11" Opacity="0.55" VerticalAlignment="Center" />
+                        <Button Content="Continue"
+                                FontSize="11"
+                                Padding="8,2"
+                                Command="{Binding $parent[ItemsControl].DataContext.ContinueTruncatedCommand}" />
+                    </StackPanel>
+
+                    <ItemsControl ItemsSource="{Binding CitationSources}"
+                                  IsVisible="{Binding HasSources}"
+                                  Margin="0,6,0,0">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="core:SourceReference">
+                                <Border CornerRadius="10"
+                                        Margin="0,0,6,4"
+                                        Padding="8,3"
+                                        Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                                        ToolTip.Tip="{Binding Snippet}">
+                                    <TextBlock FontSize="11" Opacity="0.6" Text="{Binding Title}" />
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <!-- r18 03-model-catalog-and-memory-ui.md 3.3: memories used this turn collapse
+                         behind a single count pill instead of one always-visible pill per memory. -->
+                    <StackPanel IsVisible="{Binding HasMemorySources}" Spacing="4">
+                        <ToggleButton IsChecked="{Binding IsMemorySourcesExpanded, Mode=TwoWay}"
+                                      HorizontalAlignment="Left"
+                                      Padding="8,3"
+                                      CornerRadius="10"
+                                      Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                                      BorderThickness="0">
+                            <TextBlock FontSize="11" Opacity="0.6" Text="{Binding MemorySourceSummary}" />
+                        </ToggleButton>
+
+                        <ItemsControl ItemsSource="{Binding MemorySources}"
+                                      IsVisible="{Binding IsMemorySourcesExpanded}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <WrapPanel />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="core:SourceReference">
+                                    <!-- r19 6.1: the pill used to show only the keyword-extracted
+                                         Title with the full content hidden behind a hover tooltip;
+                                         a click now opens a flyout with the actual memory content. -->
+                                    <Button CornerRadius="10"
+                                            Margin="0,0,6,4"
+                                            Padding="8,3"
+                                            Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                                            BorderThickness="0">
+                                        <TextBlock FontSize="11" Opacity="0.6" Text="{Binding Title}" />
+                                        <Button.Flyout>
+                                            <Flyout Placement="Top">
+                                                <StackPanel Width="320" Spacing="8">
+                                                    <TextBlock Text="{Binding Title}" FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                    <SelectableTextBlock Text="{Binding Snippet}" FontSize="12" TextWrapping="Wrap" Opacity="0.85" />
+                                                    <Button Content="Open in Memories"
+                                                            HorizontalAlignment="Left"
+                                                            Padding="8,4"
+                                                            CornerRadius="6"
+                                                            Command="{Binding #Root.OpenMemoryCommand}"
+                                                            CommandParameter="{Binding}" />
+                                                </StackPanel>
+                                            </Flyout>
+                                        </Button.Flyout>
+                                    </Button>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <Grid Margin="0,4,0,0" ColumnDefinitions="Auto,*">
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="2">
+                    <Button Classes="icon-btn"
+                            Opacity="0.45"
+                            ToolTip.Tip="Copy"
+                            Command="{Binding $parent[ItemsControl].DataContext.CopyMessageCommand}"
+                            CommandParameter="{Binding}">
+                        <PathIcon Data="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"
+                                  Width="12" Height="12" />
+                    </Button>
+                    <!-- r19 4.4: the speak icon becomes a stop icon while this channel is
+                         playing (any message, not just this one - only one utterance ever
+                         plays at a time) so the user always has a way to stop it. -->
+                    <Button Classes="icon-btn"
+                            Opacity="0.45"
+                            ToolTip.Tip="Read aloud"
+                            IsVisible="{Binding !$parent[ItemsControl].DataContext.IsVoicePlaying}"
+                            Command="{Binding $parent[ItemsControl].DataContext.SpeakMessageCommand}"
+                            CommandParameter="{Binding}">
+                        <PathIcon Data="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 7.97v8.05A4.5 4.5 0 0 0 16.5 12zm-2.5-8.5v2.06A7 7 0 0 1 14 18.44v2.06A9 9 0 0 0 14 3.5z"
+                                  Width="13" Height="13" />
+                    </Button>
+                    <Button Classes="icon-btn"
+                            Opacity="0.45"
+                            ToolTip.Tip="Stop"
+                            IsVisible="{Binding $parent[ItemsControl].DataContext.IsVoicePlaying}"
+                            Command="{Binding $parent[ItemsControl].DataContext.StopSpeakingCommand}">
+                        <PathIcon Data="M6 6h12v12H6z"
+                                  Width="13" Height="13" />
+                    </Button>
+                </StackPanel>
+                <TextBlock Grid.Column="1"
+                           Text="{Binding MetaDisplay}"
+                           HorizontalAlignment="Right"
+                           VerticalAlignment="Bottom"
+                           Margin="12,0,0,2"
+                           FontSize="11"
+                           Opacity="0.35"
+                           TextTrimming="CharacterEllipsis" />
+            </Grid>
+        </StackPanel>
+    </Grid>
+</UserControl>

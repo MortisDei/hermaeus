@@ -4,7 +4,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$project = Join-Path $root "src/Aether.Tests/Aether.Tests.csproj"
+$project = Join-Path $root "src/Hermaeus.Tests/Hermaeus.Tests.csproj"
 $resultsDir = Join-Path $root "dist/.coverage"
 
 Remove-Item -Recurse -Force $resultsDir -ErrorAction SilentlyContinue

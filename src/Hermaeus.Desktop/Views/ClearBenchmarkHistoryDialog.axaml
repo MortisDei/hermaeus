@@ -1,0 +1,28 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Hermaeus.Desktop.Views.ClearBenchmarkHistoryDialog"
+        Title="Clear benchmark history"
+        Width="460"
+        Height="220"
+        WindowStartupLocation="CenterOwner"
+        CanResize="False">
+    <Border Padding="18">
+        <StackPanel Spacing="14">
+            <TextBlock Text="This permanently deletes all saved benchmark runs, including prompts, outputs, scores, and runtime metadata."
+                       TextWrapping="Wrap" />
+            <TextBlock Text="Export anything you want to keep before clearing history."
+                       TextWrapping="Wrap"
+                       Opacity="0.7" />
+            <StackPanel Orientation="Horizontal"
+                        HorizontalAlignment="Right"
+                        Spacing="8">
+                <Button Content="Cancel"
+                        MinWidth="90"
+                        Click="OnCancelClick" />
+                <Button Content="Clear"
+                        MinWidth="90"
+                        Click="OnClearClick" />
+            </StackPanel>
+        </StackPanel>
+    </Border>
+</Window>

@@ -1,0 +1,705 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Hermaeus.ViewModels"
+             xmlns:controls="using:Hermaeus.Desktop.Controls"
+             xmlns:views="using:Hermaeus.Desktop.Views"
+             x:Class="Hermaeus.Desktop.Views.RagView"
+             x:DataType="vm:RagViewModel">
+
+    <Grid RowDefinitions="Auto,*,Auto">
+
+        <!-- ── Toolbar ────────────────────────────────────────────────────── -->
+        <Border Grid.Row="0" Padding="12,6"
+                BorderThickness="0,0,0,1"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="8">
+
+                <TextBlock Grid.Column="0" Text="Dataset"
+                           VerticalAlignment="Center" Opacity="0.5" FontSize="12" />
+
+                <ComboBox Grid.Column="1"
+                          ItemsSource="{Binding Datasets}"
+                          SelectedItem="{Binding SelectedDataset}"
+                          MaxWidth="280" HorizontalAlignment="Left" FontSize="13">
+                    <ComboBox.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <TextBlock Text="{Binding Name}" FontSize="13" />
+                                <TextBlock Text="{Binding ChunkCount, StringFormat={}{0} chunks}"
+                                           FontSize="11" Opacity="0.4" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                </ComboBox>
+
+                <Button Grid.Column="2" Classes="icon-btn"
+                        Command="{Binding WarmCacheCommand}"
+                        IsEnabled="{Binding !IsQuerying}"
+                        ToolTip.Tip="Warm embedding cache for selected dataset">
+                    <PathIcon Data="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"
+                              Width="16" Height="16" />
+                </Button>
+
+                <CheckBox Grid.Column="3"
+                          IsChecked="{Binding UseParentChild}"
+                          Content="Parent-child" FontSize="12"
+                          VerticalAlignment="Center" />
+
+                <!-- Grounding score pill -->
+                <Border Grid.Column="4"
+                        IsVisible="{Binding HasAnswer}"
+                        CornerRadius="10"
+                        Padding="8,3"
+                        Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                        ToolTip.Tip="Answer grounding score - how much of the answer is traceable to retrieved context">
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                        <TextBlock Text="GND" FontSize="10" Opacity="0.5" VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding GroundingScore, StringFormat={}{0:P0}}"
+                                   FontSize="12" FontWeight="SemiBold" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </Border>
+
+        <!-- ── Main content ───────────────────────────────────────────────── -->
+        <ScrollViewer Grid.Row="1"
+                      x:Name="ContentScroller"
+                      VerticalScrollBarVisibility="Auto"
+                      Padding="0,8">
+            <StackPanel Margin="24,0" Spacing="16" HorizontalAlignment="Stretch">
+
+                <!-- Empty / no datasets state -->
+                <StackPanel IsVisible="{Binding Datasets.Count, Converter={x:Static views:RagView.IsZero}}"
+                            HorizontalAlignment="Center"
+                            Margin="0,60" Spacing="10">
+                    <PathIcon Data="M12 3L1 9l11 6 9-4.91V17h2V9L12 3zM5 13.18v4L12 21l7-3.82v-4L12 17l-7-3.82z"
+                              Width="48" Height="48" Opacity="0.12"
+                              HorizontalAlignment="Center" />
+                    <TextBlock Text="No datasets yet"
+                               HorizontalAlignment="Center" FontSize="16" Opacity="0.25" />
+                    <TextBlock Text="Ingest some documents below to get started"
+                               HorizontalAlignment="Center" FontSize="13" Opacity="0.18" />
+                </StackPanel>
+
+                <Expander Header="Dataset Manager" IsExpanded="True"
+                          IsVisible="{Binding Datasets.Count, Converter={x:Static views:RagView.IsNonZero}}">
+                    <StackPanel Spacing="10" Margin="0,8,0,0">
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                            <TextBlock Grid.Column="0"
+                                       Text="{Binding DatasetManagerStatus}"
+                                       FontSize="12"
+                                       Opacity="0.65"
+                                       VerticalAlignment="Center" />
+                            <Button Grid.Column="1"
+                                    Content="Refresh datasets"
+                                    Command="{Binding RefreshDatasetManagerCommand}"
+                                    Padding="10,6" />
+                        </Grid>
+                        <ItemsControl ItemsSource="{Binding DatasetManagerItems}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="vm:RagDatasetManagerItemViewModel">
+                                    <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="8"
+                                            Padding="12"
+                                            Margin="0,0,0,8">
+                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                            <StackPanel Grid.Column="0" Spacing="4">
+                                                <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold" />
+                                                <TextBlock Text="{Binding Description}" FontSize="11" Opacity="0.55" TextWrapping="Wrap" />
+                                                <TextBlock Text="{Binding ReindexStatus}" FontSize="11" Opacity="0.7" TextWrapping="Wrap" />
+                                                <TextBlock Text="{Binding DimensionsLabel}" FontSize="11" Opacity="0.55" />
+                                            </StackPanel>
+                                            <Grid Grid.Column="1" ColumnDefinitions="Auto" RowDefinitions="Auto,Auto,Auto,Auto">
+                                                <UniformGrid Grid.Row="0" Columns="2" Rows="3" MinWidth="260">
+                                                    <TextBlock Text="{Binding ChunkCount, StringFormat=Chunks: {0}}" FontSize="11" />
+                                                    <TextBlock Text="{Binding SourceCount, StringFormat=Sources: {0}}" FontSize="11" />
+                                                    <TextBlock Text="{Binding MissingFiles, StringFormat=Missing: {0}}" FontSize="11" />
+                                                    <TextBlock Text="{Binding StaleFiles, StringFormat=Stale: {0}}" FontSize="11" />
+                                                    <TextBlock Text="{Binding DuplicateSources, StringFormat=Duplicates: {0}}" FontSize="11" />
+                                                    <TextBlock Text="{Binding LastIngestLabel}" FontSize="11" />
+                                                </UniformGrid>
+                                                <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8">
+                                                    <Button Content="Add"
+                                                            Command="{Binding $parent[ItemsControl].DataContext.AddToDatasetCommand}"
+                                                            CommandParameter="{Binding}"
+                                                            Padding="10,6"
+                                                            CornerRadius="6"
+                                                            ToolTip.Tip="Add more documents to this dataset" />
+                                                    <Button Content="Reindex"
+                                                            Command="{Binding $parent[ItemsControl].DataContext.ReindexDatasetCommand}"
+                                                            CommandParameter="{Binding}"
+                                                            IsVisible="{Binding ReindexRequired}"
+                                                            Padding="10,6"
+                                                            CornerRadius="6"
+                                                            ToolTip.Tip="Re-embed every chunk with the current embedding model" />
+                                                    <Button Content="Remove missing"
+                                                            Command="{Binding $parent[ItemsControl].DataContext.RemoveMissingSourcesCommand}"
+                                                            CommandParameter="{Binding}"
+                                                            IsVisible="{Binding MissingFiles, Converter={x:Static views:RagView.IsNonZero}}"
+                                                            Padding="10,6"
+                                                            CornerRadius="6"
+                                                            ToolTip.Tip="Remove chunks whose source files no longer exist on disk" />
+                                                    <Button Content="Delete"
+                                                            Command="{Binding $parent[ItemsControl].DataContext.DeleteDatasetCommand}"
+                                                            CommandParameter="{Binding}"
+                                                            Padding="10,6"
+                                                            CornerRadius="6"
+                                                            Foreground="Red"
+                                                            ToolTip.Tip="Delete this dataset (cannot be undone)" />
+                                                </StackPanel>
+                                            </Grid>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Expander>
+
+                <!-- Answer area -->
+                <StackPanel IsVisible="{Binding HasAnswer}" Spacing="4">
+                    <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,0,4">
+                        <PathIcon Data="M12 3L1 9l11 6 9-4.91V17h2V9L12 3z"
+                                  Width="13" Height="13" Opacity="0.4" />
+                        <TextBlock Text="Answer" FontSize="11" Opacity="0.4"
+                                   FontWeight="Medium" VerticalAlignment="Center" />
+                    </StackPanel>
+
+                    <controls:MarkdownViewer Markdown="{Binding AnswerText}"
+                                             FontSize="14" />
+
+                    <ItemsControl ItemsSource="{Binding VisibleCitationSources}"
+                                  IsVisible="{Binding Sources.Count, Converter={x:Static views:RagView.IsNonZero}}"
+                                  Margin="0,6,0,0">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel Orientation="Horizontal" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:RagSourceViewModel">
+                                <Button Command="{Binding $parent[ItemsControl].DataContext.SelectSourceCommand}"
+                                        CommandParameter="{Binding}"
+                                        Margin="0,0,6,6"
+                                        Padding="8,4"
+                                        CornerRadius="10"
+                                        FontSize="11"
+                                        Opacity="0.72"
+                                        ToolTip.Tip="{Binding Snippet}">
+                                    <TextBlock Text="{Binding ShortCitationLabel}"
+                                               TextTrimming="CharacterEllipsis"
+                                               MaxWidth="80" />
+                                </Button>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <Button IsVisible="{Binding HasSourceOverflow}"
+                            Content="{Binding SourceOverflowLabel}"
+                            Command="{Binding ToggleSourceInspectorCommand}"
+                            Padding="8,4"
+                            CornerRadius="10"
+                            FontSize="11"
+                            HorizontalAlignment="Left"
+                            Opacity="0.72"
+                            ToolTip.Tip="Show remaining sources" />
+
+                    <StackPanel Orientation="Horizontal" Spacing="2" Margin="0,4,0,0">
+                        <Button Classes="icon-btn"
+                                Command="{Binding CopyAnswerCommand}"
+                                Opacity="0.45"
+                                ToolTip.Tip="Copy answer">
+                            <PathIcon Data="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"
+                                      Width="12" Height="12" />
+                        </Button>
+                        <Button Classes="icon-btn"
+                                Command="{Binding ToggleSourceInspectorCommand}"
+                                Opacity="0.45"
+                                IsVisible="{Binding Sources.Count, Converter={x:Static views:RagView.IsNonZero}}"
+                                ToolTip.Tip="Show source inspector">
+                            <PathIcon Data="M12 3L1 9l11 6 9-4.91V17h2V9L12 3zM5 13.18v4L12 21l7-3.82v-4L12 17l-7-3.82z"
+                                      Width="13" Height="13" />
+                        </Button>
+                    </StackPanel>
+                </StackPanel>
+
+                <!-- Streaming answer (while generating) -->
+                <StackPanel IsVisible="{Binding IsQuerying}" Spacing="4">
+                    <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,0,4">
+                        <TextBlock Text="●" FontSize="9" Opacity="0.6" VerticalAlignment="Center" />
+                        <TextBlock Text="Thinking..." FontSize="11" Opacity="0.4"
+                                   VerticalAlignment="Center" />
+                    </StackPanel>
+                    <controls:MarkdownViewer Markdown="{Binding AnswerText}" FontSize="14" />
+                </StackPanel>
+
+                <!-- Source inspector -->
+                <Border IsVisible="{Binding ShowSourceInspector}"
+                        BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Padding="14"
+                        Background="{DynamicResource SubtleFillColorTertiaryBrush}">
+                    <StackPanel Spacing="10">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <StackPanel Grid.Column="0" Spacing="2">
+                                <TextBlock Text="{Binding SelectedSource.CitationLabel}"
+                                           FontSize="14"
+                                           FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding SelectedSource.File}"
+                                           FontSize="11"
+                                           Opacity="0.45" />
+                                <TextBlock Text="{Binding SelectedSource.Path}"
+                                           FontSize="11"
+                                           Opacity="0.35"
+                                           TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                            <Border Grid.Column="1"
+                                    CornerRadius="4"
+                                    Padding="6,2"
+                                    Background="{DynamicResource SubtleFillColorSecondaryBrush}">
+                                <TextBlock Text="{Binding SelectedSource.ScoreDisplay}"
+                                           FontSize="11"
+                                           FontFamily="Consolas,monospace" />
+                            </Border>
+                        </Grid>
+                        <TextBlock Text="{Binding SelectedSource.PlainLanguageSummary}"
+                                   FontSize="12"
+                                   Opacity="0.7"
+                                   TextWrapping="Wrap" />
+                        <StackPanel Orientation="Horizontal" Spacing="14">
+                            <StackPanel Orientation="Horizontal" Spacing="4" IsVisible="{Binding SelectedSource.HasVectorScore}">
+                                <TextBlock Text="Vector" FontSize="10" Opacity="0.5" />
+                                <TextBlock Text="{Binding SelectedSource.VectorScoreDisplay}" FontSize="10" FontFamily="Consolas,monospace" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Spacing="4" IsVisible="{Binding SelectedSource.HasKeywordScore}">
+                                <TextBlock Text="Keyword" FontSize="10" Opacity="0.5" />
+                                <TextBlock Text="{Binding SelectedSource.KeywordScoreDisplay}" FontSize="10" FontFamily="Consolas,monospace" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Spacing="4" IsVisible="{Binding SelectedSource.HasRerankScore}">
+                                <TextBlock Text="Reranker" FontSize="10" Opacity="0.5" />
+                                <TextBlock Text="{Binding SelectedSource.RerankScoreDisplay}" FontSize="10" FontFamily="Consolas,monospace" />
+                            </StackPanel>
+                        </StackPanel>
+                        <SelectableTextBlock Text="{Binding SelectedSource.Content}"
+                                             TextWrapping="Wrap"
+                                             FontSize="13"
+                                             LineHeight="20"
+                                             Opacity="0.86" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="Copy Source"
+                                    Command="{Binding CopySourceCommand}" />
+                            <Button Content="Copy Path"
+                                    Command="{Binding CopySourcePathCommand}" />
+                            <TextBlock Text="{Binding LastTraceId, StringFormat=Trace {0}}"
+                                       FontSize="11"
+                                       Opacity="0.35"
+                                       VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding LastTotalLatencyMs, StringFormat={}{0} ms}"
+                                       FontSize="11"
+                                       Opacity="0.35"
+                                       VerticalAlignment="Center" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <!-- Diagnostics -->
+                <Expander IsExpanded="True"
+                          IsVisible="{Binding LastTraceId, Converter={x:Static views:RagView.NotEmpty}}"
+                          Header="Diagnostics">
+                    <StackPanel Spacing="10" Margin="0,6,0,0">
+                        <StackPanel Spacing="3">
+                            <TextBlock Text="Rewritten query" FontSize="11" Opacity="0.45" />
+                            <SelectableTextBlock Text="{Binding ExpandedQuery}"
+                                                 TextWrapping="Wrap"
+                                                 FontSize="13"
+                                                 Opacity="0.9" />
+                        </StackPanel>
+                        <StackPanel Spacing="3">
+                            <TextBlock Text="Query variants" FontSize="11" Opacity="0.45" />
+                            <SelectableTextBlock Text="{Binding QueryVariants}"
+                                                 TextWrapping="Wrap"
+                                                 FontSize="12"
+                                                 Opacity="0.82" />
+                        </StackPanel>
+                        <StackPanel Spacing="3">
+                            <TextBlock Text="Planner notes" FontSize="11" Opacity="0.45" />
+                            <SelectableTextBlock Text="{Binding PlannerNotes}"
+                                                 TextWrapping="Wrap"
+                                                 FontSize="12"
+                                                 Opacity="0.82" />
+                        </StackPanel>
+                        <StackPanel Spacing="3">
+                            <TextBlock Text="Context packing" FontSize="11" Opacity="0.45" />
+                            <SelectableTextBlock Text="{Binding ContextPackingSummary}"
+                                                 TextWrapping="Wrap"
+                                                 FontSize="12"
+                                                 Opacity="0.82" />
+                        </StackPanel>
+                        <StackPanel Spacing="3">
+                            <TextBlock Text="Refusal" FontSize="11" Opacity="0.45" />
+                            <TextBlock Text="{Binding RefusalReason}"
+                                       IsVisible="{Binding TraceRefused}"
+                                       FontSize="12"
+                                       Opacity="0.82" />
+                            <TextBlock Text="Supported answer path"
+                                       IsVisible="{Binding TraceRefused}"
+                                       FontSize="12"
+                                       Opacity="0.55" />
+                        </StackPanel>
+                    </StackPanel>
+                </Expander>
+
+                <!-- Sources -->
+                <Expander IsExpanded="True"
+                          IsVisible="{Binding Sources.Count, Converter={x:Static views:RagView.IsNonZero}}"
+                          Header="Sources">
+                    <ItemsControl ItemsSource="{Binding Sources}" Margin="0,6,0,0">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:RagSourceViewModel">
+                                <Button Command="{Binding $parent[ItemsControl].DataContext.SelectSourceCommand}"
+                                        CommandParameter="{Binding}"
+                                        HorizontalAlignment="Stretch"
+                                        HorizontalContentAlignment="Stretch"
+                                        Padding="8"
+                                        Margin="0,3"
+                                        CornerRadius="6">
+                                    <Grid ColumnDefinitions="32,*,Auto">
+                                        <TextBlock Grid.Column="0"
+                                                   Text="{Binding Rank, StringFormat=[{0}]}"
+                                                   FontSize="12" Opacity="0.45"
+                                                   VerticalAlignment="Center" />
+                                        <StackPanel Grid.Column="1" Spacing="2">
+                                            <TextBlock Text="{Binding Title}"
+                                                       FontSize="13" FontWeight="Medium" />
+                                            <TextBlock Text="{Binding File}"
+                                                       FontSize="11" Opacity="0.4" />
+                                            <TextBlock Text="{Binding Snippet}"
+                                                       FontSize="11"
+                                                       Opacity="0.5"
+                                                       TextWrapping="Wrap" />
+                                        </StackPanel>
+                                        <Border Grid.Column="2"
+                                                CornerRadius="4"
+                                                Padding="6,2"
+                                                Background="{DynamicResource SubtleFillColorSecondaryBrush}">
+                                            <TextBlock Text="{Binding ScoreDisplay}"
+                                                       FontSize="11" FontFamily="Consolas,monospace" />
+                                        </Border>
+                                    </Grid>
+                                </Button>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </Expander>
+
+                <!-- Status / error -->
+                <TextBlock Text="{Binding StatusMessage}"
+                           IsVisible="{Binding StatusMessage, Converter={x:Static views:RagView.NotEmpty}}"
+                           Foreground="{Binding IsError, Converter={x:Static views:ErrorColorConverter.Instance}}"
+                           FontSize="13" Opacity="0.8" />
+
+                <!-- Ingest panel -->
+                <Expander Header="Ingest Documents" Margin="0,8,0,0" HorizontalAlignment="Stretch">
+                    <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                            BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,8,0,0">
+                        <StackPanel Spacing="12">
+
+                            <Grid ColumnDefinitions="90,*" ColumnSpacing="12"
+                                  RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="8">
+                                <TextBlock Grid.Row="0" Grid.Column="0"
+                                           Text="Dataset name" VerticalAlignment="Center"
+                                           Opacity="0.6" FontSize="13" />
+                                <TextBox Grid.Row="0" Grid.Column="1"
+                                         Text="{Binding NewDatasetName}"
+                                         Watermark="e.g.  skyrim,  work-notes"
+                                         FontSize="13" CornerRadius="6" Padding="10,6"
+                                         IsEnabled="{Binding !IsIngesting}" />
+
+                                <TextBlock Grid.Row="1" Grid.Column="0"
+                                           Text="Web loader" VerticalAlignment="Center"
+                                           Opacity="0.6" FontSize="13" />
+                                <StackPanel Grid.Row="1" Grid.Column="1" Spacing="4">
+                                    <CheckBox IsChecked="{Binding EnableWebLoader}"
+                                              Content="Enable URL ingest for this dataset"
+                                              FontSize="12"
+                                              IsEnabled="{Binding !IsIngesting}" />
+                                    <TextBlock Text="Disabled by default. Only the listed HTTP(S) pages are fetched."
+                                               FontSize="11"
+                                               Opacity="0.4"
+                                               TextWrapping="Wrap" />
+                                </StackPanel>
+
+                                <StackPanel Grid.Row="4" Grid.Column="1" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                                    <CheckBox IsChecked="{Binding IngestDryRun}" Content="Dry run" IsEnabled="{Binding !IsIngesting}" />
+                                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                        <TextBlock Text="Duplicate policy" VerticalAlignment="Center" Opacity="0.6" />
+                                        <ComboBox ItemsSource="{Binding IngestPolicyOptions}" SelectedItem="{Binding IngestPolicy}" Width="180" />
+                                    </StackPanel>
+                                </StackPanel>
+
+                                <TextBlock Grid.Row="2" Grid.Column="0"
+                                           Text="Directory" VerticalAlignment="Center"
+                                           Opacity="0.6" FontSize="13" />
+                                <Grid Grid.Row="2" Grid.Column="1"
+                                      ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                                    <Grid.IsVisible>
+                                        <Binding Path="IsLocalIngest" />
+                                    </Grid.IsVisible>
+                                    <TextBox Grid.Column="0"
+                                             Text="{Binding IngestPath}"
+                                             Watermark="/path/to/text-md-pdf/files"
+                                             FontSize="13" CornerRadius="6" Padding="10,6"
+                                             IsEnabled="{Binding !IsIngesting}" />
+                                    <Button Grid.Column="1"
+                                            Classes="icon-btn"
+                                            x:Name="BrowseBtn"
+                                            Click="OnBrowseClicked"
+                                            ToolTip.Tip="Browse">
+                                        <PathIcon Data="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z"
+                                                  Width="15" Height="15" />
+                                    </Button>
+                                </Grid>
+
+                                <TextBlock Grid.Row="3" Grid.Column="0"
+                                           Text="URLs" VerticalAlignment="Top"
+                                           Opacity="0.6" FontSize="13"
+                                           IsVisible="{Binding EnableWebLoader}" />
+                                <Grid Grid.Row="3" Grid.Column="1"
+                                      RowDefinitions="Auto,Auto"
+                                      RowSpacing="6"
+                                      IsVisible="{Binding EnableWebLoader}">
+                                    <TextBox Grid.Row="0"
+                                             Text="{Binding WebUrlList}"
+                                             Watermark="https://example.com/page"
+                                             AcceptsReturn="True"
+                                             MinHeight="74"
+                                             FontSize="13" CornerRadius="6" Padding="10,6"
+                                             IsEnabled="{Binding !IsIngesting}" />
+                                    <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8">
+                                        <TextBlock Text="Max pages" VerticalAlignment="Center"
+                                                   FontSize="12" Opacity="0.55" />
+                                        <NumericUpDown Value="{Binding WebMaxPages}"
+                                                       Minimum="1"
+                                                       Maximum="20"
+                                                       Increment="1"
+                                                       Width="86"
+                                                       FormatString="0"
+                                                       IsEnabled="{Binding !IsIngesting}" />
+                                    </StackPanel>
+                                </Grid>
+                            </Grid>
+
+                            <!-- Progress -->
+                            <StackPanel IsVisible="{Binding IsIngesting}" Spacing="4">
+                                <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="6">
+                                    <controls:MossIcon Grid.Column="0" Width="14" Height="14"
+                                                        VerticalAlignment="Center"
+                                                        ToolTip.Tip="Moss is stacking documents into piles." />
+                                    <TextBlock Grid.Column="1"
+                                               Text="{Binding IngestStage}"
+                                               FontSize="12" Opacity="0.6" />
+                                    <TextBlock Grid.Column="2"
+                                               Text="{Binding IngestProgressLabel}"
+                                               FontSize="12" Opacity="0.5" />
+                                </Grid>
+                                <ProgressBar Value="{Binding IngestDone}"
+                                             Maximum="{Binding IngestTotal}"
+                                             Height="4" CornerRadius="2" />
+                                <TextBlock Text="{Binding StatusMessage}"
+                                           FontSize="11" Opacity="0.5"
+                                           TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button Command="{Binding IngestCommand}"
+                                        IsEnabled="{Binding !IsIngesting}"
+                                        Content="Build Index"
+                                        FontSize="13" Padding="14,7" CornerRadius="6" />
+                                <Button Command="{Binding StopIngestCommand}"
+                                    IsVisible="{Binding IsIngesting}"
+                                    Content="Stop"
+                                    FontSize="13" Padding="14,7" CornerRadius="6" />
+                                <TextBlock Text="Accepts .txt, .md, and digital .pdf folders or explicit URL lists. OCR can wait."
+                                           FontSize="11" Opacity="0.4"
+                                           VerticalAlignment="Center" />
+                            </StackPanel>
+
+                            <Expander Header="Last ingest report"
+                                      IsVisible="{Binding IngestReportItems.Count, Converter={x:Static views:RagView.IsNonZero}}">
+                                <ItemsControl ItemsSource="{Binding IngestReportItems}" Margin="0,6,0,0">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="6"
+                                                    Padding="10"
+                                                    Margin="0,2">
+                                                <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+                                                    <TextBlock Grid.Column="0"
+                                                               Text="{Binding StatusLabel}"
+                                                               FontSize="11"
+                                                               FontWeight="SemiBold"
+                                                               VerticalAlignment="Top" />
+                                                    <StackPanel Grid.Column="1" Spacing="3">
+                                                        <TextBlock Text="{Binding Path}"
+                                                                   FontSize="12"
+                                                                   FontWeight="SemiBold"
+                                                                   TextWrapping="Wrap" />
+                                                        <TextBlock Text="{Binding Message}"
+                                                                   FontSize="11"
+                                                                   Opacity="0.55"
+                                                                   TextWrapping="Wrap" />
+                                                    </StackPanel>
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </Expander>
+                        </StackPanel>
+                    </Border>
+                </Expander>
+
+                <Expander Header="Eval Harness" Margin="0,8,0,0" HorizontalAlignment="Stretch">
+                    <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                            BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,8,0,0">
+                        <StackPanel Spacing="12">
+                            <TextBlock Text="Run Oghma-compatible gold.json or stress.json sets against the selected dataset."
+                                       FontSize="12"
+                                       Opacity="0.5"
+                                       TextWrapping="Wrap" />
+                            <Grid ColumnDefinitions="90,*,Auto,Auto,Auto" ColumnSpacing="8">
+                                <TextBlock Grid.Column="0"
+                                           Text="Eval file"
+                                           VerticalAlignment="Center"
+                                           Opacity="0.6"
+                                           FontSize="13" />
+                                <TextBox Grid.Column="1"
+                                         Text="{Binding EvalPath}"
+                                         Watermark="/path/to/gold.json"
+                                         CornerRadius="6"
+                                         Padding="10,6"
+                                         IsEnabled="{Binding !IsEvaluating}" />
+                                <Button Grid.Column="2"
+                                        Command="{Binding RunRetrievalEvalCommand}"
+                                        IsEnabled="{Binding !IsEvaluating}"
+                                        Content="Retrieval Eval"
+                                        Padding="12,7"
+                                        CornerRadius="6" />
+                                <Button Grid.Column="3"
+                                        Command="{Binding RunFullEvalCommand}"
+                                        IsEnabled="{Binding !IsEvaluating}"
+                                        Content="Full Eval"
+                                        Padding="12,7"
+                                        CornerRadius="6" />
+                                <Button Grid.Column="4"
+                                        Command="{Binding StopEvalCommand}"
+                                        IsVisible="{Binding IsEvaluating}"
+                                        Content="Stop"
+                                        Padding="12,7"
+                                        CornerRadius="6" />
+                            </Grid>
+
+                            <Grid ColumnDefinitions="Auto,Auto,*" ColumnSpacing="10">
+                                <Border CornerRadius="8"
+                                        Padding="10,6"
+                                        Background="{DynamicResource SubtleFillColorSecondaryBrush}">
+                                    <TextBlock Text="{Binding EvalPassed, StringFormat=Passed {0}}"
+                                               FontSize="12"
+                                               FontWeight="SemiBold" />
+                                </Border>
+                                <Border Grid.Column="1"
+                                        CornerRadius="8"
+                                        Padding="10,6"
+                                        Background="{DynamicResource SubtleFillColorSecondaryBrush}">
+                                    <TextBlock Text="{Binding EvalTotal, StringFormat=Total {0}}"
+                                               FontSize="12"
+                                               FontWeight="SemiBold" />
+                                </Border>
+                                <TextBlock Grid.Column="2"
+                                           Text="{Binding EvalStatus}"
+                                           FontSize="12"
+                                           Opacity="0.55"
+                                           VerticalAlignment="Center"
+                                           TextTrimming="CharacterEllipsis" />
+                            </Grid>
+
+                            <ItemsControl ItemsSource="{Binding EvalResults}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate DataType="vm:RagEvalResultViewModel">
+                                        <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="6"
+                                                Padding="10"
+                                                Margin="0,2">
+                                            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+                                                <TextBlock Grid.Column="0"
+                                                           Text="{Binding StatusLabel}"
+                                                           FontSize="11"
+                                                           FontWeight="SemiBold"
+                                                           VerticalAlignment="Top" />
+                                                <StackPanel Grid.Column="1" Spacing="3">
+                                                    <TextBlock Text="{Binding Question}"
+                                                               FontSize="13"
+                                                               FontWeight="SemiBold"
+                                                               TextWrapping="Wrap" />
+                                                    <TextBlock Text="{Binding RetrievedSummary}"
+                                                               FontSize="11"
+                                                               Opacity="0.45"
+                                                               TextWrapping="Wrap" />
+                                                    <TextBlock Text="{Binding Notes}"
+                                                               FontSize="11"
+                                                               Opacity="0.55"
+                                                               TextWrapping="Wrap" />
+                                                </StackPanel>
+                                                <StackPanel Grid.Column="2"
+                                                            Spacing="3"
+                                                            MinWidth="86">
+                                                    <TextBlock Text="{Binding LatencyDisplay}"
+                                                               FontSize="11"
+                                                               Opacity="0.5"
+                                                               HorizontalAlignment="Right" />
+                                                    <TextBlock Text="{Binding GroundingScore, StringFormat={}{0:P0}}"
+                                                               FontSize="11"
+                                                               Opacity="0.5"
+                                                               HorizontalAlignment="Right" />
+                                                </StackPanel>
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Border>
+                </Expander>
+
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- ── Question input bar ────────────────────────────────────────── -->
+        <Border Grid.Row="2"
+                Padding="16,10"
+                BorderThickness="0,1,0,0"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
+            <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+                <TextBox Grid.Column="0"
+                         x:Name="QuestionBox"
+                         Classes="chat-input"
+                         Text="{Binding QuestionText}"
+                         Watermark="Ask a question about your documents..."
+                         KeyDown="OnQuestionKeyDown" />
+
+                <Button Grid.Column="1" Classes="send-btn"
+                        Command="{Binding QueryCommand}"
+                        IsVisible="{Binding !IsQuerying}"
+                        Content="Ask" />
+
+                <Button Grid.Column="1" Classes="send-btn"
+                        Command="{Binding StopQueryCommand}"
+                        IsVisible="{Binding IsQuerying}"
+                        Content="Stop" />
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>
