@@ -44,43 +44,42 @@ public sealed class ChatSendLatencyTests
     }
 
     [Fact]
-    public void StreamingPhase_respects_grace_then_switches_to_thinking_and_clears_on_content()
+    public void StreamingPhase_respects_grace_then_shows_the_first_word_and_clears_on_content()
     {
         // Within the grace window nothing shows (no flicker for fast sends).
-        Assert.Equal(string.Empty, ChatStreamingPhase.Describe(1_500, sawFirstEvent: false, sawContent: false));
-        // Past grace, before any event: reading the prompt.
-        Assert.Equal("Reading prompt... 5s", ChatStreamingPhase.Describe(5_000, sawFirstEvent: false, sawContent: false));
-        // A stream event arrived but no visible token yet: thinking.
-        Assert.Equal("Thinking... 12s", ChatStreamingPhase.Describe(12_000, sawFirstEvent: true, sawContent: false));
+        Assert.Equal(string.Empty, ChatStreamingPhase.Describe(1_500, sawContent: false));
+        // Past grace: the (default, index 0) word with the elapsed seconds.
+        Assert.Equal("Reading prompt... 5s", ChatStreamingPhase.Describe(5_000, sawContent: false));
         // Once visible content arrives the placeholder disappears.
-        Assert.Equal(string.Empty, ChatStreamingPhase.Describe(12_000, sawFirstEvent: true, sawContent: true));
+        Assert.Equal(string.Empty, ChatStreamingPhase.Describe(12_000, sawContent: true));
     }
 
-    // ── r19 6.4: rotating "thinking" status words ──────────────────────────────
+    // ── r19 6.4 / field-report follow-up: rotating "thinking" status words ─────
 
     [Fact]
-    public void StreamingPhase_rotates_the_whimsy_word_over_time_while_thinking()
+    public void StreamingPhase_rotates_the_word_over_time_while_thinking()
     {
-        Assert.Equal("Thinking... 12s", ChatStreamingPhase.Describe(12_000, sawFirstEvent: true, sawContent: false, whimsyIndex: 0));
-        Assert.Equal("Pondering... 12s", ChatStreamingPhase.Describe(12_000, sawFirstEvent: true, sawContent: false, whimsyIndex: 1));
+        Assert.Equal("Reading prompt... 12s", ChatStreamingPhase.Describe(12_000, sawContent: false, wordIndex: 0));
+        Assert.Equal("Thinking... 12s", ChatStreamingPhase.Describe(12_000, sawContent: false, wordIndex: 1));
         // Cycles back around once the index exceeds the word list length.
-        Assert.Equal("Thinking... 12s", ChatStreamingPhase.Describe(12_000, sawFirstEvent: true, sawContent: false, whimsyIndex: ChatStreamingPhase.WhimsyWords.Count));
+        Assert.Equal("Reading prompt... 12s", ChatStreamingPhase.Describe(12_000, sawContent: false, wordIndex: ChatStreamingPhase.WhimsyWords.Count));
     }
 
     [Fact]
     public void StreamingPhase_freezes_and_clears_the_label_once_content_arrives()
     {
-        Assert.Equal("Pondering... 3s", ChatStreamingPhase.Describe(3_000, sawFirstEvent: true, sawContent: false, whimsyIndex: 1));
-        // Content arriving clears the label regardless of whimsyIndex.
-        Assert.Equal(string.Empty, ChatStreamingPhase.Describe(3_000, sawFirstEvent: true, sawContent: true, whimsyIndex: 1));
+        Assert.Equal("Thinking... 3s", ChatStreamingPhase.Describe(3_000, sawContent: false, wordIndex: 1));
+        // Content arriving clears the label regardless of wordIndex.
+        Assert.Equal(string.Empty, ChatStreamingPhase.Describe(3_000, sawContent: true, wordIndex: 1));
     }
 
     [Fact]
-    public void StreamingPhase_concrete_reading_prompt_text_wins_over_whimsy()
+    public void StreamingPhase_wraps_negative_word_indexes_instead_of_throwing()
     {
-        // Still reading the prompt (no event yet) is concrete, known information;
-        // whimsy must never override it even if a whimsyIndex is supplied.
-        Assert.Equal("Reading prompt... 5s", ChatStreamingPhase.Describe(5_000, sawFirstEvent: false, sawContent: false, whimsyIndex: 3));
+        // A random per-send starting offset plus elapsed/2.5s can't go negative
+        // in practice, but the modulo math must stay in-bounds regardless.
+        var text = ChatStreamingPhase.Describe(5_000, sawContent: false, wordIndex: -1);
+        Assert.Equal($"{ChatStreamingPhase.WhimsyWords[^1]}... 5s", text);
     }
 
     [Fact]

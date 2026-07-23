@@ -12,15 +12,19 @@ public static class ChatStreamingPhase
     public const long GraceMs = 2_000;
 
     /// <summary>
-    /// r19 6.4: rotating status words for the "thinking" gap, where nothing
-    /// concrete is known. "Reading prompt" is left alone below - it IS
-    /// concrete phase information, so it always wins over whimsy. "Thinking"
-    /// stays first in the list so the default (<paramref name="whimsyIndex"/>
-    /// = 0) reproduces the original steady text exactly.
+    /// r19 6.4 / field report follow-up: rotating status words for the whole
+    /// "nothing visible yet" gap. Originally "Reading prompt" was held apart
+    /// from this list as fixed, non-rotating text until the server's first
+    /// stream event arrived - but llama-server sends nothing at all during
+    /// prompt eval (no early role/metadata chunk the way OpenAI's API does),
+    /// so that first event coincides with the first visible token and the
+    /// gate never actually opens: real sends showed only a frozen "Reading
+    /// prompt... Ns" for the entire wait, defeating the point of rotating at
+    /// all. "Reading prompt" now just lives in the pool like everything else.
     /// </summary>
     public static readonly IReadOnlyList<string> WhimsyWords =
     [
-        "Thinking", "Pondering", "Herding tokens", "Warming the cache",
+        "Reading prompt", "Thinking", "Pondering", "Herding tokens", "Warming the cache",
         "Consulting the weights", "Brewing", "Untangling", "Sharpening pencils"
     ];
 
@@ -28,18 +32,18 @@ public static class ChatStreamingPhase
     /// Returns the placeholder text ("Reading prompt... 5s" / "Pondering...
     /// 12s"), or empty when a visible token has arrived or the grace
     /// threshold has not been crossed. Pure so it is testable without a live
-    /// send or a real timer; <paramref name="whimsyIndex"/> selects the
+    /// send or a real timer; <paramref name="wordIndex"/> selects the
     /// rotating word deterministically (the caller advances it, e.g. once
-    /// per 2.5s of elapsed time) rather than this method owning a timer.
+    /// per 2.5s of elapsed time, from a per-send random starting offset so
+    /// the same cycle doesn't repeat on every send) rather than this method
+    /// owning a timer or randomness.
     /// </summary>
-    public static string Describe(long elapsedMs, bool sawFirstEvent, bool sawContent, int whimsyIndex = 0)
+    public static string Describe(long elapsedMs, bool sawContent, int wordIndex = 0)
     {
         if (sawContent || elapsedMs < GraceMs)
             return string.Empty;
         var seconds = elapsedMs / 1_000;
-        if (!sawFirstEvent)
-            return $"Reading prompt... {seconds}s";
-        var index = ((whimsyIndex % WhimsyWords.Count) + WhimsyWords.Count) % WhimsyWords.Count;
+        var index = ((wordIndex % WhimsyWords.Count) + WhimsyWords.Count) % WhimsyWords.Count;
         return $"{WhimsyWords[index]}... {seconds}s";
     }
 }

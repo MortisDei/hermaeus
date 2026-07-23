@@ -9,6 +9,25 @@ FIFO for changelog entries, 10 versions in this file max. Remove older entries
 and append them to `docs/changelog-archive.md` to maintain the 10 version
 limit.
 
+## [0.25.3-alpha] - 2026-07-22
+
+### Fixed
+
+- **The "changing status messages while thinking" feature (r19 6.4) never
+  actually changed in practice.** The rotating whimsy words only activated
+  after the server's first stream event arrived, with "Reading prompt" held
+  separately as fixed text before that. For llama.cpp specifically, no
+  event of any kind arrives during prompt eval - the first SSE line to show
+  up already carries the first visible token - so the rotation gate never
+  opened and the whole wait (which can run 15+ seconds on a long prompt)
+  showed only a static "Reading prompt... Ns". "Reading prompt" is now just
+  one word in the same rotating pool as the rest, so the label actually
+  varies through the entire wait, not just an occasionally-reached tail end
+  of it.
+- **The rotation showed the identical word sequence on every send.** Each
+  send now starts from a random point in the word list (still advancing
+  deterministically from there within that send, so it doesn't flicker).
+
 ## [0.25.2-alpha] - 2026-07-22
 
 Field-report fixes from the owner's first real dogfooding session against a
@@ -647,59 +666,3 @@ today, sequentially, with a consolidated report at the end.
   a second launch attempt exits immediately instead of opening a second
   window. The OS releases the lock automatically on exit, crash, or kill, so
   there is never a stale lock to clean up.
-
-## [0.19.0-alpha] - 2026-07-18
-
-Implements docs/review r14 in full: "Fast by default." A field log showed an
-8-minute chat send reading a 9,744-token prompt at 51 tokens/sec, because
-every Windows install shipped the CPU-only llama.cpp build and launched it
-with zero GPU offload and four parallel slots (quartering the context). r13
-taught the app what hardware it runs on; r14 makes the runtime use it and
-keeps the latency story honest.
-
-### Added
-
-- **GPU-aware llama.cpp builds.** A new runtime-variant setting (Auto by
-  default) resolves against the detected GPU: NVIDIA picks the CUDA build
-  (with its `cudart` companion runtime), any other real GPU picks Vulkan, and
-  no GPU picks CPU. Asset selection matches the release by os/arch plus the
-  variant token, verified against the live GitHub asset list, and prefers the
-  lowest CUDA version for driver compatibility. After install the binary is
-  launch-verified; a GPU build that cannot start falls back to CPU once.
-- **A Doctor advisory** that fires when a real GPU is present but inference is
-  still configured for the CPU (CPU-only build or zero offload), naming the
-  measured consequence and deep-linking the fix.
-- **Superseded-version pruning.** After a successful update the flow offers to
-  remove old `bNNNNN` version directories under the install root (single
-  confirm, current and previous kept, locked directories skipped).
-
-### Changed
-
-- **GPU offload now uses the GPU.** `GpuLayers = -1` means "all layers"
-  (rendered as `--n-gpu-layers 999`) and is the default for new managed
-  servers when a GPU is detected; `0` remains explicit CPU; `N > 0` offloads
-  exactly N.
-- **One request slot by default.** Managed servers launch with `--parallel 1`
-  so the whole `--ctx-size` belongs to one conversation and every send reuses
-  the same KV cache, instead of silently getting a quarter of the context.
-  Chat requests now send `cache_prompt: true` explicitly and launch with
-  `--cache-reuse 256`; embeddings servers pin `-b 512 -ub 512` to stop the
-  batch-clamp warning. Context-limit math uses the per-slot ceiling.
-- **Updates install to the resolved install root**, not the current binary's
-  own version directory, so they no longer nest one tag deeper each time
-  (`b10064\b10066\...`), and preserve the configured runtime variant.
-- **Latency truth.** Chat timing separates the first streamed event of any
-  kind from the first visible content token, so a long non-content stream
-  prefix is no longer hidden inside "before first token"; the slow-send
-  warning names where the time went and, on a GPU machine configured for CPU
-  inference, appends a "prompt was read at CPU speed" hint.
-
-### Fixed
-
-- **"Failed to fetch models" log spam.** A stopped managed server no longer
-  logs an error per model-fetch call; the line is emitted at most once per
-  up-to-down transition, and skipped entirely when the server is known
-  stopped.
-- **Triple stop-logging per shutdown.** Stop is now idempotent at the logging
-  level: an already-stopped server logs nothing, so the runtime log shows one
-  Stopping/Stopped pair per actual shutdown.

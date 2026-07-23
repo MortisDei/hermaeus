@@ -646,11 +646,9 @@ public partial class ChatViewModel : ViewModelBase
             // from elapsed time while no visible content exists yet, so a long
             // prompt eval no longer renders as a frozen empty bubble.
             var sendClock = Stopwatch.StartNew();
-            var sawFirstEvent = 0;
             var sawContent = 0;
             using var phaseCts = new CancellationTokenSource();
             var phaseLoop = RunStreamingPhaseAsync(asst, sendClock,
-                () => Volatile.Read(ref sawFirstEvent) == 1,
                 () => Volatile.Read(ref sawContent) == 1,
                 phaseCts.Token);
 
@@ -673,8 +671,7 @@ public partial class ChatViewModel : ViewModelBase
                             SpeakStreamingChunk(chunk);
                 },
                 onUsage: usage => UpdateContextUsage(usage, "Reported by provider"),
-                _cts.Token,
-                onFirstEvent: () => Interlocked.Exchange(ref sawFirstEvent, 1));
+                _cts.Token);
 
             phaseCts.Cancel();
             try { await phaseLoop; } catch (OperationCanceledException) { }
@@ -1423,10 +1420,16 @@ public partial class ChatViewModel : ViewModelBase
     private static async Task RunStreamingPhaseAsync(
         MessageViewModel asst,
         Stopwatch clock,
-        Func<bool> sawFirstEvent,
         Func<bool> sawContent,
         CancellationToken ct)
     {
+        // Field report follow-up to r19 6.4: a fixed starting word meant every
+        // send showed the exact same rotation in the exact same order. Each
+        // send now starts from a random point in the word list; it still
+        // advances deterministically from there (elapsed/2.5s), so the same
+        // 1s poll always picks the same word within one send, it just varies
+        // send to send.
+        var startOffset = Random.Shared.Next(ChatStreamingPhase.WhimsyWords.Count);
         try
         {
             while (!ct.IsCancellationRequested && !sawContent())
@@ -1435,8 +1438,8 @@ public partial class ChatViewModel : ViewModelBase
                 // r19 6.4: rotate every 2.5s of elapsed time, deterministically
                 // (not a separate timer) so the same whimsy word is picked
                 // regardless of exactly when this 1s poll happens to land.
-                var whimsyIndex = (int)(elapsed / 2_500);
-                asst.StreamingStatus = ChatStreamingPhase.Describe(elapsed, sawFirstEvent(), sawContent(), whimsyIndex);
+                var wordIndex = startOffset + (int)(elapsed / 2_500);
+                asst.StreamingStatus = ChatStreamingPhase.Describe(elapsed, sawContent(), wordIndex);
                 await Task.Delay(1_000, ct);
             }
         }
