@@ -26,7 +26,8 @@ public static class HarnessCases
     public static IEnumerable<object[]> Backup =>
     [
         [new HarnessCase("data root migration previews moveable files", BackupMigrationTests.DataRootMigrationPreview)],
-        [new HarnessCase("data root migration refuses conflicts", BackupMigrationTests.DataRootMigrationRefusesConflicts)],
+        [new HarnessCase("data root migration refuses partial conflicts", BackupMigrationTests.DataRootMigrationRefusesPartialConflicts)],
+        [new HarnessCase("data root migration repoints without moving when target already has every file", BackupMigrationTests.DataRootMigrationRepointsWithoutMovingWhenTargetAlreadyHasEveryFile)],
         [new HarnessCase("settings save without previous root skips migration", BackupMigrationTests.SaveWithoutPreviousDataRootDoesNotAttemptMigration)],
         [new HarnessCase("data root migration moves db files and leaves no junk", BackupMigrationTests.DataRootMigrationMovesFiles)],
         [new HarnessCase("data root migration moves every known file family", BackupMigrationTests.DataRootMigrationMovesEveryKnownFileFamily)],
@@ -395,7 +396,8 @@ public static class HarnessCases
         [new HarnessCase("wizard voice install calls the same doctor entry point as settings", SetupWizardOnboardingTests.WizardVoiceInstallCallsTheSameDoctorEntryPointAsSettings)],
         [new HarnessCase("wizard voice install failure leaves finish later message", SetupWizardOnboardingTests.WizardVoiceInstallFailureLeavesFinishLaterMessage)],
         [new HarnessCase("wizard data root step migrates existing databases with a toast", SetupWizardMigrationTests.WizardDataRootStepMigratesExistingDatabasesWithAToast)],
-        [new HarnessCase("wizard data root step refuses a conflicting target and keeps settings on the old root", SetupWizardMigrationTests.WizardDataRootStepRefusesAConflictingTargetAndKeepsSettingsOnTheOldRoot)],
+        [new HarnessCase("wizard data root step refuses a partially conflicting target and keeps settings on the old root", SetupWizardMigrationTests.WizardDataRootStepRefusesAPartiallyConflictingTargetAndKeepsSettingsOnTheOldRoot)],
+        [new HarnessCase("wizard data root step repoints without moving when target already has every file", SetupWizardMigrationTests.WizardDataRootStepRepointsWithoutMovingWhenTargetAlreadyHasEveryFile)],
         [new HarnessCase("wizard data root step on first run completes without migration noise", SetupWizardMigrationTests.WizardDataRootStepOnFirstRunCompletesWithoutMigrationNoise)]
     ];
 

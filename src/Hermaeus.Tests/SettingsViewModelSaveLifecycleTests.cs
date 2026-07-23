@@ -19,6 +19,11 @@ public sealed class SettingsViewModelSaveLifecycleTests
         var oldRoot = temp.PathFor("old-root");
         Directory.CreateDirectory(oldRoot);
         await File.WriteAllTextAsync(Path.Combine(oldRoot, "conversations.db"), "data");
+        // A second, non-conflicting file makes this a partial conflict - the
+        // one real ambiguous case that must still refuse. A conflict on
+        // every migratable file is a repoint, not a refusal (see
+        // BackupMigrationTests.DataRootMigrationRepointsWithoutMovingWhenTargetAlreadyHasEveryFile).
+        await File.WriteAllTextAsync(Path.Combine(oldRoot, "memories.db"), "memory-data");
 
         var newRoot = temp.PathFor("new-root");
         Directory.CreateDirectory(newRoot);

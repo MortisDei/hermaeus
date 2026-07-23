@@ -165,6 +165,13 @@ public sealed class SettingsService : ISettingsService
             .Where(File.Exists)
             .ToList();
 
+        // A conflict on every file means the target already holds its own
+        // copy of the data - Save will repoint there without moving
+        // anything (see MigrateDataRoot), not block. Only a partial
+        // conflict is genuinely ambiguous and stays blocked.
+        if (files.Count > 0 && conflicts.Count == files.Count)
+            return new DataMigrationPlan(false, previous, next, 0, []);
+
         return new DataMigrationPlan(files.Count > 0 && conflicts.Count == 0, previous, next, files.Count, conflicts);
     }
 
@@ -184,11 +191,23 @@ public sealed class SettingsService : ISettingsService
         if (files.Count == 0)
             return new SettingsSaveResult(false, previous, next, null, 0);
 
-        foreach (var file in files)
+        var conflicts = files.Where(file => File.Exists(Path.Combine(next, file.RelativePath))).ToList();
+        if (conflicts.Count == files.Count)
         {
-            var target = Path.Combine(next, file.RelativePath);
-            if (File.Exists(target))
-                throw new IOException($"Cannot move Hermaeus data because '{target}' already exists.");
+            // Every file this migration would move already exists at the
+            // destination - the user is repointing to a folder that already
+            // holds its own copy of the data (e.g. undoing an accidental
+            // reset back to the default root), not asking to move anything.
+            // Treating that as a hard conflict used to throw here, which
+            // left the settings save failed and the data root reverted to
+            // blank with no way to just repoint without an unwanted move.
+            return new SettingsSaveResult(false, previous, next, null, 0);
+        }
+
+        if (conflicts.Count > 0)
+        {
+            var target = Path.Combine(next, conflicts[0].RelativePath);
+            throw new IOException($"Cannot move Hermaeus data because '{target}' already exists.");
         }
 
         var backupDir = Path.Combine(next, ".hermaeus-backups", DateTime.UtcNow.ToString("yyyyMMdd-HHmmss"));

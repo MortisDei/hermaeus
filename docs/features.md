@@ -764,8 +764,9 @@ flat-vector icon-scale rendering (`Controls/MossIcon`) currently appears next
 to the Services error banner and the RAG ingest-progress line as a
 placeholder built to the icon spec, pending real illustration.
 
-The app icon, taskbar icon, and system tray icon use the "Tree Ring" mark
-(a gold H monogram) from `docs/hermaeus-icons.png`. The UI theme uses the
+The app icon, taskbar icon, and system tray icon use the "Archivist's Seal" mark
+(a gold H monogram grown through with a tree and book) from `docs/hermaeus-icons.png`.
+The UI theme uses the
 brand colour palette (Forest green accent, Copper/Amber highlights) and
 three embedded brand typefaces: Cinzel for headings, Source Sans 3 for body
 text, and JetBrains Mono for code - see `docs/mascot.md` for the full

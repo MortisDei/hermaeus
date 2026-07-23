@@ -29,7 +29,11 @@ namespace Hermaeus.Tests
             await Task.CompletedTask;
         }
 
-        public static async Task DataRootMigrationRefusesConflicts()
+        /// <summary>A partial conflict (some but not all files clash) stays genuinely
+        /// ambiguous - moving the non-conflicting files while leaving the conflicting
+        /// ones behind could interleave two different histories, so this still refuses
+        /// rather than guessing.</summary>
+        public static async Task DataRootMigrationRefusesPartialConflicts()
         {
             using var temp = new TempDir();
             var previous = temp.PathFor("previous");
@@ -37,15 +41,47 @@ namespace Hermaeus.Tests
             Directory.CreateDirectory(previous);
             Directory.CreateDirectory(next);
             File.WriteAllText(Path.Combine(previous, "conversations.db"), "old");
+            File.WriteAllText(Path.Combine(previous, "memories.db"), "old-memories");
             File.WriteAllText(Path.Combine(next, "conversations.db"), "existing");
 
             var service = NewSettings(temp);
             var plan = service.PreviewDataRootMigration(previous, next);
-            Equal(false, plan.WillMove, "migration preview should refuse conflicts");
-            Equal(1, plan.Conflicts.Count, "conflicting db should be reported");
+            Equal(false, plan.WillMove, "migration preview should refuse a partial conflict");
+            Equal(1, plan.Conflicts.Count, "only the actually-conflicting db should be reported");
 
             service.Settings.DataManagement.DataRootDirectory = next;
             await ThrowsAsync<IOException>(() => service.SaveAsync(previous));
+        }
+
+        /// <summary>Regression for a real field incident: an earlier bug blanked a
+        /// user's DataRootDirectory, so the app fell back to the default root and
+        /// created fresh stray database files there. Repointing back at the user's
+        /// real (already fully populated) folder used to throw "already exists" on
+        /// every single file, leaving Save permanently failing with no way to just
+        /// repoint without a move. A conflict on every migratable file now means "the
+        /// target already has its own copy" - repoint without moving or deleting
+        /// anything on either side.</summary>
+        public static async Task DataRootMigrationRepointsWithoutMovingWhenTargetAlreadyHasEveryFile()
+        {
+            using var temp = new TempDir();
+            var previous = temp.PathFor("previous");
+            var next = temp.PathFor("next");
+            Directory.CreateDirectory(previous);
+            Directory.CreateDirectory(next);
+            File.WriteAllText(Path.Combine(previous, "conversations.db"), "stray");
+            File.WriteAllText(Path.Combine(next, "conversations.db"), "real-data");
+
+            var service = NewSettings(temp);
+            var plan = service.PreviewDataRootMigration(previous, next);
+            Equal(false, plan.WillMove, "repointing to an already-fully-populated folder should not report a move");
+            Equal(0, plan.Conflicts.Count, "a conflict on every file is a repoint, not a blocked conflict");
+
+            service.Settings.DataManagement.DataRootDirectory = next;
+            var result = await service.SaveAsync(previous);
+
+            Equal(false, result.DataMigrated, "repointing should not move any files");
+            Equal("stray", await File.ReadAllTextAsync(Path.Combine(previous, "conversations.db")), "previous root's file should be left untouched");
+            Equal("real-data", await File.ReadAllTextAsync(Path.Combine(next, "conversations.db")), "target root's file should be left untouched");
         }
 
         public static async Task SaveWithoutPreviousDataRootDoesNotAttemptMigration()

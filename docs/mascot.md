@@ -101,10 +101,12 @@ variable font plus its `OFL.txt`) and wired into `Styles/AppStyles.axaml`. See
 ## App icon vs. mascot icon
 
 `docs/hermaeus-icons.png` presents four app-icon concepts: Archivist's Seal, Moss
-(the full character face), Wax Seal, and Tree Ring. **Tree Ring was chosen** for
-the actual window/taskbar/tray icon - a gold "H" monogram with a small leaf sprout,
-set in a wood-grain medallion. It reads as a mark, not a character, and holds up
-better at small sizes than a detailed character face would.
+(the full character face), Wax Seal, and Tree Ring. **Archivist's Seal was
+chosen** for the actual window/taskbar/tray icon - a gold "H" monogram grown
+through with a small tree and an open book, set in a circular medallion. It
+reads as a mark, not a character. (Tree Ring was tried first but read worse at
+tray/taskbar size; both options fight the same problem at 16x16 - fine detail
+disappears at that size regardless of which mark is used.)
 
 The full Moss character (Option 2) is not wired into the app icon. It remains
 available for future use (About screen, onboarding, marketing) but needs real
@@ -136,7 +138,8 @@ keeping the same 16x16 silhouette rules.
 The window/taskbar icon (`Assets/hermaeus.ico`), the Linux desktop icon
 (`Assets/hermaeus-app.png`), the system tray icon (`Assets/hermaeus-tray.png`),
 and the unused `hermaeus-tray-dark.png`/`hermaeus-tray-light.png` fallback assets
-are all cropped and resized from the Tree Ring artwork in
-`docs/hermaeus-icons.png` (Option 4). Sizes at or below 32px use a contrast-boosted
-crop - the fine wood-grain texture anti-aliases into mud that small, so boosting
-contrast keeps the gold "H" legible against the dark medallion.
+are all cropped and resized from the Archivist's Seal artwork in
+`docs/hermaeus-icons.png` (Option 1). Sizes at or below 32px use a contrast-boosted
+crop - the fine engraved linework anti-aliases into mud that small, so boosting
+contrast keeps the gold "H" legible against the dark medallion. Even boosted,
+16x16 is tight; 32px and up read clearly.

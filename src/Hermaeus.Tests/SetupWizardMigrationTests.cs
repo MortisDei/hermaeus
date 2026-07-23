@@ -44,12 +44,15 @@ internal static class SetupWizardMigrationTests
         Equal("Hermaeus data moved", toastTitle ?? string.Empty, "a migration toast should be shown, matching the Settings page's save flow");
     }
 
-    public static async Task WizardDataRootStepRefusesAConflictingTargetAndKeepsSettingsOnTheOldRoot()
+    /// <summary>A partial conflict (some but not all files clash) stays genuinely
+    /// ambiguous, so the wizard still refuses rather than guessing which side wins.</summary>
+    public static async Task WizardDataRootStepRefusesAPartiallyConflictingTargetAndKeepsSettingsOnTheOldRoot()
     {
         using var temp = new TempDir();
         var oldRoot = temp.PathFor("old-root");
         Directory.CreateDirectory(oldRoot);
         await File.WriteAllTextAsync(Path.Combine(oldRoot, "conversations.db"), "data");
+        await File.WriteAllTextAsync(Path.Combine(oldRoot, "memories.db"), "memory-data");
         var newRoot = temp.PathFor("new-root");
         Directory.CreateDirectory(newRoot);
         await File.WriteAllTextAsync(Path.Combine(newRoot, "conversations.db"), "already exists");
@@ -62,9 +65,38 @@ internal static class SetupWizardMigrationTests
 
         await wizard.NextCommand.ExecuteAsync(null);
 
-        Equal(0, wizard.StepIndex, "a conflicting target must refuse to advance the step");
+        Equal(0, wizard.StepIndex, "a partially conflicting target must refuse to advance the step");
         Equal(oldRoot, settings.Settings.DataManagement.DataRootDirectory, "settings on disk must still point at the old root");
         Equal("already exists", await File.ReadAllTextAsync(Path.Combine(newRoot, "conversations.db")), "the conflicting target file must not be overwritten");
+    }
+
+    /// <summary>Regression for a real field incident: a blanked DataRootDirectory made
+    /// the app fall back to the default root and create fresh stray files there.
+    /// Repointing back at the user's real, already fully populated folder must
+    /// succeed as a plain repoint (every file conflicts, so there is nothing
+    /// ambiguous to move) instead of refusing forever with no way out.</summary>
+    public static async Task WizardDataRootStepRepointsWithoutMovingWhenTargetAlreadyHasEveryFile()
+    {
+        using var temp = new TempDir();
+        var oldRoot = temp.PathFor("old-root");
+        Directory.CreateDirectory(oldRoot);
+        await File.WriteAllTextAsync(Path.Combine(oldRoot, "conversations.db"), "stray");
+        var newRoot = temp.PathFor("new-root");
+        Directory.CreateDirectory(newRoot);
+        await File.WriteAllTextAsync(Path.Combine(newRoot, "conversations.db"), "real-data");
+
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = oldRoot;
+        var wizard = NewWizard(settings);
+        wizard.LoadFromSettings();
+        wizard.DataRootDirectory = newRoot;
+
+        await wizard.NextCommand.ExecuteAsync(null);
+
+        Equal(1, wizard.StepIndex, "repointing to an already-fully-populated folder should advance the step");
+        Equal(newRoot, settings.Settings.DataManagement.DataRootDirectory, "settings should now point at the new root");
+        Equal("stray", await File.ReadAllTextAsync(Path.Combine(oldRoot, "conversations.db")), "the old root's file must be left untouched, not deleted");
+        Equal("real-data", await File.ReadAllTextAsync(Path.Combine(newRoot, "conversations.db")), "the target's existing file must not be overwritten");
     }
 
     public static async Task WizardDataRootStepOnFirstRunCompletesWithoutMigrationNoise()
