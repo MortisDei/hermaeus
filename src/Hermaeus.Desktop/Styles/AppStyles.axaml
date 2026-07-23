@@ -4,11 +4,13 @@
     <!-- Global defaults - minimal to avoid breaking local layouts -->
     <Style Selector="Window">
         <Setter Property="FontSize" Value="13" />
+        <Setter Property="FontFamily" Value="{DynamicResource BrandBodyFont}" />
     </Style>
 
     <Style Selector="TextBlock.page-title">
         <Setter Property="FontSize" Value="26" />
         <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="FontFamily" Value="{DynamicResource BrandHeadingFont}" />
     </Style>
 
     <Style Selector="TextBlock.page-subtitle">
@@ -66,15 +68,22 @@
     </Style>
 
     <!-- ── Send / Stop button ───────────────────────────────────────────── -->
+    <!-- "Primary button" per docs/mascot.md brand palette: Forest fill, Parchment text. -->
     <Style Selector="Button.send-btn">
         <Setter Property="CornerRadius" Value="8" />
         <Setter Property="Padding" Value="14,10" />
         <Setter Property="FontSize" Value="14" />
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="MinWidth" Value="70" />
+        <Setter Property="Background" Value="{DynamicResource BrandForestBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource BrandParchmentBrush}" />
+    </Style>
+    <Style Selector="Button.send-btn:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource BrandDeepMossBrush}" />
     </Style>
 
     <!-- ── Sidebar new-chat button ──────────────────────────────────────── -->
+    <!-- "Secondary button" per docs/mascot.md brand palette: Forest outline, no fill. -->
     <Style Selector="Button.sidebar-new">
         <Setter Property="HorizontalAlignment" Value="Stretch" />
         <Setter Property="HorizontalContentAlignment" Value="Left" />
@@ -82,6 +91,14 @@
         <Setter Property="CornerRadius" Value="8" />
         <Setter Property="Margin" Value="8,4" />
         <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BrandForestBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Foreground" Value="{DynamicResource BrandForestBrush}" />
+    </Style>
+    <Style Selector="Button.sidebar-new:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource BrandForestBrush}" />
+        <Setter Property="TextBlock.Foreground" Value="{DynamicResource BrandParchmentBrush}" />
     </Style>
 
     <!-- ── Code block ───────────────────────────────────────────────────── -->

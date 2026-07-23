@@ -60,7 +60,7 @@
                                     <TextBlock Grid.Column="0" Text="{Binding RiskLabel}" FontSize="11" Opacity="0.75" />
                                     <TextBlock Grid.Column="1" Text="{Binding ExpectedResult}" FontSize="11" Opacity="0.55" TextWrapping="Wrap" />
                                 </Grid>
-                                <TextBlock Text="{Binding CommandPreviewText}" FontFamily="Consolas, Cascadia Mono, monospace"
+                                <TextBlock Text="{Binding CommandPreviewText}" FontFamily="avares://Hermaeus.Desktop/Assets/Fonts/JetBrainsMono#JetBrains Mono,Consolas,monospace"
                                            FontSize="11" Opacity="0.68" TextWrapping="Wrap" />
                             </StackPanel>
                         </Border>
@@ -79,7 +79,7 @@
             </Border>
             <TextBox Text="{Binding LocalAiSetupLog}" AcceptsReturn="True" TextWrapping="Wrap"
                      MinHeight="74" MaxHeight="160" IsReadOnly="True"
-                     FontFamily="Consolas, Cascadia Mono, monospace" FontSize="11"
+                     FontFamily="avares://Hermaeus.Desktop/Assets/Fonts/JetBrainsMono#JetBrains Mono,Consolas,monospace" FontSize="11"
                      ToolTip.Tip="Read-only output from the most recent scan or setup action." />
             <TextBlock Text="{Binding SettingsError}" FontSize="12" Foreground="{DynamicResource SystemFillColorCriticalBrush}" TextWrapping="Wrap" />
         </StackPanel>

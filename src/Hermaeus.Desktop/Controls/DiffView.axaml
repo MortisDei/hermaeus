@@ -24,10 +24,10 @@
             <Border BorderThickness="0,0,0,1" BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" 
                     Background="{Binding Type, Converter={StaticResource DiffBrush}}" Opacity="0.15" Padding="8">
               <Grid ColumnDefinitions="50,*,50,*">
-                <TextBlock Text="{Binding OldLineNumber}" HorizontalAlignment="Right" FontFamily="Courier New" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                <TextBlock Grid.Column="1" Text="{Binding OldText}" Margin="6,0" FontFamily="Courier New" FontSize="11" />
-                <TextBlock Grid.Column="2" Text="{Binding NewLineNumber}" HorizontalAlignment="Right" FontFamily="Courier New" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                <TextBlock Grid.Column="3" Text="{Binding NewText}" Margin="6,0" FontFamily="Courier New" FontSize="11" />
+                <TextBlock Text="{Binding OldLineNumber}" HorizontalAlignment="Right" FontFamily="avares://Hermaeus.Desktop/Assets/Fonts/JetBrainsMono#JetBrains Mono,Consolas,monospace" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                <TextBlock Grid.Column="1" Text="{Binding OldText}" Margin="6,0" FontFamily="avares://Hermaeus.Desktop/Assets/Fonts/JetBrainsMono#JetBrains Mono,Consolas,monospace" FontSize="11" />
+                <TextBlock Grid.Column="2" Text="{Binding NewLineNumber}" HorizontalAlignment="Right" FontFamily="avares://Hermaeus.Desktop/Assets/Fonts/JetBrainsMono#JetBrains Mono,Consolas,monospace" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                <TextBlock Grid.Column="3" Text="{Binding NewText}" Margin="6,0" FontFamily="avares://Hermaeus.Desktop/Assets/Fonts/JetBrainsMono#JetBrains Mono,Consolas,monospace" FontSize="11" />
               </Grid>
             </Border>
           </DataTemplate>

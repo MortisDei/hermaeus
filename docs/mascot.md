@@ -4,113 +4,139 @@ Hermaeus's mascot. This document is the source of truth for identity, personalit
 and visual spec. It exists so future art (illustration, animation, marketing) stays
 consistent, and so any in-app use of the character matches the brand intent.
 
+This spec reflects the illustrated brand sheets `docs/hermaeus-branding.png` and
+`docs/hermaeus-icons.png`, which superseded the earlier "mechanical tinkerer"
+placeholder concept.
+
 ## Core identity
 
 **Name:** Moss.
 
-**Role:** A small mechanical tinkerer who maintains the AI workshop.
+**Role:** Keeper of Knowledge. A small forest-dwelling companion who lives in your
+workspace and tends it: organising, remembering, and helping you understand what's
+in it.
 
-Moss is **not the AI**. He is the builder, maintainer, and curious presence behind
-the scenes making everything work: part goblin, part engineer, part sysadmin, part
-hardware gremlin.
+Moss is **not the AI**. He is the presence behind the scenes who keeps the
+workspace tidy and helps you navigate it, not the model doing the reasoning.
 
 ## Personality
 
-Traits: curious, clever, slightly chaotic, helpful, resourceful, proud of his work,
-hates waste, loves tinkering.
-
-He is the guy who has 17 cables in a drawer, 4 GPUs on a bench, three unfinished
-experiments, a perfectly organised database, and absolutely no idea where his
-coffee went.
+Traits: curious, diligent, loyal, warm, patient, quietly proud of a well-organised
+shelf.
 
 ## Brand personality
 
 Moss should communicate:
 
-> "Powerful technology, built by someone who actually enjoys understanding how it
-> works."
+> "Powerful technology, kept and tended by someone who genuinely cares about your
+> workspace."
 
 Not:
 
 > "Magical AI assistant that knows everything."
 
-He is the workshop, not the oracle. Local-first, provider-agnostic, and hands-on
-are all traits Hermaeus already has as a product; Moss is the character that carries
+He is the keeper, not the oracle. Local-first, provider-agnostic, and hands-on are
+all traits Hermaeus already has as a product; Moss is the character that carries
 that tone into anything visual.
 
 ## Visual style
 
 Overall: cute but capable. Not Disney cute, not childish. Closer to Tux, the
-GitHub Octocat, Wall-E, or a fantasy workshop mechanic. A character developers
-would put on stickers.
+GitHub Octocat, or a Studio Ghibli forest spirit. A character developers would put
+on stickers.
 
 ### Appearance
 
-- Small stature, large head, slightly oversized hands, built for working on tiny
-  components.
-- Colour palette: moss green skin, charcoal grey clothing, copper/brass mechanical
-  accents, warm amber highlights.
-- Face: intelligent eyes, slightly mischievous grin, focused concentration.
-- Avoid: evil goblin, fantasy monster, sharp/scary teeth. He should look like
-  someone you'd trust with your server.
-
-### Clothing
-
-Workshop hoodie/jacket with utility pockets, tools hanging from a belt, circuit
-board patches, tiny SSDs and cables as accessories. Optional: a small badge with
-the Hermaeus logo.
+- Small, round stature, big expressive eyes, pointed ears.
+- Moss/lichen-covered green skin, small mushroom caps and a leaf sprout growing
+  from the head as a natural "hairstyle."
+- Face: intelligent eyes, gentle expression, focused concentration when working.
+- Avoid: goblin/monster framing, sharp teeth, anything mechanical (goggles, gears,
+  cables) - that was the retired tinkerer concept. He should look like a forest
+  creature you'd trust with your notes.
 
 ### Signature items
 
-1. **Oversized tool belt** - screwdriver, USB cable, soldering iron, tiny wrench,
-   USB stick collection.
-2. **GPU backpack** - cooling fans, glowing status lights, cables sticking out. A
-   joke reference to local AI hardware.
-3. **Notebook** - small, battered, full of model benchmarks, architecture
-   diagrams, and weird experiments.
+Per the illustrated sheet's pose set: a battered leather-bound book, a small
+lantern, a mug, and (for "working" poses) a laptop. No tool belt, no GPU backpack -
+those belonged to the retired mechanical-tinkerer concept.
 
-## Animation ideas (future / marketing use)
+### Expressions and poses (reference set)
 
-These are concept notes for future illustration or motion work, not implemented
-in-app yet unless noted below.
+From `docs/hermaeus-branding.png`, for consistency in future illustration:
 
-- **Idle:** tightening a screw, checking logs, drinking coffee, looking confused
-  at an error message, poking a GPU fan.
-- **Loading ("Working..."):** Moss pushes a giant glowing core into place.
-- **Indexing documents:** Moss stacks books/documents into organised piles.
-- **Model download:** Moss drags a ridiculously oversized hard drive.
-- **Error state:** Moss in safety glasses, surrounded by sparks. Not angry - just
-  "Right. Let's see what broke."
+- **Expressions:** Curious, Thinking, Happy, Helping, Sleepy.
+- **Poses:** Reading, Explaining, Working, Celebrating, Resting.
 
-## Icon version
+## Brand colour palette
 
-For app-icon-scale use, do not use the whole character. Use only:
+Formalised in `docs/hermaeus-branding.png`. Used for illustration and, where noted
+below, pulled into the app's theme resources.
 
-- goblin face silhouette
-- goggles
-- one glowing eye
-- a small tuft of hair/ears
-- simple, flat shapes
+| Name | Hex | Use |
+| --- | --- | --- |
+| Deep Moss | `#2E3D2B` | darkest surface / ink-adjacent accents |
+| Forest | `#436B3F` | primary brand green |
+| Sage | `#7A8F6A` | secondary/lighter green |
+| Parchment | `#E8DFC6` | warm light surface / text-on-dark |
+| Ink | `#1A1D18` | near-black text/outline |
+| Copper | `#B87333` | primary accent (buttons, highlights) |
+| Amber | `#D19A42` | secondary accent / hover states |
+| Teal | `#2F6F6D` | tertiary accent |
+| Indigo | `#3D4A6B` | tertiary accent |
+| Berry | `#7B3D5A` | tertiary accent |
+
+## Typography
+
+Also formalised in `docs/hermaeus-branding.png`:
+
+- **Cinzel** (semibold) - headings and brand moments.
+- **Source Sans 3** - UI body text.
+- **JetBrains Mono** - code, console, technical detail.
+
+Embedded under `Assets/Fonts/` (Cinzel, SourceSans3, JetBrainsMono; each a
+variable font plus its `OFL.txt`) and wired into `Styles/AppStyles.axaml`. See
+`NOTICE.md` for licensing.
+
+## App icon vs. mascot icon
+
+`docs/hermaeus-icons.png` presents four app-icon concepts: Archivist's Seal, Moss
+(the full character face), Wax Seal, and Tree Ring. **Tree Ring was chosen** for
+the actual window/taskbar/tray icon - a gold "H" monogram with a small leaf sprout,
+set in a wood-grain medallion. It reads as a mark, not a character, and holds up
+better at small sizes than a detailed character face would.
+
+The full Moss character (Option 2) is not wired into the app icon. It remains
+available for future use (About screen, onboarding, marketing) but needs real
+illustration work to use anywhere in-app beyond the icon-scale silhouette below.
+
+## Icon-scale silhouette (in-app accent use)
+
+For the small in-app accent (not the app icon - see above), do not use the whole
+character. Use only:
+
+- round face silhouette
+- pointed ears
+- a small mushroom/leaf tuft
+- two simple eyes
+- flat shapes only
 
 Must read clearly at 16x16, 32x32, and desktop icon size.
 
 ## Current in-app usage
 
-A simple flat-vector approximation of the icon version (goggles, glowing eye,
-ear tuft) is implemented as `Controls/MossIcon.axaml` in `Hermaeus.Desktop`, built
-from plain Avalonia shapes (no new rendering dependency). It appears as a small
-accent next to the two states in the concept notes that map cleanly to existing UI:
-the agent task busy indicator and the shared error/status banner. This is a
-placeholder built to the icon spec above, not final illustrated art - replace with
-real illustration once one exists, keeping the same 16x16 silhouette rules.
+A simple flat-vector approximation of the icon-scale silhouette (round face, ear
+tuft, mushroom sprout, two eyes) is implemented as `Controls/MossIcon.axaml` in
+`Hermaeus.Desktop`, built from plain Avalonia shapes (no new rendering
+dependency). It appears as a small accent next to the agent task busy indicator
+and the shared error/status banner. This is a placeholder built to the icon spec
+above, not final illustrated art - replace with real illustration once one exists,
+keeping the same 16x16 silhouette rules.
 
 The window/taskbar icon (`Assets/hermaeus.ico`), the Linux desktop icon
-(`Assets/hermaeus-app.png`), and the system tray icon (`Assets/hermaeus-tray.png`,
-plus the unused `hermaeus-tray-dark.png`/`hermaeus-tray-light.png`) render the
-same shapes and colors as `MossIcon.axaml`, generated programmatically at each
-target resolution. Small sizes (<=32px) drop the dark lens-housing ring - the
-full four-ring goggle stack anti-aliases into mud below that size - so the eye
-reads as one clean glowing circle instead. `docs/hermaeus-branding.png` (an
-illustrated marketing mockup sheet, not referenced by any code or the README)
-still shows the old Aether "A" mark and wordmark text baked into the pixels;
-replacing it needs real illustration work, not a programmatic redraw.
+(`Assets/hermaeus-app.png`), the system tray icon (`Assets/hermaeus-tray.png`),
+and the unused `hermaeus-tray-dark.png`/`hermaeus-tray-light.png` fallback assets
+are all cropped and resized from the Tree Ring artwork in
+`docs/hermaeus-icons.png` (Option 4). Sizes at or below 32px use a contrast-boosted
+crop - the fine wood-grain texture anti-aliases into mud that small, so boosting
+contrast keeps the gold "H" legible against the dark medallion.

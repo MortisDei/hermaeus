@@ -513,7 +513,7 @@
                                                       VerticalScrollBarVisibility="Auto">
                                             <SelectableTextBlock
                                                 Text="{Binding LogOutput}"
-                                                FontFamily="Cascadia Code,Fira Code,Consolas,monospace"
+                                                FontFamily="avares://Hermaeus.Desktop/Assets/Fonts/JetBrainsMono#JetBrains Mono,Consolas,monospace"
                                                 FontSize="11"
                                                 TextWrapping="NoWrap"
                                                 Margin="10,2,10,8" />

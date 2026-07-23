@@ -16,7 +16,7 @@
       <StackPanel Orientation="Horizontal" Spacing="8">
         <TextBlock Text="Review proposed patch" FontWeight="SemiBold" FontSize="16" />
         <TextBlock Text="for" Opacity="0.7" />
-        <TextBlock Text="{Binding RelativePath}" FontFamily="Courier New" Opacity="0.8" FontWeight="SemiBold" />
+        <TextBlock Text="{Binding RelativePath}" FontFamily="avares://Hermaeus.Desktop/Assets/Fonts/JetBrainsMono#JetBrains Mono,Consolas,monospace" Opacity="0.8" FontWeight="SemiBold" />
       </StackPanel>
       <TextBlock Text="Review the side-by-side changes below. Lines are colour-coded: green for additions, red for removals. Click Apply to queue the patch or Cancel to discard." FontSize="12" Opacity="0.7" TextWrapping="Wrap" />
     </StackPanel>

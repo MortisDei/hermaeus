@@ -290,7 +290,7 @@
                     </ItemsControl>
                     <Expander Header="Raw model context">
                         <SelectableTextBlock Text="{Binding ContextPreviewRaw}"
-                                             FontFamily="Consolas,monospace"
+                                             FontFamily="avares://Hermaeus.Desktop/Assets/Fonts/JetBrainsMono#JetBrains Mono,Consolas,monospace"
                                              FontSize="11"
                                              TextWrapping="Wrap"
                                              MaxHeight="180" />

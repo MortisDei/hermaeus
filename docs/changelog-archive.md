@@ -2,6 +2,97 @@
 
 The CHANGELOG.md in root only contains the current 10 versions of changelogs. The rest are archived here in line with the 10 version limit in the main changelog.
 
+## [0.20.0-alpha] - 2026-07-19
+
+Implements docs/review r15 in full: sub-task orchestration. A vague, broad
+goal used to burn the whole transcript budget before the agent got anywhere;
+`plan_subtasks` now lets it split such a goal into focused sub-tasks that
+each run through the exact same loop, safety gate, and approval flow as
+today, sequentially, with a consolidated report at the end.
+
+### Added
+
+- **`plan_subtasks`: approval-gated sub-task orchestration.** A new tool
+  proposes splitting a broad, multi-domain goal into 2-6 focused sub-tasks,
+  each with a goal, a specialist profile (`general`, `correctness`,
+  `security`, `tests`, `performance`, `docs`), and success criteria. Always
+  requires approval, with a full preview of the proposed plan. Once
+  approved, children run sequentially as ordinary tasks (`ParentTaskId` set,
+  own transcript, own lessons, own `RememberedCommandApprovals` - never
+  shared with siblings or the parent) through `AgentService`'s existing
+  loop. Depth is limited to one level in code: a child requesting
+  `plan_subtasks` is blocked immediately, not by prompt instruction. The
+  whole run is capped by `Agent.MaxOrchestrationSteps` (default 60,
+  separate from each child's own `Agent.MaxAutoSteps`); hitting it marks
+  remaining sub-tasks `Skipped` and synthesis says so honestly rather than
+  pretending the run finished normally.
+- **Consolidated synthesis report.** Once every sub-task is terminal, the
+  parent runs one final model step to synthesize a report from each child's
+  outcome and writes it to `report.md` in the task directory. A
+  deterministic fallback (built from the sub-task specs themselves) takes
+  over if that synthesis step fails or returns nothing usable, so a flaky
+  last step never fails a run whose sub-task work already completed.
+- **Workbench orchestration UI.** A sub-task strip shows live status
+  (pending/running/complete/failed/skipped) per sub-task with an "Open
+  report" affordance once synthesis has run. A child's pending approval
+  surfaces in the shared review queue labeled with its parent's goal, and
+  approving it resumes the parent's orchestration rather than stalling.
+  Step/status text is labeled with the active child's sub-task position
+  while an orchestrated run is in progress; the open task in the workbench
+  stays pointed at the parent throughout.
+- **Three new built-in scenarios** (`11-orchestration-gate`,
+  `12-orchestration-depth`, `13-orchestration-budget`) plus two new
+  deterministic scenario check types (`expect_subtask_statuses`,
+  `expect_report_contains`) exercising the gate, the depth block, and
+  budget truncation.
+
+### Fixed
+
+- **A gated action with no registered executor stranded the task.** When the
+  safety gate required approval for a tool with no local executor (e.g. an
+  `mcp:` tool the bridge isn't wired for), the task landed `WaitingForUser`
+  with nothing to approve - `AppendUserReplyAsync` was the only way out,
+  which a user had no reason to guess. It now lands `Blocked` with an
+  explanatory result, matching the existing allowed-but-unexecutable case.
+- **A model-reported blocker could silently vanish or flip status twice.**
+  `state_update.blockers` set the task `Blocked`, but the blocker text was
+  never recorded anywhere, and if the same response also requested an
+  allowed tool, the later execution path silently overwrote the status back
+  to `Running` with no trace the blocker ever happened. Every blocker is now
+  recorded in `Decisions` regardless of outcome, and `Blocked` only wins
+  when the step's tool did not go on to execute successfully this step
+  (progress wins otherwise) - `ask_user`/`final` handling is unchanged.
+- **Chat responses appeared all at once instead of streaming.** `MarkdownViewer`'s
+  75ms render-debounce timer was stopped and restarted on every content
+  change; since streamed tokens arrive faster than that, the timer kept
+  getting pushed back and only ever fired once the stream paused, i.e. at the
+  end. It now leaves an already-running timer alone, giving a steady render
+  cadence during a stream instead of a debounce that never fires.
+- **Sending a message scrolled the chat view back to the top.**
+  `ChatViewModel.RefreshVisibleMessageWindow` did a full `Clear()` and rebuild
+  of the windowed message list on every send, which collapses the
+  `ScrollViewer`'s content to zero height and snaps it to the top before the
+  explicit scroll-to-bottom call can catch up. It now appends just the new
+  message(s) in place when the window's start position hasn't shifted.
+- **"Ctrl+Enter to send" had no effect on plain Enter.** The chat input's
+  `AcceptsReturn` was hardcoded `true` in `AppStyles.axaml` regardless of the
+  `Ui.CtrlEnterToSend` setting, so Avalonia's own newline-insertion consumed
+  Enter before the app's key handler ever saw it. `AcceptsReturn` is now set
+  dynamically from the setting (and kept live via `SettingsChanged`).
+- **Dragging over an assistant response only selected one block at a time.**
+  `MarkdownViewer` renders each markdown block (paragraph, code fence, list
+  item, table cell) as its own independent selectable control, so a drag
+  couldn't span block boundaries. A drag that crosses from its starting
+  block into another now selects every block in the response as a whole, and
+  Ctrl+C copies the message's full raw markdown directly.
+- **Nothing stopped a second Aether process from launching.** Two instances
+  writing to the same SQLite data root with no cross-process coordination is
+  a real corruption risk. A `SingleInstanceGuard` now holds an exclusive
+  lock file (`%LocalAppData%/Aether/aether.lock`) for the process lifetime;
+  a second launch attempt exits immediately instead of opening a second
+  window. The OS releases the lock automatically on exit, crash, or kill, so
+  there is never a stale lock to clean up.
+
 ## [0.19.0-alpha] - 2026-07-18
 
 Implements docs/review r14 in full: "Fast by default." A field log showed an

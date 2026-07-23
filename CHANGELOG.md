@@ -9,6 +9,44 @@ FIFO for changelog entries, 10 versions in this file max. Remove older entries
 and append them to `docs/changelog-archive.md` to maintain the 10 version
 limit.
 
+## [0.26.0-alpha] - 2026-07-23
+
+### Changed
+
+- **Real Hermaeus branding replaces the placeholder art shipped in the r20
+  rename.** `docs/hermaeus-branding.png` and the new `docs/hermaeus-icons.png`
+  are the first illustrated brand sheets for the product; this release wires
+  their choices into the app instead of leaving them as reference-only mockups.
+- **App icon, taskbar icon, and system tray icon now use the "Tree Ring"
+  mark** (Option 4 of 4 on `docs/hermaeus-icons.png`: a gold "H" monogram with
+  a leaf sprout, set in a wood-grain medallion) instead of the placeholder
+  goggle-eye glyph: `hermaeus.ico` (16/32/48/256px), `hermaeus-app.png`, and
+  `hermaeus-tray.png` are all cropped and resized from the same source
+  artwork. Sizes at or below 32px use a contrast-boosted crop so the "H"
+  stays legible once the fine wood-grain texture anti-aliases into mud. The
+  unused `hermaeus-tray-dark.png`/`hermaeus-tray-light.png` fallback assets
+  were refreshed the same way and normalized to 256x256 (previously an
+  inconsistent 1254x1254 left over from the r20 rename).
+- **`Controls/MossIcon.axaml` redesigned** to match the illustrated Moss
+  character (round face, pointed ears, mushroom/leaf tuft, big eyes) instead
+  of the retired mechanical-tinkerer goggle design. Still plain Avalonia
+  shapes at 16x16 icon scale, no new rendering dependency.
+- **`docs/mascot.md` rewritten** to match the actual illustrated character
+  and personality ("Keeper of Knowledge": curious, diligent, loyal) instead
+  of the earlier "mechanical tinkerer" placeholder concept that predated any
+  real art. Documents the formal brand colour palette, typography, and why
+  Tree Ring (not the full Moss face) was chosen for the app icon.
+- **Brand colour palette and typography wired into the UI theme**
+  (`App.axaml`, `Styles/AppStyles.axaml`): FluentTheme's accent colors now
+  use the brand Forest green instead of Avalonia's default blue; the primary
+  send button uses Forest fill with Parchment text, the sidebar new-chat
+  button uses a Forest outline. Three brand typefaces are embedded under
+  `Assets/Fonts/` (Cinzel for headings, Source Sans 3 for body text,
+  JetBrains Mono for code) and applied app-wide - every hardcoded
+  `Consolas`/`Courier New`/`Cascadia Code` font-family reference across the
+  Desktop views was normalized to the embedded JetBrains Mono with the same
+  fallback chain. See `NOTICE.md` for font licensing (SIL OFL 1.1).
+
 ## [0.25.3-alpha] - 2026-07-22
 
 ### Fixed
@@ -576,93 +614,3 @@ gaps.
 
 23 new tests (861 -> 884). Zero-warning build maintained throughout.
 
-## [0.20.0-alpha] - 2026-07-19
-
-Implements docs/review r15 in full: sub-task orchestration. A vague, broad
-goal used to burn the whole transcript budget before the agent got anywhere;
-`plan_subtasks` now lets it split such a goal into focused sub-tasks that
-each run through the exact same loop, safety gate, and approval flow as
-today, sequentially, with a consolidated report at the end.
-
-### Added
-
-- **`plan_subtasks`: approval-gated sub-task orchestration.** A new tool
-  proposes splitting a broad, multi-domain goal into 2-6 focused sub-tasks,
-  each with a goal, a specialist profile (`general`, `correctness`,
-  `security`, `tests`, `performance`, `docs`), and success criteria. Always
-  requires approval, with a full preview of the proposed plan. Once
-  approved, children run sequentially as ordinary tasks (`ParentTaskId` set,
-  own transcript, own lessons, own `RememberedCommandApprovals` - never
-  shared with siblings or the parent) through `AgentService`'s existing
-  loop. Depth is limited to one level in code: a child requesting
-  `plan_subtasks` is blocked immediately, not by prompt instruction. The
-  whole run is capped by `Agent.MaxOrchestrationSteps` (default 60,
-  separate from each child's own `Agent.MaxAutoSteps`); hitting it marks
-  remaining sub-tasks `Skipped` and synthesis says so honestly rather than
-  pretending the run finished normally.
-- **Consolidated synthesis report.** Once every sub-task is terminal, the
-  parent runs one final model step to synthesize a report from each child's
-  outcome and writes it to `report.md` in the task directory. A
-  deterministic fallback (built from the sub-task specs themselves) takes
-  over if that synthesis step fails or returns nothing usable, so a flaky
-  last step never fails a run whose sub-task work already completed.
-- **Workbench orchestration UI.** A sub-task strip shows live status
-  (pending/running/complete/failed/skipped) per sub-task with an "Open
-  report" affordance once synthesis has run. A child's pending approval
-  surfaces in the shared review queue labeled with its parent's goal, and
-  approving it resumes the parent's orchestration rather than stalling.
-  Step/status text is labeled with the active child's sub-task position
-  while an orchestrated run is in progress; the open task in the workbench
-  stays pointed at the parent throughout.
-- **Three new built-in scenarios** (`11-orchestration-gate`,
-  `12-orchestration-depth`, `13-orchestration-budget`) plus two new
-  deterministic scenario check types (`expect_subtask_statuses`,
-  `expect_report_contains`) exercising the gate, the depth block, and
-  budget truncation.
-
-### Fixed
-
-- **A gated action with no registered executor stranded the task.** When the
-  safety gate required approval for a tool with no local executor (e.g. an
-  `mcp:` tool the bridge isn't wired for), the task landed `WaitingForUser`
-  with nothing to approve - `AppendUserReplyAsync` was the only way out,
-  which a user had no reason to guess. It now lands `Blocked` with an
-  explanatory result, matching the existing allowed-but-unexecutable case.
-- **A model-reported blocker could silently vanish or flip status twice.**
-  `state_update.blockers` set the task `Blocked`, but the blocker text was
-  never recorded anywhere, and if the same response also requested an
-  allowed tool, the later execution path silently overwrote the status back
-  to `Running` with no trace the blocker ever happened. Every blocker is now
-  recorded in `Decisions` regardless of outcome, and `Blocked` only wins
-  when the step's tool did not go on to execute successfully this step
-  (progress wins otherwise) - `ask_user`/`final` handling is unchanged.
-- **Chat responses appeared all at once instead of streaming.** `MarkdownViewer`'s
-  75ms render-debounce timer was stopped and restarted on every content
-  change; since streamed tokens arrive faster than that, the timer kept
-  getting pushed back and only ever fired once the stream paused, i.e. at the
-  end. It now leaves an already-running timer alone, giving a steady render
-  cadence during a stream instead of a debounce that never fires.
-- **Sending a message scrolled the chat view back to the top.**
-  `ChatViewModel.RefreshVisibleMessageWindow` did a full `Clear()` and rebuild
-  of the windowed message list on every send, which collapses the
-  `ScrollViewer`'s content to zero height and snaps it to the top before the
-  explicit scroll-to-bottom call can catch up. It now appends just the new
-  message(s) in place when the window's start position hasn't shifted.
-- **"Ctrl+Enter to send" had no effect on plain Enter.** The chat input's
-  `AcceptsReturn` was hardcoded `true` in `AppStyles.axaml` regardless of the
-  `Ui.CtrlEnterToSend` setting, so Avalonia's own newline-insertion consumed
-  Enter before the app's key handler ever saw it. `AcceptsReturn` is now set
-  dynamically from the setting (and kept live via `SettingsChanged`).
-- **Dragging over an assistant response only selected one block at a time.**
-  `MarkdownViewer` renders each markdown block (paragraph, code fence, list
-  item, table cell) as its own independent selectable control, so a drag
-  couldn't span block boundaries. A drag that crosses from its starting
-  block into another now selects every block in the response as a whole, and
-  Ctrl+C copies the message's full raw markdown directly.
-- **Nothing stopped a second Aether process from launching.** Two instances
-  writing to the same SQLite data root with no cross-process coordination is
-  a real corruption risk. A `SingleInstanceGuard` now holds an exclusive
-  lock file (`%LocalAppData%/Aether/aether.lock`) for the process lifetime;
-  a second launch attempt exits immediately instead of opening a second
-  window. The OS releases the lock automatically on exit, crash, or kill, so
-  there is never a stale lock to clean up.

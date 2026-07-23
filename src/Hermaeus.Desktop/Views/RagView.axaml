@@ -260,7 +260,7 @@
                                     Background="{DynamicResource SubtleFillColorSecondaryBrush}">
                                 <TextBlock Text="{Binding SelectedSource.ScoreDisplay}"
                                            FontSize="11"
-                                           FontFamily="Consolas,monospace" />
+                                           FontFamily="avares://Hermaeus.Desktop/Assets/Fonts/JetBrainsMono#JetBrains Mono,Consolas,monospace" />
                             </Border>
                         </Grid>
                         <TextBlock Text="{Binding SelectedSource.PlainLanguageSummary}"
@@ -270,15 +270,15 @@
                         <StackPanel Orientation="Horizontal" Spacing="14">
                             <StackPanel Orientation="Horizontal" Spacing="4" IsVisible="{Binding SelectedSource.HasVectorScore}">
                                 <TextBlock Text="Vector" FontSize="10" Opacity="0.5" />
-                                <TextBlock Text="{Binding SelectedSource.VectorScoreDisplay}" FontSize="10" FontFamily="Consolas,monospace" />
+                                <TextBlock Text="{Binding SelectedSource.VectorScoreDisplay}" FontSize="10" FontFamily="avares://Hermaeus.Desktop/Assets/Fonts/JetBrainsMono#JetBrains Mono,Consolas,monospace" />
                             </StackPanel>
                             <StackPanel Orientation="Horizontal" Spacing="4" IsVisible="{Binding SelectedSource.HasKeywordScore}">
                                 <TextBlock Text="Keyword" FontSize="10" Opacity="0.5" />
-                                <TextBlock Text="{Binding SelectedSource.KeywordScoreDisplay}" FontSize="10" FontFamily="Consolas,monospace" />
+                                <TextBlock Text="{Binding SelectedSource.KeywordScoreDisplay}" FontSize="10" FontFamily="avares://Hermaeus.Desktop/Assets/Fonts/JetBrainsMono#JetBrains Mono,Consolas,monospace" />
                             </StackPanel>
                             <StackPanel Orientation="Horizontal" Spacing="4" IsVisible="{Binding SelectedSource.HasRerankScore}">
                                 <TextBlock Text="Reranker" FontSize="10" Opacity="0.5" />
-                                <TextBlock Text="{Binding SelectedSource.RerankScoreDisplay}" FontSize="10" FontFamily="Consolas,monospace" />
+                                <TextBlock Text="{Binding SelectedSource.RerankScoreDisplay}" FontSize="10" FontFamily="avares://Hermaeus.Desktop/Assets/Fonts/JetBrainsMono#JetBrains Mono,Consolas,monospace" />
                             </StackPanel>
                         </StackPanel>
                         <SelectableTextBlock Text="{Binding SelectedSource.Content}"
@@ -384,7 +384,7 @@
                                                 Padding="6,2"
                                                 Background="{DynamicResource SubtleFillColorSecondaryBrush}">
                                             <TextBlock Text="{Binding ScoreDisplay}"
-                                                       FontSize="11" FontFamily="Consolas,monospace" />
+                                                       FontSize="11" FontFamily="avares://Hermaeus.Desktop/Assets/Fonts/JetBrainsMono#JetBrains Mono,Consolas,monospace" />
                                         </Border>
                                     </Grid>
                                 </Button>

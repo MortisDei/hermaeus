@@ -54,7 +54,7 @@ public sealed class MarkdownViewer : ContentControl, IDisposable
         new MarkdownPipelineBuilder().UseAdvancedExtensions().Build();
 
     private static readonly FontFamily MonoFamily =
-        new("Cascadia Code,Fira Code,JetBrains Mono,Consolas,monospace");
+        new("avares://Hermaeus.Desktop/Assets/Fonts/JetBrainsMono#JetBrains Mono,Consolas,monospace");
     private readonly DispatcherTimer _renderTimer;
     private string _lastRenderedMarkdown = string.Empty;
     private bool _lastRenderedIsError;
