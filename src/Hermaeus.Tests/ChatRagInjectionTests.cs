@@ -7,6 +7,7 @@ using Hermaeus.Rag.Retrieval;
 using Hermaeus.Rag.Storage;
 using Hermaeus.Services;
 using Hermaeus.ViewModels;
+using Microsoft.Data.Sqlite;
 using Xunit;
 using static Hermaeus.Tests.Helpers;
 
@@ -214,6 +215,73 @@ public sealed class ChatRagInjectionTests
             "an empty dataset is a normal state, not a warning-worthy one");
     }
 
+    [Fact]
+    public async Task StoreThrowsSkipsInjectionWithOneWarningAndSendCompletes()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        var (store, dataset) = await IngestDatasetAsync(temp, settings, "Consolas is the classic Windows monospace font used for code.");
+
+        // Simulate a locked/corrupt DB file: release pooled connections from
+        // ingest, then overwrite the real backing file with non-SQLite bytes
+        // (mirrors ServiceTests.SettingsLoadBacksUpUnreadableJson's approach
+        // of corrupting a real file rather than mocking a seam that doesn't
+        // exist - SqliteRagStore is a concrete class, not behind an interface).
+        SqliteConnection.ClearAllPools();
+        var dbPath = Path.Combine(Path.GetFullPath(temp.PathFor("data")), "conversations.db");
+        await File.WriteAllBytesAsync(dbPath, [0x00, 0x01, 0x02, 0x03]);
+
+        var query = new RagQueryService(store, new FakeEmbeddingService(), new FakeLlm(), settings, new NoOpReranker());
+        var llm = new CapturingLlm();
+        var logs = new CollectingRuntimeLog();
+        var vm = BuildChatViewModel(settings, llm, query, logs);
+        await vm.LoadModelsAsync(force: true);
+        vm.SelectedModel = new LlmModel { Id = "capture", Name = "Capture", ProviderTag = "test" };
+        vm.RagDatasetId = dataset.Id;
+
+        vm.InputText = "Does this still work?";
+        await vm.SendCommand.ExecuteAsync(null);
+
+        False(vm.Messages.Last().IsError, "a store/DB failure must never fail the send");
+        Equal(1, logs.Entries.Count(e => e.Level == RuntimeLogLevel.Warning && e.Category == RuntimeLogCategory.Rag),
+            "a store/DB throw should log exactly one Warning, not spam or silently vanish");
+        var trace = Assert.Single(vm.ChatTraces);
+        Equal(0, trace.RagContextItems, "nothing should have been injected when the store threw");
+    }
+
+    [Fact]
+    public async Task CancellationDuringRetrievalPropagatesWithNoHalfInjectedState()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        var (store, dataset) = await IngestDatasetAsync(temp, settings, "Consolas is the classic Windows monospace font used for code.");
+
+        // Mirrors RagTests.cs's CancellingEmbeddingService: a synchronous
+        // OperationCanceledException from the embed seam, exercising the
+        // explicit rethrow in BuildRagInjectionAsync rather than a real
+        // Stop-command race (2.1's fallback test already covers the seam).
+        var query = new RagQueryService(store, new CancellingEmbeddingService(), new FakeLlm(), settings, new NoOpReranker());
+        var llm = new CapturingLlm();
+        var logs = new CollectingRuntimeLog();
+        var vm = BuildChatViewModel(settings, llm, query, logs);
+        await vm.LoadModelsAsync(force: true);
+        vm.SelectedModel = new LlmModel { Id = "capture", Name = "Capture", ProviderTag = "test" };
+        vm.RagDatasetId = dataset.Id;
+
+        vm.InputText = "Tell me about Consolas font";
+        await vm.SendCommand.ExecuteAsync(null);
+
+        False(vm.Messages.Any(m => m.Role == "assistant"),
+            "cancellation mid-retrieval must propagate and never leave a half-injected assistant bubble behind");
+        Assert.Empty(vm.ChatTraces);
+        True(logs.Entries.Any(e => e.Level == RuntimeLogLevel.Error && e.Category == RuntimeLogCategory.Service),
+            "cancellation should surface through the normal send-failed path rather than being silently swallowed");
+        False(logs.Entries.Any(e => e.Category == RuntimeLogCategory.Rag),
+            "cancellation is a rethrow, not a best-effort failure, so it must not log through the RAG warning path");
+    }
+
     /// <summary>Mirrors RagTests.cs's HashingBagOfWordsEmbeddingService: cosine similarity
     /// genuinely reflects shared vocabulary, unlike FakeEmbeddingService's length-derived
     /// vectors, which share fixed components regardless of content.</summary>
@@ -251,6 +319,15 @@ public sealed class ChatRagInjectionTests
         public int Dimensions => 4;
         public Task<float[]> EmbedAsync(string text, CancellationToken ct = default) =>
             throw new HttpRequestException("connection refused");
+        public Task<List<float[]>> EmbedBatchAsync(IReadOnlyList<string> texts, CancellationToken ct = default) =>
+            Task.FromResult(texts.Select(t => new[] { 1f, t.Length % 7, t.Length % 11, 0.5f }).ToList());
+    }
+
+    private sealed class CancellingEmbeddingService : Hermaeus.Rag.Embeddings.IEmbeddingService
+    {
+        public int Dimensions => 4;
+        public Task<float[]> EmbedAsync(string text, CancellationToken ct = default) =>
+            throw new OperationCanceledException(ct);
         public Task<List<float[]>> EmbedBatchAsync(IReadOnlyList<string> texts, CancellationToken ct = default) =>
             Task.FromResult(texts.Select(t => new[] { 1f, t.Length % 7, t.Length % 11, 0.5f }).ToList());
     }

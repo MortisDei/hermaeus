@@ -9,6 +9,39 @@ FIFO for changelog entries, 10 versions in this file max. Remove older entries
 and append them to `docs/changelog-archive.md` to maintain the 10 version
 limit.
 
+## [0.27.1-alpha] - 2026-07-24
+
+Closes out the two risks/follow-ups left open at the end of r21.
+
+### Fixed
+
+- **Settings > Interface > Theme (System/Dark/Light) was a dead setting**,
+  same class of bug as the font-size control fixed in 0.27.0-alpha: it saved
+  to `UiSettings.Theme` but nothing ever pushed it into Avalonia's
+  `RequestedThemeVariant`, so the app always ran the OS-default theme
+  regardless of the picker. A new `AppThemeService` applies the choice at
+  startup (mirroring `AppFontService`) and live as the user changes the
+  dropdown.
+
+### Tests
+
+- Filled the two gaps in r21 doc 02's best-effort matrix that previously had
+  no dedicated coverage: a store/DB failure (simulated by corrupting the
+  SQLite file after ingest) and chat-level cancellation during retrieval,
+  both now asserted directly in `ChatRagInjectionTests` rather than relying
+  on the RagQueryService-layer cancellation test alone.
+- Fixed two tests (`SettingsChildViewModelsApplyToSettings`,
+  `WizardDataRootStepOnFirstRunCompletesWithoutMigrationNoise`) that never
+  established an isolated "previous" data root before triggering a save/
+  migration. Without one, the migration step resolved "previous" to the
+  real `%LocalAppData%\Hermaeus` and tried to move files out from under
+  whatever Hermaeus instance is actually running on the machine, failing
+  with a file-lock error on a dev box with the real app open. Both now set
+  an explicit temp data root first, matching the pattern already used in
+  `BackupMigrationTests`.
+
+2 new tests.
+
 ## [0.27.0-alpha] - 2026-07-23
 
 Implements docs/review r21 in full: RAG meets chat. Retrieval Q&A used to
@@ -393,110 +426,4 @@ agent task continuity, voice chunk-boundary quality, chat attachments
 
 - docs/features.md, docs/agent.md, docs/voice.md, docs/benchmarks.md, and
   docs/security-review.md updated for all of the above.
-
-## [0.23.0-alpha] - 2026-07-21
-
-Implements docs/review r18 in full: closes out nine files of uncommitted r17
-follow-up work first (a real conversation-list UI regression, a keystroke-storm
-save bug, a design-fork decision, and a test "fix" that did not fix the test),
-then agent/model UX friction found in live use, then first-class llama-server
-engine options.
-
-### Finish the open work
-
-- **Conversation details auto-save** (`MainWindowViewModel`,
-  `ConversationItemViewModel`): the in-progress replacement for the manual
-  Save button saved on every keystroke and reloaded the entire conversation
-  list each time, replacing the `ConversationItemViewModel` instance backing
-  an open details flyout mid-edit. Now debounces to one save 500ms after
-  typing stops and updates the existing item in place instead of reloading;
-  pin/archive still reload immediately since those change list membership/
-  ordering. The dead `OnDetailsSaveClick` code-behind handler (button already
-  removed) was deleted.
-- **`TimeDisplay` regression**: restored the `OnUpdatedAtChanged` partial
-  method dropped while rewriting the other change handlers, so conversation
-  row timestamps ("12m ago") update again instead of freezing at first render.
-- **`SuggestContextSize` design fork resolved**: the in-progress diff had
-  quietly changed the function from "suggest a smaller context when the
-  configured one does not fit" to "also suggest a larger context when there
-  is headroom" without updating its doc comment or the Auto Tune status
-  message, which still read "configured does not fit" even when raising
-  context. Kept the upward-suggestion behavior (owner: users must always be
-  free to set a larger context when the model supports it) and fixed both.
-- **`GpuHeadroomBytes` duplication**: the in-progress diff corrected this
-  constant from 1.5 GiB to 512 MiB in two independent copies
-  (`KvCacheMath`, `ModelFitEstimator`). Collapsed to the single copy on
-  `KvCacheMath`.
-- **Voice temp-file cleanup**: the in-progress test "fix" (a bare
-  `Task.Delay(100)`) did not actually fix the failing test. Root cause:
-  every voice provider's `GenerateSpeechAsync` (OpenAI, Kokoro, F5-TTS, XTTS)
-  reported a synthesis *failure* - discarding the caller's `OutputPath` - and
-  never ran its own temp-file cleanup whenever playback itself failed after
-  a successful synthesis. Restructured all four to separate the render step
-  (still fails the whole call) from playback (best-effort; a playback error
-  is now noted in the result message but the successful `OutputPath` and its
-  cleanup are unaffected).
-
-### Agent and model UX
-
-- **Agent Scenario check correctness**: `expect_subtask_statuses` required an
-  exact-length, exact-order match against the manifest's hardcoded sub-task
-  list; a model that reasonably splits work into a different number or order
-  of sub-tasks now only needs to have reached every distinct expected status
-  at least once.
-- **Agents view layout**: the agent's current response used to be squeezed
-  into an 11px truncated header status label. It now gets its own
-  always-expanded panel (wraps, scrolls past ~320px) near the top of the
-  workbench, ahead of the reference panels (workspace profile, files,
-  retrieved context) checked less often once a run is going.
-- **Hugging Face browser scrolling**: the search results list and per-repo
-  file list both clipped instead of scrolling when there were more entries
-  than fit; both now scroll internally.
-- **Local models list clutter**: verified against a real HF hub cache that
-  the reported sub-500MB clutter was not sharded GGUF fragments (none were
-  present) but `mmproj*.gguf` vision-projector and `mtp-*.gguf`
-  multi-token-prediction draft-weight companion files - neither loadable as a
-  standalone chat model in Aether today. Both are now excluded from the
-  local models list.
-- **Chat memory pill collapse**: `SourceReference` already carried a
-  `ProvenanceKind` distinguishing memory recall from RAG citations; the chat
-  view rendered both identically as always-visible pills. Memory-sourced
-  entries now collapse behind a single "Memories used: N" pill that expands
-  on click; RAG citation pills are unchanged.
-
-### First-class llama-server engine options
-
-- **`ServerConfig`** gains `KvCacheTypeK`/`KvCacheTypeV` (string, default
-  `f16`), `FlashAttention` (tri-state, default `auto`), `ContextShift`,
-  `MemoryLock`, `NoMemoryMap`, and `NgramSpeculative` (bools, default false).
-  All additive JSON; every default emits nothing, so an older saved config
-  produces a byte-identical launch. A value already present in `ExtraArgs`
-  always wins over the equivalent first-class field, exactly like the
-  existing `--parallel`/`--cache-reuse` precedent.
-- **`KvCacheMath`** extends its bytes-per-element map to the full verified
-  value set (f32 4.0, f16/bf16 2.0, q8_0 1.0625, q5_0/q5_1 0.6875,
-  q4_0/q4_1/iq4_nl 0.5625) and gains a first-class-aware
-  `ResolveBytesPerElement` overload plus `--swa-full` detection (skips the
-  sliding-window KV discount when present, matching the engine's own
-  full-size-cache behavior). Wired into the Services card's context-fit
-  warning and `SuggestContextSize`'s ladder search, so switching the KV cache
-  dropdown from f16 to q8_0 visibly raises how much context fits the same
-  VRAM.
-- **"Suggest engine settings"** button on the Services card fills Context
-  Size, KV cache type, and Flash Attention with a hardware-tier
-  recommendation (`EngineOptionPresets`, from the owner-supplied llama-server
-  tuning guide's per-tier cheat sheet: 6 GB -> 8k ctx + q4_0; 8 GB -> 16k +
-  q8_0; 16 GB -> 32k+ + q8_0, capped at the model's training context).
-  Editable-form only, same contract as Auto Tune - nothing saves until Save
-  Config.
-- A quantized V cache combined with Flash Attention off shows an inline
-  warning (llama.cpp needs flash attention for a quantized V cache) but still
-  launches with exactly what was chosen; nothing is ever auto-changed.
-- N-gram speculative decoding is exposed as one experimental "Advanced engine
-  options" checkbox (`--spec-type ngram-mod`, zero additional VRAM). Verified
-  the full flag surface (`--flash-attn`, `--cache-type-k/v`,
-  `--context-shift`, `--spec-type`, DRY sampling, `--min-p`,
-  `--cont-batching` defaults) against the bundled llama-server b10069
-  `--help` output before implementing; every claim held.
-
 

@@ -802,4 +802,6 @@ The UI theme uses the brand colour palette (Forest green accent, Copper/Amber
 highlights) - see `docs/mascot.md` for the full palette. Typography uses the
 OS-native UI font by default (r21: the three embedded brand typefaces were
 removed for readability); Settings > Interface > Typography lets the user
-pick their own font for headings, body text, and code independently.
+pick their own font for headings, body text, and code independently. Settings
+> Interface > Theme (System/Dark/Light) is applied immediately on change and
+on startup.

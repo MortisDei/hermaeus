@@ -103,6 +103,13 @@ internal static class SetupWizardMigrationTests
     {
         using var temp = new TempDir();
         var settings = NewSettings(temp);
+        // Establish an isolated, empty previous root first. Leaving
+        // DataRootDirectory unset resolves "previous" to the real
+        // %LocalAppData%\Hermaeus on save, so the migration step tries to
+        // move files out from under whatever Hermaeus instance is actually
+        // running on the machine instead of finding nothing to migrate.
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("initial-root");
+        await settings.SaveAsync();
         var wizard = NewWizard(settings);
         wizard.LoadFromSettings();
         wizard.DataRootDirectory = temp.PathFor("fresh-root");

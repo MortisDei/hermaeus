@@ -23,21 +23,29 @@ public partial class SettingsView : UserControl
     private static void OnUiAppearanceChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (sender is not UiSettingsViewModel ui) return;
-        if (e.PropertyName is not (nameof(UiSettingsViewModel.HeadingFontFamily)
+
+        if (e.PropertyName is nameof(UiSettingsViewModel.HeadingFontFamily)
             or nameof(UiSettingsViewModel.BodyFontFamily)
             or nameof(UiSettingsViewModel.MonoFontFamily)
-            or nameof(UiSettingsViewModel.FontSize))) return;
+            or nameof(UiSettingsViewModel.FontSize))
+        {
+            AppFontService.Apply(ui.HeadingFontFamily, ui.BodyFontFamily, ui.MonoFontFamily, ui.FontSize);
+        }
 
-        AppFontService.Apply(ui.HeadingFontFamily, ui.BodyFontFamily, ui.MonoFontFamily, ui.FontSize);
+        if (e.PropertyName is nameof(UiSettingsViewModel.SelectedTheme))
+        {
+            AppThemeService.Apply(ui.SelectedTheme);
+        }
     }
 
     private void OnDataContextChanged(object? sender, EventArgs e)
     {
         if (DataContext is not SettingsViewModel vm) return;
 
-        // r21: live-preview font/size changes as the user types, mirroring
-        // what AppFontService applies from persisted settings at startup.
-        // -= before += keeps this idempotent if DataContext is set again.
+        // r21: live-preview font/size/theme changes as the user types,
+        // mirroring what AppFontService/AppThemeService apply from persisted
+        // settings at startup. -= before += keeps this idempotent if
+        // DataContext is set again.
         vm.Ui.PropertyChanged -= OnUiAppearanceChanged;
         vm.Ui.PropertyChanged += OnUiAppearanceChanged;
 

@@ -106,6 +106,7 @@ public partial class App : Application
             await settingsService.LoadAsync();
             var ui = settingsService.Settings.Ui;
             AppFontService.Apply(ui.HeadingFontFamily, ui.BodyFontFamily, ui.MonoFontFamily, ui.FontSize);
+            AppThemeService.Apply(ui.Theme);
             sp.GetRequiredService<AppLifecycleJournalService>().RecordStartup();
             // Constructed purely for its side effect: subscribes to toasts and
             // forwards Warning/Error ones onto the Notification voice channel.

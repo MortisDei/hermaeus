@@ -2049,6 +2049,13 @@ namespace Hermaeus.Tests
         {
             using var temp = new TempDir();
             var settings = NewSettings(temp);
+            // Establish an isolated previous data root before the VM changes it
+            // below. Leaving DataRootDirectory unset resolves the "previous"
+            // root to the real %LocalAppData%\Hermaeus on save, so the
+            // migration step tries to move files out from under whatever
+            // Hermaeus instance is actually running on the machine.
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("initial-data");
+            await settings.SaveAsync();
             var vm = NewSettingsViewModel(settings, new FakeSecretStore());
 
             vm.Llm.LlamaCppBaseUrl = "http://127.0.0.1:9000";
