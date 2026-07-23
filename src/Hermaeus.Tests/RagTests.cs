@@ -1099,6 +1099,137 @@ namespace Hermaeus.Tests
                 "planner notes should name both the dataset's and the current embedding model");
         }
 
+        // ── r21 2.1: embedding-failure BM25 fallback ─────────────────────────
+
+        public static async Task RagRetrievalFallsBackToBm25OnlyWhenEmbeddingServiceThrows()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var store = new SqliteRagStore(settings);
+            await store.InitializeAsync();
+
+            var docs = temp.PathFor("docs");
+            Directory.CreateDirectory(docs);
+            await File.WriteAllTextAsync(Path.Combine(docs, "a.txt"), "apple banana carrot");
+
+            var dataset = new RagDataset { Name = "embed-down" };
+            var pipeline = new RagPipeline(store, new FakeEmbeddingService());
+            await pipeline.IngestDirectoryAsync(dataset, docs);
+
+            var logs = new CollectingRuntimeLog();
+            var throwingEmbed = new ToggleFailEmbeddingService { ShouldThrow = true };
+            var query = new RagQueryService(store, throwingEmbed, new FakeLlm(), settings, new NoOpReranker(), logs);
+            var retrieval = await query.RetrieveAsync(dataset.Id, "apple", new RagQueryOptions(TopK: 5));
+
+            Equal(0, retrieval.SemanticCandidates.Count, "semantic scan should be skipped when the embedding call throws");
+            True(retrieval.Selected.Count > 0, "BM25-only retrieval should still return results for a keyword-matching corpus");
+            True(retrieval.PlannerNotes.Contains("semantic search unavailable", StringComparison.OrdinalIgnoreCase),
+                "planner notes should explain that semantic search was unavailable");
+            True(logs.Entries.Any(e => e.Level == Hermaeus.Core.Models.RuntimeLogLevel.Warning && e.Category == Hermaeus.Core.Models.RuntimeLogCategory.Rag),
+                "an embedding failure should log exactly one Warning in the Rag category");
+        }
+
+        public static async Task RagRetrievalCancellationDuringEmbeddingIsNotSwallowedIntoFallback()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var store = new SqliteRagStore(settings);
+            await store.InitializeAsync();
+
+            var docs = temp.PathFor("docs");
+            Directory.CreateDirectory(docs);
+            await File.WriteAllTextAsync(Path.Combine(docs, "a.txt"), "apple banana carrot");
+
+            var dataset = new RagDataset { Name = "embed-cancel" };
+            var pipeline = new RagPipeline(store, new FakeEmbeddingService());
+            await pipeline.IngestDirectoryAsync(dataset, docs);
+
+            var query = new RagQueryService(store, new CancellingEmbeddingService(), new FakeLlm(), settings, new NoOpReranker());
+            using var cts = new CancellationTokenSource();
+            await ThrowsAsync<OperationCanceledException>(() => query.RetrieveAsync(dataset.Id, "apple", new RagQueryOptions(TopK: 5), cts.Token));
+        }
+
+        public static async Task RagRetrievalRecoversToFullSemanticAfterATransientEmbeddingFailure()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var store = new SqliteRagStore(settings);
+            await store.InitializeAsync();
+
+            var docs = temp.PathFor("docs");
+            Directory.CreateDirectory(docs);
+            await File.WriteAllTextAsync(Path.Combine(docs, "a.txt"), "apple banana carrot");
+
+            var dataset = new RagDataset { Name = "embed-recovers" };
+            var pipeline = new RagPipeline(store, new FakeEmbeddingService());
+            await pipeline.IngestDirectoryAsync(dataset, docs);
+
+            var toggling = new ToggleFailEmbeddingService { ShouldThrow = true };
+            var query = new RagQueryService(store, toggling, new FakeLlm(), settings, new NoOpReranker());
+
+            var failed = await query.RetrieveAsync(dataset.Id, "apple", new RagQueryOptions(TopK: 5));
+            Equal(0, failed.SemanticCandidates.Count, "the first query should have degraded to BM25-only");
+
+            toggling.ShouldThrow = false;
+            var recovered = await query.RetrieveAsync(dataset.Id, "apple", new RagQueryOptions(TopK: 5));
+            True(recovered.SemanticCandidates.Count > 0,
+                "a later query on the same RagQueryService instance should be fully semantic again once the embedding server is back, proving no failure state is cached");
+            False(recovered.PlannerNotes.Contains("semantic search unavailable", StringComparison.OrdinalIgnoreCase),
+                "recovered planner notes should not still mention the earlier failure");
+        }
+
+        // ── r21 2.3: single-dataset read seam ─────────────────────────────────
+
+        public static async Task RagGetDatasetAsyncReturnsSingleDatasetOrNullWhenAbsent()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var store = new SqliteRagStore(settings);
+            await store.InitializeAsync();
+
+            var dataset = new RagDataset { Name = "single-read" };
+            await store.SaveDatasetAsync(dataset);
+
+            var query = new RagQueryService(store, new FakeEmbeddingService(), new FakeLlm(), settings, new NoOpReranker());
+
+            var found = await query.GetDatasetAsync(dataset.Id);
+            True(found is not null && found.Id == dataset.Id, "GetDatasetAsync should return the matching dataset");
+
+            var missing = await query.GetDatasetAsync("does-not-exist");
+            True(missing is null, "GetDatasetAsync should return null for an unknown dataset id");
+        }
+
+        private sealed class ToggleFailEmbeddingService : Hermaeus.Rag.Embeddings.IEmbeddingService
+        {
+            public bool ShouldThrow { get; set; }
+            public int Dimensions => 4;
+
+            public Task<float[]> EmbedAsync(string text, CancellationToken ct = default)
+            {
+                if (ShouldThrow)
+                    throw new HttpRequestException("connection refused");
+                return Task.FromResult(new[] { 1f, text.Length % 7, text.Length % 11, 0.5f });
+            }
+
+            public Task<List<float[]>> EmbedBatchAsync(IReadOnlyList<string> texts, CancellationToken ct = default) =>
+                Task.FromResult(texts.Select(t => new[] { 1f, t.Length % 7, t.Length % 11, 0.5f }).ToList());
+        }
+
+        private sealed class CancellingEmbeddingService : Hermaeus.Rag.Embeddings.IEmbeddingService
+        {
+            public int Dimensions => 4;
+
+            public Task<float[]> EmbedAsync(string text, CancellationToken ct = default) =>
+                throw new OperationCanceledException(ct);
+
+            public Task<List<float[]>> EmbedBatchAsync(IReadOnlyList<string> texts, CancellationToken ct = default) =>
+                Task.FromResult(texts.Select(t => new[] { 1f, t.Length % 7, t.Length % 11, 0.5f }).ToList());
+        }
+
         public static async Task RagReindexReEmbedsChunksAndUpdatesConfig()
         {
             using var temp = new TempDir();

@@ -10,7 +10,7 @@
                 <TextBlock Text="Configure semantic search and retrieval augmented generation settings."
                            FontSize="11" Opacity="0.55" />
             </StackPanel>
-            <Grid ColumnDefinitions="110,*,Auto" ColumnSpacing="12" RowDefinitions="Auto,Auto,Auto" RowSpacing="8">
+            <Grid ColumnDefinitions="110,*,Auto" ColumnSpacing="12" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="8">
                 <TextBlock Grid.Row="0" Grid.Column="0" Text="Embed URL" VerticalAlignment="Center"
                            Opacity="0.6" FontSize="13" />
                 <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding EmbeddingBaseUrl}"
@@ -29,6 +29,13 @@
                 <ComboBox Grid.Row="2" Grid.Column="1" ItemsSource="{Binding RerankerModelPathOptions}"
                           SelectedItem="{Binding RagRerankerModelPath}" FontSize="13" CornerRadius="6"
                           ToolTip.Tip="Optional model that re-scores search results for better ordering. Leave blank to skip reranking." />
+
+                <TextBlock Grid.Row="3" Grid.Column="0" Text="Chat knowledge context budget (tokens)" VerticalAlignment="Center"
+                           Opacity="0.6" FontSize="13" TextWrapping="Wrap" />
+                <NumericUpDown Grid.Row="3" Grid.Column="1" Value="{Binding ChatInjectionTokenBudget}"
+                               Minimum="200" Maximum="16000" Increment="100" FontSize="13"
+                               HorizontalAlignment="Left" Width="160"
+                               ToolTip.Tip="Maximum tokens of retrieved context injected into chat when a conversation has a Knowledge dataset attached." />
             </Grid>
             <TextBlock Text="Use Embed URL to target a dedicated embeddings server on a separate local port. The embedding model converts document text into vectors for semantic search. The optional reranker improves result ordering."
                        FontSize="11" Opacity="0.45" TextWrapping="Wrap" />

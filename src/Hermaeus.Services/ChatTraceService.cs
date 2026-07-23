@@ -21,7 +21,10 @@ public sealed record ChatTraceEntry(
     long FirstTokenMs,
     long TotalLatencyMs,
     string ErrorDetails,
-    string PreStreamBreakdown = "");
+    string PreStreamBreakdown = "",
+    int RagContextItems = 0,
+    long RagMs = 0,
+    string RagNote = "");
 
 /// <summary>
 /// Persists and reloads chat traces through the shared <see cref="ITraceStore"/>.
@@ -33,7 +36,16 @@ public sealed record ChatTraceEntry(
 /// </summary>
 public sealed class ChatTraceService
 {
-    private sealed record ChatTraceDetail(string Provider, string Runtime, string SystemPrompt, int AttachmentCount, int EstimatedTokens, string PreStreamBreakdown = "");
+    private sealed record ChatTraceDetail(
+        string Provider,
+        string Runtime,
+        string SystemPrompt,
+        int AttachmentCount,
+        int EstimatedTokens,
+        string PreStreamBreakdown = "",
+        int RagContextItems = 0,
+        long RagMs = 0,
+        string RagNote = "");
 
     private readonly ITraceStore? _traceStore;
     private readonly IRuntimeLogService _runtimeLogs;
@@ -66,7 +78,8 @@ public sealed class ChatTraceService
                 TotalTokens = trace.ProviderUsage?.TotalTokens ?? trace.EstimatedTokens,
                 Error = trace.ErrorDetails,
                 DetailJson = JsonSerializer.Serialize(new ChatTraceDetail(
-                    trace.Provider, trace.Runtime, trace.SystemPrompt, trace.AttachmentCount, trace.EstimatedTokens, trace.PreStreamBreakdown))
+                    trace.Provider, trace.Runtime, trace.SystemPrompt, trace.AttachmentCount, trace.EstimatedTokens, trace.PreStreamBreakdown,
+                    trace.RagContextItems, trace.RagMs, trace.RagNote))
             }, ct);
         }
         catch (Exception ex)
@@ -114,7 +127,10 @@ public sealed class ChatTraceService
             record.FirstTokenMs,
             record.TotalLatencyMs,
             record.Error,
-            detail?.PreStreamBreakdown ?? string.Empty);
+            detail?.PreStreamBreakdown ?? string.Empty,
+            detail?.RagContextItems ?? 0,
+            detail?.RagMs ?? 0,
+            detail?.RagNote ?? string.Empty);
     }
 
     private static ChatTraceDetail? TryParseDetail(string json)

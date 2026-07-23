@@ -2,6 +2,99 @@
 
 The CHANGELOG.md in root only contains the current 10 versions of changelogs. The rest are archived here in line with the 10 version limit in the main changelog.
 
+## [0.22.0-alpha] - 2026-07-19
+
+Implements docs/review r17 in full: hardware-aware context fit and benchmark
+truth. One theme across both fronts: numbers the app shows about models and
+hardware must be measured or derived, not guessed. A new internal GGUF
+header-metadata reader (layer count, KV head count, head dims, training
+context, quantization - never tensor data) makes both honest.
+
+### GGUF metadata and KV-cache math
+
+- **Sliding-window KV estimates**: GGUF parsing now reads
+  `*.attention.sliding_window` and `*.attention.sliding_window_pattern`, and
+  KV projections charge sliding-window layers at their window size instead of
+  the full configured context. This keeps auto-tune and context-fit warnings
+  from falsely capping long-context models that use interleaved sliding
+  attention.
+- **`GgufMetadataReader`** (`Aether.Services`): a small internal parser for
+  the GGUF header's metadata key/value section only. Bounds-checked against
+  untrusted downloaded files (64 KiB string cap, 1,000,000 array-element cap,
+  100,000 metadata-key cap, every read checked against the actual file
+  length); malformed or truncated input returns null rather than throwing.
+  Process-lifetime cached by (path, size, mtime).
+- **`KvCacheMath`** (`Aether.Services`): deterministic
+  `block_count * head_count_kv * (key_length + value_length) * bytesPerElement`
+  KV-cache estimate, with `--cache-type-k`/`--cache-type-v` overrides and
+  offload-fraction scaling for partial GPU layers. A known, documented
+  overestimate for sliding-window-attention models (the gemma family).
+- **`ModelFitEstimator`** gains a KV-cache-aware overload (null GGUF info
+  falls back byte-identically to the existing size-only estimate); the
+  Models page's fit chips now state the weights/KV split at the model's
+  configured or default context for local files.
+- **Services page context-fit warning** replaces the flat "above 16384
+  tokens" rule with hardware-aware VRAM/RAM math (weights + KV cache vs. the
+  detected GPU or system RAM) whenever a local GGUF header and a hardware
+  profile are both available, falling back to the old flat rule otherwise so
+  the warning never silently disappears. A training-context advisory is
+  appended independently when the configured context exceeds what the model
+  was trained at. Both are informational only - nothing here edits a value or
+  blocks Start.
+- **Auto Tune learns about context**: when the configured context does not
+  fit the GPU at full offload, `AutoTuneAsync` probes one additional
+  candidate (all layers at the largest context from a fixed ladder that
+  still fits, capped at the model's training context) before its usual
+  layer-by-layer descent at the originally configured context. This is the
+  only place in the app that changes a context size automatically, and it
+  only runs from the explicitly user-clicked Auto Tune action.
+
+### Benchmark truth
+
+- **Real server timings**: `RunCaseAsync` now streams via `StreamChatAsync`
+  events instead of the text-only stream, capturing llama-server's own
+  prompt/decode timings object. When a provider reports them, tokens/sec is
+  `predicted_n / predicted_ms * 1000` (a measurement) and prompt speed is
+  shown alongside it; each result is labeled `server-timings` or
+  `chars-approx` so measured and estimated numbers are never confused.
+- **Honest fallback math**: the chars/4 estimate (used when a provider
+  reports no timings) now divides by the decode window (total time minus
+  first-token latency) instead of total elapsed time, so a long prompt is no
+  longer counted as slow decode twice.
+- **Neutral resource score**: `ResourceScore` used to be Aether's own process
+  RSS delta - noise for a model running in `llama-server` (a different
+  process) or on a remote endpoint. It is now always neutral (1.0); the
+  before/after memory and VRAM snapshots stay for display.
+- **Honest run metadata**: runs against a managed local GGUF model now carry
+  the real context size/GPU layers/thread count/model path from the managed
+  server actually configured to serve that model, and a real quantization
+  label from the GGUF header, instead of stamping app-process values
+  (`Environment.ProcessorCount` threads, empty quantization) on every run
+  regardless of the model. `RuntimeKind` is derived from the model's own
+  provider tag instead of a hardcoded `"dotnet"`; Insights normalizes legacy
+  `"dotnet"` runs at load time (in memory only) so old and new runs of the
+  same model keep aggregating together.
+- **Rerun fidelity**: `RerunAsync` now resolves the live model instance from
+  the provider first (falling back to a thin reconstruction only if the
+  model no longer exists), so a rerun's metadata is not hollowed out by
+  losing `DefaultContextSize`/tags/profile linkage.
+- **Cold means cold**: since r14 made `cache_prompt: true` unconditional,
+  llama-server could retain a previous request's KV across benchmark runs,
+  letting a "Cold" run's first case get a warm prefill. A new
+  `LlmChatOptions.DisablePromptCache` (honored only by `LlamaCppService`,
+  benchmark-only in practice) is set for each case's iteration 0 and left
+  false for warm iterations; the chat path is untouched and keeps
+  `cache_prompt: true` as its default.
+- **No more dropdown restarts**: selecting a model in the Benchmarks dropdown
+  no longer stops and restarts the live managed chat server (previously a
+  1-2 minute operation on large models) - it only updates a status hint.
+  `RunAsync` already switches the server when actually needed via
+  `PrepareSelectedModelAsync`.
+
+57 new tests (884 -> 941). `docs/security-review.md` gained an r17 subsection
+for the GGUF header parser as untrusted-input surface. `docs/review/`
+archived to `docs/review/archived/r17/`.
+
 ## [0.21.0-alpha] - 2026-07-19
 
 Implements docs/review r16 in full: orchestration hardening, memory

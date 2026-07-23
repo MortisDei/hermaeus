@@ -18,7 +18,7 @@
                 Margin="60,0,0,0">
             <SelectableTextBlock Text="{Binding Content}"
                                  TextWrapping="Wrap"
-                                 FontSize="14"
+                                 FontSize="{DynamicResource AppChatFontSize}"
                                  LineHeight="22"
                                  Foreground="{DynamicResource TextOnAccentFillColorPrimaryBrush}" />
         </Border>
@@ -63,7 +63,7 @@
                     <controls:MarkdownViewer Markdown="{Binding Content}"
                                              IsError="{Binding IsError}"
                                              RequestSaveCodeBlock="{Binding $parent[ItemsControl].DataContext.SaveCodeBlockAction}"
-                                             FontSize="14" />
+                                             FontSize="{DynamicResource AppChatFontSize}" />
 
                     <!-- r19 1.2: generation stopped at the token cap, not because the
                          model finished naturally; say so and offer to keep going. -->

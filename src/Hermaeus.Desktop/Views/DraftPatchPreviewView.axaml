@@ -11,7 +11,7 @@
       <StackPanel Orientation="Horizontal" Spacing="8">
         <TextBlock Text="Draft patch preview" FontWeight="SemiBold" FontSize="16" />
         <TextBlock Text=" - " Opacity="0.7" />
-        <TextBlock Text="{Binding RelativePath}" FontFamily="avares://Hermaeus.Desktop/Assets/Fonts/JetBrainsMono#JetBrains Mono,Consolas,monospace" Opacity="0.8" />
+        <TextBlock Text="{Binding RelativePath}" FontFamily="{DynamicResource AppMonoFont}" Opacity="0.8" />
       </StackPanel>
       <TextBlock Text="Review the proposed changes before applying. Lines highlighted in green are additions, red are removals." FontSize="12" Opacity="0.7" TextWrapping="Wrap" />
     </StackPanel>

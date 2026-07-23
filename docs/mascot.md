@@ -88,15 +88,15 @@ below, pulled into the app's theme resources.
 
 ## Typography
 
-Also formalised in `docs/hermaeus-branding.png`:
-
-- **Cinzel** (semibold) - headings and brand moments.
-- **Source Sans 3** - UI body text.
-- **JetBrains Mono** - code, console, technical detail.
-
-Embedded under `Assets/Fonts/` (Cinzel, SourceSans3, JetBrainsMono; each a
-variable font plus its `OFL.txt`) and wired into `Styles/AppStyles.axaml`. See
-`NOTICE.md` for licensing.
+r21: the three embedded brand typefaces (Cinzel, Source Sans 3, JetBrains
+Mono) were removed after they proved hard to read in daily chat use, sizing
+aside. The UI now defaults to the OS-native font for headings/body text
+(`Segoe UI,sans-serif`) and code/technical text (`Consolas,monospace`), set
+in `App.axaml` and wired through `Styles/AppStyles.axaml`. Settings >
+Interface > Typography lets the user override each of the three roles
+(heading, body, code) with their own installed font; `AppFontService`
+applies the choice live. `docs/hermaeus-branding.png` still documents the
+original brand palette and typeface intent for reference.
 
 ## App icon vs. mascot icon
 

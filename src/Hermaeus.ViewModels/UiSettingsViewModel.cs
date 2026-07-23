@@ -22,6 +22,9 @@ public partial class UiSettingsViewModel : ObservableObject
     [ObservableProperty] private bool _enableGlobalHotkeys;
     [ObservableProperty] private string _globalHotkeyStatus = "System-wide hotkeys are off.";
     [ObservableProperty] private bool _showNavLabels;
+    [ObservableProperty] private string _headingFontFamily = string.Empty;
+    [ObservableProperty] private string _bodyFontFamily = string.Empty;
+    [ObservableProperty] private string _monoFontFamily = string.Empty;
 
     public string[] Themes { get; } = ["System", "Dark", "Light"];
 
@@ -37,6 +40,9 @@ public partial class UiSettingsViewModel : ObservableObject
         EnableLocalHotkeys = settings.Ui.EnableLocalHotkeys;
         EnableGlobalHotkeys = settings.Ui.EnableGlobalHotkeys;
         ShowNavLabels = settings.Ui.ShowNavLabels;
+        HeadingFontFamily = settings.Ui.HeadingFontFamily;
+        BodyFontFamily = settings.Ui.BodyFontFamily;
+        MonoFontFamily = settings.Ui.MonoFontFamily;
     }
 
     public void ApplyTo(AppSettings settings)
@@ -51,5 +57,8 @@ public partial class UiSettingsViewModel : ObservableObject
         settings.Ui.EnableLocalHotkeys = EnableLocalHotkeys;
         settings.Ui.EnableGlobalHotkeys = EnableGlobalHotkeys;
         settings.Ui.ShowNavLabels = ShowNavLabels;
+        settings.Ui.HeadingFontFamily = HeadingFontFamily;
+        settings.Ui.BodyFontFamily = BodyFontFamily;
+        settings.Ui.MonoFontFamily = MonoFontFamily;
     }
 }

@@ -102,7 +102,10 @@ public partial class App : Application
             logs = sp.GetRequiredService<IRuntimeLogService>();
 
             var phaseTimer = Stopwatch.StartNew();
-            await sp.GetRequiredService<ISettingsService>().LoadAsync();
+            var settingsService = sp.GetRequiredService<ISettingsService>();
+            await settingsService.LoadAsync();
+            var ui = settingsService.Settings.Ui;
+            AppFontService.Apply(ui.HeadingFontFamily, ui.BodyFontFamily, ui.MonoFontFamily, ui.FontSize);
             sp.GetRequiredService<AppLifecycleJournalService>().RecordStartup();
             // Constructed purely for its side effect: subscribes to toasts and
             // forwards Warning/Error ones onto the Notification voice channel.

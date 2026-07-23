@@ -9,6 +9,74 @@ FIFO for changelog entries, 10 versions in this file max. Remove older entries
 and append them to `docs/changelog-archive.md` to maintain the 10 version
 limit.
 
+## [0.27.0-alpha] - 2026-07-23
+
+Implements docs/review r21 in full: RAG meets chat. Retrieval Q&A used to
+exist only in the RAG panel's one-shot query box; a conversation can now
+have a Knowledge dataset attached, with per-turn retrieval injection,
+citation pills, trace visibility, and honest degradation baked in from the
+start. Also removes the three embedded brand fonts shipped in 0.26.0-alpha
+after they proved hard to read in daily chat use.
+
+### Added
+
+- **Knowledge: a RAG dataset can be attached to a conversation.** The chat
+  header's "Knowledge" picker (owner-facing name; code/settings stay `Rag*`)
+  lists datasets with chunk counts; selecting one attaches it, "None"
+  detaches. Every send against an attached conversation retrieves from the
+  dataset (top 5, parent/child per the dataset's own config) and, when
+  retrieval clears the confidence threshold, injects a bounded "Knowledge
+  Context" block into the system prompt. Retrieved chunks render as
+  individually clickable citation pills on the reply - the same pills the
+  RAG panel's query pane already used, now finally reachable from daily
+  chat. A weak or unrelated match ("thanks!") injects nothing, so attaching
+  a dataset never degrades unrelated turns.
+- **Chat Trace Viewer and Context Inspector show Knowledge truth.** The
+  previously-dead `RagContextItems` trace field is now populated, alongside
+  a new `RagMs` timing stage and a `RagNote` (weak-retrieval skip, embedding
+  fallback, or missing-dataset reason) shown whenever nothing was injected.
+  The Context Inspector's "exact context pack before send" now genuinely
+  includes the Knowledge block (or an honest skip/failure reason) instead of
+  silently omitting it.
+- **Embedding-server-down fallback removes a raw-exception path.**
+  `RagQueryService.RetrieveAsync` now degrades to BM25-only keyword search
+  (with a planner note) when the embedding call throws, instead of failing
+  the whole query - both from the RAG panel and from a chat send. The
+  fallback is never cached; the next query probes the embedding server
+  again.
+- **Open in chat** on a Dataset Manager card starts a new chat conversation
+  with that dataset pre-attached, reusing the same "new conversation" path
+  as Ctrl+N.
+- Settings > RAG gains "Chat knowledge context budget (tokens)"
+  (`RagSettings.ChatInjectionTokenBudget`, default 2000), separate from the
+  RAG panel's own query budget.
+- Privacy Audit's "Remote providers" entry now names chat knowledge
+  injection explicitly when a remote chat provider is selected and the RAG
+  subsystem is available, matching the existing image-attachment disclosure.
+
+### Changed
+
+- **The three embedded brand fonts (Cinzel, Source Sans 3, JetBrains Mono)
+  are removed.** The UI now defaults to the OS-native font for
+  headings/body text and code, matching how the app looked before the
+  0.26.0-alpha branding round. Settings > Interface > Typography lets a user
+  override the heading, body, and code font families independently with any
+  font installed on their system; `AppFontService` applies the choice live.
+  The Settings > Interface "Font size" control, previously saved but never
+  actually applied to anything, now controls chat message text size (the
+  composer, the user bubble, and the assistant reply).
+
+### Fixed
+
+- **A conversation's `RagDatasetId` no longer resolving (dataset deleted, or
+  a temporarily unmounted data root) degrades honestly**: the picker shows
+  "Knowledge: missing" and the send proceeds with nothing injected, rather
+  than silently forgetting the attachment or erroring the send.
+
+12 new tests. `ConversationStore` schema version 1 to 2 (additive
+`rag_dataset_id` column). `docs/security-review.md` gained an r21
+subsection. `docs/review/` archived to `docs/review/archived/r21/`.
+
 ## [0.26.1-alpha] - 2026-07-23
 
 ### Fixed
@@ -431,96 +499,4 @@ engine options.
   `--cont-batching` defaults) against the bundled llama-server b10069
   `--help` output before implementing; every claim held.
 
-## [0.22.0-alpha] - 2026-07-19
-
-Implements docs/review r17 in full: hardware-aware context fit and benchmark
-truth. One theme across both fronts: numbers the app shows about models and
-hardware must be measured or derived, not guessed. A new internal GGUF
-header-metadata reader (layer count, KV head count, head dims, training
-context, quantization - never tensor data) makes both honest.
-
-### GGUF metadata and KV-cache math
-
-- **Sliding-window KV estimates**: GGUF parsing now reads
-  `*.attention.sliding_window` and `*.attention.sliding_window_pattern`, and
-  KV projections charge sliding-window layers at their window size instead of
-  the full configured context. This keeps auto-tune and context-fit warnings
-  from falsely capping long-context models that use interleaved sliding
-  attention.
-- **`GgufMetadataReader`** (`Aether.Services`): a small internal parser for
-  the GGUF header's metadata key/value section only. Bounds-checked against
-  untrusted downloaded files (64 KiB string cap, 1,000,000 array-element cap,
-  100,000 metadata-key cap, every read checked against the actual file
-  length); malformed or truncated input returns null rather than throwing.
-  Process-lifetime cached by (path, size, mtime).
-- **`KvCacheMath`** (`Aether.Services`): deterministic
-  `block_count * head_count_kv * (key_length + value_length) * bytesPerElement`
-  KV-cache estimate, with `--cache-type-k`/`--cache-type-v` overrides and
-  offload-fraction scaling for partial GPU layers. A known, documented
-  overestimate for sliding-window-attention models (the gemma family).
-- **`ModelFitEstimator`** gains a KV-cache-aware overload (null GGUF info
-  falls back byte-identically to the existing size-only estimate); the
-  Models page's fit chips now state the weights/KV split at the model's
-  configured or default context for local files.
-- **Services page context-fit warning** replaces the flat "above 16384
-  tokens" rule with hardware-aware VRAM/RAM math (weights + KV cache vs. the
-  detected GPU or system RAM) whenever a local GGUF header and a hardware
-  profile are both available, falling back to the old flat rule otherwise so
-  the warning never silently disappears. A training-context advisory is
-  appended independently when the configured context exceeds what the model
-  was trained at. Both are informational only - nothing here edits a value or
-  blocks Start.
-- **Auto Tune learns about context**: when the configured context does not
-  fit the GPU at full offload, `AutoTuneAsync` probes one additional
-  candidate (all layers at the largest context from a fixed ladder that
-  still fits, capped at the model's training context) before its usual
-  layer-by-layer descent at the originally configured context. This is the
-  only place in the app that changes a context size automatically, and it
-  only runs from the explicitly user-clicked Auto Tune action.
-
-### Benchmark truth
-
-- **Real server timings**: `RunCaseAsync` now streams via `StreamChatAsync`
-  events instead of the text-only stream, capturing llama-server's own
-  prompt/decode timings object. When a provider reports them, tokens/sec is
-  `predicted_n / predicted_ms * 1000` (a measurement) and prompt speed is
-  shown alongside it; each result is labeled `server-timings` or
-  `chars-approx` so measured and estimated numbers are never confused.
-- **Honest fallback math**: the chars/4 estimate (used when a provider
-  reports no timings) now divides by the decode window (total time minus
-  first-token latency) instead of total elapsed time, so a long prompt is no
-  longer counted as slow decode twice.
-- **Neutral resource score**: `ResourceScore` used to be Aether's own process
-  RSS delta - noise for a model running in `llama-server` (a different
-  process) or on a remote endpoint. It is now always neutral (1.0); the
-  before/after memory and VRAM snapshots stay for display.
-- **Honest run metadata**: runs against a managed local GGUF model now carry
-  the real context size/GPU layers/thread count/model path from the managed
-  server actually configured to serve that model, and a real quantization
-  label from the GGUF header, instead of stamping app-process values
-  (`Environment.ProcessorCount` threads, empty quantization) on every run
-  regardless of the model. `RuntimeKind` is derived from the model's own
-  provider tag instead of a hardcoded `"dotnet"`; Insights normalizes legacy
-  `"dotnet"` runs at load time (in memory only) so old and new runs of the
-  same model keep aggregating together.
-- **Rerun fidelity**: `RerunAsync` now resolves the live model instance from
-  the provider first (falling back to a thin reconstruction only if the
-  model no longer exists), so a rerun's metadata is not hollowed out by
-  losing `DefaultContextSize`/tags/profile linkage.
-- **Cold means cold**: since r14 made `cache_prompt: true` unconditional,
-  llama-server could retain a previous request's KV across benchmark runs,
-  letting a "Cold" run's first case get a warm prefill. A new
-  `LlmChatOptions.DisablePromptCache` (honored only by `LlamaCppService`,
-  benchmark-only in practice) is set for each case's iteration 0 and left
-  false for warm iterations; the chat path is untouched and keeps
-  `cache_prompt: true` as its default.
-- **No more dropdown restarts**: selecting a model in the Benchmarks dropdown
-  no longer stops and restarts the live managed chat server (previously a
-  1-2 minute operation on large models) - it only updates a status hint.
-  `RunAsync` already switches the server when actually needed via
-  `PrepareSelectedModelAsync`.
-
-57 new tests (884 -> 941). `docs/security-review.md` gained an r17 subsection
-for the GGUF header parser as untrusted-input surface. `docs/review/`
-archived to `docs/review/archived/r17/`.
 

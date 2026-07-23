@@ -51,4 +51,11 @@ public class RagSettings
     /// Embedding model name used for document chunking and retrieval.
     /// </summary>
     public string EmbeddingModel { get; set; } = "nomic-embed-text";
+
+    /// <summary>
+    /// r21: token budget for the Knowledge context block injected into chat
+    /// when a conversation has a RAG dataset attached. Separate from the RAG
+    /// panel's own query token budget.
+    /// </summary>
+    public int ChatInjectionTokenBudget { get; set; } = 2000;
 }

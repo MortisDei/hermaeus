@@ -14,7 +14,7 @@
                 <ItemsControl ItemsSource="{Binding Paths}">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
-                            <TextBlock Text="{Binding}" FontFamily="avares://Hermaeus.Desktop/Assets/Fonts/JetBrainsMono#JetBrains Mono,Consolas,monospace" FontSize="11" TextWrapping="Wrap" Margin="0,2" />
+                            <TextBlock Text="{Binding}" FontFamily="{DynamicResource AppMonoFont}" FontSize="11" TextWrapping="Wrap" Margin="0,2" />
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>

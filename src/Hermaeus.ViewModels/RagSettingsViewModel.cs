@@ -15,6 +15,7 @@ public partial class RagSettingsViewModel : ObservableObject
     [ObservableProperty] private string _embeddingBaseUrl = "http://localhost:39202";
     [ObservableProperty] private string _embeddingModel = "nomic-embed-text";
     [ObservableProperty] private string _ragRerankerModelPath = string.Empty;
+    [ObservableProperty] private int _chatInjectionTokenBudget = 2000;
 
     public UiBoundCollection<string> EmbeddingModelOptions { get; } = [];
     public UiBoundCollection<string> RerankerModelPathOptions { get; } = [];
@@ -26,6 +27,7 @@ public partial class RagSettingsViewModel : ObservableObject
         EmbeddingBaseUrl = settings.Rag.EmbeddingBaseUrl;
         EmbeddingModel = settings.Rag.EmbeddingModel;
         RagRerankerModelPath = settings.Rag.RerankerModelPath;
+        ChatInjectionTokenBudget = settings.Rag.ChatInjectionTokenBudget;
         RefreshLocalAiAssetOptions(localAiAssetsRoot);
     }
 
@@ -34,6 +36,7 @@ public partial class RagSettingsViewModel : ObservableObject
         settings.Rag.EmbeddingBaseUrl = EmbeddingBaseUrl.Trim();
         settings.Rag.EmbeddingModel = EmbeddingModel;
         settings.Rag.RerankerModelPath = RagRerankerModelPath.Trim();
+        settings.Rag.ChatInjectionTokenBudget = ChatInjectionTokenBudget;
     }
 
     public void RefreshEmbeddingModelOptions(string localAiAssetsRoot)

@@ -141,6 +141,41 @@ app restart.
   configured model, skips semantic search and falls back to BM25-only
   retrieval with a planner note, instead of a raw exception or silently
   wrong rankings. Reindex the dataset to re-enable semantic search.
+- An unreachable or stopped embedding server falls back to the same BM25-only
+  path with a planner note ("semantic search unavailable: ...") instead of a
+  raw exception, both from the RAG panel and from a chat send with a
+  Knowledge dataset attached. The fallback is not cached - the next query
+  probes the embedding server again and is fully semantic once it is back.
+
+### Using a dataset in Chat
+
+- A conversation can have one RAG dataset attached via the chat header's
+  "Knowledge" picker (owner-facing name; settings and code keep the `Rag*`
+  names). Selecting "None" detaches it. The picker refreshes its dataset list
+  only when its flyout opens - there is no live update if a dataset is
+  created or deleted elsewhere while it is closed.
+- Every send against a conversation with a dataset attached retrieves from it
+  (top 5, parent/child per the dataset's own ingest config) and, when
+  retrieval clears the confidence threshold, injects a bounded "Knowledge
+  Context" block into the system prompt with the retrieved chunks. Chunks
+  that survive packing render as individually clickable citation pills on
+  the reply, the same pills the RAG panel's own query pane uses.
+- A weak or unrelated match (e.g. "thanks!") injects nothing - chat does not
+  parrot weakly-related chunks into every message just because a dataset
+  happens to be attached. Unlike the RAG panel, chat never refuses to answer;
+  weak retrieval simply means the model answers from its own knowledge, as it
+  always does when no context is injected.
+- The injection budget is `RagSettings.ChatInjectionTokenBudget` (default
+  2000 tokens; Settings > RAG > "Chat knowledge context budget"), separate
+  from the RAG panel's own query budget. TopK and the refusal threshold use
+  the pipeline defaults; there is no per-conversation override in this round.
+- If the attached dataset id no longer resolves (deleted, or a temporarily
+  unmounted data root), the picker shows "Knowledge: missing" and the send
+  proceeds with nothing injected. The stored id is never silently cleared -
+  only picking another dataset or "None" changes it - matching how missing
+  RAG sources are never auto-removed elsewhere in the app.
+- **Open in chat** on a Dataset Manager card starts a new conversation with
+  that dataset pre-attached.
 
 ### Reranker
 

@@ -96,13 +96,20 @@ public sealed class PrivacyAuditService
         var voiceRemote = activeVoiceProvider?.Capabilities.HasFlag(VoiceCapability.Remote) ?? false;
         var anyRemote = remoteChatProviders.Count > 0 || voiceRemote;
 
+        // r21 3.4: disclosure describes surface, not the current toggle state
+        // (matches the image-attachment entry above it) - it appears whenever
+        // the RAG subsystem is available and a remote chat provider is
+        // selected, not only when a conversation currently has a dataset
+        // attached.
+        var ragInjectionCapable = _ragStore is not null && remoteChatProviders.Count > 0;
         items.Add(new PrivacyAuditItem(
             "Remote providers",
             anyRemote ? "Review" : "Local",
             anyRemote
                 ? string.Join(" ", remoteChatProviders
                     .Select(p => $"{p.DisplayName} chat endpoint configured at {settings.Llm.OpenAiBaseUrl}. Prompts, and any images attached to a chat message, may leave the machine when selected.")
-                    .Concat(voiceRemote ? [$"Voice provider {activeVoiceProvider!.Name} sends audio off the machine."] : []))
+                    .Concat(voiceRemote ? [$"Voice provider {activeVoiceProvider!.Name} sends audio off the machine."] : [])
+                    .Concat(ragInjectionCapable ? ["Chat knowledge context: excerpts from local RAG datasets are included in prompts sent to the remote chat provider."] : []))
                 : "No enabled remote chat or voice provider detected in settings."));
 
         items.Add(new PrivacyAuditItem(

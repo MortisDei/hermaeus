@@ -18,6 +18,7 @@ using Markdig.Syntax;
 using Markdig.Syntax.Inlines;
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
+using Hermaeus.Desktop;
 
 namespace Hermaeus.Desktop.Controls;
 
@@ -53,8 +54,7 @@ public sealed class MarkdownViewer : ContentControl, IDisposable
     private static readonly MarkdownPipeline Pipeline =
         new MarkdownPipelineBuilder().UseAdvancedExtensions().Build();
 
-    private static readonly FontFamily MonoFamily =
-        new("avares://Hermaeus.Desktop/Assets/Fonts/JetBrainsMono#JetBrains Mono,Consolas,monospace");
+    private static FontFamily MonoFamily => AppFontService.MonoFont;
     private readonly DispatcherTimer _renderTimer;
     private string _lastRenderedMarkdown = string.Empty;
     private bool _lastRenderedIsError;

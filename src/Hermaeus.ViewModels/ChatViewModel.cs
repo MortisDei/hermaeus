@@ -5,6 +5,8 @@ using Hermaeus.Agent.Models;
 using Hermaeus.Agent.Services;
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
+using Hermaeus.Rag;
+using Hermaeus.Rag.Models;
 using Hermaeus.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -49,6 +51,10 @@ public sealed class ChatTraceViewModel
     public int MemoryItems { get; init; }
     public int AttachmentCount { get; init; }
     public int RagContextItems { get; init; }
+    public long RagMs { get; init; }
+    public string RagNote { get; init; } = string.Empty;
+    public bool HasRagNote => !string.IsNullOrWhiteSpace(RagNote);
+    public bool HasRagContext => RagContextItems > 0;
     public int EstimatedTokens { get; init; }
     public ChatTokenUsage? ProviderUsage { get; init; }
     public long FirstTokenMs { get; init; }
@@ -116,6 +122,8 @@ public partial class ChatViewModel : ViewModelBase
     private readonly ILessonStore? _lessons;
     private readonly IVoiceOrchestrator? _voice;
     private readonly ChatArtifactService? _artifacts;
+    private readonly RagQueryService? _rag;
+    private bool _suppressRagDatasetWrite;
     private CancellationTokenSource? _cts;
     private CancellationTokenSource? _ttsCts;
     private CancellationTokenSource? _contextUsageCts;
@@ -148,6 +156,14 @@ public partial class ChatViewModel : ViewModelBase
 
     public bool HasEarlierMessages => Messages.Count > MessageWindowSize + _revealedEarlierMessageCount;
     public UiBoundCollection<LlmModel>         AvailableModels { get; } = [];
+
+    /// <summary>r21 1.2: "Knowledge" dataset picker list, refreshed only when
+    /// the flyout opens (doc 03.1: no event plumbing between RagViewModel
+    /// and ChatViewModel).</summary>
+    public UiBoundCollection<RagDataset> AvailableRagDatasets { get; } = [];
+
+    /// <summary>Sentinel entry so the picker flyout has a real, clickable "detach" row.</summary>
+    public static readonly RagDataset NoneRagDataset = new() { Id = string.Empty, Name = "None" };
     public UiBoundCollection<ChatContextAttachment> ContextAttachments { get; } = [];
     public UiBoundCollection<ChatContextPartViewModel> ContextPreviewParts { get; } = [];
     public UiBoundCollection<ChatTraceViewModel> ChatTraces { get; } = [];
@@ -224,6 +240,26 @@ public partial class ChatViewModel : ViewModelBase
     [ObservableProperty] private bool      _isComparingModels;
     [ObservableProperty] private string    _compareStatus = string.Empty;
     [ObservableProperty] private string    _activeWorkspaceRoot = string.Empty;
+
+    /// <summary>r21: the RAG dataset id attached to the current conversation.
+    /// Empty means no dataset attached ("Knowledge" in the UI).</summary>
+    [ObservableProperty] private string    _ragDatasetId = string.Empty;
+
+    /// <summary>r21 1.2: the picker's current selection. Setting this writes
+    /// <see cref="RagDatasetId"/> (unless <see cref="_suppressRagDatasetWrite"/>
+    /// is set, e.g. while resolving the id after a conversation switch - doc
+    /// 03.2 forbids ever auto-clearing a stored id that fails to resolve).</summary>
+    [ObservableProperty] private RagDataset? _selectedRagDataset;
+
+    /// <summary>doc 03.2: an attached dataset id that no longer resolves to a
+    /// real dataset (deleted, or a temporarily unmounted data root) must
+    /// degrade honestly in the picker button, never silently forget the id.</summary>
+    public bool HasMissingRagDataset => !string.IsNullOrWhiteSpace(RagDatasetId) && SelectedRagDataset is null;
+
+    public string RagDatasetButtonLabel =>
+        string.IsNullOrWhiteSpace(RagDatasetId) ? "Knowledge"
+        : HasMissingRagDataset ? "Knowledge: missing"
+        : SelectedRagDataset!.Name;
 
     public event EventHandler?        ScrollToBottom;
     public event EventHandler<string>? ConversationSaved;
@@ -358,9 +394,11 @@ public partial class ChatViewModel : ViewModelBase
         ILessonStore? lessons = null,
         IVoiceOrchestrator? voice = null,
         ISystemInfoService? systemInfo = null,
-        ChatArtifactService? artifacts = null)
+        ChatArtifactService? artifacts = null,
+        RagQueryService? rag = null)
     {
         _artifacts = artifacts;
+        _rag = rag;
         SaveCodeBlockAction = (lang, code, markdown) => _ = SaveCodeBlockAsync(lang, code, markdown);
         _llm = llm; _store = store; _settings = settings; _tts = tts; _profiles = profiles; _toasts = toasts;
         _systemInfo = systemInfo;
@@ -541,6 +579,7 @@ public partial class ChatViewModel : ViewModelBase
         SystemPrompt          = conv.SystemPrompt;
         if (!string.IsNullOrEmpty(conv.ModelId))
             SelectedModel = AvailableModels.FirstOrDefault(m => m.Id == conv.ModelId) ?? SelectedModel;
+        RagDatasetId = conv.RagDatasetId;
         Messages.Clear();
         foreach (var msg in conv.Messages)
         {
@@ -563,6 +602,7 @@ public partial class ChatViewModel : ViewModelBase
         ScrollToBottom?.Invoke(this, EventArgs.Empty);
         await RefreshMemoryStatusAsync();
         await RefreshArtifactsAsync();
+        await ResolveSelectedRagDatasetAsync();
     }
 
     public void NewConversation()
@@ -572,9 +612,94 @@ public partial class ChatViewModel : ViewModelBase
         SystemPrompt          = _settings.Settings.Llm.DefaultSystemPrompt;
         Messages.Clear();
         Artifacts.Clear();
+        RagDatasetId = string.Empty;
+        SetSelectedRagDatasetWithoutWriting(NoneRagDataset);
         OnPropertyChanged(nameof(HasArtifacts));
         OnPropertyChanged(nameof(ArtifactsSummary));
         _ = Task.Run(RefreshMemoryStatusAsync);
+    }
+
+    /// <summary>r21 1.2: picking an entry from the Knowledge flyout list (including the "None" sentinel).</summary>
+    [RelayCommand]
+    private void SelectRagDataset(RagDataset? dataset) => SelectedRagDataset = dataset;
+
+    /// <summary>
+    /// r21 1.2: refreshes the Knowledge picker's dataset list. Called only
+    /// when the flyout opens (doc 03.1) - there is no event bus between
+    /// RagViewModel and ChatViewModel by design, so a dataset created or
+    /// deleted elsewhere is picked up on the picker's next open, not live.
+    /// </summary>
+    [RelayCommand]
+    private async Task RefreshRagDatasetsAsync()
+    {
+        if (_rag is null) return;
+        try
+        {
+            var datasets = await _rag.GetDatasetsAsync();
+            AvailableRagDatasets.Clear();
+            AvailableRagDatasets.Add(NoneRagDataset);
+            foreach (var ds in datasets)
+                AvailableRagDatasets.Add(ds);
+        }
+        catch (Exception ex)
+        {
+            _runtimeLogs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Rag,
+                $"Refreshing Knowledge datasets failed: {ex.Message}"));
+        }
+    }
+
+    /// <summary>
+    /// r21 3.2: resolves the current conversation's attached dataset id
+    /// against the store for an authoritative name/existence check,
+    /// independent of whether the picker flyout has ever been opened. Never
+    /// writes back to <see cref="RagDatasetId"/> - a resolve failure must
+    /// show "Knowledge: missing", not silently clear the stored id.
+    /// </summary>
+    private async Task ResolveSelectedRagDatasetAsync()
+    {
+        if (_rag is null || string.IsNullOrWhiteSpace(RagDatasetId))
+        {
+            SetSelectedRagDatasetWithoutWriting(NoneRagDataset);
+            return;
+        }
+
+        RagDataset? resolved = null;
+        try
+        {
+            resolved = await _rag.GetDatasetAsync(RagDatasetId);
+        }
+        catch (Exception ex)
+        {
+            _runtimeLogs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Rag,
+                $"Resolving the attached Knowledge dataset failed: {ex.Message}"));
+        }
+        SetSelectedRagDatasetWithoutWriting(resolved);
+    }
+
+    private void SetSelectedRagDatasetWithoutWriting(RagDataset? dataset)
+    {
+        _suppressRagDatasetWrite = true;
+        SelectedRagDataset = dataset;
+        _suppressRagDatasetWrite = false;
+    }
+
+    partial void OnRagDatasetIdChanged(string value)
+    {
+        OnPropertyChanged(nameof(RagDatasetButtonLabel));
+        OnPropertyChanged(nameof(HasMissingRagDataset));
+    }
+
+    partial void OnSelectedRagDatasetChanged(RagDataset? value)
+    {
+        OnPropertyChanged(nameof(RagDatasetButtonLabel));
+        OnPropertyChanged(nameof(HasMissingRagDataset));
+        if (_suppressRagDatasetWrite)
+            return;
+
+        // r21 1.2: matches how ModelId/SystemPrompt changes persist today -
+        // they land in the Conversation object PersistAsync builds on the
+        // next save, not an immediate write-through.
+        RagDatasetId = value is null || value.Id.Length == 0 ? string.Empty : value.Id;
     }
 
     [RelayCommand(CanExecute = nameof(CanSend))]
@@ -622,8 +747,14 @@ public partial class ChatViewModel : ViewModelBase
             foreach (var source in memorySources)
                 asst.Sources.Add(source);
 
+            // r21 1.3: runs after memory recall in the pre-stream phase
+            // (sequential is fine and keeps the trace breakdown legible).
+            var (ragContext, ragSources, ragMs, ragContextItems, ragNote) = await BuildRagInjectionAsync(text, _cts.Token);
+            foreach (var source in ragSources)
+                asst.Sources.Add(source);
+
             var promptBuildSw = Stopwatch.StartNew();
-            var systemPromptTokens = EstimateTokens(SystemPrompt) + EstimateTokens(memoryContext);
+            var systemPromptTokens = EstimateTokens(SystemPrompt) + EstimateTokens(memoryContext) + EstimateTokens(ragContext);
             var history = TruncateHistoryToContextWindow(
                 Messages.Where(m => !m.IsStreaming).ToList(),
                 ResolveContextWindowLimit(),
@@ -654,7 +785,7 @@ public partial class ChatViewModel : ViewModelBase
 
             var result = await ChatSendOrchestrator.StreamAsync(
                 _llm, selectedModelId, history,
-                BuildChatOptions(memoryContext),
+                BuildChatOptions(memoryContext, ragContext),
                 onToken: token =>
                 {
                     if (Interlocked.Exchange(ref sawContent, 1) == 0)
@@ -683,7 +814,7 @@ public partial class ChatViewModel : ViewModelBase
                 ScrollToBottom?.Invoke(this, EventArgs.Empty);
             }
 
-            var timing = new ChatSendTiming(recallMs, selectMs, lessonMs, promptBuildMs, result.FirstTokenMs, result.TotalLatencyMs, result.ServerTimings, result.FirstEventMs);
+            var timing = new ChatSendTiming(recallMs, selectMs, lessonMs, promptBuildMs, result.FirstTokenMs, result.TotalLatencyMs, result.ServerTimings, result.FirstEventMs, ragMs);
             asst.DurationMs = result.TotalLatencyMs;
             PerformanceLog = result.Cancelled
                 ? $"cancelled after {result.TotalLatencyMs} ms"
@@ -757,7 +888,7 @@ public partial class ChatViewModel : ViewModelBase
                     SpeakStreamingChunk(asst.Content);
             }
 
-            AddChatTrace(snapshot, selectedModelId, result.Usage, result.FirstTokenMs, result.TotalLatencyMs, traceError, timing.Format());
+            AddChatTrace(snapshot, selectedModelId, result.Usage, result.FirstTokenMs, result.TotalLatencyMs, traceError, timing.Format(), ragContextItems, ragMs, ragNote);
         }
         catch (Exception ex)
         {
@@ -1060,7 +1191,7 @@ public partial class ChatViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private void ToggleContextInspector()
+    private async Task ToggleContextInspectorAsync()
     {
         ShowContextInspector = !ShowContextInspector;
         if (ShowContextInspector)
@@ -1070,7 +1201,10 @@ public partial class ChatViewModel : ViewModelBase
             ShowSystemPrompt = false;
         }
         if (ShowContextInspector)
+        {
             RefreshContextInspector();
+            await RefreshContextInspectorRagPartAsync();
+        }
     }
 
     [RelayCommand]
@@ -1140,9 +1274,9 @@ public partial class ChatViewModel : ViewModelBase
         && SelectedModel is not null
         && (!string.IsNullOrWhiteSpace(InputText) || ContextAttachments.Any(a => a.IsReady));
 
-    private LlmChatOptions BuildChatOptions(string memoryContext = "") => new()
+    private LlmChatOptions BuildChatOptions(string memoryContext = "", string ragContext = "") => new()
     {
-        SystemPrompt = ComposeSystemPrompt(memoryContext),
+        SystemPrompt = ComposeSystemPrompt(memoryContext, ragContext),
         Temperature = Temperature,
         MaxTokens = MaxTokens > 0 ? MaxTokens : null,
         TopP = TopP,
@@ -1153,9 +1287,9 @@ public partial class ChatViewModel : ViewModelBase
         PresencePenalty = PresencePenalty
     };
 
-    private string? ComposeSystemPrompt(string memoryContext)
+    private string? ComposeSystemPrompt(string memoryContext, string ragContext = "")
     {
-        var combined = string.IsNullOrWhiteSpace(memoryContext) ? SystemPrompt : $"{SystemPrompt}{memoryContext}";
+        var combined = SystemPrompt + memoryContext + ragContext;
         return string.IsNullOrWhiteSpace(combined) ? null : combined;
     }
 
@@ -1229,6 +1363,73 @@ public partial class ChatViewModel : ViewModelBase
             contextText += _memoryInjection.GetMemoryInstructionPrompt();
 
         return (contextText, sources, injectedIds, recallMs, selectMs, lessonMs);
+    }
+
+    /// <summary>
+    /// r21 1.3: mirrors <see cref="BuildMemoryInjectionAsync"/> exactly in
+    /// shape. Runs only when the current conversation has a resolvable RAG
+    /// dataset attached; retrieval only ever adds context, it never blocks,
+    /// rewrites, or vetoes a send. Everything after the guard clauses is
+    /// best-effort (doc 02.2): any exception here must never fail the send,
+    /// it logs one Warning and returns empty. Cancellation propagates
+    /// (never swallowed into the best-effort catch), matching 2.1's fallback.
+    /// </summary>
+    private async Task<(string ContextText, List<SourceReference> Sources, long RagMs, int RagContextItems, string RagNote)> BuildRagInjectionAsync(string question, CancellationToken ct)
+    {
+        if (_rag is null || string.IsNullOrWhiteSpace(RagDatasetId) || string.IsNullOrWhiteSpace(question))
+            return (string.Empty, [], 0, 0, string.Empty);
+
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            var dataset = await _rag.GetDatasetAsync(RagDatasetId, ct);
+            if (dataset is null)
+                return (string.Empty, [], sw.ElapsedMilliseconds, 0, "attached dataset no longer exists");
+
+            var opts = new RagQueryOptions(
+                TopK: 5,
+                UseParentChild: dataset.Config.UseParentChild,
+                ContextTokenBudget: _settings.Settings.Rag.ChatInjectionTokenBudget);
+            var retrieval = await _rag.RetrieveAsync(dataset.Id, question, opts, ct);
+
+            // r21 1.3: the entire reason attaching a dataset does not degrade
+            // normal conversation - chat must not parrot weakly-related
+            // chunks into "thanks!" or "write me a poem" just because a
+            // dataset happens to be attached.
+            if (RagQueryService.WouldRefuse(retrieval.SemanticCandidates, retrieval.Bm25Candidates, opts.RefusalThreshold))
+                return (string.Empty, [], sw.ElapsedMilliseconds, 0, "retrieval below confidence threshold; nothing injected");
+
+            var pack = _rag.BuildContextPack(retrieval.Selected, opts);
+            if (pack.PackedChunks.Count == 0 || string.IsNullOrWhiteSpace(pack.Text))
+                return (string.Empty, [], sw.ElapsedMilliseconds, 0, retrieval.PlannerNotes);
+
+            var contextText =
+                $"\n---\n## Knowledge Context (dataset: {dataset.Name})\n" +
+                "The following excerpts were retrieved from the user's local documents\n" +
+                "because they appear relevant to the message. Treat them as reference\n" +
+                "material; if they do not answer the question, say so rather than\n" +
+                "guessing. Cite excerpts as [1], [2], ... when you rely on them.\n\n" +
+                pack.Text + "\n";
+
+            var sources = pack.PackedChunks.Select(packed => new SourceReference(
+                ProvenanceKind.Rag,
+                packed.Chunk.SourceTitle,
+                Locator: string.IsNullOrWhiteSpace(packed.Chunk.SourcePath) ? packed.Chunk.SourceFile : packed.Chunk.SourcePath,
+                Snippet: packed.Content,
+                Timestamp: null)).ToList();
+
+            return (contextText, sources, sw.ElapsedMilliseconds, pack.PackedChunks.Count, retrieval.PlannerNotes);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _runtimeLogs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Rag,
+                $"Knowledge context injection failed: {ex.Message}"));
+            return (string.Empty, [], sw.ElapsedMilliseconds, 0, string.Empty);
+        }
     }
 
     /// <summary>
@@ -1313,7 +1514,46 @@ public partial class ChatViewModel : ViewModelBase
         ContextPreviewRaw = string.Join("\n\n---\n\n", snapshot.Parts.Select(part => $"[{part.Kind}] {part.Title}\n{part.Content}"));
     }
 
-    private void AddChatTrace(ChatContextSnapshot snapshot, string modelId, ChatTokenUsage? usage, long firstTokenMs, long totalMs, string error, string preStreamBreakdown)
+    /// <summary>
+    /// r21 1.5: the Context Inspector's claim to show "the exact context pack
+    /// before send" must not silently omit the Knowledge block.
+    /// <see cref="RefreshContextInspector"/> only builds parts from static
+    /// state, so this runs the real per-draft retrieval (bounded by a short
+    /// timeout) and appends either the block or a one-line skip/failure
+    /// reason as its own part.
+    /// </summary>
+    private async Task RefreshContextInspectorRagPartAsync()
+    {
+        if (_rag is null || string.IsNullOrWhiteSpace(RagDatasetId))
+            return;
+
+        var datasetLabel = string.IsNullOrWhiteSpace(SelectedRagDataset?.Name) ? RagDatasetId : SelectedRagDataset!.Name;
+        string content;
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+        try
+        {
+            var (ragContext, _, _, _, ragNote) = await BuildRagInjectionAsync(InputText.Trim(), cts.Token);
+            content = !string.IsNullOrWhiteSpace(ragContext)
+                ? ragContext
+                : $"retrieval skipped: {(string.IsNullOrWhiteSpace(ragNote) ? "no draft text or nothing relevant" : ragNote)}";
+        }
+        catch (OperationCanceledException)
+        {
+            content = "retrieval failed: timed out";
+        }
+
+        var part = new ChatContextPartViewModel
+        {
+            Kind = "Knowledge",
+            Title = $"Dataset: {datasetLabel}",
+            Content = content,
+            EstimatedTokens = EstimateTokens(content)
+        };
+        ContextPreviewParts.Add(part);
+        ContextPreviewRaw += $"\n\n---\n\n[{part.Kind}] {part.Title}\n{part.Content}";
+    }
+
+    private void AddChatTrace(ChatContextSnapshot snapshot, string modelId, ChatTokenUsage? usage, long firstTokenMs, long totalMs, string error, string preStreamBreakdown, int ragContextItems = 0, long ragMs = 0, string ragNote = "")
     {
         var model = AvailableModels.FirstOrDefault(m => m.Id == modelId);
         var trace = new ChatTraceViewModel
@@ -1323,6 +1563,9 @@ public partial class ChatViewModel : ViewModelBase
             Runtime = model?.ProviderTag ?? _llm.ProviderName,
             SystemPrompt = SystemPrompt,
             AttachmentCount = snapshot.Parts.Count(p => p.Kind == "Attachment"),
+            RagContextItems = ragContextItems,
+            RagMs = ragMs,
+            RagNote = ragNote,
             EstimatedTokens = snapshot.EstimatedTokens,
             ProviderUsage = usage,
             FirstTokenMs = firstTokenMs,
@@ -1338,7 +1581,8 @@ public partial class ChatViewModel : ViewModelBase
         var entry = new ChatTraceEntry(
             trace.Id, trace.Timestamp, trace.ModelId, trace.Provider, trace.Runtime, trace.SystemPrompt,
             trace.AttachmentCount, trace.EstimatedTokens, trace.ProviderUsage, trace.FirstTokenMs,
-            trace.TotalLatencyMs, trace.ErrorDetails, trace.PreStreamBreakdown);
+            trace.TotalLatencyMs, trace.ErrorDetails, trace.PreStreamBreakdown,
+            trace.RagContextItems, trace.RagMs, trace.RagNote);
         _ = Task.Run(() => _chatTraces?.PersistAsync(entry, CurrentConversationId) ?? Task.CompletedTask);
     }
 
@@ -1357,6 +1601,9 @@ public partial class ChatViewModel : ViewModelBase
             Runtime = entry.Runtime,
             SystemPrompt = entry.SystemPrompt,
             AttachmentCount = entry.AttachmentCount,
+            RagContextItems = entry.RagContextItems,
+            RagMs = entry.RagMs,
+            RagNote = entry.RagNote,
             EstimatedTokens = entry.EstimatedTokens,
             ProviderUsage = entry.ProviderUsage,
             FirstTokenMs = entry.FirstTokenMs,
@@ -1488,6 +1735,32 @@ public partial class ChatViewModel : ViewModelBase
             systemTokens,
             currentPromptTokens);
 
+    /// <summary>
+    /// r21 3.3: "Open in chat" from the Dataset Manager attaches a dataset to
+    /// a brand-new conversation and must persist that attachment immediately
+    /// - <see cref="PersistAsync"/> itself is a no-op until the first message
+    /// is sent (see its own guard below), but the attachment must survive
+    /// navigating away or an app restart even before the user sends anything.
+    /// </summary>
+    public async Task AttachRagDatasetAndPersistAsync(RagDataset dataset)
+    {
+        SelectedRagDataset = dataset;
+
+        if (string.IsNullOrEmpty(CurrentConversationId))
+            CurrentConversationId = Guid.NewGuid().ToString();
+
+        await _store.SaveAsync(new Conversation
+        {
+            Id = CurrentConversationId,
+            Title = ConversationTitle,
+            ModelId = SelectedModel?.Id ?? string.Empty,
+            SystemPrompt = SystemPrompt,
+            RagDatasetId = RagDatasetId,
+            Messages = []
+        });
+        ConversationSaved?.Invoke(this, CurrentConversationId);
+    }
+
     private async Task PersistAsync()
     {
         if (Messages.Count == 0) return;
@@ -1514,6 +1787,7 @@ public partial class ChatViewModel : ViewModelBase
             Tags = existing?.Tags ?? [],
             IsPinned = existing?.IsPinned ?? false,
             IsArchived = existing?.IsArchived ?? false,
+            RagDatasetId = RagDatasetId,
             Messages = Messages.Where(m => !m.IsStreaming).Select(m => new Message
             {
                 Id = m.Id, ConversationId = CurrentConversationId,

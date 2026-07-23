@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -19,9 +20,26 @@ public partial class SettingsView : UserControl
     private void OnPointerWheelChanged(object? sender, PointerWheelEventArgs e) =>
         WheelScrollHelper.Handle(PageScroller, e);
 
+    private static void OnUiAppearanceChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (sender is not UiSettingsViewModel ui) return;
+        if (e.PropertyName is not (nameof(UiSettingsViewModel.HeadingFontFamily)
+            or nameof(UiSettingsViewModel.BodyFontFamily)
+            or nameof(UiSettingsViewModel.MonoFontFamily)
+            or nameof(UiSettingsViewModel.FontSize))) return;
+
+        AppFontService.Apply(ui.HeadingFontFamily, ui.BodyFontFamily, ui.MonoFontFamily, ui.FontSize);
+    }
+
     private void OnDataContextChanged(object? sender, EventArgs e)
     {
         if (DataContext is not SettingsViewModel vm) return;
+
+        // r21: live-preview font/size changes as the user types, mirroring
+        // what AppFontService applies from persisted settings at startup.
+        // -= before += keeps this idempotent if DataContext is set again.
+        vm.Ui.PropertyChanged -= OnUiAppearanceChanged;
+        vm.Ui.PropertyChanged += OnUiAppearanceChanged;
 
         vm.Data.RequestDataRootPicker = async () =>
         {

@@ -10,6 +10,13 @@ public class Conversation
     public List<string> Tags { get; set; } = [];
     public bool IsPinned { get; set; }
     public bool IsArchived { get; set; }
+
+    /// <summary>
+    /// r21: RAG dataset id attached to this conversation for per-turn
+    /// retrieval injection ("Knowledge" in the chat UI). Empty means no
+    /// dataset attached.
+    /// </summary>
+    public string RagDatasetId { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     public List<Message> Messages { get; set; } = [];

@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Hermaeus.ViewModels"
+             xmlns:rag="using:Hermaeus.Rag.Models"
              xmlns:controls="using:Hermaeus.Desktop.Controls"
              xmlns:views="using:Hermaeus.Desktop.Views"
              x:Class="Hermaeus.Desktop.Views.ChatView"
@@ -48,7 +49,7 @@
                 Padding="12,6"
                 BorderThickness="0,0,0,1"
                 BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
-            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
 
                 <TextBlock Grid.Column="0" Text="Model"
                            VerticalAlignment="Center" Opacity="0.5" FontSize="12" />
@@ -169,49 +170,95 @@
                     </Button.Flyout>
                 </Button>
 
+                <!-- r21 1.2: "Knowledge" dataset picker. UI copy says "Knowledge";
+                     code/settings stay Rag*. Refreshes its list only when the
+                     flyout opens (doc 03.1 - no event plumbing). -->
                 <Button Grid.Column="3" Classes="icon-btn"
+                        x:Name="RagPickerButton"
+                        Command="{Binding RefreshRagDatasetsCommand}"
+                        ToolTip.Tip="Attach a RAG dataset to this conversation">
+                    <Button.Flyout>
+                        <Flyout Placement="Bottom">
+                            <StackPanel Width="260" Spacing="6">
+                                <TextBlock Text="Knowledge" FontSize="13" FontWeight="SemiBold" />
+                                <TextBlock Text="Attach a dataset so this conversation's sends retrieve context from it."
+                                           FontSize="11" Opacity="0.55" TextWrapping="Wrap" />
+                                <ItemsControl ItemsSource="{Binding AvailableRagDatasets}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate DataType="rag:RagDataset">
+                                            <Button Command="{Binding $parent[ItemsControl].DataContext.SelectRagDatasetCommand}"
+                                                    CommandParameter="{Binding}"
+                                                    Click="OnRagDatasetSelected"
+                                                    HorizontalAlignment="Stretch"
+                                                    HorizontalContentAlignment="Left"
+                                                    Background="Transparent"
+                                                    BorderThickness="0"
+                                                    Padding="8,6"
+                                                    CornerRadius="6">
+                                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                                    <TextBlock Text="{Binding Name}" FontSize="12" />
+                                                    <TextBlock Text="{Binding ChunkCount, StringFormat={}{0} chunks}"
+                                                               FontSize="10" Opacity="0.5" VerticalAlignment="Center"
+                                                               IsVisible="{Binding Id, Converter={x:Static views:NotEmptyConverter.Instance}}" />
+                                                </StackPanel>
+                                            </Button>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Flyout>
+                    </Button.Flyout>
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                        <PathIcon Data="M12 3L1 9l11 6 9-4.91V17h2V9L12 3zM5 13.18v4L12 21l7-3.82v-4L12 17l-7-3.82z"
+                                  Width="15" Height="15" />
+                        <TextBlock Text="{Binding RagDatasetButtonLabel}" FontSize="12"
+                                   Classes.context-usage-critical="{Binding HasMissingRagDataset}" />
+                    </StackPanel>
+                </Button>
+
+                <Button Grid.Column="4" Classes="icon-btn"
                         Command="{Binding ToggleSystemPromptCommand}"
                         ToolTip.Tip="System prompt">
                     <PathIcon Data="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 9h12v2H6V9zm8 5H6v-2h8v2zm4-6H6V6h12v2z"
                               Width="16" Height="16" />
                 </Button>
 
-                <Button Grid.Column="4" Classes="icon-btn"
+                <Button Grid.Column="5" Classes="icon-btn"
                         Command="{Binding ClearChatCommand}"
                         ToolTip.Tip="Clear chat">
                     <PathIcon Data="M12 2C6.47 2 2 6.47 2 12s4.47 10 10 10 10-4.47 10-10S17.53 2 12 2zm5 13.59L15.59 17 12 13.41 8.41 17 7 15.59 10.59 12 7 8.41 8.41 7 12 10.59 15.59 7 17 8.41 13.41 12 17 15.59z"
                               Width="16" Height="16" />
                 </Button>
 
-                <Button Grid.Column="5" Classes="icon-btn"
+                <Button Grid.Column="6" Classes="icon-btn"
                         Command="{Binding ToggleContextInspectorCommand}"
                         ToolTip.Tip="Context inspector">
                     <PathIcon Data="M3 4h18v2H3V4zm0 5h18v2H3V9zm0 5h12v2H3v-2zm0 5h8v2H3v-2z"
                               Width="16" Height="16" />
                 </Button>
 
-                <Button Grid.Column="6" Classes="icon-btn"
+                <Button Grid.Column="7" Classes="icon-btn"
                         Command="{Binding ToggleChatTracesCommand}"
                         ToolTip.Tip="Chat traces">
                     <PathIcon Data="M12 2a10 10 0 1 0 10 10h-2a8 8 0 1 1-2.34-5.66L14 10h8V2l-2.93 2.93A9.96 9.96 0 0 0 12 2z"
                               Width="16" Height="16" />
                 </Button>
 
-                <Button Grid.Column="7" Classes="icon-btn"
+                <Button Grid.Column="8" Classes="icon-btn"
                         Command="{Binding ToggleCompareModelsCommand}"
                         ToolTip.Tip="Compare models">
                     <PathIcon Data="M4 5h7v14H4V5zm9 0h7v14h-7V5zM6 7v10h3V7H6zm9 0v10h3V7h-3z"
                               Width="16" Height="16" />
                 </Button>
 
-                <Button Grid.Column="8" Classes="icon-btn"
+                <Button Grid.Column="9" Classes="icon-btn"
                         Command="{Binding ExportMarkdownCommand}"
                         ToolTip.Tip="Export conversation as Markdown">
                     <PathIcon Data="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zM13 9V3.5L18.5 9H13zM8 13h8v2H8v-2zm0 4h8v2H8v-2z"
                               Width="16" Height="16" />
                 </Button>
 
-                <Button Grid.Column="9" Classes="icon-btn"
+                <Button Grid.Column="10" Classes="icon-btn"
                         Command="{Binding ExportJsonCommand}"
                         ToolTip.Tip="Export conversation as JSON">
                     <PathIcon Data="M5 3h14v18H5V3zm2 2v14h10V5H7zm2 3h2v2H9V8zm4 0h2v2h-2V8zm-4 4h2v2H9v-2zm4 0h2v2h-2v-2z"
@@ -221,7 +268,7 @@
                 <!-- r19 4.4: global stop for streamed auto-speech, which queues many
                      chunks - StopChannel clears the whole queue, not just what is
                      currently playing. -->
-                <Button Grid.Column="10" Classes="icon-btn"
+                <Button Grid.Column="11" Classes="icon-btn"
                         Command="{Binding StopSpeakingCommand}"
                         IsVisible="{Binding IsVoicePlaying}"
                         ToolTip.Tip="Stop voice playback">
@@ -290,7 +337,7 @@
                     </ItemsControl>
                     <Expander Header="Raw model context">
                         <SelectableTextBlock Text="{Binding ContextPreviewRaw}"
-                                             FontFamily="avares://Hermaeus.Desktop/Assets/Fonts/JetBrainsMono#JetBrains Mono,Consolas,monospace"
+                                             FontFamily="{DynamicResource AppMonoFont}"
                                              FontSize="11"
                                              TextWrapping="Wrap"
                                              MaxHeight="180" />
@@ -326,6 +373,12 @@
                             <TextBlock Text="{Binding SelectedChatTrace.TotalLatencyMs, StringFormat='Total latency: {0} ms', FallbackValue='Total latency: N/A'}" FontSize="11" Opacity="0.65" />
                             <TextBlock Text="{Binding SelectedChatTrace.AttachmentCount, StringFormat='Attachments: {0}', FallbackValue='Attachments: N/A'}" FontSize="11" Opacity="0.65" />
                             <TextBlock Text="{Binding SelectedChatTrace.EstimatedTokens, StringFormat='Estimated tokens: {0}', FallbackValue='Estimated tokens: N/A'}" FontSize="11" Opacity="0.65" />
+                            <TextBlock Text="{Binding SelectedChatTrace.RagContextItems, StringFormat='Knowledge chunks injected: {0}'}" FontSize="11" Opacity="0.65"
+                                       IsVisible="{Binding SelectedChatTrace.HasRagContext}" />
+                            <TextBlock Text="{Binding SelectedChatTrace.RagMs, StringFormat='Knowledge retrieval: {0} ms'}" FontSize="11" Opacity="0.65"
+                                       IsVisible="{Binding SelectedChatTrace.HasRagContext}" />
+                            <TextBlock Text="{Binding SelectedChatTrace.RagNote}" FontSize="11" Opacity="0.65" TextWrapping="Wrap"
+                                       IsVisible="{Binding SelectedChatTrace.HasRagNote}" />
                             <SelectableTextBlock Text="{Binding SelectedChatTrace.ErrorDetails, FallbackValue='No errors'}" FontSize="11" TextWrapping="Wrap" />
                     </StackPanel>
                 </Grid>

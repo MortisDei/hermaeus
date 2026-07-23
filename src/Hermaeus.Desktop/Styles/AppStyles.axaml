@@ -4,13 +4,13 @@
     <!-- Global defaults - minimal to avoid breaking local layouts -->
     <Style Selector="Window">
         <Setter Property="FontSize" Value="13" />
-        <Setter Property="FontFamily" Value="{DynamicResource BrandBodyFont}" />
+        <Setter Property="FontFamily" Value="{DynamicResource AppBodyFont}" />
     </Style>
 
     <Style Selector="TextBlock.page-title">
         <Setter Property="FontSize" Value="26" />
         <Setter Property="FontWeight" Value="SemiBold" />
-        <Setter Property="FontFamily" Value="{DynamicResource BrandHeadingFont}" />
+        <Setter Property="FontFamily" Value="{DynamicResource AppHeadingFont}" />
     </Style>
 
     <Style Selector="TextBlock.page-subtitle">
@@ -43,7 +43,7 @@
     <Style Selector="TextBox.chat-input">
         <Setter Property="CornerRadius" Value="10" />
         <Setter Property="Padding" Value="14,10" />
-        <Setter Property="FontSize" Value="14" />
+        <Setter Property="FontSize" Value="{DynamicResource AppChatFontSize}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="MinHeight" Value="48" />
         <Setter Property="MaxHeight" Value="200" />

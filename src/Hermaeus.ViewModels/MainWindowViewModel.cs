@@ -114,6 +114,9 @@ public partial class MainWindowViewModel : ViewModelBase
             ActivePanel = "memories";
             Memories.SearchText = title;
         };
+        // r21 3.3: Dataset Manager's "Open in chat" - reuses the exact NewConversation
+        // path (Ctrl+N), then attaches and persists the dataset.
+        Rag.RequestOpenInChat = dataset => RunBackgroundTaskAsync("open dataset in chat", () => OpenDatasetInChatAsync(dataset));
         // r19 2.2: Doctor has no server-process knowledge of its own; bridge
         // the llama.cpp update flow's stop-before/restart-after to Services.
         Doctor.RequestStopRunningLlamaServersForUpdate = Services.StopRunningLlamaServersForUpdate;
@@ -305,6 +308,16 @@ public partial class MainWindowViewModel : ViewModelBase
         foreach (var c in Conversations) c.IsSelected = false;
         Chat.NewConversation();
         ActivePanel = "chat";
+    }
+
+    /// <summary>r21 3.3: reuses NewConversation (same path as Ctrl+N) so any unsent draft in
+    /// the input box is handled exactly as that path already handles it, then attaches and
+    /// immediately persists the dataset - a brand-new conversation has no messages yet, so
+    /// nothing else would save the attachment until the user actually sends something.</summary>
+    private async Task OpenDatasetInChatAsync(Hermaeus.Rag.Models.RagDataset dataset)
+    {
+        NewConversation();
+        await Chat.AttachRagDatasetAndPersistAsync(dataset);
     }
 
     [RelayCommand]

@@ -839,11 +839,59 @@ outbound identity strings.
   old `Aether` service name on those platforms. No secret material moves or
   is re-encrypted as part of this round.
 
+### r21: RAG Meets Chat
+
+No new network surface. This round moves existing local dataset content into
+chat prompts and adds one additive conversation-store column; the changes
+are about what leaves the machine under a remote provider, not about a new
+way for something to reach the machine.
+
+- **Chat knowledge injection is bounded and gated, not a free-form corpus
+  dump.** `ChatViewModel.BuildRagInjectionAsync` only ever injects a packed
+  context block through the same budget-aware `RagQueryService.
+  BuildContextPack` seam the RAG panel itself uses
+  (`RagSettings.ChatInjectionTokenBudget`, default 2000 tokens), and only
+  when retrieval clears `RagQueryService.WouldRefuse`'s confidence
+  threshold - an unrelated message ("thanks!") injects nothing even with a
+  dataset attached, which is the honesty gate that keeps a whole corpus from
+  leaking into every remote-provider chat regardless of relevance.
+- **Remote-provider implication is disclosed, not new.** Injected excerpts
+  ride the same system-prompt path memory injection and attachments already
+  use; when a remote chat provider is selected and the RAG subsystem is
+  available, the Privacy Audit's "Remote providers" entry now names Chat
+  knowledge context explicitly (`PrivacyAuditService.ScanAsync`), matching
+  the existing image-attachment disclosure style. The entry describes
+  surface (capability is live), not the current toggle state (a dataset
+  attached to this specific conversation right now), consistent with how
+  every other disclosure in that list already behaves.
+- **`Conversation.RagDatasetId` is an additive, non-executable column.**
+  `ConversationStore`'s schema version 1 to 2 migration adds
+  `rag_dataset_id TEXT NOT NULL DEFAULT ''` through the existing
+  `SqliteMigrationRunner`/`EnsureColumnAsync` pattern (the same shape r6's
+  folder/tags/pin/archive migration used); it is a plain string looked up
+  against the dataset table, never interpolated into SQL or a shell
+  argument, and is deliberately excluded from the FTS index (not searchable
+  text).
+- **Embedding-server-down fallback removes a raw-exception path, adds no new
+  privilege.** `RagQueryService.RetrieveAsync` now catches an embedding-call
+  failure and degrades to BM25-only (the same degraded path the existing
+  embedding-model-mismatch case already used), logging one Warning and
+  never caching the failure. `OperationCanceledException` is explicitly
+  rethrown rather than swallowed into the fallback, so a cancelled send or
+  query still cancels cleanly. This is a robustness fix to an existing local
+  code path, not a new capability.
+- **A stale/deleted dataset attachment degrades honestly, never silently.**
+  A `RagDatasetId` that no longer resolves is never auto-cleared (matching
+  the r10 stance that missing RAG sources are never auto-removed); the
+  picker shows "Knowledge: missing" and the send proceeds with nothing
+  injected. Dataset deletion does not scan conversations for references -
+  an explicit, documented non-goal (doc 03.2) rather than an oversight.
+
 ## Release Gate Status
 
 The initial security review and threat model refresh was completed for
 `0.13.0-alpha` as an engineering documentation gate; subsequent rounds (r14
-through r20, see Threat Scenarios above) have each re-reviewed the surface
+through r21, see Threat Scenarios above) have each re-reviewed the surface
 they touched. The following items from the original gate remain public-release
 hardening work not yet addressed by a later round:
 

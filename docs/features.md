@@ -14,13 +14,19 @@
   local estimates before send.
 - Context Inspector panel shows the exact context pack before send when opened:
   system prompt, draft message, ready attachments, chat history token estimate,
-  and the raw prompt sections that will be sent to the model.
+  the raw prompt sections that will be sent to the model, and - when a
+  Knowledge dataset is attached - a "Knowledge" part showing the retrieved
+  block that would be injected for the current draft, or a one-line
+  retrieval-skipped/failed reason when nothing would be injected.
 - Chat Trace Viewer records completed sends with selected model/runtime,
   system prompt, attachment count, estimated tokens, provider usage when
   reported, first-token latency, total latency, error details, and a
   pre-stream timing breakdown (memory recall, injection selection, lesson
-  context, prompt build, first token) so a slow send is diagnosable without a
-  profiler. When llama.cpp reports its own prompt-processing timings, the
+  context, Knowledge retrieval, prompt build, first token) so a slow send is
+  diagnosable without a profiler. When a Knowledge dataset is attached, the
+  trace also shows how many chunks were injected and a note (weak-retrieval
+  skip, embedding-failure fallback, or a missing dataset) whenever nothing
+  was injected. When llama.cpp reports its own prompt-processing timings, the
   breakdown also shows the server-side prompt tokens/time so a slow send can
   be narrowed to request queuing versus actual prompt evaluation. The
   breakdown also separates the first streamed event of any kind from the first
@@ -29,6 +35,20 @@
   exceeds 10 seconds logs a runtime warning with the full breakdown, and on a
   machine with a real GPU that is still configured for CPU inference the
   warning ends with a "prompt was read at CPU speed" hint pointing at Doctor.
+- Knowledge (r21): a conversation can have one RAG dataset attached via the
+  chat header's "Knowledge" picker (a dataset name, chunk count list; "None"
+  detaches). Every send against that conversation retrieves from the attached
+  dataset and, when retrieval clears the confidence threshold, injects a
+  bounded context block into the prompt with the retrieved chunks surfaced as
+  individually clickable citation pills on the reply - the same pills RAG's
+  own query pane uses. A weak/unrelated match (e.g. "thanks!") injects
+  nothing rather than parroting unrelated chunks into every message. Chat
+  stays chat: retrieval only adds context, it never blocks, rewrites, or
+  refuses a send the way the RAG panel's grounded-answer mode does. The
+  injection budget is configurable at Settings > RAG ("Chat knowledge context
+  budget"). A dataset that no longer resolves (deleted, or a temporarily
+  unmounted data root) shows "Knowledge: missing" in the picker rather than
+  silently forgetting the attachment or erroring the send.
 - Compare Models sends the current draft prompt to one to four selected models
   and compares answers, latency, token usage, and simple quality notes without
   adding the comparison run to chat history.
@@ -496,6 +516,16 @@
 - Embedding input for a chunk now fits a full default-length chunk plus its
   header, instead of only the first roughly-quarter of it; an oversized
   custom chunk size setting surfaces an ingest health warning.
+- A query (from the RAG panel or a chat send with a Knowledge dataset
+  attached) falls back to keyword-only (BM25) search when the embedding
+  server is unreachable, instead of failing with a raw exception. The
+  planner note and trace name the fallback; a later query with a working
+  embedding server is fully semantic again, since the fallback is never
+  cached as a sticky failure.
+- **Open in chat** on a Dataset Manager card starts a new chat conversation
+  with that dataset pre-attached (same "new conversation" path as Ctrl+N, so
+  an unsent draft in the current chat is handled exactly as that path
+  already handles it).
 
 ## Local AI Setup
 
@@ -699,14 +729,16 @@ model IDs, error or incomplete markers, and attached file paths. JSON preserves
 the stored conversation shape for local migration or inspection.
 
 Chat now injects relevant stored memories into each turn's system prompt when
-Memory is enabled (Settings > Memory). RAG citations still render as
-individually visible, clickable pills under the assistant's reply; memories
-actually used that turn instead collapse behind a single "Memories used: N"
+Memory is enabled (Settings > Memory), and retrieves from an attached RAG
+dataset (see Knowledge, above) when one is attached to the conversation.
+Memories actually used that turn collapse behind a single "Memories used: N"
 pill that opens a flyout listing the individual memories (each with its
 content as a tooltip); clicking one jumps straight to it in the Memories
-view. This closes a gap from the
-original memory feature: memory injection existed as a service but nothing in
-chat ever called it.
+view. RAG chunks retrieved for the turn render individually as visible,
+clickable citation pills under the assistant's reply instead. This closes a
+gap from the original memory and RAG features: both existed as services but,
+before r21, nothing in chat ever called either one for RAG, and memory
+injection was the only half actually wired up.
 
 ### Model and Dataset Lifecycle
 
@@ -766,8 +798,8 @@ placeholder built to the icon spec, pending real illustration.
 
 The app icon, taskbar icon, and system tray icon use the "Archivist's Seal" mark
 (a gold H monogram grown through with a tree and book) from `docs/hermaeus-icons.png`.
-The UI theme uses the
-brand colour palette (Forest green accent, Copper/Amber highlights) and
-three embedded brand typefaces: Cinzel for headings, Source Sans 3 for body
-text, and JetBrains Mono for code - see `docs/mascot.md` for the full
-palette and `NOTICE.md` for font licensing.
+The UI theme uses the brand colour palette (Forest green accent, Copper/Amber
+highlights) - see `docs/mascot.md` for the full palette. Typography uses the
+OS-native UI font by default (r21: the three embedded brand typefaces were
+removed for readability); Settings > Interface > Typography lets the user
+pick their own font for headings, body text, and code independently.

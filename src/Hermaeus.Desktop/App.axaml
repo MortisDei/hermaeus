@@ -1,5 +1,6 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:sys="using:System"
              xmlns:conv="using:Hermaeus.Desktop.Converters"
              x:Class="Hermaeus.Desktop.App"
              RequestedThemeVariant="Default">
@@ -10,11 +11,13 @@
     <Application.Resources>
         <conv:UppercaseConverter x:Key="UppercaseConverter" />
 
-        <!-- Brand fonts (docs/mascot.md / docs/hermaeus-branding.png). Embedded so
-             the look is identical regardless of what's installed on the host. -->
-        <FontFamily x:Key="BrandHeadingFont">avares://Hermaeus.Desktop/Assets/Fonts/Cinzel#Cinzel</FontFamily>
-        <FontFamily x:Key="BrandBodyFont">avares://Hermaeus.Desktop/Assets/Fonts/SourceSans3#Source Sans 3</FontFamily>
-        <FontFamily x:Key="BrandMonoFont">avares://Hermaeus.Desktop/Assets/Fonts/JetBrainsMono#JetBrains Mono</FontFamily>
+        <!-- r21: OS-native default fonts, not embedded brand typefaces.
+             AppFontService overwrites these at startup and live from
+             Settings > Interface > Typography if the user picks their own. -->
+        <FontFamily x:Key="AppHeadingFont">Segoe UI,sans-serif</FontFamily>
+        <FontFamily x:Key="AppBodyFont">Segoe UI,sans-serif</FontFamily>
+        <FontFamily x:Key="AppMonoFont">Consolas,monospace</FontFamily>
+        <sys:Double x:Key="AppChatFontSize">14</sys:Double>
 
         <!-- Brand colour palette (docs/mascot.md). -->
         <Color x:Key="BrandDeepMossColor">#2E3D2B</Color>

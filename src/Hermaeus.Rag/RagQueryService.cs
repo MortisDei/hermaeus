@@ -148,6 +148,15 @@ public sealed class RagQueryService
     public async Task<List<RagDataset>> GetDatasetsAsync(CancellationToken ct = default)
         => await _store.GetDatasetsAsync(ct);
 
+    /// <summary>
+    /// r21 2.3: single-dataset read seam so callers that need one dataset's
+    /// name/config (chat's per-send injection) do not have to duplicate
+    /// <see cref="RetrieveAsync"/>'s own internal list read. Not cached; the
+    /// dataset table is tiny.
+    /// </summary>
+    public async Task<RagDataset?> GetDatasetAsync(string datasetId, CancellationToken ct = default)
+        => (await _store.GetDatasetsAsync(ct)).FirstOrDefault(d => d.Id == datasetId);
+
     public async Task<List<RagChunk>> GetChunksForDatasetAsync(string datasetId, bool includeEmbeddings = false, CancellationToken ct = default)
         => await _store.GetChunksAsync(datasetId, includeEmbeddings, ct);
 
@@ -243,8 +252,26 @@ public sealed class RagQueryService
         }
         else
         {
-            var qEmbed = await _embed.EmbedAsync(plan.PrimaryQuery, ct);
-            semantic = HybridRetriever.CosineScan(qEmbed, chunks, semanticK);
+            try
+            {
+                var qEmbed = await _embed.EmbedAsync(plan.PrimaryQuery, ct);
+                semantic = HybridRetriever.CosineScan(qEmbed, chunks, semanticK);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // r21 2.1: an unreachable/stopped embedding server must degrade
+                // to keyword-only search, not kill the query. Never cached -
+                // the next query probes again in case the server came back.
+                var oneLine = ex.Message.Replace('\r', ' ').Replace('\n', ' ');
+                var note = $"semantic search unavailable: {oneLine}; used keyword search only";
+                plannerNotes = string.IsNullOrWhiteSpace(plannerNotes) ? note : $"{plannerNotes}; {note}";
+                _logs?.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Rag,
+                    $"RAG semantic search failed for dataset {datasetId}: {ex.Message}"));
+            }
         }
 
         var bm25Stats = await _store.GetBm25StatsAsync(datasetId, ct);
@@ -570,7 +597,7 @@ public sealed class RagQueryService
         return upgraded;
     }
 
-    private static ContextPack BuildContext(IReadOnlyList<ScoredChunk> chunks, RagQueryOptions opts)
+    private static RagContextPack BuildContext(IReadOnlyList<ScoredChunk> chunks, RagQueryOptions opts)
     {
         var candidates = chunks.Select(scored => new ContextPart(
             "rag-chunk",
@@ -588,18 +615,28 @@ public sealed class RagQueryService
 
         var sb = new StringBuilder();
         var rank = 0;
+        var packedChunks = new List<RagContextPackedChunk>();
         foreach (var part in packed.Parts)
         {
             if (part.Data is RagChunk chunk)
+            {
                 AppendContextChunk(sb, ++rank, chunk, part.Content, part.Truncated);
+                packedChunks.Add(new RagContextPackedChunk(chunk, part.Content, part.Truncated));
+            }
         }
 
-        return new ContextPack(
-            sb.ToString().Trim(),
-            packed.TokensUsed,
-            packed.Parts.Count,
-            packed.Summary);
+        return new RagContextPack(sb.ToString().Trim(), packed.Summary, packedChunks);
     }
+
+    /// <summary>
+    /// r21 1.4: public seam so chat's per-turn Knowledge injection reuses the
+    /// exact same budget-aware, per-source-capped packing
+    /// <see cref="StreamQueryAsync"/> uses instead of reimplementing it. The
+    /// returned <see cref="RagContextPack.PackedChunks"/> is the list that
+    /// actually survived packing (post budget cuts), so citation pills match
+    /// what was truly injected, not the pre-pack candidate list.
+    /// </summary>
+    public RagContextPack BuildContextPack(IReadOnlyList<ScoredChunk> selected, RagQueryOptions opts) => BuildContext(selected, opts);
 
     private static void AppendContextChunk(StringBuilder sb, int rank, RagChunk chunk, string content, bool truncated)
     {
@@ -769,4 +806,6 @@ internal sealed record QueryPlan(string PrimaryQuery, List<string> QueryVariants
 
 internal sealed record AliasExpansionPlan(string ExpandedQuery, List<string> AliasTerms, string Notes);
 
-internal sealed record ContextPack(string Text, int TokensUsed, int ChunksUsed, string Summary);
+public sealed record RagContextPack(string Text, string Summary, IReadOnlyList<RagContextPackedChunk> PackedChunks);
+
+public sealed record RagContextPackedChunk(RagChunk Chunk, string Content, bool Truncated);

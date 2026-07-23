@@ -461,6 +461,36 @@ namespace Hermaeus.Tests
             True(vm.PrivacyAuditItems.Any(i => i.Name == "Exposed local servers" && i.Status == "Warning"), "network-facing server args should warn");
         }
 
+        // ── r21 3.4: RAG chat-injection disclosure ────────────────────────
+
+        public static async Task PrivacyAuditDisclosesRagInjectionOnlyWhenRagAvailableAndProviderRemote()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            settings.Settings.Llm.OpenAiEnabled = true;
+            settings.Settings.Llm.OpenAiBaseUrl = "https://api.example.invalid/v1";
+            var ragStore = new SqliteRagStore(settings);
+            await ragStore.InitializeAsync();
+
+            var withRag = new PrivacyAuditService(settings, new FakeSecretStore(), new RuntimeLogService(settings), new FakeVoiceProviderRegistry(settings), new SqliteTraceStore(settings), ragStore);
+            var remoteWithRag = (await withRag.ScanAsync()).Single(i => i.Name == "Remote providers");
+            True(remoteWithRag.Detail.Contains("Chat knowledge context", StringComparison.Ordinal),
+                "a remote chat provider with the RAG subsystem available should disclose chat knowledge injection, regardless of whether any conversation currently has a dataset attached");
+
+            var withoutRag = new PrivacyAuditService(settings, new FakeSecretStore(), new RuntimeLogService(settings), new FakeVoiceProviderRegistry(settings), new SqliteTraceStore(settings));
+            var remoteWithoutRag = (await withoutRag.ScanAsync()).Single(i => i.Name == "Remote providers");
+            False(remoteWithoutRag.Detail.Contains("Chat knowledge context", StringComparison.Ordinal),
+                "without the RAG subsystem available, the disclosure must not appear");
+
+            settings.Settings.Llm.OpenAiEnabled = false;
+            settings.Settings.Llm.LlamaCppEnabled = true;
+            var localOnly = new PrivacyAuditService(settings, new FakeSecretStore(), new RuntimeLogService(settings), new FakeVoiceProviderRegistry(settings), new SqliteTraceStore(settings), ragStore);
+            var remoteLocalOnly = (await localOnly.ScanAsync()).Single(i => i.Name == "Remote providers");
+            False(remoteLocalOnly.Detail.Contains("Chat knowledge context", StringComparison.Ordinal),
+                "with only a local chat provider selected, the disclosure must not appear even if RAG is available");
+        }
+
         public static async Task PrivacyAuditFlagsRemoteVoiceProviderWithNoChatProviderEnabled()
         {
             using var temp = new TempDir();
@@ -2237,6 +2267,48 @@ namespace Hermaeus.Tests
             var legacyReloaded = await store.GetByIdAsync("conv-model-attribution");
             True(legacyReloaded is not null, "legacy messages_json without modelId should still load");
             True(legacyReloaded!.Messages.All(m => m.ModelId == string.Empty), "legacy messages should default to an empty model id, not throw");
+        }
+
+        // ── r21 1.1: Conversation.RagDatasetId round-trip + legacy-row read ──
+
+        public static async Task ConversationStoreRoundTripsRagDatasetIdAndLegacyRowsReadAsEmpty()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var store = new ConversationStore(settings);
+            await store.InitializeAsync();
+
+            var conversation = new Conversation
+            {
+                Id = "conv-rag-dataset",
+                Title = "Knowledge-attached chat",
+                RagDatasetId = "dataset-123"
+            };
+            await store.SaveAsync(conversation);
+
+            var reloaded = await store.GetByIdAsync("conv-rag-dataset");
+            True(reloaded is not null, "conversation should reload");
+            Equal("dataset-123", reloaded!.RagDatasetId, "RagDatasetId should survive a save/reload round trip");
+
+            // A row written before the rag_dataset_id column existed (its
+            // insert statement never mentions the column) must still read
+            // back as an empty string, not null.
+            await using var c = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={Path.Combine(temp.PathFor("data"), "conversations.db")}");
+            await c.OpenAsync();
+            var insert = c.CreateCommand();
+            insert.CommandText = @"
+                INSERT INTO conversations (id, title, model_id, system_prompt, created_at, updated_at, messages_json)
+                VALUES ($id, $title, '', '', $ca, $ua, '[]')";
+            insert.Parameters.AddWithValue("$id", "conv-legacy-row");
+            insert.Parameters.AddWithValue("$title", "Pre-r21 row");
+            insert.Parameters.AddWithValue("$ca", DateTime.UtcNow.ToString("O"));
+            insert.Parameters.AddWithValue("$ua", DateTime.UtcNow.ToString("O"));
+            await insert.ExecuteNonQueryAsync();
+
+            var legacyReloaded = await store.GetByIdAsync("conv-legacy-row");
+            True(legacyReloaded is not null, "a pre-migration row missing rag_dataset_id in its insert should still load");
+            Equal(string.Empty, legacyReloaded!.RagDatasetId, "a legacy row should read RagDatasetId as empty string, not null");
         }
 
         public static async Task ConversationAutoSummaryStoresMemoriesWhenImportant()

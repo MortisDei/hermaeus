@@ -318,6 +318,11 @@ public partial class ChatView : UserControl
             textBox.SelectedText = text;
     }
 
+    /// <summary>r21 1.2: picking a dataset (or None) from the Knowledge flyout
+    /// closes it - a Button click inside a Flyout does not auto-dismiss it.</summary>
+    private void OnRagDatasetSelected(object? sender, RoutedEventArgs e) =>
+        (this.FindControl<Button>("RagPickerButton"))?.Flyout?.Hide();
+
     private void OnContextDragOver(object? sender, DragEventArgs e)
     {
         var hasFiles = e.Data.Contains(DataFormats.Files);

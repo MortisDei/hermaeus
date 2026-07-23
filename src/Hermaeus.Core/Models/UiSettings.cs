@@ -57,4 +57,23 @@ public class UiSettings
     /// (r6 01-first-five-minutes.md 1.1).
     /// </summary>
     public bool ShowNavLabels { get; set; } = false;
+
+    /// <summary>
+    /// Font family for page titles and headings. Empty means the OS-default
+    /// UI font (r21: replaces the embedded Cinzel brand typeface).
+    /// </summary>
+    public string HeadingFontFamily { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Font family for chat and general UI text. Empty means the OS-default
+    /// UI font (r21: replaces the embedded Source Sans 3 brand typeface).
+    /// </summary>
+    public string BodyFontFamily { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Font family for code blocks and other technical/monospace text.
+    /// Empty means the OS-default monospace font (r21: replaces the
+    /// embedded JetBrains Mono brand typeface).
+    /// </summary>
+    public string MonoFontFamily { get; set; } = string.Empty;
 }

@@ -185,6 +185,10 @@ public partial class RagViewModel : ObservableObject
     public Action<string>? RequestCopyToClipboard { get; set; }
     public Func<RagDatasetManagerItemViewModel, Task<bool>>? RequestDeleteDatasetConfirmation { get; set; }
     public Func<RagDatasetManagerItemViewModel, Task<bool>>? RequestRemoveMissingSourcesConfirmation { get; set; }
+
+    /// <summary>r21 3.3: "Open in chat" handoff, wired by MainWindowViewModel (which owns
+    /// view switching and ChatViewModel access) - RagViewModel has no direct chat reference.</summary>
+    public Action<RagDataset>? RequestOpenInChat { get; set; }
     public bool IsLocalIngest => !EnableWebLoader;
 
     public RagViewModel(RagQueryService query, RagPipeline pipeline, RagEvalService eval, IToastService toasts, IRuntimeLogService logs, ISettingsService settings, ServicesViewModel? services = null, XttsProcessManager? xtts = null, KokoroProcessManager? kokoro = null)
@@ -441,6 +445,17 @@ public partial class RagViewModel : ObservableObject
 
         // Scroll to ingest section (could be done via UI event if needed)
         StatusMessage = $"Ready to add documents to '{item.Dataset.Name}'. Select a directory or configure URLs below.";
+    }
+
+    /// <summary>r21 3.3: navigates to Chat and starts a new conversation with this
+    /// dataset pre-attached. No reverse affordance ("open dataset" from chat) this round.</summary>
+    [RelayCommand]
+    private void OpenInChat(RagDatasetManagerItemViewModel item)
+    {
+        if (item?.Dataset is null)
+            return;
+
+        RequestOpenInChat?.Invoke(item.Dataset);
     }
 
     /// <summary>

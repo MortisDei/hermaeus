@@ -60,6 +60,7 @@ public static class HarnessCases
         [new HarnessCase("benchmark disables prompt cache only on the cold iteration", ServiceTests.BenchmarkDisablesPromptCacheOnlyOnTheColdIteration)],
         [new HarnessCase("system info returns safe fallback values", ServiceTests.SystemInfoSafeFallback)],
         [new HarnessCase("privacy audit reports remote providers and exposed servers", ServiceTests.PrivacyAuditReportsRemoteAndNetworkExposure)],
+        [new HarnessCase("privacy audit discloses RAG injection only when RAG available and provider remote", ServiceTests.PrivacyAuditDisclosesRagInjectionOnlyWhenRagAvailableAndProviderRemote)],
         [new HarnessCase("privacy audit flags a remote voice provider even with no chat provider enabled", ServiceTests.PrivacyAuditFlagsRemoteVoiceProviderWithNoChatProviderEnabled)],
         [new HarnessCase("privacy audit shows per-app local API activity", ServiceTests.PrivacyAuditShowsPerAppLocalApiActivity)],
         [new HarnessCase("privacy audit counts outbound destinations across chat voice and mcp", ServiceTests.PrivacyAuditCountsOutboundDestinationsAcrossChatVoiceMcp)],
@@ -131,6 +132,7 @@ public static class HarnessCases
         [new HarnessCase("server auto-tune plans descending GPU candidates", ServiceTests.ServerAutoTunePlansDescendingGpuCandidates)],
         [new HarnessCase("embedding client surfaces pooling compatibility hints", ServiceTests.EmbeddingClientSurfacesPoolingHintWhenServerRejectsNonePooling)],
         [new HarnessCase("conversation store round-trips per-message model attribution", ServiceTests.ConversationStoreRoundTripsPerMessageModelAttribution)],
+        [new HarnessCase("conversation store round-trips RagDatasetId and legacy rows read as empty", ServiceTests.ConversationStoreRoundTripsRagDatasetIdAndLegacyRowsReadAsEmpty)],
         [new HarnessCase("conversation auto-summary stores memories when important", ServiceTests.ConversationAutoSummaryStoresMemoriesWhenImportant)],
         [new HarnessCase("memory store CRUD and search works", ServiceTests.MemoryStoreCrudAndSearchWorks)],
         [new HarnessCase("memory store round trips explicit source and backfills legacy rows", ServiceTests.MemoryStoreRoundTripsExplicitSourceAndBackfillsLegacyRows)],
@@ -203,7 +205,11 @@ public static class HarnessCases
         [new HarnessCase("RAG view model reindex cancelled mid run leaves dataset on the old model", RagTests.RagViewModelReindexCancelledMidRunLeavesDatasetOnTheOldModel)],
         [new HarnessCase("RAG view model parses trace bindings", TraceBindingTests.RagViewModel_ParsesTraceBindings)],
         [new HarnessCase("RAG small dataset retrieval and trace integration", TraceBindingTests.RagIntegration_SmallDatasetRetrievalAndTrace)],
-        [new HarnessCase("RAG query stream trace chunks carry score breakdown", TraceBindingTests.RagQueryStreamTraceChunksCarryScoreBreakdown)]
+        [new HarnessCase("RAG query stream trace chunks carry score breakdown", TraceBindingTests.RagQueryStreamTraceChunksCarryScoreBreakdown)],
+        [new HarnessCase("RAG retrieval falls back to BM25 only when embedding service throws", RagTests.RagRetrievalFallsBackToBm25OnlyWhenEmbeddingServiceThrows)],
+        [new HarnessCase("RAG retrieval cancellation during embedding is not swallowed into fallback", RagTests.RagRetrievalCancellationDuringEmbeddingIsNotSwallowedIntoFallback)],
+        [new HarnessCase("RAG retrieval recovers to full semantic after a transient embedding failure", RagTests.RagRetrievalRecoversToFullSemanticAfterATransientEmbeddingFailure)],
+        [new HarnessCase("RAG GetDatasetAsync returns single dataset or null when absent", RagTests.RagGetDatasetAsyncReturnsSingleDatasetOrNullWhenAbsent)]
     ];
 
     public static IEnumerable<object[]> Tts =>
