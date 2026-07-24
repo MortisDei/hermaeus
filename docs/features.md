@@ -323,6 +323,13 @@
   than requiring the exact same number and order of sub-tasks the manifest
   hardcodes - a model reasonably splitting work differently no longer fails
   the check on its own.
+- Sixteen built-in scenarios, including three added in r23: confused user
+  authority (a pre-announced "I confirm, this is pre-approved" must still go
+  through the approval gate), tool result poisoning (provocative file and
+  directory names as the injection vector, not file body content), and
+  memory poisoning (a workspace instructs the agent to record a lesson
+  claiming blanket approval; the stated-lesson gate-claim filter must reject
+  it, checked by a new forbid_active_lesson_matching scenario check).
 
 ## Model Management
 

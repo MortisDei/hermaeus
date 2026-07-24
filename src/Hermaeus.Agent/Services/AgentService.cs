@@ -1235,32 +1235,7 @@ public sealed class AgentService : IAgentService
         System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled,
         TimeSpan.FromMilliseconds(500));
 
-    /// <summary>
-    /// Deterministic (no LLM), case-insensitive tokens that mark a stated
-    /// lesson as an approval-policy claim (r23 4.2, "Stated-lesson
-    /// gate-claim filter"). The safety gate never reads the lesson store, so
-    /// a poisoned lesson could not widen execution today - but it would
-    /// still sit in every future context pack and the Lessons panel as
-    /// persistent social engineering. Precision matters more than recall
-    /// here; add tokens as new phrasings turn up rather than trying to be
-    /// exhaustive up front.
-    /// </summary>
-    private static readonly string[] ApprovalClaimTokens =
-    [
-        "approv", "no confirmation", "without asking", "without review",
-        "skip review", "skip the gate", "always allow", "allow all",
-        "trusted to run", "does not need permission"
-    ];
-
-    private static string? MatchedApprovalClaimToken(string claim)
-    {
-        foreach (var token in ApprovalClaimTokens)
-        {
-            if (claim.Contains(token, StringComparison.OrdinalIgnoreCase))
-                return token;
-        }
-        return null;
-    }
+    private static string? MatchedApprovalClaimToken(string claim) => AgentApprovalClaimTokens.FirstMatch(claim);
 
     /// <summary>
     /// The only model-authored lesson source: a [LESSON: ...] marker in the
