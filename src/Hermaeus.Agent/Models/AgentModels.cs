@@ -177,6 +177,12 @@ public sealed class AgentTaskState
     /// Always 0 for a task that is not an orchestration parent.
     /// </summary>
     public int OrchestrationStepsUsed { get; set; }
+    /// <summary>
+    /// Successful read_file/summarize_file executions so far this task,
+    /// checked against the workspace policy's MaxFileReadsPerTask (r23 3.1).
+    /// Persisted so a restart does not reset the budget.
+    /// </summary>
+    public int FileReadCount { get; set; }
 }
 
 /// <summary>
@@ -556,7 +562,24 @@ public sealed record AgentWorkspaceOptions(
     string ModelId = "",
     int MaxFileBytes = 128 * 1024,
     int MaxSearchResults = 20,
-    int MaxContextItems = 6);
+    int MaxContextItems = 6,
+    /// <summary>The active workspace's manifest policy, if any (r23 3.1); null means unrestricted. Set by the caller from a loaded WorkspaceManifest, never by AgentWorkspaceTools itself.</summary>
+    WorkspacePolicy? Policy = null,
+    /// <summary>Mutable read-count tracker shared by reference across a step's tool calls, so AgentWorkspaceTools can enforce and increment MaxFileReadsPerTask in one place (r23 3.1). Null disables the cap regardless of policy.</summary>
+    AgentReadBudget? ReadBudget = null);
+
+/// <summary>
+/// Tracks read_file/summarize_file executions against a workspace policy's
+/// MaxFileReadsPerTask for one agent step (r23 3.1). Seeded from
+/// AgentTaskState.FileReadCount by the caller and read back afterward so the
+/// budget persists across steps and restarts.
+/// </summary>
+public sealed class AgentReadBudget
+{
+    public int MaxReads { get; init; }
+    public int UsedReads { get; set; }
+    public bool IsExhausted => MaxReads > 0 && UsedReads >= MaxReads;
+}
 
 /// <summary>
 /// One entry in a task's persisted step transcript (transcript.jsonl). Unlike
@@ -628,6 +651,22 @@ public sealed record WorkspaceCommandRecipe(
     string Why,
     AgentRiskLevel RiskLevel);
 
+/// <summary>
+/// Deterministic read/write/never glob policy, narrowing what the agent's
+/// tools may touch inside a workspace (r23 3.1). Policy can only ever
+/// narrow: absent or empty allow lists mean "allow all" (backwards
+/// compatible with a workspace that has no policy), and <see cref="Never"/>
+/// beats both allow lists for both reads and writes.
+/// </summary>
+public sealed class WorkspacePolicy
+{
+    public List<string> ReadAllow { get; set; } = [];
+    public List<string> WriteAllow { get; set; } = [];
+    public List<string> Never { get; set; } = [];
+    /// <summary>0 or absent means unlimited; counted on <see cref="AgentTaskState.FileReadCount"/>, persisted so a restart does not reset it.</summary>
+    public int MaxFileReadsPerTask { get; set; }
+}
+
 public sealed class WorkspaceManifest
 {
     public int SchemaVersion { get; set; } = 1;
@@ -643,6 +682,17 @@ public sealed class WorkspaceManifest
     /// Agent channel's configured profile.
     /// </summary>
     public string VoiceProfileName { get; set; } = string.Empty;
+    /// <summary>Null when absent (unrestricted) or when a present policy was malformed and rejected as a whole (r23 3.1); see <see cref="PolicyRejectionWarning"/>.</summary>
+    public WorkspacePolicy? Policy { get; set; }
+    /// <summary>
+    /// Set only by WorkspaceManifestService.LoadAsync when a present
+    /// <c>policy</c> object failed validation and was rejected as a whole
+    /// (r23 3.1). Transient - never persisted back to workspace.json - so a
+    /// re-save from a form that never touched policy cannot silently erase a
+    /// user's hand-edited (if malformed) policy block.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? PolicyRejectionWarning { get; set; }
 }
 
 public sealed record WorkspaceActivation(

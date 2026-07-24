@@ -191,6 +191,11 @@
 - Every approval is bound to a fingerprint of the pending action as
   displayed; a mismatch between what was shown and what is actually pending
   refuses to execute instead of running whatever changed underneath it.
+- Workspace policy: an optional `.hermaeus/workspace.json` `policy` block
+  narrows (never widens) which paths the agent's tools may read or write,
+  plus a per-task cap on file reads; a denied read refuses gracefully, a
+  denied write is blocked before it can ever be approved, and a malformed
+  policy is rejected as a whole with a visible warning.
 - Autonomous runs: Start (or resuming after an approval or a reply) runs
   steps back to back without a click per step, stopping at a final answer, a
   question for the user, a gated action needing approval, a blocked or

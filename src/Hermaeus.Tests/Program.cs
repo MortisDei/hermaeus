@@ -2908,4 +2908,171 @@ internal static class AgentTests
     Equal("child-1", commandEntry.TaskId, "a folded-in command entry must also carry the child's task id");
     return Task.CompletedTask;
     }
+
+    public static Task WorkspacePolicyEvaluatorNeverBeatsAnOtherwiseMatchingAllowList()
+    {
+    var policy = new WorkspacePolicy { WriteAllow = ["docs/**"], Never = ["docs/secret.md"] };
+    var verdict = WorkspacePolicyEvaluator.EvaluateWrite(policy, "docs/secret.md");
+    False(verdict.Allowed, "never must beat an otherwise-matching writeAllow entry");
+    True(verdict.Reason.Length > 0, "the verdict should name the matched rule");
+    return Task.CompletedTask;
+    }
+
+    public static Task WorkspacePolicyEvaluatorEmptyAllowListMeansAllowAllButANonEmptyOneNarrows()
+    {
+    var unrestricted = new WorkspacePolicy();
+    True(WorkspacePolicyEvaluator.EvaluateRead(unrestricted, "anything.txt").Allowed, "an empty readAllow means allow all, matching a workspace with no policy at all");
+
+    var restricted = new WorkspacePolicy { ReadAllow = ["src/**"] };
+    True(WorkspacePolicyEvaluator.EvaluateRead(restricted, "src/Foo.cs").Allowed, "a path matching the allow list should be allowed");
+    False(WorkspacePolicyEvaluator.EvaluateRead(restricted, "docs/readme.md").Allowed, "a path outside a non-empty allow list should be denied");
+    return Task.CompletedTask;
+    }
+
+    public static async Task WorkspaceManifestServiceRejectsAMalformedPolicyAsAWholeWithAWarning()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(Path.Combine(root, ".hermaeus"));
+    await File.WriteAllTextAsync(Path.Combine(root, ".hermaeus", "workspace.json"), """
+        {
+          "preferred_model_id": "test-model",
+          "policy": { "max_file_reads_per_task": -5 }
+        }
+        """);
+
+    var service = new WorkspaceManifestService();
+    var manifest = await service.LoadAsync(root);
+
+    True(manifest is not null, "the rest of the manifest should still load despite a malformed policy");
+    Equal("test-model", manifest!.PreferredModelId, "non-policy fields must load normally, not fail the whole file");
+    True(manifest.Policy is null, "a malformed policy must be rejected as a whole, never partially applied");
+    True(!string.IsNullOrEmpty(manifest.PolicyRejectionWarning), "a visible warning should be set for the workbench and log to surface");
+    }
+
+    public static Task WorkspacePolicyIsConsultedOnlyAfterContainmentSoAnEscapingPathFailsContainmentNotPolicy()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    var tools = new AgentWorkspaceTools();
+    var policy = new WorkspacePolicy { Never = ["**"] };
+    var options = new AgentWorkspaceOptions(root) with { Policy = policy };
+
+    InvalidOperationException? caught = null;
+    try { tools.ReadFile(options, "../escape.txt"); }
+    catch (InvalidOperationException ex) { caught = ex; }
+
+    True(caught is not null, "an escaping path must still throw");
+    False(caught is AgentWorkspacePolicyDeniedException, "an escaping path must fail containment, never be reported as a policy denial, even though this policy denies everything");
+    True(caught!.Message.Contains("escapes the workspace root", StringComparison.OrdinalIgnoreCase), "the exception should name the actual containment failure, not a policy one");
+    return Task.CompletedTask;
+    }
+
+    public static async Task AgentReadFileDeniedByNeverPolicyReturnsAGracefulRefusalNotAnException()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(Path.Combine(root, "secrets"));
+    await File.WriteAllTextAsync(Path.Combine(root, "secrets", "token.txt"), "super-secret-token");
+    var tools = new AgentWorkspaceTools();
+    var executor = new AgentToolExecutor(tools);
+    var policy = new WorkspacePolicy { Never = ["secrets/**"] };
+    var options = new AgentWorkspaceOptions(root) with { Policy = policy };
+
+    var result = await executor.ExecuteAsync("read_file", new Dictionary<string, object?> { ["relative_path"] = "secrets/token.txt" }, options);
+
+    False(result.ResultSummary.Contains("super-secret-token", StringComparison.Ordinal), "the tool result must never contain the denied file's content");
+    True(result.ResultSummary.Contains("read blocked by workspace policy", StringComparison.Ordinal), "the refusal should name the policy rule, and the step must complete normally rather than crash");
+    }
+
+    public static async Task AgentReadCapCountsAcrossASaveLoadCycleAndDeniesGracefullyOnceSpent()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    await File.WriteAllTextAsync(Path.Combine(root, "a.txt"), "a");
+    await File.WriteAllTextAsync(Path.Combine(root, "b.txt"), "b");
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var tools = new AgentWorkspaceTools();
+    var manifests = new WorkspaceManifestService();
+    await manifests.SaveAsync(root, new WorkspaceManifest { Policy = new WorkspacePolicy { MaxFileReadsPerTask = 1 } });
+
+    var readAResponse = """
+        {
+          "thought_summary": "Reading a.",
+          "current_step": "Read a.txt.",
+          "next_action": { "type": "tool", "tool_name": "read_file", "arguments": { "relative_path": "a.txt" }, "requires_approval": false, "risk_level": "none" },
+          "state_update": { "completed": [], "pending": [], "new_facts": [], "blockers": [] },
+          "user_message": "Reading a."
+        }
+        """;
+    var readBResponse = """
+        {
+          "thought_summary": "Reading b.",
+          "current_step": "Read b.txt.",
+          "next_action": { "type": "tool", "tool_name": "read_file", "arguments": { "relative_path": "b.txt" }, "requires_approval": false, "risk_level": "none" },
+          "state_update": { "completed": [], "pending": [], "new_facts": [], "blockers": [] },
+          "user_message": "Reading b."
+        }
+        """;
+    var llm = new FakeSequencedAgentLlm([readAResponse, readBResponse]);
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-sequenced-agent");
+
+    var store = new FileAgentTaskStateStore(settings);
+    var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), llm, manifests: manifests, settings: settings);
+    var state = await service.CreateTaskAsync("Read files", options);
+    var first = await service.RunStepAsync(state.TaskId, options);
+    Equal(1, first.State.FileReadCount, "the first read, within budget, should count toward it");
+    True(first.State.ToolResults.Any(r => r.Tool == "read_file" && !r.ResultSummary.Contains("read budget", StringComparison.Ordinal)), "the first read should succeed normally");
+
+    // A fresh store/service simulates a restart between steps.
+    var reloadedStore = new FileAgentTaskStateStore(settings);
+    var reloadedService = new AgentService(reloadedStore, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), llm, manifests: manifests, settings: settings);
+    var second = await reloadedService.RunStepAsync(state.TaskId, options);
+    Equal(1, second.State.FileReadCount, "the budget must not reset just because state was reloaded from disk");
+    True(second.State.ToolResults.Any(r => r.Tool == "read_file" && r.ResultSummary.Contains("read budget", StringComparison.Ordinal)), "the second read should be denied once the budget of 1 is already spent");
+    }
+
+    public static async Task AgentWriteDeniedByPolicyIsClassifiedBlockedAndNeverReachesApproval()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    await File.WriteAllTextAsync(Path.Combine(root, "notes.md"), "original");
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    var tools = new AgentWorkspaceTools();
+    var manifests = new WorkspaceManifestService();
+    await manifests.SaveAsync(root, new WorkspaceManifest { Policy = new WorkspacePolicy { Never = ["notes.md"] } });
+
+    var editResponse = """
+        {
+          "thought_summary": "Editing notes.",
+          "current_step": "Edit notes.md.",
+          "next_action": {
+            "type": "tool",
+            "tool_name": "edit_file",
+            "arguments": { "relative_path": "notes.md", "old_string": "original", "new_string": "changed" },
+            "requires_approval": true,
+            "risk_level": "medium"
+          },
+          "state_update": { "completed": [], "pending": [], "new_facts": [], "blockers": [] },
+          "user_message": "Requesting edit."
+        }
+        """;
+    var llm = new FakeSequencedAgentLlm([editResponse]);
+    var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), llm, manifests: manifests, settings: settings, workspaceTools: tools);
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-sequenced-agent");
+
+    var state = await service.CreateTaskAsync("Edit notes", options);
+    var step = await service.RunStepAsync(state.TaskId, options);
+
+    Equal(AgentTaskStatus.Blocked, step.State.Status, "a policy-denied write must classify Blocked, never sit waiting for approval");
+    True(step.State.PendingToolAction is null, "a Blocked write must never become an approvable pending action");
+    Equal("original", await File.ReadAllTextAsync(Path.Combine(root, "notes.md")), "the file must remain untouched");
+    True(step.State.ToolResults.Any(r => r.Tool == "safety_gate" && r.ResultSummary.Contains("write blocked by workspace policy", StringComparison.Ordinal)), "the safety gate row should name the policy rule");
+    }
 }

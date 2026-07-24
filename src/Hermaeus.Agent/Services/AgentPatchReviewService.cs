@@ -15,16 +15,31 @@ public sealed class AgentPatchReviewService
     private readonly IAgentWorkspaceTools _workspaceTools;
     private readonly IAgentTaskStateStore _store;
     private readonly IAgentService _agent;
+    private readonly IWorkspaceManifestStore? _manifests;
 
-    public AgentPatchReviewService(IAgentWorkspaceTools workspaceTools, IAgentTaskStateStore store, IAgentService agent)
+    public AgentPatchReviewService(IAgentWorkspaceTools workspaceTools, IAgentTaskStateStore store, IAgentService agent, IWorkspaceManifestStore? manifests = null)
     {
         _workspaceTools = workspaceTools;
         _store = store;
         _agent = agent;
+        _manifests = manifests;
+    }
+
+    /// <summary>
+    /// The draft-patch queue and Rewind apply the same write-policy rules as
+    /// the direct-approval path, through this same enrichment, rather than a
+    /// second implementation (r23 3.2).
+    /// </summary>
+    private async Task<AgentWorkspaceOptions> WithPolicyAsync(AgentWorkspaceOptions options, CancellationToken ct)
+    {
+        if (_manifests is null) return options;
+        var manifest = await _manifests.LoadAsync(options.WorkspaceRoot, ct);
+        return manifest?.Policy is null ? options : options with { Policy = manifest.Policy };
     }
 
     public async Task ApplyAsync(AgentTaskState task, AgentDraftPatch patch, AgentWorkspaceOptions options, CancellationToken ct = default)
     {
+        options = await WithPolicyAsync(options, ct);
         // Captured before the write so a later revert can restore exactly
         // what was there, or delete the file if it did not exist yet
         // (r6 01-first-five-minutes.md 1.8).
@@ -61,6 +76,7 @@ public sealed class AgentPatchReviewService
         if (patch.Status != AgentDraftPatchStatus.Applied)
             return "Only an applied patch can be reverted.";
 
+        options = await WithPolicyAsync(options, ct);
         var result = await _workspaceTools.RevertAppliedPatchAsync(
             options, patch.RelativePath, patch.PreImageExisted ? patch.PreImageContent : null, patch.AppliedContent, ct);
         if (!result.Reverted)
@@ -112,6 +128,12 @@ public sealed class AgentPatchReviewService
             throw new InvalidOperationException("This task is still running; wait for it to finish before reverting the run.");
         if (task.PendingToolAction is not null)
             throw new InvalidOperationException("This task has a pending approval; resolve it before reverting the run.");
+
+        // Loaded once from the top-level task's workspace and carried
+        // through the per-child `with { WorkspaceRoot = ... }` below (r23
+        // 3.2): children share the same policy in the ordinary case of one
+        // physical workspace per orchestration run.
+        options = await WithPolicyAsync(options, ct);
 
         var children = new List<AgentTaskState>();
         foreach (var spec in task.SubTaskPlan)

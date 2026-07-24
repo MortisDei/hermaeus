@@ -66,44 +66,61 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
             };
         }
 
-        object result = normalized switch
+        object result;
+        try
         {
-            "list_files" => _workspaceTools.ListFiles(options, ArgOrNull(arguments, "subdirectory"), ArgIntOrNull(arguments, "max_depth")),
-            "search_files" => _workspaceTools.SearchFiles(
-                options,
-                Arg(arguments, "query"),
-                ArgBool(arguments, "regex"),
-                ArgInt(arguments, "context_lines")),
-            "glob_files" => _workspaceTools.GlobFiles(options, Arg(arguments, "pattern")),
-            "read_file" => _workspaceTools.ReadFile(
-                options,
-                Arg(arguments, "relative_path", "path"),
-                ArgIntOrNull(arguments, "line_offset"),
-                ArgIntOrNull(arguments, "line_limit")),
-            "summarize_file" => _workspaceTools.SummarizeFile(options, Arg(arguments, "relative_path", "path")),
-            "draft_patch" => _workspaceTools.DraftPatch(
-                Arg(arguments, "relative_path", "path"),
-                Arg(arguments, "rationale"),
-                Arg(arguments, "proposed_content", "content")),
-            "inspect_git_diff" => await InspectGitDiffAsync(options, ct),
-            "apply_draft_patch" => await _workspaceTools.ApplyDraftPatchAsync(
-                options,
-                Arg(arguments, "relative_path", "path"),
-                Arg(arguments, "proposed_content", "content"),
-                ct),
-            "edit_file" => await _workspaceTools.EditFileAsync(
-                options,
-                Arg(arguments, "relative_path", "path"),
-                Arg(arguments, "old_string"),
-                Arg(arguments, "new_string"),
-                ct),
-            "create_file" => await _workspaceTools.CreateFileAsync(
-                options,
-                Arg(arguments, "relative_path", "path"),
-                Arg(arguments, "content"),
-                ct),
-            _ => throw new InvalidOperationException($"Unsupported agent tool: {toolName}")
-        };
+            result = normalized switch
+            {
+                "list_files" => _workspaceTools.ListFiles(options, ArgOrNull(arguments, "subdirectory"), ArgIntOrNull(arguments, "max_depth")),
+                "search_files" => _workspaceTools.SearchFiles(
+                    options,
+                    Arg(arguments, "query"),
+                    ArgBool(arguments, "regex"),
+                    ArgInt(arguments, "context_lines")),
+                "glob_files" => _workspaceTools.GlobFiles(options, Arg(arguments, "pattern")),
+                "read_file" => _workspaceTools.ReadFile(
+                    options,
+                    Arg(arguments, "relative_path", "path"),
+                    ArgIntOrNull(arguments, "line_offset"),
+                    ArgIntOrNull(arguments, "line_limit")),
+                "summarize_file" => _workspaceTools.SummarizeFile(options, Arg(arguments, "relative_path", "path")),
+                "draft_patch" => _workspaceTools.DraftPatch(
+                    Arg(arguments, "relative_path", "path"),
+                    Arg(arguments, "rationale"),
+                    Arg(arguments, "proposed_content", "content")),
+                "inspect_git_diff" => await InspectGitDiffAsync(options, ct),
+                "apply_draft_patch" => await _workspaceTools.ApplyDraftPatchAsync(
+                    options,
+                    Arg(arguments, "relative_path", "path"),
+                    Arg(arguments, "proposed_content", "content"),
+                    ct),
+                "edit_file" => await _workspaceTools.EditFileAsync(
+                    options,
+                    Arg(arguments, "relative_path", "path"),
+                    Arg(arguments, "old_string"),
+                    Arg(arguments, "new_string"),
+                    ct),
+                "create_file" => await _workspaceTools.CreateFileAsync(
+                    options,
+                    Arg(arguments, "relative_path", "path"),
+                    Arg(arguments, "content"),
+                    ct),
+                _ => throw new InvalidOperationException($"Unsupported agent tool: {toolName}")
+            };
+        }
+        catch (AgentWorkspacePolicyDeniedException ex)
+        {
+            // A structured refusal, not a crash (r23 3.2): the step
+            // completes normally with the denial in the transcript so the
+            // model sees it and can route around it, instead of aborting
+            // the whole step the way a containment or not-found failure does.
+            return new AgentToolResult
+            {
+                Tool = normalized,
+                Arguments = new Dictionary<string, object?>(arguments, StringComparer.OrdinalIgnoreCase),
+                ResultSummary = ex.Message
+            };
+        }
 
         return new AgentToolResult
         {

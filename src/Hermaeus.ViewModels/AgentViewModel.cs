@@ -477,6 +477,11 @@ public partial class AgentViewModel : ViewModelBase
     public UiBoundCollection<WorkspaceCommandRecipeViewModel> CommandRecipes { get; } = [];
     public UiBoundCollection<string> WorkspaceRisks { get; } = [];
     public UiBoundCollection<string> InstructionWarnings { get; } = [];
+    /// <summary>Raw glob rules behind WorkspacePolicySummary, for the capability disclosure's expandable detail (r23 3.3). Read-only; the manifest is hand-edited, not edited from here.</summary>
+    public UiBoundCollection<string> WorkspacePolicyRules { get; } = [];
+    [ObservableProperty] private string _workspacePolicySummary = string.Empty;
+    public bool HasWorkspacePolicy => WorkspacePolicySummary.Length > 0;
+    partial void OnWorkspacePolicySummaryChanged(string value) => OnPropertyChanged(nameof(HasWorkspacePolicy));
 
     public IReadOnlyList<string> CapabilityNotes { get; } =
     [
@@ -645,7 +650,7 @@ public partial class AgentViewModel : ViewModelBase
         _lessons = lessons;
         _voice = voice;
         ScenarioSuite = scenarioSuite;
-        _patchReview = new AgentPatchReviewService(workspaceTools, store, agent);
+        _patchReview = new AgentPatchReviewService(workspaceTools, store, agent, workspaceManifests);
         // r12 03-runtime-vm-correctness.md 3.5: defaulting to the whole user
         // profile meant every startup (and every Agent panel navigation)
         // silently enumerated and analyzed it, writing a "Workspace profile"
@@ -1572,7 +1577,48 @@ public partial class AgentViewModel : ViewModelBase
 
         _activeWorkspaceVoiceProfile = activation.VoiceProfileName ?? string.Empty;
         WorkspaceVoiceProfileName = _activeWorkspaceVoiceProfile;
+
+        await RefreshWorkspacePolicyDisclosureAsync();
     }
+
+    /// <summary>
+    /// Populates the capability disclosure's "Workspace policy" line and
+    /// expandable raw-glob detail (r23 3.3), and surfaces a malformed-policy
+    /// rejection as a workspace risk. The manifest is hand-edited, like
+    /// AllowedCommands already is; there is no policy editor here.
+    /// </summary>
+    private async Task RefreshWorkspacePolicyDisclosureAsync()
+    {
+        WorkspacePolicyRules.Clear();
+        if (string.IsNullOrWhiteSpace(WorkspaceRoot) || !Directory.Exists(WorkspaceRoot))
+        {
+            WorkspacePolicySummary = string.Empty;
+            return;
+        }
+
+        var manifest = await _workspaceManifests.LoadAsync(WorkspaceRoot);
+        if (manifest?.PolicyRejectionWarning is { Length: > 0 } warning)
+            WorkspaceRisks.Add(warning);
+
+        if (manifest?.Policy is not { } policy)
+        {
+            WorkspacePolicySummary = string.Empty;
+            return;
+        }
+
+        WorkspacePolicySummary =
+            $"Workspace policy: reads {DescribePolicyAllowCount(policy.ReadAllow.Count)}, "
+            + $"writes {DescribePolicyAllowCount(policy.WriteAllow.Count)}, "
+            + $"{policy.Never.Count} path{(policy.Never.Count == 1 ? string.Empty : "s")} off limits.";
+        foreach (var rule in policy.ReadAllow) WorkspacePolicyRules.Add($"read allow: {rule}");
+        foreach (var rule in policy.WriteAllow) WorkspacePolicyRules.Add($"write allow: {rule}");
+        foreach (var rule in policy.Never) WorkspacePolicyRules.Add($"never: {rule}");
+        if (policy.MaxFileReadsPerTask > 0)
+            WorkspacePolicyRules.Add($"max file reads per task: {policy.MaxFileReadsPerTask}");
+    }
+
+    private static string DescribePolicyAllowCount(int count) =>
+        count == 0 ? "unrestricted" : $"limited to {count} rule{(count == 1 ? string.Empty : "s")}";
 
     [RelayCommand]
     private async Task SaveWorkspaceManifestAsync()

@@ -28,8 +28,9 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
         var depth = maxDepth is > 0 ? maxDepth.Value : int.MaxValue;
         return EnumerateSafeFiles(scope, options.MaxFileBytes)
             .Where(path => PathDepthBelow(scope, path) <= depth)
-            .Take(options.MaxSearchResults)
             .Select(path => ToRelative(root, path))
+            .Where(relative => WorkspacePolicyEvaluator.EvaluateRead(options.Policy, relative).Allowed)
+            .Take(options.MaxSearchResults)
             .ToList();
     }
 
@@ -50,6 +51,8 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
         {
             if (results.Count >= options.MaxSearchResults) break;
             var relative = ToRelative(root, file);
+            if (!WorkspacePolicyEvaluator.EvaluateRead(options.Policy, relative).Allowed)
+                continue;
             var nameMatch = !regex && relative.Contains(query, StringComparison.OrdinalIgnoreCase);
             var snippet = string.Empty;
             if (!nameMatch)
@@ -100,6 +103,7 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
         return EnumerateSafeFiles(root, options.MaxFileBytes)
             .Select(path => ToRelative(root, path))
             .Where(relative => regex.IsMatch(relative))
+            .Where(relative => WorkspacePolicyEvaluator.EvaluateRead(options.Policy, relative).Allowed)
             .Take(options.MaxSearchResults)
             .ToList();
     }
@@ -108,6 +112,7 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
     {
         var root = ResolveWorkspaceRoot(options.WorkspaceRoot);
         var full = ResolveSafePath(root, relativePath);
+        EnforceReadPolicy(options, ToRelative(root, full));
         if (!File.Exists(full))
             throw new FileNotFoundException("Agent file read target does not exist.", relativePath);
 
@@ -159,6 +164,7 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
     {
         var root = ResolveWorkspaceRoot(options.WorkspaceRoot);
         var full = ResolveSafePath(root, relativePath);
+        EnforceWritePolicy(options, ToRelative(root, full));
         var content = proposedContent.Replace("\r\n", "\n").Replace('\r', '\n');
 
         // This is the one write path that touches files the user did not ask
@@ -180,6 +186,7 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
     {
         var root = ResolveWorkspaceRoot(options.WorkspaceRoot);
         var full = ResolveSafePath(root, relativePath);
+        EnforceWritePolicy(options, ToRelative(root, full));
         if (!File.Exists(full))
             throw new FileNotFoundException("Agent edit target does not exist; use create_file for new files.", relativePath);
         if (string.IsNullOrEmpty(oldString))
@@ -202,6 +209,7 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
     {
         var root = ResolveWorkspaceRoot(options.WorkspaceRoot);
         var full = ResolveSafePath(root, relativePath);
+        EnforceWritePolicy(options, ToRelative(root, full));
         if (File.Exists(full))
             throw new InvalidOperationException("create_file refuses to overwrite an existing file; use edit_file instead.");
 
@@ -225,6 +233,15 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
     {
         var root = ResolveWorkspaceRoot(options.WorkspaceRoot);
         var full = ResolveSafePath(root, relativePath);
+        // Graceful, not an exception, so RevertTaskAsync's per-file loop
+        // (r23 1.3) can report a policy-denied revert the same truthful way
+        // it already reports a content-changed conflict, through the same
+        // write-policy rules edit_file/create_file/apply_draft_patch use
+        // (r23 3.2 - one code path, not a second implementation).
+        var writeVerdict = WorkspacePolicyEvaluator.EvaluateWrite(options.Policy, ToRelative(root, full));
+        if (!writeVerdict.Allowed)
+            return new AgentRevertResult(false, $"revert blocked by workspace policy: {writeVerdict.Reason}");
+
         var currentContent = File.Exists(full) ? await File.ReadAllTextAsync(full, ct) : null;
         if (currentContent != expectedCurrentContent)
         {
@@ -246,6 +263,33 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
         return new AgentRevertResult(Reverted: true, Message: string.Empty);
     }
 
+    /// <summary>
+    /// Single-target read enforcement point (r23 3.2), called immediately
+    /// after ResolveSafePath so policy can never be consulted before
+    /// containment. Throws AgentWorkspacePolicyDeniedException - caught by
+    /// AgentToolExecutor and turned into a normal tool result, never an
+    /// unhandled crash - on a glob denial or an exhausted read budget.
+    /// </summary>
+    private static void EnforceReadPolicy(AgentWorkspaceOptions options, string relativePath)
+    {
+        var verdict = WorkspacePolicyEvaluator.EvaluateRead(options.Policy, relativePath);
+        if (!verdict.Allowed)
+            throw new AgentWorkspacePolicyDeniedException($"read blocked by workspace policy: {verdict.Reason}");
+
+        var budget = options.ReadBudget;
+        if (budget is null) return;
+        if (budget.IsExhausted)
+            throw new AgentWorkspacePolicyDeniedException("read budget for this task is spent (workspace policy maxFileReadsPerTask).");
+        budget.UsedReads++;
+    }
+
+    private static void EnforceWritePolicy(AgentWorkspaceOptions options, string relativePath)
+    {
+        var verdict = WorkspacePolicyEvaluator.EvaluateWrite(options.Policy, relativePath);
+        if (!verdict.Allowed)
+            throw new AgentWorkspacePolicyDeniedException($"write blocked by workspace policy: {verdict.Reason}");
+    }
+
     private static int CountOccurrences(string content, string needle)
     {
         var count = 0;
@@ -259,7 +303,13 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
         return count;
     }
 
-    private static Regex GlobToRegex(string pattern)
+    /// <summary>
+    /// Internal so WorkspacePolicyEvaluator reuses the exact same glob
+    /// engine glob_files uses; a second implementation could diverge from
+    /// "what glob_files matches" and that divergence would be a security bug
+    /// (r23 3.4).
+    /// </summary>
+    internal static Regex GlobToRegex(string pattern)
     {
         var sb = new StringBuilder("^");
         var normalized = pattern.Replace('\\', '/');

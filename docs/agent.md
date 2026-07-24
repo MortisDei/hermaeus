@@ -478,6 +478,60 @@ whichever workspace happens to be active in the workbench at approval time.
 Older tasks created before this behavior shipped, with no stored root, fall
 back to the workbench's active workspace, exactly as before.
 
+## Workspace Policy
+
+A workspace can optionally narrow, never widen, what the agent's tools may
+read or write inside it, on top of the containment rules above. Add a
+`policy` object to `.hermaeus/workspace.json`:
+
+```json
+{
+  "policy": {
+    "read_allow": ["src/**", "docs/**"],
+    "write_allow": ["docs/**", "reports/**"],
+    "never": ["secrets/**", "certificates/**", ".git/**"],
+    "max_file_reads_per_task": 200
+  }
+}
+```
+
+- `read_allow` / `write_allow`: glob allowlists, workspace-relative, using
+  the identical `*`/`**` syntax `glob_files` already matches (the same
+  matcher, not a second implementation). Empty or absent means "allow all"
+  in that direction, so a workspace with no policy behaves exactly as
+  before.
+- `never`: a deny list that beats both allow lists, for reads and writes
+  alike.
+- `max_file_reads_per_task`: caps `read_file`/`summarize_file` executions
+  per task. 0 or absent means unlimited. The count is persisted on the task,
+  so a restart does not reset the budget.
+- **Policy only ever narrows.** Since the manifest lives inside the
+  workspace, hostile workspace content can author one; the worst it can do
+  is restrict the agent further inside that workspace. Nothing in policy can
+  grant a path outside the root, a new command family, or relax any gate.
+- A malformed policy (bad shape, a negative cap) is rejected as a whole,
+  with a visible warning in the workbench and log; the rest of the manifest
+  still loads normally. Hermaeus never silently falls back to a
+  half-applied policy, since a boundary the user trusts but that is not
+  actually there is worse than no boundary at all.
+
+Enforcement sits immediately after the existing containment/symlink checks,
+so policy is never consulted before a `../escape`-style path has already
+failed containment. A denied read returns a structured refusal naming the
+path and the rule (not an exception, so the step completes normally and the
+model can route around it); a denied write is classified Blocked by the
+safety gate before it ever becomes an approvable pending action, so it
+cannot be approved into existing. The draft-patch queue and Task Rewind
+enforce the same write rules through the same code path; a Rewind of a file
+the current policy denies writing is refused per file with the policy named,
+and the ledger still shows it.
+
+The workbench's capability disclosure strip shows one line when a policy is
+active (for example "Workspace policy: reads limited to 2 rules, writes to
+2, 3 paths off limits."); expanding it lists the raw globs, read-only. There
+is no policy editor; the manifest is hand-edited, like `AllowedCommands`
+already is.
+
 ## Context Packs
 
 A context pack is a compact, task-scoped bundle the agent provides to the

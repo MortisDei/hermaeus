@@ -135,6 +135,19 @@
                     </StackPanel>
                 </Border>
 
+                <Expander Header="{Binding WorkspacePolicySummary}"
+                          HorizontalAlignment="Stretch"
+                          IsVisible="{Binding HasWorkspacePolicy}"
+                          ToolTip.Tip="Expand to see the workspace's raw policy globs. The manifest (.hermaeus/workspace.json) is hand-edited; there is no editor here.">
+                    <ItemsControl ItemsSource="{Binding WorkspacePolicyRules}" Margin="0,6,0,0">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding}" FontFamily="{DynamicResource AppMonoFont}" FontSize="11" Opacity="0.75" TextWrapping="Wrap" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </Expander>
+
                 <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="10"
                         IsVisible="{Binding HasSubTaskPlan}">
                     <StackPanel Spacing="6">

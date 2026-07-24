@@ -320,7 +320,14 @@ public static class HarnessCases
         [new HarnessCase("agent run ledger builder distinguishes created from edited files", AgentTests.AgentRunLedgerBuilderDistinguishesCreatedFromEditedFiles)],
         [new HarnessCase("agent run ledger builder folds multiple patches per file and computes line delta and order", AgentTests.AgentRunLedgerBuilderFoldsMultiplePatchesPerFileAndComputesLineDeltaAndOrder)],
         [new HarnessCase("agent run ledger builder marks a file reverted only when every patch for it is reverted", AgentTests.AgentRunLedgerBuilderMarksAFileRevertedOnlyWhenEveryPatchForItIsReverted)],
-        [new HarnessCase("agent run ledger builder folds child task entries tagged with the child id", AgentTests.AgentRunLedgerBuilderFoldsChildTaskEntriesTaggedWithTheChildId)]
+        [new HarnessCase("agent run ledger builder folds child task entries tagged with the child id", AgentTests.AgentRunLedgerBuilderFoldsChildTaskEntriesTaggedWithTheChildId)],
+        [new HarnessCase("workspace policy evaluator: never beats an otherwise-matching allow list", AgentTests.WorkspacePolicyEvaluatorNeverBeatsAnOtherwiseMatchingAllowList)],
+        [new HarnessCase("workspace policy evaluator: empty allow list means allow all but a non-empty one narrows", AgentTests.WorkspacePolicyEvaluatorEmptyAllowListMeansAllowAllButANonEmptyOneNarrows)],
+        [new HarnessCase("workspace manifest service rejects a malformed policy as a whole with a warning", AgentTests.WorkspaceManifestServiceRejectsAMalformedPolicyAsAWholeWithAWarning)],
+        [new HarnessCase("workspace policy is consulted only after containment so an escaping path fails containment not policy", AgentTests.WorkspacePolicyIsConsultedOnlyAfterContainmentSoAnEscapingPathFailsContainmentNotPolicy)],
+        [new HarnessCase("agent read_file denied by never policy returns a graceful refusal not an exception", AgentTests.AgentReadFileDeniedByNeverPolicyReturnsAGracefulRefusalNotAnException)],
+        [new HarnessCase("agent read cap counts across a save/load cycle and denies gracefully once spent", AgentTests.AgentReadCapCountsAcrossASaveLoadCycleAndDeniesGracefullyOnceSpent)],
+        [new HarnessCase("agent write denied by policy is classified blocked and never reaches approval", AgentTests.AgentWriteDeniedByPolicyIsClassifiedBlockedAndNeverReachesApproval)]
     ];
 
     public static IEnumerable<object[]> Mcp =>

@@ -314,6 +314,17 @@ public sealed class AgentService : IAgentService
         AgentToolResult? executedToolResult = null;
         if (response.NextAction.Type == AgentActionKind.Tool)
         {
+            var manifest = _manifests is null ? null : await _manifests.LoadAsync(options.WorkspaceRoot, ct);
+            // Carries the workspace policy (r23 3.1) and a per-task read
+            // budget seeded from persisted state into every tool call this
+            // step makes - both the Allowed-tool direct-execute path below
+            // and, via AppendApprovalAsync, the later approved-write path.
+            var toolOptions = options with
+            {
+                Policy = manifest?.Policy,
+                ReadBudget = new AgentReadBudget { MaxReads = manifest?.Policy?.MaxFileReadsPerTask ?? 0, UsedReads = state.FileReadCount }
+            };
+
             AgentToolPolicyDecision decision;
             if (string.Equals(nextTool, "plan_subtasks", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(state.ParentTaskId))
             {
@@ -337,7 +348,6 @@ public sealed class AgentService : IAgentService
             else if (string.Equals(nextTool, "run_command", StringComparison.OrdinalIgnoreCase))
             {
                 var requestedCommand = AgentToolExecutor.Arg(response.NextAction.Arguments, "command");
-                var manifest = _manifests is null ? null : await _manifests.LoadAsync(options.WorkspaceRoot, ct);
                 decision = _safetyGate.EvaluateCommand(requestedCommand, manifest?.AllowedCommands ?? []);
                 if (decision.Disposition == AgentToolDisposition.RequiresApproval
                     && state.RememberedCommandApprovals.Any(c => string.Equals(c, requestedCommand.Trim(), StringComparison.OrdinalIgnoreCase)))
@@ -349,6 +359,19 @@ public sealed class AgentService : IAgentService
                     // trusted".
                     decision = decision with { Disposition = AgentToolDisposition.Allowed, Reason = "Command was already approved once in this task." };
                 }
+            }
+            else if (nextTool is "edit_file" or "create_file" or "apply_draft_patch")
+            {
+                // A policy-denied write is classified Blocked before it ever
+                // becomes an approvable pending action (r23 3.2); the same
+                // rule is re-checked at actual execution time inside
+                // AgentWorkspaceTools, for the draft-patch queue and Rewind
+                // paths that do not go through this classification step.
+                var targetPath = AgentToolExecutor.Arg(response.NextAction.Arguments, "relative_path", "path");
+                var writeVerdict = WorkspacePolicyEvaluator.EvaluateWrite(manifest?.Policy, targetPath);
+                decision = writeVerdict.Allowed
+                    ? _safetyGate.Evaluate(nextTool, response.NextAction.RequiresApproval)
+                    : new AgentToolPolicyDecision(AgentToolDisposition.Blocked, AgentRiskLevel.High, $"write blocked by workspace policy: {writeVerdict.Reason}");
             }
             else
             {
@@ -418,7 +441,7 @@ public sealed class AgentService : IAgentService
                     AgentToolResult toolResult;
                     try
                     {
-                        toolResult = await _toolExecutor.ExecuteAsync(nextTool, response.NextAction.Arguments, options, ct);
+                        toolResult = await _toolExecutor.ExecuteAsync(nextTool, response.NextAction.Arguments, toolOptions, ct);
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException)
                     {
@@ -431,6 +454,11 @@ public sealed class AgentService : IAgentService
                         throw;
                     }
 
+                    // Persists the read budget's usage so it survives a
+                    // restart (r23 3.1); a policy-denied or budget-exhausted
+                    // attempt returns gracefully without incrementing, so it
+                    // never counts against the budget it was refused by.
+                    state.FileReadCount = toolOptions.ReadBudget!.UsedReads;
                     state.ToolResults.Add(toolResult);
                     executedToolResult = toolResult;
                     state.Status = AgentTaskStatus.Running;
