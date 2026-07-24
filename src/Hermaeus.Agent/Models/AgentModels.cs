@@ -183,6 +183,30 @@ public sealed class AgentTaskState
     /// Persisted so a restart does not reset the budget.
     /// </summary>
     public int FileReadCount { get; set; }
+    /// <summary>
+    /// Set true the first time the plan-approval checkpoint pauses this task
+    /// (r23 2.1, AgentSettings.RequirePlanApproval) and never cleared
+    /// afterward, so the checkpoint fires at most once per task even across
+    /// a restart. See <see cref="PlanApprovalPending"/> for whether the pause
+    /// is currently active.
+    /// </summary>
+    public bool PlanApprovalCheckpointFired { get; set; }
+    /// <summary>
+    /// True only while the task is actively paused at the plan-approval
+    /// checkpoint (r23 2.1): distinguishes that pause from an ordinary
+    /// ask_user reply-wait, since both otherwise look identical (WaitingForUser
+    /// with no PendingToolAction). Cleared as soon as the run resumes.
+    /// </summary>
+    public bool PlanApprovalPending { get; set; }
+    /// <summary>Step count at which set_plan last replaced a non-empty plan (r23 2.2); null until the first revision.</summary>
+    public int? PlanRevisedAtStep { get; set; }
+    /// <summary>
+    /// Set from the model's final answer when non-empty (r23 2.3): things it
+    /// looked for and could not verify or finish. Status stays Complete;
+    /// this is presentation ("Completed with reservations") plus persisted
+    /// metadata, not a new state machine value. Empty means nothing to show.
+    /// </summary>
+    public List<string> Reservations { get; set; } = [];
 }
 
 /// <summary>
@@ -541,6 +565,14 @@ public sealed class AgentPlannerResponse
     public AgentNextAction NextAction { get; set; } = new();
     public AgentStateUpdate StateUpdate { get; set; } = new();
     public string UserMessage { get; set; } = string.Empty;
+    /// <summary>
+    /// Optional, model-provided (r23 2.3): things it looked for and could
+    /// not verify or finish, on a final answer. Never required and never
+    /// nagged for; an empty or absent list means nothing is shown. Not a
+    /// confidence score - each entry is a specific, honest statement, not a
+    /// number dressing a vibe as measurement.
+    /// </summary>
+    public List<string> Reservations { get; set; } = [];
 }
 
 public sealed class AgentStateUpdate
@@ -608,7 +640,9 @@ public sealed record AgentTaskListItem(
     string? ParentTaskId = null,
     /// <summary>r19 3.3: PendingSteps.Count as of the last save, so the recent-tasks list can flag a
     /// terminal task that declared victory with its own plan still open, without loading the full state.</summary>
-    int PendingStepCount = 0);
+    int PendingStepCount = 0,
+    /// <summary>r23 2.3: true when the task completed with a non-empty Reservations list, so the recent-tasks list can show "Completed with reservations" without loading the full state.</summary>
+    bool HasReservations = false);
 
 public sealed record AgentFileSearchResult(
     string RelativePath,

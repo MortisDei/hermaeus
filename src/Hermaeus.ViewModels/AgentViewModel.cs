@@ -130,6 +130,7 @@ public sealed class AgentTaskListItemViewModel
         UpdatedAt = item.UpdatedAt;
         ParentTaskId = item.ParentTaskId;
         PendingStepCount = item.PendingStepCount;
+        HasReservations = item.HasReservations;
     }
 
     public string TaskId { get; }
@@ -138,8 +139,10 @@ public sealed class AgentTaskListItemViewModel
     public DateTime UpdatedAt { get; }
     public string? ParentTaskId { get; }
     public int PendingStepCount { get; }
+    public bool HasReservations { get; }
     public bool IsSubTask => !string.IsNullOrWhiteSpace(ParentTaskId);
-    public string StatusLabel => Status.ToString();
+    /// <summary>r23 2.3: presentation only - status stays Complete; a non-empty Reservations list just changes what this label says.</summary>
+    public string StatusLabel => Status == AgentTaskStatus.Complete && HasReservations ? "Completed with reservations" : Status.ToString();
 
     /// <summary>r19 3.3: a terminal task (Complete/Failed/Blocked) whose own plan still lists
     /// pending steps declared victory prematurely; flag it at a glance in the recent-tasks list.</summary>
@@ -561,7 +564,14 @@ public partial class AgentViewModel : ViewModelBase
     [ObservableProperty] private string _replyText = string.Empty;
     [ObservableProperty] private string _workspaceVoiceProfileName = string.Empty;
 
-    public string CurrentTaskStatusLabel => CurrentTask is null ? "No active task" : CurrentTask.Status.ToString();
+    /// <summary>r23 2.3: presentation only - status stays Complete; a non-empty Reservations list just changes what this label says.</summary>
+    public string CurrentTaskStatusLabel => CurrentTask switch
+    {
+        null => "No active task",
+        { Status: AgentTaskStatus.Complete, Reservations.Count: > 0 } => "Completed with reservations",
+        _ => CurrentTask.Status.ToString()
+    };
+    public bool HasReservations => CurrentTask is { Reservations.Count: > 0 };
     /// <summary>
     /// Plain "step N/max" for an ordinary task; "sub-task X/N, step Y" for
     /// an orchestration parent, sourced from SubTaskPlan and
@@ -597,6 +607,14 @@ public partial class AgentViewModel : ViewModelBase
         ? $"Finished with {t.PendingSteps.Count} planned step{(t.PendingSteps.Count == 1 ? "" : "s")} not run."
         : string.Empty;
     public bool HasPrematureCompleteNote => !string.IsNullOrEmpty(PrematureCompleteNote);
+
+    /// <summary>r23 2.1: the task is paused at the opt-in plan-approval checkpoint, distinct from an ordinary ask_user reply-wait.</summary>
+    public bool IsWaitingForPlanApproval => CurrentTask is { Status: AgentTaskStatus.WaitingForUser, PendingToolAction: null } && CurrentTask.PlanApprovalPending;
+    /// <summary>The existing "Continue task" box (r19 3.1) also covers resuming past the plan-approval checkpoint (r23 2.1) - same mechanism, ContinueTaskAsync, either way.</summary>
+    public bool ShowContinueBox => IsTaskTerminal || IsWaitingForPlanApproval;
+    /// <summary>r23 2.2: "revised at step N" annotation on the plan panel, shown once set_plan has replaced a non-empty plan at least once.</summary>
+    public string PlanRevisedLabel => CurrentTask?.PlanRevisedAtStep is { } step ? $"revised at step {step}" : string.Empty;
+    public bool HasPlanRevision => PlanRevisedLabel.Length > 0;
     /// <summary>True when the task is asking a question, not waiting on a tool approval; only then does the reply box apply.</summary>
     public bool IsWaitingForReply => CurrentTask is { Status: AgentTaskStatus.WaitingForUser, PendingToolAction: null };
     public int RecentTaskCount => RecentTasks.Count;
@@ -987,7 +1005,7 @@ public partial class AgentViewModel : ViewModelBase
         }
     }
 
-    private bool CanContinueTask() => !IsRunning && IsTaskTerminal;
+    private bool CanContinueTask() => !IsRunning && (IsTaskTerminal || IsWaitingForPlanApproval);
 
     /// <summary>
     /// Shared by <see cref="ApproveReviewAsync"/> and <see cref="SendReplyAsync"/>:
@@ -1866,6 +1884,7 @@ public partial class AgentViewModel : ViewModelBase
     private void RefreshTaskPreview()
     {
         OnPropertyChanged(nameof(CurrentTaskStatusLabel));
+        OnPropertyChanged(nameof(HasReservations));
         OnPropertyChanged(nameof(CurrentStepCountLabel));
         OnPropertyChanged(nameof(CurrentTaskGoalLabel));
         OnPropertyChanged(nameof(CurrentTaskSummaryLabel));
@@ -1955,6 +1974,10 @@ public partial class AgentViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsTaskTerminal));
         OnPropertyChanged(nameof(PrematureCompleteNote));
         OnPropertyChanged(nameof(HasPrematureCompleteNote));
+        OnPropertyChanged(nameof(IsWaitingForPlanApproval));
+        OnPropertyChanged(nameof(ShowContinueBox));
+        OnPropertyChanged(nameof(PlanRevisedLabel));
+        OnPropertyChanged(nameof(HasPlanRevision));
         _ = RefreshQueuedPatchesAsync();
         _ = RefreshRunLedgerAsync();
     }

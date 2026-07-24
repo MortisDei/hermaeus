@@ -26,4 +26,13 @@ public class AgentSettings
     /// across the whole orchestration.
     /// </summary>
     public int MaxOrchestrationSteps { get; set; } = 60;
+
+    /// <summary>
+    /// When true, a fresh task's first autonomous run pauses after the
+    /// model's first successful <c>set_plan</c> so the user can review the
+    /// plan before it continues (r23 2.1). Off by default: it adds a click
+    /// to every run, and some users trust plans more than opaque momentum,
+    /// but that is their choice to opt into.
+    /// </summary>
+    public bool RequirePlanApproval { get; set; }
 }

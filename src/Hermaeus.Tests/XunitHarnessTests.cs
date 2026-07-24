@@ -330,7 +330,14 @@ public static class HarnessCases
         [new HarnessCase("agent write denied by policy is classified blocked and never reaches approval", AgentTests.AgentWriteDeniedByPolicyIsClassifiedBlockedAndNeverReachesApproval)],
         [new HarnessCase("agent rejects a stated lesson claiming approval policy and does not store it", AgentTests.AgentRejectsAStatedLessonClaimingApprovalPolicyAndDoesNotStoreIt)],
         [new HarnessCase("agent rejected stated lesson writes a trace event with the claim and matched token", AgentTests.AgentRejectedStatedLessonWritesATraceEventWithTheClaimAndMatchedToken)],
-        [new HarnessCase("agent deterministic approval lessons are unaffected by the stated lesson filter", AgentTests.AgentDeterministicApprovalLessonsAreUnaffectedByTheStatedLessonFilter)]
+        [new HarnessCase("agent deterministic approval lessons are unaffected by the stated lesson filter", AgentTests.AgentDeterministicApprovalLessonsAreUnaffectedByTheStatedLessonFilter)],
+        [new HarnessCase("agent plan approval checkpoint pauses after the first set_plan when enabled", AgentTests.AgentPlanApprovalCheckpointPausesAfterTheFirstSetPlanWhenEnabled)],
+        [new HarnessCase("agent plan approval checkpoint never fires twice for the same task", AgentTests.AgentPlanApprovalCheckpointNeverFiresTwiceForTheSameTask)],
+        [new HarnessCase("agent plan approval checkpoint never fires for a sub-task", AgentTests.AgentPlanApprovalCheckpointNeverFiresForASubTask)],
+        [new HarnessCase("agent plan revision is logged and annotates the step it happened at", AgentTests.AgentPlanRevisionIsLoggedAndAnnotatesTheStepItHappenedAt)],
+        [new HarnessCase("agent final answer with reservations persists them on the task", AgentTests.AgentFinalAnswerWithReservationsPersistsThemOnTheTask)],
+        [new HarnessCase("agent final answer without reservations leaves the list empty", AgentTests.AgentFinalAnswerWithoutReservationsLeavesTheListEmpty)],
+        [new HarnessCase("agent orchestration synthesis carries child reservations into the report", AgentTests.AgentOrchestrationSynthesisCarriesChildReservationsIntoTheReport)]
     ];
 
     public static IEnumerable<object[]> Mcp =>

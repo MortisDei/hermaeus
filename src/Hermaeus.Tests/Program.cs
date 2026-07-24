@@ -213,7 +213,7 @@ internal static class AgentTests
         await c.OpenAsync();
         await using var cmd = c.CreateCommand();
         cmd.CommandText = "SELECT version FROM hermaeus_schema_versions WHERE scope = 'agent_task_index'";
-        Equal(3L, (long)(await cmd.ExecuteScalarAsync() ?? 0L), "agent task index should record schema version");
+        Equal(4L, (long)(await cmd.ExecuteScalarAsync() ?? 0L), "agent task index should record schema version");
     }
 
     File.Delete(Path.Combine(store.GetTaskDirectory("indexed-task"), "task_state.json"));
@@ -3160,5 +3160,221 @@ internal static class AgentTests
     True(step.State.PendingToolAction is null, "a Blocked write must never become an approvable pending action");
     Equal("original", await File.ReadAllTextAsync(Path.Combine(root, "notes.md")), "the file must remain untouched");
     True(step.State.ToolResults.Any(r => r.Tool == "safety_gate" && r.ResultSummary.Contains("write blocked by workspace policy", StringComparison.Ordinal)), "the safety gate row should name the policy rule");
+    }
+
+    private const string SetPlanResponse = """
+        {
+          "thought_summary": "Setting the plan.",
+          "current_step": "Plan created.",
+          "next_action": {
+            "type": "tool",
+            "tool_name": "set_plan",
+            "arguments": { "steps": [ { "description": "Step one", "status": "pending" }, { "description": "Step two", "status": "pending" } ] },
+            "requires_approval": false,
+            "risk_level": "none"
+          },
+          "state_update": { "completed": [], "pending": [], "new_facts": [], "blockers": [] },
+          "user_message": "Plan created."
+        }
+        """;
+
+    private const string SetPlanRevisedResponse = """
+        {
+          "thought_summary": "Revising the plan.",
+          "current_step": "Plan revised.",
+          "next_action": {
+            "type": "tool",
+            "tool_name": "set_plan",
+            "arguments": { "steps": [ { "description": "Step one", "status": "pending" }, { "description": "Step two", "status": "pending" }, { "description": "Step three", "status": "pending" } ] },
+            "requires_approval": false,
+            "risk_level": "none"
+          },
+          "state_update": { "completed": [], "pending": [], "new_facts": [], "blockers": [] },
+          "user_message": "Plan revised."
+        }
+        """;
+
+    public static async Task AgentPlanApprovalCheckpointPausesAfterTheFirstSetPlanWhenEnabled()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    settings.Settings.Agent.RequirePlanApproval = true;
+    var store = new FileAgentTaskStateStore(settings);
+    var tools = new AgentWorkspaceTools();
+    var llm = new FakeSequencedAgentLlm([SetPlanResponse]);
+    var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), llm, settings: settings);
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-sequenced-agent");
+
+    var state = await service.CreateTaskAsync("Do a multi-step thing", options);
+    var step = await service.RunStepAsync(state.TaskId, options);
+
+    Equal(AgentTaskStatus.WaitingForUser, step.State.Status, "the run should pause after the first set_plan when the checkpoint is enabled");
+    True(step.State.PlanApprovalPending, "the pending-plan-approval flag should be set while paused here");
+    True(step.State.PlanApprovalCheckpointFired, "the checkpoint should record that it already fired");
+    Equal(2, step.State.Plan.Count, "the plan itself should still be applied even though the run paused");
+
+    var resumed = await service.ContinueTaskAsync(state.TaskId, "", options);
+    Equal(AgentTaskStatus.Running, resumed.Status, "continuing should return the task to Running");
+    False(resumed.PlanApprovalPending, "continuing should clear the pending-plan-approval flag");
+    }
+
+    public static async Task AgentPlanApprovalCheckpointNeverFiresTwiceForTheSameTask()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    settings.Settings.Agent.RequirePlanApproval = true;
+    var store = new FileAgentTaskStateStore(settings);
+    var tools = new AgentWorkspaceTools();
+    var llm = new FakeSequencedAgentLlm([SetPlanResponse, SetPlanRevisedResponse]);
+    var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), llm, settings: settings);
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-sequenced-agent");
+
+    var state = await service.CreateTaskAsync("Do a multi-step thing", options);
+    var first = await service.RunStepAsync(state.TaskId, options);
+    Equal(AgentTaskStatus.WaitingForUser, first.State.Status, "the first set_plan should still pause the run");
+
+    await service.ContinueTaskAsync(state.TaskId, string.Empty, options);
+    var second = await service.RunStepAsync(state.TaskId, options);
+
+    Equal(AgentTaskStatus.Running, second.State.Status, "a plan revision after the checkpoint already fired must not re-pause the task");
+    True(second.State.PlanApprovalCheckpointFired, "the checkpoint flag should remain set");
+    False(second.State.PlanApprovalPending, "the task should not be pending plan approval again");
+    }
+
+    public static async Task AgentPlanApprovalCheckpointNeverFiresForASubTask()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    settings.Settings.Agent.RequirePlanApproval = true;
+    var store = new FileAgentTaskStateStore(settings);
+    var tools = new AgentWorkspaceTools();
+    var llm = new FakeSequencedAgentLlm([SetPlanResponse]);
+    var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), llm, settings: settings);
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-sequenced-agent");
+
+    var child = new AgentTaskState { Goal = "child goal", ParentTaskId = "some-parent-id", Status = AgentTaskStatus.New };
+    await store.SaveAsync(child);
+
+    var step = await service.RunStepAsync(child.TaskId, options);
+
+    Equal(AgentTaskStatus.Running, step.State.Status, "a sub-task's own set_plan must never trigger the plan-approval checkpoint");
+    False(step.State.PlanApprovalPending, "a sub-task should never show as pending plan approval");
+    False(step.State.PlanApprovalCheckpointFired, "a sub-task should never mark the checkpoint as fired");
+    }
+
+    public static async Task AgentPlanRevisionIsLoggedAndAnnotatesTheStepItHappenedAt()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    var tools = new AgentWorkspaceTools();
+    var llm = new FakeSequencedAgentLlm([SetPlanResponse, SetPlanRevisedResponse]);
+    var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), llm, settings: settings);
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-sequenced-agent");
+
+    var state = await service.CreateTaskAsync("Do a multi-step thing", options);
+    var first = await service.RunStepAsync(state.TaskId, options);
+    True(first.State.PlanRevisedAtStep is null, "the first set_plan call is not a revision");
+    var second = await service.RunStepAsync(state.TaskId, options);
+
+    Equal(2, second.State.PlanRevisedAtStep, "the revision should be tagged with the step count it happened at");
+    Equal(3, second.State.Plan.Count, "the revised plan should have replaced the original");
+    var log = await File.ReadAllTextAsync(Path.Combine(store.GetTaskDirectory(state.TaskId), "agent.log"));
+    True(log.Contains("plan revised: 2 items -> 3 items", StringComparison.Ordinal), "the log should record the revision with counts, not a diff");
+    var transcript = await store.LoadTranscriptAsync(state.TaskId);
+    True(transcript.Any(e => e.Content.Contains("plan revised", StringComparison.Ordinal)), "the transcript should also record the revision");
+    }
+
+    public static async Task AgentFinalAnswerWithReservationsPersistsThemOnTheTask()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    var tools = new AgentWorkspaceTools();
+    var finalWithReservations = """
+        {
+          "thought_summary": "Wrapping up.",
+          "current_step": "Done.",
+          "next_action": { "type": "final", "requires_approval": false, "risk_level": "none" },
+          "state_update": { "completed": [], "pending": [], "new_facts": [], "blockers": [] },
+          "user_message": "Finished the migration.",
+          "reservations": ["Could not find deployment documentation anywhere in the workspace.", "  ", ""]
+        }
+        """;
+    var llm = new FakeSequencedAgentLlm([finalWithReservations]);
+    var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), llm, settings: settings);
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-sequenced-agent");
+
+    var state = await service.CreateTaskAsync("Migrate the config", options);
+    var step = await service.RunStepAsync(state.TaskId, options);
+
+    Equal(AgentTaskStatus.Complete, step.State.Status, "a final answer with reservations should still complete the task normally");
+    Equal(1, step.State.Reservations.Count, "blank reservation entries should be dropped");
+    Equal("Could not find deployment documentation anywhere in the workspace.", step.State.Reservations[0], "the reservation text should persist");
+    }
+
+    public static async Task AgentFinalAnswerWithoutReservationsLeavesTheListEmpty()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    var tools = new AgentWorkspaceTools();
+    var llm = new FakeSequencedAgentLlm([FinalResponseWithMessage("All done, no caveats.")]);
+    var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), llm, settings: settings);
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-sequenced-agent");
+
+    var state = await service.CreateTaskAsync("Do something simple", options);
+    var step = await service.RunStepAsync(state.TaskId, options);
+
+    Equal(AgentTaskStatus.Complete, step.State.Status, "an ordinary final answer should complete the task");
+    Equal(0, step.State.Reservations.Count, "an absent reservations field should mean nothing is shown, not an empty entry");
+    }
+
+    public static async Task AgentOrchestrationSynthesisCarriesChildReservationsIntoTheReport()
+    {
+    using var temp = new TempDir();
+    var childFinalWithReservation = """
+        {
+          "thought_summary": "First sub-task done, with a caveat.",
+          "current_step": "Done.",
+          "next_action": { "type": "final", "requires_approval": false, "risk_level": "none" },
+          "state_update": { "completed": [], "pending": [], "new_facts": [], "blockers": [] },
+          "user_message": "Fixed the bug in Foo.cs.",
+          "reservations": ["Could not run the full test suite; only the affected module was tested."]
+        }
+        """;
+    var llm = new FakeSequencedAgentLlm([
+        PlanTwoSubtasksResponse,
+        childFinalWithReservation,
+        FinalResponseWithMessage("Added a regression test."),
+        FinalResponseWithMessage("Both sub-tasks completed successfully.")
+    ]);
+    var (store, service, options, state) = await CreateApprovedTwoSubtaskPlanAsync(temp, llm);
+
+    var result = await service.RunAsync(state.TaskId, options);
+
+    Equal(AgentTaskStatus.Complete, result.State.Status, "the parent should complete once every sub-task and synthesis are done");
+    var reportPath = Path.Combine(store.GetTaskDirectory(state.TaskId), "report.md");
+    var report = await File.ReadAllTextAsync(reportPath);
+    True(report.Contains("## Reservations", StringComparison.Ordinal), "the report should carry a Reservations heading when a child had one");
+    True(report.Contains("Could not run the full test suite", StringComparison.Ordinal), "the report should carry the child's actual reservation text");
     }
 }

@@ -51,6 +51,9 @@ public sealed class AgentService : IAgentService
         verbatim. Approval policy is never a valid lesson subject - a lesson
         claiming the user approves, pre-approves, or does not need to review
         something is rejected outright, not stored.
+        On a final answer you may optionally include "reservations": a short
+        list of specific things you looked for and could not verify or
+        finish - not a hedge, not a confidence score, and never required.
         Return only valid JSON matching:
         {
           "thought_summary": "brief user-visible reasoning summary",
@@ -68,7 +71,8 @@ public sealed class AgentService : IAgentService
             "new_facts": [],
             "blockers": []
           },
-          "user_message": "message for the user"
+          "user_message": "message for the user",
+          "reservations": []
         }
         """;
 
@@ -432,11 +436,45 @@ public sealed class AgentService : IAgentService
             {
                 if (string.Equals(nextTool, "set_plan", StringComparison.OrdinalIgnoreCase))
                 {
+                    var previousPlanCount = state.Plan.Count;
                     var planResult = ApplySetPlan(state, response.NextAction.Arguments);
                     state.ToolResults.Add(planResult);
                     executedToolResult = planResult;
                     state.Status = AgentTaskStatus.Running;
                     response.UserMessage = $"Updated plan ({state.Plan.Count} step(s)).";
+
+                    // r23 2.2: set_plan silently replacing an existing
+                    // checklist used to be invisible; a revision after the
+                    // first set_plan call is now logged (counts, not a diff)
+                    // and the workbench annotates the plan with when.
+                    if (previousPlanCount > 0)
+                    {
+                        // state.StepCount++ has not run yet for this step
+                        // (it happens later in the method), so the step this
+                        // revision belongs to is one ahead of the current value.
+                        var currentStep = state.StepCount + 1;
+                        state.PlanRevisedAtStep = currentStep;
+                        var revisionNote = $"plan revised: {previousPlanCount} items -> {state.Plan.Count} items";
+                        await _store.AppendLogAsync(taskId, revisionNote, ct);
+                        await _store.AppendTranscriptEntryAsync(taskId, new AgentTranscriptEntry(
+                            currentStep, "tool", "set_plan", revisionNote, DateTime.UtcNow), ct);
+                    }
+
+                    // r23 2.1: opt-in pause after the FIRST set_plan of a
+                    // fresh task, so the user can review the plan before the
+                    // run proceeds unattended. Fires at most once per task
+                    // (PlanApprovalCheckpointFired never resets) and never
+                    // for a sub-task, whose own plan_subtasks approval
+                    // already showed the user the full sub-task plan.
+                    if (_settings?.Settings.Agent.RequirePlanApproval == true
+                        && !state.PlanApprovalCheckpointFired
+                        && string.IsNullOrEmpty(state.ParentTaskId))
+                    {
+                        state.PlanApprovalCheckpointFired = true;
+                        state.PlanApprovalPending = true;
+                        state.Status = AgentTaskStatus.WaitingForUser;
+                        response.UserMessage = "Plan is ready for review. Continue when you are ready to let the run proceed.";
+                    }
                 }
                 else if (_toolExecutor.CanExecute(nextTool))
                 {
@@ -501,7 +539,12 @@ public sealed class AgentService : IAgentService
         if (response.NextAction.Type == AgentActionKind.AskUser)
             state.Status = AgentTaskStatus.WaitingForUser;
         if (response.NextAction.Type == AgentActionKind.Final)
+        {
             state.Status = AgentTaskStatus.Complete;
+            // r23 2.3: optional, model-provided, never required; an empty
+            // list (the common case) means nothing is shown anywhere.
+            state.Reservations = response.Reservations?.Where(r => !string.IsNullOrWhiteSpace(r)).Select(r => r.Trim()).ToList() ?? [];
+        }
 
         if (parseFailed && state.ConsecutiveStepErrors >= 3)
         {
@@ -796,6 +839,13 @@ public sealed class AgentService : IAgentService
         if (budgetTruncated && !report.Contains("budget", StringComparison.OrdinalIgnoreCase))
             report += "\n\nNote: this run was truncated by the orchestration step budget; some sub-tasks were skipped.";
 
+        // r23 2.3: a child's own reservations are otherwise invisible once
+        // synthesis folds its outcome into one line of ResultSummary; carry
+        // them into the parent's report so the user still sees them.
+        var childReservations = await CollectChildReservationsAsync(state.SubTaskPlan, ct);
+        if (childReservations.Count > 0)
+            report += "\n\n## Reservations\n" + string.Join("\n", childReservations.Select(r => $"- {r}"));
+
         state.Status = AgentTaskStatus.Complete;
         state.PendingToolAction = null;
         state.Summary = report;
@@ -815,6 +865,20 @@ public sealed class AgentService : IAgentService
         return stepResult is not null && synthesisSucceeded
             ? stepResult with { State = state }
             : new AgentStepResult(state, stepResult?.ContextPack ?? new AgentContextPack(), stepResult?.PlannerResponse ?? new AgentPlannerResponse { UserMessage = report }, report);
+    }
+
+    private async Task<List<string>> CollectChildReservationsAsync(IReadOnlyList<AgentSubTaskSpec> subTaskPlan, CancellationToken ct)
+    {
+        var reservations = new List<string>();
+        foreach (var spec in subTaskPlan)
+        {
+            if (string.IsNullOrEmpty(spec.TaskId)) continue;
+            var child = await _store.LoadAsync(spec.TaskId, ct);
+            if (child is null) continue;
+            foreach (var reservation in child.Reservations)
+                reservations.Add($"{spec.Goal}: {reservation}");
+        }
+        return reservations;
     }
 
     private static string BuildFallbackSynthesisReport(AgentTaskState state)
@@ -1029,6 +1093,7 @@ public sealed class AgentService : IAgentService
 
         state.Status = AgentTaskStatus.Running;
         state.ConsecutiveStepErrors = 0;
+        state.PlanApprovalPending = false;
         await _store.SaveAsync(state, ct);
         await _store.AppendLogAsync(taskId, $"continued: {trimmedInstruction}", ct);
         return state;
