@@ -95,6 +95,41 @@ approve-and-continue shape as a gated-action approval. A reply is never
 accepted while a tool approval is also pending on the same task - those are
 answered separately, on their own explicit approve/reject path.
 
+## Plan Checkpoint and Completion Honesty
+
+- **Plan-approval checkpoint** (`Agent.RequirePlanApproval`, Settings;
+  default off): when enabled, a fresh task's first successful `set_plan`
+  pauses the run instead of continuing, so the plan can be reviewed before
+  anything unattended happens. The Continue task box (the same one used to
+  resume a task that stopped early) resumes the run from there. This fires
+  at most once per task, even across a restart, and never for a sub-task -
+  its own `plan_subtasks` approval already showed the full sub-task plan
+  before anything ran. If the model proposes a gated action before ever
+  calling `set_plan`, the existing approval flow already provides the
+  checkpoint; this never adds a second pause on top of it. Off by default
+  because it adds a click to every run; some users trust plans more than
+  opaque momentum, and this is their choice to opt into.
+- **Visible plan revisions**: `set_plan` still replaces the whole checklist
+  each call (it stays a Safe, non-gated tool), but a call that replaces a
+  non-empty existing plan now logs `plan revised: 4 items -> 6 items`
+  (counts, not a diff) to `agent.log` and the transcript, and the plan panel
+  shows a small "revised at step N" annotation.
+- **Completed with reservations**: a final answer may optionally carry a
+  short list of specific things the model looked for and could not verify
+  or finish. This is never a numeric confidence score - a self-reported
+  percentage is theatre, not measurement - and never required or nagged
+  for; an empty or absent list shows nothing. A task completing with
+  reservations shows "Completed with reservations" in the summary strip and
+  the recent-tasks list (status stays `Complete`); the reservations render
+  as their own list under the final answer, and orchestration synthesis
+  carries a child's reservations into the parent's `report.md` under a
+  "Reservations" heading.
+- **Context receipt**: a collapsed-by-default "Context receipt" expander in
+  the workbench shows the latest step's context sections exactly as
+  `AgentContextReceiptBuilder` computed them - label, item count, token
+  estimate, and item identifiers. Read-only, no new persistence; the
+  `agent.trace.jsonl` trace remains the tool for step-by-step archaeology.
+
 ## Sub-task Orchestration
 
 For a broad, multi-domain goal, the agent can request `plan_subtasks`: a

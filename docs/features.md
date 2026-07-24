@@ -196,6 +196,17 @@
   plus a per-task cap on file reads; a denied read refuses gracefully, a
   denied write is blocked before it can ever be approved, and a malformed
   policy is rejected as a whole with a visible warning.
+- Optional plan-approval checkpoint (`Agent.RequirePlanApproval`, off by
+  default): a fresh task's first `set_plan` pauses the run for review before
+  anything unattended happens, at most once per task. A later `set_plan`
+  revising a non-empty plan is now logged and annotated ("revised at step
+  N") instead of silently replacing the checklist.
+- A final answer may optionally carry a short list of specific things the
+  model could not verify or finish ("reservations") - never a numeric
+  confidence score, never required. A task completing with any shows
+  "Completed with reservations" in the summary strip and recent-tasks list;
+  orchestration synthesis carries a child's reservations into the parent's
+  report under a Reservations heading.
 - Autonomous runs: Start (or resuming after an approval or a reply) runs
   steps back to back without a click per step, stopping at a final answer, a
   question for the user, a gated action needing approval, a blocked or
