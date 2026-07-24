@@ -88,6 +88,7 @@ public sealed partial class DoctorService : IDoctorService
             await CheckAiAssetsRootAsync(ct),
             CheckLlamaServerBinary(),
             await CheckLlamaServerUpdateAsync(ct),
+            await CheckAppUpdateAsync(ct),
             CheckGgufModels(),
             CheckUntunedGgufModels(),
             await CheckOllamaAsync(ct),

@@ -4,23 +4,26 @@
              x:Class="Hermaeus.Desktop.Controls.MossIcon"
              Width="16" Height="16">
   <!--
-    Icon-scale rendering of the "Moss" mascot per docs/mascot.md: round
-    face silhouette, pointed ears, a mushroom tuft, two big eyes. Plain
-    vector shapes only (no image/SVG dependency) so it scales cleanly at
-    any size this control is placed at.
+    Icon-scale rendering of the "Moss" mascot per docs/mascot.md's
+    woodland-goblin spec: a weathered hood (not a round cute face), pointed
+    ears, a small brass spectacles band, and a warm lantern-glow accent in
+    place of the retired cute-era mushroom tuft. Plain vector shapes only
+    (no image/SVG dependency) so it scales cleanly at any size this control
+    is placed at.
   -->
   <Viewbox Stretch="Uniform">
     <Canvas Width="24" Height="24">
-      <Ellipse Canvas.Left="2" Canvas.Top="9" Width="4" Height="6" Fill="#436B3F" />
-      <Ellipse Canvas.Left="18" Canvas.Top="9" Width="4" Height="6" Fill="#436B3F" />
-      <Ellipse Canvas.Left="3" Canvas.Top="6" Width="18" Height="15" Fill="#7A8F6A" />
-      <Rectangle Canvas.Left="11" Canvas.Top="3" Width="2" Height="4" Fill="#E8DFC6" />
-      <Ellipse Canvas.Left="8.5" Canvas.Top="1" Width="4" Height="3" Fill="#B87333" />
-      <Ellipse Canvas.Left="12.5" Canvas.Top="2" Width="3" Height="2.4" Fill="#D19A42" />
-      <Ellipse Canvas.Left="7.5" Canvas.Top="12" Width="3.2" Height="4" Fill="#1A1D18" />
-      <Ellipse Canvas.Left="13.3" Canvas.Top="12" Width="3.2" Height="4" Fill="#1A1D18" />
-      <Ellipse Canvas.Left="8.1" Canvas.Top="12.6" Width="1" Height="1" Fill="#E8DFC6" />
-      <Ellipse Canvas.Left="13.9" Canvas.Top="12.6" Width="1" Height="1" Fill="#E8DFC6" />
+      <Polygon Points="4,8 8,3 8,9" Fill="#436B3F" />
+      <Polygon Points="20,8 16,3 16,9" Fill="#436B3F" />
+      <Ellipse Canvas.Left="4" Canvas.Top="5" Width="16" Height="14" Fill="#436B3F" />
+      <Polygon Points="8,5 12,1 16,5" Fill="#2E3D2B" />
+      <Ellipse Canvas.Left="7" Canvas.Top="10" Width="10" Height="8" Fill="#E8DFC6" />
+      <Ellipse Canvas.Left="8.3" Canvas.Top="12.5" Width="3" Height="3.6" Fill="#1A1D18" />
+      <Ellipse Canvas.Left="12.7" Canvas.Top="12.5" Width="3" Height="3.6" Fill="#1A1D18" />
+      <Ellipse Canvas.Left="8.9" Canvas.Top="13" Width="0.9" Height="0.9" Fill="#E8DFC6" />
+      <Ellipse Canvas.Left="13.3" Canvas.Top="13" Width="0.9" Height="0.9" Fill="#E8DFC6" />
+      <Rectangle Canvas.Left="7.8" Canvas.Top="13.6" Width="8.4" Height="1" RadiusX="0.5" RadiusY="0.5" Fill="#B87333" />
+      <Ellipse Canvas.Left="18" Canvas.Top="15" Width="2.4" Height="2.4" Fill="#D19A42" />
     </Canvas>
   </Viewbox>
 </UserControl>

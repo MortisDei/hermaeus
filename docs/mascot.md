@@ -144,31 +144,28 @@ cute-era sheet.
 
 ## Icon-scale silhouette (in-app accent use)
 
-This silhouette spec (round face, pointed ears, mushroom/leaf tuft, two simple
-eyes) was written for the superseded cute-era redesign, not the new
-woodland-goblin direction. It's what `Controls/MossIcon.axaml` currently
-implements (see below); revisit it alongside future illustration work rather than
-assuming it still applies.
-
-For the small in-app accent (not the app icon - see above), do not use the whole
+Revised for the woodland-goblin direction: a hood, not a round cute face. For
+the small in-app accent (not the app icon - see above), do not use the whole
 character. Use only:
 
-- round face silhouette
-- pointed ears
-- a small mushroom/leaf tuft
-- two simple eyes
+- a pointed, weathered hood silhouette (not bare skin/hair)
+- pointed ears peeking out at the sides
+- a small brass spectacles band across the eyes (the "spectacles (optional)"
+  appearance trait, made non-optional at icon scale as the clearest way to
+  read "knowing" rather than "cute")
+- two simple, calm eyes
+- a small warm lantern-glow accent in place of the retired mushroom/leaf tuft
 - flat shapes only
 
 Must read clearly at 16x16, 32x32, and desktop icon size.
 
 ## Current in-app usage
 
-A simple flat-vector approximation of the icon-scale silhouette above (round face,
-ear tuft, mushroom sprout, two eyes) is implemented as `Controls/MossIcon.axaml` in
-`Hermaeus.Desktop`, built from plain Avalonia shapes (no new rendering
-dependency). **This reflects the superseded cute-era design, not the
-woodland-goblin direction above; updating it is follow-up work, not part of
-this doc revision.**
+A flat-vector approximation of the icon-scale silhouette above (pointed hood,
+ears, brass spectacles band, lantern-glow accent) is implemented as
+`Controls/MossIcon.axaml` in `Hermaeus.Desktop`, built from plain Avalonia
+shapes (no new rendering dependency). This now matches the woodland-goblin
+direction described above, not the retired cute-era design.
 
 r22 spread that same icon to every place `docs/mascot.md` sanctions (empty
 states, onboarding, tips) via one shared control,

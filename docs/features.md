@@ -620,6 +620,14 @@
   memory or RAG is enabled: embedding requests silently fall back to the chat
   server otherwise, queuing behind chat generation on a single-slot
   llama-server.
+- Doctor checks the newest published GitHub release against the running app
+  version on every scan (including the automatic startup scan) and flags a
+  warning if a newer one exists. The check only compares version numbers; it
+  never downloads or installs anything, and its fix action just opens the
+  releases page in your browser so you can update yourself. This needs the
+  `MortisDei/hermaeus` GitHub repository to be public to succeed; while it is
+  private the check fails closed and reports itself as unable to reach
+  GitHub, the same as it will for any other network outage.
 - Doctor reports whether the previous session exited cleanly, using a small
   local-only lifecycle journal (no telemetry, nothing leaves the machine).
   If Hermaeus did not shut down cleanly last time (a crash or force-close), the

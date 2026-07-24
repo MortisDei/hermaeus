@@ -9,6 +9,8 @@ namespace Hermaeus.ViewModels;
 
 public partial class DoctorViewModel : ObservableObject
 {
+    private const string HermaeusReleasesPageUrl = "https://github.com/MortisDei/hermaeus/releases/latest";
+
     private readonly IDoctorService _doctor;
     private readonly IToastService _toasts;
     private readonly ISettingsService _settingsService;
@@ -36,6 +38,13 @@ public partial class DoctorViewModel : ObservableObject
 
     public Action<string>? RequestCopyToClipboard { get; set; }
     public Action<string>? RequestNavigate { get; set; }
+
+    /// <summary>
+    /// Opens an external URL (e.g. the GitHub releases page) in the user's
+    /// default browser. Delegate-injected, like the requests above, so this
+    /// stays testable without launching a real browser during a test run.
+    /// </summary>
+    public Action<string>? RequestOpenUrl { get; set; }
 
     /// <summary>
     /// Asks the user to confirm a titled action (r14 3.2 prune). When unset,
@@ -424,6 +433,18 @@ public partial class DoctorViewModel : ObservableObject
         if (check.Key == "llama-server-update" || wantsLlamaDownload)
         {
             await RunLlamaUpdateAsync();
+            return;
+        }
+
+        if (check.Key == "app-update")
+        {
+            if (RequestOpenUrl is null)
+            {
+                _toasts.Show("Cannot open browser", "Opening a URL is not configured.", ToastKind.Warning, 4000);
+                return;
+            }
+
+            RequestOpenUrl(HermaeusReleasesPageUrl);
             return;
         }
 

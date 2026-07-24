@@ -60,6 +60,14 @@ rather than adding new capability.
   agent to have ignored. The scenario library now ships 16 scenarios.
 - Context receipt now has its own collapsed-by-default panel, split out
   from "Retrieved Context" for clarity.
+- **Update check.** Doctor now compares the running app version against the
+  newest published GitHub release on every scan, including the automatic
+  startup scan, and flags a warning when a newer one exists. It never
+  downloads or installs anything; the check's fix action just opens the
+  releases page in your browser so you can update yourself. This needs the
+  `MortisDei/hermaeus` repository to be public to succeed; while it is
+  private the check fails closed the same way it would for any other
+  network outage.
 
 ### Changed
 
@@ -70,6 +78,12 @@ rather than adding new capability.
 - Code changes now land via pull request (`docs/pull-requests.md`): one
   open PR per maintainer at a time, merged by the owner. This round is the
   first to go through that flow end to end.
+- **The in-app Moss accent icon** (`Controls/MossIcon.axaml`, shown in empty
+  states, tooltips, and the setup wizard greeting) now matches the current
+  woodland-goblin mascot direction (`docs/mascot.md`) instead of the retired
+  cute-era silhouette: a pointed hood, ears, a small brass spectacles band,
+  and a warm lantern-glow accent in place of the old mushroom tuft. The
+  app/taskbar/tray icon (Archivist's Seal) is unaffected.
 
 ## [0.29.1-alpha] - 2026-07-24
 
