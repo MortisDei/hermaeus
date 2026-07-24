@@ -13,7 +13,7 @@ description: Rules for Hermaeus's SQLite stores, schema migrations, data root la
 - Any new persistent artifact must live under the data root (or the
   configured local AI assets root for model files), be included in data-root
   migration, and be considered for backup inclusion/exclusion. Secrets
-  (fallback vault + key file) are **excluded** from backup by design — keep it
+  (fallback vault + key file) are **excluded** from backup by design; keep it
   that way.
 
 ## SQLite rules
@@ -31,7 +31,7 @@ description: Rules for Hermaeus's SQLite stores, schema migrations, data root la
 ## File-write rules
 
 - Settings, small state files, generated scripts, exports: atomic replacement
-  (write temp, then move) — see `SettingsService` for the pattern. An
+  (write temp, then move); see `SettingsService` for the pattern. An
   unreadable `settings.json` is copied aside, not overwritten.
 - Anything extracted from archives (restore) must reject path traversal and
   prefix-escape entries; anything resolving user paths must reject symlinks
@@ -44,6 +44,6 @@ description: Rules for Hermaeus's SQLite stores, schema migrations, data root la
 1. Migration added via the runner, version bumped, additive only.
 2. Included in data-root migration and backup logic (or deliberately
    excluded, with a comment saying why).
-3. Retention/growth considered — unbounded append-only stores need a cap or
+3. Retention/growth considered; unbounded append-only stores need a cap or
    cleanup story.
 4. Data-safety tests updated (`BackupMigrationTests` and friends).

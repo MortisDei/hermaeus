@@ -25,8 +25,10 @@ and noncommercial use but may also be commercially licensed.
 - Do not add hosted-service dependencies by default.
 - Prefer optional integrations over hard dependencies.
 - Run `dotnet build Hermaeus.sln` before submitting changes.
-- Run `dotnet run --project src/Hermaeus.Tests/Hermaeus.Tests.csproj` when changes
+- Run `dotnet test src/Hermaeus.Tests/Hermaeus.Tests.csproj` when changes
   affect storage, settings, security, RAG, backup, restore, or runtime launch.
+- Submit changes as pull requests; see `docs/pull-requests.md`. One open pull
+  request per maintainer at any one time.
 
 ## Vocabulary
 

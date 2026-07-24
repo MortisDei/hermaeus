@@ -10,7 +10,7 @@ review and by the Trust & Safety / security docs (`docs/security-review.md`).
 
 ## Processes
 
-- Launch via `ProcessStartInfo.ArgumentList` — never shell strings or
+- Launch via `ProcessStartInfo.ArgumentList`; never shell strings or
   concatenated command lines. See `ServerProcessManager`.
 - Managed servers bind to `127.0.0.1` only. Flag anything that would expose
   `0.0.0.0` (including `--host=` style equals flags) through the trust checks.
@@ -32,7 +32,7 @@ review and by the Trust & Safety / security docs (`docs/security-review.md`).
 
 - Model/binary downloads must be pinned (exact URL or Hugging Face commit)
   and SHA256-verified before use; failed downloads are deleted. Follow the
-  Doctor embedding-model install pattern. No auto-downloads at query time —
+  Doctor embedding-model install pattern. No auto-downloads at query time ;
   installs are explicit, user-approved actions.
 
 ## Paths
@@ -46,7 +46,7 @@ review and by the Trust & Safety / security docs (`docs/security-review.md`).
 
 - The Agent is read-first: read-only tools execute; writes are approval-gated
   through the patch queue with `baseHash` stale-file protection; shell,
-  network, install, commit/push are **blocked** — even if the model asks.
+  network, install, commit/push are **blocked**, even if the model asks.
 - Risk classification is deterministic and recorded in `agent.trace.jsonl`.
   Never add a tool that bypasses classification or the review queue; new
   capabilities extend the risk table in `docs/agent.md` first.
