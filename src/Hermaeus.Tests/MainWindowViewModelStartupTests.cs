@@ -57,9 +57,10 @@ public sealed class MainWindowViewModelStartupTests
         var agent = new AgentViewModel(agentService, agentStore, workspaceMemory, workspaceTools, llm, ragQuery, logs, analysis, activation, manifests, settings);
 
         var secrets = new FakeSecretStore();
-        var settingsVm = NewSettingsViewModel(settings, secrets);
+        var tts = NewTtsSettingsViewModel(settings);
+        var settingsVm = NewSettingsViewModel(settings, secrets, tts);
 
-        var servicesVm = new ServicesViewModel(settings, new RuntimeProfileService(settings), toasts, new RedactionService(), new TrustService(), logs);
+        var servicesVm = new ServicesViewModel(settings, new RuntimeProfileService(settings), toasts, new RedactionService(), new TrustService(), logs, tts);
         var models = new ModelManagementViewModel(llm, new ModelProfileService(settings), toasts, settings, new FakeSystemInfo(), servicesVm,
             new ModelManifestStore(settings), new HuggingFaceClient(), new ModelDownloadService());
 

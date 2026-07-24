@@ -109,6 +109,14 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         0 => "0 (CPU)",
         var n => n.ToString()
     };
+
+    /// <summary>
+    /// The URL RAG/chat actually reach this server at (Settings > RAG used to
+    /// duplicate this as an editable "Embed URL" text field; it was always
+    /// overwritten by this server's Port on save, so the port here is the
+    /// single source of truth - this label just surfaces the result).
+    /// </summary>
+    public string EmbedUrlLabel => $"http://localhost:{Port}";
     public string ExtraArgsTrustWarning
     {
         get
@@ -445,7 +453,11 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         // storm this round also fixes) from blocking the UI while it scans.
         var config = BuildConfig();
         var info = await Task.Run(() => _orphanDetector.Detect(config));
-        RunOnUi(() => ApplyOrphanDetectionResult(info));
+        await RunOnUiAsync(() =>
+        {
+            ApplyOrphanDetectionResult(info);
+            return Task.CompletedTask;
+        });
     }
 
     private void ApplyOrphanDetectionResult(OrphanServerInfo? info)
@@ -809,7 +821,17 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         // connect to) pointing at the old port, silently breaking model listing,
         // generation, and embedding health checks.
         if (EmbeddingsMode)
+        {
             _settings.Settings.Rag.EmbeddingBaseUrl = $"http://localhost:{Port}";
+
+            // Settings > RAG used to have its own "Embed model" picker that pushed a
+            // name down to this card's ModelPath; that duplicated this card, so this
+            // card is now the only place the model is chosen and pushes the name the
+            // other direction instead - RagViewModel's dataset/reindex tracking reads
+            // Rag.EmbeddingModel by name, not by file path.
+            if (!string.IsNullOrWhiteSpace(ModelPath))
+                _settings.Settings.Rag.EmbeddingModel = Path.GetFileNameWithoutExtension(ModelPath);
+        }
         else
             SyncChatBaseUrlToPort();
     }
@@ -927,7 +949,11 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
             ContextSourceLabel = string.Empty;
         }
     }
-    partial void OnPortChanged(int value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnPortChanged(int value)
+    {
+        OnPropertyChanged(nameof(HasUnsavedChanges));
+        OnPropertyChanged(nameof(EmbedUrlLabel));
+    }
     partial void OnContextSizeChanged(int value)
     {
         OnPropertyChanged(nameof(HasUnsavedChanges));
@@ -1035,6 +1061,11 @@ public partial class ServicesViewModel : ViewModelBase
     private readonly ModelProfileService _modelProfiles;
     private HardwareProfile? _hardwareProfile;
 
+    /// <summary>Shared (DI singleton) with <see cref="SettingsViewModel.Tts"/> - voice
+    /// provider/process management now lives here; per-channel routing and profiles
+    /// stay in Settings, reading the same live instance.</summary>
+    public TtsSettingsViewModel Tts { get; }
+
     public UiBoundCollection<ServerProcessViewModel> Servers { get; } = [];
     public UiBoundCollection<RuntimeProfileViewModel> RuntimeProfiles { get; } = [];
     public event EventHandler? ServerAvailabilityChanged;
@@ -1066,6 +1097,7 @@ public partial class ServicesViewModel : ViewModelBase
         RedactionService redactor,
         TrustService trust,
         IRuntimeLogService runtimeLogs,
+        TtsSettingsViewModel tts,
         OrphanServerDetector? orphanDetector = null,
         ISystemInfoService? systemInfo = null,
         ModelProfileService? modelProfiles = null)
@@ -1076,6 +1108,7 @@ public partial class ServicesViewModel : ViewModelBase
         _redactor = redactor;
         _trust = trust;
         _runtimeLogs = runtimeLogs;
+        Tts = tts;
         _orphanDetector = orphanDetector ?? new OrphanServerDetector();
         _systemInfo = systemInfo;
         _modelProfiles = modelProfiles ?? new ModelProfileService(settings);

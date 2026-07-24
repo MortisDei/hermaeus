@@ -549,8 +549,8 @@
 - The Local AI setup can now detect available GPU backends when creating
   a Python venv and will suggest a device (`cuda` for NVIDIA, `rocm` for
   AMD/ROCm, `mps` for Apple Silicon, or `cpu`) to use for TTS/model inference.
-  You can still override the selected device in **Settings -> Voice providers**
-  after setup.
+  You can still override the selected device in **Services -> Voice** after
+  setup.
 - First-run Setup Wizard: on first launch Hermaeus runs a guided 6-step
   setup wizard to select the data root, local AI assets root, chat backend,
   model folder, voice provider, and to run the Hermaeus Doctor for a quick
@@ -797,7 +797,8 @@ to the Services error banner and the RAG ingest-progress line as a
 placeholder built to the icon spec, pending real illustration.
 
 The app icon, taskbar icon, and system tray icon use the "Archivist's Seal" mark
-(a gold H monogram grown through with a tree and book) from `docs/hermaeus-icons.png`.
+(a gold H monogram grown through with a tree and book) - see `docs/mascot.md` for
+the icon source and cropping notes.
 The UI theme uses the brand colour palette (Forest green accent, Copper/Amber
 highlights) - see `docs/mascot.md` for the full palette. Typography uses the
 OS-native UI font by default (r21: the three embedded brand typefaces were

@@ -35,7 +35,7 @@ public sealed class ServicesViewModelModelDefaultsTests
             });
         }
 
-        var vm = new ServicesViewModel(settings, new RuntimeProfileService(settings), new FakeToasts(), new RedactionService(), new TrustService(), new RuntimeLogService(settings));
+        var vm = NewServicesViewModel(settings);
         return (vm, vm.Servers[0], settings, modelPath);
     }
 

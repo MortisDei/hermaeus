@@ -77,7 +77,6 @@ public static class HarnessCases
         [new HarnessCase("local ai assets excludes companion GGUF files", ServiceTests.LocalAiAssetsExcludesCompanionGgufFiles)],
         [new HarnessCase("local ai assets list discovered embedding models", ServiceTests.LocalAiAssetsListsDiscoveredEmbeddingModels)],
         [new HarnessCase("local ai assets list discovered reranker directories", ServiceTests.LocalAiAssetsListsDiscoveredRerankerDirectories)],
-        [new HarnessCase("RAG settings preserve configured embedding model option", ServiceTests.RagSettingsPreservesConfiguredEmbeddingModelOption)],
         [new HarnessCase("RAG settings discover and select installed reranker", ServiceTests.RagSettingsDiscoversAndSelectsInstalledReranker)],
         [new HarnessCase("app lifecycle journal tracks clean and unclean exits", ServiceTests.AppLifecycleJournalTracksCleanAndUncleanExits)],
         [new HarnessCase("Doctor warns when previous session did not exit cleanly", ServiceTests.DoctorWarnsWhenPreviousSessionDidNotExitCleanly)],

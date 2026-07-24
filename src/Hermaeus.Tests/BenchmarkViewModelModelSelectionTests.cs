@@ -29,7 +29,7 @@ public sealed class BenchmarkViewModelModelSelectionTests
         settings.Settings.ManagedServers.Add(new ServerConfig { Name = "Chat", Port = 39555 });
         settings.Settings.ManagedServers.Add(new ServerConfig { Name = "Embeddings", Port = 39556, EmbeddingsMode = true });
 
-        var services = new ServicesViewModel(settings, new RuntimeProfileService(settings), new FakeToasts(), new RedactionService(), new TrustService(), new RuntimeLogService(settings));
+        var services = NewServicesViewModel(settings);
         var starts = 0;
         services.Servers[0].PropertyChanged += (_, e) =>
         {

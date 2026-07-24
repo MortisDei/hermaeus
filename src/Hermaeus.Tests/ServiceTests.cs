@@ -856,27 +856,6 @@ namespace Hermaeus.Tests
             return Task.CompletedTask;
         }
 
-        public static Task RagSettingsPreservesConfiguredEmbeddingModelOption()
-        {
-            using var temp = new TempDir();
-            var root = temp.PathFor("AI");
-            Directory.CreateDirectory(Path.Combine(root, "Models"));
-            File.WriteAllText(Path.Combine(root, "Models", "NextCoder-7B.Q4_K_M.gguf"), "model");
-
-            var settings = NewSettings(temp);
-            settings.Settings.DataManagement.LocalAiAssetsRoot = root;
-            settings.Settings.Rag.EmbeddingModel = "nomic-embed-text";
-            var vm = new RagSettingsViewModel(() => root);
-
-            vm.ReloadFrom(settings.Settings, root);
-
-            Equal("nomic-embed-text", vm.EmbeddingModelOptions[0], "current embedding model should remain selectable before discovered GGUFs");
-            Equal("nomic-embed-text", vm.EmbeddingModel, "current embedding model should not be replaced by the first local GGUF");
-            False(vm.EmbeddingModelOptions.Any(option => option.Contains("NextCoder", StringComparison.OrdinalIgnoreCase)),
-                "embedding selector should not list chat GGUF models");
-            return Task.CompletedTask;
-        }
-
         public static Task RagSettingsDiscoversAndSelectsInstalledReranker()
         {
             using var temp = new TempDir();
@@ -2060,7 +2039,6 @@ namespace Hermaeus.Tests
 
             vm.Llm.LlamaCppBaseUrl = "http://127.0.0.1:9000";
             vm.Llm.OpenAiEnabled = true;
-            vm.Rag.EmbeddingModel = "local-embed";
             vm.Rag.RagRerankerModelPath = temp.PathFor("reranker");
             vm.Data.DataRootDirectory = temp.PathFor("data");
             vm.Data.LocalAiAssetsRoot = temp.PathFor("ai");
@@ -2073,7 +2051,6 @@ namespace Hermaeus.Tests
 
             Equal("http://127.0.0.1:9000", settings.Settings.Llm.LlamaCppBaseUrl, "llm section should apply base URL");
             Equal(true, settings.Settings.Llm.OpenAiEnabled, "llm section should apply remote toggle");
-            Equal("local-embed", settings.Settings.Rag.EmbeddingModel, "rag section should apply embedding model");
             Equal(temp.PathFor("reranker"), settings.Settings.Rag.RerankerModelPath, "rag section should apply reranker path");
             Equal(temp.PathFor("data"), settings.Settings.DataManagement.DataRootDirectory, "data section should apply data root");
             Equal(temp.PathFor("ai"), settings.Settings.DataManagement.LocalAiAssetsRoot, "data section should apply AI assets root");

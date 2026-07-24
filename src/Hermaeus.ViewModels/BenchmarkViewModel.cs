@@ -50,6 +50,11 @@ public partial class BenchmarkViewModel : ObservableObject
     [ObservableProperty] private double _temperature = 0.7;
     [ObservableProperty] private bool _runAllSuites = true;
 
+    /// <summary>Index into the right-pane TabControl (Rankings, All Results, Insights, Run Detail).
+    /// Selecting or completing a run jumps here (<see cref="OnSelectedRunChanged"/>) so results land
+    /// next to where the user was looking instead of a separate, disconnected panel.</summary>
+    [ObservableProperty] private int _selectedTabIndex;
+
     public BenchmarkViewModel(
         BenchmarkService benchmarks,
         ILlmService llm,
@@ -434,7 +439,15 @@ public partial class BenchmarkViewModel : ObservableObject
         foreach (var result in value.Run.Results.Select(r => new BenchmarkResultViewModel(r)))
             SelectedResults.Add(result);
         SelectedResult = SelectedResults.FirstOrDefault();
+
+        // Only jump tabs for a deliberate selection (row click, run/rerun completing),
+        // not the initial-load default pick in ReloadRunsAsync.
+        if (!_isLoading)
+            SelectedTabIndex = RunDetailTabIndex;
     }
+
+    /// <summary>Position of the "Run Detail" tab in BenchmarkView's TabControl.</summary>
+    public const int RunDetailTabIndex = 3;
 
     private void ApplySuiteDefaults()
     {

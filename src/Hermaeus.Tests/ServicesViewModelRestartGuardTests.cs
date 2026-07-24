@@ -19,14 +19,7 @@ public sealed class ServicesViewModelRestartGuardTests
     {
         using var temp = new TempDir();
         var settings = NewSettings(temp);
-        var runtimeLogs = new RuntimeLogService(settings);
-        var services = new ServicesViewModel(
-            settings,
-            new RuntimeProfileService(settings),
-            new FakeToasts(),
-            new RedactionService(),
-            new TrustService(),
-            runtimeLogs);
+        var services = NewServicesViewModel(settings);
 
         var server = services.Servers.First();
         var samePath = System.IO.Path.GetFullPath(
@@ -44,15 +37,7 @@ public sealed class ServicesViewModelRestartGuardTests
     {
         using var temp = new TempDir();
         var settings = NewSettings(temp);
-        var runtimeLogs = new RuntimeLogService(settings);
-        var toasts = new FakeToasts();
-        var services = new ServicesViewModel(
-            settings,
-            new RuntimeProfileService(settings),
-            toasts,
-            new RedactionService(),
-            new TrustService(),
-            runtimeLogs);
+        var services = NewServicesViewModel(settings);
 
         var server = services.Servers.First();
         var originalStatus = server.Status;

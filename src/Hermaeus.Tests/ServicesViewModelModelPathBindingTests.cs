@@ -49,7 +49,7 @@ public sealed class ServicesViewModelModelPathBindingTests
         settings.Settings.ManagedServers.Add(new ServerConfig { Name = "Chat", ModelPath = modelPath, Port = 39201 });
         settings.Settings.ManagedServers.Add(new ServerConfig { Name = "Embeddings", Port = 39202, EmbeddingsMode = true });
 
-        var vm = new ServicesViewModel(settings, new RuntimeProfileService(settings), new FakeToasts(), new RedactionService(), new TrustService(), new RuntimeLogService(settings));
+        var vm = NewServicesViewModel(settings);
         var server = vm.Servers[0];
         AttachComboBoxLikeBehavior(server);
 
@@ -74,7 +74,7 @@ public sealed class ServicesViewModelModelPathBindingTests
         settings.Settings.ManagedServers.Add(new ServerConfig { Name = "Chat", ExecutablePath = "llama-server.exe", ModelPath = modelPath, Port = 39201, ContextSize = 16000, GpuLayers = 999, Threads = 4 });
         settings.Settings.ManagedServers.Add(new ServerConfig { Name = "Embeddings", Port = 39202, EmbeddingsMode = true });
 
-        var vm = new ServicesViewModel(settings, new RuntimeProfileService(settings), new FakeToasts(), new RedactionService(), new TrustService(), new RuntimeLogService(settings));
+        var vm = NewServicesViewModel(settings);
         var server = vm.Servers[0];
         AttachComboBoxLikeBehavior(server);
 

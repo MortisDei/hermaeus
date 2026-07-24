@@ -91,62 +91,9 @@ public partial class SettingsView : UserControl
             return await dialog.ShowDialog<bool>(owner);
         };
 
-        vm.Tts.RequestTtsScriptPicker = async () =>
-        {
-            var files = await PickFileAsync(
-                "Choose xtts_api_server.py",
-                [
-                    new FilePickerFileType("Python script") { Patterns = ["*.py"] },
-                    new FilePickerFileType("All files") { Patterns = ["*"] }
-                ]);
-            if (files.Count > 0)
-                vm.Tts.TtsScriptPath = files[0].Path.LocalPath;
-        };
-
-        vm.Tts.RequestTtsPythonPicker = async () =>
-        {
-            var files = await PickFileAsync(
-                "Choose XTTS venv Python",
-                [
-                    new FilePickerFileType("Python") { Patterns = OperatingSystem.IsWindows() ? ["python.exe"] : ["python"] },
-                    new FilePickerFileType("All files") { Patterns = ["*"] }
-                ]);
-            if (files.Count > 0)
-                vm.Tts.TtsPythonPath = files[0].Path.LocalPath;
-        };
-
-        vm.Tts.RequestTtsOutputPicker = async () =>
-        {
-            var folders = await PickFolderAsync("Choose XTTS output folder");
-            if (folders.Count > 0)
-                vm.Tts.TtsOutputDirectory = folders[0].Path.LocalPath;
-        };
-
-        vm.Tts.RequestTtsModelDirectoryPicker = async () =>
-        {
-            var folders = await PickFolderAsync("Choose XTTS v2 model folder");
-            if (folders.Count > 0)
-                vm.Tts.TtsModelDirectory = folders[0].Path.LocalPath;
-        };
-
-        vm.Tts.RequestTtsVoiceDirectoryPicker = async () =>
-        {
-            var folders = await PickFolderAsync("Choose XTTS voice sample folder");
-            if (folders.Count > 0)
-                vm.Tts.TtsVoiceDirectory = folders[0].Path.LocalPath;
-        };
-
-        vm.Tts.RequestTtsVoiceSamplePicker = async () =>
-        {
-            var files = await PickFileAsync(
-                "Import XTTS voice sample",
-                [
-                    new FilePickerFileType("Audio sample") { Patterns = ["*.wav", "*.mp3", "*.flac"] },
-                    new FilePickerFileType("All files") { Patterns = ["*"] }
-                ]);
-            if (files.Count > 0)
-                await vm.Tts.ImportTtsVoiceSampleAsync(files[0].Path.LocalPath);
-        };
+        // Voice's own file pickers (Python/script/model/output/voice-sample) are wired
+        // from ServicesView now that the "Voice providers" card lives there; Tts is a
+        // shared singleton so either view wiring them is equally valid.
 
         vm.LocalAiSetup.RequestCopyToClipboard = async text =>
         {

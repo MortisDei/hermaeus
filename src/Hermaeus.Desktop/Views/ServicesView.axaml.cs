@@ -35,9 +35,10 @@ public partial class ServicesView : UserControl
 
         if (DataContext is not ServicesViewModel vm) return;
         _wiredViewModel = vm;
-        
+
         foreach (var srv in vm.Servers)
             WireFilePickers(srv);
+        WireVoiceFilePickers(vm.Tts);
 
         // Create and store handler to allow unsubscribing later
         _collectionChangedHandler = (_, e) =>
@@ -96,6 +97,91 @@ public partial class ServicesView : UserControl
             else if (isMmproj) srv.MmprojPath      = path;
             else               srv.ModelPath       = path;
         };
+    }
+
+    private void WireVoiceFilePickers(TtsSettingsViewModel tts)
+    {
+        tts.RequestTtsScriptPicker = async () =>
+        {
+            var files = await PickFileAsync(
+                "Choose xtts_api_server.py",
+                [
+                    new FilePickerFileType("Python script") { Patterns = ["*.py"] },
+                    new FilePickerFileType("All files") { Patterns = ["*"] }
+                ]);
+            if (files.Count > 0)
+                tts.TtsScriptPath = files[0].Path.LocalPath;
+        };
+
+        tts.RequestTtsPythonPicker = async () =>
+        {
+            var files = await PickFileAsync(
+                "Choose XTTS venv Python",
+                [
+                    new FilePickerFileType("Python") { Patterns = OperatingSystem.IsWindows() ? ["python.exe"] : ["python"] },
+                    new FilePickerFileType("All files") { Patterns = ["*"] }
+                ]);
+            if (files.Count > 0)
+                tts.TtsPythonPath = files[0].Path.LocalPath;
+        };
+
+        tts.RequestTtsOutputPicker = async () =>
+        {
+            var folders = await PickFolderAsync("Choose XTTS output folder");
+            if (folders.Count > 0)
+                tts.TtsOutputDirectory = folders[0].Path.LocalPath;
+        };
+
+        tts.RequestTtsModelDirectoryPicker = async () =>
+        {
+            var folders = await PickFolderAsync("Choose XTTS v2 model folder");
+            if (folders.Count > 0)
+                tts.TtsModelDirectory = folders[0].Path.LocalPath;
+        };
+
+        tts.RequestTtsVoiceDirectoryPicker = async () =>
+        {
+            var folders = await PickFolderAsync("Choose XTTS voice sample folder");
+            if (folders.Count > 0)
+                tts.TtsVoiceDirectory = folders[0].Path.LocalPath;
+        };
+
+        tts.RequestTtsVoiceSamplePicker = async () =>
+        {
+            var files = await PickFileAsync(
+                "Import XTTS voice sample",
+                [
+                    new FilePickerFileType("Audio sample") { Patterns = ["*.wav", "*.mp3", "*.flac"] },
+                    new FilePickerFileType("All files") { Patterns = ["*"] }
+                ]);
+            if (files.Count > 0)
+                await tts.ImportTtsVoiceSampleAsync(files[0].Path.LocalPath);
+        };
+    }
+
+    private async Task<IReadOnlyList<IStorageFolder>> PickFolderAsync(string title)
+    {
+        var top = TopLevel.GetTopLevel(this);
+        return top is null
+            ? []
+            : await top.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+            {
+                Title = title,
+                AllowMultiple = false
+            });
+    }
+
+    private async Task<IReadOnlyList<IStorageFile>> PickFileAsync(string title, IReadOnlyList<FilePickerFileType> filters)
+    {
+        var top = TopLevel.GetTopLevel(this);
+        return top is null
+            ? []
+            : await top.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+            {
+                Title = title,
+                AllowMultiple = false,
+                FileTypeFilter = filters
+            });
     }
 }
 

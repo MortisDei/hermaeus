@@ -23,11 +23,14 @@ namespace Hermaeus.Tests
     {
         public static SettingsService NewSettings(TempDir temp) => new(temp.PathFor("settings/settings.json"));
 
-        public static SettingsViewModel NewSettingsViewModel(ISettingsService settings, ISecretStore secrets) =>
-            new(settings, new FakeTts(), new FakeVoiceProviderRegistry(settings), new FakeToasts(), new BackupService(settings), secrets, new XttsProcessManager(), new KokoroProcessManager(), new LocalApiProcessManager(), new LocalAiSetupService(new PythonHealthValidator()), new TrustService());
+        public static TtsSettingsViewModel NewTtsSettingsViewModel(ISettingsService settings) =>
+            new(new FakeTts(), new FakeVoiceProviderRegistry(settings), new FakeToasts(), new XttsProcessManager(), new KokoroProcessManager(), new FakeSecretStore(), settings);
 
-        public static ServicesViewModel NewServicesViewModel(ISettingsService settings) =>
-            new(settings, new RuntimeProfileService(settings), new FakeToasts(), new RedactionService(), new TrustService(), new RuntimeLogService(settings));
+        public static SettingsViewModel NewSettingsViewModel(ISettingsService settings, ISecretStore secrets, TtsSettingsViewModel? tts = null) =>
+            new(settings, tts ?? NewTtsSettingsViewModel(settings), new FakeToasts(), new BackupService(settings), secrets, new XttsProcessManager(), new KokoroProcessManager(), new LocalApiProcessManager(), new LocalAiSetupService(new PythonHealthValidator()), new TrustService());
+
+        public static ServicesViewModel NewServicesViewModel(ISettingsService settings, TtsSettingsViewModel? tts = null) =>
+            new(settings, new RuntimeProfileService(settings), new FakeToasts(), new RedactionService(), new TrustService(), new RuntimeLogService(settings), tts ?? NewTtsSettingsViewModel(settings));
 
         public static async Task ThrowsAsync<T>(Func<Task> action) where T : Exception
         {

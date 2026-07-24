@@ -239,6 +239,13 @@ provider.
   (relative to the top score in the current filter) alongside a Details
   button that opens the same run-info dialog used elsewhere, instead of a
   bare table
+- Two-column layout: a left rail stacks Suites, Run Setup, and Run History;
+  the right side is one panel with tabs (Rankings, All Results, Insights, and
+  Run Detail). Run Detail holds a selected run's case-by-case results and raw
+  output - selecting a run in Run History, or a run/rerun completing, switches
+  to it automatically so results land next to where you were looking instead
+  of a separate panel. Tab content is width-capped and centered rather than
+  stretching edge-to-edge on a maximized window.
 
 ## System Overview
 

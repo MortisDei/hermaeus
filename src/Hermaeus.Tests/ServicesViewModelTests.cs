@@ -159,7 +159,7 @@ public sealed class ServicesViewModelTests
     {
         settings = NewSettings(temp);
         settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
-        return new ServicesViewModel(settings, new RuntimeProfileService(settings), new FakeToasts(), new RedactionService(), new TrustService(), new RuntimeLogService(settings));
+        return NewServicesViewModel(settings);
     }
 
     /// <summary>

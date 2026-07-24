@@ -23,7 +23,7 @@ public sealed class ServicesViewModelMmprojTests
         settings.Settings.ManagedServers.Clear();
         settings.Settings.ManagedServers.Add(new ServerConfig { Name = "Chat", Port = 39301 });
 
-        var vm = new ServicesViewModel(settings, new RuntimeProfileService(settings), new FakeToasts(), new RedactionService(), new TrustService(), new RuntimeLogService(settings));
+        var vm = NewServicesViewModel(settings);
         return (vm, vm.Servers[0], modelPath, nested);
     }
 

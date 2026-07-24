@@ -23,13 +23,13 @@ Supported providers:
   footprint.
 
 Kokoro (Python), F5-TTS, and XTTS v2 are grouped under **Advanced** in
-**Settings -> Voice providers**; Kokoro (native) is **Recommended**.
+**Services -> Voice**; Kokoro (native) is **Recommended**.
 
 ## Local Environment and Hardware Setup
 
 The first-run Setup Wizard and Local AI setup can detect available hardware
 backends and suggest an inference device. You can override the selected device
-in **Settings -> Voice providers**.
+in **Services -> Voice**.
 
 - **NVIDIA** - `cuda`
 - **AMD/ROCm** - `rocm`
@@ -58,7 +58,7 @@ The Kokoro (Python) fallback, along with F5-TTS and XTTS v2, run as managed
 Python subprocesses. For those, Hermaeus can detect available hardware backends
 when creating a Python venv and will suggest a device (`cuda`, `rocm`, `mps`,
 or `cpu`) to use for TTS inference. You can still override the selected
-device in **Settings -> Voice providers** after setup.
+device in **Services -> Voice** after setup.
 
 TTS speed is configurable per-provider and persisted in settings.
 
@@ -158,4 +158,16 @@ a per-message speak/stop icon swap wired to this.
   secret store before sending requests.
 - Hermaeus does not cache generated WAV responses.
 - Imported clone samples are copied only when explicitly imported.
-- Voice sample import is available in Settings under TTS configuration.
+- Voice sample import is available in Services under the Voice card.
+
+## Settings vs. Services
+
+The Voice card was split the same way RAG's embeddings config was -
+provider selection, base URL, Start/Stop, and the voice/device/speed/path
+fields (everything that manages the Kokoro/XTTS/F5 background process) now
+live on **Services -> Voice**, alongside the Chat/Embeddings llama-server
+cards it's a sibling of. **Settings -> Voice** keeps only voice orchestration:
+mute-all, auto-speak, per-channel routing, and named voice profiles - none of
+which start or stop a process. `TtsSettingsViewModel` is a single DI-shared
+instance (`ServicesViewModel.Tts` and `SettingsViewModel.Tts` are the same
+object), so both pages always reflect the same live state.

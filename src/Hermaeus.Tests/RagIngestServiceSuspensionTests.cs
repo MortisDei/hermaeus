@@ -26,14 +26,7 @@ public sealed class RagIngestServiceSuspensionTests
     {
         using var temp = new TempDir();
         var settings = NewSettings(temp);
-        var runtimeLogs = new RuntimeLogService(settings);
-        var services = new ServicesViewModel(
-            settings,
-            new RuntimeProfileService(settings),
-            new FakeToasts(),
-            new RedactionService(),
-            new TrustService(),
-            runtimeLogs);
+        var services = NewServicesViewModel(settings);
 
         var suspension = new RagIngestServiceSuspension(services, xtts: null, kokoro: null, settings);
 

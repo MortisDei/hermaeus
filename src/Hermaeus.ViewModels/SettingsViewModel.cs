@@ -14,7 +14,6 @@ public partial class SettingsViewModel : ViewModelBase
     private readonly XttsProcessManager _xttsProcess;
     private readonly KokoroProcessManager _kokoroProcess;
     private readonly LocalApiProcessManager _localApiProcess;
-    private readonly ServicesViewModel? _servicesView;
 
     [ObservableProperty] private bool _isSaved;
     [ObservableProperty] private string _settingsError = string.Empty;
@@ -122,8 +121,7 @@ public partial class SettingsViewModel : ViewModelBase
 
     public SettingsViewModel(
         ISettingsService svc,
-        ITtsService tts,
-        IVoiceProviderRegistry voiceProviderRegistry,
+        TtsSettingsViewModel tts,
         IToastService toasts,
         BackupService backups,
         ISecretStore secrets,
@@ -131,16 +129,13 @@ public partial class SettingsViewModel : ViewModelBase
         KokoroProcessManager kokoroProcess,
         LocalApiProcessManager localApiProcess,
         LocalAiSetupService localAiSetup,
-        TrustService trust,
-        ServicesViewModel? services = null,
-        IVoiceOrchestrator? voiceOrchestrator = null)
+        TrustService trust)
     {
         _svc = svc;
         _toasts = toasts;
         _xttsProcess = xttsProcess;
         _kokoroProcess = kokoroProcess;
         _localApiProcess = localApiProcess;
-        _servicesView = services;
 
         Llm = new LlmDefaultsSettingsViewModel(secrets);
         Rag = new RagSettingsViewModel(ResolveDataRoot);
@@ -151,7 +146,10 @@ public partial class SettingsViewModel : ViewModelBase
         LocalApi = new LocalApiSettingsViewModel(secrets, _svc);
         LocalApi.ProcessStatusLabel = _localApiProcess.StatusLabel;
         _localApiProcess.StatusChanged += () => RunOnUi(() => LocalApi.ProcessStatusLabel = _localApiProcess.StatusLabel);
-        Tts = new TtsSettingsViewModel(tts, voiceProviderRegistry, _toasts, xttsProcess, kokoroProcess, secrets, _svc, voiceOrchestrator);
+        // Voice providers/process management now live on the Services page; this VM
+        // is shared (DI singleton) so both pages reflect the same live state - see
+        // ServicesViewModel.Tts.
+        Tts = tts;
         LocalAiSetup = new LocalAiSetupSettingsViewModel(_svc, localAiSetup, _toasts, Tts, Data, Rag, SaveAsync);
         Trust = new TrustSettingsViewModel(_svc, trust, _toasts, Tts, Data, Rag);
 
@@ -219,7 +217,6 @@ public partial class SettingsViewModel : ViewModelBase
     {
         var candidate = _svc.Settings.Clone();
         var previousDataRoot = _svc.Settings.DataManagement.DataRootDirectory;
-        var previousEmbedding = _svc.Settings.Rag.EmbeddingModel;
         SettingsError = string.Empty;
         Data.SettingsError = string.Empty;
         LocalAiSetup.SettingsError = string.Empty;
@@ -255,7 +252,6 @@ public partial class SettingsViewModel : ViewModelBase
 
         IsSaved = true;
         _toasts.Show("Settings saved", "Hermaeus settings were updated.", ToastKind.Success);
-        await ApplyEmbeddingModelChangeAsync(previousEmbedding);
         await EnsureLocalApiRunningStateAsync();
         // r12 01-settings-lifecycle.md 1.7: reset the flag after a short
         // delay without keeping the async command "executing" for it.
@@ -330,50 +326,4 @@ public partial class SettingsViewModel : ViewModelBase
             : Path.GetFullPath(configured);
     }
 
-    private async Task ApplyEmbeddingModelChangeAsync(string previousEmbedding)
-    {
-        try
-        {
-            if (string.Equals(previousEmbedding, Rag.EmbeddingModel, StringComparison.OrdinalIgnoreCase))
-                return;
-
-            var modelPath = ResolveLocalEmbeddingModelPath(Rag.EmbeddingModel, Data.LocalAiAssetsRoot);
-            if (string.IsNullOrWhiteSpace(modelPath))
-                return;
-
-            var server = _svc.Settings.ManagedServers.FirstOrDefault(s => s.EmbeddingsMode);
-            if (server is null)
-                return;
-
-            server.ModelPath = modelPath;
-            await _svc.SaveAsync();
-            if (_servicesView is null)
-                return;
-
-            var embedServer = _servicesView.Servers.FirstOrDefault(x => x.EmbeddingsMode);
-            if (embedServer is not null)
-            {
-                await _servicesView.RestartServersAsync([embedServer.Id]);
-                _toasts.Show("Embedding server restarted", "Embedding server restarted with the new model.", ToastKind.Info);
-            }
-        }
-        catch (Exception ex)
-        {
-            _toasts.Show("Embedding model apply failed", ex.Message, ToastKind.Warning);
-        }
-    }
-
-    private static string ResolveLocalEmbeddingModelPath(string modelId, string root)
-    {
-        try
-        {
-            if (string.IsNullOrWhiteSpace(root) || string.IsNullOrWhiteSpace(modelId)) return string.Empty;
-            var candidates = LocalAiAssetLocator.FindEmbeddingModels(root)
-                .Where(p => Path.GetFileNameWithoutExtension(p).IndexOf(modelId, StringComparison.OrdinalIgnoreCase) >= 0)
-                .OrderBy(p => p.Length)
-                .ToList();
-            return candidates.FirstOrDefault() ?? string.Empty;
-        }
-        catch { return string.Empty; }
-    }
 }
