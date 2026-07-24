@@ -351,6 +351,20 @@ public sealed class AgentDraftPatch
 /// <summary>Outcome of attempting to revert an applied patch.</summary>
 public sealed record AgentRevertResult(bool Reverted, string Message);
 
+/// <summary>One file's outcome within a whole-run Task Rewind (r23 1.3).</summary>
+public sealed record AgentTaskRevertFileOutcome(string RelativePath, bool Reverted, string Message);
+
+/// <summary>
+/// Outcome of AgentPatchReviewService.RevertTaskAsync: a truthful partial-success
+/// report. Reverting a run never overwrites content changed after the run, so
+/// some files can be skipped while others succeed (r23 1.3).
+/// </summary>
+public sealed record AgentTaskRevertResult(IReadOnlyList<AgentTaskRevertFileOutcome> Files, string Summary)
+{
+    public int RevertedCount => Files.Count(f => f.Reverted);
+    public int TotalCount => Files.Count;
+}
+
 /// <summary>
 /// Outcome of an approval decision (AgentService.AppendApprovalAsync).
 /// <see cref="Applied"/> is false only when the approval fingerprint did not

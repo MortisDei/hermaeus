@@ -167,4 +167,135 @@ public sealed class AgentPatchReviewServiceTests
         Assert.NotEqual(string.Empty, error);
         Assert.Equal(AgentDraftPatchStatus.Pending, patch.Status);
     }
+
+    [Fact]
+    public async Task RevertTaskAsync_restores_every_touched_file_to_its_pre_run_content()
+    {
+        using var temp = new TempDir();
+        var (service, agent, store, workspace) = Build(temp);
+        File.WriteAllText(Path.Combine(workspace, "second.md"), "second-original");
+        var task = new AgentTaskState { Goal = "test" };
+        var patch1 = new AgentDraftPatch { RelativePath = "notes.md", ProposedContent = "updated" };
+        var patch2 = new AgentDraftPatch { RelativePath = "second.md", ProposedContent = "second-updated" };
+        task.DraftPatches.Add(patch1);
+        task.DraftPatches.Add(patch2);
+        var options = new AgentWorkspaceOptions(workspace);
+        await service.ApplyAsync(task, patch1, options);
+        await service.ApplyAsync(task, patch2, options);
+
+        var result = await service.RevertTaskAsync(task, options);
+
+        Assert.Equal(2, result.RevertedCount);
+        Assert.Equal(2, result.TotalCount);
+        Assert.Equal("original", await File.ReadAllTextAsync(Path.Combine(workspace, "notes.md")));
+        Assert.Equal("second-original", await File.ReadAllTextAsync(Path.Combine(workspace, "second.md")));
+        Assert.Equal(AgentDraftPatchStatus.Reverted, patch1.Status);
+        Assert.Equal(AgentDraftPatchStatus.Reverted, patch2.Status);
+        Assert.NotNull(patch1.RevertedAt);
+        Assert.Equal("User", patch1.RevertedBy);
+        var trace = await File.ReadAllTextAsync(Path.Combine(store.GetTaskDirectory(task.TaskId), "agent.trace.jsonl"));
+        Assert.Contains("task_reverted", trace);
+    }
+
+    [Fact]
+    public async Task RevertTaskAsync_deletes_a_file_the_run_created()
+    {
+        using var temp = new TempDir();
+        var (service, agent, store, workspace) = Build(temp);
+        var task = new AgentTaskState { Goal = "test" };
+        var patch = new AgentDraftPatch { RelativePath = "new-file.md", ProposedContent = "brand new content" };
+        task.DraftPatches.Add(patch);
+        var options = new AgentWorkspaceOptions(workspace);
+        await service.ApplyAsync(task, patch, options);
+        Assert.True(File.Exists(Path.Combine(workspace, "new-file.md")));
+
+        var result = await service.RevertTaskAsync(task, options);
+
+        Assert.Equal(1, result.RevertedCount);
+        Assert.False(File.Exists(Path.Combine(workspace, "new-file.md")));
+    }
+
+    [Fact]
+    public async Task RevertTaskAsync_reports_partial_success_when_one_file_changed_again()
+    {
+        using var temp = new TempDir();
+        var (service, agent, store, workspace) = Build(temp);
+        File.WriteAllText(Path.Combine(workspace, "second.md"), "second-original");
+        var task = new AgentTaskState { Goal = "test" };
+        var patch1 = new AgentDraftPatch { RelativePath = "notes.md", ProposedContent = "updated" };
+        var patch2 = new AgentDraftPatch { RelativePath = "second.md", ProposedContent = "second-updated" };
+        task.DraftPatches.Add(patch1);
+        task.DraftPatches.Add(patch2);
+        var options = new AgentWorkspaceOptions(workspace);
+        await service.ApplyAsync(task, patch1, options);
+        await service.ApplyAsync(task, patch2, options);
+        await File.WriteAllTextAsync(Path.Combine(workspace, "second.md"), "someone edited this after the patch");
+
+        var result = await service.RevertTaskAsync(task, options);
+
+        Assert.Equal(1, result.RevertedCount);
+        Assert.Equal(2, result.TotalCount);
+        Assert.Contains("Reverted 1 of 2", result.Summary, StringComparison.Ordinal);
+        Assert.Contains("Skipped second.md", result.Summary, StringComparison.Ordinal);
+        Assert.Equal("original", await File.ReadAllTextAsync(Path.Combine(workspace, "notes.md")));
+        Assert.Equal("someone edited this after the patch", await File.ReadAllTextAsync(Path.Combine(workspace, "second.md")));
+        Assert.Equal(AgentDraftPatchStatus.Reverted, patch1.Status);
+        Assert.Equal(AgentDraftPatchStatus.Applied, patch2.Status);
+    }
+
+    [Fact]
+    public async Task RevertTaskAsync_refuses_while_the_task_is_running()
+    {
+        using var temp = new TempDir();
+        var (service, agent, store, workspace) = Build(temp);
+        var task = new AgentTaskState { Goal = "test", Status = AgentTaskStatus.Running };
+        var options = new AgentWorkspaceOptions(workspace);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.RevertTaskAsync(task, options));
+    }
+
+    [Fact]
+    public async Task RevertTaskAsync_refuses_when_a_tool_approval_is_pending()
+    {
+        using var temp = new TempDir();
+        var (service, agent, store, workspace) = Build(temp);
+        var task = new AgentTaskState { Goal = "test", PendingToolAction = new AgentPendingToolAction { ToolName = "run_command" } };
+        var options = new AgentWorkspaceOptions(workspace);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.RevertTaskAsync(task, options));
+    }
+
+    [Fact]
+    public async Task RevertTaskAsync_refuses_when_an_orchestration_child_is_unfinished()
+    {
+        using var temp = new TempDir();
+        var (service, agent, store, workspace) = Build(temp);
+        var task = new AgentTaskState { Goal = "test" };
+        task.SubTaskPlan.Add(new AgentSubTaskSpec { Goal = "child", Status = AgentSubTaskStatus.Running, TaskId = "child-1" });
+        var options = new AgentWorkspaceOptions(workspace);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.RevertTaskAsync(task, options));
+    }
+
+    [Fact]
+    public async Task RevertTaskAsync_reverts_a_parent_and_its_finished_children()
+    {
+        using var temp = new TempDir();
+        var (service, agent, store, workspace) = Build(temp);
+        var task = new AgentTaskState { Goal = "parent" };
+        var child = new AgentTaskState { Goal = "child", ParentTaskId = task.TaskId, WorkspaceRoot = workspace };
+        task.SubTaskPlan.Add(new AgentSubTaskSpec { Goal = "child", Status = AgentSubTaskStatus.Complete, TaskId = child.TaskId });
+
+        var childPatch = new AgentDraftPatch { RelativePath = "notes.md", ProposedContent = "child-updated" };
+        child.DraftPatches.Add(childPatch);
+        var options = new AgentWorkspaceOptions(workspace);
+        await service.ApplyAsync(child, childPatch, options);
+
+        var result = await service.RevertTaskAsync(task, options);
+
+        Assert.Equal(1, result.RevertedCount);
+        Assert.Equal("original", await File.ReadAllTextAsync(Path.Combine(workspace, "notes.md")));
+        var reloadedChild = await store.LoadAsync(child.TaskId);
+        Assert.Equal(AgentDraftPatchStatus.Reverted, reloadedChild!.DraftPatches.Single().Status);
+    }
 }

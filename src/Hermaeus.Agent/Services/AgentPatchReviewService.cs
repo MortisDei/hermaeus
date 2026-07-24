@@ -93,4 +93,97 @@ public sealed class AgentPatchReviewService
         await _store.SaveAsync(task, ct);
         await _agent.AppendApprovalAsync(task.TaskId, "draft_patch_block", approved: false, AgentApprovalFingerprint.Resolve(task.PendingToolAction), options, ct);
     }
+
+    /// <summary>
+    /// Reverts an entire run: every distinct file path the task (and, for an
+    /// orchestration parent, its children) touched, restored to the content
+    /// from before the run first touched it (r23 1.3, doc
+    /// "01-run-ledger-and-task-rewind.md"). Per file this is exactly the
+    /// existing per-patch revert rule - refuse if the file changed again
+    /// after the patch was applied - so Rewind can never overwrite content
+    /// the user or anyone else wrote afterward. Partial success is reported
+    /// truthfully rather than treated as a failure. Records no lesson:
+    /// reverting is user judgment about wanted-ness, not evidence a tool or
+    /// command failed.
+    /// </summary>
+    public async Task<AgentTaskRevertResult> RevertTaskAsync(AgentTaskState task, AgentWorkspaceOptions options, CancellationToken ct = default)
+    {
+        if (task.Status == AgentTaskStatus.Running)
+            throw new InvalidOperationException("This task is still running; wait for it to finish before reverting the run.");
+        if (task.PendingToolAction is not null)
+            throw new InvalidOperationException("This task has a pending approval; resolve it before reverting the run.");
+
+        var children = new List<AgentTaskState>();
+        foreach (var spec in task.SubTaskPlan)
+        {
+            if (spec.Status is AgentSubTaskStatus.Pending or AgentSubTaskStatus.Running)
+                throw new InvalidOperationException("This task has an unfinished sub-task; wait for orchestration to finish before reverting the run.");
+            if (string.IsNullOrEmpty(spec.TaskId))
+                continue;
+            var child = await _store.LoadAsync(spec.TaskId, ct)
+                ?? throw new InvalidOperationException($"Sub-task {spec.TaskId} could not be loaded.");
+            children.Add(child);
+        }
+
+        var tasksToRevert = new List<AgentTaskState> { task };
+        tasksToRevert.AddRange(children);
+
+        var outcomes = new List<AgentTaskRevertFileOutcome>();
+        foreach (var t in tasksToRevert)
+        {
+            var taskOptions = t.WorkspaceRoot is { Length: > 0 } root ? options with { WorkspaceRoot = root } : options;
+            var groups = t.DraftPatches
+                .Where(p => p.Status is AgentDraftPatchStatus.Applied or AgentDraftPatchStatus.Reverted)
+                .GroupBy(p => p.RelativePath);
+
+            foreach (var group in groups)
+            {
+                var patches = group.ToList();
+                if (patches.All(p => p.Status == AgentDraftPatchStatus.Reverted))
+                    continue;
+
+                var first = patches[0];
+                var latest = patches[^1];
+                var result = await _workspaceTools.RevertAppliedPatchAsync(
+                    taskOptions, group.Key, first.PreImageContent, latest.AppliedContent, ct);
+                outcomes.Add(new AgentTaskRevertFileOutcome(group.Key, result.Reverted, result.Message));
+
+                if (result.Reverted)
+                {
+                    foreach (var patch in patches)
+                    {
+                        patch.Status = AgentDraftPatchStatus.Reverted;
+                        patch.RevertedAt = DateTime.UtcNow;
+                        patch.RevertedBy = "User";
+                    }
+                    await _store.SaveAsync(t, ct);
+                }
+            }
+        }
+
+        var summary = BuildSummary(outcomes);
+        await _store.AppendLogAsync(task.TaskId, summary, ct);
+        await _store.AppendTraceAsync(task.TaskId, new
+        {
+            task_id = task.TaskId,
+            type = "task_reverted",
+            files = outcomes.Select(o => new { path = o.RelativePath, reverted = o.Reverted, message = o.Message }),
+            logged_at = DateTime.UtcNow
+        }, ct);
+
+        return new AgentTaskRevertResult(outcomes, summary);
+    }
+
+    private static string BuildSummary(IReadOnlyList<AgentTaskRevertFileOutcome> outcomes)
+    {
+        if (outcomes.Count == 0)
+            return "Nothing to revert.";
+
+        var revertedCount = outcomes.Count(o => o.Reverted);
+        var summary = $"Reverted {revertedCount} of {outcomes.Count} file(s).";
+        var skipped = outcomes.Where(o => !o.Reverted);
+        foreach (var skip in skipped)
+            summary += $" Skipped {skip.RelativePath}: {skip.Message}";
+        return summary;
+    }
 }
