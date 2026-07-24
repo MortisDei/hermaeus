@@ -30,25 +30,30 @@ Never add a reference against that flow.
 ```bash
 dotnet build Hermaeus.sln                                  # zero warnings enforced (TreatWarningsAsErrors)
 dotnet test src/Hermaeus.Tests/Hermaeus.Tests.csproj         # standard xunit; all tests must pass
-dotnet run --project src/Hermaeus.Desktop                  # launch the app
+dotnet run --project src/Hermaeus.Desktop                  # launch the app; see warning below
 ./build.sh --skip-restore    # or: pwsh ./build.ps1 -SkipRestore   # packaging
 ./scripts/coverage.sh        # or: pwsh ./scripts/coverage.ps1     # line-coverage ratchet (floor: 45%)
 ```
 
 Any compiler warning fails the build. Fix the warning; do not suppress it without a comment explaining the constraint.
 
+- New harness-style test methods must be registered in `XunitHarnessTests.HarnessCases`; a reflection guard (`HarnessRegistrationGuardTests`) fails the suite otherwise.
+- `dotnet run` on the Desktop project reads and writes the SAME `%LOCALAPPDATA%\Hermaeus\settings.json` (Linux: `~/.local/share/Hermaeus`) as the owner's installed app. Look, do not resave settings casually, and never force-kill the process (`taskkill /F`); close it cleanly.
+- Releases are tag-driven (`.github/workflows/release.yml`, see `docs/packaging.md`). Never push a version tag; that is an owner action.
+
 ## Conventions
 
 - C#: file-scoped namespaces, nullable enabled, `sealed` by default for new classes, records for immutable models/DTOs.
-- Settings live in domain sections on `AppSettings` (Llm, Rag, Data, Memory, Voice, Ui, Trust); one save flow via `SettingsService`. Add fields to the matching section; never write `settings.json` directly.
+- Settings live in domain sections on `AppSettings` (Llm, Tts, Rag, Ui, DataManagement, Memory, Mcp, LocalApi, Agent, plus trust models); one save flow via `SettingsService`. Add fields to the matching section; never write `settings.json` directly. Placement rule: process/server/runtime configuration belongs on the Services page; preference-only knobs belong on the Settings page.
 - Secrets: never store raw keys in settings or logs. Use `ISecretStore`
   references. Runtime log output goes through `RedactionService`.
 - User-facing state files: write via atomic replacement (temp + move), like existing code in `SettingsService`/`BackupService`.
+- UI copy: icon-only controls need tooltips (a guard test scans axaml and fails without one); empty states use the shared `MossEmptyState` control; any text attributed to Moss follows `docs/mascot.md` "Voice in UI copy". When in doubt, drop the personality and state the fact.
 - Docs: user-visible behaviour changes must update `docs/features.md` and the relevant workflow doc (`docs/rag.md`, `docs/agent.md`, `docs/voice.md`, `docs/benchmarks.md`) plus `CHANGELOG.md`. Do not document planned behaviour as existing behaviour.
 
 ## Known hot spots (read before large edits)
 
-`DoctorService`, `LocalAiSetupService`, `BenchmarkService`, `ChatViewModel`,`AgentViewModel`, `RagViewModel` are large and cross-cutting. Make minimal, focused changes there; do not add new subsystem knowledge to Doctor/Setup if it can live with the subsystem instead. The long-term direction for these files is documented in `docs/review/` (2026-07 architecture review) — align new work with it.
+`DoctorService`, `LocalAiSetupService`, `BenchmarkService`, `ChatViewModel`,`AgentViewModel`, `RagViewModel` are large and cross-cutting. Make minimal, focused changes there; do not add new subsystem knowledge to Doctor/Setup if it can live with the subsystem instead. The long-term direction for these files is documented in `docs/review/` (2026-07 architecture review); align new work with it.
 
 ## Working agreement
 
@@ -61,5 +66,10 @@ Before finishing any task:
 2. Update docs if behaviour, commands, setup, or features changed.
 3. Commit; push only after build/tests pass and docs are truthful.
 4. If any step was impossible, say exactly what and why.
+
+Git rules:
+- Code changes land via pull request on a branch, per `docs/pull-requests.md`: one open PR per maintainer at any one time. Documentation-only changes may be committed straight to `main` when the owner says so.
+- Never add AI co-author trailers (e.g. `Co-Authored-By: Claude`) to commits.
+- Never push version tags or create releases; never change repository settings or visibility. Owner-only.
 
 Final response format: what changed; build/test result; risks or follow-ups.
