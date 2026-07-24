@@ -68,7 +68,7 @@ Releases). First version released as a tagged GitHub Release.
   section; `scripts/release-notes-footer.sh` generates the footer. See
   `docs/packaging.md` "Releases" for the versioning and tagging policy.
 
-
+## [0.28.0-alpha] - 2026-07-24
 
 Dogfooding round: layout and settings-organisation feedback from actually
 using the app, plus a real concurrency bug the feedback session's failing
