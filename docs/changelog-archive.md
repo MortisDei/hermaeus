@@ -2,6 +2,75 @@
 
 The CHANGELOG.md in root only contains the current 10 versions of changelogs. The rest are archived here in line with the 10 version limit in the main changelog.
 
+## [0.25.1-alpha] - 2026-07-22
+
+### Changed
+
+- **App icon, taskbar icon, and system tray icon now show Moss** instead of
+  the old Aether "A" mark: `hermaeus.ico` (window/taskbar, 16/32/48/256px),
+  `hermaeus-app.png` (Linux desktop icon), and `hermaeus-tray.png` render the
+  same shapes and colors as the in-app `Controls/MossIcon.axaml`, generated
+  programmatically so every size stays pixel-consistent with it. Sizes at or
+  below 32px drop the dark lens-housing ring for legibility (the full
+  four-ring goggle stack anti-aliases into mud that small), so the eye reads
+  as one clean glowing circle instead. The unused `hermaeus-tray-dark.png`/
+  `hermaeus-tray-light.png` fallback assets were refreshed the same way for
+  consistency, though nothing currently references them.
+- `docs/hermaeus-branding.png` (an illustrated marketing mockup sheet, not
+  referenced by any code or the README) still shows the old mark and
+  wordmark text baked into the pixels - flagged in docs/mascot.md as a
+  follow-up needing real illustration work, not a programmatic redraw.
+
+## [0.25.0-alpha] - 2026-07-22
+
+Implements docs/review r20 in full: the product is renamed from Aether to
+Hermaeus (after Hermaeus Soter, the Indo-Greek king) ahead of going public.
+The go-public trademark check found "Aether" carries real risk: multiple
+live USPTO Class 9 registrations plus several existing local-AI desktop
+projects already use the name.
+
+This touches every namespace, project, and assembly (`Hermaeus.Core`,
+`Hermaeus.Desktop`, etc.), the solution and csproj files, the default data
+root (`{LocalApplicationData}/Hermaeus`), avares resource URIs, and every
+doc. Moss the mascot is unchanged; only the product name around him changes.
+
+### Breaking
+
+- **Default data root moved** to `{LocalApplicationData}/Hermaeus` (was
+  `.../Aether`). No automated migration; move the folder by hand while the
+  app is closed (see the updated README).
+- **Local API headers renamed**: `X-Aether-Token`/`X-Aether-Client` become
+  `X-Hermaeus-Token`/`X-Hermaeus-Client`. Any external caller script needs
+  updating.
+- **Crash log filenames renamed**: `aether_unhandled.log`/
+  `aether_unobserved.log` become `hermaeus_unhandled.log`/
+  `hermaeus_unobserved.log`. Doctor no longer reads old-named crash logs.
+- **OS secret store service name renamed** (Linux `secret-tool`, macOS
+  Keychain): existing secrets stored under the old `Aether` service name on
+  those platforms are orphaned, not migrated. Windows (DPAPI file under the
+  data root) is unaffected beyond the data-root move above.
+- **Single-instance lock file renamed** to `hermaeus.lock` under the new
+  data root folder.
+
+### Compatibility (kept on purpose)
+
+- The SQLite schema-version bookkeeping table (`aether_schema_versions`) is
+  renamed to `hermaeus_schema_versions` in place on first open of an
+  existing database, so already-migrated data does not re-run every
+  migration.
+- The Agent workspace manifest continues to be read from the legacy
+  `.aether/workspace.json` path if the new `.hermaeus/workspace.json` one
+  is absent; it is always written to the new path.
+
+### Added
+
+- A permanent `NamingConsistencyTests` guard scans the repo for stray
+  "Aether" references so a future edit or bad merge fails the build instead
+  of shipping half-migrated.
+- Kokoro voice lexicon gains a `hermaeus` pronunciation entry
+  (`her-MEE-us`); the `aether` dictionary-word entry is kept since it is a
+  real English word CMUdict may still miss.
+
 ## [0.24.1-alpha] - 2026-07-22
 
 ### Added
