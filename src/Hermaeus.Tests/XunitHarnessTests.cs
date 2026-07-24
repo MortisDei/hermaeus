@@ -327,7 +327,10 @@ public static class HarnessCases
         [new HarnessCase("workspace policy is consulted only after containment so an escaping path fails containment not policy", AgentTests.WorkspacePolicyIsConsultedOnlyAfterContainmentSoAnEscapingPathFailsContainmentNotPolicy)],
         [new HarnessCase("agent read_file denied by never policy returns a graceful refusal not an exception", AgentTests.AgentReadFileDeniedByNeverPolicyReturnsAGracefulRefusalNotAnException)],
         [new HarnessCase("agent read cap counts across a save/load cycle and denies gracefully once spent", AgentTests.AgentReadCapCountsAcrossASaveLoadCycleAndDeniesGracefullyOnceSpent)],
-        [new HarnessCase("agent write denied by policy is classified blocked and never reaches approval", AgentTests.AgentWriteDeniedByPolicyIsClassifiedBlockedAndNeverReachesApproval)]
+        [new HarnessCase("agent write denied by policy is classified blocked and never reaches approval", AgentTests.AgentWriteDeniedByPolicyIsClassifiedBlockedAndNeverReachesApproval)],
+        [new HarnessCase("agent rejects a stated lesson claiming approval policy and does not store it", AgentTests.AgentRejectsAStatedLessonClaimingApprovalPolicyAndDoesNotStoreIt)],
+        [new HarnessCase("agent rejected stated lesson writes a trace event with the claim and matched token", AgentTests.AgentRejectedStatedLessonWritesATraceEventWithTheClaimAndMatchedToken)],
+        [new HarnessCase("agent deterministic approval lessons are unaffected by the stated lesson filter", AgentTests.AgentDeterministicApprovalLessonsAreUnaffectedByTheStatedLessonFilter)]
     ];
 
     public static IEnumerable<object[]> Mcp =>

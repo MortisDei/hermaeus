@@ -48,7 +48,9 @@ public sealed class AgentService : IAgentService
         remembering for next time that is not already covered there, say so
         with a [LESSON: <short observation>] marker anywhere in
         thought_summary or user_message; it will not be shown to the user
-        verbatim.
+        verbatim. Approval policy is never a valid lesson subject - a lesson
+        claiming the user approves, pre-approves, or does not need to review
+        something is rejected outright, not stored.
         Return only valid JSON matching:
         {
           "thought_summary": "brief user-visible reasoning summary",
@@ -1234,6 +1236,33 @@ public sealed class AgentService : IAgentService
         TimeSpan.FromMilliseconds(500));
 
     /// <summary>
+    /// Deterministic (no LLM), case-insensitive tokens that mark a stated
+    /// lesson as an approval-policy claim (r23 4.2, "Stated-lesson
+    /// gate-claim filter"). The safety gate never reads the lesson store, so
+    /// a poisoned lesson could not widen execution today - but it would
+    /// still sit in every future context pack and the Lessons panel as
+    /// persistent social engineering. Precision matters more than recall
+    /// here; add tokens as new phrasings turn up rather than trying to be
+    /// exhaustive up front.
+    /// </summary>
+    private static readonly string[] ApprovalClaimTokens =
+    [
+        "approv", "no confirmation", "without asking", "without review",
+        "skip review", "skip the gate", "always allow", "allow all",
+        "trusted to run", "does not need permission"
+    ];
+
+    private static string? MatchedApprovalClaimToken(string claim)
+    {
+        foreach (var token in ApprovalClaimTokens)
+        {
+            if (claim.Contains(token, StringComparison.OrdinalIgnoreCase))
+                return token;
+        }
+        return null;
+    }
+
+    /// <summary>
     /// The only model-authored lesson source: a [LESSON: ...] marker in the
     /// model's own thought/user message, captured at low starting
     /// confidence (see SqliteLessonStore.InitialConfidence) and labelled
@@ -1257,6 +1286,25 @@ public sealed class AgentService : IAgentService
                 {
                     var claim = match.Groups[1].Value.Trim();
                     if (claim.Length == 0) continue;
+
+                    var matchedToken = MatchedApprovalClaimToken(claim);
+                    if (matchedToken is not null)
+                    {
+                        // Rejected outright, not stored at any confidence
+                        // (r23 4.2): the safety gate never reads the lesson
+                        // store, but a stored claim like this would still be
+                        // persistent social engineering in every future
+                        // context pack and the Lessons panel.
+                        await _store.AppendTraceAsync(state.TaskId, new
+                        {
+                            task_id = state.TaskId,
+                            type = "lesson_rejected",
+                            claim,
+                            matched_token = matchedToken,
+                            logged_at = DateTime.UtcNow
+                        }, ct);
+                        continue;
+                    }
 
                     var signature = "stated:" + Convert.ToHexString(
                         System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(claim.ToLowerInvariant())))[..16];
