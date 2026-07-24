@@ -366,7 +366,8 @@ public sealed class AgentService : IAgentService
                         ToolName = nextTool,
                         Arguments = response.NextAction.Arguments,
                         RiskLevel = decision.RiskLevel,
-                        Reason = decision.Reason
+                        Reason = decision.Reason,
+                        Fingerprint = AgentApprovalFingerprint.Compute(nextTool, response.NextAction.Arguments)
                     };
                 }
                 else
@@ -811,10 +812,46 @@ public sealed class AgentService : IAgentService
     public Task<IReadOnlyList<AgentTaskListItem>> LoadRecentTasksAsync(CancellationToken ct = default) =>
         _store.ListRecentAsync(25, ct);
 
-    public async Task AppendApprovalAsync(string taskId, string action, bool approved, AgentWorkspaceOptions? options = null, CancellationToken ct = default)
+    public async Task<AgentApprovalResult> AppendApprovalAsync(string taskId, string action, bool approved, string expectedFingerprint, AgentWorkspaceOptions? options = null, CancellationToken ct = default)
     {
         var state = await _store.LoadAsync(taskId, ct)
             ?? throw new InvalidOperationException("Agent task was not found.");
+
+        // Binds the approval to the pending action as it exists right now,
+        // not as it was when the UI rendered it (r23 4.1). A concurrent step,
+        // a crash-restore race, or a tampered task_state.json could otherwise
+        // let the user approve one thing and execute another. A pre-r23
+        // pending action has no stored Fingerprint; recompute it from
+        // ToolName/Arguments so old tasks keep working without a migration -
+        // the UI does the same recompute when it renders a legacy task.
+        var pendingAtStart = state.PendingToolAction;
+        var actualFingerprint = AgentApprovalFingerprint.Resolve(pendingAtStart);
+        var fingerprintMismatch = pendingAtStart is not null
+            && !string.Equals(actualFingerprint, expectedFingerprint, StringComparison.Ordinal);
+        if (fingerprintMismatch)
+        {
+            await _store.AppendTraceAsync(taskId, new
+            {
+                task_id = taskId,
+                type = "approval_fingerprint_mismatch",
+                tool = pendingAtStart!.ToolName,
+                expected_fingerprint = expectedFingerprint,
+                actual_fingerprint = actualFingerprint,
+                approved,
+                logged_at = DateTime.UtcNow
+            }, ct);
+        }
+
+        if (approved && fingerprintMismatch)
+        {
+            // Refuse execution: the pending action stays pending and the task
+            // stays waiting_for_review. Rejections do not need this refusal
+            // (rejecting the wrong thing executes nothing) - only the trace
+            // event above, already written.
+            await _store.AppendLogAsync(taskId, $"approval refused: pending action changed since it was displayed ({pendingAtStart!.ToolName})", ct);
+            return new AgentApprovalResult(false, "The pending action changed since it was displayed. Review it again.");
+        }
+
         state.ApprovalHistory.Add(new AgentApprovalRecord(action, approved, DateTime.UtcNow));
         if (approved && state.PendingToolAction is not null && string.Equals(state.PendingToolAction.ToolName, "plan_subtasks", StringComparison.OrdinalIgnoreCase))
         {
@@ -908,6 +945,7 @@ public sealed class AgentService : IAgentService
         }
         await _store.SaveAsync(state, ct);
         await _store.AppendLogAsync(taskId, $"approval recorded: {action} approved={approved}", ct);
+        return new AgentApprovalResult(true, string.Empty);
     }
 
     public async Task AppendUserReplyAsync(string taskId, string reply, CancellationToken ct = default)

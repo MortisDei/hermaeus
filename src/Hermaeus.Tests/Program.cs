@@ -921,7 +921,7 @@ internal static class AgentTests
     var first = await serviceWithManifest.RunStepAsync(state.TaskId, options);
     Equal(AgentTaskStatus.WaitingForUser, first.State.Status, "the first dotnet build should still require approval");
 
-    await serviceWithManifest.AppendApprovalAsync(state.TaskId, "run_command", approved: true, options);
+    await serviceWithManifest.AppendApprovalAsync(state.TaskId, "run_command", approved: true, await PendingFingerprintAsync(store, state.TaskId), options);
     var afterApproval = await store.LoadAsync(state.TaskId);
     True(afterApproval!.RememberedCommandApprovals.Any(c => string.Equals(c, "dotnet build", StringComparison.OrdinalIgnoreCase)),
         "approving a run_command should remember the exact command for the rest of the task");
@@ -1054,7 +1054,7 @@ internal static class AgentTests
     True(transcript.Any(e => e.Role == "assistant" && e.Step == 1), "transcript should record the assistant's first-step thought");
     Equal(1, step.State.StepCount, "step count should advance once per RunStepAsync call");
 
-    await service.AppendApprovalAsync(state.TaskId, "draft_patch", approved: false);
+    await service.AppendApprovalAsync(state.TaskId, "draft_patch", approved: false, await PendingFingerprintAsync(store, state.TaskId));
     var reloaded = await store.LoadAsync(state.TaskId);
     True(reloaded?.ApprovalHistory.Count == 1, "approval history should persist");
     }
@@ -1222,7 +1222,7 @@ internal static class AgentTests
     var step = await serviceWithManifest.RunStepAsync(state.TaskId, options);
     Equal(AgentTaskStatus.WaitingForUser, step.State.Status, "run_command should still require approval the first time");
 
-    await serviceWithManifest.AppendApprovalAsync(state.TaskId, "run_command", approved: true, options);
+    await serviceWithManifest.AppendApprovalAsync(state.TaskId, "run_command", approved: true, await PendingFingerprintAsync(taskStore, state.TaskId), options);
 
     var lessons = await lessonStore.ListRelevantAsync(root, includeRetired: false, 50);
     True(lessons.Any(l => l.Kind == AgentLessonKind.Command), "a command lesson should be captured after the approved run");
@@ -1253,7 +1253,7 @@ internal static class AgentTests
 
     var state = await service.CreateTaskAsync("Review docs", options);
     await service.RunStepAsync(state.TaskId, options);
-    await service.AppendApprovalAsync(state.TaskId, "draft_patch", approved: false, options);
+    await service.AppendApprovalAsync(state.TaskId, "draft_patch", approved: false, await PendingFingerprintAsync(taskStore, state.TaskId), options);
 
     var lessons = await lessonStore.ListAllAsync(includeRetired: false);
     True(lessons.Any(l => l.Kind == AgentLessonKind.Approval && l.Outcome == AgentLessonOutcome.UserRejected),
@@ -1376,7 +1376,7 @@ internal static class AgentTests
 
     var state = await service.CreateTaskAsync("Review docs", options);
     await service.RunStepAsync(state.TaskId, options);
-    await service.AppendApprovalAsync(state.TaskId, "draft_patch", approved: true, options);
+    await service.AppendApprovalAsync(state.TaskId, "draft_patch", approved: true, await PendingFingerprintAsync(store, state.TaskId), options);
 
     var transcript = await store.LoadTranscriptAsync(state.TaskId);
     True(transcript.Any(e => e.Role == "tool" && e.ToolName == "draft_patch"),
@@ -1419,7 +1419,7 @@ internal static class AgentTests
 
     var state = await service.CreateTaskAsync("Add notes", options);
     await service.RunStepAsync(state.TaskId, options);
-    await service.AppendApprovalAsync(state.TaskId, "create_file", approved: true, options);
+    await service.AppendApprovalAsync(state.TaskId, "create_file", approved: true, await PendingFingerprintAsync(store, state.TaskId), options);
 
     var reloaded = await store.LoadAsync(state.TaskId);
     var recorded = reloaded!.DraftPatches.Single(p => p.RelativePath == "notes.md");
@@ -1532,7 +1532,7 @@ internal static class AgentTests
 
     var state = await service.CreateTaskAsync("Run tests", options);
     await service.RunStepAsync(state.TaskId, options);
-    await service.AppendApprovalAsync(state.TaskId, "run_command", approved: true, options);
+    await service.AppendApprovalAsync(state.TaskId, "run_command", approved: true, await PendingFingerprintAsync(taskStore, state.TaskId), options);
 
     var lessons = await lessonStore.ListAllAsync(includeRetired: false);
     var lesson = lessons.Single(l => l.Kind == AgentLessonKind.Command);
@@ -1564,7 +1564,7 @@ internal static class AgentTests
     {
         var rejectState = await service.CreateTaskAsync($"Review docs, round {i}", options);
         await service.RunStepAsync(rejectState.TaskId, options);
-        await service.AppendApprovalAsync(rejectState.TaskId, "draft_patch", approved: false, options);
+        await service.AppendApprovalAsync(rejectState.TaskId, "draft_patch", approved: false, await PendingFingerprintAsync(taskStore, rejectState.TaskId), options);
 
         var current = (await lessonStore.ListAllAsync(includeRetired: true)).Single(l => l.Kind == AgentLessonKind.Approval);
         lessonId = current.Id;
@@ -1574,7 +1574,7 @@ internal static class AgentTests
 
     var approveState = await service.CreateTaskAsync("Review docs, now approved", options);
     await service.RunStepAsync(approveState.TaskId, options);
-    await service.AppendApprovalAsync(approveState.TaskId, "draft_patch", approved: true, options);
+    await service.AppendApprovalAsync(approveState.TaskId, "draft_patch", approved: true, await PendingFingerprintAsync(taskStore, approveState.TaskId), options);
 
     var afterApprove = await lessonStore.GetByIdAsync(lessonId!);
     True(afterApprove!.Confidence < confidenceAfterReject, "approving the same tool afterwards should counter (weaken) the prior rejection lesson");
@@ -1958,7 +1958,7 @@ internal static class AgentTests
     var state = await service.CreateTaskAsync(goal, options);
     var proposed = await service.RunStepAsync(state.TaskId, options);
     Equal(AgentTaskStatus.WaitingForUser, proposed.State.Status, "plan_subtasks should always pause for approval");
-    await service.AppendApprovalAsync(state.TaskId, "plan_subtasks", approved: true, options);
+    await service.AppendApprovalAsync(state.TaskId, "plan_subtasks", approved: true, await PendingFingerprintAsync(store, state.TaskId), options);
 
     return (store, service, options, state);
     }
@@ -2045,7 +2045,7 @@ internal static class AgentTests
     NotEqual(state.TaskId, paused.State.TaskId, "the paused result should describe the CHILD task, not the parent");
     Equal("edit_file", paused.State.PendingToolAction?.ToolName, "the child's pending action should be edit_file");
 
-    await service.AppendApprovalAsync(paused.State.TaskId, "edit_file", approved: true, options);
+    await service.AppendApprovalAsync(paused.State.TaskId, "edit_file", approved: true, await PendingFingerprintAsync(store, paused.State.TaskId), options);
 
     var resumed = await service.RunAsync(state.TaskId, options);
     Equal(AgentTaskStatus.Complete, resumed.State.Status, "resuming the parent should continue the same child and finish the run");
@@ -2089,12 +2089,12 @@ internal static class AgentTests
 
     var state = await service.CreateTaskAsync("Build twice across two sub-tasks", options);
     await service.RunStepAsync(state.TaskId, options);
-    await service.AppendApprovalAsync(state.TaskId, "plan_subtasks", approved: true, options);
+    await service.AppendApprovalAsync(state.TaskId, "plan_subtasks", approved: true, await PendingFingerprintAsync(store, state.TaskId), options);
 
     var firstPause = await service.RunAsync(state.TaskId, options);
     Equal("run_command", firstPause.State.PendingToolAction?.ToolName, "the first child should need approval for run_command");
     var firstChildId = firstPause.State.TaskId;
-    await service.AppendApprovalAsync(firstChildId, "run_command", approved: true, options);
+    await service.AppendApprovalAsync(firstChildId, "run_command", approved: true, await PendingFingerprintAsync(store, firstChildId), options);
 
     var secondPause = await service.RunAsync(state.TaskId, options);
     Equal(AgentTaskStatus.WaitingForUser, secondPause.State.Status, "the second child should still need its own approval for the identical command");
@@ -2122,7 +2122,7 @@ internal static class AgentTests
 
     var state = await service.CreateTaskAsync("A goal needing three sub-tasks", options);
     await service.RunStepAsync(state.TaskId, options);
-    await service.AppendApprovalAsync(state.TaskId, "plan_subtasks", approved: true, options);
+    await service.AppendApprovalAsync(state.TaskId, "plan_subtasks", approved: true, await PendingFingerprintAsync(store, state.TaskId), options);
 
     var result = await service.RunAsync(state.TaskId, options);
 
@@ -2392,7 +2392,7 @@ internal static class AgentTests
     // workspace (B), as would happen if the workbench had workspace B active
     // while approving a task created in workspace A (1.4 headline fix).
     var optionsB = new AgentWorkspaceOptions(rootB, ModelId: "fake-sequenced-agent");
-    await service.AppendApprovalAsync(state.TaskId, "review_queue", approved: true, optionsB);
+    await service.AppendApprovalAsync(state.TaskId, "review_queue", approved: true, await PendingFingerprintAsync(store, state.TaskId), optionsB);
 
     True(File.Exists(Path.Combine(rootA, "output.txt")), "the approved action should execute against the TASK's own workspace root (A), not the caller's options (B)");
     False(File.Exists(Path.Combine(rootB, "output.txt")), "the file must not be created in the workspace the caller happened to have active");
@@ -2423,7 +2423,7 @@ internal static class AgentTests
     var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), new FakeSequencedAgentLlm([]), settings: settings);
 
     var threw = false;
-    try { await service.AppendApprovalAsync(state.TaskId, "review_queue", approved: true, options: null); }
+    try { await service.AppendApprovalAsync(state.TaskId, "review_queue", approved: true, await PendingFingerprintAsync(store, state.TaskId), options: null); }
     catch (InvalidOperationException) { threw = true; }
     True(threw, "approving with no options and no stored workspace root should throw InvalidOperationException (1.5)");
 
@@ -2464,11 +2464,141 @@ internal static class AgentTests
     var state = await service.CreateTaskAsync("Create a file", options);
     await service.RunStepAsync(state.TaskId, options);
 
-    await service.AppendApprovalAsync(state.TaskId, "review_queue", approved: true, options: null);
+    await service.AppendApprovalAsync(state.TaskId, "review_queue", approved: true, await PendingFingerprintAsync(store, state.TaskId), options: null);
 
     True(File.Exists(Path.Combine(root, "output.txt")), "a null-options approval should fall back to the task's own stored WorkspaceRoot and execute normally (1.5)");
     var reloaded = await store.LoadAsync(state.TaskId);
     Equal(AgentTaskStatus.Running, reloaded!.Status, "approval should return the task to Running");
+    }
+
+    public static Task AgentApprovalFingerprintIsStableRegardlessOfArgumentInsertionOrder()
+    {
+    var forward = new Dictionary<string, object?> { ["command"] = "dotnet build", ["cwd"] = "src" };
+    var backward = new Dictionary<string, object?> { ["cwd"] = "src", ["command"] = "dotnet build" };
+
+    Equal(
+        AgentApprovalFingerprint.Compute("run_command", forward),
+        AgentApprovalFingerprint.Compute("run_command", backward),
+        "the fingerprint must depend on tool name and argument content only, not dictionary enumeration order");
+    NotEqual(
+        AgentApprovalFingerprint.Compute("run_command", forward),
+        AgentApprovalFingerprint.Compute("run_command", new Dictionary<string, object?> { ["command"] = "dotnet test", ["cwd"] = "src" }),
+        "a different argument value must fingerprint differently");
+    return Task.CompletedTask;
+    }
+
+    public static async Task AgentApprovalMismatchedFingerprintRefusesExecutionAndLeavesPendingIntact()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    var tools = new AgentWorkspaceTools();
+    var llm = new FakeSequencedAgentLlm([CreateFileToolResponse]);
+    var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), llm, settings: settings, workspaceTools: tools);
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-sequenced-agent");
+
+    var state = await service.CreateTaskAsync("Add notes", options);
+    await service.RunStepAsync(state.TaskId, options);
+    var beforeApproval = await store.LoadAsync(state.TaskId);
+
+    var result = await service.AppendApprovalAsync(state.TaskId, "review_queue", approved: true, "stale-fingerprint-from-a-different-render", options);
+
+    False(result.Applied, "an approval whose fingerprint does not match the current pending action must refuse to execute");
+    False(File.Exists(Path.Combine(root, "notes.md")), "the mismatched approval must not have created the file");
+    var afterAttempt = await store.LoadAsync(state.TaskId);
+    Equal(AgentTaskStatus.WaitingForUser, afterAttempt!.Status, "the task must stay waiting_for_review after a refused approval");
+    Equal(beforeApproval!.PendingToolAction!.ToolName, afterAttempt.PendingToolAction!.ToolName, "the pending action must be left exactly as it was");
+    Equal(0, afterAttempt.ApprovalHistory.Count, "a refused approval must not be recorded as a completed approval decision");
+    var trace = await File.ReadAllTextAsync(Path.Combine(store.GetTaskDirectory(state.TaskId), "agent.trace.jsonl"));
+    True(trace.Contains("approval_fingerprint_mismatch", StringComparison.Ordinal), "a mismatch must be recorded in the trace");
+    }
+
+    public static async Task AgentApprovalMatchingFingerprintExecutesAndReportsApplied()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    var tools = new AgentWorkspaceTools();
+    var llm = new FakeSequencedAgentLlm([CreateFileToolResponse]);
+    var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), llm, settings: settings, workspaceTools: tools);
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-sequenced-agent");
+
+    var state = await service.CreateTaskAsync("Add notes", options);
+    await service.RunStepAsync(state.TaskId, options);
+
+    var result = await service.AppendApprovalAsync(state.TaskId, "review_queue", approved: true, await PendingFingerprintAsync(store, state.TaskId), options);
+
+    True(result.Applied, "an approval whose fingerprint matches the current pending action must execute");
+    True(File.Exists(Path.Combine(root, "notes.md")), "the matching approval should have created the file");
+    }
+
+    public static async Task AgentRejectionWithMismatchedFingerprintStillRejectsButRecordsTheMismatch()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    File.WriteAllText(Path.Combine(root, "README.md"), "docs");
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    var tools = new AgentWorkspaceTools();
+    var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), new FakeAgentLlm(), settings: settings);
+    var options = new AgentWorkspaceOptions(root, ModelId: "fake-agent");
+
+    var state = await service.CreateTaskAsync("Review docs", options);
+    await service.RunStepAsync(state.TaskId, options);
+
+    var result = await service.AppendApprovalAsync(state.TaskId, "review_queue", approved: false, "stale-fingerprint-from-a-different-render", options);
+
+    True(result.Applied, "rejecting the wrong thing executes nothing, so a fingerprint mismatch must not block the rejection itself");
+    var reloaded = await store.LoadAsync(state.TaskId);
+    Equal(AgentTaskStatus.WaitingForUser, reloaded!.Status, "a rejection should leave the task waiting for the user");
+    True(reloaded.PendingToolAction is null, "a rejection should clear the pending action regardless of the fingerprint mismatch");
+    var trace = await File.ReadAllTextAsync(Path.Combine(store.GetTaskDirectory(state.TaskId), "agent.trace.jsonl"));
+    True(trace.Contains("approval_fingerprint_mismatch", StringComparison.Ordinal), "the mismatch should still be recorded in the trace even though the rejection proceeded");
+    }
+
+    public static async Task AgentApprovalOfALegacyFingerprintlessPendingActionRecomputesAndMatches()
+    {
+    using var temp = new TempDir();
+    var root = temp.PathFor("workspace");
+    Directory.CreateDirectory(root);
+    var settings = NewSettings(temp);
+    settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+    var store = new FileAgentTaskStateStore(settings);
+    await store.InitializeAsync();
+    var tools = new AgentWorkspaceTools();
+
+    // Simulates a task_state.json persisted before r23: a pending action
+    // with no stored Fingerprint at all.
+    var arguments = new Dictionary<string, object?> { ["relative_path"] = "x.txt", ["content"] = "x" };
+    var state = new AgentTaskState
+    {
+        Goal = "Pre-r23 task",
+        Status = AgentTaskStatus.WaitingForUser,
+        WorkspaceRoot = root,
+        PendingToolAction = new AgentPendingToolAction { ToolName = "create_file", Arguments = arguments }
+    };
+    await store.SaveAsync(state);
+    Equal(string.Empty, state.PendingToolAction.Fingerprint, "the fixture must genuinely have no stored fingerprint");
+
+    var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), new FakeSequencedAgentLlm([]), settings: settings, workspaceTools: tools);
+    var options = new AgentWorkspaceOptions(root);
+
+    // The UI recomputes the fingerprint the same way when it renders a
+    // legacy task with no stored value (r23 4.1); this mirrors that path
+    // rather than reading a (non-existent) stored one.
+    var renderedFingerprint = AgentApprovalFingerprint.Compute("create_file", arguments);
+    var result = await service.AppendApprovalAsync(state.TaskId, "review_queue", approved: true, renderedFingerprint, options);
+
+    True(result.Applied, "a legacy pending action with no stored fingerprint should still match a freshly recomputed one");
+    True(File.Exists(Path.Combine(root, "x.txt")), "the legacy approval should have executed normally");
     }
 
     public static async Task AgentReviewQueueChildEntriesCarryParentTaskIdAndWorkspaceRoot()
@@ -2596,7 +2726,7 @@ internal static class AgentTests
     };
     await store.SaveAsync(loaded);
 
-    await service.AppendApprovalAsync(state.TaskId, "plan_subtasks", approved: true, options);
+    await service.AppendApprovalAsync(state.TaskId, "plan_subtasks", approved: true, await PendingFingerprintAsync(store, state.TaskId), options);
 
     var reloaded = await store.LoadAsync(state.TaskId);
     Equal(2, reloaded!.SubTaskPlan.Count, "the existing plan must not be replaced by a stale racing approval");
@@ -2641,7 +2771,7 @@ internal static class AgentTests
     Equal(AgentTaskStatus.WaitingForUser, parentAfterPause!.Status, "the parent must truthfully mirror its paused child's status instead of sitting Running forever (1.6)");
     True(parentAfterPause.ActiveStep.Contains("Waiting on sub-task 1/2", StringComparison.Ordinal), "the parent's ActiveStep should name which sub-task it is waiting on (1.6)");
 
-    await service.AppendApprovalAsync(paused.State.TaskId, "edit_file", approved: true, options);
+    await service.AppendApprovalAsync(paused.State.TaskId, "edit_file", approved: true, await PendingFingerprintAsync(store, paused.State.TaskId), options);
     var resumed = await service.RunAsync(state.TaskId, options);
     Equal(AgentTaskStatus.Complete, resumed.State.Status, "resuming the parent (whose own status was WaitingForUser, not Running) should still complete the run (1.6)");
     }

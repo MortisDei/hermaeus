@@ -140,7 +140,7 @@ public sealed class AgentScenarioRunner : IAgentScenarioRunner
                         // whichever task id actually holds it, then resume
                         // via the PARENT's task id so the orchestration loop
                         // re-enters and continues that same child.
-                        await agent.AppendApprovalAsync(lastResult.State.TaskId, pending.ToolName, approved: true, options, ct);
+                        await agent.AppendApprovalAsync(lastResult.State.TaskId, pending.ToolName, approved: true, AgentApprovalFingerprint.Resolve(pending), options, ct);
                         continue;
                     }
 

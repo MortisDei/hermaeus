@@ -22,10 +22,10 @@ public sealed class AgentPatchReviewServiceTests
         public Task<IReadOnlyList<AgentTaskListItem>> LoadRecentTasksAsync(CancellationToken ct = default) =>
             throw new NotSupportedException();
 
-        public Task AppendApprovalAsync(string taskId, string action, bool approved, AgentWorkspaceOptions? options = null, CancellationToken ct = default)
+        public Task<AgentApprovalResult> AppendApprovalAsync(string taskId, string action, bool approved, string expectedFingerprint, AgentWorkspaceOptions? options = null, CancellationToken ct = default)
         {
             Actions.Add($"{action}:{approved}");
-            return Task.CompletedTask;
+            return Task.FromResult(new AgentApprovalResult(true, string.Empty));
         }
 
         public Task AppendUserReplyAsync(string taskId, string reply, CancellationToken ct = default) =>

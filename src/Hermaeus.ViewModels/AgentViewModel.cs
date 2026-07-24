@@ -55,6 +55,12 @@ public sealed class AgentReviewQueueItemViewModel
         PendingToolName = item.PendingToolAction?.ToolName ?? string.Empty;
         PendingRiskLevel = item.PendingToolAction?.RiskLevel;
         PendingReason = item.PendingToolAction?.Reason ?? string.Empty;
+        // Computed fresh from the pending action as just loaded, not read off
+        // a possibly-stale stored value, so a legacy (pre-r23) task without a
+        // stored Fingerprint still gets a correct one here (r23 4.1). This is
+        // "the fingerprint of the action actually rendered": AppendApprovalAsync
+        // recomputes the same way from current state and compares.
+        PendingFingerprint = AgentApprovalFingerprint.Resolve(item.PendingToolAction);
         RecipePreview = recipePreview;
         ParentGoal = item.ParentGoal ?? string.Empty;
         ParentTaskId = item.ParentTaskId;
@@ -101,6 +107,8 @@ public sealed class AgentReviewQueueItemViewModel
     public string PendingRiskLabel => PendingRiskLevel?.ToString() ?? string.Empty;
     /// <summary>Why the safety gate gated this action (AgentToolPolicyDecision.Reason).</summary>
     public string PendingReason { get; }
+    /// <summary>The pending action's fingerprint as rendered here; passed back to AppendApprovalAsync so approval executes only what was actually shown (r23 4.1).</summary>
+    public string PendingFingerprint { get; }
     public bool HasPendingAction => !string.IsNullOrEmpty(PendingToolName);
     /// <summary>What a pending run_command approval will actually execute (r6 3.2); empty for non-command tools.</summary>
     public string RecipePreview { get; }
@@ -793,9 +801,17 @@ public partial class AgentViewModel : ViewModelBase
     private async Task ApproveReviewAsync(AgentReviewQueueItemViewModel? item)
     {
         if (item is null) return;
-        await _agent.AppendApprovalAsync(item.TaskId, "review_queue", approved: true, BuildOptions());
+        var result = await _agent.AppendApprovalAsync(item.TaskId, "review_queue", approved: true, item.PendingFingerprint, BuildOptions());
         await RefreshReviewQueueAsync();
         await LoadTaskIfOpenAsync(item.TaskId);
+        if (!result.Applied)
+        {
+            // The pending action changed since this row was rendered (r23
+            // 4.1); the refresh above already shows the current one. Nothing
+            // executed, so there is nothing to resume.
+            StatusMessage = result.Message;
+            return;
+        }
 
         // Approve-and-continue: a single approval both unblocks the gated
         // action and resumes the autonomous loop, instead of leaving the
@@ -916,7 +932,7 @@ public partial class AgentViewModel : ViewModelBase
     private async Task RejectReviewAsync(AgentReviewQueueItemViewModel? item)
     {
         if (item is null) return;
-        await _agent.AppendApprovalAsync(item.TaskId, "review_queue", approved: false, BuildOptions());
+        await _agent.AppendApprovalAsync(item.TaskId, "review_queue", approved: false, item.PendingFingerprint, BuildOptions());
         await RefreshReviewQueueAsync();
         await LoadTaskIfOpenAsync(item.TaskId);
     }

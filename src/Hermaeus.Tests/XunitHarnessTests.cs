@@ -310,7 +310,12 @@ public static class HarnessCases
         [new HarnessCase("agent run step throws for a parent with unfinished sub-tasks", AgentTests.AgentRunStepThrowsForAParentWithUnfinishedSubTasks)],
         [new HarnessCase("agent plan_subtasks is blocked when proposed again during synthesis", AgentTests.AgentPlanSubtasksIsBlockedWhenProposedAgainDuringSynthesis)],
         [new HarnessCase("agent plan_subtasks approval rejects when the task already has a plan", AgentTests.AgentPlanSubtasksApprovalRejectsWhenTheTaskAlreadyHasAPlan)],
-        [new HarnessCase("agent parent status mirrors paused child status and resumes to complete", AgentTests.AgentParentStatusMirrorsPausedChildStatusAndResumesToComplete)]
+        [new HarnessCase("agent parent status mirrors paused child status and resumes to complete", AgentTests.AgentParentStatusMirrorsPausedChildStatusAndResumesToComplete)],
+        [new HarnessCase("agent approval fingerprint is stable regardless of argument insertion order", AgentTests.AgentApprovalFingerprintIsStableRegardlessOfArgumentInsertionOrder)],
+        [new HarnessCase("agent approval with a mismatched fingerprint refuses execution and leaves the pending action intact", AgentTests.AgentApprovalMismatchedFingerprintRefusesExecutionAndLeavesPendingIntact)],
+        [new HarnessCase("agent approval with a matching fingerprint executes and reports applied", AgentTests.AgentApprovalMatchingFingerprintExecutesAndReportsApplied)],
+        [new HarnessCase("agent rejection with a mismatched fingerprint still rejects but records the mismatch", AgentTests.AgentRejectionWithMismatchedFingerprintStillRejectsButRecordsTheMismatch)],
+        [new HarnessCase("agent approval of a legacy fingerprintless pending action recomputes and matches", AgentTests.AgentApprovalOfALegacyFingerprintlessPendingActionRecomputesAndMatches)]
     ];
 
     public static IEnumerable<object[]> Mcp =>

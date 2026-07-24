@@ -80,6 +80,17 @@ namespace Hermaeus.Tests
 
         public static void False(bool value, string message) => True(!value, message);
 
+        /// <summary>
+        /// The fingerprint AppendApprovalAsync's caller is expected to pass
+        /// (r23 4.1): reloads the task fresh and computes it the same way the
+        /// real UI does, so happy-path tests do not need to hand-compute one.
+        /// </summary>
+        public static async Task<string> PendingFingerprintAsync(IAgentTaskStateStore store, string taskId, CancellationToken ct = default)
+        {
+            var state = await store.LoadAsync(taskId, ct);
+            return AgentApprovalFingerprint.Resolve(state?.PendingToolAction);
+        }
+
         public static void ContainsInOrder(IReadOnlyList<string> values, string first, string second, string message)
         {
             for (var i = 0; i < values.Count - 1; i++)

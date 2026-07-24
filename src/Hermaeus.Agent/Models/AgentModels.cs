@@ -351,6 +351,14 @@ public sealed class AgentDraftPatch
 /// <summary>Outcome of attempting to revert an applied patch.</summary>
 public sealed record AgentRevertResult(bool Reverted, string Message);
 
+/// <summary>
+/// Outcome of an approval decision (AgentService.AppendApprovalAsync).
+/// <see cref="Applied"/> is false only when the approval fingerprint did not
+/// match the currently pending action (r23 4.1); the pending action stays
+/// pending and nothing executed.
+/// </summary>
+public sealed record AgentApprovalResult(bool Applied, string Message);
+
 public sealed class AgentContextPack
 {
     public string CurrentGoal { get; set; } = string.Empty;
@@ -429,6 +437,16 @@ public sealed class AgentPendingToolAction
     /// UI so risk is never a bare, unexplained label (r6 01-first-five-minutes.md 1.7).
     /// </summary>
     public string Reason { get; set; } = string.Empty;
+
+    /// <summary>
+    /// SHA256 (hex) over the tool name and canonicalized arguments, computed
+    /// once when this action is created (AgentApprovalFingerprint.Compute).
+    /// AppendApprovalAsync refuses to execute an approval whose caller-supplied
+    /// expected fingerprint does not match this, binding what was displayed to
+    /// what actually executes (r23 4.1). Empty on pre-r23 persisted state; the
+    /// approval path recomputes from ToolName/Arguments in that case.
+    /// </summary>
+    public string Fingerprint { get; set; } = string.Empty;
 }
 
 public sealed class AgentNextAction
