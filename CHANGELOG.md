@@ -13,6 +13,43 @@ From 0.29.0-alpha onward, every minor version is tagged and released on
 GitHub (see `docs/packaging.md` "Releases"); patch versions are tagged only
 for urgent hotfixes.
 
+## [0.29.1-alpha] - 2026-07-24
+
+Hotfix: a Services-page settings-loss bug reported live during dogfooding, plus the first Linux CI results from this repo's newly re-enabled Actions.
+
+### Fixed
+
+- **Services page silently dropped edits after any unrelated settings save.**
+  `ServicesViewModel`'s per-server rows held a `readonly` reference into
+  `ManagedServers[]` captured once at construction. The Settings tab's save
+  path swaps `ISettingsService.Settings` to a new object on every save
+  (by design, for atomic rollback-on-failure); any *other* open Services row
+  kept pointing at the now-orphaned pre-swap config, so every Start/Save on
+  that row afterward wrote into a dangling object instead of the live
+  settings tree. No error was raised - the edit just never reached
+  `settings.json`. This is why Doctor's "GPU present but the chat server is
+  set to 0 GPU layers" advisory could report `0` layers even while a model
+  was genuinely running with real GPU offload: the last real edit (from
+  Auto Tune or a manual GPU-layers change) had been silently lost. Fixed by
+  re-pointing each row's config reference at its fresh same-id instance
+  whenever the settings object changes.
+- **3 Linux-only CI test failures, root-caused and fixed** (first real Linux
+  CI run on this repo - Actions was disabled here until this release).
+  `LlamaRuntimeVariantTests`' path-walking tests used hardcoded Windows
+  backslash literals as production-code input; backslash is not a path
+  separator on Linux, so `ResolveInstallRoot`/`SelectPrunableVersionDirectories`/
+  `NearestTagDirectoryName` silently failed to parse the literal on that leg.
+  Normalized the test inputs to forward slashes (valid on both platforms).
+  `ServerProcessManagerTests.AutoTuneAsync_fails_fast_with_the_named_port_owner_when_the_port_is_occupied`
+  was missing the `OperatingSystem.IsWindows()` guard its sibling tests all
+  have; its fixture is a real `where.exe` copy, Windows-only by construction.
+  `RagHarnessTests`' reindex-cancel test cancelled from a `PropertyChanged`
+  handler reacting to `Progress<T>`-marshaled VM state, which posts through
+  `SynchronizationContext` instead of running inline - a real race against
+  the reindex loop's own progress, with no cross-platform ordering guarantee.
+  Replaced with a deterministic cancel triggered synchronously from inside
+  the embedding call itself.
+
 ## [0.29.0-alpha] - 2026-07-24
 
 Fit for public view: makes the app presentable (Moss presence, readability)

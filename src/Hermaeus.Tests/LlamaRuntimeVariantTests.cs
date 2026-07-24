@@ -103,46 +103,51 @@ public sealed class LlamaRuntimeVariantTests
     public void ResolveInstallRoot_walks_up_nested_tag_directories()
         => Assert.Equal(
             NormPath(@"C:\AI\llama.cpp"),
-            NormPath(LlamaServerSetupService.ResolveInstallRoot(@"C:\AI\llama.cpp\b10064\b10066")));
+            NormPath(LlamaServerSetupService.ResolveInstallRoot(NormPath(@"C:\AI\llama.cpp\b10064\b10066"))));
 
     [Fact]
     public void ResolveInstallRoot_keeps_unversioned_layout()
         => Assert.Equal(
             NormPath(@"C:\AI\llama.cpp"),
-            NormPath(LlamaServerSetupService.ResolveInstallRoot(@"C:\AI\llama.cpp")));
+            NormPath(LlamaServerSetupService.ResolveInstallRoot(NormPath(@"C:\AI\llama.cpp"))));
 
     [Fact]
     public void ResolveInstallRoot_does_not_walk_a_tag_named_root_into_the_drive()
         => Assert.Equal(
             NormPath(@"C:\b10050"),
-            NormPath(LlamaServerSetupService.ResolveInstallRoot(@"C:\b10050")));
+            NormPath(LlamaServerSetupService.ResolveInstallRoot(NormPath(@"C:\b10050"))));
 
     [Fact]
     public void SelectPrunableVersionDirectories_keeps_current_and_previous_ignores_non_tags()
     {
+        // Literal paths are normalized to forward slashes: Path.GetFileName /
+        // GetDirectoryName only treat '\' as a separator on Windows, so a
+        // hardcoded backslash literal silently fails to parse into path
+        // components when this test runs on Linux CI. Forward slashes parse
+        // identically on both (Windows accepts '/' as an alt separator).
         string[] siblings =
         [
-            @"C:\AI\llama.cpp\b10060",
-            @"C:\AI\llama.cpp\b10064",
-            @"C:\AI\llama.cpp\b10066",
-            @"C:\AI\llama.cpp\models",
-            @"C:\AI\llama.cpp\notes-b1",
+            NormPath(@"C:\AI\llama.cpp\b10060"),
+            NormPath(@"C:\AI\llama.cpp\b10064"),
+            NormPath(@"C:\AI\llama.cpp\b10066"),
+            NormPath(@"C:\AI\llama.cpp\models"),
+            NormPath(@"C:\AI\llama.cpp\notes-b1"),
         ];
 
         var prunable = LlamaServerSetupService.SelectPrunableVersionDirectories(siblings, "b10066", "b10064");
 
-        Assert.Contains(@"C:\AI\llama.cpp\b10060", prunable);
-        Assert.DoesNotContain(@"C:\AI\llama.cpp\b10066", prunable); // current kept
-        Assert.DoesNotContain(@"C:\AI\llama.cpp\b10064", prunable); // previous kept
-        Assert.DoesNotContain(@"C:\AI\llama.cpp\models", prunable); // non-tag ignored
-        Assert.DoesNotContain(@"C:\AI\llama.cpp\notes-b1", prunable);
+        Assert.Contains(NormPath(@"C:\AI\llama.cpp\b10060"), prunable);
+        Assert.DoesNotContain(NormPath(@"C:\AI\llama.cpp\b10066"), prunable); // current kept
+        Assert.DoesNotContain(NormPath(@"C:\AI\llama.cpp\b10064"), prunable); // previous kept
+        Assert.DoesNotContain(NormPath(@"C:\AI\llama.cpp\models"), prunable); // non-tag ignored
+        Assert.DoesNotContain(NormPath(@"C:\AI\llama.cpp\notes-b1"), prunable);
     }
 
     [Fact]
     public void NearestTagDirectoryName_finds_the_version_dir()
     {
-        Assert.Equal("b10066", LlamaServerSetupService.NearestTagDirectoryName(@"C:\AI\llama.cpp\b10064\b10066\llama-server.exe"));
-        Assert.Null(LlamaServerSetupService.NearestTagDirectoryName(@"C:\AI\llama.cpp\llama-server.exe"));
+        Assert.Equal("b10066", LlamaServerSetupService.NearestTagDirectoryName(NormPath(@"C:\AI\llama.cpp\b10064\b10066\llama-server.exe")));
+        Assert.Null(LlamaServerSetupService.NearestTagDirectoryName(NormPath(@"C:\AI\llama.cpp\llama-server.exe")));
     }
 
     [Theory]

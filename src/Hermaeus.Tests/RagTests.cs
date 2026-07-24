@@ -1008,6 +1008,44 @@ namespace Hermaeus.Tests
 
         // ── 3.7 Reindex must not flip the recorded model before the pipeline commits (r12 03-runtime-vm-correctness.md) ──
 
+        /// <summary>
+        /// Cancels synchronously from inside the same call stack as the reindex
+        /// loop's own embedding call, once armed. The original version of this
+        /// test triggered the cancel from a PropertyChanged handler reacting to
+        /// Progress&lt;T&gt;-marshaled VM state; Progress&lt;T&gt; always posts through
+        /// the captured SynchronizationContext instead of running inline, so
+        /// that cancel raced the reindex loop's own progress with no ordering
+        /// guarantee - it landed reliably under Windows CI's scheduling but not
+        /// Linux CI's, which is why this only failed on the ubuntu-latest leg.
+        /// </summary>
+        private sealed class CancelOnNextEmbedCallEmbeddingService : Hermaeus.Rag.Embeddings.IEmbeddingService
+        {
+            private readonly Action _cancel;
+            public bool Armed { get; set; }
+            public int Dimensions => 4;
+
+            public CancelOnNextEmbedCallEmbeddingService(Action cancel) => _cancel = cancel;
+
+            public Task<float[]> EmbedAsync(string text, CancellationToken ct = default)
+            {
+                Fire();
+                return Task.FromResult(new[] { 1f, text.Length % 7, text.Length % 11, 0.5f });
+            }
+
+            public Task<List<float[]>> EmbedBatchAsync(IReadOnlyList<string> texts, CancellationToken ct = default)
+            {
+                Fire();
+                return Task.FromResult(texts.Select(t => new[] { 1f, t.Length % 7, t.Length % 11, 0.5f }).ToList());
+            }
+
+            private void Fire()
+            {
+                if (!Armed) return;
+                Armed = false;
+                _cancel();
+            }
+        }
+
         public static async Task RagViewModelReindexCancelledMidRunLeavesDatasetOnTheOldModel()
         {
             using var temp = new TempDir();
@@ -1021,14 +1059,17 @@ namespace Hermaeus.Tests
             for (var i = 0; i < 20; i++)
                 await File.WriteAllTextAsync(Path.Combine(docs, $"f{i}.txt"), string.Concat(Enumerable.Repeat($"keyword{i} ", 200)));
 
+            RagViewModel? vmRef = null;
+            var embedding = new CancelOnNextEmbedCallEmbeddingService(() => vmRef!.StopIngestCommand.Execute(null));
             var query = new RagQueryService(store, new FakeEmbeddingService(), new FakeLlm(), settings, new NoOpReranker());
-            var pipeline = new RagPipeline(store, new FakeEmbeddingService());
+            var pipeline = new RagPipeline(store, embedding);
             var eval = new Hermaeus.Rag.Eval.RagEvalService(query, settings, new FakeEvalStore());
             var vm = new RagViewModel(query, pipeline, eval, new FakeToasts(), new RuntimeLogService(settings), settings)
             {
                 NewDatasetName = "reindex-cancel-test",
                 IngestPath = docs
             };
+            vmRef = vm;
             await vm.IngestCommand.ExecuteAsync(null);
             var dataset = (await query.GetDatasetsAsync()).First(d => d.Name == "reindex-cancel-test");
             var originalModel = dataset.Config.EmbeddingModel;
@@ -1038,12 +1079,7 @@ namespace Hermaeus.Tests
             var item = vm.DatasetManagerItems.First(i => i.Id == dataset.Id);
             True(item.ReindexRequired, "the dataset should need reindexing once the current embedding model changes");
 
-            vm.PropertyChanged += (_, e) =>
-            {
-                if (e.PropertyName == nameof(RagViewModel.IngestStageDone) && vm.IngestStageDone > 0)
-                    vm.StopIngestCommand.Execute(null);
-            };
-
+            embedding.Armed = true;
             await vm.ReindexDatasetCommand.ExecuteAsync(item);
 
             var reloaded = (await query.GetDatasetsAsync()).First(d => d.Id == dataset.Id);

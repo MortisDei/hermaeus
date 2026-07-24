@@ -193,6 +193,8 @@ public sealed class ServerProcessManagerTests
     [Fact]
     public async Task AutoTuneAsync_fails_fast_with_the_named_port_owner_when_the_port_is_occupied()
     {
+        if (!OperatingSystem.IsWindows()) return;
+
         using var temp = new TempDir();
         var modelPath = temp.PathFor("model.gguf");
         File.WriteAllText(modelPath, "fake");

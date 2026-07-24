@@ -287,4 +287,35 @@ public sealed class ServicesViewModelTests
         Assert.True(chatRow.IsDisposed, "a row whose config was removed must be disposed, not just dropped");
         Assert.DoesNotContain(vm.Servers, s => s.Id == chatRow.Id);
     }
+
+    /// <summary>
+    /// The Settings tab's SaveAsync(AppSettings, ...) overload swaps
+    /// ISettingsService.Settings to a brand new clone (same content, new
+    /// object identity) on every save, from anywhere else in the app. Before
+    /// this fix, an existing ServerProcessViewModel row kept its readonly
+    /// _config pointed at the pre-swap object forever, so any edit made on
+    /// that row afterward silently mutated an orphaned object instead of the
+    /// live settings tree: SyncToConfig() "succeeded" and _settings.SaveAsync()
+    /// returned normally, but the edit never actually reached settings.json.
+    /// </summary>
+    [Fact]
+    public async Task An_unrelated_settings_swap_does_not_silently_drop_the_next_edit_on_an_existing_row()
+    {
+        using var temp = new TempDir();
+        var vm = NewServicesVm(temp, out var settings);
+        var chatRow = vm.Servers.First(s => !s.EmbeddingsMode);
+
+        // Simulate an unrelated Settings-tab save (e.g. toggling a UI
+        // preference): same ManagedServers content, new AppSettings identity.
+        await settings.SaveAsync(settings.Settings.Clone());
+        await WaitForAsync(() => ReferenceEquals(vm.Servers.First(s => s.Id == chatRow.Id), chatRow));
+
+        chatRow.AutoStart = true;
+        chatRow.GpuLayers = 999;
+        await chatRow.SaveConfigCommand.ExecuteAsync(null);
+
+        var persisted = settings.Settings.ManagedServers.First(s => s.Id == chatRow.Id);
+        Assert.True(persisted.AutoStart, "AutoStart edited after an unrelated settings swap must actually persist");
+        Assert.Equal(999, persisted.GpuLayers);
+    }
 }

@@ -18,7 +18,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     private readonly IRuntimeLogService    _runtimeLogs;
     private readonly OrphanServerDetector  _orphanDetector;
     private readonly ModelProfileService?  _modelProfiles;
-    private readonly ServerConfig          _config;
+    private ServerConfig                   _config;
     private OrphanServerInfo? _orphanInfo;
     private string? _lastModelPathForDefaults;
 
@@ -168,6 +168,20 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
                 : Hermaeus.Services.LocalAiAssetLocator.Detect(root).ModelsDirectory;
         }
     }
+
+    /// <summary>
+    /// An unrelated settings save from anywhere else in the app (the Settings
+    /// tab's SaveAsync(AppSettings, ...) overload swaps ISettingsService.Settings
+    /// wholesale) otherwise leaves this row's _config pointing at the pre-swap
+    /// object: still readable, but no longer part of the live settings tree. The
+    /// next Start/Save on this row would silently mutate that orphaned object
+    /// via SyncToConfig() and then serialize the *live* tree, discarding the
+    /// edit with no error. Re-pointing _config at the fresh same-id instance
+    /// (called from Rebuild for every already-known server) fixes that; bound
+    /// display properties are left untouched so an in-progress unsaved edit in
+    /// the form is never clobbered.
+    /// </summary>
+    public void RebindConfig(ServerConfig cfg) => _config = cfg;
 
     public void RefreshDetectedModels()
     {
@@ -1185,6 +1199,7 @@ public partial class ServicesViewModel : ViewModelBase
                 var currentIndex = Servers.IndexOf(current);
                 if (currentIndex != index)
                     Servers.Move(currentIndex, index);
+                current.RebindConfig(cfg);
                 current.RefreshDetectedModels();
             }
             else
