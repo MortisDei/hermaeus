@@ -792,9 +792,12 @@ Endpoints:
 
 Hermaeus's mascot is Moss, Keeper of Knowledge (not the AI itself); full
 identity, personality, and visual spec live in [docs/mascot.md](mascot.md). A
-flat-vector icon-scale rendering (`Controls/MossIcon`) currently appears next
-to the Services error banner and the RAG ingest-progress line as a
-placeholder built to the icon spec, pending real illustration.
+flat-vector icon-scale rendering (`Controls/MossIcon`) is a placeholder built
+to the icon spec, pending real illustration. It now appears in every empty
+state that has nothing to show yet (Chat, Agent, Benchmark, Memories, RAG),
+in a small greeting on the first-run setup wizard, and in its two original
+spots (the Services error banner and the RAG ingest-progress line) - never in
+the chat transcript itself.
 
 The app icon, taskbar icon, and system tray icon use the "Archivist's Seal" mark
 (a gold H monogram grown through with a tree and book) - see `docs/mascot.md` for
@@ -805,4 +808,6 @@ OS-native UI font by default (r21: the three embedded brand typefaces were
 removed for readability); Settings > Interface > Typography lets the user
 pick their own font for headings, body text, and code independently. Settings
 > Interface > Theme (System/Dark/Light) is applied immediately on change and
-on startup.
+on startup. Tooltips use an explicit branded, theme-aware style, and
+secondary/tertiary text uses two first-party opacity classes (`hint`,
+`faint`) with a contrast floor, instead of ad-hoc per-control opacity values.

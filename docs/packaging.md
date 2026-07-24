@@ -106,6 +106,37 @@ Get-FileHash -Algorithm SHA256 dist/hermaeus-<version>-win-x64.zip
 Get-Content dist/hermaeus-<version>-win-x64.zip.sha256
 ```
 
+## Releases
+
+Starting with 0.29.0-alpha, pushing an annotated tag builds and publishes a
+GitHub Release automatically; nothing about local packaging above changes.
+
+- Versions live in `Directory.Build.props` (`VersionPrefix`/`VersionSuffix`);
+  that file is the single source of truth. Nothing else should be edited to
+  bump a version.
+- Every minor version bump (0.28.0 -> 0.29.0) gets an annotated tag
+  `v<version>` (e.g. `v0.29.0-alpha`) pushed once the release commit is on
+  `main` with green CI:
+
+  ```bash
+  git tag -a v0.29.0-alpha -m "Hermaeus 0.29.0-alpha"
+  git push origin v0.29.0-alpha
+  ```
+
+  The tag push triggers `.github/workflows/release.yml`, which builds
+  win-x64 and linux-x64 packages with the same `build.ps1`/`build.sh` scripts
+  described above, verifies the tag matches `Directory.Build.props`, and
+  publishes a GitHub Release with changelog-derived notes.
+- Patch versions (0.29.1) are tagged and released only when they carry an
+  urgent fix users need; otherwise they ride until the next minor.
+- While `VersionSuffix` is `alpha` (or any prerelease suffix), releases are
+  marked prerelease on GitHub.
+- Binaries are unsigned. Every release's notes say so plainly and include
+  per-OS SHA256 verification commands (see Checksums above). Installer
+  signing remains documented future work.
+- The release workflow never bumps a version, writes the changelog, or
+  creates a tag; it only reacts to a tag that already exists.
+
 ## Licensing Posture
 
 Packages include the source-available noncommercial license, commercial license

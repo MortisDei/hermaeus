@@ -1,0 +1,130 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.compute.outputs.version }}
+      prerelease: ${{ steps.compute.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify tag matches Directory.Build.props
+        id: compute
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version_prefix="$(sed -n 's:.*<VersionPrefix>\(.*\)</VersionPrefix>.*:\1:p' Directory.Build.props | head -n 1)"
+          version_suffix="$(sed -n 's:.*<VersionSuffix>\(.*\)</VersionSuffix>.*:\1:p' Directory.Build.props | head -n 1)"
+          if [[ -z "$version_prefix" ]]; then
+            echo "Could not read VersionPrefix from Directory.Build.props." >&2
+            exit 1
+          fi
+          version="$version_prefix"
+          prerelease="false"
+          if [[ -n "$version_suffix" ]]; then
+            version="$version-$version_suffix"
+            prerelease="true"
+          fi
+          expected_tag="v$version"
+          if [[ "$TAG_NAME" != "$expected_tag" ]]; then
+            echo "Tag '$TAG_NAME' does not match the version in Directory.Build.props ('$version'); expected tag '$expected_tag'." >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+
+  build-windows:
+    needs: verify
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Package (build.ps1)
+        shell: pwsh
+        run: ./build.ps1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-package
+          path: |
+            dist/*.zip
+            dist/*.zip.sha256
+
+  build-linux:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Package (build.sh)
+        run: ./build.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-package
+          path: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+
+  release:
+    needs: [verify, build-windows, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-package
+          path: dist
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-package
+          path: dist
+
+      - name: Generate release notes
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
+          {
+            ./scripts/release-notes.sh "$VERSION"
+            ./scripts/release-notes-footer.sh "$VERSION"
+          } > notes.md
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.ref_name }}
+          PRERELEASE: ${{ needs.verify.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          prerelease_flag=()
+          if [[ "$PRERELEASE" == "true" ]]; then
+            prerelease_flag=(--prerelease)
+          fi
+          gh release create "$TAG_NAME" \
+            --title "Hermaeus $TAG_NAME" \
+            --notes-file notes.md \
+            "${prerelease_flag[@]}" \
+            dist/*.zip dist/*.zip.sha256 dist/*.tar.gz dist/*.tar.gz.sha256

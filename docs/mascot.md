@@ -166,12 +166,28 @@ Must read clearly at 16x16, 32x32, and desktop icon size.
 A simple flat-vector approximation of the icon-scale silhouette above (round face,
 ear tuft, mushroom sprout, two eyes) is implemented as `Controls/MossIcon.axaml` in
 `Hermaeus.Desktop`, built from plain Avalonia shapes (no new rendering
-dependency). It currently appears in exactly two places: next to the RAG
-ingest progress row (`Views/RagView.axaml`) and in the Services error banner
-(`Views/ServicesView.axaml`), each with a short in-character tooltip.
-**This reflects the superseded cute-era
-design, not the woodland-goblin direction above** - updating it is follow-up work,
-not part of this doc revision.
+dependency). **This reflects the superseded cute-era design, not the
+woodland-goblin direction above; updating it is follow-up work, not part of
+this doc revision.**
+
+r22 spread that same icon to every place `docs/mascot.md` sanctions (empty
+states, onboarding, tips) via one shared control,
+`Controls/MossEmptyState.axaml`:
+
+- Empty states: Chat ("Start a conversation" and "No chat model is set up
+  yet"), Agent ("No tasks yet"), Benchmark ("No runs yet"), Memories ("No
+  memories yet"), and RAG ("No datasets yet") - each with a short in-voice
+  hint, no action buttons baked into the control itself.
+- The first-run setup wizard header (`Views/SetupWizardView.axaml`) gets a
+  small greeting icon with an in-voice tooltip; the individual wizard steps
+  do not.
+- The two pre-existing placements stay as they were: the RAG ingest progress
+  row (`Views/RagView.axaml`) and the Services error banner
+  (`Views/ServicesView.axaml`), each with its own short in-character
+  tooltip.
+
+Still no animation, no timed tips, no popups, and no Moss in the chat
+transcript; he never appears to be answering for the model.
 
 The window/taskbar icon (`Assets/hermaeus.ico`), the Linux desktop icon
 (`Assets/hermaeus-app.png`), the system tray icon (`Assets/hermaeus-tray.png`),

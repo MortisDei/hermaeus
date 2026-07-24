@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Hermaeus.ViewModels"
+             xmlns:controls="using:Hermaeus.Desktop.Controls"
              x:Class="Hermaeus.Desktop.Views.MemoriesView"
              x:DataType="vm:MemoriesViewModel">
 
@@ -160,11 +161,10 @@
             </Border>
 
             <!-- Empty State -->
-            <StackPanel Spacing="8" HorizontalAlignment="Center" VerticalAlignment="Center"
-                        IsVisible="{Binding HasNoMemories}">
-                <TextBlock Text="No memories yet" FontSize="16" FontWeight="SemiBold" Opacity="0.5" HorizontalAlignment="Center" />
-                <TextBlock Text="Memories will appear here as the agent learns about you." FontSize="12" Opacity="0.4" HorizontalAlignment="Center" />
-            </StackPanel>
+            <controls:MossEmptyState HorizontalAlignment="Center" VerticalAlignment="Center"
+                        Title="No memories yet"
+                        Hint="Memories build up automatically as you chat: the model saves facts and preferences worth remembering later."
+                        IsVisible="{Binding HasNoMemories}" />
         </StackPanel>
     </ScrollViewer>
 </UserControl>

@@ -1,6 +1,50 @@
 <Styles xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
+    <!-- r22 2.3: branded, theme-aware tooltip surface. FluentTheme's stock
+         ToolTip resources are theme-dictionary based and were not actually
+         broken, but they sit next to App.axaml's variant-blind SystemAccentColor
+         overrides with nothing pinning tooltip contrast in place; these
+         explicit brushes remove that dependency. -->
+    <Styles.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Dark">
+                    <SolidColorBrush x:Key="AppToolTipBackgroundBrush" Color="#2E3D2B" />
+                    <SolidColorBrush x:Key="AppToolTipForegroundBrush" Color="#E8DFC6" />
+                    <SolidColorBrush x:Key="AppToolTipBorderBrush" Color="#66436B3F" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Light">
+                    <SolidColorBrush x:Key="AppToolTipBackgroundBrush" Color="#E8DFC6" />
+                    <SolidColorBrush x:Key="AppToolTipForegroundBrush" Color="#1A1D18" />
+                    <SolidColorBrush x:Key="AppToolTipBorderBrush" Color="#66436B3F" />
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+        </ResourceDictionary>
+    </Styles.Resources>
+
+    <Style Selector="ToolTip">
+        <Setter Property="Background" Value="{DynamicResource AppToolTipBackgroundBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource AppToolTipForegroundBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource AppToolTipBorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="Padding" Value="10,8" />
+        <Setter Property="MaxWidth" Value="360" />
+        <Setter Property="TextBlock.TextWrapping" Value="Wrap" />
+    </Style>
+
+    <!-- r22 2.2: first-party text-dim classes with a contrast floor. Ad-hoc
+         Opacity on text has no floor and each instance is a fresh chance to
+         be unreadable in one theme variant; "faint" is the dimmest any
+         user-relevant text may go. -->
+    <Style Selector="TextBlock.hint">
+        <Setter Property="Opacity" Value="0.65" />
+    </Style>
+    <Style Selector="TextBlock.faint">
+        <Setter Property="Opacity" Value="0.45" />
+    </Style>
+
     <!-- Global defaults - minimal to avoid breaking local layouts -->
     <Style Selector="Window">
         <Setter Property="FontSize" Value="13" />

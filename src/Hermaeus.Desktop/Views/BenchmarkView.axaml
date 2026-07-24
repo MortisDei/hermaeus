@@ -3,6 +3,7 @@
              xmlns:vm="using:Hermaeus.ViewModels"
              xmlns:models="using:Hermaeus.Core.Models"
              xmlns:conv="clr-namespace:Avalonia.Data.Converters;assembly=Avalonia.Base"
+             xmlns:controls="using:Hermaeus.Desktop.Controls"
              x:Class="Hermaeus.Desktop.Views.BenchmarkView"
              x:DataType="vm:BenchmarkViewModel">
     <Grid x:Name="Root"
@@ -139,9 +140,10 @@
                                     ToolTip.Tip="Deletes all saved benchmark runs after confirmation. Export any runs you want to keep first." />
                             </StackPanel>
                         </Grid>
-                        <TextBlock Grid.Row="1"
-                                   Text="No runs yet. Pick a suite and model above, then click Run."
-                                   FontSize="12" Opacity="0.5" TextWrapping="Wrap"
+                        <controls:MossEmptyState Grid.Row="1"
+                                   Title="No runs yet"
+                                   Hint="Pick a suite and model above, then click Run."
+                                   IconSize="28"
                                    IsVisible="{Binding !HasRuns}" />
                         <TextBlock Grid.Row="1"
                                    Text="Click a run to see its case-by-case results in Run Detail, on the right."
@@ -159,7 +161,7 @@
                                             <StackPanel Spacing="2">
                                                 <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
                                                 <TextBlock Text="{Binding Summary}" FontSize="11" Opacity="0.55" />
-                                                <TextBlock Text="{Binding Started}" FontSize="10" Opacity="0.35" />
+                                                <TextBlock Text="{Binding Started}" FontSize="10" Classes="faint" />
                                             </StackPanel>
                                             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Top">
                                                 <Button Content="ℹ" Padding="6" MinWidth="32" Command="{Binding #Root.DataContext.ShowRunInfoCommand}" CommandParameter="{Binding .}" ToolTip.Tip="Show test details" />

@@ -7,6 +7,8 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Net.Http;
 using System.Threading.Tasks;
+using System.Xml;
+using System.Xml.Linq;
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
 using Hermaeus.Desktop.Controls;
@@ -1749,6 +1751,54 @@ namespace Hermaeus.Tests
                 .Select(item => $"{item.path}:{item.index + 1}")
                 .ToList();
             Equal(0, offenders.Count, $"source should avoid em dash and en dash characters: {string.Join(", ", offenders)}");
+            return Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// r22 2.5: guards the floor, not full tooltip coverage (that stays a
+        /// review-time judgement call, r22 doc 02.4). An icon-only Button/
+        /// ToggleButton/RepeatButton with no visible text has no way to
+        /// convey what it does except a tooltip.
+        /// </summary>
+        private static readonly HashSet<string> IconOnlyTooltipAllowlist = new(StringComparer.OrdinalIgnoreCase)
+        {
+            // Intentionally empty: the r22 sweep found full coverage already.
+            // Add entries here only when a real exception is justified, one
+            // reason per line, e.g.:
+            // "Views/Example.axaml:42" // decorative, never rendered standalone
+        };
+
+        public static Task IconOnlyControlsHaveTooltips()
+        {
+            var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../"));
+            var desktopRoot = Path.Combine(root, "src", "Hermaeus.Desktop");
+            var offenders = new List<string>();
+
+            foreach (var path in Directory.EnumerateFiles(desktopRoot, "*.axaml", SearchOption.AllDirectories))
+            {
+                var doc = XDocument.Load(path, LoadOptions.SetLineInfo);
+                var relative = Path.GetRelativePath(root, path).Replace('\\', '/');
+
+                foreach (var button in doc.Descendants().Where(e => e.Name.LocalName is "Button" or "ToggleButton" or "RepeatButton"))
+                {
+                    var hasIcon = button.Descendants().Any(e => e.Name.LocalName is "PathIcon" or "MossIcon");
+                    if (!hasIcon)
+                        continue;
+
+                    var hasText = button.Descendants().Any(e => e.Name.LocalName == "TextBlock");
+                    var hasContentAttribute = button.Attribute("Content") is not null;
+                    var hasTooltip = button.Attribute("ToolTip.Tip") is not null;
+                    if (hasText || hasContentAttribute || hasTooltip)
+                        continue;
+
+                    var line = ((IXmlLineInfo)button).LineNumber;
+                    var offender = $"{relative}:{line} <{button.Name.LocalName}>";
+                    if (!IconOnlyTooltipAllowlist.Contains($"{relative}:{line}"))
+                        offenders.Add(offender);
+                }
+            }
+
+            Equal(0, offenders.Count, $"icon-only controls need a ToolTip.Tip (or an allowlist entry with a reason): {string.Join(", ", offenders)}");
             return Task.CompletedTask;
         }
 

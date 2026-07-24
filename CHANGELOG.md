@@ -9,7 +9,66 @@ FIFO for changelog entries, 10 versions in this file max. Remove older entries
 and append them to `docs/changelog-archive.md` to maintain the 10 version
 limit.
 
-## [0.28.0-alpha] - 2026-07-24
+From 0.29.0-alpha onward, every minor version is tagged and released on
+GitHub (see `docs/packaging.md` "Releases"); patch versions are tagged only
+for urgent hotfixes.
+
+## [0.29.0-alpha] - 2026-07-24
+
+Fit for public view: makes the app presentable (Moss presence, readability)
+and makes shipping it a repeatable one-command act (tag-driven GitHub
+Releases). First version released as a tagged GitHub Release.
+
+### Fixed
+
+- **Dark-mode readability bug, root-caused.** The reported "dark grey and
+  hard to read" text near Moss was not the tooltip surface (FluentTheme's
+  stock tooltip resources render correctly in dark mode); it was ad-hoc
+  `Opacity` values on TextBlocks with no contrast floor. Confirmed by
+  screenshot sampling: a chat empty-state label at Opacity 0.4 rendered at
+  roughly 3.7:1 contrast against a black background, below the WCAG AA
+  minimum. Every TextBlock below 0.4 opacity across the app is now raised to
+  one of two new first-party classes.
+
+### Added
+
+- **`hint`/`faint` text-dim classes** (`Styles/AppStyles.axaml`): `hint`
+  (0.65 opacity) for secondary text, `faint` (0.45) as the floor no
+  user-relevant text may render dimmer than. Applied to every TextBlock this
+  round touched and every instance found below 0.4 opacity anywhere in
+  `Hermaeus.Desktop`.
+- **Branded, theme-aware `ToolTip` style**: explicit `ThemeDictionaries`
+  background/foreground/border brushes (Deep Moss surface + Parchment text
+  in dark mode, Parchment surface + Ink text in light mode) so tooltip
+  readability no longer depends on FluentTheme defaults interacting with the
+  app's accent-color overrides. Checked by eye in both themes.
+- **`Controls/MossEmptyState.axaml`**: one shared empty-state control (icon,
+  title, hint) replacing five copy-pasted bare-text blocks. Moss now appears
+  in Chat's two empty states, Agent's "no tasks yet", Benchmark's "no runs
+  yet", Memories' "no memories yet", and RAG's "no datasets yet", plus a
+  small greeting icon on the first-run setup wizard header. No animation, no
+  popups, no presence in the chat transcript.
+- **Tooltip coverage sweep**, concentrated on the Agent workbench's approval
+  gates: the patch-review Approve/Reject/Block buttons and the review-queue
+  Approve/Reject buttons had no tooltips before this round despite being the
+  app's highest-consequence controls; each now states what approving or
+  rejecting actually does. Smaller additions to Settings > Trust, Settings >
+  Voice, and per-item conversation actions.
+- **Icon-only tooltip guard test** (`ServiceTests.IconOnlyControlsHaveTooltips`):
+  scans every `.axaml` under `Hermaeus.Desktop` for a `Button`/`ToggleButton`/
+  `RepeatButton` with an icon but no text and no `ToolTip.Tip`, alongside the
+  existing em-dash scan. Passes with an empty allowlist; the sweep found full
+  coverage already.
+- **Tag-driven GitHub Releases** (`.github/workflows/release.yml`): pushing
+  an annotated `v<version>` tag verifies the tag matches
+  `Directory.Build.props`, builds win-x64 and linux-x64 packages with the
+  existing `build.ps1`/`build.sh` scripts, and publishes a GitHub Release
+  with changelog-derived notes plus an unsigned-binary/SHA256-verification
+  footer. `scripts/release-notes.sh`/`.ps1` extract a version's changelog
+  section; `scripts/release-notes-footer.sh` generates the footer. See
+  `docs/packaging.md` "Releases" for the versioning and tagging policy.
+
+
 
 Dogfooding round: layout and settings-organisation feedback from actually
 using the app, plus a real concurrency bug the feedback session's failing
@@ -362,16 +421,4 @@ doc. Moss the mascot is unchanged; only the product name around him changes.
 - Kokoro voice lexicon gains a `hermaeus` pronunciation entry
   (`her-MEE-us`); the `aether` dictionary-word entry is kept since it is a
   real English word CMUdict may still miss.
-
-## [0.24.1-alpha] - 2026-07-22
-
-### Added
-
-- **Moss, the workshop mascot.** `docs/mascot.md` defines the character
-  (identity, personality, visual spec, animation ideas, icon rules) as the
-  source of truth for future art. A flat-vector icon-scale rendering
-  (`Controls/MossIcon.axaml`, plain Avalonia shapes, no new dependency) now
-  appears next to the Services error banner and the RAG ingest-progress
-  line, matching the "goggles, one glowing eye" icon spec.
-
 

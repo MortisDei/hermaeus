@@ -471,25 +471,12 @@
                         VerticalAlignment="Top"
                         Margin="0,80,0,0"
                         Spacing="10">
-                <StackPanel IsVisible="{Binding !HasNoAvailableModels}" Spacing="10">
-                    <PathIcon Data="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"
-                              Width="52" Height="52" Opacity="0.12"
-                              HorizontalAlignment="Center" />
-                    <TextBlock Text="Start a conversation"
-                               HorizontalAlignment="Center"
-                               FontSize="17" Opacity="0.25" />
-                    <TextBlock Text="Select a model above then type below"
-                               HorizontalAlignment="Center"
-                               FontSize="13" Opacity="0.18" />
-                </StackPanel>
+                <controls:MossEmptyState IsVisible="{Binding !HasNoAvailableModels}"
+                                         Title="Start a conversation"
+                                         Hint="Select a model above then type below" />
 
                 <StackPanel IsVisible="{Binding HasNoAvailableModels}" Spacing="10">
-                    <PathIcon Data="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"
-                              Width="52" Height="52" Opacity="0.18"
-                              HorizontalAlignment="Center" />
-                    <TextBlock Text="No chat model is set up yet"
-                               HorizontalAlignment="Center"
-                               FontSize="17" Opacity="0.4" />
+                    <controls:MossEmptyState Title="No chat model is set up yet" />
                     <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
                         <Button Content="Open setup wizard"
                                 Command="{Binding OpenSetupWizardFromEmptyStateCommand}"

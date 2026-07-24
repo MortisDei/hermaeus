@@ -2,6 +2,17 @@
 
 The CHANGELOG.md in root only contains the current 10 versions of changelogs. The rest are archived here in line with the 10 version limit in the main changelog.
 
+## [0.24.1-alpha] - 2026-07-22
+
+### Added
+
+- **Moss, the workshop mascot.** `docs/mascot.md` defines the character
+  (identity, personality, visual spec, animation ideas, icon rules) as the
+  source of truth for future art. A flat-vector icon-scale rendering
+  (`Controls/MossIcon.axaml`, plain Avalonia shapes, no new dependency) now
+  appears next to the Services error banner and the RAG ingest-progress
+  line, matching the "goggles, one glowing eye" icon spec.
+
 ## [0.24.0-alpha] - 2026-07-22
 
 Implements docs/review r19 in full: the "daily-driver truth" pack covering

@@ -2,6 +2,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Hermaeus.ViewModels"
              xmlns:views="using:Hermaeus.Desktop.Views"
+             xmlns:controls="using:Hermaeus.Desktop.Controls"
              x:Name="Root"
              x:Class="Hermaeus.Desktop.Views.AgentView"
              x:DataType="vm:AgentViewModel">
@@ -674,12 +675,15 @@
                                         <StackPanel Orientation="Horizontal" Spacing="8" x:CompileBindings="False"
                                                     IsVisible="{Binding CanReview}">
                                             <Button Content="Approve"
+                                                    ToolTip.Tip="{Binding RelativePath, StringFormat='Opens a preview of this change to {0}, then writes it if you confirm.'}"
                                                     Command="{Binding DataContext.ApprovePatchCommand, ElementName=Root}"
                                                     CommandParameter="{Binding}" />
                                             <Button Content="Reject"
+                                                    ToolTip.Tip="{Binding RelativePath, StringFormat='Discards this patch without writing it to {0}.'}"
                                                     Command="{Binding DataContext.RejectPatchCommand, ElementName=Root}"
                                                     CommandParameter="{Binding}" />
                                             <Button Content="Block"
+                                                    ToolTip.Tip="{Binding RelativePath, StringFormat='Discards this patch without writing it to {0} and marks it blocked.'}"
                                                     Command="{Binding DataContext.BlockPatchCommand, ElementName=Root}"
                                                     CommandParameter="{Binding}" />
                                         </StackPanel>
@@ -732,8 +736,10 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
-                    <TextBlock Text="No tasks yet. Start one above." FontSize="12" Opacity="0.5"
-                               IsVisible="{Binding !HasTaskHistory}" Margin="0,8,0,0" />
+                    <controls:MossEmptyState Title="No tasks yet"
+                                             Hint="Start one above. It runs inside a selected workspace, and every write, command, or MCP call waits for your approval."
+                                             IconSize="28"
+                                             IsVisible="{Binding !HasTaskHistory}" Margin="0,8,0,0" />
                   </StackPanel>
                 </Expander>
 
@@ -798,9 +804,11 @@
                                                    ToolTip.Tip="This task's own workspace, shown because it differs from the active one. Approvals execute against the task's workspace, not the active one." />
                                         <StackPanel Orientation="Horizontal" Spacing="8" x:CompileBindings="False">
                                             <Button Content="Approve"
+                                                    ToolTip.Tip="Approves the pending action shown above (if any) and resumes this task."
                                                     Command="{Binding DataContext.ApproveReviewCommand, ElementName=Root}"
                                                     CommandParameter="{Binding}" />
                                             <Button Content="Reject"
+                                                    ToolTip.Tip="Denies the pending action shown above (if any). The task stays paused."
                                                     Command="{Binding DataContext.RejectReviewCommand, ElementName=Root}"
                                                     CommandParameter="{Binding}" />
                                             <Button Content="Open"

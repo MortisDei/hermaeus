@@ -1,0 +1,25 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="using:Hermaeus.Desktop.Controls"
+             xmlns:conv="using:Avalonia.Data.Converters"
+             x:Class="Hermaeus.Desktop.Controls.MossEmptyState"
+             x:Name="Root">
+  <!--
+    r22 1.1: shared "nothing here yet" surface so Moss shows up consistently
+    across empty states instead of five copy-pasted bare TextBlocks. Display
+    only; callers that need action buttons (the chat no-model state) place
+    them below this control in their own view.
+  -->
+  <StackPanel HorizontalAlignment="Center" Spacing="10">
+    <controls:MossIcon Width="{Binding #Root.IconSize}" Height="{Binding #Root.IconSize}"
+                        HorizontalAlignment="Center"
+                        ToolTip.Tip="{Binding #Root.MossTip}" />
+    <TextBlock Text="{Binding #Root.Title}" Classes="hint"
+               FontSize="17" HorizontalAlignment="Center"
+               TextWrapping="Wrap" TextAlignment="Center" />
+    <TextBlock Text="{Binding #Root.Hint}" Classes="faint"
+               FontSize="13" HorizontalAlignment="Center"
+               TextWrapping="Wrap" TextAlignment="Center"
+               IsVisible="{Binding #Root.Hint, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}" />
+  </StackPanel>
+</UserControl>
