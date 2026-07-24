@@ -359,6 +359,60 @@ public sealed record AgentRevertResult(bool Reverted, string Message);
 /// </summary>
 public sealed record AgentApprovalResult(bool Applied, string Message);
 
+public enum AgentLedgerFileKind { Created, Edited }
+
+/// <summary>
+/// A file entry's current status in the ledger. The builder
+/// (AgentRunLedgerBuilder) only ever produces Applied or Reverted, derived
+/// from persisted patch state; Conflicted is set by a caller that has
+/// workspace access, after comparing <see cref="AgentLedgerFileEntry.LatestAppliedContent"/>
+/// against the file's live content (r23 1.1 - the builder never touches disk).
+/// </summary>
+public enum AgentLedgerFileStatus { Applied, Reverted, Conflicted }
+
+/// <summary>One distinct file a run touched, folded across every applied/reverted patch for that path.</summary>
+public sealed record AgentLedgerFileEntry(
+    string RelativePath,
+    AgentLedgerFileKind Kind,
+    int AppliedPatchCount,
+    AgentLedgerFileStatus Status,
+    int LineDelta,
+    /// <summary>The most recent applied patch's content, for a caller to diff against the live file to detect Conflicted.</summary>
+    string LatestAppliedContent,
+    /// <summary>The task this entry came from: the run's own id, or a child's when folded in from a sub-task (r23 1.1).</summary>
+    string TaskId);
+
+/// <summary>One run_command execution the ledger surfaces (r23 1.1).</summary>
+public sealed record AgentLedgerCommandEntry(
+    string Command,
+    int? ExitCode,
+    bool TimedOut,
+    DateTime Timestamp,
+    string TaskId);
+
+/// <summary>One approval decision the ledger surfaces (r23 1.1).</summary>
+public sealed record AgentLedgerApprovalEntry(
+    string Action,
+    bool Approved,
+    DateTime Timestamp,
+    string TaskId);
+
+/// <summary>One sub-task line for an orchestration parent's ledger (r23 1.1).</summary>
+public sealed record AgentLedgerSubTaskEntry(
+    string Goal,
+    AgentSubTaskStatus Status,
+    string? TaskId);
+
+/// <summary>A run's total footprint: every file, command, and approval it produced (r23 1.1, the Run Ledger).</summary>
+public sealed record AgentRunLedger(
+    IReadOnlyList<AgentLedgerFileEntry> Files,
+    IReadOnlyList<AgentLedgerCommandEntry> Commands,
+    IReadOnlyList<AgentLedgerApprovalEntry> Approvals,
+    IReadOnlyList<AgentLedgerSubTaskEntry> SubTasks)
+{
+    public bool IsEmpty => Files.Count == 0 && Commands.Count == 0 && Approvals.Count == 0;
+}
+
 public sealed class AgentContextPack
 {
     public string CurrentGoal { get; set; } = string.Empty;

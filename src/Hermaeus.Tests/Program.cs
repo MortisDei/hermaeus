@@ -2775,4 +2775,137 @@ internal static class AgentTests
     var resumed = await service.RunAsync(state.TaskId, options);
     Equal(AgentTaskStatus.Complete, resumed.State.Status, "resuming the parent (whose own status was WaitingForUser, not Running) should still complete the run (1.6)");
     }
+
+    public static Task AgentRunLedgerBuilderOnAnEmptyRunReturnsEmptyLedger()
+    {
+    var task = new AgentTaskState { Goal = "Nothing happened yet" };
+    var ledger = AgentRunLedgerBuilder.Build(task);
+
+    True(ledger.IsEmpty, "a run with no patches, commands, or approvals should report an empty ledger");
+    Equal(0, ledger.Files.Count, "no files should appear");
+    Equal(0, ledger.Commands.Count, "no commands should appear");
+    Equal(0, ledger.Approvals.Count, "no approvals should appear");
+    return Task.CompletedTask;
+    }
+
+    public static Task AgentRunLedgerBuilderDistinguishesCreatedFromEditedFiles()
+    {
+    var task = new AgentTaskState { Goal = "Touch two files" };
+    task.DraftPatches.Add(new AgentDraftPatch
+    {
+        RelativePath = "new.md",
+        Status = AgentDraftPatchStatus.Applied,
+        PreImageExisted = false,
+        PreImageContent = null,
+        AppliedContent = "brand new"
+    });
+    task.DraftPatches.Add(new AgentDraftPatch
+    {
+        RelativePath = "existing.md",
+        Status = AgentDraftPatchStatus.Applied,
+        PreImageExisted = true,
+        PreImageContent = "old",
+        AppliedContent = "old\nnew line"
+    });
+
+    var ledger = AgentRunLedgerBuilder.Build(task);
+
+    Equal(2, ledger.Files.Count, "both touched files should be in the ledger");
+    var created = ledger.Files.Single(f => f.RelativePath == "new.md");
+    Equal(AgentLedgerFileKind.Created, created.Kind, "a patch whose pre-image never existed should be classified as created");
+    Equal(1, created.LineDelta, "a created file's delta should count from zero, so one line of content is a delta of 1");
+    var edited = ledger.Files.Single(f => f.RelativePath == "existing.md");
+    Equal(AgentLedgerFileKind.Edited, edited.Kind, "a patch with a pre-image should be classified as edited");
+    return Task.CompletedTask;
+    }
+
+    public static Task AgentRunLedgerBuilderFoldsMultiplePatchesPerFileAndComputesLineDeltaAndOrder()
+    {
+    var task = new AgentTaskState { Goal = "Edit one file twice, plus run a command and get an approval" };
+    task.DraftPatches.Add(new AgentDraftPatch
+    {
+        RelativePath = "b.md",
+        Status = AgentDraftPatchStatus.Applied,
+        PreImageExisted = false,
+        AppliedContent = "one"
+    });
+    task.DraftPatches.Add(new AgentDraftPatch
+    {
+        RelativePath = "a.md",
+        Status = AgentDraftPatchStatus.Applied,
+        PreImageExisted = true,
+        PreImageContent = "line1\nline2",
+        AppliedContent = "line1\nline2\nline3\nline4"
+    });
+    task.DraftPatches.Add(new AgentDraftPatch
+    {
+        RelativePath = "b.md",
+        Status = AgentDraftPatchStatus.Applied,
+        PreImageExisted = false,
+        AppliedContent = "one\ntwo\nthree"
+    });
+    task.ToolResults.Add(new AgentToolResult
+    {
+        Tool = "run_command",
+        Arguments = new Dictionary<string, object?> { ["command"] = "dotnet build" },
+        ExitCode = 0,
+        TimedOut = false
+    });
+    task.ApprovalHistory.Add(new AgentApprovalRecord("run_command", true, DateTime.UtcNow));
+
+    var ledger = AgentRunLedgerBuilder.Build(task);
+
+    Equal(2, ledger.Files.Count, "two distinct paths should each yield exactly one entry");
+    Equal("b.md", ledger.Files[0].RelativePath, "files should be ordered by first touch, not alphabetically");
+    Equal("a.md", ledger.Files[1].RelativePath, "the second-touched file should come second");
+    var bEntry = ledger.Files[0];
+    Equal(2, bEntry.AppliedPatchCount, "both patches touching b.md should count toward its applied-patch total");
+    Equal(3, bEntry.LineDelta, "b.md's delta should be measured against the LATEST applied content (3 lines), not the first patch");
+    var aEntry = ledger.Files[1];
+    Equal(2, aEntry.LineDelta, "a.md grew from 2 lines to 4 lines, a delta of +2");
+
+    Equal(1, ledger.Commands.Count, "the run_command tool result should appear as a command entry");
+    Equal("dotnet build", ledger.Commands[0].Command, "the command string should be extracted from the tool arguments");
+    Equal(0, ledger.Commands[0].ExitCode, "the exit code should carry through");
+
+    Equal(1, ledger.Approvals.Count, "the approval history entry should appear in the ledger");
+    True(ledger.Approvals[0].Approved, "the approval's approved flag should carry through");
+    return Task.CompletedTask;
+    }
+
+    public static Task AgentRunLedgerBuilderMarksAFileRevertedOnlyWhenEveryPatchForItIsReverted()
+    {
+    var mixedTask = new AgentTaskState { Goal = "Partially reverted file" };
+    mixedTask.DraftPatches.Add(new AgentDraftPatch { RelativePath = "mixed.md", Status = AgentDraftPatchStatus.Reverted, PreImageExisted = true, PreImageContent = "a", AppliedContent = "b" });
+    mixedTask.DraftPatches.Add(new AgentDraftPatch { RelativePath = "mixed.md", Status = AgentDraftPatchStatus.Applied, PreImageExisted = true, PreImageContent = "b", AppliedContent = "c" });
+    var mixedLedger = AgentRunLedgerBuilder.Build(mixedTask);
+    Equal(AgentLedgerFileStatus.Applied, mixedLedger.Files.Single().Status, "a file with at least one still-applied patch must not read as fully reverted");
+
+    var fullyRevertedTask = new AgentTaskState { Goal = "Fully reverted file" };
+    fullyRevertedTask.DraftPatches.Add(new AgentDraftPatch { RelativePath = "gone.md", Status = AgentDraftPatchStatus.Reverted, PreImageExisted = true, PreImageContent = "a", AppliedContent = "b" });
+    var fullyRevertedLedger = AgentRunLedgerBuilder.Build(fullyRevertedTask);
+    Equal(AgentLedgerFileStatus.Reverted, fullyRevertedLedger.Files.Single().Status, "a file whose only patch was reverted should read as reverted");
+    return Task.CompletedTask;
+    }
+
+    public static Task AgentRunLedgerBuilderFoldsChildTaskEntriesTaggedWithTheChildId()
+    {
+    var parent = new AgentTaskState { Goal = "Orchestration parent" };
+    parent.SubTaskPlan.Add(new AgentSubTaskSpec { Goal = "Fix the bug", Status = AgentSubTaskStatus.Complete, TaskId = "child-1" });
+    parent.SubTaskPlan.Add(new AgentSubTaskSpec { Goal = "Add coverage", Status = AgentSubTaskStatus.Complete, TaskId = "child-2" });
+
+    var child = new AgentTaskState { TaskId = "child-1", Goal = "Fix the bug", ParentTaskId = parent.TaskId };
+    child.DraftPatches.Add(new AgentDraftPatch { RelativePath = "Foo.cs", Status = AgentDraftPatchStatus.Applied, PreImageExisted = true, PreImageContent = "bug", AppliedContent = "fixed" });
+    child.ToolResults.Add(new AgentToolResult { Tool = "run_command", Arguments = new Dictionary<string, object?> { ["command"] = "dotnet test" }, ExitCode = 0 });
+
+    var ledger = AgentRunLedgerBuilder.Build(parent, [child]);
+
+    Equal(2, ledger.SubTasks.Count, "both sub-task specs should appear as ledger sub-task lines");
+    var fileEntry = ledger.Files.Single();
+    Equal("Foo.cs", fileEntry.RelativePath, "the child's own file change should fold into the parent's ledger");
+    Equal("child-1", fileEntry.TaskId, "a folded-in entry must be tagged with the CHILD's task id, not the parent's");
+    var commandEntry = ledger.Commands.Single();
+    Equal("child-1", commandEntry.TaskId, "a folded-in command entry must also carry the child's task id");
+    return Task.CompletedTask;
+    }
 }

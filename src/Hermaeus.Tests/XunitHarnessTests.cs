@@ -315,7 +315,12 @@ public static class HarnessCases
         [new HarnessCase("agent approval with a mismatched fingerprint refuses execution and leaves the pending action intact", AgentTests.AgentApprovalMismatchedFingerprintRefusesExecutionAndLeavesPendingIntact)],
         [new HarnessCase("agent approval with a matching fingerprint executes and reports applied", AgentTests.AgentApprovalMatchingFingerprintExecutesAndReportsApplied)],
         [new HarnessCase("agent rejection with a mismatched fingerprint still rejects but records the mismatch", AgentTests.AgentRejectionWithMismatchedFingerprintStillRejectsButRecordsTheMismatch)],
-        [new HarnessCase("agent approval of a legacy fingerprintless pending action recomputes and matches", AgentTests.AgentApprovalOfALegacyFingerprintlessPendingActionRecomputesAndMatches)]
+        [new HarnessCase("agent approval of a legacy fingerprintless pending action recomputes and matches", AgentTests.AgentApprovalOfALegacyFingerprintlessPendingActionRecomputesAndMatches)],
+        [new HarnessCase("agent run ledger builder on an empty run returns an empty ledger", AgentTests.AgentRunLedgerBuilderOnAnEmptyRunReturnsEmptyLedger)],
+        [new HarnessCase("agent run ledger builder distinguishes created from edited files", AgentTests.AgentRunLedgerBuilderDistinguishesCreatedFromEditedFiles)],
+        [new HarnessCase("agent run ledger builder folds multiple patches per file and computes line delta and order", AgentTests.AgentRunLedgerBuilderFoldsMultiplePatchesPerFileAndComputesLineDeltaAndOrder)],
+        [new HarnessCase("agent run ledger builder marks a file reverted only when every patch for it is reverted", AgentTests.AgentRunLedgerBuilderMarksAFileRevertedOnlyWhenEveryPatchForItIsReverted)],
+        [new HarnessCase("agent run ledger builder folds child task entries tagged with the child id", AgentTests.AgentRunLedgerBuilderFoldsChildTaskEntriesTaggedWithTheChildId)]
     ];
 
     public static IEnumerable<object[]> Mcp =>
