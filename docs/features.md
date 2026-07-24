@@ -182,6 +182,15 @@
 
 - Local task workbench with explicit task state, a persisted step transcript,
   compact context packs, local logs/traces, and review queue controls.
+- Every agent run has an undo button. Hermaeus keeps a ledger of everything a
+  run changed and can put it all back, file by file, with one click. The
+  Changes view shows every file, command, and approval a run produced
+  (folding in an orchestration parent's children); Rewind restores or
+  deletes files per the ledger, skipping anything changed again since,
+  behind a mandatory confirmation that lists exactly what will happen.
+- Every approval is bound to a fingerprint of the pending action as
+  displayed; a mismatch between what was shown and what is actually pending
+  refuses to execute instead of running whatever changed underneath it.
 - Autonomous runs: Start (or resuming after an approval or a reply) runs
   steps back to back without a click per step, stopping at a final answer, a
   question for the user, a gated action needing approval, a blocked or

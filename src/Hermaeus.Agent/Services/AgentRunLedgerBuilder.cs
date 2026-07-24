@@ -65,6 +65,7 @@ public static class AgentRunLedgerBuilder
                 AppliedPatchCount: patches.Count(p => p.Status == AgentDraftPatchStatus.Applied),
                 Status: status,
                 LineDelta: CountLines(latest.AppliedContent) - CountLines(first.PreImageContent),
+                EarliestPreImageContent: first.PreImageContent,
                 LatestAppliedContent: latest.AppliedContent,
                 TaskId: task.TaskId);
         }

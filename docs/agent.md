@@ -304,6 +304,14 @@ across task sessions.
 - Workspace path checks stay case-sensitive on Linux and macOS, and
   case-insensitive on Windows, matching the platform filesystem rules.
 - Approval queue provides clear visibility into pending actions.
+- Approving an action is bound to a fingerprint (SHA256 over the tool name
+  and its canonicalized arguments) of the pending action as displayed. If the
+  pending action changed between render and click (a concurrent step, a
+  crash-restore race, a tampered `task_state.json`), the mismatch refuses
+  execution instead of running whatever happens to be pending; the task
+  stays waiting for review and the mismatch is recorded in the trace.
+  Rejections are unaffected, since rejecting the wrong thing executes
+  nothing.
 - Full trace logs enable debugging and auditing of agent behavior.
 - Local execution means no data leaves your machine.
 
@@ -395,6 +403,59 @@ When a patch is drafted the agent stores the file hash (for example, SHA-256):
 Before applying a patch the agent compares the stored `baseHash` with the
 current file hash. If they differ the patch is blocked and the UI prompts the
 user to review or regenerate the patch.
+
+## Run Ledger and Task Rewind
+
+Every agent run has an undo button. Hermaeus keeps a ledger of everything a
+run changed and can put it all back, file by file, with one click.
+
+The Changes view on an open task (in the Agent workbench) shows the run's
+total footprint, projected purely from persisted task state:
+
+- **Files**: one entry per distinct file path the run touched, grouped
+  across every applied patch for that path. Each entry shows whether the
+  file was created or edited, how many patches applied to it, its current
+  status (applied, reverted, or conflicted), and its net line delta.
+  Conflicted means the file's live content no longer matches what the run
+  last wrote to it; this is detected only when the Changes view has
+  workspace access to read the file, never by the underlying projection
+  itself. Selecting a file shows its content before and after the run,
+  using the same preview presentation as a queued draft patch.
+- **Commands**: every `run_command` execution, with its exit code and
+  whether it timed out.
+- **Approvals**: every approval decision recorded for the run.
+- **Sub-tasks**: for an orchestration parent, each sub-task's goal and
+  status, with the children's own file and command entries folded into the
+  sections above and tagged with the child's own task id.
+
+**Rewind run** restores every distinct file path the run touched (including
+finished orchestration children, each against its own stored workspace
+root) to its content from before the run first touched it, or deletes it if
+the run created it. Per file, this reuses the exact same conflict rule as a
+single patch's revert: if the file's current content does not match the
+latest content the run applied, that file is skipped rather than
+overwritten, and the skip reason is reported. Rewind is therefore always a
+truthful partial-success report ("Reverted 4 of 5 files. Skipped
+src/Foo.cs: the file changed again after this patch was applied."), never a
+silent all-or-nothing operation. A confirmation dialog lists exactly which
+files will be restored and which will be deleted before anything runs; there
+is no "do not ask again."
+
+Rewind refuses to start while the task is still running, has a pending tool
+approval, or (for an orchestration parent) has an unfinished sub-task. A
+successful rewind writes a `task_reverted` trace event with the per-file
+outcomes and appends the summary to `agent.log`. No lesson is recorded from
+a rewind: reverting is user judgment about wanted-ness, not evidence that a
+tool or command failed.
+
+What Rewind explicitly does not do:
+
+- No filesystem snapshots, copy-on-write overlays, or shadow workspaces. The
+  ledger only ever covers what the agent itself changed through its tools.
+- No revert of command side effects. The ledger shows that commands ran; it
+  cannot un-run `dotnet build`, and build outputs under `bin`/`obj` are
+  never ledger entries.
+- No auto-rewind on task failure. Rewind is always a user action.
 
 ## Workspace Boundary Rules
 

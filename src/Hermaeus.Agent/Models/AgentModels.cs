@@ -391,7 +391,9 @@ public sealed record AgentLedgerFileEntry(
     int AppliedPatchCount,
     AgentLedgerFileStatus Status,
     int LineDelta,
-    /// <summary>The most recent applied patch's content, for a caller to diff against the live file to detect Conflicted.</summary>
+    /// <summary>Content before the run first touched the file; null for a created file. The "before" half of the ledger UI's before/after preview.</summary>
+    string? EarliestPreImageContent,
+    /// <summary>The most recent applied patch's content: the "after" half of the preview, and what a caller diffs against the live file to detect Conflicted.</summary>
     string LatestAppliedContent,
     /// <summary>The task this entry came from: the run's own id, or a child's when folded in from a sub-task (r23 1.1).</summary>
     string TaskId);

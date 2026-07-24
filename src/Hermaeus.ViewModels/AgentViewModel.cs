@@ -336,9 +336,98 @@ public sealed class AgentDraftPatchViewModel
 
 public sealed record DraftPatchPreviewRequest(string PatchId, string RelativePath, string OldContent, string NewContent);
 
+/// <summary>One row of the Changes (Run Ledger) view's file list (r23 1.1/1.2).</summary>
+public sealed class AgentLedgerFileEntryViewModel
+{
+    public AgentLedgerFileEntryViewModel(AgentLedgerFileEntry entry, bool conflicted)
+    {
+        RelativePath = entry.RelativePath;
+        Kind = entry.Kind;
+        AppliedPatchCount = entry.AppliedPatchCount;
+        LineDelta = entry.LineDelta;
+        TaskId = entry.TaskId;
+        EarliestPreImageContent = entry.EarliestPreImageContent ?? string.Empty;
+        LatestAppliedContent = entry.LatestAppliedContent;
+        // The builder only ever reports Applied/Reverted (r23 1.1); Conflicted
+        // is layered on here, the caller with workspace access, once a live
+        // read shows the file no longer matches what the run last wrote.
+        Status = conflicted && entry.Status == AgentLedgerFileStatus.Applied
+            ? AgentLedgerFileStatus.Conflicted
+            : entry.Status;
+    }
+
+    public string RelativePath { get; }
+    public AgentLedgerFileKind Kind { get; }
+    public int AppliedPatchCount { get; }
+    public int LineDelta { get; }
+    public string TaskId { get; }
+    public string EarliestPreImageContent { get; }
+    public string LatestAppliedContent { get; }
+    public AgentLedgerFileStatus Status { get; }
+
+    public string KindLabel => Kind == AgentLedgerFileKind.Created ? "created" : "edited";
+    public string StatusLabel => Status switch
+    {
+        AgentLedgerFileStatus.Applied => "applied",
+        AgentLedgerFileStatus.Reverted => "reverted",
+        AgentLedgerFileStatus.Conflicted => "conflicted",
+        _ => Status.ToString()
+    };
+    public string LineDeltaLabel => LineDelta > 0 ? $"+{LineDelta}" : LineDelta.ToString();
+    public string PatchCountLabel => $"{AppliedPatchCount} patch{(AppliedPatchCount == 1 ? string.Empty : "es")}";
+}
+
+/// <summary>One row of the Changes view's command list (r23 1.1/1.2).</summary>
+public sealed class AgentLedgerCommandEntryViewModel
+{
+    public AgentLedgerCommandEntryViewModel(AgentLedgerCommandEntry entry)
+    {
+        Command = entry.Command;
+        ExitCode = entry.ExitCode;
+        TimedOut = entry.TimedOut;
+        Timestamp = entry.Timestamp;
+    }
+
+    public string Command { get; }
+    public int? ExitCode { get; }
+    public bool TimedOut { get; }
+    public DateTime Timestamp { get; }
+    public string OutcomeLabel => TimedOut ? "timed out" : ExitCode is { } code ? $"exit {code}" : "no exit code recorded";
+}
+
+/// <summary>One row of the Changes view's approvals list (r23 1.1/1.2).</summary>
+public sealed class AgentLedgerApprovalEntryViewModel
+{
+    public AgentLedgerApprovalEntryViewModel(AgentLedgerApprovalEntry entry)
+    {
+        Action = entry.Action;
+        Approved = entry.Approved;
+        Timestamp = entry.Timestamp;
+    }
+
+    public string Action { get; }
+    public bool Approved { get; }
+    public DateTime Timestamp { get; }
+    public string OutcomeLabel => Approved ? "approved" : "rejected";
+}
+
+/// <summary>
+/// What Rewind is about to do, for the confirmation dialog (r23 1.4): every
+/// file it will restore, and every file it will delete (created by the run,
+/// so nothing existed before it). The dialog is not optional.
+/// </summary>
+public sealed record AgentTaskRewindConfirmation(IReadOnlyList<string> FilesToRestore, IReadOnlyList<string> FilesToDelete);
+
 public partial class AgentViewModel : ViewModelBase
 {
     public Func<DraftPatchPreviewRequest, Task<bool>>? RequestDraftPatchPreview { get; set; }
+    /// <summary>
+    /// Emitted before RewindTaskAsync touches anything, listing exactly which
+    /// files will be restored and which will be deleted; returning false
+    /// cancels without reverting a single file (r23 1.4). Destructive-adjacent,
+    /// so this confirmation is never optional and has no "do not ask again".
+    /// </summary>
+    public Func<AgentTaskRewindConfirmation, Task<bool>>? RequestRewindConfirmation { get; set; }
     private readonly IAgentService _agent;
     private readonly IAgentTaskStateStore _store;
     private readonly IAgentWorkspaceMemoryStore _workspaceMemory;
@@ -380,6 +469,10 @@ public partial class AgentViewModel : ViewModelBase
     /// <summary>Per-section counts/token estimates for the most recent step's context pack (r6 1.5).</summary>
     public UiBoundCollection<AgentContextReceiptSectionViewModel> ContextReceipt { get; } = [];
     public UiBoundCollection<AgentDraftPatchViewModel> QueuedPatches { get; } = [];
+    /// <summary>The Run Ledger's files section for the open task, folding in any orchestration children (r23 1.1/1.2).</summary>
+    public UiBoundCollection<AgentLedgerFileEntryViewModel> LedgerFiles { get; } = [];
+    public UiBoundCollection<AgentLedgerCommandEntryViewModel> LedgerCommands { get; } = [];
+    public UiBoundCollection<AgentLedgerApprovalEntryViewModel> LedgerApprovals { get; } = [];
     public UiBoundCollection<ProjectInstructionFileViewModel> ProjectInstructions { get; } = [];
     public UiBoundCollection<WorkspaceCommandRecipeViewModel> CommandRecipes { get; } = [];
     public UiBoundCollection<string> WorkspaceRisks { get; } = [];
@@ -511,6 +604,16 @@ public partial class AgentViewModel : ViewModelBase
     public int RejectedPatchCount => QueuedPatches.Count(patch => patch.Status == AgentDraftPatchStatus.Rejected);
     public int BlockedPatchCount => QueuedPatches.Count(patch => patch.Status == AgentDraftPatchStatus.Blocked);
     public bool HasQueuedPatches => QueuedPatchCount > 0;
+
+    private static readonly HashSet<AgentTaskStatus> RewindEligibleStatuses =
+    [
+        AgentTaskStatus.Complete, AgentTaskStatus.Failed, AgentTaskStatus.Blocked, AgentTaskStatus.WaitingForUser
+    ];
+
+    public bool HasLedgerEntries => LedgerFiles.Count > 0 || LedgerCommands.Count > 0 || LedgerApprovals.Count > 0;
+    [ObservableProperty] private AgentLedgerFileEntryViewModel? _selectedLedgerFile;
+    public bool HasSelectedLedgerFile => SelectedLedgerFile is not null;
+    partial void OnSelectedLedgerFileChanged(AgentLedgerFileEntryViewModel? value) => OnPropertyChanged(nameof(HasSelectedLedgerFile));
 
     public AgentViewModel(
         IAgentService agent,
@@ -1042,6 +1145,112 @@ public partial class AgentViewModel : ViewModelBase
 
         return Task.CompletedTask;
     }
+
+    /// <summary>
+    /// Rebuilds the Changes (Run Ledger) view from the open task, folding in
+    /// any orchestration children's own entries (r23 1.1/1.2). Conflict
+    /// detection - a live file no longer matching what the run last wrote -
+    /// happens here, not in AgentRunLedgerBuilder, because only this layer
+    /// has workspace access.
+    /// </summary>
+    [RelayCommand]
+    private async Task RefreshRunLedgerAsync()
+    {
+        LedgerFiles.Clear();
+        LedgerCommands.Clear();
+        LedgerApprovals.Clear();
+        SelectedLedgerFile = null;
+
+        if (CurrentTask is null)
+        {
+            OnPropertyChanged(nameof(HasLedgerEntries));
+            RewindTaskCommand.NotifyCanExecuteChanged();
+            return;
+        }
+
+        var children = new List<AgentTaskState>();
+        foreach (var spec in CurrentTask.SubTaskPlan)
+        {
+            if (string.IsNullOrEmpty(spec.TaskId))
+                continue;
+            var child = await _store.LoadAsync(spec.TaskId);
+            if (child is not null)
+                children.Add(child);
+        }
+
+        var options = BuildOptions();
+        var workspaceRootsByTaskId = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [CurrentTask.TaskId] = CurrentTask.WorkspaceRoot is { Length: > 0 } root ? root : options.WorkspaceRoot
+        };
+        foreach (var child in children)
+            workspaceRootsByTaskId[child.TaskId] = child.WorkspaceRoot is { Length: > 0 } childRoot ? childRoot : options.WorkspaceRoot;
+
+        var ledger = AgentRunLedgerBuilder.Build(CurrentTask, children);
+        foreach (var file in ledger.Files)
+        {
+            var conflicted = false;
+            if (file.Status == AgentLedgerFileStatus.Applied)
+            {
+                var fileRoot = workspaceRootsByTaskId.GetValueOrDefault(file.TaskId, options.WorkspaceRoot);
+                try
+                {
+                    var live = await _workspaceTools.ReadFileForRevertAsync(options with { WorkspaceRoot = fileRoot }, file.RelativePath);
+                    conflicted = live != file.LatestAppliedContent;
+                }
+                catch { /* best effort; a failed live read leaves the file shown as Applied, not falsely Conflicted */ }
+            }
+            LedgerFiles.Add(new AgentLedgerFileEntryViewModel(file, conflicted));
+        }
+        foreach (var command in ledger.Commands)
+            LedgerCommands.Add(new AgentLedgerCommandEntryViewModel(command));
+        foreach (var approval in ledger.Approvals)
+            LedgerApprovals.Add(new AgentLedgerApprovalEntryViewModel(approval));
+
+        OnPropertyChanged(nameof(HasLedgerEntries));
+        RewindTaskCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>
+    /// Reverts the whole open run (r23 1.3/1.4): every file it touched,
+    /// restored or deleted per AgentPatchReviewService.RevertTaskAsync's
+    /// truthful partial-success report. The confirmation dialog is mandatory;
+    /// declining it leaves every file untouched.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanRewindTask))]
+    private async Task RewindTaskAsync()
+    {
+        if (CurrentTask is null) return;
+
+        var applied = LedgerFiles.Where(f => f.Status == AgentLedgerFileStatus.Applied).ToList();
+        var filesToRestore = applied.Where(f => f.Kind == AgentLedgerFileKind.Edited).Select(f => f.RelativePath).ToList();
+        var filesToDelete = applied.Where(f => f.Kind == AgentLedgerFileKind.Created).Select(f => f.RelativePath).ToList();
+        var confirmation = new AgentTaskRewindConfirmation(filesToRestore, filesToDelete);
+        if (RequestRewindConfirmation is null || !await RequestRewindConfirmation(confirmation))
+            return;
+
+        try
+        {
+            var result = await _patchReview.RevertTaskAsync(CurrentTask, BuildOptions());
+            StatusMessage = result.Summary;
+            await RefreshWorkspaceFilesAsync();
+            await LoadTaskIfOpenAsync(CurrentTask.TaskId);
+        }
+        catch (Exception ex)
+        {
+            SetError(ex.Message);
+        }
+    }
+
+    private bool CanRewindTask() =>
+        CurrentTask is not null
+        && RewindEligibleStatuses.Contains(CurrentTask.Status)
+        && LedgerFiles.Any(f => f.Status == AgentLedgerFileStatus.Applied);
+
+    /// <summary>Shows a ledger file's before/after content, reusing the existing patch preview presentation rather than a new diff control (r23 1.2).</summary>
+    [RelayCommand]
+    private void SelectLedgerFile(AgentLedgerFileEntryViewModel? file) =>
+        SelectedLedgerFile = SelectedLedgerFile == file ? null : file;
 
     [RelayCommand]
     private async Task RefreshWorkspaceFilesAsync()
@@ -1630,12 +1839,14 @@ public partial class AgentViewModel : ViewModelBase
             TaskStatePreview = string.Empty;
             CurrentStep = string.Empty;
             QueuedPatches.Clear();
+            _ = RefreshRunLedgerAsync();
             return;
         }
 
         CurrentStep = CurrentTask.ActiveStep;
         TaskStatePreview = JsonSerializer.Serialize(CurrentTask, new JsonSerializerOptions { WriteIndented = true });
         _ = RefreshQueuedPatchesAsync();
+        _ = RefreshRunLedgerAsync();
     }
 
     private void SetError(string message)
@@ -1699,6 +1910,7 @@ public partial class AgentViewModel : ViewModelBase
         OnPropertyChanged(nameof(PrematureCompleteNote));
         OnPropertyChanged(nameof(HasPrematureCompleteNote));
         _ = RefreshQueuedPatchesAsync();
+        _ = RefreshRunLedgerAsync();
     }
     partial void OnReplyTextChanged(string value) => SendReplyCommand.NotifyCanExecuteChanged();
     partial void OnIsRunningChanged(bool value)

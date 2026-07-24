@@ -23,6 +23,12 @@ public partial class MainWindow : Window
         if (DataContext is MainWindowViewModel vm)
         {
             vm.Agent.RequestDraftPatchPreview = ShowDraftPatchPreviewAsync;
+            vm.Agent.RequestRewindConfirmation = async plan =>
+            {
+                var dialog = new TaskRewindConfirmationDialog();
+                dialog.SetPlan(plan);
+                return await dialog.ShowDialog<bool>(this);
+            };
             vm.RequestDeleteConversationConfirmation = async item =>
             {
                 var dialog = new ConfirmActionDialog(
