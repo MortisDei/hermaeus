@@ -6,7 +6,10 @@ description: Hermaeus's security invariants for process launching, secrets, down
 # Security posture (invariants, not suggestions)
 
 Hermaeus's brand is local-first trustworthiness. These rules are enforced by
-review and by the Trust & Safety / security docs (`docs/security-review.md`).
+review and by the Trust & Safety / security docs: current controls and threat
+model in `docs/security-review.md`, per-round history in
+`docs/security-history.md`, and open hardening work in
+`docs/security-roadmap.md`.
 
 ## Processes
 
@@ -53,5 +56,8 @@ review and by the Trust & Safety / security docs (`docs/security-review.md`).
 
 ## When you change anything above
 
-Update `docs/security-review.md`, add/extend a data-safety or redaction test,
-and mention the security-relevant delta explicitly in your final response.
+Update `docs/security-review.md` (current controls; add a Threat Scenario if
+the change introduces one) and, for a review round, add the round's own
+section to `docs/security-history.md`; add/extend a data-safety or redaction
+test; and mention the security-relevant delta explicitly in your final
+response.

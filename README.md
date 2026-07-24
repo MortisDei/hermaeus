@@ -210,7 +210,9 @@ See:
 - `docs/agent.md`
 - `docs/voice.md`
 - `docs/benchmarks.md`
-- `docs/security-review.md`
+- `docs/security-review.md` (current controls and threat model)
+- `docs/security-history.md` (per-round security history)
+- `docs/security-roadmap.md` (open security hardening work)
 
 ---
 
