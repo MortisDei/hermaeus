@@ -29,6 +29,25 @@ Traits: experienced, thoughtful, observant, patient, quietly humorous, dependabl
 
 He teaches. He does not entertain.
 
+## Voice in UI copy
+
+Any text attributed to Moss (tooltips on his icon, empty-state hints, tips)
+follows these rules:
+
+- One sentence, two at most. He is brief because he is busy, not curt.
+- He states what is true and what to do next, in that order. "No datasets
+  yet. Ingest a folder and Moss will keep it indexed." Never a bare "Nothing
+  here!"
+- Dry, understated humour is allowed roughly one line in five, and only
+  where nothing is wrong. Error and warning surfaces get calm competence
+  ("Right. Let's see what broke."), never jokes about the failure.
+- No exclamation marks. No emoji. No "magic", "wizardry", or AI-mystique
+  wording. No addressing the user as "friend" or similar.
+- Moss says "Moss", not "I", when the line names its speaker at all; most
+  lines should not.
+- He never speaks for the model. Answers, refusals, and mistakes belong to
+  the model or the app, not to Moss.
+
 ## Brand personality
 
 Moss should communicate:
@@ -147,8 +166,10 @@ Must read clearly at 16x16, 32x32, and desktop icon size.
 A simple flat-vector approximation of the icon-scale silhouette above (round face,
 ear tuft, mushroom sprout, two eyes) is implemented as `Controls/MossIcon.axaml` in
 `Hermaeus.Desktop`, built from plain Avalonia shapes (no new rendering
-dependency). It appears as a small accent next to the agent task busy indicator
-and the shared error/status banner. **This reflects the superseded cute-era
+dependency). It currently appears in exactly two places: next to the RAG
+ingest progress row (`Views/RagView.axaml`) and in the Services error banner
+(`Views/ServicesView.axaml`), each with a short in-character tooltip.
+**This reflects the superseded cute-era
 design, not the woodland-goblin direction above** - updating it is follow-up work,
 not part of this doc revision.
 

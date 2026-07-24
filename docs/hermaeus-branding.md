@@ -1,186 +1,186 @@
-Brand Specification
-Goal
+# Brand Specification
+
+## Goal
 
 Hermaeus presents itself as a premium local-first AI workspace.
 
 The brand should communicate:
 
-Knowledge
-Trust
-Craftsmanship
-Privacy
-Quiet confidence
+- Knowledge
+- Trust
+- Craftsmanship
+- Privacy
+- Quiet confidence
 
 Not:
 
-Magic
-Sci-fi
-"Artificial intelligence"
-Gaming
-Visual Style
+- Magic
+- Sci-fi
+- "Artificial intelligence"
+- Gaming
 
-Primary inspiration
+## Visual style
 
-Libraries
-Manuscripts
-Archives
-Botanical collections
-Natural materials
-High quality desktop software
+Primary inspiration:
+
+- Libraries
+- Manuscripts
+- Archives
+- Botanical collections
+- Natural materials
+- High quality desktop software
 
 Avoid futuristic themes.
 
-Colour Palette
+## Colour palette
 
-Primary
+Primary:
 
-Moss Green #436B3F
-Deep Moss #2E3D2B
-Slate #1C1D1A
+- Moss Green `#436B3F`
+- Deep Moss `#2E3D2B`
+- Slate `#1C1D1A`
 
-Accent
+Accent:
 
-Brass #B77738
-Warm Gold #D7B15B
-Parchment #EEE5D4
+- Brass `#B77738`
+- Warm Gold `#D7B15B`
+- Parchment `#EEE5D4`
 
 Accent colours should remain accents.
 
-Typography
+The fuller implementation palette actually wired into the app's theme
+resources (`App.axaml`) is tabulated in `docs/mascot.md`; treat it as the
+implementation detail behind this brand-level statement.
+
+## Typography
 
 Default to system UI fonts.
 
 Reasons:
 
-zero dependencies
-native appearance
-accessibility
-user configurable
+- zero dependencies
+- native appearance
+- accessibility
+- user configurable
 
 Do not bundle fonts unless a future requirement justifies it.
 
-Logo
+## Logo
 
-Requirements
+Requirements:
 
-recognisable silhouette
-simple geometry
-readable at 16×16
-works in monochrome
-works without gradients
+- recognisable silhouette
+- simple geometry
+- readable at 16x16
+- works in monochrome
+- works without gradients
 
-Potential motifs
+Potential motifs:
 
-Archivist's seal
-Tree rings
-Open book
-Branches / roots
-Growth rings
-Abstract "H"
+- Archivist's seal
+- Tree rings
+- Open book
+- Branches / roots
+- Growth rings
+- Abstract "H"
 
-Avoid
+Avoid:
 
-Eyes
-Crystals
-Shields
-Swords
-Fantasy crests
-Generic AI symbols
-Application Icon
+- Eyes
+- Crystals
+- Shields
+- Swords
+- Fantasy crests
+- Generic AI symbols
 
-Requirements
+## Application icon
 
-identical silhouette across platforms
-recognisable in system trays
-flat-first design
-gradients optional, never required
-Mascot
+Requirements:
 
-Name
+- identical silhouette across platforms
+- recognisable in system trays
+- flat-first design
+- gradients optional, never required
 
-Moss
+The shipped icon is the Archivist's Seal; see `docs/mascot.md` ("App icon
+vs. mascot icon") for the history and small-size legibility notes.
 
-Purpose
+## Mascot
 
-Represents accumulated knowledge and patient guidance.
+Name: **Moss**.
 
-He is not comic relief.
+Purpose: represents accumulated knowledge and patient guidance. He is not
+comic relief.
 
-Personality
+### Personality
 
 Moss should feel:
 
-experienced
-thoughtful
-observant
-patient
-quietly humorous
-dependable
+- experienced
+- thoughtful
+- observant
+- patient
+- quietly humorous
+- dependable
 
-He teaches.
+He teaches. He does not entertain.
 
-He does not entertain.
+### Appearance
 
-Appearance
+Small woodland goblin. Weathered rather than cute.
 
-Small woodland goblin.
+Features:
 
-Weathered rather than cute.
+- moss-covered clothing
+- practical satchel
+- notebooks
+- keys
+- scrolls
+- walking staff
+- lantern
+- spectacles (optional)
 
-Features
+### Expression
 
-moss-covered clothing
-practical satchel
-notebooks
-keys
-scrolls
-walking staff
-lantern
-spectacles (optional)
+Calm. Curious. Knowing. Never goofy.
 
-Expression
+### Behaviour
 
-Calm.
+Suitable locations:
 
-Curious.
+- onboarding
+- empty states
+- documentation
+- release notes
+- achievements
+- tips
 
-Knowing.
+Avoid:
 
-Never goofy.
+- constant popups
+- excessive animation
+- interrupting workflows
 
-Behaviour
+The full mascot spec, including the in-app icon silhouette and current
+usage, lives in `docs/mascot.md`.
 
-Suitable locations
+## Interface
 
-onboarding
-empty states
-documentation
-release notes
-achievements
-tips
+Priorities:
 
-Avoid
-
-constant popups
-excessive animation
-interrupting workflows
-Interface
-
-Priorities
-
-Readability
-Consistency
-Performance
-Native desktop feel
+- Readability
+- Consistency
+- Performance
+- Native desktop feel
 
 Branding should support usability, never compete with it.
 
-Overall Impression
+## Overall impression
 
 The application should feel like:
 
-Software maintained by an experienced archivist.
+> Software maintained by an experienced archivist.
 
 Not:
 
-Software built by a wizard.
+> Software built by a wizard.
