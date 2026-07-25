@@ -86,4 +86,44 @@ public sealed class DoctorViewModelUpdateStopRestartTests
 
         Assert.False(restartCalled, "Restart must not be invoked when nothing was stopped.");
     }
+
+    /// <summary>
+    /// A real bug report: updating llama.cpp while every managed server was
+    /// already stopped left the Services page showing the pre-update path
+    /// until the app was restarted. InstallLlamaServerUpdateDetailedAsync
+    /// rewrites every server's ExecutablePath unconditionally, but the old
+    /// flow only ever re-synced servers named in the (here, empty) stopped
+    /// list, so the Services rows never learned about the change.
+    /// </summary>
+    [Fact]
+    public async Task Successful_update_syncs_server_paths_even_when_nothing_was_running()
+    {
+        using var temp = new TempDir();
+        var vm = new DoctorViewModel(new ScriptedDetailedUpdateDoctorService(succeeds: true), new FakeToasts(), NewSettings(temp));
+
+        var syncCalls = 0;
+        vm.RequestStopRunningLlamaServersForUpdate = () => [];
+        vm.RequestRestartServers = _ => Task.CompletedTask;
+        vm.RequestSyncServerExecutablePaths = () => syncCalls++;
+
+        await vm.RunFixCommand.ExecuteAsync(UpdateCheck);
+
+        Assert.Equal(1, syncCalls);
+    }
+
+    [Fact]
+    public async Task Failed_update_does_not_sync_server_paths()
+    {
+        using var temp = new TempDir();
+        var vm = new DoctorViewModel(new ScriptedDetailedUpdateDoctorService(succeeds: false), new FakeToasts(), NewSettings(temp));
+
+        var syncCalls = 0;
+        vm.RequestStopRunningLlamaServersForUpdate = () => ["server-a"];
+        vm.RequestRestartServers = _ => Task.CompletedTask;
+        vm.RequestSyncServerExecutablePaths = () => syncCalls++;
+
+        await vm.RunFixCommand.ExecuteAsync(UpdateCheck);
+
+        Assert.Equal(0, syncCalls);
+    }
 }

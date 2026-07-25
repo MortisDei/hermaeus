@@ -85,6 +85,25 @@ rather than adding new capability.
   and a warm lantern-glow accent in place of the old mushroom tuft. The
   app/taskbar/tray icon (Archivist's Seal) is unaffected.
 
+### Fixed
+
+- **Services page kept showing the pre-update executable path after an
+  llama.cpp update, until the app was restarted**, whenever every managed
+  server was already stopped at update time. The update flow rewrites every
+  managed server's path unconditionally, but the Services page only
+  re-synced servers it had just stopped and restarted; a server that was
+  never running (and so never in that list) kept its stale, construction-time
+  path on screen. Every row now re-syncs from its config immediately after a
+  successful update, regardless of whether it was running.
+- **The "GPU present but 0 layers" Doctor advisory fired for a stopped
+  server**, based only on static configuration. It now requires the chat
+  server to actually be responding (a model genuinely loaded and running at
+  CPU speed) before advising, since a stopped server cannot be wasting the
+  GPU.
+- **Hotkey support reported a neutral grey status on Windows** even though
+  system-wide hotkeys are fully supported there. Now reports Ready (green)
+  on Windows; unsupported platforms still report a warning.
+
 ## [0.29.1-alpha] - 2026-07-24
 
 Hotfix: a Services-page settings-loss bug reported live during dogfooding, plus the first Linux CI results from this repo's newly re-enabled Actions.

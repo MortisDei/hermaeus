@@ -1267,6 +1267,21 @@ public partial class ServicesViewModel : ViewModelBase
         }
     }
 
+    /// <summary>
+    /// Re-syncs every server row's displayed <c>ExecutablePath</c> from its
+    /// underlying config, without starting or stopping anything. An llama.cpp
+    /// update rewrites <c>ExecutablePath</c> on every <see cref="ServerConfig"/>
+    /// unconditionally, including ones that were not running (and so are never
+    /// named in <see cref="RestartServersAsync"/>'s server-id list); those rows
+    /// would otherwise keep showing the pre-update path until the next app
+    /// restart rebuilds them from settings.
+    /// </summary>
+    public void SyncAllExecutablePathsFromConfig()
+    {
+        foreach (var server in Servers)
+            server.SyncExecutablePathFromConfig();
+    }
+
     private static bool LooksLikeLlamaServerExecutable(string executablePath) =>
         !string.IsNullOrWhiteSpace(executablePath)
         && Path.GetFileName(executablePath.Trim()).Contains("llama-server", StringComparison.OrdinalIgnoreCase);

@@ -63,6 +63,14 @@ public partial class DoctorViewModel : ObservableObject
     public Func<IReadOnlyList<string>>? RequestStopRunningLlamaServersForUpdate { get; set; }
     public Func<IReadOnlyList<string>, Task>? RequestRestartServers { get; set; }
 
+    /// <summary>
+    /// Re-syncs every Services row's displayed executable path after a
+    /// successful llama.cpp update, since the update rewrites every managed
+    /// server's path unconditionally, not just the ones that were running
+    /// (and so get resynced anyway by <see cref="RequestRestartServers"/>).
+    /// </summary>
+    public Action? RequestSyncServerExecutablePaths { get; set; }
+
     public DoctorViewModel(IDoctorService doctor, IToastService toasts, ISettingsService settings, IVoiceOrchestrator? voice = null)
     {
         _doctor = doctor;
@@ -342,6 +350,12 @@ public partial class DoctorViewModel : ObservableObject
                     ? "Restarting the servers that were stopped for the update."
                     : "No running servers needed to be stopped.",
                 ToastKind.Success, 8000);
+
+            // Every managed server's ExecutablePath was rewritten on disk,
+            // including servers that were not running (and so are not in
+            // stoppedServerIds); refresh all rows' displayed path now rather
+            // than leaving the not-running ones stale until app restart.
+            RequestSyncServerExecutablePaths?.Invoke();
 
             if (outcome.PrunableVersionDirectories.Count > 0 && RequestConfirmAsync is not null)
             {

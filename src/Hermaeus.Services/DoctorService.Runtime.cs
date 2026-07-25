@@ -156,6 +156,28 @@ public sealed partial class DoctorService
     public static bool ShouldAdviseGpuInference(bool hasRealGpu, bool installedBuildIsCpu, int chatGpuLayers)
         => hasRealGpu && (installedBuildIsCpu || chatGpuLayers == 0);
 
+    /// <summary>
+    /// A quick, short-timeout probe of a managed server's <c>/health</c>
+    /// endpoint (same convention as <see cref="ProcessManagement.ServerProcessManager"/>'s
+    /// own health poll), used to gate advisories that only make sense while a
+    /// model is actually loaded rather than merely configured.
+    /// </summary>
+    private static async Task<bool> IsServerRespondingAsync(int port, CancellationToken ct)
+    {
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(TimeSpan.FromSeconds(1.5));
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(1.5) };
+            var response = await http.GetAsync($"http://127.0.0.1:{port}/health", timeout.Token);
+            return response.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private async Task<DoctorCheck?> CheckGpuInferenceAdvisoryAsync(CancellationToken ct)
     {
         var profile = await _systemInfo.GetHardwareProfileAsync(ct);
@@ -165,8 +187,17 @@ public sealed partial class DoctorService
 
         var chat = _settings.Settings.ManagedServers.FirstOrDefault(s => !s.EmbeddingsMode)
             ?? _settings.Settings.ManagedServers.FirstOrDefault();
-        var chatGpuLayers = chat?.GpuLayers ?? 0;
-        var resolvedExe = ResolveExecutable(chat?.ExecutablePath ?? string.Empty);
+        if (chat is null)
+            return null;
+
+        // Only warn about a model actually loaded at CPU speed right now, not
+        // a stopped server's static configuration - the wasted-GPU condition
+        // does not exist until a model is actually loaded.
+        if (!await IsServerRespondingAsync(chat.Port, ct))
+            return null;
+
+        var chatGpuLayers = chat.GpuLayers;
+        var resolvedExe = ResolveExecutable(chat.ExecutablePath ?? string.Empty);
         var installedBuildIsCpu = IsCpuOnlyBuild(resolvedExe);
 
         if (!ShouldAdviseGpuInference(hasRealGpu, installedBuildIsCpu, chatGpuLayers))

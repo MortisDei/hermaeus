@@ -133,6 +133,7 @@ public partial class MainWindowViewModel : ViewModelBase
         // the llama.cpp update flow's stop-before/restart-after to Services.
         Doctor.RequestStopRunningLlamaServersForUpdate = Services.StopRunningLlamaServersForUpdate;
         Doctor.RequestRestartServers = Services.RestartServersAsync;
+        Doctor.RequestSyncServerExecutablePaths = Services.SyncAllExecutablePathsFromConfig;
         // Keep toolbar doctor badge in sync with doctor checks
         Doctor.Checks.CollectionChanged += (_, _) => UpdateDoctorStatus();
         UpdateDoctorStatus();

@@ -415,6 +415,9 @@
 - Doctor advises when a real GPU is present but inference is still configured
   for the CPU (a CPU-only build is installed, or the chat server offloads zero
   layers), naming the measured consequence and linking the fix in Services.
+  Only fires while the chat server is actually responding (a model is loaded
+  and would be running at CPU speed right now), not for a stopped server's
+  static configuration.
 - The Models page lists every model as a compact, collapsed-by-default card
   (name, running badge, provider, size, tags, fits/update chips, tune
   summary) with a name/tag filter box, instead of a fully-expanded editor
