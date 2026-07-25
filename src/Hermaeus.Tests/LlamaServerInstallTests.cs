@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Net;
 using System.Text;
+using Hermaeus.Core.Models;
 using Hermaeus.Services;
 using Xunit;
 
@@ -92,5 +93,31 @@ public sealed class LlamaServerInstallTests
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
             throw new InvalidOperationException("Install should not hit the network when the executable already exists.");
+    }
+
+    /// <summary>
+    /// r24 field report: a real 403 from GitHub's anonymous rate limit
+    /// surfaced to the user as the framework's generic
+    /// "Response status code does not indicate success: 403 (rate limit
+    /// exceeded)." GetLatestDownloadInfoAsync must turn that into an
+    /// actionable message instead.
+    /// </summary>
+    [Fact]
+    public async Task GetLatestDownloadInfoAsync_turns_a_403_into_an_actionable_rate_limit_message()
+    {
+        using var http = new HttpClient(new FixedStatusHandler(HttpStatusCode.Forbidden));
+        var service = new LlamaServerSetupService(new ModelDownloadService(http), http);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => service.GetLatestDownloadInfoAsync(LlamaRuntimeVariant.Cpu));
+
+        Assert.Contains("rate limit", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("hour", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private sealed class FixedStatusHandler(HttpStatusCode status) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(status));
     }
 }

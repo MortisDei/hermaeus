@@ -540,7 +540,10 @@ public sealed partial class DoctorService
         }
     }
 
-    private static async Task<LlamaLatestRelease?> TryGetLatestLlamaReleaseAsync(CancellationToken ct)
+    private Task<LlamaLatestRelease?> TryGetLatestLlamaReleaseAsync(CancellationToken ct) =>
+        GetCachedGitHubReleaseAsync("llama.cpp-latest-release", FetchLatestLlamaReleaseAsync, ct);
+
+    private static async Task<LlamaLatestRelease?> FetchLatestLlamaReleaseAsync(CancellationToken ct)
     {
         try
         {

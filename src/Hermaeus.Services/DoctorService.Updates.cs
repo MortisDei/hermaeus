@@ -95,7 +95,10 @@ public sealed partial class DoctorService
         ?? typeof(DoctorService).Assembly.GetName().Version?.ToString()
         ?? "unknown";
 
-    private static async Task<GitHubRelease?> TryGetLatestHermaeusReleaseAsync(CancellationToken ct)
+    private Task<GitHubRelease?> TryGetLatestHermaeusReleaseAsync(CancellationToken ct) =>
+        GetCachedGitHubReleaseAsync("hermaeus-latest-release", FetchLatestHermaeusReleaseAsync, ct);
+
+    private static async Task<GitHubRelease?> FetchLatestHermaeusReleaseAsync(CancellationToken ct)
     {
         try
         {

@@ -173,6 +173,17 @@ namespace Hermaeus.Tests
             // actively in use, so a single retry is not always enough under
             // full-suite thread-pool contention - retry a few times with a
             // growing backoff before giving up for real.
+            //
+            // This is not SQLite-specific: an atomic temp+move write to a plain
+            // file (e.g. Agent's task_state.json) under this root can also still
+            // be settling, and CI's shared Windows runners occasionally hold a
+            // freshly-written file open a beat longer than any local dev machine
+            // does (observed in practice: r23/r24 CI, "task_state.json ... being
+            // used by another process" a few hundred ms into a full-suite run
+            // that never reproduced locally, in isolation or in full-suite
+            // repeats). 5 attempts (750ms total backoff) was not always enough
+            // under that contention; 10 attempts widens the worst case to a few
+            // seconds without adding any latency to the common, uncontended case.
             for (var attempt = 1; ; attempt++)
             {
                 SqliteConnection.ClearAllPools();
@@ -181,7 +192,7 @@ namespace Hermaeus.Tests
                     Directory.Delete(_root, recursive: true);
                     return;
                 }
-                catch (Exception ex) when ((ex is IOException or UnauthorizedAccessException) && attempt < 5)
+                catch (Exception ex) when ((ex is IOException or UnauthorizedAccessException) && attempt < 10)
                 {
                     Thread.Sleep(75 * attempt);
                 }

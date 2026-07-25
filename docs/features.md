@@ -624,13 +624,19 @@
   server otherwise, queuing behind chat generation on a single-slot
   llama-server.
 - Doctor checks the newest published GitHub release against the running app
-  version on every scan (including the automatic startup scan) and flags a
-  warning if a newer one exists. The check only compares version numbers; it
-  never downloads or installs anything, and its fix action just opens the
-  releases page in your browser so you can update yourself. This needs the
-  `MortisDei/hermaeus` GitHub repository to be public to succeed; while it is
-  private the check fails closed and reports itself as unable to reach
-  GitHub, the same as it will for any other network outage.
+  version and flags a warning if a newer one exists (the same check runs for
+  the `llama.cpp` binary Hermaeus manages). The check only compares version
+  numbers; it never downloads or installs anything, and its fix action just
+  opens the releases page in your browser so you can update yourself. This
+  needs the `MortisDei/hermaeus` GitHub repository to be public to succeed;
+  while it is private the check fails closed and reports itself as unable to
+  reach GitHub, the same as it will for any other network outage. Both
+  update checks cache their result for an hour rather than calling GitHub on
+  every scan: GitHub's anonymous API allows only 60 requests/hour per IP,
+  and Doctor's automatic startup scan plus manual rescans could otherwise
+  exhaust that quota on background checks alone and leave no headroom for
+  an actual llama.cpp update click, which failed with a rate-limit error in
+  practice before this caching was added.
 - Doctor reports whether the previous session exited cleanly, using a small
   local-only lifecycle journal (no telemetry, nothing leaves the machine).
   If Hermaeus did not shut down cleanly last time (a crash or force-close), the

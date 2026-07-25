@@ -66,6 +66,88 @@ public sealed class DoctorAdvisoryTests
     }
 
     /// <summary>
+    /// r24: GitHub's anonymous API allows only 60 requests/hour per IP, and
+    /// Doctor's two update checks (llama.cpp, Hermaeus) both call it on every
+    /// scan, including the automatic startup scan. A user restarting or
+    /// rescanning a few times an hour could exhaust that quota on background
+    /// checks alone and then have an actual llama.cpp update attempt fail
+    /// with a 403. Repeated calls within the TTL must reuse the cached
+    /// result instead of hitting the network again.
+    /// </summary>
+    [Fact]
+    public async Task GetCachedGitHubReleaseAsync_reuses_a_cached_result_within_the_ttl()
+    {
+        var cache = new Dictionary<string, (DateTimeOffset CachedAt, object? Value)>();
+        var calls = 0;
+
+        Task<string?> Fetch(CancellationToken ct)
+        {
+            calls++;
+            return Task.FromResult<string?>("v1.2.3");
+        }
+
+        var first = await DoctorService.GetCachedGitHubReleaseAsync(cache, "key", Fetch, TimeSpan.FromHours(1), CancellationToken.None);
+        var second = await DoctorService.GetCachedGitHubReleaseAsync(cache, "key", Fetch, TimeSpan.FromHours(1), CancellationToken.None);
+
+        Assert.Equal("v1.2.3", first);
+        Assert.Equal("v1.2.3", second);
+        Assert.Equal(1, calls);
+    }
+
+    [Fact]
+    public async Task GetCachedGitHubReleaseAsync_caches_a_failed_null_fetch_too()
+    {
+        var cache = new Dictionary<string, (DateTimeOffset CachedAt, object? Value)>();
+        var calls = 0;
+
+        Task<string?> Fetch(CancellationToken ct)
+        {
+            calls++;
+            return Task.FromResult<string?>(null);
+        }
+
+        var first = await DoctorService.GetCachedGitHubReleaseAsync(cache, "key", Fetch, TimeSpan.FromHours(1), CancellationToken.None);
+        var second = await DoctorService.GetCachedGitHubReleaseAsync(cache, "key", Fetch, TimeSpan.FromHours(1), CancellationToken.None);
+
+        Assert.Null(first);
+        Assert.Null(second);
+        Assert.Equal(1, calls);
+    }
+
+    [Fact]
+    public async Task GetCachedGitHubReleaseAsync_refetches_once_the_ttl_has_expired()
+    {
+        var cache = new Dictionary<string, (DateTimeOffset CachedAt, object? Value)>
+        {
+            ["key"] = (DateTimeOffset.UtcNow.AddHours(-2), (object?)"stale")
+        };
+        var calls = 0;
+
+        Task<string?> Fetch(CancellationToken ct)
+        {
+            calls++;
+            return Task.FromResult<string?>("fresh");
+        }
+
+        var result = await DoctorService.GetCachedGitHubReleaseAsync(cache, "key", Fetch, TimeSpan.FromHours(1), CancellationToken.None);
+
+        Assert.Equal("fresh", result);
+        Assert.Equal(1, calls);
+    }
+
+    [Fact]
+    public async Task GetCachedGitHubReleaseAsync_keys_are_independent()
+    {
+        var cache = new Dictionary<string, (DateTimeOffset CachedAt, object? Value)>();
+
+        var llama = await DoctorService.GetCachedGitHubReleaseAsync(cache, "llama.cpp-latest-release", _ => Task.FromResult<string?>("llama"), TimeSpan.FromHours(1), CancellationToken.None);
+        var hermaeus = await DoctorService.GetCachedGitHubReleaseAsync(cache, "hermaeus-latest-release", _ => Task.FromResult<string?>("hermaeus"), TimeSpan.FromHours(1), CancellationToken.None);
+
+        Assert.Equal("llama", llama);
+        Assert.Equal("hermaeus", hermaeus);
+    }
+
+    /// <summary>
     /// The embedding backend check used to report the vague, Warning-severity
     /// "Embedding backend not reachable" for a server that was never started
     /// at all, indistinguishable from an actually-broken running server.

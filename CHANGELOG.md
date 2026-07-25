@@ -116,6 +116,22 @@ rather than adding new capability.
   endpoint first and reports a grey, Info-severity "No embedding server
   started" when nothing is listening; the warning is reserved for a server
   that is up but genuinely failing to embed.
+- **Doctor's two GitHub update checks (llama.cpp, Hermaeus) hit GitHub's
+  anonymous API on every scan, including the automatic startup scan.**
+  GitHub allows only 60 requests/hour per unauthenticated IP; a handful of
+  app restarts or manual rescans could exhaust that quota on background
+  checks alone, then make a genuine llama.cpp update attempt fail with a
+  403 rate-limit error, as reported live. Both checks now cache their
+  result for an hour instead of re-fetching every scan. The 403 case
+  itself, when it does happen, now surfaces as a clear "GitHub's rate
+  limit was reached, wait about an hour" message instead of a raw HTTP
+  exception string.
+- A CI flake in `ServicesViewModelModelPathBindingTests` (asserted on a
+  `SettingsChanged`-triggered rebuild immediately instead of polling for
+  it, like an equivalent test elsewhere already does) and widened
+  `TempDir`'s Windows file-lock-on-cleanup retry budget after two other
+  CI runs failed on an unrelated, already-mitigated instance of the same
+  class of flake in Agent orchestration tests.
 
 ## [0.29.1-alpha] - 2026-07-24
 
