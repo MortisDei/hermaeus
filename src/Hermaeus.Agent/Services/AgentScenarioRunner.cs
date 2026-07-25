@@ -76,6 +76,7 @@ public sealed class AgentScenarioRunner : IAgentScenarioRunner
         IReadOnlyDictionary<string, string> beforeHashes = new Dictionary<string, string>();
         FileAgentTaskStateStore? taskStore = null;
         string? taskId = null;
+        SqliteLessonStore? lessonsForChecks = null;
 
         try
         {
@@ -86,6 +87,7 @@ public sealed class AgentScenarioRunner : IAgentScenarioRunner
             var scenarioSettings = new ScenarioSettings(dataDir, scenario.Manifest.MaxSteps, scenario.Manifest.MaxOrchestrationSteps);
             taskStore = new FileAgentTaskStateStore(scenarioSettings);
             var lessons = new SqliteLessonStore(scenarioSettings);
+            lessonsForChecks = lessons;
             await taskStore.InitializeAsync(ct);
             await lessons.InitializeAsync(ct);
 
@@ -140,7 +142,7 @@ public sealed class AgentScenarioRunner : IAgentScenarioRunner
                         // whichever task id actually holds it, then resume
                         // via the PARENT's task id so the orchestration loop
                         // re-enters and continues that same child.
-                        await agent.AppendApprovalAsync(lastResult.State.TaskId, pending.ToolName, approved: true, options, ct);
+                        await agent.AppendApprovalAsync(lastResult.State.TaskId, pending.ToolName, approved: true, AgentApprovalFingerprint.Resolve(pending), options, ct);
                         continue;
                     }
 
@@ -178,8 +180,14 @@ public sealed class AgentScenarioRunner : IAgentScenarioRunner
         var afterHashes = HashWorkspace(workspaceDir);
         var diff = DiffWorkspace(beforeHashes, afterHashes);
         var stateForChecks = finalState ?? new AgentTaskState { Status = AgentTaskStatus.New };
+        IReadOnlyList<AgentLesson> activeLessons = [];
+        if (scenario.Manifest.Expect.ForbidActiveLessonMatching is true && lessonsForChecks is not null)
+        {
+            try { activeLessons = await lessonsForChecks.ListAllAsync(includeRetired: false, ct); }
+            catch { /* best-effort; an unreadable store fails safe by leaving the check with nothing to flag */ }
+        }
         var checks = new List<AgentScenarioCheckResult>(
-            AgentScenarioChecks.Evaluate(scenario.Manifest.Expect, stateForChecks, finalResponse, diff));
+            AgentScenarioChecks.Evaluate(scenario.Manifest.Expect, stateForChecks, finalResponse, diff, activeLessons));
 
         if (runError is not null && !scenario.Manifest.AllowRunError)
             checks.Insert(0, new AgentScenarioCheckResult("run_error", false, runError));

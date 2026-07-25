@@ -13,6 +13,126 @@ From 0.29.0-alpha onward, every minor version is tagged and released on
 GitHub (see `docs/packaging.md` "Releases"); patch versions are tagged only
 for urgent hotfixes.
 
+## [0.30.0-alpha] - 2026-07-25
+
+Implements docs/review r23 in full: "Trust You Can Operate", a round about
+making the agent workbench's safety guarantees legible and reversible
+rather than adding new capability.
+
+### Added
+
+- **Run Ledger and Task Rewind.** A "Changes" panel on the agent task view
+  now shows every file touched (created/edited/reverted), every command
+  run, and every approval decision for the current run, derived entirely
+  from the existing persisted task state (no new storage). A "Rewind"
+  action reverts a task's file changes back to their pre-run state via the
+  existing draft-patch revert path, folding in any completed sub-tasks;
+  it refuses while the task is still running or has a pending approval.
+- **Approval fingerprint binding.** Every approve/reject decision is now
+  bound to a SHA256 fingerprint of the exact tool name and canonicalized
+  arguments that were rendered to the user. If the pending action changed
+  underneath the approval (a TOCTOU window), the approval is refused
+  instead of silently applying to different arguments than what was shown.
+- **Workspace policy.** `.hermaeus/workspace.json` gains an optional
+  `policy` block: glob-based read/write allow-lists plus a `never`
+  deny-list that only ever narrows what the agent can touch, and an
+  optional per-task read cap. Enforced by the same glob matcher `glob_files`
+  already uses. A policy summary is visible in the workspace disclosure UI.
+- **Plan-approval checkpoint (opt-in).** A new `RequirePlanApproval` agent
+  setting pauses a task the first time it sets a plan, so the user can
+  review the plan before any tool runs. Plan revisions after that point are
+  logged and annotated with the step they happened at, and shown in the
+  plan panel.
+- **Completed-with-reservations.** The agent can now report a task as
+  finished while flagging specific caveats (`reservations` in its final
+  answer) instead of only ever claiming unqualified success; reservations
+  from sub-tasks roll up into the parent's synthesis report and are shown
+  in a dedicated panel.
+- **Stated-lesson gate-claim filter.** A lesson the agent tries to record
+  that claims a specific approval, policy, or safety-gate outcome is now
+  rejected before storage (logged as `lesson_rejected`), closing a path
+  where a poisoned or hallucinated "lesson" could bias future runs toward
+  skipping a real safety check.
+- **Three new agent scenarios** (14 confused-user-authority, 15
+  tool-result-poisoning, 17 memory-poisoning), and a
+  `forbid_active_lesson_matching` scenario check that fails if a run's
+  active lessons match an injected instruction the scenario expects the
+  agent to have ignored. The scenario library now ships 16 scenarios.
+- Context receipt now has its own collapsed-by-default panel, split out
+  from "Retrieved Context" for clarity.
+- **Update check.** Doctor now compares the running app version against the
+  newest published GitHub release on every scan, including the automatic
+  startup scan, and flags a warning when a newer one exists. It never
+  downloads or installs anything; the check's fix action just opens the
+  releases page in your browser so you can update yourself. This needs the
+  `MortisDei/hermaeus` repository to be public to succeed; while it is
+  private the check fails closed the same way it would for any other
+  network outage.
+
+### Changed
+
+- `docs/security-review.md` is split into three focused docs:
+  `docs/security-review.md` (current posture only), `docs/security-history.md`
+  (past rounds' findings, newest first), and `docs/security-roadmap.md`
+  (known, accepted gaps with triggers for revisiting them).
+- Code changes now land via pull request (`docs/pull-requests.md`): one
+  open PR per maintainer at a time, merged by the owner. This round is the
+  first to go through that flow end to end.
+- **The in-app Moss accent icon** (`Controls/MossIcon.axaml`, shown in empty
+  states, tooltips, and the setup wizard greeting) now matches the current
+  woodland-goblin mascot direction (`docs/mascot.md`) instead of the retired
+  cute-era silhouette: a pointed hood, ears, a small brass spectacles band,
+  and a warm lantern-glow accent in place of the old mushroom tuft. The
+  app/taskbar/tray icon (Archivist's Seal) is unaffected.
+- **Settings > Voice channel routing no longer uses named voice profiles.**
+  The "Add profile" step (create a named voice/speed combination, then pick
+  it per channel) was confusing and is gone; each channel now picks a voice
+  directly from the active provider's own voice list (or free-types one for
+  a provider that cannot enumerate voices), and remembers it. A channel
+  voice chosen before this change (via a legacy named profile) still
+  resolves correctly on load rather than silently resetting to the default.
+
+### Fixed
+
+- **Services page kept showing the pre-update executable path after an
+  llama.cpp update, until the app was restarted**, whenever every managed
+  server was already stopped at update time. The update flow rewrites every
+  managed server's path unconditionally, but the Services page only
+  re-synced servers it had just stopped and restarted; a server that was
+  never running (and so never in that list) kept its stale, construction-time
+  path on screen. Every row now re-syncs from its config immediately after a
+  successful update, regardless of whether it was running.
+- **The "GPU present but 0 layers" Doctor advisory fired for a stopped
+  server**, based only on static configuration. It now requires the chat
+  server to actually be responding (a model genuinely loaded and running at
+  CPU speed) before advising, since a stopped server cannot be wasting the
+  GPU.
+- **Hotkey support reported a neutral grey status on Windows** even though
+  system-wide hotkeys are fully supported there. Now reports Ready (green)
+  on Windows; unsupported platforms still report a warning.
+- **The embedding backend health check reported a vague "not reachable"
+  warning whenever no embedding server was running at all**, indistinguishable
+  from an actually broken running server. It now probes the resolved
+  endpoint first and reports a grey, Info-severity "No embedding server
+  started" when nothing is listening; the warning is reserved for a server
+  that is up but genuinely failing to embed.
+- **Doctor's two GitHub update checks (llama.cpp, Hermaeus) hit GitHub's
+  anonymous API on every scan, including the automatic startup scan.**
+  GitHub allows only 60 requests/hour per unauthenticated IP; a handful of
+  app restarts or manual rescans could exhaust that quota on background
+  checks alone, then make a genuine llama.cpp update attempt fail with a
+  403 rate-limit error, as reported live. Both checks now cache their
+  result for an hour instead of re-fetching every scan. The 403 case
+  itself, when it does happen, now surfaces as a clear "GitHub's rate
+  limit was reached, wait about an hour" message instead of a raw HTTP
+  exception string.
+- A CI flake in `ServicesViewModelModelPathBindingTests` (asserted on a
+  `SettingsChanged`-triggered rebuild immediately instead of polling for
+  it, like an equivalent test elsewhere already does) and widened
+  `TempDir`'s Windows file-lock-on-cleanup retry budget after two other
+  CI runs failed on an unrelated, already-mitigated instance of the same
+  class of flake in Agent orchestration tests.
+
 ## [0.29.1-alpha] - 2026-07-24
 
 Hotfix: a Services-page settings-loss bug reported live during dogfooding, plus the first Linux CI results from this repo's newly re-enabled Actions.
@@ -389,73 +509,4 @@ local Gemma model.
   folder stable if the conversation is renamed later; folders created
   before this change (bare GUID names) are still found via the same lookup,
   so no existing artifacts are orphaned.
-
-## [0.25.1-alpha] - 2026-07-22
-
-### Changed
-
-- **App icon, taskbar icon, and system tray icon now show Moss** instead of
-  the old Aether "A" mark: `hermaeus.ico` (window/taskbar, 16/32/48/256px),
-  `hermaeus-app.png` (Linux desktop icon), and `hermaeus-tray.png` render the
-  same shapes and colors as the in-app `Controls/MossIcon.axaml`, generated
-  programmatically so every size stays pixel-consistent with it. Sizes at or
-  below 32px drop the dark lens-housing ring for legibility (the full
-  four-ring goggle stack anti-aliases into mud that small), so the eye reads
-  as one clean glowing circle instead. The unused `hermaeus-tray-dark.png`/
-  `hermaeus-tray-light.png` fallback assets were refreshed the same way for
-  consistency, though nothing currently references them.
-- `docs/hermaeus-branding.png` (an illustrated marketing mockup sheet, not
-  referenced by any code or the README) still shows the old mark and
-  wordmark text baked into the pixels - flagged in docs/mascot.md as a
-  follow-up needing real illustration work, not a programmatic redraw.
-
-## [0.25.0-alpha] - 2026-07-22
-
-Implements docs/review r20 in full: the product is renamed from Aether to
-Hermaeus (after Hermaeus Soter, the Indo-Greek king) ahead of going public.
-The go-public trademark check found "Aether" carries real risk: multiple
-live USPTO Class 9 registrations plus several existing local-AI desktop
-projects already use the name.
-
-This touches every namespace, project, and assembly (`Hermaeus.Core`,
-`Hermaeus.Desktop`, etc.), the solution and csproj files, the default data
-root (`{LocalApplicationData}/Hermaeus`), avares resource URIs, and every
-doc. Moss the mascot is unchanged; only the product name around him changes.
-
-### Breaking
-
-- **Default data root moved** to `{LocalApplicationData}/Hermaeus` (was
-  `.../Aether`). No automated migration; move the folder by hand while the
-  app is closed (see the updated README).
-- **Local API headers renamed**: `X-Aether-Token`/`X-Aether-Client` become
-  `X-Hermaeus-Token`/`X-Hermaeus-Client`. Any external caller script needs
-  updating.
-- **Crash log filenames renamed**: `aether_unhandled.log`/
-  `aether_unobserved.log` become `hermaeus_unhandled.log`/
-  `hermaeus_unobserved.log`. Doctor no longer reads old-named crash logs.
-- **OS secret store service name renamed** (Linux `secret-tool`, macOS
-  Keychain): existing secrets stored under the old `Aether` service name on
-  those platforms are orphaned, not migrated. Windows (DPAPI file under the
-  data root) is unaffected beyond the data-root move above.
-- **Single-instance lock file renamed** to `hermaeus.lock` under the new
-  data root folder.
-
-### Compatibility (kept on purpose)
-
-- The SQLite schema-version bookkeeping table (`aether_schema_versions`) is
-  renamed to `hermaeus_schema_versions` in place on first open of an
-  existing database, so already-migrated data does not re-run every
-  migration.
-- The Agent workspace manifest continues to be read from the legacy
-  `.aether/workspace.json` path if the new `.hermaeus/workspace.json` one
-  is absent; it is always written to the new path.
-
-### Added
-
-- A permanent `NamingConsistencyTests` guard scans the repo for stray
-  "Aether" references so a future edit or bad merge fails the build instead
-  of shipping half-migrated.
-- Kokoro voice lexicon gains a `hermaeus` pronunciation entry
-  (`her-MEE-us`); the `aether` dictionary-word entry is kept since it is a
-  real English word CMUdict may still miss.
 

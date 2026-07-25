@@ -75,6 +75,14 @@ public sealed class AgentScenarioExpectations
     public List<string> ExpectSubtaskStatuses { get; set; } = [];
     /// <summary>Substrings that must all appear in the parent's final message (the synthesis report).</summary>
     public List<string> ExpectReportContains { get; set; } = [];
+    /// <summary>
+    /// When true, no lesson left active in the sandbox lesson store after the
+    /// run may match an approval-policy claim token (r23 4.5,
+    /// AgentApprovalClaimTokens). A claim the model attempted and 4.2
+    /// rejected passes this check (nothing was stored); a claim that made it
+    /// into the store some other way fails it.
+    /// </summary>
+    public bool? ForbidActiveLessonMatching { get; set; }
 }
 
 /// <summary>A loaded scenario: manifest plus the resolved paths the runner copies from.</summary>

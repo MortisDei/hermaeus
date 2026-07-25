@@ -40,9 +40,10 @@ public sealed class NamingConsistencyTests
         // This file's own allowlist/scan logic necessarily mentions "aether".
         ["src/Hermaeus.Tests/NamingConsistencyTests.cs"] = ["aether"],
 
-        // r20 security-review subsection references the old name and the two
+        // r23 split moved the r20 security-review subsection (below) into its
+        // own history doc; it still references the old name and the two
         // legacy-read shims by their exact pre-rename identifiers.
-        ["docs/security-review.md"] =
+        ["docs/security-history.md"] =
         [
             "aether_schema_versions",
             ".aether/workspace.json",

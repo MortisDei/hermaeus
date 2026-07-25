@@ -1,0 +1,35 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Hermaeus.Desktop.Views.TaskRewindConfirmationDialog"
+        Title="Rewind run"
+        Width="520"
+        Height="480"
+        WindowStartupLocation="CenterOwner">
+    <Border Padding="18">
+        <Grid RowDefinitions="Auto,Auto,*,Auto" RowSpacing="10">
+            <TextBlock Grid.Row="0"
+                       Text="This restores every file the run changed. A file that changed again after the run is skipped, never overwritten."
+                       TextWrapping="Wrap" />
+            <TextBlock Grid.Row="1" Name="SummaryText" FontWeight="SemiBold" TextWrapping="Wrap" />
+            <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+                <StackPanel Spacing="10">
+                    <StackPanel Name="RestorePanel" Spacing="4">
+                        <TextBlock Text="Restore to their content before this run:" FontWeight="SemiBold" FontSize="12" />
+                        <ItemsControl Name="RestoreList" />
+                    </StackPanel>
+                    <StackPanel Name="DeletePanel" Spacing="4">
+                        <TextBlock Text="Delete (this run created them, nothing existed before):" FontWeight="SemiBold" FontSize="12" />
+                        <ItemsControl Name="DeleteList" />
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+            <StackPanel Grid.Row="3"
+                        Orientation="Horizontal"
+                        HorizontalAlignment="Right"
+                        Spacing="8">
+                <Button Content="Cancel" MinWidth="90" Click="OnCancelClick" />
+                <Button Content="Rewind" MinWidth="90" Click="OnConfirmClick" />
+            </StackPanel>
+        </Grid>
+    </Border>
+</Window>

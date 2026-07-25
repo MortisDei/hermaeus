@@ -167,7 +167,9 @@ provider selection, base URL, Start/Stop, and the voice/device/speed/path
 fields (everything that manages the Kokoro/XTTS/F5 background process) now
 live on **Services -> Voice**, alongside the Chat/Embeddings llama-server
 cards it's a sibling of. **Settings -> Voice** keeps only voice orchestration:
-mute-all, auto-speak, per-channel routing, and named voice profiles - none of
-which start or stop a process. `TtsSettingsViewModel` is a single DI-shared
+mute-all, auto-speak, and per-channel routing (each channel picks a voice
+directly from the active provider's own voice list, or free-types one for a
+provider that cannot enumerate voices) - none of which start or stop a
+process. `TtsSettingsViewModel` is a single DI-shared
 instance (`ServicesViewModel.Tts` and `SettingsViewModel.Tts` are the same
 object), so both pages always reflect the same live state.

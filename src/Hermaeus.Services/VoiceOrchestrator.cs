@@ -112,13 +112,19 @@ public sealed class VoiceOrchestrator : IVoiceOrchestrator, IDisposable
             return utterance.VoiceOverride;
 
         var tts = _settings.Settings.Tts;
-        if (tts.Channels.TryGetValue(utterance.Channel.ToString(), out var channelConfig)
-            && !string.IsNullOrWhiteSpace(channelConfig.ProfileName))
+        if (tts.Channels.TryGetValue(utterance.Channel.ToString(), out var channelConfig))
         {
-            var profile = tts.Profiles.FirstOrDefault(p =>
-                string.Equals(p.Name, channelConfig.ProfileName, StringComparison.OrdinalIgnoreCase));
-            if (profile is not null && !string.IsNullOrWhiteSpace(profile.VoiceId))
-                return profile.VoiceId;
+            if (!string.IsNullOrWhiteSpace(channelConfig.VoiceId))
+                return channelConfig.VoiceId;
+
+            // Legacy (pre-r24): the channel still only names a Profiles entry.
+            if (!string.IsNullOrWhiteSpace(channelConfig.ProfileName))
+            {
+                var profile = tts.Profiles.FirstOrDefault(p =>
+                    string.Equals(p.Name, channelConfig.ProfileName, StringComparison.OrdinalIgnoreCase));
+                if (profile is not null && !string.IsNullOrWhiteSpace(profile.VoiceId))
+                    return profile.VoiceId;
+            }
         }
 
         return string.IsNullOrWhiteSpace(tts.Speaker) ? null : tts.Speaker;

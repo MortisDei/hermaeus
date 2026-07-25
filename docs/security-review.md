@@ -1,28 +1,19 @@
 # Hermaeus Security Review And Threat Model
 
-Last refreshed for `0.24.0-alpha` (see the r19 subsection under Threat
-Scenarios, covering chat attachments, chat artifacts, and crash logs). The
-prior r18 pass covered first-class llama-server engine options, and r17
-covered the new GGUF header parser. The `0.10.0-alpha` pass re-verified the
-areas that changed in r3-r5 (agent tool execution, run_command recipes,
-lesson store, voice orchestration, benchmark insights) directly against the
-code, and confirmed via git history that the Local API, MCP bridge, secret
-store, redaction, process managers, and RAG ingest code were unchanged since
-their `0.9.41-alpha` verification, so those rows carried forward. r6 then
-implemented two of that pass's own follow-ups (recipe transparency in the
-agent approval prompt, and a lesson review moment) plus one new write path
-(applied-patch revert) with the same review-then-verify treatment below. r7
-added the Agent Scenario Suite (`AgentScenarioRunner`), a test harness that
-drives the real, unmodified `AgentSafetyGate`/`AgentService` inside an
-isolated sandbox; see the new subsection under Threat Scenarios. r8 added
-starter-model downloads, clickable markdown links, and a user pronunciation
-lexicon; see the r8 subsection under Threat Scenarios. Local API, MCP,
-secrets, redaction, and RAG remain unchanged since `0.9.41-alpha`.
+This is the current-state entry point: what Hermaeus actually does today to
+protect its assets, and the threat model behind it. Two companion docs cover
+what this one deliberately does not:
+
+- **`docs/security-history.md`**: the per-round narrative of how the posture
+  below got here, newest round first. Read it for "why", not "what is true
+  now".
+- **`docs/security-roadmap.md`**: hardening work identified but not yet
+  done. Read it before assuming a gap here is unnoticed.
 
 Hermaeus is a local-first desktop application. The primary security goal is to
-keep user data, model paths, API keys, local runtimes, and generated voice audio
-under the user's control while avoiding accidental network exposure or unsafe
-filesystem writes.
+keep user data, model paths, API keys, local runtimes, and generated voice
+audio under the user's control while avoiding accidental network exposure or
+unsafe filesystem writes.
 
 This document is an engineering threat model, not legal advice or a formal
 penetration-test report.
@@ -80,9 +71,11 @@ penetration-test report.
 | Logs | Runtime and visible process logs pass through redaction for API keys, bearer tokens, GitHub-style tokens, AWS-style access keys, Azure-style key assignments, query-string secrets, password parameters, and home paths. Log buffers are capped and archive rotation is collision-safe. | Redaction is best effort and may miss provider-specific token formats or sensitive filenames outside the home path. |
 | RAG ingest | Local `.txt`/`.md` ingest is the default. Optional web URL ingest is off by default, accepts only explicit HTTP(S) URLs, caps pages, strips script/style blocks from HTML, validates prompt templates, and verifies pinned embedding model and ONNX reranker assets with SHA256. | Large local files are warned, not refused. Web text extraction is intentionally simple and should not be treated as a browser sandbox or crawler. |
 | Voice backends | Kokoro (native) is the default voice provider and needs no Python subprocess; its ONNX model and voice files are never downloaded on the synthesis path, only through an explicit Doctor install action that verifies each file against a pinned SHA256 hash before it is ever loaded, matching the RAG reranker's asset posture. Generated voice preview audio is handled in memory by the app workflow. Managed Python-based Kokoro and XTTS processes (now `Advanced` fallback providers) are killed on stop/exit. Local AI setup no longer asks for a Python venv when the active provider needs none (native Kokoro, OpenAI). | Configured XTTS output directory exists for server operation and could contain files created by the external XTTS server. First run needs one explicit Doctor install click before native Kokoro can synthesize speech. |
-| Agent workspace tools | Agent file tools are constrained to the selected workspace (`AgentWorkspaceTools.ResolveSafePath` plus symlink-ancestor and reparse-point rejection), skip symlinked entries, use case-sensitive path checks on case-sensitive platforms, validate task IDs with a safe allowlist, and block unsupported shell/network/install/commit/push actions. `AgentSafetyGate` auto-executes only a fixed read-only tool list, requires approval for every mutation and every `mcp:` call, and blocks unknown tool names outright. Applied mutations capture a pre-image and are individually revertible, refusing if the file changed again since (r6). | Approved draft patch application can still overwrite intended workspace files before a revert is requested, so review remains mandatory; revert is a mitigation for an approved-but-regretted patch, not a substitute for careful review. |
+| Agent workspace tools | Agent file tools are constrained to the selected workspace (`AgentWorkspaceTools.ResolveSafePath` plus symlink-ancestor and reparse-point rejection), skip symlinked entries, use case-sensitive path checks on case-sensitive platforms, validate task IDs with a safe allowlist, and block unsupported shell/network/install/commit/push actions. `AgentSafetyGate` auto-executes only a fixed read-only tool list, requires approval for every mutation and every `mcp:` call, and blocks unknown tool names outright. Applied mutations capture a pre-image and are individually revertible, refusing if the file changed again since (r6). A whole run can be reverted in one action (Task Rewind, r23): the same per-file refusal rule applies per path, so Rewind can only restore content the agent itself wrote and never overwrites a newer edit; revert paths go through the same containment checks as every other file operation. | Approved draft patch application can still overwrite intended workspace files before a revert is requested, so review remains mandatory; revert (single-patch or whole-run) is a mitigation for an approved-but-regretted change, not a substitute for careful review. Rewind never covers command side effects (it cannot un-run `dotnet build`). |
 | Agent run_command | Commands execute only when they match one of seven hardcoded template families (`dotnet build/test`, `npm test`, `npm run`, `cargo build/test`, `pytest`), the family is also declared in the workspace's own manifest recipes, and the optional argument validates (workspace-contained path, or an npm script that already exists in package.json). Execution uses `ProcessStartInfo.ArgumentList` with no shell, a 5-minute timeout, and process-tree kill; every run requires approval. | The approval prompt shows the command family, not what it transitively executes: `npm run x` runs whatever package.json defines for `x`, and `dotnet build` runs workspace MSBuild targets. On a hostile workspace an approved recipe is still arbitrary code execution. |
-| Agent lessons | Lessons live in `agent/lessons.db` under the data root with schema-versioned additive migrations. They are derived from task outcomes, deduped by signature, confidence-scored, and injected read-only: capped at 10, formatted as a separate prompt block, never reachable by chat's `[MEMORY_UPDATE]`/`[MEMORY_FORGET]` markers, and chat consumption (`Memory.ConsumeAgentLessonsInChat`) is off by default. | Lesson text originates partly from model output and workspace content, so it is a persistence channel: misleading content encountered in one task can be re-injected into later agent tasks or chat as a stored "lesson". Lifecycle controls (pin/retire/delete) exist in the Agent workbench but poisoning is not automatically detected. |
+| Agent workspace policy | A workspace can optionally declare a `policy` block in `.hermaeus/workspace.json` (read/write glob allow-lists, a `never` deny-list, a per-task file-read cap), enforced in `AgentWorkspaceTools` immediately after containment/symlink checks and reusing `glob_files`'s own matcher (r23). Policy only ever narrows: since the manifest lives inside the workspace, hostile content can author one, but the implementation makes it structurally impossible for policy to grant a path outside the root, a new command family, or a gate relaxation. A malformed policy is rejected as a whole, with a visible warning, rather than silently falling back to a half-applied restriction. | No policy editor UI; the manifest is hand-edited. `run_command`'s optional path argument is checked at execution time rather than pre-approval classification time (see `docs/security-roadmap.md`). |
+| Approval integrity | Every pending action carries a fingerprint (SHA256 over the tool name and canonicalized arguments) computed when it is created; approving it requires the caller to supply the fingerprint of what it actually rendered, and a mismatch refuses execution instead of running whatever is currently pending (r23). Closes a TOCTOU gap: a concurrent step, a crash-restore race, or a tampered `task_state.json` between render and click can no longer make the user approve one action and execute a different one. Rejection is unaffected by a mismatch (rejecting the wrong thing executes nothing regardless), though the mismatch is still recorded. | None significant; a legacy (pre-r23) pending action with no stored fingerprint is handled by recomputing from ToolName/Arguments at both render and approval time. |
+| Agent lessons | Lessons live in `agent/lessons.db` under the data root with schema-versioned additive migrations. They are derived from task outcomes, deduped by signature, confidence-scored, and injected read-only: capped at 10, formatted as a separate prompt block, never reachable by chat's `[MEMORY_UPDATE]`/`[MEMORY_FORGET]` markers, and chat consumption (`Memory.ConsumeAgentLessonsInChat`) is off by default. The safety gate never reads the lesson store, so a poisoned lesson cannot widen execution. A model-authored (`[LESSON: ...]`) claim that reads as an approval-policy statement ("the user approves all commands") is deterministically rejected outright at capture time and never stored, closing the social-engineering channel a stored claim like that would otherwise be (r23). | Lesson text otherwise still originates partly from model output and workspace content, so it remains a persistence channel: misleading (non-approval-claim) content encountered in one task can be re-injected into later agent tasks or chat as a stored "lesson". Lifecycle controls (pin/retire/delete) exist in the Agent workbench but general poisoning is not automatically detected. |
 | Voice channels | Voice output is centralized in `VoiceOrchestrator`: one utterance at a time, priority queue, per-channel enablement that defaults to Chat only, so Doctor/Agent/Benchmark/Notification speech is opt-in. Agent narration is built from task state, never from raw model text. Notification voice forwards only Warning/Error toasts. | Utterance text goes to whichever TTS provider is active. With a remote provider (OpenAI voice), enabled channels send app-generated text such as toast messages and Doctor findings, which can include local file paths, to the remote API. Voice text does not pass through log redaction. |
 | Benchmark insights | Insights are deterministic aggregation over locally stored runs (`BenchmarkInsightsMath`): no LLM, no network, no new database. The Doctor advisory that compares the active model against benchmark leaders is Info-severity only and never switches anything automatically. | None significant; recommendations can be skewed by unrepresentative local runs, which is a quality issue rather than a security one. |
 | MCP tool bridge | Each configured MCP server can optionally be restricted to an explicit allowed-tools list (Settings > MCP Servers); an empty list permits every tool the server declares, matching prior behavior. The bridge independently refuses to forward a tool name the server did not actually declare via `tools/list`, even if a stale allowlist entry names it, so a compromised server cannot expand its own callable surface by simply declaring more tools. Every `mcp:` call always requires approval regardless of what the allowlist or the server claims about itself. The client drains a spawned server's stderr continuously and faults outstanding calls immediately if the server process closes its connection, rather than hanging for the full per-call timeout. | A configured server's declared tool descriptions are still visible to the model verbatim and are prompt-injection surface; the allowlist restricts which tools can execute, not what a malicious description can say to influence the model's next step. |
@@ -90,6 +83,7 @@ penetration-test report.
 | SQLite schemas | Conversation, memory, RAG, and Agent task-index databases record schema versions in `hermaeus_schema_versions` before running additive migrations. | Existing migrations are additive. Destructive migrations still need bespoke backup and verification steps before public release. |
 | Tray and hotkeys | Close exits and stops managed services. Minimize-to-tray is explicit. Tray menu includes Stop Services and Quit. Local hotkeys only work while focused. Windows global hotkeys are opt-in and registered through the OS hotkey API. | Linux global hotkeys remain deferred because Wayland/X11 compositor behavior varies. |
 | Packaging | Linux/Windows archives include README, license, notice, commercial terms, and checksums. Linux desktop install is user-local. | Archives are unsigned; users must verify checksums from a trusted channel. |
+| Update check | Doctor makes anonymous, unauthenticated GETs to GitHub's public releases API for `MortisDei/hermaeus` and `ggerganov/llama.cpp` to compare the newest published tag against the running/installed version. No request body, no telemetry, no identifying data beyond standard HTTP/TLS metadata. A failed or unreachable request (including a private repository, which returns 404) is treated as informational, not an error. Neither check ever downloads or applies anything; each one's only action opens the corresponding releases page in the default browser for the user to install manually. Both results are cached in memory for one hour (`DoctorService.GetCachedGitHubReleaseAsync`) rather than re-fetched on every scan. | This is an automatic outbound network call with no per-scan opt-out toggle. The hourly cache exists for reliability (GitHub's 60 requests/hour anonymous rate limit was exhausted in practice by repeated scans, which then made a genuine llama.cpp update attempt fail with a 403), not for privacy, so it does not reduce what GitHub can observe (an install exists and checked in) below one request per hour per check while the app is in use. |
 | Local API host | `Hermaeus.LocalApi` is off by default; `LocalApiProcessManager` only launches the child process when a user explicitly enables it in Settings and at least one named token exists, and the host itself independently refuses to serve if launched directly with the setting off. It binds `127.0.0.1` only, never `0.0.0.0`. Each configured caller gets its own named token; every request must present a matching `X-Hermaeus-Token` header, and the host fails closed (503) when no token exists, rather than allowing unauthenticated access. A token can be revoked individually without affecting the others. The surface is deliberately minimal: chat completion (buffered or SSE-streamed), embeddings, memory query, RAG query, and a read-only models list, no agent/benchmark/settings endpoints. Every call is logged to the shared trace store (`TraceKind.LocalApi`) keyed by the verified token name that authenticated it, and Privacy Audit's "Local API activity" item shows which per-app tokens have been calling in, and how often. | Any other local process on a shared machine that learns a token can call the API for as long as that token stays valid. The `X-Hermaeus-Client` header is still recorded alongside the verified token name, but only as a self-reported, unverified display hint, not an access-control or attribution guarantee (a caller can claim to be anyone). |
 
 ## Threat Scenarios
@@ -111,9 +105,8 @@ Current mitigations:
   secret parameters, AWS-style access keys, Azure-style key assignments,
   password parameters, `api_key=`, and home paths before entries reach disk.
 
-Required follow-up:
-
-- Show a clearer UI state when the local fallback vault is active.
+Required follow-up: see `docs/security-roadmap.md` ("Clearer UI state when
+the local fallback secret vault is active").
 
 ### Accidental LAN Exposure
 
@@ -126,10 +119,8 @@ Current mitigations:
 - Health checks target loopback only.
 - README documents localhost binding as the managed-service posture.
 
-Required follow-up:
-
-- Decide whether host override warnings should become hard blocks for
-  public release builds.
+Required follow-up: see `docs/security-roadmap.md` ("Optional blocking
+policy for network-affecting `llama-server` flags").
 
 ### Unsafe Restore Or Migration
 
@@ -148,10 +139,9 @@ Current mitigations:
 - Data-root migration refuses conflicting destination DB files.
 - Migration creates timestamped backup copies under the destination.
 
-Required follow-up:
-
-- Add a backup manifest with app version and source platform.
-- Consider dry-run restore previews before extracting.
+Required follow-up: see `docs/security-roadmap.md` ("Backup manifest
+recording app version and source platform", "Restore preview / dry-run
+before extracting").
 
 ### RAG Corpus Abuse
 
@@ -168,11 +158,9 @@ Current mitigations:
 - Web pages are capped and script/style blocks are stripped before chunking.
 - Prompt template shape is validated.
 
-Required follow-up:
-
-- Enforce configurable file-size limits instead of warning only.
-- Add domain allow-listing or stronger provenance controls if web ingest grows
-  beyond explicit single-page fetches.
+Required follow-up: see `docs/security-roadmap.md` ("Stronger RAG file-size
+enforcement", "Broader text sanitization / domain allow-listing for web
+ingest").
 
 ### Malicious Local Executable Path
 
@@ -187,22 +175,24 @@ Current mitigations:
   scope, runtime endpoints, and network exposure warnings.
 - Managed child processes are killed on stop/dispose.
 
-Required follow-up:
-
-- Consider hash display/pinning for known local runtime binaries.
+Required follow-up: see `docs/security-roadmap.md` ("Hash display/pinning
+for known local runtime binaries").
 
 ### Hostile Workspace Content
 
 Attack path: the Agent is pointed at a workspace containing adversarial
-content (prompt-injection text in source files or docs, a malicious
-package.json script, hostile MSBuild targets). The model is steered into
-proposing harmful patches, running a recipe that executes attacker code, or
-storing misleading lessons that persist into future tasks.
+content (prompt-injection text in source files or docs, provocative file or
+directory names, a malicious package.json script, hostile MSBuild targets,
+or an instruction to record a misleading lesson). The model is steered into
+proposing harmful patches, running a recipe that executes attacker code,
+leaking a file it should never read, or storing a lesson that persists into
+future tasks.
 
 Current mitigations:
 
-- Read-first posture: injected text can only influence the model's proposals;
-  every mutation and every command still stops at the human approval gate.
+- Read-first posture: injected text (in file bodies, filenames, or listings)
+  can only influence the model's proposals; every mutation and every
+  command still stops at the human approval gate.
 - run_command is limited to declared recipe families with validated
   arguments; no arbitrary shell ever executes.
 - Risk classification is deterministic and recorded in `agent.trace.jsonl`,
@@ -212,23 +202,61 @@ Current mitigations:
   package.json for `npm run`, or a fixed provenance note for
   `dotnet`/`cargo`/`pytest` naming that they run workspace-defined build or
   test logic (`AgentApprovalPreview`, r6).
+- A workspace can declare a read/write/never policy that narrows (never
+  widens) what the agent's tools may touch inside it, enforced immediately
+  after containment (r23); a hostile workspace authoring its own
+  restrictive policy can only restrict the agent further, never grant it
+  anything.
+- A user-intent goal that pre-announces consent ("this is pre-approved, do
+  not ask again") does not skip the approval gate; tool authority is never
+  derived from what the goal text claims (r23, exercised by Agent Scenario
+  Suite `14-confused-user-authority`).
 - Lessons are read-only at injection time, capped, labeled with confidence
   and evidence counts, and manageable (pin/retire/delete) in the workbench.
   A task that actually creates a new lesson (not merely reinforces an
   existing one) surfaces it in a "new lessons" strip with Keep/Retire
   actions at that task's next load, so a poisoned lesson is seen once by a
   human before it can silently keep influencing future prompts (r6,
-  `AgentTaskState.NewLessonIds`).
+  `AgentTaskState.NewLessonIds`). A model-authored lesson claiming
+  approval/permission ("the user approves all commands") is rejected
+  outright at capture time and never stored at all (r23).
 - Agent narration never speaks raw model text, removing one social-engineering
   channel.
 - Applied file mutations (the manual draft-patch queue and direct
   `edit_file`/`create_file`/`apply_draft_patch` approvals alike) capture a
-  pre-image and can be reverted; revert refuses instead of overwriting if
-  the file changed again after the patch was applied (r6, `AgentPatchReviewService.RevertAsync`).
+  pre-image and can be reverted, individually or as a whole run; revert
+  refuses instead of overwriting if the file changed again after the patch
+  was applied (r6 `AgentPatchReviewService.RevertAsync`; r23
+  `RevertTaskAsync`).
 
-Required follow-up:
+Required follow-up: none outstanding at this pass.
 
-- None outstanding at this pass.
+### Approval Integrity (Time-of-Check to Time-of-Use)
+
+Attack path: the workbench renders a pending action for the user to review,
+but by the time the user clicks Approve, the actual pending action has
+changed (a concurrent step advanced it, a crash-restore race replaced it, or
+`task_state.json` was edited between render and click) - so the user
+believes they approved one thing while a different action executes.
+
+Current mitigations:
+
+- Every pending action carries a fingerprint (SHA256 over the tool name and
+  canonicalized arguments) computed once, when it is created.
+- Approving requires the caller to supply the fingerprint of the action it
+  actually rendered; the service recomputes the fingerprint of whatever is
+  actually pending right now and refuses to execute on a mismatch, leaving
+  the pending action untouched and the task waiting for review (r23).
+- The mismatch (both the expected and actual fingerprint) is recorded in
+  `agent.trace.jsonl` regardless of whether the caller was approving or
+  rejecting, so a race is auditable even on the reject path, where it does
+  not need to block anything (rejecting the wrong thing executes nothing).
+- A pre-r23 persisted task with no stored fingerprint is handled by
+  recomputing from ToolName/Arguments at both render and approval time, so
+  legacy tasks keep working without a migration and without weakening the
+  check for new ones.
+
+Required follow-up: none outstanding at this pass.
 
 ### Local API Token Compromise
 
@@ -256,12 +284,8 @@ Current mitigations:
   keyed by the verified token identity rather than the unverifiable
   self-reported name.
 
-Required follow-up:
-
-- None outstanding at this pass. A further hardening step (not yet done) is
-  per-server tool-level scoping for the local API itself, analogous to the
-  MCP per-server allowed-tools list, if the surface grows beyond its current
-  five endpoints.
+Required follow-up: see `docs/security-roadmap.md` ("Local API per-server
+tool-level scoping").
 
 ### Agent Scenario Suite (Contributed Scenario Content)
 
@@ -294,612 +318,25 @@ Current mitigations:
   isolation guarantee does not depend on cleanup succeeding - the real data
   root is never referenced by the execution path in the first place, only
   by report export after a suite finishes.
+- Sixteen scenarios ship built in (r23 added three: confused user
+  authority, tool result poisoning, memory poisoning); see
+  `docs/agent.md` "Scenario Suite Checks" for the current roster and what
+  each one grades.
 
-Required follow-up:
-
-- None outstanding at this pass. A user-authored scenario can auto-approve
-  file-mutating tools (`edit_file`, `create_file`, `apply_draft_patch`);
-  those writes land in the sandbox copy only, but a reviewer importing a
-  third-party scenario should still read `scenario.json` before running it,
-  the same way they would review any other script before executing it.
-
-### r8: Starter Model Downloads, Clickable Links, Pronunciation Lexicon
-
-Three new download/content-rendering surfaces landed in `0.13.0-alpha`.
-
-- **Starter model downloads** (`StarterModelCatalog`, wired through the setup
-  wizard). The catalog is a hardcoded, three-entry list (no user-supplied
-  URLs); every entry is `https://` and carries a pinned SHA256 verified via
-  the existing `ModelDownloadService.VerifyHashAsync` before the file is
-  trusted. A hash mismatch deletes the downloaded file and reports an error;
-  the app's settings are left untouched. No new download primitive was
-  introduced - this reuses the same verified path `DoctorService`'s
-  reranker/embedding-model installs already use.
-- **Clickable markdown links** (`MarkdownViewer`). Assistant output can now
-  open the user's default browser on click. Mitigations: a scheme allowlist
-  (`IsSafeLinkScheme`, `http`/`https` only - `file:`, `javascript:`, `data:`,
-  and anything unparsable render as inert styled text, never launched), an
-  explicit user click is required (nothing auto-opens), and the full target
-  URL is shown in the link's tooltip before the click happens.
-- **User pronunciation lexicon** (`{DataRoot}/voice/lexicon.txt`). Plain text,
-  parsed defensively: every IPA value is validated against Kokoro's fixed
-  vocabulary symbol-by-symbol before being accepted; a line that fails
-  validation is skipped and logged, never executed, interpolated, or passed
-  to a shell. The file only ever affects locally-synthesized speech text.
-
-### r9: Server Lifecycle Hardening
-
-`0.14.0-alpha` closes the process-lifecycle gap the 2026-07-15 crash exposed:
-an orphaned `llama-server` held a port, RAM, and GPU layers across app
-restarts. Three new surfaces, all confined to processes the app itself
-launched.
-
-- **Job-object process containment** (`ProcessJobObject`,
-  `Win32ProcessJobObject`). On Windows, every managed server, auto-tune
-  probe, and voice-engine (XTTS/Kokoro) child process is assigned to one
-  shared job object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, so the OS
-  kills them when the app process dies, however it dies. This is containment
-  of the app's own children, not a new attack surface: no new process is
-  launched that wasn't already being launched, and job-object creation or
-  assignment failure only logs a Warning and never blocks or alters the
-  launch. Non-Windows is a no-op behind `OperatingSystem.IsWindows()`.
-- **Port-owner lookup** (`PortOwnerLookup`, `SystemPortOwnerLookup`). Before
-  launching, and when detecting an orphan, the app reads local TCP listener
-  state (`IPGlobalProperties.GetActiveTcpListeners()`, cross-platform) and,
-  best-effort on Windows, the PID and executable path of whatever process
-  owns a given loopback port (`GetExtendedTcpTable`, read-only). This is
-  read-only process metadata inspection - it names a process for the user,
-  it never acts on what it finds by itself.
-- **Orphan Stop affordance** (`OrphanServerDetector`). This is the only place
-  the app terminates a process it did not start this session, so it is the
-  most sensitive of the three additions. Mitigations: (1) exact-path
-  identification - a process only qualifies as "this server's own orphan,"
-  and only then gets a Stop button, when its executable path matches the
-  server's configured `ExecutablePath` exactly (normalized, case-insensitive
-  on Windows); any other process on the port is reported for information
-  only, with no Stop affordance, matching the existing rule that the app must
-  never terminate a process it cannot positively identify as its own binary.
-  (2) Stopping is never automatic - it requires an explicit user click,
-  routed through `OrphanServerDetector.TryStop`. (3) PID-reuse guard: the
-  port's owner and its executable path are both re-verified immediately
-  before the kill, inside `TryStop` itself, not from a cached snapshot the
-  UI took when it first showed the banner; a PID that has since been
-  reassigned to a different process, or whose executable no longer matches,
-  refuses the stop instead of killing the wrong process.
-
-Explicitly rejected for this round (see `docs/review/archived/r9/04-roadmap.md`):
-auto-killing an unrecognized process on a conflicting port, and any
-synchronization-based alternative to UI-thread marshaling for the unrelated
-`UiBoundCollection<T>` guard work landing in the same release.
-
-### r10: RAG Storage-Destructive Actions and Shutdown Disposal
-
-`0.15.0-alpha` is a RAG-subsystem correctness/quality pass with two
-data-destructive or data-rewriting additions and one shutdown-disposal
-change. No new network surface.
-
-- **Reindex action** (`RagPipeline.ReindexDatasetAsync`, `RagViewModel.
-  ReindexDatasetAsync`). Re-embeds every stored chunk of a dataset with the
-  currently configured embedding model and rewrites the dataset's recorded
-  `EmbeddingModel`/`EmbeddingDimensions`. Explicit and user-clicked (a button
-  shown only when the dataset's recorded model differs from the current
-  one); never a side effect of ingest or a background pass. Operates only on
-  the app's own `conversations.db` chunk rows - it re-embeds stored content,
-  never touches or requires the original source files, and never reaches the
-  filesystem outside the data root.
-- **Remove missing sources** (`RagQueryService.RemoveMissingSourcesAsync`,
-  `RagViewModel.RemoveMissingSourcesAsync`). Deletes chunk rows for source
-  files no longer present on disk. Confirm-gated in the VM the same way
-  dataset delete is (`RequestRemoveMissingSourcesConfirmation`, a dialog
-  listing the exact paths about to be dropped before the user can proceed).
-  Never automatic during ingest or a health refresh: a temporarily
-  unmounted drive must not silently shred a dataset, matching r9's
-  rejection of auto-killing an unrecognized process. Deletes only rows in
-  the app's own database; the source files themselves are never touched.
-- **Dataset delete no longer relies on a foreign-key pragma.**
-  `DeleteDatasetAsync` previously depended on `ON DELETE CASCADE`, but no
-  connection ever enabled SQLite foreign-key enforcement, so every deleted
-  dataset left its chunks and BM25 stats behind. Deletes are now explicit,
-  transactional statements in `SqliteRagStore`, and store initialization
-  does a one-time sweep (logged if non-zero) for rows already orphaned by
-  the old behavior. This closes a data-retention gap (deleted data was not
-  actually deleted), not a new destructive surface.
-- **Shutdown disposal.** `App.axaml.cs` disposed the DI container
-  synchronously (`sp.Dispose()`), which throws for any singleton that is
-  `IAsyncDisposable`-only - `McpToolBridge` is exactly that, so an active MCP
-  session produced an unhandled exception on window close. Shutdown now
-  awaits `sp.DisposeAsync()` bounded to 5 seconds; a hung MCP child process
-  is abandoned to the existing r9 job-object containment rather than
-  blocking exit. This changes shutdown disposal only, not what the app is
-  allowed to launch or terminate during a normal session. A guard test
-  (`ShutdownDisposalTests`) enumerates every singleton registration whose
-  implementation type is `IAsyncDisposable`-only against a maintained
-  allowlist, so the next async-only service added to the DI graph fails the
-  build instead of silently reintroducing this crash.
-
-Explicitly rejected for this round (see `docs/review/archived/r10/04-roadmap.md`):
-auto-reindexing a dataset when the embedding model changes, auto-removing
-missing-source chunks during ingest, a vector database or persisted
-ANN/inverted index dependency, LLM-based query expansion on the query path, a
-semantic grounding scorer to replace token overlap, auto-changing
-`llama-server` flags from send-lag findings, an async-over-sync rework of
-Avalonia's synchronous `Exit` event, and stripping em dashes app-wide (the
-new typographic normalization in `KokoroTextNormalizer` is scoped to the
-speech boundary only, not authored text or chat rendering).
-
-### r11: Services Deep-Dive
-
-`0.16.0-alpha` is the first dedicated audit of Hermaeus.Services (providers,
-process management, stores, setup/download, Doctor, voice glue). No new
-network surface; the touches below are to the app's only self-updating
-binary download, the data-root migration, and an information-leak-class fix.
-
-- **The llama-server installer is rebuilt.** Previously the only code path
-  that downloads and runs a third-party binary. `ArchiveExtractor` extracts
-  the real llama.cpp release archive (zip on Windows, tar.gz elsewhere) with
-  a zip-slip guard: every entry's resolved destination is checked to remain
-  inside the target directory before it is written, and a malicious entry
-  (`../evil.exe`, or an absolute path) is rejected outright rather than
-  extracted. **Provenance decision:** GitHub's releases API does not publish
-  per-asset SHA256 hashes, so the pinned-tag download path is HTTPS + GitHub
-  origin + exact tag + exact asset name, not a pinned hash - the same trust
-  boundary the app already places in GitHub for its own release channel. The
-  latest-release path additionally verifies the selected asset matches this
-  platform's expected naming exactly (`SelectDownloadAsset`, tested against
-  a captured real release fixture) before downloading. This is a narrower
-  guarantee than the SHA256-pinned starter-model and embedding-model
-  downloads (r8/Doctor), which remain the standard for content Hermaeus can
-  pin a fixed hash for; it is recorded here as a deliberate, scoped
-  exception for a binary that moves with every llama.cpp release.
-- **The setup wizard's Phi-4 model download closes the last unverified-
-  download gap.** `ModelHashes` was an empty map (dead verification branch);
-  the download is now pinned via the Hugging Face LFS oid, matching the r8
-  `StarterModelCatalog`/Doctor embedding-model precedent, and a failed
-  verification deletes the file.
-- **Data-root migration now moves `secrets.local.json`/`secrets.local.key`
-  along with everything else the app writes to the data root**, closing a
-  gap where a moved data root left a live copy of the app's most sensitive
-  file behind in the old root while the new root's `SecretStore` silently
-  reported missing credentials. The move is a `File.Move` (not copy), so the
-  old root retains nothing after migration; the moved files have their
-  owner-only Unix permissions re-applied (mirrors `SecretStore`'s own
-  `TryRestrictPermissions`) since a move does not guarantee mode bits
-  survive across filesystems. `BackupService` shares the same
-  `DataRootManifest` enumeration and continues to exclude both secrets files
-  from backups by design, unchanged from prior rounds.
-- **Runtime-profile health checks no longer send a secret reference as a
-  bearer token.** When a runtime profile's API key was stored through
-  `ISecretStore`, `CheckHealthAsync` sent the literal `secret:<name>` string
-  as the `Authorization` header instead of resolving it - an information-
-  leak-class issue (the reference string reaches a network peer instead of
-  the credential), low severity and loopback-typical for local runtimes, but
-  a real bug for any profile pointed at a remote OpenAI-compatible endpoint.
-  Resolved via the same `ISecretStore.ResolveAsync` path every other
-  outbound call uses.
-
-### r12: ViewModels Deep-Dive
-
-`0.17.0-alpha` is the first dedicated audit of Hermaeus.ViewModels. No new
-network, process, or secret surface; the two touches below shrink an
-existing implicit-trust surface and close a settings-integrity gap.
-
-- **The agent no longer treats the user's whole profile folder as an
-  implicit workspace.** `AgentViewModel.WorkspaceRoot` defaulted to
-  `Environment.SpecialFolder.UserProfile`, and `LoadAsync` (run at every
-  startup and on every Agent panel navigation) unconditionally enumerated
-  and analyzed it, writing a "Workspace profile" workspace-memory entry for
-  a folder the user never explicitly chose - against the standing posture
-  that the agent's workspace is always an explicit user choice. The default
-  is now empty; the existing "no workspace selected" empty state governs
-  until the user picks a root, at which point the previously-audited
-  read-first, approval-gated tool surface applies exactly as before.
-- **Trust rescans are now genuinely read-only with respect to settings.**
-  `TrustSettingsViewModel.SyncSettingsForTrustScan` used to copy the
-  edit-box values (TTS paths, assets root, reranker path) directly onto the
-  live, shared `ISettingsService.Settings` object without saving - a scan
-  could leave an unconfirmed edit sitting in memory until an unrelated save
-  persisted it. Trust scans (and the Local AI setup scan) now build a
-  scan-scoped deep copy instead; nothing a scan does can affect what
-  eventually reaches disk. The broader settings-lifecycle fix behind this
-  (`SettingsViewModel.SaveAsync` applying onto a deep copy, swapped in only
-  on success) is a data-integrity hardening, not a new attack surface, but
-  is recorded here since it changes how live settings can be mutated.
-
-### r13: Model Library And Hugging Face Integration
-
-`0.18.0-alpha` adds one genuinely new outbound surface (huggingface.co) and
-two new data-mutation actions (the model folder organizer and the model
-updater), plus read-only registry queries for honest system info. Everything
-below is scoped to that new surface; Local API, MCP, secrets, redaction, and
-RAG remain unchanged since `0.9.41-alpha`.
-
-- **New outbound surface: huggingface.co, manual-only.** `HuggingFaceClient`
-  only calls `https://huggingface.co/api/...` and
-  `https://huggingface.co/{repo}/resolve/main/...` (HTTPS, host-hardcoded,
-  no user-configurable base URL). Every call is triggered by a specific
-  button press (search, select a repo, download, "Check for updates",
-  "Update", "Link to Hugging Face repo..."); none run on startup or a timer,
-  matching the r6/r8 posture that Hermaeus's "0 configured outbound
-  destinations" claim must stay literally true until the user opts in.
-  Access is anonymous only - no HF token, no gated/private repo support (an
-  explicit r13 rejection) - so there is no new credential to store or leak.
-  `PrivacyAuditService.CountOutboundDestinationsAsync` and `ScanAsync` now
-  disclose this surface whenever the model manifest has at least one
-  repo-linked entry, so the System page's outbound-destination count stays
-  honest the same way it already does for remote chat/voice providers, RAG
-  web ingest, and MCP servers.
-- **Download integrity is origin-integrity, the same deliberate stance as
-  r11's llama-server binary.** Every HF download (starter model precedent,
-  browser download, and update) is verified against the SHA256 the repo's
-  own tree API reports (`lfs.oid`) before the file is trusted or swapped
-  into place. This is integrity against corruption and against
-  huggingface.co serving something other than what its own metadata
-  describes - not independent third-party attestation, since the hash and
-  the file come from the same origin. This mirrors the r8 starter-model
-  posture exactly and is recorded explicitly here per the r13 spec's
-  request, the same way r11 recorded the equivalent scoped exception for
-  the llama-server binary.
-- **The folder organizer is move-only and confirmation-gated.**
-  `ModelFolderOrganizer.Plan` is pure (no filesystem writes); `ExecuteAsync`
-  only runs after the view shows a full "from -> to" preview (including
-  every collision it will skip) and the user confirms. It never renames a
-  file, never overwrites a name collision, and moves multi-part GGUF sets
-  atomically (all parts or none). Leftover empty directories are offered for
-  removal as a **second, separate** confirmation, and that removal path only
-  ever deletes directories that are still empty at removal time - it never
-  deletes a file. The organizer also refuses to start while any managed
-  server is running, since Windows holds an exclusive lock on a model file a
-  running `llama-server` has open.
-- **The model updater's atomic swap never destroys the original on
-  failure.** `ModelUpdateApplier.Swap` moves the current file to
-  `<file>.previous`, moves the (already hash-verified) replacement into
-  place, and only deletes `<file>.previous` once both moves succeeded; a
-  failure at the second move restores the original from `.previous` before
-  returning, and a leftover `.previous` from a prior interrupted update is
-  refused rather than silently overwritten. The update path itself refuses
-  to run while the model is running, or while any managed server currently
-  running has that file as its `ModelPath`. A hash mismatch after download
-  deletes only the `.update.tmp` file and leaves the original untouched. No
-  update is ever auto-applied - "Update" is a per-model button press, and
-  there is no background update polling (both explicit r13 rejections).
-- **Registry reads for system truth (RAM, OS build, CPU name, GPU/VRAM) are
-  read-only HKLM queries**, wrapped in try/catch, requiring no new
-  privileges beyond what the app already runs with. No WMI (an explicit r13
-  rejection: slower and flakier on stripped installs than the P/Invoke +
-  registry + `nvidia-smi` combination already in place).
-
-### r14: GPU Runtime, Serving Defaults, Update Hygiene
-
-- **New download assets keep r11's provenance posture.** The GPU build
-  variants (`llama-<tag>-bin-win-cuda-<ver>-x64.zip`,
-  `llama-<tag>-bin-win-vulkan-x64.zip`) and the CUDA runtime companion
-  (`cudart-llama-bin-win-cuda-<ver>-x64.zip`) are the same
-  GitHub-releases-over-HTTPS, tag-pinned-or-latest-API, GitHub-origin trust
-  as the existing CPU asset: no independent per-asset hash is published, so
-  the exception is origin-integrity, not attestation - the deliberate stance
-  first stated in r11. All are extracted through the zip-slip-guarded
-  `ArchiveExtractor`. Asset names are matched by os/arch plus a fixed variant
-  token, re-verified against the live release API at implementation time.
-- **Launch-arg changes stay inside `ArgumentList` (no shell) and bound to
-  `127.0.0.1`.** The new flags (`--parallel`, `--cache-reuse`,
-  `--n-gpu-layers 999`, embeddings `-b/-ub`) are constant literals or config
-  integers, never user-interpolated strings; the loopback host bind and its
-  extra-args precedence are unchanged.
-- **Version pruning deletes only tag-pattern directories under the resolved
-  install root**, is confirm-gated (no confirmation callback means no
-  deletion), keeps the current and previous versions, and skips locked
-  directories. It never touches a user model or data path. The install-root
-  resolver walks up only `bNNNNN` directories and never into a drive root, so
-  a legitimately tag-named install root is preserved.
-- **No background/auto update polling and no auto-restart without consent**
-  (both explicit r14 rejections): update checks and the post-update
-  server-restart remain user-initiated, and no accelerator variants beyond
-  CUDA/Vulkan are added this round.
-
-### r15: Sub-Task Orchestration
-
-- **No new tool capability, no new network surface, no gate bypass.**
-  `plan_subtasks` only ever produces ordinary child tasks that go through the
-  unchanged `AgentSafetyGate`/`AgentToolExecutor` path per action; nothing in
-  this round widens what a child is allowed to do, and no approval ever
-  propagates from parent to child, child to sibling, or via
-  `RememberedCommandApprovals` (task-scoped, never inherited).
-- **The new attack surface is prompt-injected decomposition**: workspace
-  content convincing the model to propose malicious-looking sub-tasks (e.g. a
-  sub-task goal worded to make a later step look routine). Mitigation is the
-  same as every other gated action: the plan itself is approval-gated with a
-  full preview (`AgentApprovalPreview.Describe`, every proposed goal/profile
-  visible before approval), each child's own actions still hit the unchanged
-  per-action gates individually, and depth-1 (enforced in code in
-  `AgentService.RunStepAsync`, not by prompt instruction) prevents a child
-  from using its own delegation to launder a bigger blast radius through
-  recursive amplification.
-- **The standing `02-prompt-injection` scenario still passes** with
-  orchestration wired in; the scenario runner's auto-approve hook now applies
-  to child pending actions too but still refuses to auto-approve
-  `run_command` anywhere in the tree (`AgentScenarioManifestValidator`).
-- **`report.md` is written via the existing atomic-write pattern**
-  (`AtomicFileWriter`) to the parent's own task directory only, never
-  workspace-relative, so it carries the same path-safety guarantees as every
-  other agent-owned file.
-
-### r16: Orchestration Hardening, Memory Integrity, Workbench Truth
-
-- **1.4 narrows where an approved action can land; it does not loosen
-  anything.** Approving a pending `edit_file`/`create_file`/`run_command`
-  action now executes against the task's own persisted `WorkspaceRoot`
-  instead of whatever workspace the caller's options happened to describe
-  (the review queue lists tasks across every workspace, so those could
-  silently disagree). The action was already approved by the user looking
-  at its preview; the fix is executing it where it was actually authorized,
-  never adding a refusal path. A null-options approval with no stored root
-  now throws instead of half-approving (leaving `Running` with an
-  unexecuted `PendingToolAction`), closing a latent stranding path.
-- **2.2 is a new model-authored write path into the memory store, gated and
-  bounded.** The `[MEMORY: ...]` save marker was already taught to the model
-  by the existing injection prompt but never wired up; it now actually
-  saves, but only when `Memory.Enabled`, only through the same
-  `MergeAndSaveAsync` dedupe path auto-summary already uses (never a raw
-  insert), and capped at 3 new memories per turn. No new tool, no new
-  approval surface, no network call - a local SQLite write identical in
-  shape to what auto-summary already performed post-conversation, just
-  triggered per-turn instead.
-- **2.1's archived-row fix and 2.3's expiration enforcement are read-side
-  corrections, not new capability.** `SearchAsync` excluding archived/expired
-  rows and `ArchiveStaleMemoriesAsync` now also sweeping past-expiration rows
-  change what recall returns, not what the store lets anyone write or reach;
-  no new threat surface.
-- **2.4's re-embed action is destructive only to stale vectors, and only on
-  a user click.** `ClearMismatchedEmbeddingsAsync` clears `embedding`/
-  `embedding_dim` on mismatched rows and re-embeds via the existing
-  background backfill; it never runs automatically on a settings or model
-  change, and never touches memory content, only its vector cache.
-- **1.1's reconcile and 1.6's status-mirroring are internal-state
-  corrections with no new execution path.** Reconciling a child's terminal
-  status onto its parent's spec, and mirroring a paused child's status onto
-  the parent, only ever copy already-persisted, already-approval-gated state
-  around; neither can cause an action to execute that would not otherwise
-  have been approved.
-- **3.1's recent-tasks list and review-queue Open button surface existing
-  state, they do not add a new entry point to execute anything.** Opening a
-  task loads its persisted state into the workbench exactly as the existing
-  review queue already did; approvals and replies still go through the same
-  gated paths regardless of how the task was opened.
-- **3.3's conversation-delete confirmation and 3.6's Ctrl+Q removal are
-  pure friction-adding changes**, consistent with every other
-  confirm-gated destructive action in the app; neither has a security
-  implication beyond reducing accidental data loss.
-
-### r17: GGUF Header Parser (New Attack Surface Over Untrusted Files)
-
-`GgufMetadataReader` (`Hermaeus.Services/GgufMetadataReader.cs`) is the first
-code in the repo that parses byte content out of a `.gguf` model file rather
-than treating it as an opaque blob. Model files are downloaded from the
-internet (Hugging Face, direct URLs), so a malicious or corrupted file is a
-realistic input, not a hypothetical one.
-
-- **Metadata only, tensor data never read.** The parser stops after the
-  header's key/value metadata section; tensor payloads (which can be tens of
-  gigabytes) are never touched. This bounds the amount of the file that is
-  ever parsed, independent of the file's total size.
-- **Every allocation is capped before it happens.** String lengths (keys and
-  string values) are capped at 64 KiB, array element counts at 1,000,000, and
-  the metadata key/value count at 100,000, each checked against the declared
-  length *before* any buffer is allocated or bytes are read - a file
-  declaring a multi-gigabyte string or a billion-element array is rejected
-  immediately rather than causing a large allocation attempt.
-- **Every read is bounds-checked against the actual file, not the file's own
-  claims.** A declared length longer than the remaining file content raises
-  `EndOfStreamException`/`InvalidDataException` internally rather than
-  reading past the end of the stream or leaving a partially-read state;
-  `BinaryReader.ReadBytes`-style short reads (which return fewer bytes than
-  requested rather than throwing) are explicitly checked and treated as
-  truncation.
-- **Null-on-failure contract, never an escaping exception.** `TryRead`
-  catches every parse failure - bad magic, unsupported version, malformed
-  structure, an oversized declared length, a truncated file - and returns
-  null. Every call site (context-fit warning, fit chips, Auto Tune context
-  suggestion, benchmark quantization metadata) already had to handle "no
-  local file information available" as a pre-existing, tested fallback path,
-  so a hostile or corrupt GGUF file degrades those features to their
-  pre-r17 behavior rather than crashing or hanging the app.
-- **No code execution surface.** The parser only interprets a small, fixed
-  set of integer/string/array value types into fields the app already
-  displays (architecture name, quantization label, layer/head counts); there
-  is no reflection, no dynamic dispatch, and no path derived from parsed
-  content is ever used to read or write a different file.
-- **Test coverage is fixture/fuzz-style**, not just the happy path:
-  `GgufMetadataReaderTests` hand-writes byte fixtures for magic mismatch,
-  rejected versions, truncation at every structural boundary (mid-magic,
-  mid-header, mid-key, mid-value), an oversized declared string length, and
-  an oversized declared key count, alongside valid v2/v3 headers, unknown
-  value types that must be skipped without derailing later keys, and a
-  per-layer array value. No real model files are committed to the repo.
-
-### r18: First-Class llama-server Engine Options
-
-Six new `ServerConfig` fields (`KvCacheTypeK/V`, `FlashAttention`,
-`ContextShift`, `MemoryLock`, `NoMemoryMap`, `NgramSpeculative`) become
-command-line flags passed to the managed `llama-server` process.
-
-- **No new process-launch surface.** Every new flag is appended to the same
-  `ArgumentList`-based launch `ServerProcessManager.BuildLaunchArguments`
-  already builds - no shell string, no new `ProcessStartInfo` path. Values are
-  drawn from a fixed dropdown/checkbox set (`KvCacheTypeOptions`,
-  `FlashAttentionOptions`) or plain booleans, not arbitrary user text.
-- **`--host 127.0.0.1` is untouched.** No new option or preset ever emits or
-  suggests a different bind host; the tuning guide this round was sourced
-  from recommends `--host 0.0.0.0`, and that recommendation was explicitly
-  not adopted (docs/review/archived/r18/04-llama-server-engine-options.md
-  4.5). Still a standing invariant, not something this round could weaken.
-- **`ExtraArgs` always wins.** Every new first-class flag is suppressed
-  whenever the equivalent flag is already present in `ExtraArgs` (the same
-  `HasArg` guard `--parallel`/`--cache-reuse` already used), so a flag is
-  never emitted twice and a value typed into `ExtraArgs` cannot be silently
-  overridden by a first-class control the user did not touch.
-- **No forced or default-on quantization/flags.** Every new field defaults to
-  today's exact behavior (f16 KV cache, auto flash attention, everything else
-  off); "Suggest engine settings" only fills the editable form and never
-  saves without an explicit Save Config click, the same contract Auto Tune
-  already established.
-- **No new network surface.** `--rpc` (remote compute-peer pooling) was
-  explicitly not implemented this round precisely because it is a
-  distributed-systems feature needing its own trust/failure-mode review
-  (docs/review/archived/r18/05-roadmap.md).
-
-### r19: Chat Attachments (.docx/.pdf/images), Chat Artifacts, Crash Logs
-
-Four new surfaces this round touch untrusted file parsing, a new local write
-path, relocated diagnostic logging, and a new outbound payload shape.
-
-- **`.docx`/`.pdf` parsing of untrusted files.** `DocxTextExtractor`
-  (`Hermaeus.Services`) reads a user-selected `.docx` as a `ZipArchive` and
-  pulls text out of `word/document.xml` only; a non-zip file, a zip missing
-  that entry, or malformed XML is caught and returned as a structured Skip
-  result, never an escaping exception. `.pdf` extraction reuses
-  `Hermaeus.Rag.Pipeline.PdfTextExtractor` (the PdfPig-backed parser
-  `Hermaeus.Rag`'s own ingest pipeline already depends on and already has test
-  coverage for) rather than adding a second, hand-rolled parser for the same
-  file format - one reviewed PDF-parsing surface instead of two. Both paths
-  are capped before the expensive part happens (20 MB file cap for PDFs,
-  extracted-text byte caps shared with the plain-text attachment path) and a
-  file that fails to parse is Skipped with a reason shown to the user, never
-  silently substituted with empty content.
-- **Chat artifacts write to a bounded, per-conversation folder.**
-  `ChatArtifactService.SaveAsync` writes only under
-  `{DataRoot}/chat-artifacts/{sanitized conversation title, or id}/`: the
-  title (or id, when no title is available yet) is sanitized before it
-  becomes a path segment, folder identity for lookup is tracked via a hidden
-  marker file (not the folder name itself, which can legitimately collide
-  across conversations and gets deduped with a `(2)` suffix) so renaming a
-  conversation never causes a path to resolve outside its own folder, the
-  suggested filename is stripped of path separators and traversal sequences
-  before `ResolveSafePath` re-validates the final resolved path still sits
-  under that conversation's folder, and a filename collision within a folder
-  dedupes with a `(2)` suffix rather than overwriting. Writes are atomic
-  (temp file + move), the
-  same pattern `SettingsService`/`BackupService` already use.
-- **Crash log relocated under the data root, not somewhere less scoped.**
-  `Program.cs`'s unhandled-exception log now writes under
-  `{DataRoot}/logs/` (resolved via a minimal settings read that runs before
-  full DI is available) instead of the previous fixed location, keeping the
-  crash log inside the same backup/export/migration boundary as every other
-  piece of app state. `CrashLogReader` only ever reads this file back for
-  display in Doctor; it is not uploaded or transmitted anywhere.
-- **Vision payloads embed local file bytes into the request body.** An
-  attached image is read once, base64-encoded into a `data:` URI
-  client-side, and sent as an OpenAI-style `image_url` content part
-  (`OpenAiCompatibleToolWire.BuildContent`) - the same mechanism as prompt
-  text, just a different content-part type, and it only ever reaches a
-  request when the user explicitly attached the image to that message.
-  Images are gated on either the active managed server having an explicit
-  `MmprojPath` configured (Services > Vision projector), or the selected
-  model routing through the OpenAI provider (`ChatViewModel.
-  CurrentModelAcceptsVisionAttachments`); with neither, an attached image is
-  Skipped with an honest reason rather than silently degrading to a
-  text-only send. The OpenAI path trusts the user's own model choice the
-  same way the mmproj path trusts their own picker choice - Hermaeus does not
-  probe whether the specific selected OpenAI model actually supports vision,
-  the same posture it already takes for llama.cpp. The Privacy Audit's
-  remote-provider disclosure and "features that may send data remotely" item
-  both name images explicitly, so a remote chat configuration's audit entry
-  is not silently stale now that images are in play there too.
-- **`--mmproj` is a launch-argument addition, not a new launch surface.**
-  Like every r18 engine-option flag, it is appended to the same
-  `ArgumentList`-based `ServerProcessManager.BuildLaunchArguments` call - no
-  shell string, no new `ProcessStartInfo` path - and is suppressed whenever
-  `--mmproj` is already present in `ExtraArgs`, following the same
-  never-emit-twice guard those flags established.
-
-### r20: Rename Aether to Hermaeus
-
-A trademark-driven product rename, not a new feature surface. No new attack
-surface: the mechanical scope is namespaces, assembly names, file paths, and
-outbound identity strings.
-
-- **Outbound identity strings changed**, not their trust posture: the
-  `HuggingFaceClient`/`DoctorService`/`LlamaServerSetupService` user agents
-  (`Hermaeus/1.0`, `Hermaeus-Doctor/1.0`) and the MCP client-identify name
-  sent during `initialize` are cosmetic string changes to requests these
-  services already made; no new outbound call was added.
-- **Local API headers renamed** (`X-Hermaeus-Token`/`X-Hermaeus-Client`);
-  the auth model is unchanged (named bearer token per caller, fail-closed
-  when no token exists). The old header names are not accepted; this is a
-  clean break, not a downgrade.
-- **Two narrow legacy-read shims, both read-only fallbacks that never widen
-  what gets trusted.** The schema-version bookkeeping table
-  (`aether_schema_versions` to `hermaeus_schema_versions`) is renamed via a
-  same-process `ALTER TABLE` gated on the old table's existence, not a
-  general migration path; the Agent workspace manifest falls back to reading
-  `.aether/workspace.json` when the new path is absent, and always writes to
-  the new path, so an attacker cannot use the fallback to persist state the
-  new path wouldn't also accept.
-- **OS secret store service name changed** (Linux `secret-tool`, macOS
-  Keychain); this orphans, rather than exposes, any secret stored under the
-  old `Aether` service name on those platforms. No secret material moves or
-  is re-encrypted as part of this round.
-
-### r21: RAG Meets Chat
-
-No new network surface. This round moves existing local dataset content into
-chat prompts and adds one additive conversation-store column; the changes
-are about what leaves the machine under a remote provider, not about a new
-way for something to reach the machine.
-
-- **Chat knowledge injection is bounded and gated, not a free-form corpus
-  dump.** `ChatViewModel.BuildRagInjectionAsync` only ever injects a packed
-  context block through the same budget-aware `RagQueryService.
-  BuildContextPack` seam the RAG panel itself uses
-  (`RagSettings.ChatInjectionTokenBudget`, default 2000 tokens), and only
-  when retrieval clears `RagQueryService.WouldRefuse`'s confidence
-  threshold - an unrelated message ("thanks!") injects nothing even with a
-  dataset attached, which is the honesty gate that keeps a whole corpus from
-  leaking into every remote-provider chat regardless of relevance.
-- **Remote-provider implication is disclosed, not new.** Injected excerpts
-  ride the same system-prompt path memory injection and attachments already
-  use; when a remote chat provider is selected and the RAG subsystem is
-  available, the Privacy Audit's "Remote providers" entry now names Chat
-  knowledge context explicitly (`PrivacyAuditService.ScanAsync`), matching
-  the existing image-attachment disclosure style. The entry describes
-  surface (capability is live), not the current toggle state (a dataset
-  attached to this specific conversation right now), consistent with how
-  every other disclosure in that list already behaves.
-- **`Conversation.RagDatasetId` is an additive, non-executable column.**
-  `ConversationStore`'s schema version 1 to 2 migration adds
-  `rag_dataset_id TEXT NOT NULL DEFAULT ''` through the existing
-  `SqliteMigrationRunner`/`EnsureColumnAsync` pattern (the same shape r6's
-  folder/tags/pin/archive migration used); it is a plain string looked up
-  against the dataset table, never interpolated into SQL or a shell
-  argument, and is deliberately excluded from the FTS index (not searchable
-  text).
-- **Embedding-server-down fallback removes a raw-exception path, adds no new
-  privilege.** `RagQueryService.RetrieveAsync` now catches an embedding-call
-  failure and degrades to BM25-only (the same degraded path the existing
-  embedding-model-mismatch case already used), logging one Warning and
-  never caching the failure. `OperationCanceledException` is explicitly
-  rethrown rather than swallowed into the fallback, so a cancelled send or
-  query still cancels cleanly. This is a robustness fix to an existing local
-  code path, not a new capability.
-- **A stale/deleted dataset attachment degrades honestly, never silently.**
-  A `RagDatasetId` that no longer resolves is never auto-cleared (matching
-  the r10 stance that missing RAG sources are never auto-removed); the
-  picker shows "Knowledge: missing" and the send proceeds with nothing
-  injected. Dataset deletion does not scan conversations for references -
-  an explicit, documented non-goal (doc 03.2) rather than an oversight.
+Required follow-up: none outstanding at this pass. A user-authored scenario
+can auto-approve file-mutating tools (`edit_file`, `create_file`,
+`apply_draft_patch`); those writes land in the sandbox copy only, but a
+reviewer importing a third-party scenario should still read `scenario.json`
+before running it, the same way they would review any other script before
+executing it.
 
 ## Release Gate Status
 
 The initial security review and threat model refresh was completed for
-`0.13.0-alpha` as an engineering documentation gate; subsequent rounds (r14
-through r21, see Threat Scenarios above) have each re-reviewed the surface
-they touched. The following items from the original gate remain public-release
-hardening work not yet addressed by a later round:
-
-- Optional blocking policy for network-affecting `llama-server` flags.
-- Stronger RAG file-size enforcement and broader text sanitization.
-- Broader redaction fixtures for provider-specific secrets.
-- Signed packages/installers and trusted checksum publication.
-- Restore preview/manifest support.
+`0.13.0-alpha` as an engineering documentation gate; every round since (see
+`docs/security-history.md`) has re-reviewed the surface it touched. Items
+from the original gate not yet addressed by a later round now live in
+`docs/security-roadmap.md`, alongside hardening identified in later rounds.
 
 ## Validation Checklist
 
@@ -921,9 +358,16 @@ hardening work not yet addressed by a later round:
 - Agent run_command rejects undeclared families, workspace-escaping path
   arguments, and npm scripts absent from package.json.
 - Agent lessons are never mutable from chat and chat consumption defaults off.
+- A model-authored lesson claiming approval/permission is rejected outright
+  and never stored, at any confidence.
 - Voice channels other than Chat default to disabled.
-- Applied-patch revert refuses (does not overwrite) when the file changed
-  again after the patch was applied.
+- Applied-patch revert (single-patch or whole-run) refuses (does not
+  overwrite) when the file changed again after the patch was applied.
+- An approval whose fingerprint does not match the currently pending action
+  refuses to execute and leaves the task waiting for review.
+- A workspace policy's `never` rule beats both allow lists for reads and
+  writes; a malformed policy is rejected as a whole, never partially
+  applied; policy is consulted only after containment.
 - model_usage rollup counters are local-only and disclosed in Privacy Audit;
   never transmitted.
 - A child task can never itself request `plan_subtasks` (depth-1 enforced in

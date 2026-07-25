@@ -80,8 +80,34 @@ public sealed class ServicesViewModelModelPathBindingTests
 
         await server.SaveConfigCommand.ExecuteAsync(null);
 
+        // ServicesViewModel.Rebuild runs from ISettingsService.SettingsChanged via
+        // RunOnUi; under xUnit's AsyncTestSyncContext, RunOnUi's captured context does
+        // not always match the context active by the time the event fires deep inside
+        // SaveAsync's own await chain, so the posted Rebuild can land after the awaited
+        // SaveConfigCommand call already returned (see ServicesViewModelTests's own
+        // WaitForAsync for the same, already-diagnosed timing gap). Poll instead of
+        // asserting immediately.
+        await WaitForAsync(() => !string.IsNullOrWhiteSpace(server.ModelPath));
+
         Assert.False(string.IsNullOrWhiteSpace(server.ModelPath), "ModelPath was cleared by Save Config's settings-changed rebuild.");
         Assert.Equal(modelPath, server.ModelPath);
         Assert.Equal(modelPath, settings.Settings.ManagedServers[0].ModelPath);
+    }
+
+    private static async Task WaitForAsync(Func<bool> condition, int timeoutMs = 2000)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (sw.ElapsedMilliseconds < timeoutMs)
+        {
+            try
+            {
+                if (condition()) return;
+            }
+            catch (InvalidOperationException)
+            {
+                // Collection mutated mid-enumeration; treat as not-yet-settled.
+            }
+            await Task.Delay(10);
+        }
     }
 }

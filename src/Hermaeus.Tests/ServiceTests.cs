@@ -1070,6 +1070,11 @@ namespace Hermaeus.Tests
             Equal(DoctorCheckStatus.Info, backendCheck.Status, "embedding backend should be skipped until an embedding model exists");
             if (OperatingSystem.IsLinux())
                 False(report.Checks.Any(c => c.Key == "hotkeys"), "Linux global hotkey support should not be reported as a Doctor problem");
+            if (OperatingSystem.IsWindows())
+            {
+                var hotkeyCheck = report.Checks.Single(c => c.Key == "hotkeys");
+                Equal(DoctorCheckStatus.Ready, hotkeyCheck.Status, "Windows supports system-wide hotkeys and should report Ready, not a neutral Info");
+            }
         }
 
         public static async Task DoctorWarnsForUntunedLocalGgufModels()

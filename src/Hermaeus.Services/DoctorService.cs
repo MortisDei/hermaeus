@@ -43,6 +43,20 @@ public sealed partial class DoctorService : IDoctorService
     private readonly AppLifecycleJournalService? _lifecycleJournal;
     private readonly IBenchmarkInsightsService? _benchmarkInsights;
 
+    /// <summary>
+    /// Caches GitHub API release lookups (llama.cpp's update check, Hermaeus's
+    /// own) for <see cref="GitHubReleaseCacheTtl"/>. Doctor runs a full scan
+    /// automatically on every app startup plus every manual rescan, and
+    /// GitHub's anonymous API allows only 60 requests/hour per IP; without
+    /// this, a user restarting or rescanning a handful of times in an hour
+    /// could exhaust that quota on background checks alone, then have an
+    /// actual llama.cpp update attempt fail with a 403 rate-limit error.
+    /// <see cref="DoctorService"/> is a DI singleton, so this survives across
+    /// scans for the life of the app.
+    /// </summary>
+    private readonly Dictionary<string, (DateTimeOffset CachedAt, object? Value)> _gitHubReleaseCache = new();
+    private static readonly TimeSpan GitHubReleaseCacheTtl = TimeSpan.FromHours(1);
+
     public DoctorService(
         ISettingsService settings,
         RuntimeProfileService runtimes,
@@ -88,6 +102,7 @@ public sealed partial class DoctorService : IDoctorService
             await CheckAiAssetsRootAsync(ct),
             CheckLlamaServerBinary(),
             await CheckLlamaServerUpdateAsync(ct),
+            await CheckAppUpdateAsync(ct),
             CheckGgufModels(),
             CheckUntunedGgufModels(),
             await CheckOllamaAsync(ct),
@@ -130,6 +145,31 @@ public sealed partial class DoctorService : IDoctorService
             : $"Doctor scan found {errorCount} error(s) and {warningCount} warning(s).";
 
         return new DoctorReport(checks, DateTime.UtcNow, summary);
+    }
+
+    private Task<T?> GetCachedGitHubReleaseAsync<T>(string cacheKey, Func<CancellationToken, Task<T?>> fetch, CancellationToken ct) =>
+        GetCachedGitHubReleaseAsync(_gitHubReleaseCache, cacheKey, fetch, GitHubReleaseCacheTtl, ct);
+
+    /// <summary>Fetches through <paramref name="cache"/>, keyed by
+    /// <paramref name="cacheKey"/>. A failed fetch (null) is cached too, so a
+    /// rate-limited or offline moment does not retry on every subsequent scan
+    /// within the TTL either. Static and parameterized (rather than an
+    /// instance method reading <see cref="_gitHubReleaseCache"/> directly) so
+    /// the caching behaviour itself is unit-testable without a real network
+    /// call.</summary>
+    internal static async Task<T?> GetCachedGitHubReleaseAsync<T>(
+        Dictionary<string, (DateTimeOffset CachedAt, object? Value)> cache,
+        string cacheKey,
+        Func<CancellationToken, Task<T?>> fetch,
+        TimeSpan ttl,
+        CancellationToken ct)
+    {
+        if (cache.TryGetValue(cacheKey, out var cached) && DateTimeOffset.UtcNow - cached.CachedAt < ttl)
+            return (T?)cached.Value;
+
+        var result = await fetch(ct);
+        cache[cacheKey] = (DateTimeOffset.UtcNow, result);
+        return result;
     }
 
     private static DoctorCheck BuildCheck(

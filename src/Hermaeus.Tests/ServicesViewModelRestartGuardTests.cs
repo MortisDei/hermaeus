@@ -46,4 +46,35 @@ public sealed class ServicesViewModelRestartGuardTests
 
         Assert.Equal(originalStatus, server.Status);
     }
+
+    /// <summary>
+    /// A real bug report: an llama.cpp update rewrites every managed
+    /// server's ExecutablePath on the underlying config directly, including
+    /// stopped servers, but each row's own bound property only ever synced
+    /// from config at construction. SyncAllExecutablePathsFromConfig must
+    /// pick up that change for every row, whether it was ever started or
+    /// not, without starting anything.
+    /// </summary>
+    [Fact]
+    public void SyncAllExecutablePathsFromConfigUpdatesEveryRowIncludingStoppedOnes()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var services = NewServicesViewModel(settings);
+
+        foreach (var server in services.Servers)
+            Assert.Equal(ServerStatus.Stopped, server.Status);
+
+        var newPath = temp.PathFor("llama-server-new/llama-server.exe");
+        foreach (var config in settings.Settings.ManagedServers)
+            config.ExecutablePath = newPath;
+
+        services.SyncAllExecutablePathsFromConfig();
+
+        foreach (var server in services.Servers)
+        {
+            Assert.Equal(newPath, server.ExecutablePath);
+            Assert.Equal(ServerStatus.Stopped, server.Status);
+        }
+    }
 }

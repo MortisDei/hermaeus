@@ -86,8 +86,12 @@ public class TtsSettings
     public bool StreamingChatSpeech { get; set; } = false;
 
     /// <summary>
-    /// Named voice/speed combinations that channels can reference instead of
-    /// always using the global <see cref="Speaker"/>.
+    /// Legacy (pre-r24) named voice/speed combinations. The Settings > Voice
+    /// UI no longer creates or edits these; kept only so
+    /// <see cref="VoiceChannelConfig.ProfileName"/> can still resolve for
+    /// settings saved before profiles were removed, and so the Agent
+    /// workspace's separate free-text narration voice profile field keeps
+    /// working.
     /// </summary>
     public List<VoiceProfile> Profiles { get; set; } = [];
 
@@ -110,5 +114,19 @@ public sealed class VoiceProfile
 public sealed class VoiceChannelConfig
 {
     public bool Enabled { get; set; }
+
+    /// <summary>
+    /// The provider voice id to speak this channel with. Empty means "use
+    /// the global <see cref="TtsSettings.Speaker"/>" (r24: named voice
+    /// profiles were removed as a confusing extra step; a channel just has
+    /// a voice directly now).
+    /// </summary>
+    public string VoiceId { get; set; } = "";
+
+    /// <summary>
+    /// Legacy (pre-r24): the name of a <see cref="TtsSettings.Profiles"/>
+    /// entry. Read-only fallback so a channel voice chosen before profiles
+    /// were removed is not silently lost; current code never writes this.
+    /// </summary>
     public string ProfileName { get; set; } = "";
 }

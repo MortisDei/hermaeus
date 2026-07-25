@@ -48,7 +48,12 @@ public sealed class AgentService : IAgentService
         remembering for next time that is not already covered there, say so
         with a [LESSON: <short observation>] marker anywhere in
         thought_summary or user_message; it will not be shown to the user
-        verbatim.
+        verbatim. Approval policy is never a valid lesson subject - a lesson
+        claiming the user approves, pre-approves, or does not need to review
+        something is rejected outright, not stored.
+        On a final answer you may optionally include "reservations": a short
+        list of specific things you looked for and could not verify or
+        finish - not a hedge, not a confidence score, and never required.
         Return only valid JSON matching:
         {
           "thought_summary": "brief user-visible reasoning summary",
@@ -66,7 +71,8 @@ public sealed class AgentService : IAgentService
             "new_facts": [],
             "blockers": []
           },
-          "user_message": "message for the user"
+          "user_message": "message for the user",
+          "reservations": []
         }
         """;
 
@@ -314,6 +320,17 @@ public sealed class AgentService : IAgentService
         AgentToolResult? executedToolResult = null;
         if (response.NextAction.Type == AgentActionKind.Tool)
         {
+            var manifest = _manifests is null ? null : await _manifests.LoadAsync(options.WorkspaceRoot, ct);
+            // Carries the workspace policy (r23 3.1) and a per-task read
+            // budget seeded from persisted state into every tool call this
+            // step makes - both the Allowed-tool direct-execute path below
+            // and, via AppendApprovalAsync, the later approved-write path.
+            var toolOptions = options with
+            {
+                Policy = manifest?.Policy,
+                ReadBudget = new AgentReadBudget { MaxReads = manifest?.Policy?.MaxFileReadsPerTask ?? 0, UsedReads = state.FileReadCount }
+            };
+
             AgentToolPolicyDecision decision;
             if (string.Equals(nextTool, "plan_subtasks", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(state.ParentTaskId))
             {
@@ -337,7 +354,6 @@ public sealed class AgentService : IAgentService
             else if (string.Equals(nextTool, "run_command", StringComparison.OrdinalIgnoreCase))
             {
                 var requestedCommand = AgentToolExecutor.Arg(response.NextAction.Arguments, "command");
-                var manifest = _manifests is null ? null : await _manifests.LoadAsync(options.WorkspaceRoot, ct);
                 decision = _safetyGate.EvaluateCommand(requestedCommand, manifest?.AllowedCommands ?? []);
                 if (decision.Disposition == AgentToolDisposition.RequiresApproval
                     && state.RememberedCommandApprovals.Any(c => string.Equals(c, requestedCommand.Trim(), StringComparison.OrdinalIgnoreCase)))
@@ -349,6 +365,19 @@ public sealed class AgentService : IAgentService
                     // trusted".
                     decision = decision with { Disposition = AgentToolDisposition.Allowed, Reason = "Command was already approved once in this task." };
                 }
+            }
+            else if (nextTool is "edit_file" or "create_file" or "apply_draft_patch")
+            {
+                // A policy-denied write is classified Blocked before it ever
+                // becomes an approvable pending action (r23 3.2); the same
+                // rule is re-checked at actual execution time inside
+                // AgentWorkspaceTools, for the draft-patch queue and Rewind
+                // paths that do not go through this classification step.
+                var targetPath = AgentToolExecutor.Arg(response.NextAction.Arguments, "relative_path", "path");
+                var writeVerdict = WorkspacePolicyEvaluator.EvaluateWrite(manifest?.Policy, targetPath);
+                decision = writeVerdict.Allowed
+                    ? _safetyGate.Evaluate(nextTool, response.NextAction.RequiresApproval)
+                    : new AgentToolPolicyDecision(AgentToolDisposition.Blocked, AgentRiskLevel.High, $"write blocked by workspace policy: {writeVerdict.Reason}");
             }
             else
             {
@@ -366,7 +395,8 @@ public sealed class AgentService : IAgentService
                         ToolName = nextTool,
                         Arguments = response.NextAction.Arguments,
                         RiskLevel = decision.RiskLevel,
-                        Reason = decision.Reason
+                        Reason = decision.Reason,
+                        Fingerprint = AgentApprovalFingerprint.Compute(nextTool, response.NextAction.Arguments)
                     };
                 }
                 else
@@ -406,18 +436,52 @@ public sealed class AgentService : IAgentService
             {
                 if (string.Equals(nextTool, "set_plan", StringComparison.OrdinalIgnoreCase))
                 {
+                    var previousPlanCount = state.Plan.Count;
                     var planResult = ApplySetPlan(state, response.NextAction.Arguments);
                     state.ToolResults.Add(planResult);
                     executedToolResult = planResult;
                     state.Status = AgentTaskStatus.Running;
                     response.UserMessage = $"Updated plan ({state.Plan.Count} step(s)).";
+
+                    // r23 2.2: set_plan silently replacing an existing
+                    // checklist used to be invisible; a revision after the
+                    // first set_plan call is now logged (counts, not a diff)
+                    // and the workbench annotates the plan with when.
+                    if (previousPlanCount > 0)
+                    {
+                        // state.StepCount++ has not run yet for this step
+                        // (it happens later in the method), so the step this
+                        // revision belongs to is one ahead of the current value.
+                        var currentStep = state.StepCount + 1;
+                        state.PlanRevisedAtStep = currentStep;
+                        var revisionNote = $"plan revised: {previousPlanCount} items -> {state.Plan.Count} items";
+                        await _store.AppendLogAsync(taskId, revisionNote, ct);
+                        await _store.AppendTranscriptEntryAsync(taskId, new AgentTranscriptEntry(
+                            currentStep, "tool", "set_plan", revisionNote, DateTime.UtcNow), ct);
+                    }
+
+                    // r23 2.1: opt-in pause after the FIRST set_plan of a
+                    // fresh task, so the user can review the plan before the
+                    // run proceeds unattended. Fires at most once per task
+                    // (PlanApprovalCheckpointFired never resets) and never
+                    // for a sub-task, whose own plan_subtasks approval
+                    // already showed the user the full sub-task plan.
+                    if (_settings?.Settings.Agent.RequirePlanApproval == true
+                        && !state.PlanApprovalCheckpointFired
+                        && string.IsNullOrEmpty(state.ParentTaskId))
+                    {
+                        state.PlanApprovalCheckpointFired = true;
+                        state.PlanApprovalPending = true;
+                        state.Status = AgentTaskStatus.WaitingForUser;
+                        response.UserMessage = "Plan is ready for review. Continue when you are ready to let the run proceed.";
+                    }
                 }
                 else if (_toolExecutor.CanExecute(nextTool))
                 {
                     AgentToolResult toolResult;
                     try
                     {
-                        toolResult = await _toolExecutor.ExecuteAsync(nextTool, response.NextAction.Arguments, options, ct);
+                        toolResult = await _toolExecutor.ExecuteAsync(nextTool, response.NextAction.Arguments, toolOptions, ct);
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException)
                     {
@@ -430,6 +494,11 @@ public sealed class AgentService : IAgentService
                         throw;
                     }
 
+                    // Persists the read budget's usage so it survives a
+                    // restart (r23 3.1); a policy-denied or budget-exhausted
+                    // attempt returns gracefully without incrementing, so it
+                    // never counts against the budget it was refused by.
+                    state.FileReadCount = toolOptions.ReadBudget!.UsedReads;
                     state.ToolResults.Add(toolResult);
                     executedToolResult = toolResult;
                     state.Status = AgentTaskStatus.Running;
@@ -470,7 +539,12 @@ public sealed class AgentService : IAgentService
         if (response.NextAction.Type == AgentActionKind.AskUser)
             state.Status = AgentTaskStatus.WaitingForUser;
         if (response.NextAction.Type == AgentActionKind.Final)
+        {
             state.Status = AgentTaskStatus.Complete;
+            // r23 2.3: optional, model-provided, never required; an empty
+            // list (the common case) means nothing is shown anywhere.
+            state.Reservations = response.Reservations?.Where(r => !string.IsNullOrWhiteSpace(r)).Select(r => r.Trim()).ToList() ?? [];
+        }
 
         if (parseFailed && state.ConsecutiveStepErrors >= 3)
         {
@@ -765,6 +839,13 @@ public sealed class AgentService : IAgentService
         if (budgetTruncated && !report.Contains("budget", StringComparison.OrdinalIgnoreCase))
             report += "\n\nNote: this run was truncated by the orchestration step budget; some sub-tasks were skipped.";
 
+        // r23 2.3: a child's own reservations are otherwise invisible once
+        // synthesis folds its outcome into one line of ResultSummary; carry
+        // them into the parent's report so the user still sees them.
+        var childReservations = await CollectChildReservationsAsync(state.SubTaskPlan, ct);
+        if (childReservations.Count > 0)
+            report += "\n\n## Reservations\n" + string.Join("\n", childReservations.Select(r => $"- {r}"));
+
         state.Status = AgentTaskStatus.Complete;
         state.PendingToolAction = null;
         state.Summary = report;
@@ -784,6 +865,20 @@ public sealed class AgentService : IAgentService
         return stepResult is not null && synthesisSucceeded
             ? stepResult with { State = state }
             : new AgentStepResult(state, stepResult?.ContextPack ?? new AgentContextPack(), stepResult?.PlannerResponse ?? new AgentPlannerResponse { UserMessage = report }, report);
+    }
+
+    private async Task<List<string>> CollectChildReservationsAsync(IReadOnlyList<AgentSubTaskSpec> subTaskPlan, CancellationToken ct)
+    {
+        var reservations = new List<string>();
+        foreach (var spec in subTaskPlan)
+        {
+            if (string.IsNullOrEmpty(spec.TaskId)) continue;
+            var child = await _store.LoadAsync(spec.TaskId, ct);
+            if (child is null) continue;
+            foreach (var reservation in child.Reservations)
+                reservations.Add($"{spec.Goal}: {reservation}");
+        }
+        return reservations;
     }
 
     private static string BuildFallbackSynthesisReport(AgentTaskState state)
@@ -811,10 +906,46 @@ public sealed class AgentService : IAgentService
     public Task<IReadOnlyList<AgentTaskListItem>> LoadRecentTasksAsync(CancellationToken ct = default) =>
         _store.ListRecentAsync(25, ct);
 
-    public async Task AppendApprovalAsync(string taskId, string action, bool approved, AgentWorkspaceOptions? options = null, CancellationToken ct = default)
+    public async Task<AgentApprovalResult> AppendApprovalAsync(string taskId, string action, bool approved, string expectedFingerprint, AgentWorkspaceOptions? options = null, CancellationToken ct = default)
     {
         var state = await _store.LoadAsync(taskId, ct)
             ?? throw new InvalidOperationException("Agent task was not found.");
+
+        // Binds the approval to the pending action as it exists right now,
+        // not as it was when the UI rendered it (r23 4.1). A concurrent step,
+        // a crash-restore race, or a tampered task_state.json could otherwise
+        // let the user approve one thing and execute another. A pre-r23
+        // pending action has no stored Fingerprint; recompute it from
+        // ToolName/Arguments so old tasks keep working without a migration -
+        // the UI does the same recompute when it renders a legacy task.
+        var pendingAtStart = state.PendingToolAction;
+        var actualFingerprint = AgentApprovalFingerprint.Resolve(pendingAtStart);
+        var fingerprintMismatch = pendingAtStart is not null
+            && !string.Equals(actualFingerprint, expectedFingerprint, StringComparison.Ordinal);
+        if (fingerprintMismatch)
+        {
+            await _store.AppendTraceAsync(taskId, new
+            {
+                task_id = taskId,
+                type = "approval_fingerprint_mismatch",
+                tool = pendingAtStart!.ToolName,
+                expected_fingerprint = expectedFingerprint,
+                actual_fingerprint = actualFingerprint,
+                approved,
+                logged_at = DateTime.UtcNow
+            }, ct);
+        }
+
+        if (approved && fingerprintMismatch)
+        {
+            // Refuse execution: the pending action stays pending and the task
+            // stays waiting_for_review. Rejections do not need this refusal
+            // (rejecting the wrong thing executes nothing) - only the trace
+            // event above, already written.
+            await _store.AppendLogAsync(taskId, $"approval refused: pending action changed since it was displayed ({pendingAtStart!.ToolName})", ct);
+            return new AgentApprovalResult(false, "The pending action changed since it was displayed. Review it again.");
+        }
+
         state.ApprovalHistory.Add(new AgentApprovalRecord(action, approved, DateTime.UtcNow));
         if (approved && state.PendingToolAction is not null && string.Equals(state.PendingToolAction.ToolName, "plan_subtasks", StringComparison.OrdinalIgnoreCase))
         {
@@ -908,6 +1039,7 @@ public sealed class AgentService : IAgentService
         }
         await _store.SaveAsync(state, ct);
         await _store.AppendLogAsync(taskId, $"approval recorded: {action} approved={approved}", ct);
+        return new AgentApprovalResult(true, string.Empty);
     }
 
     public async Task AppendUserReplyAsync(string taskId, string reply, CancellationToken ct = default)
@@ -961,6 +1093,7 @@ public sealed class AgentService : IAgentService
 
         state.Status = AgentTaskStatus.Running;
         state.ConsecutiveStepErrors = 0;
+        state.PlanApprovalPending = false;
         await _store.SaveAsync(state, ct);
         await _store.AppendLogAsync(taskId, $"continued: {trimmedInstruction}", ct);
         return state;
@@ -1167,6 +1300,8 @@ public sealed class AgentService : IAgentService
         System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled,
         TimeSpan.FromMilliseconds(500));
 
+    private static string? MatchedApprovalClaimToken(string claim) => AgentApprovalClaimTokens.FirstMatch(claim);
+
     /// <summary>
     /// The only model-authored lesson source: a [LESSON: ...] marker in the
     /// model's own thought/user message, captured at low starting
@@ -1191,6 +1326,25 @@ public sealed class AgentService : IAgentService
                 {
                     var claim = match.Groups[1].Value.Trim();
                     if (claim.Length == 0) continue;
+
+                    var matchedToken = MatchedApprovalClaimToken(claim);
+                    if (matchedToken is not null)
+                    {
+                        // Rejected outright, not stored at any confidence
+                        // (r23 4.2): the safety gate never reads the lesson
+                        // store, but a stored claim like this would still be
+                        // persistent social engineering in every future
+                        // context pack and the Lessons panel.
+                        await _store.AppendTraceAsync(state.TaskId, new
+                        {
+                            task_id = state.TaskId,
+                            type = "lesson_rejected",
+                            claim,
+                            matched_token = matchedToken,
+                            logged_at = DateTime.UtcNow
+                        }, ct);
+                        continue;
+                    }
 
                     var signature = "stated:" + Convert.ToHexString(
                         System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(claim.ToLowerInvariant())))[..16];

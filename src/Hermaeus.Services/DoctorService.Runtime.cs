@@ -156,6 +156,33 @@ public sealed partial class DoctorService
     public static bool ShouldAdviseGpuInference(bool hasRealGpu, bool installedBuildIsCpu, int chatGpuLayers)
         => hasRealGpu && (installedBuildIsCpu || chatGpuLayers == 0);
 
+    /// <summary>
+    /// A quick, short-timeout probe of a managed server's <c>/health</c>
+    /// endpoint (same convention as <see cref="ProcessManagement.ServerProcessManager"/>'s
+    /// own health poll), used to gate advisories that only make sense while a
+    /// model is actually loaded rather than merely configured.
+    /// </summary>
+    private static Task<bool> IsServerRespondingAsync(int port, CancellationToken ct) =>
+        IsServerRespondingAsync($"http://127.0.0.1:{port}", ct);
+
+    /// <summary>Same probe as the port overload, for a config-supplied base URL
+    /// (e.g. RAG's EmbeddingBaseUrl) rather than a known-localhost port.</summary>
+    private static async Task<bool> IsServerRespondingAsync(string baseUrl, CancellationToken ct)
+    {
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(TimeSpan.FromSeconds(1.5));
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(1.5) };
+            var response = await http.GetAsync($"{baseUrl.TrimEnd('/')}/health", timeout.Token);
+            return response.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private async Task<DoctorCheck?> CheckGpuInferenceAdvisoryAsync(CancellationToken ct)
     {
         var profile = await _systemInfo.GetHardwareProfileAsync(ct);
@@ -165,8 +192,17 @@ public sealed partial class DoctorService
 
         var chat = _settings.Settings.ManagedServers.FirstOrDefault(s => !s.EmbeddingsMode)
             ?? _settings.Settings.ManagedServers.FirstOrDefault();
-        var chatGpuLayers = chat?.GpuLayers ?? 0;
-        var resolvedExe = ResolveExecutable(chat?.ExecutablePath ?? string.Empty);
+        if (chat is null)
+            return null;
+
+        // Only warn about a model actually loaded at CPU speed right now, not
+        // a stopped server's static configuration - the wasted-GPU condition
+        // does not exist until a model is actually loaded.
+        if (!await IsServerRespondingAsync(chat.Port, ct))
+            return null;
+
+        var chatGpuLayers = chat.GpuLayers;
+        var resolvedExe = ResolveExecutable(chat.ExecutablePath ?? string.Empty);
         var installedBuildIsCpu = IsCpuOnlyBuild(resolvedExe);
 
         if (!ShouldAdviseGpuInference(hasRealGpu, installedBuildIsCpu, chatGpuLayers))
@@ -504,7 +540,10 @@ public sealed partial class DoctorService
         }
     }
 
-    private static async Task<LlamaLatestRelease?> TryGetLatestLlamaReleaseAsync(CancellationToken ct)
+    private Task<LlamaLatestRelease?> TryGetLatestLlamaReleaseAsync(CancellationToken ct) =>
+        GetCachedGitHubReleaseAsync("llama.cpp-latest-release", FetchLatestLlamaReleaseAsync, ct);
+
+    private static async Task<LlamaLatestRelease?> FetchLatestLlamaReleaseAsync(CancellationToken ct)
     {
         try
         {

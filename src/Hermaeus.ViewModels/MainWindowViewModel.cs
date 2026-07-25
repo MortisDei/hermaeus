@@ -3,6 +3,7 @@ using Hermaeus.Core.Services;
 using Hermaeus.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using System.Diagnostics;
 
 namespace Hermaeus.ViewModels;
 
@@ -107,6 +108,17 @@ public partial class MainWindowViewModel : ViewModelBase
         Models = models; Rag = rag; Services = services;
         Benchmarks = benchmarks; SystemOverview = systemOverview; Doctor = doctor; Memories = memories; Logs = logs; Wizard = wizard;
         Doctor.RequestNavigate = panel => ActivePanel = panel;
+        Doctor.RequestOpenUrl = url =>
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                _toasts.Show("Could not open browser", ex.Message, ToastKind.Error, 5000);
+            }
+        };
         Chat.RequestNavigate = panel => ActivePanel = panel;
         // r19 6.1: memory pill flyout's "Open in Memories" navigates and prefills search.
         Chat.RequestNavigateToMemory = title =>
@@ -121,6 +133,7 @@ public partial class MainWindowViewModel : ViewModelBase
         // the llama.cpp update flow's stop-before/restart-after to Services.
         Doctor.RequestStopRunningLlamaServersForUpdate = Services.StopRunningLlamaServersForUpdate;
         Doctor.RequestRestartServers = Services.RestartServersAsync;
+        Doctor.RequestSyncServerExecutablePaths = Services.SyncAllExecutablePathsFromConfig;
         // Keep toolbar doctor badge in sync with doctor checks
         Doctor.Checks.CollectionChanged += (_, _) => UpdateDoctorStatus();
         UpdateDoctorStatus();

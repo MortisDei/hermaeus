@@ -42,46 +42,50 @@ public sealed class VoiceSettingsTests
         Assert.False(vm.VoiceChannels.Single(c => c.Channel == VoiceChannel.Agent).Enabled);
     }
 
+    /// <summary>r24: profiles removed - a channel now stores its voice id directly, with
+    /// no separate named-profile entity to create first.</summary>
     [Fact]
-    public void ReloadFrom_and_ApplyVoiceOrchestrationTo_round_trip_profiles_and_channels()
+    public void ReloadFrom_and_ApplyVoiceOrchestrationTo_round_trip_channel_voice_ids()
     {
         using var temp = new TempDir();
         var settings = NewSettings(temp);
-        settings.Settings.Tts.Profiles.Add(new VoiceProfile { Name = "narrator", VoiceId = "voice-x", Speed = 1.2 });
-        settings.Settings.Tts.Channels["Agent"] = new VoiceChannelConfig { Enabled = true, ProfileName = "narrator" };
+        settings.Settings.Tts.Channels["Agent"] = new VoiceChannelConfig { Enabled = true, VoiceId = "voice-x" };
         settings.Settings.Tts.AutoSpeakChatReplies = true;
 
         var vm = NewTtsVm(settings);
         vm.ReloadFrom(settings.Settings);
 
         Assert.True(vm.AutoSpeakChatReplies);
-        var profile = Assert.Single(vm.VoiceProfiles);
-        Assert.Equal("narrator", profile.Name);
         var agentChannel = vm.VoiceChannels.Single(c => c.Channel == VoiceChannel.Agent);
         Assert.True(agentChannel.Enabled);
-        Assert.Equal("narrator", agentChannel.ProfileName);
+        Assert.Equal("voice-x", agentChannel.VoiceId);
+        Assert.Equal("voice-x", agentChannel.VoiceDisplay);
 
         var target = new TtsSettings();
         vm.ApplyVoiceOrchestrationTo(target);
 
         Assert.True(target.AutoSpeakChatReplies);
-        Assert.Single(target.Profiles);
         Assert.True(target.Channels["Agent"].Enabled);
-        Assert.Equal("narrator", target.Channels["Agent"].ProfileName);
+        Assert.Equal("voice-x", target.Channels["Agent"].VoiceId);
     }
 
+    /// <summary>r24: a channel voice chosen before profiles were removed (VoiceId empty,
+    /// only a legacy ProfileName pointing into the read-only Profiles list) must still
+    /// resolve to the right voice on load, not silently reset to the default.</summary>
     [Fact]
-    public void RemoveVoiceProfile_removes_the_selected_profile()
+    public void ReloadFrom_resolves_a_legacy_profile_name_into_the_channels_voice_id()
     {
         using var temp = new TempDir();
         var settings = NewSettings(temp);
+        settings.Settings.Tts.Profiles.Add(new VoiceProfile { Name = "narrator", VoiceId = "narrator-voice" });
+        settings.Settings.Tts.Channels["Agent"] = new VoiceChannelConfig { Enabled = true, ProfileName = "narrator" };
+
         var vm = NewTtsVm(settings);
-        vm.AddVoiceProfileCommand.Execute(null);
-        var profile = vm.VoiceProfiles.Single();
+        vm.ReloadFrom(settings.Settings);
 
-        vm.RemoveVoiceProfileCommand.Execute(profile);
-
-        Assert.Empty(vm.VoiceProfiles);
+        var agentChannel = vm.VoiceChannels.Single(c => c.Channel == VoiceChannel.Agent);
+        Assert.Equal("narrator-voice", agentChannel.VoiceId);
+        Assert.Equal("narrator-voice", agentChannel.VoiceDisplay);
     }
 
     [Fact]
@@ -121,55 +125,35 @@ public sealed class VoiceSettingsTests
         Assert.Equal("narrator", reloaded!.VoiceProfileName);
     }
 
-    // ── r19 4.3: dropdowns instead of free-text for channel profile / voice id ──
+    // ── r24: channel voice picker lists available voices directly, no profile step ──
 
     [Fact]
-    public void ProfileNameOptions_starts_with_the_default_entry_and_gains_added_profiles()
+    public void ChannelVoiceOptions_starts_with_the_default_entry_plus_the_initial_voice_and_gains_added_voices()
     {
         using var temp = new TempDir();
         var settings = NewSettings(temp);
         var vm = NewTtsVm(settings);
 
-        Assert.Equal([VoiceChannelSettingViewModel.DefaultVoiceLabel], vm.ProfileNameOptions);
+        // TtsVoices seeds with "default" before any provider refresh runs.
+        Assert.Equal([VoiceChannelSettingViewModel.DefaultVoiceLabel, "default"], vm.ChannelVoiceOptions);
 
-        vm.AddVoiceProfileCommand.Execute(null);
-        var profile = vm.VoiceProfiles.Single();
-        profile.Name = "narrator";
+        vm.TtsVoices.Add("voice-a");
+        vm.TtsVoices.Add("voice-b");
 
-        Assert.Equal([VoiceChannelSettingViewModel.DefaultVoiceLabel, "narrator"], vm.ProfileNameOptions);
+        Assert.Equal([VoiceChannelSettingViewModel.DefaultVoiceLabel, "default", "voice-a", "voice-b"], vm.ChannelVoiceOptions);
     }
 
     [Fact]
-    public void ProfileNameOptions_updates_on_rename_and_removal()
-    {
-        using var temp = new TempDir();
-        var settings = NewSettings(temp);
-        var vm = NewTtsVm(settings);
-        vm.AddVoiceProfileCommand.Execute(null);
-        var profile = vm.VoiceProfiles.Single();
-        profile.Name = "narrator";
-        Assert.Contains("narrator", vm.ProfileNameOptions);
-
-        profile.Name = "renamed";
-        Assert.DoesNotContain("narrator", vm.ProfileNameOptions);
-        Assert.Contains("renamed", vm.ProfileNameOptions);
-
-        vm.RemoveVoiceProfileCommand.Execute(profile);
-        Assert.DoesNotContain("renamed", vm.ProfileNameOptions);
-        Assert.Equal([VoiceChannelSettingViewModel.DefaultVoiceLabel], vm.ProfileNameOptions);
-    }
-
-    [Fact]
-    public void ProfileNameDisplay_shows_the_default_label_for_an_empty_profile_name_and_round_trips()
+    public void VoiceDisplay_shows_the_default_label_for_an_empty_voice_id_and_round_trips()
     {
         var channel = new VoiceChannelSettingViewModel(VoiceChannel.Chat, "Chat");
-        Assert.Equal(VoiceChannelSettingViewModel.DefaultVoiceLabel, channel.ProfileNameDisplay);
+        Assert.Equal(VoiceChannelSettingViewModel.DefaultVoiceLabel, channel.VoiceDisplay);
 
-        channel.ProfileNameDisplay = "narrator";
-        Assert.Equal("narrator", channel.ProfileName);
+        channel.VoiceDisplay = "voice-x";
+        Assert.Equal("voice-x", channel.VoiceId);
 
-        channel.ProfileNameDisplay = VoiceChannelSettingViewModel.DefaultVoiceLabel;
-        Assert.Equal(string.Empty, channel.ProfileName);
+        channel.VoiceDisplay = VoiceChannelSettingViewModel.DefaultVoiceLabel;
+        Assert.Equal(string.Empty, channel.VoiceId);
     }
 
     [Fact]
@@ -183,8 +167,15 @@ public sealed class VoiceSettingsTests
         await vm.RefreshTtsVoicesCommand.ExecuteAsync(null);
 
         Assert.Equal(["voice-a", "voice-b", "voice-c"], vm.TtsVoices);
+        Assert.Equal(
+            [VoiceChannelSettingViewModel.DefaultVoiceLabel, "voice-a", "voice-b", "voice-c"],
+            vm.ChannelVoiceOptions);
     }
 
+    /// <summary>Avalonia's ComboBox has no free-text entry mode; the channel voice picker
+    /// uses AutoCompleteBox instead, so a hand-typed voice id still works for providers
+    /// that cannot enumerate voices (TtsVoices then holds nothing) - the channel row's
+    /// VoiceDisplay setter accepts any text regardless of ChannelVoiceOptions membership.</summary>
     [Fact]
     public async Task A_provider_that_cannot_enumerate_voices_leaves_manual_entry_working()
     {
@@ -196,11 +187,9 @@ public sealed class VoiceSettingsTests
         await vm.RefreshTtsVoicesCommand.ExecuteAsync(null);
         Assert.Empty(vm.TtsVoices);
 
-        vm.AddVoiceProfileCommand.Execute(null);
-        var profile = vm.VoiceProfiles.Single();
-        // AutoCompleteBox.Text still binds VoiceId directly regardless of ItemsSource being empty.
-        profile.VoiceId = "hand-typed-voice-id";
-        Assert.Equal("hand-typed-voice-id", profile.VoiceId);
+        var channel = new VoiceChannelSettingViewModel(VoiceChannel.Chat, "Chat");
+        channel.VoiceDisplay = "hand-typed-voice-id";
+        Assert.Equal("hand-typed-voice-id", channel.VoiceId);
     }
 
     private sealed class ScriptedTts(IReadOnlyList<string> voices) : ITtsService

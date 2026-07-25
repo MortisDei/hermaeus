@@ -179,7 +179,7 @@ Highlights include:
 
 See **docs/security-review.md** for the complete engineering review, and **SECURITY.md** to report a vulnerability.
 
-An automated regression suite of **1,090 tests** runs on every commit across Windows and Linux, with warnings treated as build errors.
+An automated regression suite of **1,176 tests** runs on every commit across Windows and Linux, with warnings treated as build errors.
 
 ---
 
@@ -210,7 +210,9 @@ See:
 - `docs/agent.md`
 - `docs/voice.md`
 - `docs/benchmarks.md`
-- `docs/security-review.md`
+- `docs/security-review.md` (current controls and threat model)
+- `docs/security-history.md` (per-round security history)
+- `docs/security-roadmap.md` (open security hardening work)
 
 ---
 

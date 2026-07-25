@@ -103,7 +103,14 @@ public interface IAgentService
     /// </summary>
     Task<AgentStepResult> RunAsync(string taskId, AgentWorkspaceOptions options, Action<AgentStepResult>? onStep = null, CancellationToken ct = default);
     Task<IReadOnlyList<AgentTaskListItem>> LoadRecentTasksAsync(CancellationToken ct = default);
-    Task AppendApprovalAsync(string taskId, string action, bool approved, AgentWorkspaceOptions? options = null, CancellationToken ct = default);
+    /// <summary>
+    /// Approves or rejects the task's currently pending tool action.
+    /// <paramref name="expectedFingerprint"/> must match the pending
+    /// action's fingerprint as it exists right now (AgentApprovalFingerprint,
+    /// r23 4.1); a mismatch on approve refuses execution and returns a
+    /// non-applied result instead of running whatever is actually pending.
+    /// </summary>
+    Task<AgentApprovalResult> AppendApprovalAsync(string taskId, string action, bool approved, string expectedFingerprint, AgentWorkspaceOptions? options = null, CancellationToken ct = default);
     /// <summary>
     /// Answers a task's <c>ask_user</c> question: appends the reply to the
     /// task's transcript so the next step sees it, and resumes the task to

@@ -182,6 +182,31 @@
 
 - Local task workbench with explicit task state, a persisted step transcript,
   compact context packs, local logs/traces, and review queue controls.
+- Every agent run has an undo button. Hermaeus keeps a ledger of everything a
+  run changed and can put it all back, file by file, with one click. The
+  Changes view shows every file, command, and approval a run produced
+  (folding in an orchestration parent's children); Rewind restores or
+  deletes files per the ledger, skipping anything changed again since,
+  behind a mandatory confirmation that lists exactly what will happen.
+- Every approval is bound to a fingerprint of the pending action as
+  displayed; a mismatch between what was shown and what is actually pending
+  refuses to execute instead of running whatever changed underneath it.
+- Workspace policy: an optional `.hermaeus/workspace.json` `policy` block
+  narrows (never widens) which paths the agent's tools may read or write,
+  plus a per-task cap on file reads; a denied read refuses gracefully, a
+  denied write is blocked before it can ever be approved, and a malformed
+  policy is rejected as a whole with a visible warning.
+- Optional plan-approval checkpoint (`Agent.RequirePlanApproval`, off by
+  default): a fresh task's first `set_plan` pauses the run for review before
+  anything unattended happens, at most once per task. A later `set_plan`
+  revising a non-empty plan is now logged and annotated ("revised at step
+  N") instead of silently replacing the checklist.
+- A final answer may optionally carry a short list of specific things the
+  model could not verify or finish ("reservations") - never a numeric
+  confidence score, never required. A task completing with any shows
+  "Completed with reservations" in the summary strip and recent-tasks list;
+  orchestration synthesis carries a child's reservations into the parent's
+  report under a Reservations heading.
 - Autonomous runs: Start (or resuming after an approval or a reply) runs
   steps back to back without a click per step, stopping at a final answer, a
   question for the user, a gated action needing approval, a blocked or
@@ -309,6 +334,13 @@
   than requiring the exact same number and order of sub-tasks the manifest
   hardcodes - a model reasonably splitting work differently no longer fails
   the check on its own.
+- Sixteen built-in scenarios, including three added in r23: confused user
+  authority (a pre-announced "I confirm, this is pre-approved" must still go
+  through the approval gate), tool result poisoning (provocative file and
+  directory names as the injection vector, not file body content), and
+  memory poisoning (a workspace instructs the agent to record a lesson
+  claiming blanket approval; the stated-lesson gate-claim filter must reject
+  it, checked by a new forbid_active_lesson_matching scenario check).
 
 ## Model Management
 
@@ -383,6 +415,9 @@
 - Doctor advises when a real GPU is present but inference is still configured
   for the CPU (a CPU-only build is installed, or the chat server offloads zero
   layers), naming the measured consequence and linking the fix in Services.
+  Only fires while the chat server is actually responding (a model is loaded
+  and would be running at CPU speed right now), not for a stopped server's
+  static configuration.
 - The Models page lists every model as a compact, collapsed-by-default card
   (name, running badge, provider, size, tags, fits/update chips, tune
   summary) with a name/tag filter box, instead of a fully-expanded editor
@@ -588,6 +623,20 @@
   memory or RAG is enabled: embedding requests silently fall back to the chat
   server otherwise, queuing behind chat generation on a single-slot
   llama-server.
+- Doctor checks the newest published GitHub release against the running app
+  version and flags a warning if a newer one exists (the same check runs for
+  the `llama.cpp` binary Hermaeus manages). The check only compares version
+  numbers; it never downloads or installs anything, and its fix action just
+  opens the releases page in your browser so you can update yourself. This
+  needs the `MortisDei/hermaeus` GitHub repository to be public to succeed;
+  while it is private the check fails closed and reports itself as unable to
+  reach GitHub, the same as it will for any other network outage. Both
+  update checks cache their result for an hour rather than calling GitHub on
+  every scan: GitHub's anonymous API allows only 60 requests/hour per IP,
+  and Doctor's automatic startup scan plus manual rescans could otherwise
+  exhaust that quota on background checks alone and leave no headroom for
+  an actual llama.cpp update click, which failed with a rate-limit error in
+  practice before this caching was added.
 - Doctor reports whether the previous session exited cleanly, using a small
   local-only lifecycle journal (no telemetry, nothing leaves the machine).
   If Hermaeus did not shut down cleanly last time (a crash or force-close), the

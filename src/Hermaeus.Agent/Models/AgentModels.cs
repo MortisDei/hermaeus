@@ -177,6 +177,36 @@ public sealed class AgentTaskState
     /// Always 0 for a task that is not an orchestration parent.
     /// </summary>
     public int OrchestrationStepsUsed { get; set; }
+    /// <summary>
+    /// Successful read_file/summarize_file executions so far this task,
+    /// checked against the workspace policy's MaxFileReadsPerTask (r23 3.1).
+    /// Persisted so a restart does not reset the budget.
+    /// </summary>
+    public int FileReadCount { get; set; }
+    /// <summary>
+    /// Set true the first time the plan-approval checkpoint pauses this task
+    /// (r23 2.1, AgentSettings.RequirePlanApproval) and never cleared
+    /// afterward, so the checkpoint fires at most once per task even across
+    /// a restart. See <see cref="PlanApprovalPending"/> for whether the pause
+    /// is currently active.
+    /// </summary>
+    public bool PlanApprovalCheckpointFired { get; set; }
+    /// <summary>
+    /// True only while the task is actively paused at the plan-approval
+    /// checkpoint (r23 2.1): distinguishes that pause from an ordinary
+    /// ask_user reply-wait, since both otherwise look identical (WaitingForUser
+    /// with no PendingToolAction). Cleared as soon as the run resumes.
+    /// </summary>
+    public bool PlanApprovalPending { get; set; }
+    /// <summary>Step count at which set_plan last replaced a non-empty plan (r23 2.2); null until the first revision.</summary>
+    public int? PlanRevisedAtStep { get; set; }
+    /// <summary>
+    /// Set from the model's final answer when non-empty (r23 2.3): things it
+    /// looked for and could not verify or finish. Status stays Complete;
+    /// this is presentation ("Completed with reservations") plus persisted
+    /// metadata, not a new state machine value. Empty means nothing to show.
+    /// </summary>
+    public List<string> Reservations { get; set; } = [];
 }
 
 /// <summary>
@@ -351,6 +381,84 @@ public sealed class AgentDraftPatch
 /// <summary>Outcome of attempting to revert an applied patch.</summary>
 public sealed record AgentRevertResult(bool Reverted, string Message);
 
+/// <summary>One file's outcome within a whole-run Task Rewind (r23 1.3).</summary>
+public sealed record AgentTaskRevertFileOutcome(string RelativePath, bool Reverted, string Message);
+
+/// <summary>
+/// Outcome of AgentPatchReviewService.RevertTaskAsync: a truthful partial-success
+/// report. Reverting a run never overwrites content changed after the run, so
+/// some files can be skipped while others succeed (r23 1.3).
+/// </summary>
+public sealed record AgentTaskRevertResult(IReadOnlyList<AgentTaskRevertFileOutcome> Files, string Summary)
+{
+    public int RevertedCount => Files.Count(f => f.Reverted);
+    public int TotalCount => Files.Count;
+}
+
+/// <summary>
+/// Outcome of an approval decision (AgentService.AppendApprovalAsync).
+/// <see cref="Applied"/> is false only when the approval fingerprint did not
+/// match the currently pending action (r23 4.1); the pending action stays
+/// pending and nothing executed.
+/// </summary>
+public sealed record AgentApprovalResult(bool Applied, string Message);
+
+public enum AgentLedgerFileKind { Created, Edited }
+
+/// <summary>
+/// A file entry's current status in the ledger. The builder
+/// (AgentRunLedgerBuilder) only ever produces Applied or Reverted, derived
+/// from persisted patch state; Conflicted is set by a caller that has
+/// workspace access, after comparing <see cref="AgentLedgerFileEntry.LatestAppliedContent"/>
+/// against the file's live content (r23 1.1 - the builder never touches disk).
+/// </summary>
+public enum AgentLedgerFileStatus { Applied, Reverted, Conflicted }
+
+/// <summary>One distinct file a run touched, folded across every applied/reverted patch for that path.</summary>
+public sealed record AgentLedgerFileEntry(
+    string RelativePath,
+    AgentLedgerFileKind Kind,
+    int AppliedPatchCount,
+    AgentLedgerFileStatus Status,
+    int LineDelta,
+    /// <summary>Content before the run first touched the file; null for a created file. The "before" half of the ledger UI's before/after preview.</summary>
+    string? EarliestPreImageContent,
+    /// <summary>The most recent applied patch's content: the "after" half of the preview, and what a caller diffs against the live file to detect Conflicted.</summary>
+    string LatestAppliedContent,
+    /// <summary>The task this entry came from: the run's own id, or a child's when folded in from a sub-task (r23 1.1).</summary>
+    string TaskId);
+
+/// <summary>One run_command execution the ledger surfaces (r23 1.1).</summary>
+public sealed record AgentLedgerCommandEntry(
+    string Command,
+    int? ExitCode,
+    bool TimedOut,
+    DateTime Timestamp,
+    string TaskId);
+
+/// <summary>One approval decision the ledger surfaces (r23 1.1).</summary>
+public sealed record AgentLedgerApprovalEntry(
+    string Action,
+    bool Approved,
+    DateTime Timestamp,
+    string TaskId);
+
+/// <summary>One sub-task line for an orchestration parent's ledger (r23 1.1).</summary>
+public sealed record AgentLedgerSubTaskEntry(
+    string Goal,
+    AgentSubTaskStatus Status,
+    string? TaskId);
+
+/// <summary>A run's total footprint: every file, command, and approval it produced (r23 1.1, the Run Ledger).</summary>
+public sealed record AgentRunLedger(
+    IReadOnlyList<AgentLedgerFileEntry> Files,
+    IReadOnlyList<AgentLedgerCommandEntry> Commands,
+    IReadOnlyList<AgentLedgerApprovalEntry> Approvals,
+    IReadOnlyList<AgentLedgerSubTaskEntry> SubTasks)
+{
+    public bool IsEmpty => Files.Count == 0 && Commands.Count == 0 && Approvals.Count == 0;
+}
+
 public sealed class AgentContextPack
 {
     public string CurrentGoal { get; set; } = string.Empty;
@@ -429,6 +537,16 @@ public sealed class AgentPendingToolAction
     /// UI so risk is never a bare, unexplained label (r6 01-first-five-minutes.md 1.7).
     /// </summary>
     public string Reason { get; set; } = string.Empty;
+
+    /// <summary>
+    /// SHA256 (hex) over the tool name and canonicalized arguments, computed
+    /// once when this action is created (AgentApprovalFingerprint.Compute).
+    /// AppendApprovalAsync refuses to execute an approval whose caller-supplied
+    /// expected fingerprint does not match this, binding what was displayed to
+    /// what actually executes (r23 4.1). Empty on pre-r23 persisted state; the
+    /// approval path recomputes from ToolName/Arguments in that case.
+    /// </summary>
+    public string Fingerprint { get; set; } = string.Empty;
 }
 
 public sealed class AgentNextAction
@@ -447,6 +565,14 @@ public sealed class AgentPlannerResponse
     public AgentNextAction NextAction { get; set; } = new();
     public AgentStateUpdate StateUpdate { get; set; } = new();
     public string UserMessage { get; set; } = string.Empty;
+    /// <summary>
+    /// Optional, model-provided (r23 2.3): things it looked for and could
+    /// not verify or finish, on a final answer. Never required and never
+    /// nagged for; an empty or absent list means nothing is shown. Not a
+    /// confidence score - each entry is a specific, honest statement, not a
+    /// number dressing a vibe as measurement.
+    /// </summary>
+    public List<string> Reservations { get; set; } = [];
 }
 
 public sealed class AgentStateUpdate
@@ -468,7 +594,24 @@ public sealed record AgentWorkspaceOptions(
     string ModelId = "",
     int MaxFileBytes = 128 * 1024,
     int MaxSearchResults = 20,
-    int MaxContextItems = 6);
+    int MaxContextItems = 6,
+    /// <summary>The active workspace's manifest policy, if any (r23 3.1); null means unrestricted. Set by the caller from a loaded WorkspaceManifest, never by AgentWorkspaceTools itself.</summary>
+    WorkspacePolicy? Policy = null,
+    /// <summary>Mutable read-count tracker shared by reference across a step's tool calls, so AgentWorkspaceTools can enforce and increment MaxFileReadsPerTask in one place (r23 3.1). Null disables the cap regardless of policy.</summary>
+    AgentReadBudget? ReadBudget = null);
+
+/// <summary>
+/// Tracks read_file/summarize_file executions against a workspace policy's
+/// MaxFileReadsPerTask for one agent step (r23 3.1). Seeded from
+/// AgentTaskState.FileReadCount by the caller and read back afterward so the
+/// budget persists across steps and restarts.
+/// </summary>
+public sealed class AgentReadBudget
+{
+    public int MaxReads { get; init; }
+    public int UsedReads { get; set; }
+    public bool IsExhausted => MaxReads > 0 && UsedReads >= MaxReads;
+}
 
 /// <summary>
 /// One entry in a task's persisted step transcript (transcript.jsonl). Unlike
@@ -497,7 +640,9 @@ public sealed record AgentTaskListItem(
     string? ParentTaskId = null,
     /// <summary>r19 3.3: PendingSteps.Count as of the last save, so the recent-tasks list can flag a
     /// terminal task that declared victory with its own plan still open, without loading the full state.</summary>
-    int PendingStepCount = 0);
+    int PendingStepCount = 0,
+    /// <summary>r23 2.3: true when the task completed with a non-empty Reservations list, so the recent-tasks list can show "Completed with reservations" without loading the full state.</summary>
+    bool HasReservations = false);
 
 public sealed record AgentFileSearchResult(
     string RelativePath,
@@ -540,6 +685,22 @@ public sealed record WorkspaceCommandRecipe(
     string Why,
     AgentRiskLevel RiskLevel);
 
+/// <summary>
+/// Deterministic read/write/never glob policy, narrowing what the agent's
+/// tools may touch inside a workspace (r23 3.1). Policy can only ever
+/// narrow: absent or empty allow lists mean "allow all" (backwards
+/// compatible with a workspace that has no policy), and <see cref="Never"/>
+/// beats both allow lists for both reads and writes.
+/// </summary>
+public sealed class WorkspacePolicy
+{
+    public List<string> ReadAllow { get; set; } = [];
+    public List<string> WriteAllow { get; set; } = [];
+    public List<string> Never { get; set; } = [];
+    /// <summary>0 or absent means unlimited; counted on <see cref="AgentTaskState.FileReadCount"/>, persisted so a restart does not reset it.</summary>
+    public int MaxFileReadsPerTask { get; set; }
+}
+
 public sealed class WorkspaceManifest
 {
     public int SchemaVersion { get; set; } = 1;
@@ -555,6 +716,17 @@ public sealed class WorkspaceManifest
     /// Agent channel's configured profile.
     /// </summary>
     public string VoiceProfileName { get; set; } = string.Empty;
+    /// <summary>Null when absent (unrestricted) or when a present policy was malformed and rejected as a whole (r23 3.1); see <see cref="PolicyRejectionWarning"/>.</summary>
+    public WorkspacePolicy? Policy { get; set; }
+    /// <summary>
+    /// Set only by WorkspaceManifestService.LoadAsync when a present
+    /// <c>policy</c> object failed validation and was rejected as a whole
+    /// (r23 3.1). Transient - never persisted back to workspace.json - so a
+    /// re-save from a form that never touched policy cannot silently erase a
+    /// user's hand-edited (if malformed) policy block.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? PolicyRejectionWarning { get; set; }
 }
 
 public sealed record WorkspaceActivation(

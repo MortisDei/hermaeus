@@ -454,8 +454,20 @@ public sealed class LlamaServerSetupService
 
     public async Task<LlamaServerLatestDownload> GetLatestDownloadInfoAsync(LlamaRuntimeVariant variant, CancellationToken ct = default)
     {
-        var release = await _http.GetFromJsonAsync<GitHubRelease>($"{ReleaseApiBaseUrl}/latest", ct)
-            ?? throw new InvalidOperationException("GitHub did not return llama.cpp release metadata.");
+        GitHubRelease? release;
+        try
+        {
+            release = await _http.GetFromJsonAsync<GitHubRelease>($"{ReleaseApiBaseUrl}/latest", ct);
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Forbidden)
+        {
+            throw new InvalidOperationException(
+                "GitHub's anonymous API rate limit (60 requests/hour per IP) was reached while checking for the "
+                + "latest llama.cpp release. Wait about an hour and try again.", ex);
+        }
+
+        if (release is null)
+            throw new InvalidOperationException("GitHub did not return llama.cpp release metadata.");
         var assets = release.Assets ?? [];
         var platform = CurrentPlatform();
 

@@ -55,6 +55,12 @@ public sealed class AgentReviewQueueItemViewModel
         PendingToolName = item.PendingToolAction?.ToolName ?? string.Empty;
         PendingRiskLevel = item.PendingToolAction?.RiskLevel;
         PendingReason = item.PendingToolAction?.Reason ?? string.Empty;
+        // Computed fresh from the pending action as just loaded, not read off
+        // a possibly-stale stored value, so a legacy (pre-r23) task without a
+        // stored Fingerprint still gets a correct one here (r23 4.1). This is
+        // "the fingerprint of the action actually rendered": AppendApprovalAsync
+        // recomputes the same way from current state and compares.
+        PendingFingerprint = AgentApprovalFingerprint.Resolve(item.PendingToolAction);
         RecipePreview = recipePreview;
         ParentGoal = item.ParentGoal ?? string.Empty;
         ParentTaskId = item.ParentTaskId;
@@ -101,6 +107,8 @@ public sealed class AgentReviewQueueItemViewModel
     public string PendingRiskLabel => PendingRiskLevel?.ToString() ?? string.Empty;
     /// <summary>Why the safety gate gated this action (AgentToolPolicyDecision.Reason).</summary>
     public string PendingReason { get; }
+    /// <summary>The pending action's fingerprint as rendered here; passed back to AppendApprovalAsync so approval executes only what was actually shown (r23 4.1).</summary>
+    public string PendingFingerprint { get; }
     public bool HasPendingAction => !string.IsNullOrEmpty(PendingToolName);
     /// <summary>What a pending run_command approval will actually execute (r6 3.2); empty for non-command tools.</summary>
     public string RecipePreview { get; }
@@ -122,6 +130,7 @@ public sealed class AgentTaskListItemViewModel
         UpdatedAt = item.UpdatedAt;
         ParentTaskId = item.ParentTaskId;
         PendingStepCount = item.PendingStepCount;
+        HasReservations = item.HasReservations;
     }
 
     public string TaskId { get; }
@@ -130,8 +139,10 @@ public sealed class AgentTaskListItemViewModel
     public DateTime UpdatedAt { get; }
     public string? ParentTaskId { get; }
     public int PendingStepCount { get; }
+    public bool HasReservations { get; }
     public bool IsSubTask => !string.IsNullOrWhiteSpace(ParentTaskId);
-    public string StatusLabel => Status.ToString();
+    /// <summary>r23 2.3: presentation only - status stays Complete; a non-empty Reservations list just changes what this label says.</summary>
+    public string StatusLabel => Status == AgentTaskStatus.Complete && HasReservations ? "Completed with reservations" : Status.ToString();
 
     /// <summary>r19 3.3: a terminal task (Complete/Failed/Blocked) whose own plan still lists
     /// pending steps declared victory prematurely; flag it at a glance in the recent-tasks list.</summary>
@@ -328,9 +339,98 @@ public sealed class AgentDraftPatchViewModel
 
 public sealed record DraftPatchPreviewRequest(string PatchId, string RelativePath, string OldContent, string NewContent);
 
+/// <summary>One row of the Changes (Run Ledger) view's file list (r23 1.1/1.2).</summary>
+public sealed class AgentLedgerFileEntryViewModel
+{
+    public AgentLedgerFileEntryViewModel(AgentLedgerFileEntry entry, bool conflicted)
+    {
+        RelativePath = entry.RelativePath;
+        Kind = entry.Kind;
+        AppliedPatchCount = entry.AppliedPatchCount;
+        LineDelta = entry.LineDelta;
+        TaskId = entry.TaskId;
+        EarliestPreImageContent = entry.EarliestPreImageContent ?? string.Empty;
+        LatestAppliedContent = entry.LatestAppliedContent;
+        // The builder only ever reports Applied/Reverted (r23 1.1); Conflicted
+        // is layered on here, the caller with workspace access, once a live
+        // read shows the file no longer matches what the run last wrote.
+        Status = conflicted && entry.Status == AgentLedgerFileStatus.Applied
+            ? AgentLedgerFileStatus.Conflicted
+            : entry.Status;
+    }
+
+    public string RelativePath { get; }
+    public AgentLedgerFileKind Kind { get; }
+    public int AppliedPatchCount { get; }
+    public int LineDelta { get; }
+    public string TaskId { get; }
+    public string EarliestPreImageContent { get; }
+    public string LatestAppliedContent { get; }
+    public AgentLedgerFileStatus Status { get; }
+
+    public string KindLabel => Kind == AgentLedgerFileKind.Created ? "created" : "edited";
+    public string StatusLabel => Status switch
+    {
+        AgentLedgerFileStatus.Applied => "applied",
+        AgentLedgerFileStatus.Reverted => "reverted",
+        AgentLedgerFileStatus.Conflicted => "conflicted",
+        _ => Status.ToString()
+    };
+    public string LineDeltaLabel => LineDelta > 0 ? $"+{LineDelta}" : LineDelta.ToString();
+    public string PatchCountLabel => $"{AppliedPatchCount} patch{(AppliedPatchCount == 1 ? string.Empty : "es")}";
+}
+
+/// <summary>One row of the Changes view's command list (r23 1.1/1.2).</summary>
+public sealed class AgentLedgerCommandEntryViewModel
+{
+    public AgentLedgerCommandEntryViewModel(AgentLedgerCommandEntry entry)
+    {
+        Command = entry.Command;
+        ExitCode = entry.ExitCode;
+        TimedOut = entry.TimedOut;
+        Timestamp = entry.Timestamp;
+    }
+
+    public string Command { get; }
+    public int? ExitCode { get; }
+    public bool TimedOut { get; }
+    public DateTime Timestamp { get; }
+    public string OutcomeLabel => TimedOut ? "timed out" : ExitCode is { } code ? $"exit {code}" : "no exit code recorded";
+}
+
+/// <summary>One row of the Changes view's approvals list (r23 1.1/1.2).</summary>
+public sealed class AgentLedgerApprovalEntryViewModel
+{
+    public AgentLedgerApprovalEntryViewModel(AgentLedgerApprovalEntry entry)
+    {
+        Action = entry.Action;
+        Approved = entry.Approved;
+        Timestamp = entry.Timestamp;
+    }
+
+    public string Action { get; }
+    public bool Approved { get; }
+    public DateTime Timestamp { get; }
+    public string OutcomeLabel => Approved ? "approved" : "rejected";
+}
+
+/// <summary>
+/// What Rewind is about to do, for the confirmation dialog (r23 1.4): every
+/// file it will restore, and every file it will delete (created by the run,
+/// so nothing existed before it). The dialog is not optional.
+/// </summary>
+public sealed record AgentTaskRewindConfirmation(IReadOnlyList<string> FilesToRestore, IReadOnlyList<string> FilesToDelete);
+
 public partial class AgentViewModel : ViewModelBase
 {
     public Func<DraftPatchPreviewRequest, Task<bool>>? RequestDraftPatchPreview { get; set; }
+    /// <summary>
+    /// Emitted before RewindTaskAsync touches anything, listing exactly which
+    /// files will be restored and which will be deleted; returning false
+    /// cancels without reverting a single file (r23 1.4). Destructive-adjacent,
+    /// so this confirmation is never optional and has no "do not ask again".
+    /// </summary>
+    public Func<AgentTaskRewindConfirmation, Task<bool>>? RequestRewindConfirmation { get; set; }
     private readonly IAgentService _agent;
     private readonly IAgentTaskStateStore _store;
     private readonly IAgentWorkspaceMemoryStore _workspaceMemory;
@@ -372,10 +472,19 @@ public partial class AgentViewModel : ViewModelBase
     /// <summary>Per-section counts/token estimates for the most recent step's context pack (r6 1.5).</summary>
     public UiBoundCollection<AgentContextReceiptSectionViewModel> ContextReceipt { get; } = [];
     public UiBoundCollection<AgentDraftPatchViewModel> QueuedPatches { get; } = [];
+    /// <summary>The Run Ledger's files section for the open task, folding in any orchestration children (r23 1.1/1.2).</summary>
+    public UiBoundCollection<AgentLedgerFileEntryViewModel> LedgerFiles { get; } = [];
+    public UiBoundCollection<AgentLedgerCommandEntryViewModel> LedgerCommands { get; } = [];
+    public UiBoundCollection<AgentLedgerApprovalEntryViewModel> LedgerApprovals { get; } = [];
     public UiBoundCollection<ProjectInstructionFileViewModel> ProjectInstructions { get; } = [];
     public UiBoundCollection<WorkspaceCommandRecipeViewModel> CommandRecipes { get; } = [];
     public UiBoundCollection<string> WorkspaceRisks { get; } = [];
     public UiBoundCollection<string> InstructionWarnings { get; } = [];
+    /// <summary>Raw glob rules behind WorkspacePolicySummary, for the capability disclosure's expandable detail (r23 3.3). Read-only; the manifest is hand-edited, not edited from here.</summary>
+    public UiBoundCollection<string> WorkspacePolicyRules { get; } = [];
+    [ObservableProperty] private string _workspacePolicySummary = string.Empty;
+    public bool HasWorkspacePolicy => WorkspacePolicySummary.Length > 0;
+    partial void OnWorkspacePolicySummaryChanged(string value) => OnPropertyChanged(nameof(HasWorkspacePolicy));
 
     public IReadOnlyList<string> CapabilityNotes { get; } =
     [
@@ -455,7 +564,14 @@ public partial class AgentViewModel : ViewModelBase
     [ObservableProperty] private string _replyText = string.Empty;
     [ObservableProperty] private string _workspaceVoiceProfileName = string.Empty;
 
-    public string CurrentTaskStatusLabel => CurrentTask is null ? "No active task" : CurrentTask.Status.ToString();
+    /// <summary>r23 2.3: presentation only - status stays Complete; a non-empty Reservations list just changes what this label says.</summary>
+    public string CurrentTaskStatusLabel => CurrentTask switch
+    {
+        null => "No active task",
+        { Status: AgentTaskStatus.Complete, Reservations.Count: > 0 } => "Completed with reservations",
+        _ => CurrentTask.Status.ToString()
+    };
+    public bool HasReservations => CurrentTask is { Reservations.Count: > 0 };
     /// <summary>
     /// Plain "step N/max" for an ordinary task; "sub-task X/N, step Y" for
     /// an orchestration parent, sourced from SubTaskPlan and
@@ -491,6 +607,14 @@ public partial class AgentViewModel : ViewModelBase
         ? $"Finished with {t.PendingSteps.Count} planned step{(t.PendingSteps.Count == 1 ? "" : "s")} not run."
         : string.Empty;
     public bool HasPrematureCompleteNote => !string.IsNullOrEmpty(PrematureCompleteNote);
+
+    /// <summary>r23 2.1: the task is paused at the opt-in plan-approval checkpoint, distinct from an ordinary ask_user reply-wait.</summary>
+    public bool IsWaitingForPlanApproval => CurrentTask is { Status: AgentTaskStatus.WaitingForUser, PendingToolAction: null } && CurrentTask.PlanApprovalPending;
+    /// <summary>The existing "Continue task" box (r19 3.1) also covers resuming past the plan-approval checkpoint (r23 2.1) - same mechanism, ContinueTaskAsync, either way.</summary>
+    public bool ShowContinueBox => IsTaskTerminal || IsWaitingForPlanApproval;
+    /// <summary>r23 2.2: "revised at step N" annotation on the plan panel, shown once set_plan has replaced a non-empty plan at least once.</summary>
+    public string PlanRevisedLabel => CurrentTask?.PlanRevisedAtStep is { } step ? $"revised at step {step}" : string.Empty;
+    public bool HasPlanRevision => PlanRevisedLabel.Length > 0;
     /// <summary>True when the task is asking a question, not waiting on a tool approval; only then does the reply box apply.</summary>
     public bool IsWaitingForReply => CurrentTask is { Status: AgentTaskStatus.WaitingForUser, PendingToolAction: null };
     public int RecentTaskCount => RecentTasks.Count;
@@ -503,6 +627,16 @@ public partial class AgentViewModel : ViewModelBase
     public int RejectedPatchCount => QueuedPatches.Count(patch => patch.Status == AgentDraftPatchStatus.Rejected);
     public int BlockedPatchCount => QueuedPatches.Count(patch => patch.Status == AgentDraftPatchStatus.Blocked);
     public bool HasQueuedPatches => QueuedPatchCount > 0;
+
+    private static readonly HashSet<AgentTaskStatus> RewindEligibleStatuses =
+    [
+        AgentTaskStatus.Complete, AgentTaskStatus.Failed, AgentTaskStatus.Blocked, AgentTaskStatus.WaitingForUser
+    ];
+
+    public bool HasLedgerEntries => LedgerFiles.Count > 0 || LedgerCommands.Count > 0 || LedgerApprovals.Count > 0;
+    [ObservableProperty] private AgentLedgerFileEntryViewModel? _selectedLedgerFile;
+    public bool HasSelectedLedgerFile => SelectedLedgerFile is not null;
+    partial void OnSelectedLedgerFileChanged(AgentLedgerFileEntryViewModel? value) => OnPropertyChanged(nameof(HasSelectedLedgerFile));
 
     public AgentViewModel(
         IAgentService agent,
@@ -534,7 +668,7 @@ public partial class AgentViewModel : ViewModelBase
         _lessons = lessons;
         _voice = voice;
         ScenarioSuite = scenarioSuite;
-        _patchReview = new AgentPatchReviewService(workspaceTools, store, agent);
+        _patchReview = new AgentPatchReviewService(workspaceTools, store, agent, workspaceManifests);
         // r12 03-runtime-vm-correctness.md 3.5: defaulting to the whole user
         // profile meant every startup (and every Agent panel navigation)
         // silently enumerated and analyzed it, writing a "Workspace profile"
@@ -793,9 +927,17 @@ public partial class AgentViewModel : ViewModelBase
     private async Task ApproveReviewAsync(AgentReviewQueueItemViewModel? item)
     {
         if (item is null) return;
-        await _agent.AppendApprovalAsync(item.TaskId, "review_queue", approved: true, BuildOptions());
+        var result = await _agent.AppendApprovalAsync(item.TaskId, "review_queue", approved: true, item.PendingFingerprint, BuildOptions());
         await RefreshReviewQueueAsync();
         await LoadTaskIfOpenAsync(item.TaskId);
+        if (!result.Applied)
+        {
+            // The pending action changed since this row was rendered (r23
+            // 4.1); the refresh above already shows the current one. Nothing
+            // executed, so there is nothing to resume.
+            StatusMessage = result.Message;
+            return;
+        }
 
         // Approve-and-continue: a single approval both unblocks the gated
         // action and resumes the autonomous loop, instead of leaving the
@@ -863,7 +1005,7 @@ public partial class AgentViewModel : ViewModelBase
         }
     }
 
-    private bool CanContinueTask() => !IsRunning && IsTaskTerminal;
+    private bool CanContinueTask() => !IsRunning && (IsTaskTerminal || IsWaitingForPlanApproval);
 
     /// <summary>
     /// Shared by <see cref="ApproveReviewAsync"/> and <see cref="SendReplyAsync"/>:
@@ -916,7 +1058,7 @@ public partial class AgentViewModel : ViewModelBase
     private async Task RejectReviewAsync(AgentReviewQueueItemViewModel? item)
     {
         if (item is null) return;
-        await _agent.AppendApprovalAsync(item.TaskId, "review_queue", approved: false, BuildOptions());
+        await _agent.AppendApprovalAsync(item.TaskId, "review_queue", approved: false, item.PendingFingerprint, BuildOptions());
         await RefreshReviewQueueAsync();
         await LoadTaskIfOpenAsync(item.TaskId);
     }
@@ -1026,6 +1168,112 @@ public partial class AgentViewModel : ViewModelBase
 
         return Task.CompletedTask;
     }
+
+    /// <summary>
+    /// Rebuilds the Changes (Run Ledger) view from the open task, folding in
+    /// any orchestration children's own entries (r23 1.1/1.2). Conflict
+    /// detection - a live file no longer matching what the run last wrote -
+    /// happens here, not in AgentRunLedgerBuilder, because only this layer
+    /// has workspace access.
+    /// </summary>
+    [RelayCommand]
+    private async Task RefreshRunLedgerAsync()
+    {
+        LedgerFiles.Clear();
+        LedgerCommands.Clear();
+        LedgerApprovals.Clear();
+        SelectedLedgerFile = null;
+
+        if (CurrentTask is null)
+        {
+            OnPropertyChanged(nameof(HasLedgerEntries));
+            RewindTaskCommand.NotifyCanExecuteChanged();
+            return;
+        }
+
+        var children = new List<AgentTaskState>();
+        foreach (var spec in CurrentTask.SubTaskPlan)
+        {
+            if (string.IsNullOrEmpty(spec.TaskId))
+                continue;
+            var child = await _store.LoadAsync(spec.TaskId);
+            if (child is not null)
+                children.Add(child);
+        }
+
+        var options = BuildOptions();
+        var workspaceRootsByTaskId = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [CurrentTask.TaskId] = CurrentTask.WorkspaceRoot is { Length: > 0 } root ? root : options.WorkspaceRoot
+        };
+        foreach (var child in children)
+            workspaceRootsByTaskId[child.TaskId] = child.WorkspaceRoot is { Length: > 0 } childRoot ? childRoot : options.WorkspaceRoot;
+
+        var ledger = AgentRunLedgerBuilder.Build(CurrentTask, children);
+        foreach (var file in ledger.Files)
+        {
+            var conflicted = false;
+            if (file.Status == AgentLedgerFileStatus.Applied)
+            {
+                var fileRoot = workspaceRootsByTaskId.GetValueOrDefault(file.TaskId, options.WorkspaceRoot);
+                try
+                {
+                    var live = await _workspaceTools.ReadFileForRevertAsync(options with { WorkspaceRoot = fileRoot }, file.RelativePath);
+                    conflicted = live != file.LatestAppliedContent;
+                }
+                catch { /* best effort; a failed live read leaves the file shown as Applied, not falsely Conflicted */ }
+            }
+            LedgerFiles.Add(new AgentLedgerFileEntryViewModel(file, conflicted));
+        }
+        foreach (var command in ledger.Commands)
+            LedgerCommands.Add(new AgentLedgerCommandEntryViewModel(command));
+        foreach (var approval in ledger.Approvals)
+            LedgerApprovals.Add(new AgentLedgerApprovalEntryViewModel(approval));
+
+        OnPropertyChanged(nameof(HasLedgerEntries));
+        RewindTaskCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>
+    /// Reverts the whole open run (r23 1.3/1.4): every file it touched,
+    /// restored or deleted per AgentPatchReviewService.RevertTaskAsync's
+    /// truthful partial-success report. The confirmation dialog is mandatory;
+    /// declining it leaves every file untouched.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanRewindTask))]
+    private async Task RewindTaskAsync()
+    {
+        if (CurrentTask is null) return;
+
+        var applied = LedgerFiles.Where(f => f.Status == AgentLedgerFileStatus.Applied).ToList();
+        var filesToRestore = applied.Where(f => f.Kind == AgentLedgerFileKind.Edited).Select(f => f.RelativePath).ToList();
+        var filesToDelete = applied.Where(f => f.Kind == AgentLedgerFileKind.Created).Select(f => f.RelativePath).ToList();
+        var confirmation = new AgentTaskRewindConfirmation(filesToRestore, filesToDelete);
+        if (RequestRewindConfirmation is null || !await RequestRewindConfirmation(confirmation))
+            return;
+
+        try
+        {
+            var result = await _patchReview.RevertTaskAsync(CurrentTask, BuildOptions());
+            StatusMessage = result.Summary;
+            await RefreshWorkspaceFilesAsync();
+            await LoadTaskIfOpenAsync(CurrentTask.TaskId);
+        }
+        catch (Exception ex)
+        {
+            SetError(ex.Message);
+        }
+    }
+
+    private bool CanRewindTask() =>
+        CurrentTask is not null
+        && RewindEligibleStatuses.Contains(CurrentTask.Status)
+        && LedgerFiles.Any(f => f.Status == AgentLedgerFileStatus.Applied);
+
+    /// <summary>Shows a ledger file's before/after content, reusing the existing patch preview presentation rather than a new diff control (r23 1.2).</summary>
+    [RelayCommand]
+    private void SelectLedgerFile(AgentLedgerFileEntryViewModel? file) =>
+        SelectedLedgerFile = SelectedLedgerFile == file ? null : file;
 
     [RelayCommand]
     private async Task RefreshWorkspaceFilesAsync()
@@ -1347,7 +1595,48 @@ public partial class AgentViewModel : ViewModelBase
 
         _activeWorkspaceVoiceProfile = activation.VoiceProfileName ?? string.Empty;
         WorkspaceVoiceProfileName = _activeWorkspaceVoiceProfile;
+
+        await RefreshWorkspacePolicyDisclosureAsync();
     }
+
+    /// <summary>
+    /// Populates the capability disclosure's "Workspace policy" line and
+    /// expandable raw-glob detail (r23 3.3), and surfaces a malformed-policy
+    /// rejection as a workspace risk. The manifest is hand-edited, like
+    /// AllowedCommands already is; there is no policy editor here.
+    /// </summary>
+    private async Task RefreshWorkspacePolicyDisclosureAsync()
+    {
+        WorkspacePolicyRules.Clear();
+        if (string.IsNullOrWhiteSpace(WorkspaceRoot) || !Directory.Exists(WorkspaceRoot))
+        {
+            WorkspacePolicySummary = string.Empty;
+            return;
+        }
+
+        var manifest = await _workspaceManifests.LoadAsync(WorkspaceRoot);
+        if (manifest?.PolicyRejectionWarning is { Length: > 0 } warning)
+            WorkspaceRisks.Add(warning);
+
+        if (manifest?.Policy is not { } policy)
+        {
+            WorkspacePolicySummary = string.Empty;
+            return;
+        }
+
+        WorkspacePolicySummary =
+            $"Workspace policy: reads {DescribePolicyAllowCount(policy.ReadAllow.Count)}, "
+            + $"writes {DescribePolicyAllowCount(policy.WriteAllow.Count)}, "
+            + $"{policy.Never.Count} path{(policy.Never.Count == 1 ? string.Empty : "s")} off limits.";
+        foreach (var rule in policy.ReadAllow) WorkspacePolicyRules.Add($"read allow: {rule}");
+        foreach (var rule in policy.WriteAllow) WorkspacePolicyRules.Add($"write allow: {rule}");
+        foreach (var rule in policy.Never) WorkspacePolicyRules.Add($"never: {rule}");
+        if (policy.MaxFileReadsPerTask > 0)
+            WorkspacePolicyRules.Add($"max file reads per task: {policy.MaxFileReadsPerTask}");
+    }
+
+    private static string DescribePolicyAllowCount(int count) =>
+        count == 0 ? "unrestricted" : $"limited to {count} rule{(count == 1 ? string.Empty : "s")}";
 
     [RelayCommand]
     private async Task SaveWorkspaceManifestAsync()
@@ -1595,6 +1884,7 @@ public partial class AgentViewModel : ViewModelBase
     private void RefreshTaskPreview()
     {
         OnPropertyChanged(nameof(CurrentTaskStatusLabel));
+        OnPropertyChanged(nameof(HasReservations));
         OnPropertyChanged(nameof(CurrentStepCountLabel));
         OnPropertyChanged(nameof(CurrentTaskGoalLabel));
         OnPropertyChanged(nameof(CurrentTaskSummaryLabel));
@@ -1614,12 +1904,14 @@ public partial class AgentViewModel : ViewModelBase
             TaskStatePreview = string.Empty;
             CurrentStep = string.Empty;
             QueuedPatches.Clear();
+            _ = RefreshRunLedgerAsync();
             return;
         }
 
         CurrentStep = CurrentTask.ActiveStep;
         TaskStatePreview = JsonSerializer.Serialize(CurrentTask, new JsonSerializerOptions { WriteIndented = true });
         _ = RefreshQueuedPatchesAsync();
+        _ = RefreshRunLedgerAsync();
     }
 
     private void SetError(string message)
@@ -1682,7 +1974,12 @@ public partial class AgentViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsTaskTerminal));
         OnPropertyChanged(nameof(PrematureCompleteNote));
         OnPropertyChanged(nameof(HasPrematureCompleteNote));
+        OnPropertyChanged(nameof(IsWaitingForPlanApproval));
+        OnPropertyChanged(nameof(ShowContinueBox));
+        OnPropertyChanged(nameof(PlanRevisedLabel));
+        OnPropertyChanged(nameof(HasPlanRevision));
         _ = RefreshQueuedPatchesAsync();
+        _ = RefreshRunLedgerAsync();
     }
     partial void OnReplyTextChanged(string value) => SendReplyCommand.NotifyCanExecuteChanged();
     partial void OnIsRunningChanged(bool value)

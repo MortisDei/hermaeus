@@ -114,7 +114,7 @@ public sealed partial class DoctorService
         return BuildCheck(
             "hotkeys",
             "Hotkey support",
-            supported ? DoctorCheckStatus.Info : DoctorCheckStatus.Warning,
+            supported ? DoctorCheckStatus.Ready : DoctorCheckStatus.Warning,
             supported ? "System-wide hotkeys supported" : "System-wide hotkeys unavailable",
             supported ? "Windows only for now." : "Global hotkeys are disabled on this OS.",
             "Details",
