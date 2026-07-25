@@ -84,6 +84,13 @@ rather than adding new capability.
   cute-era silhouette: a pointed hood, ears, a small brass spectacles band,
   and a warm lantern-glow accent in place of the old mushroom tuft. The
   app/taskbar/tray icon (Archivist's Seal) is unaffected.
+- **Settings > Voice channel routing no longer uses named voice profiles.**
+  The "Add profile" step (create a named voice/speed combination, then pick
+  it per channel) was confusing and is gone; each channel now picks a voice
+  directly from the active provider's own voice list (or free-types one for
+  a provider that cannot enumerate voices), and remembers it. A channel
+  voice chosen before this change (via a legacy named profile) still
+  resolves correctly on load rather than silently resetting to the default.
 
 ### Fixed
 
@@ -103,6 +110,12 @@ rather than adding new capability.
 - **Hotkey support reported a neutral grey status on Windows** even though
   system-wide hotkeys are fully supported there. Now reports Ready (green)
   on Windows; unsupported platforms still report a warning.
+- **The embedding backend health check reported a vague "not reachable"
+  warning whenever no embedding server was running at all**, indistinguishable
+  from an actually broken running server. It now probes the resolved
+  endpoint first and reports a grey, Info-severity "No embedding server
+  started" when nothing is listening; the warning is reserved for a server
+  that is up but genuinely failing to embed.
 
 ## [0.29.1-alpha] - 2026-07-24
 

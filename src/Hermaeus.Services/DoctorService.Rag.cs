@@ -49,6 +49,21 @@ public sealed partial class DoctorService
 
     private async Task<DoctorCheck> CheckEmbeddingBackendAsync(CancellationToken ct)
     {
+        var baseUrl = ResolveEmbeddingBaseUrl();
+        if (!await IsServerRespondingAsync(baseUrl, ct))
+        {
+            return BuildCheck(
+                "embeddings",
+                "Embedding backend health",
+                DoctorCheckStatus.Info,
+                "No embedding server started",
+                $"No server is responding at {baseUrl}. Start the embedding server (or the chat server, if embeddings fall back to it) in Services, then rerun Doctor.",
+                "Open Services",
+                true,
+                $"Checked {baseUrl}/health",
+                "RAG");
+        }
+
         try
         {
             var embedding = await _embeddings.EmbedAsync("doctor", ct);
@@ -77,6 +92,17 @@ public sealed partial class DoctorService
                 ex.ToString(),
                 "RAG");
         }
+    }
+
+    /// <summary>Mirrors <see cref="Hermaeus.Rag.Embeddings.LlamaCppEmbeddingService"/>'s own
+    /// base-URL resolution exactly, so the health probe checks the same server the real
+    /// embed call would use: a dedicated RAG.EmbeddingBaseUrl, or the chat server as fallback.</summary>
+    private string ResolveEmbeddingBaseUrl()
+    {
+        var configured = _settings.Settings.Rag.EmbeddingBaseUrl?.Trim();
+        return !string.IsNullOrWhiteSpace(configured)
+            ? configured.TrimEnd('/')
+            : _settings.Settings.Llm.LlamaCppBaseUrl.TrimEnd('/');
     }
 
     private DoctorCheck CheckEmbeddingModel()

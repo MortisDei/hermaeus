@@ -162,14 +162,19 @@ public sealed partial class DoctorService
     /// own health poll), used to gate advisories that only make sense while a
     /// model is actually loaded rather than merely configured.
     /// </summary>
-    private static async Task<bool> IsServerRespondingAsync(int port, CancellationToken ct)
+    private static Task<bool> IsServerRespondingAsync(int port, CancellationToken ct) =>
+        IsServerRespondingAsync($"http://127.0.0.1:{port}", ct);
+
+    /// <summary>Same probe as the port overload, for a config-supplied base URL
+    /// (e.g. RAG's EmbeddingBaseUrl) rather than a known-localhost port.</summary>
+    private static async Task<bool> IsServerRespondingAsync(string baseUrl, CancellationToken ct)
     {
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeout.CancelAfter(TimeSpan.FromSeconds(1.5));
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(1.5) };
-            var response = await http.GetAsync($"http://127.0.0.1:{port}/health", timeout.Token);
+            var response = await http.GetAsync($"{baseUrl.TrimEnd('/')}/health", timeout.Token);
             return response.IsSuccessStatusCode;
         }
         catch

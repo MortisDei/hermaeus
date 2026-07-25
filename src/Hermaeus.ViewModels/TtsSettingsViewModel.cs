@@ -15,15 +15,15 @@ namespace Hermaeus.ViewModels;
 /// <summary>One row of the per-channel voice settings editor (Settings > Voice).</summary>
 public partial class VoiceChannelSettingViewModel : ObservableObject
 {
-    /// <summary>r19 4.3: display sentinel for "no profile" in the Profile dropdown; never
-    /// itself stored - <see cref="ProfileNameDisplay"/> maps it to/from an empty <see cref="ProfileName"/>.</summary>
+    /// <summary>r24: display sentinel for "use the global voice" in the channel voice picker;
+    /// never itself stored - <see cref="VoiceDisplay"/> maps it to/from an empty <see cref="VoiceId"/>.</summary>
     public const string DefaultVoiceLabel = "(Default voice)";
 
     public VoiceChannel Channel { get; }
     public string DisplayName { get; }
 
     [ObservableProperty] private bool _enabled;
-    [ObservableProperty] private string _profileName = string.Empty;
+    [ObservableProperty] private string _voiceId = string.Empty;
 
     /// <summary>Set by the owning <see cref="TtsSettingsViewModel"/> whenever the active
     /// voice provider changes; drives <see cref="ShowsRemoteNotice"/> (r6 03-platform-cleanup.md 3.4).</summary>
@@ -32,14 +32,12 @@ public partial class VoiceChannelSettingViewModel : ObservableObject
     /// <summary>True when this channel is enabled and the active provider sends spoken text off-machine.</summary>
     public bool ShowsRemoteNotice => Enabled && RemoteProviderActive;
 
-    /// <summary>r19 4.3: the Profile dropdown's bound value - matches a profile name option,
-    /// or <see cref="DefaultVoiceLabel"/> for the leading "use the default voice" entry. A
-    /// profile renamed or removed out from under this channel no longer matches any option,
-    /// so the ComboBox correctly renders unselected instead of silently keeping the stale name.</summary>
-    public string ProfileNameDisplay
+    /// <summary>r24: the channel voice picker's bound text - a provider voice id, or
+    /// <see cref="DefaultVoiceLabel"/> for "use the global voice".</summary>
+    public string VoiceDisplay
     {
-        get => string.IsNullOrEmpty(ProfileName) ? DefaultVoiceLabel : ProfileName;
-        set => ProfileName = value == DefaultVoiceLabel ? string.Empty : value;
+        get => string.IsNullOrEmpty(VoiceId) ? DefaultVoiceLabel : VoiceId;
+        set => VoiceId = value == DefaultVoiceLabel ? string.Empty : value;
     }
 
     public VoiceChannelSettingViewModel(VoiceChannel channel, string displayName)
@@ -50,15 +48,7 @@ public partial class VoiceChannelSettingViewModel : ObservableObject
 
     partial void OnEnabledChanged(bool value) => OnPropertyChanged(nameof(ShowsRemoteNotice));
     partial void OnRemoteProviderActiveChanged(bool value) => OnPropertyChanged(nameof(ShowsRemoteNotice));
-    partial void OnProfileNameChanged(string value) => OnPropertyChanged(nameof(ProfileNameDisplay));
-}
-
-/// <summary>One editable named voice/speed combination (Settings > Voice > Profiles).</summary>
-public partial class VoiceProfileEditViewModel : ObservableObject
-{
-    [ObservableProperty] private string _name = string.Empty;
-    [ObservableProperty] private string _voiceId = string.Empty;
-    [ObservableProperty] private double? _speed;
+    partial void OnVoiceIdChanged(string value) => OnPropertyChanged(nameof(VoiceDisplay));
 }
 
 public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
@@ -74,11 +64,10 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
     private bool _isReloading;
 
     public UiBoundCollection<VoiceChannelSettingViewModel> VoiceChannels { get; } = [];
-    public UiBoundCollection<VoiceProfileEditViewModel> VoiceProfiles { get; } = [];
 
-    /// <summary>r19 4.3: Channel "Profile" dropdown options - kept live as profiles are
-    /// added/renamed/removed, so the ComboBox never lags behind <see cref="VoiceProfiles"/>.</summary>
-    public UiBoundCollection<string> ProfileNameOptions { get; } = [VoiceChannelSettingViewModel.DefaultVoiceLabel];
+    /// <summary>r24: the channel voice picker's suggestion list - the default-voice sentinel
+    /// followed by the active provider's own voices, kept live as <see cref="TtsVoices"/> refreshes.</summary>
+    public UiBoundCollection<string> ChannelVoiceOptions { get; } = [VoiceChannelSettingViewModel.DefaultVoiceLabel];
 
     [ObservableProperty] private bool _autoSpeakChatReplies;
     [ObservableProperty] private bool _streamingChatSpeech;
@@ -209,33 +198,18 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
         _voice = voiceOrchestrator;
         _xttsProcess.StatusChanged += OnXttsStatusChanged;
         _kokoroProcess.StatusChanged += OnXttsStatusChanged;
-        VoiceProfiles.CollectionChanged += (_, e) =>
-        {
-            if (e.NewItems is not null)
-                foreach (VoiceProfileEditViewModel added in e.NewItems)
-                    added.PropertyChanged += OnVoiceProfilePropertyChanged;
-            if (e.OldItems is not null)
-                foreach (VoiceProfileEditViewModel removed in e.OldItems)
-                    removed.PropertyChanged -= OnVoiceProfilePropertyChanged;
-            RefreshProfileNameOptions();
-        };
+        TtsVoices.CollectionChanged += (_, _) => RefreshChannelVoiceOptions();
+        RefreshChannelVoiceOptions();
     }
 
-    private void OnVoiceProfilePropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    /// <summary>r24: recomputes the channel voice picker's suggestion list from the
+    /// current <see cref="TtsVoices"/> (the active provider's own voices).</summary>
+    private void RefreshChannelVoiceOptions()
     {
-        if (e.PropertyName == nameof(VoiceProfileEditViewModel.Name))
-            RefreshProfileNameOptions();
-    }
-
-    /// <summary>r19 4.3: recomputes the Channel Profile dropdown's options from the current
-    /// <see cref="VoiceProfiles"/> list; a channel whose ProfileName no longer matches any
-    /// entry here (renamed/removed) correctly renders unselected rather than stale.</summary>
-    private void RefreshProfileNameOptions()
-    {
-        ProfileNameOptions.Clear();
-        ProfileNameOptions.Add(VoiceChannelSettingViewModel.DefaultVoiceLabel);
-        foreach (var name in VoiceProfiles.Select(p => p.Name.Trim()).Where(n => n.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase))
-            ProfileNameOptions.Add(name);
+        ChannelVoiceOptions.Clear();
+        ChannelVoiceOptions.Add(VoiceChannelSettingViewModel.DefaultVoiceLabel);
+        foreach (var voice in TtsVoices)
+            ChannelVoiceOptions.Add(voice);
     }
 
     private static readonly VoiceChannel[] AllChannels =
@@ -244,47 +218,44 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
         VoiceChannel.Benchmark, VoiceChannel.Notification, VoiceChannel.System
     ];
 
-    [RelayCommand]
-    private void AddVoiceProfile() => VoiceProfiles.Add(new VoiceProfileEditViewModel { Name = "New profile" });
-
-    [RelayCommand]
-    private void RemoveVoiceProfile(VoiceProfileEditViewModel? profile)
-    {
-        if (profile is not null) VoiceProfiles.Remove(profile);
-    }
-
     /// <summary>
-    /// Writes the channel/profile editor state back onto <paramref name="tts"/>.
+    /// Writes the channel voice editor state back onto <paramref name="tts"/>.
     /// Called from <c>SettingsViewModel.ApplyTtsTo</c> alongside the rest of
-    /// the TTS field mapping.
+    /// the TTS field mapping. Never touches <see cref="TtsSettings.Profiles"/>
+    /// (r24: legacy, read-only from this UI).
     /// </summary>
     public void ApplyVoiceOrchestrationTo(TtsSettings tts)
     {
         tts.AutoSpeakChatReplies = AutoSpeakChatReplies;
         tts.StreamingChatSpeech = StreamingChatSpeech;
-        tts.Profiles = VoiceProfiles
-            .Where(p => !string.IsNullOrWhiteSpace(p.Name))
-            .Select(p => new VoiceProfile { Name = p.Name.Trim(), VoiceId = p.VoiceId.Trim(), Speed = p.Speed })
-            .ToList();
         tts.Channels = VoiceChannels.ToDictionary(
             c => c.Channel.ToString(),
-            c => new VoiceChannelConfig { Enabled = c.Enabled, ProfileName = c.ProfileName.Trim() });
+            c => new VoiceChannelConfig { Enabled = c.Enabled, VoiceId = c.VoiceId.Trim() });
+    }
+
+    /// <summary>r24: a channel's voice id, preferring the direct value and falling back to
+    /// resolving a legacy ProfileName against the (no-longer-editable) Profiles list once,
+    /// so an existing per-channel choice made before profiles were removed is not lost.</summary>
+    private static string ResolveChannelVoiceId(TtsSettings tts, VoiceChannelConfig? config)
+    {
+        if (config is null) return string.Empty;
+        if (!string.IsNullOrWhiteSpace(config.VoiceId)) return config.VoiceId;
+        if (string.IsNullOrWhiteSpace(config.ProfileName)) return string.Empty;
+
+        var profile = tts.Profiles.FirstOrDefault(p =>
+            string.Equals(p.Name, config.ProfileName, StringComparison.OrdinalIgnoreCase));
+        return profile?.VoiceId ?? string.Empty;
     }
 
     private void ReloadVoiceOrchestration(TtsSettings tts)
     {
-        VoiceProfiles.Clear();
-        foreach (var profile in tts.Profiles)
-            VoiceProfiles.Add(new VoiceProfileEditViewModel { Name = profile.Name, VoiceId = profile.VoiceId, Speed = profile.Speed });
-
         VoiceChannels.Clear();
         foreach (var channel in AllChannels)
         {
-            var enabled = tts.Channels.TryGetValue(channel.ToString(), out var config)
-                ? config.Enabled
-                : channel == VoiceChannel.Chat;
-            var profileName = tts.Channels.TryGetValue(channel.ToString(), out var existing) ? existing.ProfileName : string.Empty;
-            VoiceChannels.Add(new VoiceChannelSettingViewModel(channel, channel.ToString()) { Enabled = enabled, ProfileName = profileName });
+            var hasConfig = tts.Channels.TryGetValue(channel.ToString(), out var config);
+            var enabled = hasConfig ? config!.Enabled : channel == VoiceChannel.Chat;
+            var voiceId = ResolveChannelVoiceId(tts, config);
+            VoiceChannels.Add(new VoiceChannelSettingViewModel(channel, channel.ToString()) { Enabled = enabled, VoiceId = voiceId });
         }
 
         AutoSpeakChatReplies = tts.AutoSpeakChatReplies;

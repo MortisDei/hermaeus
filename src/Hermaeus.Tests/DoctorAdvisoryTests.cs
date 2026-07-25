@@ -65,6 +65,46 @@ public sealed class DoctorAdvisoryTests
         Assert.DoesNotContain(report.Checks, c => c.Key == "gpu-inference");
     }
 
+    /// <summary>
+    /// The embedding backend check used to report the vague, Warning-severity
+    /// "Embedding backend not reachable" for a server that was never started
+    /// at all, indistinguishable from an actually-broken running server.
+    /// It must now report Info-severity "No embedding server started" when
+    /// nothing is listening at the resolved base URL.
+    /// </summary>
+    [Fact]
+    public async Task Embedding_backend_check_reports_no_server_started_grey_not_a_warning()
+    {
+        using var temp = new TempDir();
+        var root = temp.PathFor("AI");
+        var embedDir = Path.Combine(root, "Models", "embed");
+        Directory.CreateDirectory(embedDir);
+        File.WriteAllText(Path.Combine(embedDir, "nomic-embed-text-v1.5-Q4_K_M.gguf"), "model");
+
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.LocalAiAssetsRoot = root;
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        settings.Settings.Rag.EmbeddingModel = "nomic-embed-text-v1.5";
+        settings.Settings.Rag.EmbeddingBaseUrl = "http://127.0.0.1:1";
+
+        var doctor = new DoctorService(
+            settings,
+            new RuntimeProfileService(settings),
+            new FakeVoiceProviderRegistry(settings),
+            new FakeSecretStore(),
+            new SqliteRagStore(settings),
+            new FakeEmbeddingService(),
+            new FakeSystemInfo(),
+            new PythonHealthValidator(),
+            new NoOpReranker());
+
+        var report = await doctor.ScanAsync();
+        var check = report.Checks.Single(c => c.Key == "embeddings");
+
+        Assert.Equal(DoctorCheckStatus.Info, check.Status);
+        Assert.Equal("No embedding server started", check.Summary);
+    }
+
     [Fact]
     public async Task Blank_embedding_base_url_with_memory_enabled_yields_the_fallback_advisory()
     {
