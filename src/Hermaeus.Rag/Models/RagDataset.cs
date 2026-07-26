@@ -9,6 +9,10 @@ public class RagDataset
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? LastIngestUtc { get; set; }
     public string LastIngestPath { get; set; } = string.Empty;
+
+    /// <summary>r24 doc 01: project this dataset belongs to, or empty for none. A
+    /// default and a filter only; the dataset stays usable from anywhere.</summary>
+    public string ProjectId { get; set; } = string.Empty;
     public RagDatasetConfig Config { get; set; } = new();
 
     /// <summary>

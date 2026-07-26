@@ -166,6 +166,13 @@ public sealed class AgentTaskState
     /// </summary>
     public string WorkspaceRoot { get; set; } = string.Empty;
     /// <summary>
+    /// r24 doc 01: the project this task was created under, if any, captured
+    /// once at creation time. Switching the active project never changes it,
+    /// including while the task is running (doc 01 1.3). Empty for pre-r24
+    /// task state files (JSON-additive).
+    /// </summary>
+    public string ProjectId { get; set; } = string.Empty;
+    /// <summary>
     /// Populated only on a parent task, only by an approved <c>plan_subtasks</c>
     /// action. Empty for every ordinary task and for every child task.
     /// </summary>
@@ -642,7 +649,9 @@ public sealed record AgentTaskListItem(
     /// terminal task that declared victory with its own plan still open, without loading the full state.</summary>
     int PendingStepCount = 0,
     /// <summary>r23 2.3: true when the task completed with a non-empty Reservations list, so the recent-tasks list can show "Completed with reservations" without loading the full state.</summary>
-    bool HasReservations = false);
+    bool HasReservations = false,
+    /// <summary>r24 doc 01: the project this task was created under, if any.</summary>
+    string ProjectId = "");
 
 public sealed record AgentFileSearchResult(
     string RelativePath,

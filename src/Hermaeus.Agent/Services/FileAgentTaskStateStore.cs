@@ -9,7 +9,7 @@ namespace Hermaeus.Agent.Services;
 
 public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
 {
-    private const int IndexSchemaVersion = 4;
+    private const int IndexSchemaVersion = 5;
     private const int MaxTaskIdLength = 80;
     private static readonly Regex SafeTaskIdRegex = new("^[A-Za-z0-9_-]+$", RegexOptions.Compiled);
     private static readonly HashSet<string> WindowsReservedNames = new(StringComparer.OrdinalIgnoreCase)
@@ -76,7 +76,7 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
         await c.OpenAsync(ct);
         await using var cmd = c.CreateCommand();
         cmd.CommandText = @"
-            SELECT task_id, goal, status, updated_at, parent_task_id, pending_step_count, has_reservations
+            SELECT task_id, goal, status, updated_at, parent_task_id, pending_step_count, has_reservations, project_id
             FROM agent_task_index
             ORDER BY updated_at DESC
             LIMIT $limit";
@@ -92,7 +92,8 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
                 ParseDate(r.GetString(3)),
                 r.IsDBNull(4) ? null : r.GetString(4),
                 r.GetInt32(5),
-                r.GetInt32(6) != 0));
+                r.GetInt32(6) != 0,
+                r.IsDBNull(7) ? string.Empty : r.GetString(7)));
         }
 
         return tasks;
@@ -254,7 +255,8 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
                         last_approval_at TEXT,
                         parent_task_id TEXT,
                         pending_step_count INTEGER NOT NULL DEFAULT 0,
-                        has_reservations INTEGER NOT NULL DEFAULT 0
+                        has_reservations INTEGER NOT NULL DEFAULT 0,
+                        project_id TEXT NOT NULL DEFAULT ''
                     );
                     CREATE INDEX IF NOT EXISTS idx_agent_task_index_updated ON agent_task_index(updated_at DESC);
                     CREATE INDEX IF NOT EXISTS idx_agent_task_index_review ON agent_task_index(status, approval_count, updated_at DESC);";
@@ -266,7 +268,8 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
                 new SqliteMigration(1, (_, _) => Task.FromResult(false)),
                 new SqliteMigration(2, AddParentTaskIdColumnAsync),
                 new SqliteMigration(3, AddPendingStepCountColumnAsync),
-                new SqliteMigration(4, AddHasReservationsColumnAsync)
+                new SqliteMigration(4, AddHasReservationsColumnAsync),
+                new SqliteMigration(5, AddProjectIdColumnAsync)
             ], ct);
             await ReconcileIndexAsync(c, ct);
 
@@ -328,6 +331,23 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
         return true;
     }
 
+    /// <summary>Additive schema change for r24 doc 01 1.2: a fresh install already gets
+    /// the column from CREATE TABLE, so this only matters for a pre-r24 index file.</summary>
+    private static async Task<bool> AddProjectIdColumnAsync(SqliteConnection c, CancellationToken ct)
+    {
+        await using (var check = c.CreateCommand())
+        {
+            check.CommandText = "SELECT COUNT(*) FROM pragma_table_info('agent_task_index') WHERE name = 'project_id'";
+            var exists = Convert.ToInt64(await check.ExecuteScalarAsync(ct)) > 0;
+            if (exists) return false;
+        }
+
+        await using var alter = c.CreateCommand();
+        alter.CommandText = "ALTER TABLE agent_task_index ADD COLUMN project_id TEXT NOT NULL DEFAULT ''";
+        await alter.ExecuteNonQueryAsync(ct);
+        return true;
+    }
+
     private async Task ReconcileIndexAsync(SqliteConnection c, CancellationToken ct)
     {
         foreach (var file in Directory.EnumerateFiles(Path.Combine(AgentRoot, "tasks"), "task_state.json", SearchOption.AllDirectories))
@@ -362,10 +382,10 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
         cmd.CommandText = @"
             INSERT INTO agent_task_index (
                 task_id, goal, status, updated_at, active_step, summary,
-                approval_count, last_approval_action, last_approval_approved, last_approval_at, parent_task_id, pending_step_count, has_reservations)
+                approval_count, last_approval_action, last_approval_approved, last_approval_at, parent_task_id, pending_step_count, has_reservations, project_id)
             VALUES (
                 $task_id, $goal, $status, $updated_at, $active_step, $summary,
-                $approval_count, $last_action, $last_approved, $last_at, $parent_task_id, $pending_step_count, $has_reservations)
+                $approval_count, $last_action, $last_approved, $last_at, $parent_task_id, $pending_step_count, $has_reservations, $project_id)
             ON CONFLICT(task_id) DO UPDATE SET
                 goal = excluded.goal,
                 status = excluded.status,
@@ -378,7 +398,8 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
                 last_approval_at = excluded.last_approval_at,
                 parent_task_id = excluded.parent_task_id,
                 pending_step_count = excluded.pending_step_count,
-                has_reservations = excluded.has_reservations";
+                has_reservations = excluded.has_reservations,
+                project_id = excluded.project_id";
         cmd.Parameters.AddWithValue("$task_id", state.TaskId);
         cmd.Parameters.AddWithValue("$goal", state.Goal);
         cmd.Parameters.AddWithValue("$status", state.Status.ToString());
@@ -392,6 +413,7 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
         cmd.Parameters.AddWithValue("$parent_task_id", (object?)state.ParentTaskId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$pending_step_count", state.PendingSteps.Count);
         cmd.Parameters.AddWithValue("$has_reservations", state.Reservations.Count > 0 ? 1 : 0);
+        cmd.Parameters.AddWithValue("$project_id", state.ProjectId);
         await cmd.ExecuteNonQueryAsync(ct);
     }
 

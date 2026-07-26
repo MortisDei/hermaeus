@@ -13,7 +13,7 @@ namespace Hermaeus.Rag.Storage;
 /// </summary>
 public sealed class SqliteRagStore
 {
-    private const int SchemaVersion = 1;
+    private const int SchemaVersion = 2;
     private readonly ISettingsService _settings;
     private readonly IRuntimeLogService? _logs;
     private string _initializedPath = string.Empty;
@@ -188,7 +188,9 @@ public sealed class SqliteRagStore
                     changed |= await EnsureColumnAsync(db, "rag_datasets", "last_ingest_utc", "TEXT", token);
 
                     return changed;
-                })
+                }),
+                new SqliteMigration(2, async (db, token) =>
+                    await EnsureColumnAsync(db, "rag_datasets", "project_id", "TEXT NOT NULL DEFAULT ''", token))
             ], ct);
 
             // r10 01-rag-correctness.md 1.2: DeleteDatasetAsync used to rely on
@@ -272,12 +274,13 @@ public sealed class SqliteRagStore
         await using var c = new SqliteConnection(Cs); await c.OpenAsync(ct);
         var cmd = c.CreateCommand();
         cmd.CommandText = @"
-            INSERT INTO rag_datasets (id,name,description,chunk_count,created_at,config_json,last_ingest_path,last_ingest_utc)
-            VALUES ($id,$name,$desc,$cc,$ca,$cfg,$lip,$liu)
+            INSERT INTO rag_datasets (id,name,description,chunk_count,created_at,config_json,last_ingest_path,last_ingest_utc,project_id)
+            VALUES ($id,$name,$desc,$cc,$ca,$cfg,$lip,$liu,$pid)
             ON CONFLICT(id) DO UPDATE SET
                 name=excluded.name, description=excluded.description,
                 chunk_count=excluded.chunk_count, config_json=excluded.config_json,
-                last_ingest_path=excluded.last_ingest_path, last_ingest_utc=excluded.last_ingest_utc";
+                last_ingest_path=excluded.last_ingest_path, last_ingest_utc=excluded.last_ingest_utc,
+                project_id=excluded.project_id";
         cmd.Parameters.AddWithValue("$id",   ds.Id);
         cmd.Parameters.AddWithValue("$name", ds.Name);
         cmd.Parameters.AddWithValue("$desc", ds.Description);
@@ -286,6 +289,7 @@ public sealed class SqliteRagStore
         cmd.Parameters.AddWithValue("$cfg",  JsonSerializer.Serialize(ds.Config));
         cmd.Parameters.AddWithValue("$lip",  ds.LastIngestPath);
         cmd.Parameters.AddWithValue("$liu",  (object?)ds.LastIngestUtc?.ToString("O") ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$pid",  ds.ProjectId.Trim());
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
@@ -552,7 +556,8 @@ public sealed class SqliteRagStore
         CreatedAt      = DateTime.Parse(r.GetString(4)),
         Config         = JsonSerializer.Deserialize<RagDatasetConfig>(r.GetString(5)) ?? new(),
         LastIngestPath = GetString(r, "last_ingest_path"),
-        LastIngestUtc  = TryParseDate(GetString(r, "last_ingest_utc"))
+        LastIngestUtc  = TryParseDate(GetString(r, "last_ingest_utc")),
+        ProjectId      = GetString(r, "project_id")
     };
 
     private static RagChunk MapChunk(SqliteDataReader r) => new()
