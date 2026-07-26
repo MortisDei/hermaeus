@@ -24,7 +24,7 @@
             <Border Grid.Row="0" Padding="8,6"
                     BorderThickness="0,0,0,1"
                     BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
-                <Grid ColumnDefinitions="Auto,*,Auto">
+                <Grid ColumnDefinitions="Auto,*,Auto,Auto">
 
                     <Button Grid.Column="0" Classes="icon-btn"
                             Command="{Binding ToggleSidebarCommand}"
@@ -182,6 +182,9 @@
                                Margin="0,0,12,0" Opacity="0.5"
                                FontSize="12" MaxWidth="220"
                                TextTrimming="CharacterEllipsis" />
+
+                    <views:ProjectSwitcherView Grid.Column="3" DataContext="{Binding Projects}"
+                                                VerticalAlignment="Center" Margin="0,0,4,0" />
                 </Grid>
             </Border>
 

@@ -78,9 +78,10 @@ public sealed class MainWindowViewModelStartupTests
         var memories = new MemoriesViewModel(memoryStore, convStore, settings, toasts);
         var logsVm = new LogsViewModel(logs, new RedactionService());
         var wizard = new SetupWizardViewModel(settings, new RuntimeProfileService(settings), new FakeVoiceProviderRegistry(settings), new FakeDoctorService(), toasts, new FakeSystemInfo());
+        var projects = new ProjectViewModel(new ProjectStore(settings), settings, toasts, memoryStore, convStore, agentStore, ragStore);
 
         var main = new MainWindowViewModel(
-            convStore, chat, agent, settingsVm, models, rag, servicesVm, benchmarks, systemOverview, doctor, memories, logsVm, wizard,
+            convStore, chat, agent, settingsVm, models, rag, servicesVm, benchmarks, systemOverview, doctor, memories, logsVm, wizard, projects,
             settings, toasts, logs, new ConversationExportService());
 
         return new Harness(main, llm, logs, toasts, convStore);

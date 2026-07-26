@@ -36,6 +36,20 @@ public partial class MainWindow : Window
                     $"Permanently delete \"{item.Title}\"? This cannot be undone.");
                 return await dialog.ShowDialog<bool>(this);
             };
+            vm.Projects.RequestOpenEditor = () =>
+            {
+                var editor = new ProjectEditorWindow { DataContext = vm.Projects };
+                _ = editor.ShowDialog(this);
+            };
+            vm.Projects.RequestConfirmDelete = async name =>
+            {
+                var dialog = new ConfirmActionDialog(
+                    "Delete project",
+                    $"Delete \"{name}\"? This removes only the project label and its defaults. " +
+                    "Every conversation, agent task, RAG dataset and memory that pointed at it is " +
+                    "kept exactly as it is - nothing is deleted.");
+                return await dialog.ShowDialog<bool>(this);
+            };
             if (vm.Settings.StartMinimized)
                 WindowState = WindowState.Minimized;
         }

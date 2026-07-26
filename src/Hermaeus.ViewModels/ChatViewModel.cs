@@ -210,6 +210,11 @@ public partial class ChatViewModel : ViewModelBase
     [ObservableProperty] private int       _maxTokens;
     [ObservableProperty] private string    _systemPrompt = string.Empty;
     [ObservableProperty] private string    _currentConversationId = string.Empty;
+
+    /// <summary>r24 doc 01: the project this conversation was created under, if any.
+    /// Set once by <see cref="NewConversation"/> or on load; switching the active
+    /// project afterward never changes it.</summary>
+    private string _currentProjectId = string.Empty;
     [ObservableProperty] private string    _conversationTitle = "New Conversation";
     [ObservableProperty] private bool      _showSystemPrompt;
     [ObservableProperty] private double    _temperature = 0.7;
@@ -273,6 +278,11 @@ public partial class ChatViewModel : ViewModelBase
     /// <summary>r19 6.1: "Open in Memories" from a memory pill's flyout - navigates to the
     /// Memories panel with the search box prefilled with the memory's title.</summary>
     public Action<string>? RequestNavigateToMemory { get; set; }
+
+    /// <summary>r24 doc 01 1.6: returns the currently active project, if any, so a brand
+    /// new conversation can inherit its default model/prompt/dataset and project id.
+    /// Wired by MainWindowViewModel; never queried on an existing conversation.</summary>
+    public Func<Project?>? ActiveProjectProvider { get; set; }
 
     // ── r19 5.4: chat artifacts (saving a code block to a real file) ────────
 
@@ -580,6 +590,7 @@ public partial class ChatViewModel : ViewModelBase
         if (!string.IsNullOrEmpty(conv.ModelId))
             SelectedModel = AvailableModels.FirstOrDefault(m => m.Id == conv.ModelId) ?? SelectedModel;
         RagDatasetId = conv.RagDatasetId;
+        _currentProjectId = conv.ProjectId;
         Messages.Clear();
         foreach (var msg in conv.Messages)
         {
@@ -609,14 +620,23 @@ public partial class ChatViewModel : ViewModelBase
     {
         CurrentConversationId = string.Empty;
         ConversationTitle     = "New Conversation";
-        SystemPrompt          = _settings.Settings.Llm.DefaultSystemPrompt;
         Messages.Clear();
         Artifacts.Clear();
-        RagDatasetId = string.Empty;
-        SetSelectedRagDatasetWithoutWriting(NoneRagDataset);
         OnPropertyChanged(nameof(HasArtifacts));
         OnPropertyChanged(nameof(ArtifactsSummary));
+
+        // r24 doc 01 1.6: a new conversation inherits the active project's
+        // defaults and id. No project active behaves exactly as before.
+        var project = ActiveProjectProvider?.Invoke();
+        _currentProjectId = project?.Id ?? string.Empty;
+        SystemPrompt = !string.IsNullOrWhiteSpace(project?.DefaultSystemPrompt)
+            ? project!.DefaultSystemPrompt
+            : _settings.Settings.Llm.DefaultSystemPrompt;
+        if (!string.IsNullOrWhiteSpace(project?.DefaultModelId))
+            SelectedModel = AvailableModels.FirstOrDefault(m => m.Id == project!.DefaultModelId) ?? SelectedModel;
+        RagDatasetId = project?.DatasetId ?? string.Empty;
         _ = Task.Run(RefreshMemoryStatusAsync);
+        _ = ResolveSelectedRagDatasetAsync();
     }
 
     /// <summary>r21 1.2: picking an entry from the Knowledge flyout list (including the "None" sentinel).</summary>
@@ -1756,6 +1776,7 @@ public partial class ChatViewModel : ViewModelBase
             ModelId = SelectedModel?.Id ?? string.Empty,
             SystemPrompt = SystemPrompt,
             RagDatasetId = RagDatasetId,
+            ProjectId = _currentProjectId,
             Messages = []
         });
         ConversationSaved?.Invoke(this, CurrentConversationId);
@@ -1788,6 +1809,7 @@ public partial class ChatViewModel : ViewModelBase
             IsPinned = existing?.IsPinned ?? false,
             IsArchived = existing?.IsArchived ?? false,
             RagDatasetId = RagDatasetId,
+            ProjectId = existing?.ProjectId ?? _currentProjectId,
             Messages = Messages.Where(m => !m.IsStreaming).Select(m => new Message
             {
                 Id = m.Id, ConversationId = CurrentConversationId,

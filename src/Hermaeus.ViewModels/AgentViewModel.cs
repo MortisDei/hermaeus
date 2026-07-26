@@ -510,6 +510,20 @@ public partial class AgentViewModel : ViewModelBase
     /// <summary>Opens a path with the OS default handler (same shape as LogsViewModel.RequestOpenFolder); used here for the synthesis report.md (r15 02-orchestration-ui.md 2.4).</summary>
     public Action<string>? RequestOpenFolder { get; set; }
 
+    /// <summary>r24 doc 01 1.6: id of the active project, captured onto every new task at
+    /// creation time. Wired by MainWindowViewModel; a running task never rereads this.</summary>
+    public string ActiveProjectId { get; set; } = string.Empty;
+
+    /// <summary>r24 doc 01 1.6: pre-fills the workspace root box from a newly activated
+    /// project's folder root. Pre-fill only, never auto-select: it never overwrites a
+    /// root the user already has typed, and starting a task still requires the user's
+    /// own confirmation exactly as before (docs/features.md 300-303).</summary>
+    public void PrefillWorkspaceRootFromProject(string folderRoot)
+    {
+        if (string.IsNullOrWhiteSpace(WorkspaceRoot) && !string.IsNullOrWhiteSpace(folderRoot))
+            WorkspaceRoot = folderRoot;
+    }
+
     /// <summary>Drives the "no workspace selected" empty state (r8 02-onboarding-and-usability.md 2.6).</summary>
     public bool HasWorkspace => !string.IsNullOrWhiteSpace(WorkspaceRoot) && Directory.Exists(WorkspaceRoot);
 
@@ -801,7 +815,7 @@ public partial class AgentViewModel : ViewModelBase
         {
             _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Agent,
                 $"Agent started: {GoalText}"));
-            CurrentTask = await _agent.CreateTaskAsync(GoalText, BuildOptions(), _cts.Token);
+            CurrentTask = await _agent.CreateTaskAsync(GoalText, BuildOptions(), _cts.Token, ActiveProjectId);
             _openedTaskId = CurrentTask.TaskId;
             _currentTaskParentGoal = string.Empty;
             Narrate("Agent task started.", VoicePriority.Normal, $"{CurrentTask.TaskId}:started");

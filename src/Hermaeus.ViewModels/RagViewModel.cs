@@ -137,6 +137,19 @@ public partial class RagViewModel : ObservableObject
 
     [ObservableProperty] private RagDataset? _selectedDataset;
     [ObservableProperty] private string      _questionText    = string.Empty;
+
+    /// <summary>r24 doc 01 1.6: pre-selects the newly activated project's dataset for
+    /// the next query or add-documents action, but only when nothing is already
+    /// selected - never overrides a dataset the user is actively working in.</summary>
+    public void SetDefaultDatasetFromProject(string datasetId)
+    {
+        if (SelectedDataset is not null || string.IsNullOrWhiteSpace(datasetId))
+            return;
+
+        var match = Datasets.FirstOrDefault(d => d.Id == datasetId);
+        if (match is not null)
+            SelectedDataset = match;
+    }
     [ObservableProperty] private string      _answerText      = string.Empty;
     [ObservableProperty] private bool        _isQuerying;
     [ObservableProperty] private bool        _isIngesting;

@@ -32,6 +32,7 @@ public partial class MainWindowViewModel : ViewModelBase
     public MemoriesViewModel        Memories { get; }
     public LogsViewModel            Logs { get; }
     public SetupWizardViewModel     Wizard { get; }
+    public ProjectViewModel         Projects { get; }
 
     public UiBoundCollection<ConversationItemViewModel> Conversations { get; } = [];
     public UiBoundCollection<ToastViewModel> Toasts { get; } = [];
@@ -95,6 +96,7 @@ public partial class MainWindowViewModel : ViewModelBase
         MemoriesViewModel memories,
         LogsViewModel logs,
         SetupWizardViewModel wizard,
+        ProjectViewModel projects,
         ISettingsService settingsService,
         IToastService toasts,
         IRuntimeLogService runtimeLogs,
@@ -107,6 +109,19 @@ public partial class MainWindowViewModel : ViewModelBase
         _store = store; Chat = chat; Agent = agent; Settings = settings;
         Models = models; Rag = rag; Services = services;
         Benchmarks = benchmarks; SystemOverview = systemOverview; Doctor = doctor; Memories = memories; Logs = logs; Wizard = wizard;
+        Projects = projects;
+        // r24 doc 01 1.6: switching a project only ever changes what NEW work
+        // inherits. Existing conversations/tasks/datasets are never rewritten.
+        Chat.ActiveProjectProvider = () => Projects.ActiveProject;
+        Projects.ChatContextProvider = () => (Chat.ConversationTitle, Chat.RagDatasetId, Chat.SelectedModel?.Id ?? string.Empty);
+        Projects.AgentWorkspaceProvider = () => Agent.WorkspaceRoot;
+        Projects.ProjectSwitched += project =>
+        {
+            Agent.ActiveProjectId = project?.Id ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(project?.FolderRoot))
+                Agent.PrefillWorkspaceRootFromProject(project.FolderRoot);
+            Rag.SetDefaultDatasetFromProject(project?.DatasetId ?? string.Empty);
+        };
         Doctor.RequestNavigate = panel => ActivePanel = panel;
         Doctor.RequestOpenUrl = url =>
         {
@@ -174,6 +189,8 @@ public partial class MainWindowViewModel : ViewModelBase
             Settings.Reload();
             ShowQuickChat = Settings.ShowQuickChat;
             await LoadToastHistoryAsync();
+            await Projects.EnsureLoadedAsync();
+            Agent.ActiveProjectId = Projects.ActiveProject?.Id ?? string.Empty;
             if (!_settingsService.Settings.SetupWizardCompleted)
             {
                 ActivePanel = "wizard";

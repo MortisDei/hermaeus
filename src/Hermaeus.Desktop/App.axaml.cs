@@ -230,6 +230,7 @@ public partial class App : Application
         s.AddSingleton<MemoriesViewModel>();
         s.AddSingleton<LogsViewModel>();
         s.AddSingleton<SetupWizardViewModel>();
+        s.AddSingleton<ProjectViewModel>();
         s.AddSingleton<MainWindowViewModel>();
     }
 }

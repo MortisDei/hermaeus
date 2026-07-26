@@ -27,6 +27,24 @@ public class Project
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     public DateTime LastOpenedAt { get; set; } = DateTime.UtcNow;
     public bool IsArchived { get; set; }
+
+    /// <summary>A working copy for the detail editor, so edits can be cancelled
+    /// without mutating the live, list-bound instance before Save.</summary>
+    public Project Clone() => new()
+    {
+        Id = Id,
+        Name = Name,
+        Description = Description,
+        FolderRoot = FolderRoot,
+        DatasetId = DatasetId,
+        DefaultModelId = DefaultModelId,
+        DefaultSystemPrompt = DefaultSystemPrompt,
+        Color = Color,
+        CreatedAt = CreatedAt,
+        UpdatedAt = UpdatedAt,
+        LastOpenedAt = LastOpenedAt,
+        IsArchived = IsArchived
+    };
 }
 
 /// <summary>
