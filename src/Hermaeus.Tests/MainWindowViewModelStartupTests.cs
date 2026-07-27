@@ -6,6 +6,7 @@ using Hermaeus.Rag.Pipeline;
 using Hermaeus.Rag.Retrieval;
 using Hermaeus.Rag.Storage;
 using Hermaeus.Services;
+using Hermaeus.Services.Recall;
 using Hermaeus.ViewModels;
 using Xunit;
 using static Hermaeus.Tests.Helpers;
@@ -80,9 +81,21 @@ public sealed class MainWindowViewModelStartupTests
         var wizard = new SetupWizardViewModel(settings, new RuntimeProfileService(settings), new FakeVoiceProviderRegistry(settings), new FakeDoctorService(), toasts, new FakeSystemInfo());
         var projects = new ProjectViewModel(new ProjectStore(settings), settings, toasts, memoryStore, convStore, agentStore, ragStore);
 
+        var recallIndex = new RecallIndexStore(settings, new FakeEmbeddingService());
+        var recallIndexing = new RecallIndexingService(recallIndex, settings);
+        var recallService = new RecallService(
+        [
+            new ConversationRecallSource(recallIndex),
+            new TaskRecallSource(recallIndex),
+            new MemoryRecallSource(memoryStore),
+            new DocumentRecallSource(ragStore, new FakeEmbeddingService())
+        ], new FakeEmbeddingService());
+        var commandRegistry = new CommandRegistry();
+        var palette = new PaletteViewModel(commandRegistry, recallService);
+
         var main = new MainWindowViewModel(
             convStore, chat, agent, settingsVm, models, rag, servicesVm, benchmarks, systemOverview, doctor, memories, logsVm, wizard, projects,
-            new CommandRegistry(), settings, toasts, logs, new ConversationExportService());
+            commandRegistry, palette, settings, toasts, logs, new ConversationExportService(), recallIndexing);
 
         return new Harness(main, llm, logs, toasts, convStore);
     }

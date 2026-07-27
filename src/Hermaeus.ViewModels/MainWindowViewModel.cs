@@ -34,6 +34,7 @@ public partial class MainWindowViewModel : ViewModelBase
     public LogsViewModel            Logs { get; }
     public SetupWizardViewModel     Wizard { get; }
     public ProjectViewModel         Projects { get; }
+    public PaletteViewModel         Palette { get; }
 
     public UiBoundCollection<ConversationItemViewModel> Conversations { get; } = [];
     public UiBoundCollection<ToastViewModel> Toasts { get; } = [];
@@ -99,6 +100,7 @@ public partial class MainWindowViewModel : ViewModelBase
         SetupWizardViewModel wizard,
         ProjectViewModel projects,
         ICommandRegistry commands,
+        PaletteViewModel palette,
         ISettingsService settingsService,
         IToastService toasts,
         IRuntimeLogService runtimeLogs,
@@ -106,6 +108,7 @@ public partial class MainWindowViewModel : ViewModelBase
         Hermaeus.Services.Recall.RecallIndexingService? recallIndexing = null)
     {
         _recallIndexing = recallIndexing;
+        Palette = palette;
         _toasts = toasts;
         _logs = runtimeLogs;
         _exports = exports;
@@ -125,7 +128,9 @@ public partial class MainWindowViewModel : ViewModelBase
             if (!string.IsNullOrWhiteSpace(project?.FolderRoot))
                 Agent.PrefillWorkspaceRootFromProject(project.FolderRoot);
             Rag.SetDefaultDatasetFromProject(project?.DatasetId ?? string.Empty);
+            Palette.SetActiveProject(project?.Id ?? string.Empty, project?.Name ?? string.Empty);
         };
+        Palette.RequestNavigate = NavigateToRecallHitAsync;
         Doctor.RequestNavigate = panel => ActivePanel = panel;
         Doctor.RequestOpenUrl = url =>
         {
@@ -229,6 +234,34 @@ public partial class MainWindowViewModel : ViewModelBase
             Execute: () => { IsSidebarOpen = !IsSidebarOpen; return Task.CompletedTask; }));
     }
 
+    /// <summary>doc 02 2.4: every RecallHit.Target kind must land somewhere real.</summary>
+    private async Task NavigateToRecallHitAsync(RecallHit hit)
+    {
+        var target = hit.Target;
+        if (!string.IsNullOrWhiteSpace(target.ConversationId))
+        {
+            ActivePanel = "chat";
+            await Chat.LoadConversationAsync(target.ConversationId);
+        }
+        else if (!string.IsNullOrWhiteSpace(target.TaskId))
+        {
+            ActivePanel = "agent";
+            await Agent.LoadTaskCommand.ExecuteAsync(target.TaskId);
+        }
+        else if (!string.IsNullOrWhiteSpace(target.MemoryId))
+        {
+            ActivePanel = "memories";
+            Memories.SearchText = hit.Title;
+            await Memories.SearchAsync();
+        }
+        else if (!string.IsNullOrWhiteSpace(target.DatasetId))
+        {
+            ActivePanel = "rag";
+            var dataset = Rag.Datasets.FirstOrDefault(d => d.Id == target.DatasetId);
+            if (dataset is not null) Rag.SelectedDataset = dataset;
+        }
+    }
+
     private void UpdateDoctorStatus()
     {
         var errs = Doctor.Checks.Count(c => c.Status == Hermaeus.Core.Models.DoctorCheckStatus.Error);
@@ -249,6 +282,7 @@ public partial class MainWindowViewModel : ViewModelBase
             await LoadToastHistoryAsync();
             await Projects.EnsureLoadedAsync();
             Agent.ActiveProjectId = Projects.ActiveProject?.Id ?? string.Empty;
+            Palette.SetActiveProject(Projects.ActiveProject?.Id ?? string.Empty, Projects.ActiveProject?.Name ?? string.Empty);
             if (!_settingsService.Settings.SetupWizardCompleted)
             {
                 ActivePanel = "wizard";
