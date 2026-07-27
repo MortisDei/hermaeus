@@ -10,6 +10,7 @@ namespace Hermaeus.ViewModels;
 public partial class MainWindowViewModel : ViewModelBase
 {
     private readonly IConversationStore _store;
+    private readonly Hermaeus.Services.Recall.RecallIndexingService? _recallIndexing;
     private readonly IToastService _toasts;
     private readonly IRuntimeLogService _logs;
     private readonly ConversationExportService _exports;
@@ -101,8 +102,10 @@ public partial class MainWindowViewModel : ViewModelBase
         ISettingsService settingsService,
         IToastService toasts,
         IRuntimeLogService runtimeLogs,
-        ConversationExportService exports)
+        ConversationExportService exports,
+        Hermaeus.Services.Recall.RecallIndexingService? recallIndexing = null)
     {
+        _recallIndexing = recallIndexing;
         _toasts = toasts;
         _logs = runtimeLogs;
         _exports = exports;
@@ -281,6 +284,16 @@ public partial class MainWindowViewModel : ViewModelBase
         await RunBackgroundTaskCoreAsync("ensure Local API running state", () => Settings.EnsureLocalApiRunningStateAsync());
         await RunBackgroundTaskCoreAsync("load chat models", () => Chat.LoadModelsAsync());
         RunBackgroundTaskAsync("run startup doctor scan", () => Doctor.RunStartupScanAsync());
+        // r24 doc 02 2.1: shortly after startup, bounded, never on the send path.
+        if (_recallIndexing is not null)
+            RunBackgroundTaskAsync("recall startup backfill", RunRecallStartupBackfillAsync);
+    }
+
+    private async Task RunRecallStartupBackfillAsync()
+    {
+        var conversations = await _store.GetAllAsync(includeArchived: true);
+        var tasks = await Agent.BuildRecallTaskInputsAsync();
+        await _recallIndexing!.RunStartupBackfillAsync(conversations, tasks);
     }
 
     public void Shutdown()
@@ -384,7 +397,8 @@ public partial class MainWindowViewModel : ViewModelBase
         Folder = c.Folder,
         TagsText = string.Join(", ", c.Tags),
         IsPinned = c.IsPinned,
-        IsArchived = c.IsArchived
+        IsArchived = c.IsArchived,
+        IsRecallExcluded = c.RecallExcluded
     };
 
     [RelayCommand]
@@ -434,7 +448,21 @@ public partial class MainWindowViewModel : ViewModelBase
         await _store.DeleteAsync(item.Id);
         Conversations.Remove(item);
         if (Chat.CurrentConversationId == item.Id) Chat.NewConversation();
+        // r24 doc 02 2.0: deletion propagates, always - a record that survives
+        // its own source is treated as a bug of the highest severity in that doc.
+        if (_recallIndexing is not null)
+            _ = Task.Run(() => _recallIndexing.RemoveConversationAsync(item.Id));
         _toasts.Show("Conversation deleted", $"\"{item.Title}\" was removed.", ToastKind.Info);
+    }
+
+    [RelayCommand]
+    private async Task ToggleRecallExclusionAsync(ConversationItemViewModel item)
+    {
+        item.IsRecallExcluded = !item.IsRecallExcluded;
+        await SaveConversationMetadataAsync(item, showToast: false);
+        _toasts.Show(item.IsRecallExcluded ? "Excluded from Recall" : "Included in Recall",
+            $"\"{item.Title}\" was {(item.IsRecallExcluded ? "excluded from" : "re-included in")} Recall.",
+            ToastKind.Info);
     }
 
     [RelayCommand]
@@ -477,7 +505,10 @@ public partial class MainWindowViewModel : ViewModelBase
         conv.Tags = item.Tags;
         conv.IsPinned = item.IsPinned;
         conv.IsArchived = item.IsArchived;
+        conv.RecallExcluded = item.IsRecallExcluded;
         await _store.SaveAsync(conv);
+        if (_recallIndexing is not null)
+            _ = Task.Run(() => _recallIndexing.IndexConversationAsync(conv));
 
         // In-place update only: a full LoadConversationsAsync() reload here would replace every
         // ConversationItemViewModel instance out from under the open details flyout on each save

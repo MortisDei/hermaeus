@@ -40,6 +40,15 @@ public partial class ConversationListView : UserControl
         }
     }
 
+    private void OnDetailsRecallExclusionClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Control { DataContext: ConversationItemViewModel item }
+            && DataContext is MainWindowViewModel vm)
+        {
+            vm.ToggleRecallExclusionCommand.Execute(item);
+        }
+    }
+
     private void OnDetailsDeleteClick(object? sender, RoutedEventArgs e)
     {
         if (sender is Control { DataContext: ConversationItemViewModel item }
@@ -118,6 +127,15 @@ public partial class ConversationListView : UserControl
             && DataContext is MainWindowViewModel vm)
         {
             vm.ToggleArchiveConversationCommand.Execute(item);
+        }
+    }
+
+    private void OnContextMenuRecallExclusionClick(object? sender, RoutedEventArgs e)
+    {
+        if (ConvList.SelectedItem is ConversationItemViewModel item
+            && DataContext is MainWindowViewModel vm)
+        {
+            vm.ToggleRecallExclusionCommand.Execute(item);
         }
     }
 

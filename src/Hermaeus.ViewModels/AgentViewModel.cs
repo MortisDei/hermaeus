@@ -433,6 +433,7 @@ public partial class AgentViewModel : ViewModelBase
     public Func<AgentTaskRewindConfirmation, Task<bool>>? RequestRewindConfirmation { get; set; }
     private readonly IAgentService _agent;
     private readonly IAgentTaskStateStore _store;
+    private readonly Hermaeus.Services.Recall.RecallIndexingService? _recallIndexing;
     private readonly IAgentWorkspaceMemoryStore _workspaceMemory;
     private readonly IAgentWorkspaceTools _workspaceTools;
     private readonly ILlmService _llm;
@@ -666,10 +667,12 @@ public partial class AgentViewModel : ViewModelBase
         ISettingsService? settings = null,
         ILessonStore? lessons = null,
         IVoiceOrchestrator? voice = null,
-        AgentScenarioSuiteViewModel? scenarioSuite = null)
+        AgentScenarioSuiteViewModel? scenarioSuite = null,
+        Hermaeus.Services.Recall.RecallIndexingService? recallIndexing = null)
     {
         _agent = agent;
         _store = store;
+        _recallIndexing = recallIndexing;
         _workspaceMemory = workspaceMemory;
         _workspaceTools = workspaceTools;
         _llm = llm;
@@ -2022,6 +2025,55 @@ public partial class AgentViewModel : ViewModelBase
         OnPropertyChanged(nameof(HasPlanRevision));
         _ = RefreshQueuedPatchesAsync();
         _ = RefreshRunLedgerAsync();
+
+        // r24 doc 02 2.3: re-index on terminal transition only, never per step.
+        if (value is { Status: AgentTaskStatus.Complete or AgentTaskStatus.Failed })
+            _ = IndexTaskForRecallAsync(value);
+    }
+
+    /// <summary>Used by MainWindowViewModel's startup Recall backfill (doc 02 2.1/2.3):
+    /// only terminal tasks are indexable material.</summary>
+    public async Task<IReadOnlyList<Hermaeus.Core.Models.RecallTaskInput>> BuildRecallTaskInputsAsync()
+    {
+        var recent = await _store.ListRecentAsync(limit: 200);
+        var inputs = new List<Hermaeus.Core.Models.RecallTaskInput>();
+        foreach (var item in recent.Where(t => t.Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed))
+        {
+            var full = await _store.LoadAsync(item.TaskId);
+            if (full is null) continue;
+            var parts = new List<string> { full.Goal, full.Summary };
+            if (full.Reservations.Count > 0) parts.Add(string.Join("; ", full.Reservations));
+            if (full.Plan.Count > 0) parts.Add(string.Join(" ", full.Plan.Select(p => p.Description)));
+            var body = string.Join("\n", parts.Where(p => !string.IsNullOrWhiteSpace(p)));
+            inputs.Add(new Hermaeus.Core.Models.RecallTaskInput(full.TaskId, full.ParentTaskId, full.Goal, body, full.ProjectId, full.CreatedAt));
+        }
+        return inputs;
+    }
+
+    private async Task IndexTaskForRecallAsync(AgentTaskState task)
+    {
+        if (_recallIndexing is null) return;
+        try
+        {
+            var parts = new List<string> { task.Goal, task.Summary };
+            if (task.Reservations.Count > 0)
+                parts.Add("Reservations: " + string.Join("; ", task.Reservations));
+            if (task.Plan.Count > 0)
+                parts.Add(string.Join(" ", task.Plan.Select(p => p.Description)));
+
+            var reportPath = Path.Combine(_store.GetTaskDirectory(task.TaskId), "report.md");
+            if (File.Exists(reportPath))
+                parts.Add(await File.ReadAllTextAsync(reportPath));
+
+            var body = string.Join("\n", parts.Where(p => !string.IsNullOrWhiteSpace(p)));
+            await _recallIndexing.IndexTaskAsync(new Hermaeus.Core.Models.RecallTaskInput(
+                task.TaskId, task.ParentTaskId, task.Goal, body, task.ProjectId, task.CreatedAt));
+        }
+        catch (Exception ex)
+        {
+            _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Agent,
+                $"Recall indexing failed for task {task.TaskId}: {ex.Message}"));
+        }
     }
     partial void OnReplyTextChanged(string value) => SendReplyCommand.NotifyCanExecuteChanged();
     partial void OnIsRunningChanged(bool value)

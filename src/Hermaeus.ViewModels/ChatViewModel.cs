@@ -123,6 +123,7 @@ public partial class ChatViewModel : ViewModelBase
     private readonly IVoiceOrchestrator? _voice;
     private readonly ChatArtifactService? _artifacts;
     private readonly RagQueryService? _rag;
+    private readonly Hermaeus.Services.Recall.RecallIndexingService? _recallIndexing;
     private bool _suppressRagDatasetWrite;
     private CancellationTokenSource? _cts;
     private CancellationTokenSource? _ttsCts;
@@ -405,10 +406,12 @@ public partial class ChatViewModel : ViewModelBase
         IVoiceOrchestrator? voice = null,
         ISystemInfoService? systemInfo = null,
         ChatArtifactService? artifacts = null,
-        RagQueryService? rag = null)
+        RagQueryService? rag = null,
+        Hermaeus.Services.Recall.RecallIndexingService? recallIndexing = null)
     {
         _artifacts = artifacts;
         _rag = rag;
+        _recallIndexing = recallIndexing;
         SaveCodeBlockAction = (lang, code, markdown) => _ = SaveCodeBlockAsync(lang, code, markdown);
         _llm = llm; _store = store; _settings = settings; _tts = tts; _profiles = profiles; _toasts = toasts;
         _systemInfo = systemInfo;
@@ -1817,7 +1820,7 @@ public partial class ChatViewModel : ViewModelBase
             ? null
             : await _store.GetByIdAsync(CurrentConversationId);
 
-        await _store.SaveAsync(new Conversation
+        var conv = new Conversation
         {
             Id = CurrentConversationId,
             Title = ConversationTitle,
@@ -1829,6 +1832,8 @@ public partial class ChatViewModel : ViewModelBase
             IsArchived = existing?.IsArchived ?? false,
             RagDatasetId = RagDatasetId,
             ProjectId = existing?.ProjectId ?? _currentProjectId,
+            RecallExcluded = existing?.RecallExcluded ?? false,
+            CreatedAt = existing?.CreatedAt ?? DateTime.UtcNow,
             Messages = Messages.Where(m => !m.IsStreaming).Select(m => new Message
             {
                 Id = m.Id, ConversationId = CurrentConversationId,
@@ -1844,8 +1849,13 @@ public partial class ChatViewModel : ViewModelBase
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToList()
             }).ToList()
-        });
+        };
+        await _store.SaveAsync(conv);
         ConversationSaved?.Invoke(this, CurrentConversationId);
+        // r24 doc 02 2.2/06: never on the send path - fire and forget, off the
+        // caller's await chain, so a slow embedding endpoint cannot slow a send.
+        if (_recallIndexing is not null)
+            _ = Task.Run(() => _recallIndexing.IndexConversationAsync(conv));
         await RefreshMemoryStatusAsync();
     }
 
