@@ -689,6 +689,25 @@ public partial class RagViewModel : ObservableObject
             RequestCopyToClipboard?.Invoke(path);
     }
 
+    /// <summary>doc 04 4.1: registered next to the ViewModel that owns the action.</summary>
+    public void RegisterCommands(ICommandRegistry registry)
+    {
+        registry.Register(new AppCommand(
+            Id: "rag.refresh-datasets", Title: "Refresh datasets", Area: "RAG",
+            Description: "Reload the list of RAG datasets from disk.",
+            Keywords: ["rag", "dataset", "refresh", "reload"], Shortcut: "",
+            CanExecute: () => true,
+            Execute: () => RefreshDatasetManagerCommand.ExecuteAsync(null)));
+
+        registry.Register(new AppCommand(
+            Id: "rag.warm-cache", Title: "Warm query cache", Area: "RAG",
+            Description: "Pre-warm the selected dataset's query cache.",
+            Keywords: ["rag", "cache", "warm"], Shortcut: "",
+            CanExecute: () => SelectedDataset is not null,
+            DisabledReason: () => "No dataset selected.",
+            Execute: () => WarmCacheCommand.ExecuteAsync(null)));
+    }
+
     [RelayCommand]
     private async Task WarmCacheAsync()
     {

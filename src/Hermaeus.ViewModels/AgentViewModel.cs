@@ -804,6 +804,34 @@ public partial class AgentViewModel : ViewModelBase
         }
     }
 
+    /// <summary>doc 04 4.1: registered next to the ViewModel that owns the action.</summary>
+    public void RegisterCommands(ICommandRegistry registry)
+    {
+        registry.Register(new AppCommand(
+            Id: "agent.start-task", Title: "Start agent task", Area: "Agent",
+            Description: "Start a new agent task with the current goal.",
+            Keywords: ["agent", "task", "start", "run"], Shortcut: "",
+            CanExecute: () => StartCommand.CanExecute(null),
+            DisabledReason: () => string.IsNullOrWhiteSpace(GoalText) ? "No goal entered." : "Agent is already running.",
+            Execute: () => StartCommand.ExecuteAsync(null)));
+
+        registry.Register(new AppCommand(
+            Id: "agent.stop-task", Title: "Stop agent task", Area: "Agent",
+            Description: "Stop the running agent task.",
+            Keywords: ["agent", "stop", "cancel"], Shortcut: "",
+            CanExecute: () => IsRunning,
+            DisabledReason: () => "No agent task is running.",
+            Execute: () => { StopCommand.Execute(null); return Task.CompletedTask; }));
+
+        registry.Register(new AppCommand(
+            Id: "agent.choose-workspace-root", Title: "Choose workspace folder", Area: "Agent",
+            Description: "Pick the folder the agent works in.",
+            Keywords: ["agent", "workspace", "folder", "root"], Shortcut: "",
+            CanExecute: () => RequestWorkspaceRootPicker is not null,
+            DisabledReason: () => "Workspace picker is not available.",
+            Execute: () => { RequestWorkspaceRootPicker?.Invoke(); return Task.CompletedTask; }));
+    }
+
     [RelayCommand(CanExecute = nameof(CanStart))]
     private async Task StartAsync()
     {

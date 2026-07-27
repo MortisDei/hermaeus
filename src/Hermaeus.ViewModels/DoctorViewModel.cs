@@ -79,6 +79,26 @@ public partial class DoctorViewModel : ObservableObject
         _voice = voice;
     }
 
+    /// <summary>doc 04 4.1: registered next to the ViewModel that owns the action.</summary>
+    public void RegisterCommands(ICommandRegistry registry)
+    {
+        registry.Register(new AppCommand(
+            Id: "doctor.run-scan", Title: "Run Doctor scan", Area: "Doctor",
+            Description: "Check the local environment for problems.",
+            Keywords: ["doctor", "scan", "diagnose", "check"], Shortcut: "",
+            CanExecute: () => !IsScanning,
+            DisabledReason: () => "A scan is already running.",
+            Execute: () => ScanCommand.ExecuteAsync(null)));
+
+        registry.Register(new AppCommand(
+            Id: "doctor.copy-all-diagnostics", Title: "Copy all diagnostics", Area: "Doctor",
+            Description: "Copy every Doctor check result to the clipboard.",
+            Keywords: ["doctor", "copy", "diagnostics"], Shortcut: "",
+            CanExecute: () => Checks.Count > 0,
+            DisabledReason: () => "Run a scan first.",
+            Execute: () => CopyAllDiagnosticsCommand.ExecuteAsync(null)));
+    }
+
     [RelayCommand]
     private async Task ScanAsync()
     {

@@ -286,6 +286,17 @@ public partial class BenchmarkViewModel : ObservableObject
         _toasts.Show("Run info", md, ToastKind.Info, 8000);
     }
 
+    /// <summary>doc 04 4.1: registered next to the ViewModel that owns the action.</summary>
+    public void RegisterCommands(ICommandRegistry registry)
+    {
+        registry.Register(new AppCommand(
+            Id: "benchmarks.refresh", Title: "Refresh benchmark runs", Area: "Benchmarks",
+            Description: "Reload benchmark run history.",
+            Keywords: ["benchmark", "refresh", "runs"], Shortcut: "",
+            CanExecute: () => true,
+            Execute: () => RefreshCommand.ExecuteAsync(null)));
+    }
+
     [RelayCommand]
     private async Task RefreshAsync() => await LoadAsync();
 

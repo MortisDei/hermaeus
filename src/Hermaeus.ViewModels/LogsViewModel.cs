@@ -58,6 +58,24 @@ public partial class LogsViewModel : ViewModelBase
         Refresh();
     }
 
+    /// <summary>doc 04 4.1: registered next to the ViewModel that owns the action.</summary>
+    public void RegisterCommands(ICommandRegistry registry)
+    {
+        registry.Register(new AppCommand(
+            Id: "logs.refresh", Title: "Refresh logs", Area: "System",
+            Description: "Reload the runtime log view.",
+            Keywords: ["logs", "refresh"], Shortcut: "",
+            CanExecute: () => true,
+            Execute: () => { RefreshCommand.Execute(null); return Task.CompletedTask; }));
+
+        registry.Register(new AppCommand(
+            Id: "logs.open-folder", Title: "Open log folder", Area: "System",
+            Description: "Open the folder containing runtime log files.",
+            Keywords: ["logs", "folder", "open"], Shortcut: "",
+            CanExecute: () => true,
+            Execute: () => { OpenLogFolderCommand.Execute(null); return Task.CompletedTask; }));
+    }
+
     [RelayCommand]
     private void Refresh()
     {

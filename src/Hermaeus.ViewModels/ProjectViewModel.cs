@@ -93,6 +93,24 @@ public partial class ProjectViewModel : ViewModelBase
         _rag = rag;
     }
 
+    /// <summary>doc 04 4.1: registered next to the ViewModel that owns the action.</summary>
+    public void RegisterCommands(ICommandRegistry registry)
+    {
+        registry.Register(new AppCommand(
+            Id: "projects.switch", Title: "Switch project", Area: "Chat",
+            Description: "Open the project switcher.",
+            Keywords: ["project", "switch", "workspace"], Shortcut: "",
+            CanExecute: () => true,
+            Execute: () => OpenSwitcherCommand.ExecuteAsync(null)));
+
+        registry.Register(new AppCommand(
+            Id: "projects.new", Title: "New project", Area: "Chat",
+            Description: "Create a new project.",
+            Keywords: ["project", "new", "create"], Shortcut: "",
+            CanExecute: () => true,
+            Execute: () => { OpenNewProjectEmptyCommand.Execute(null); return Task.CompletedTask; }));
+    }
+
     public async Task EnsureLoadedAsync()
     {
         if (_loaded) return;

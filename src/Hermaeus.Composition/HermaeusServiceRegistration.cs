@@ -44,6 +44,7 @@ public static class HermaeusServiceRegistration
         s.AddSingleton<ITraceStore, SqliteTraceStore>();
         s.AddSingleton<IModelUsageService, ModelUsageService>();
         s.AddSingleton<ChatTraceService>();
+        s.AddSingleton<ICommandRegistry, CommandRegistry>();
         s.AddSingleton<IConversationStore, ConversationStore>();
         s.AddSingleton<IProjectStore, ProjectStore>();
         s.AddSingleton<ConversationExportService>();

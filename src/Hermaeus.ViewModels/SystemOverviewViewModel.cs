@@ -29,6 +29,18 @@ public partial class SystemOverviewViewModel : ObservableObject
         _privacyAudit = privacyAudit;
     }
 
+    /// <summary>doc 04 4.1: registered next to the ViewModel that owns the action.</summary>
+    public void RegisterCommands(ICommandRegistry registry)
+    {
+        registry.Register(new AppCommand(
+            Id: "system.refresh-snapshot", Title: "Refresh system overview", Area: "System",
+            Description: "Recapture hardware, storage and privacy audit info.",
+            Keywords: ["system", "refresh", "snapshot", "hardware"], Shortcut: "",
+            CanExecute: () => !IsRefreshing,
+            DisabledReason: () => "Already refreshing.",
+            Execute: () => RefreshCommand.ExecuteAsync(null)));
+    }
+
     [RelayCommand]
     public async Task RefreshAsync()
     {

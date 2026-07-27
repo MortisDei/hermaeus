@@ -616,6 +616,25 @@ public partial class ChatViewModel : ViewModelBase
         await ResolveSelectedRagDatasetAsync();
     }
 
+    /// <summary>doc 04 4.1: registered next to the ViewModel that owns the action.</summary>
+    public void RegisterCommands(ICommandRegistry registry)
+    {
+        registry.Register(new AppCommand(
+            Id: "chat.export-conversation", Title: "Export conversation", Area: "Chat",
+            Description: "Export the current conversation to a file.",
+            Keywords: ["export", "save", "markdown", "json"], Shortcut: "",
+            CanExecute: () => !string.IsNullOrWhiteSpace(CurrentConversationId),
+            DisabledReason: () => "No conversation to export yet.",
+            Execute: () => ExportMarkdownCommand.ExecuteAsync(null)));
+
+        registry.Register(new AppCommand(
+            Id: "chat.toggle-system-prompt", Title: "Toggle system prompt", Area: "Chat",
+            Description: "Show or hide the system prompt editor for this conversation.",
+            Keywords: ["system", "prompt", "persona"], Shortcut: "",
+            CanExecute: () => true,
+            Execute: () => { ShowSystemPrompt = !ShowSystemPrompt; return Task.CompletedTask; }));
+    }
+
     public void NewConversation()
     {
         CurrentConversationId = string.Empty;

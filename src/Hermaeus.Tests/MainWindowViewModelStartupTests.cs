@@ -82,9 +82,32 @@ public sealed class MainWindowViewModelStartupTests
 
         var main = new MainWindowViewModel(
             convStore, chat, agent, settingsVm, models, rag, servicesVm, benchmarks, systemOverview, doctor, memories, logsVm, wizard, projects,
-            settings, toasts, logs, new ConversationExportService());
+            new CommandRegistry(), settings, toasts, logs, new ConversationExportService());
 
         return new Harness(main, llm, logs, toasts, convStore);
+    }
+
+    /// <summary>doc 04 4.1 guard: the registry is the app's public self-description
+    /// and cannot ship half-filled - every registered command needs a non-empty
+    /// Title/Area/Description and a unique Id.</summary>
+    [Fact]
+    public async Task Command_registry_has_no_duplicate_or_incomplete_commands()
+    {
+        using var temp = new TempDir();
+        var harness = await NewHarnessAsync(temp, initializeRagStore: true);
+
+        var all = harness.Main.Commands.All;
+        Assert.NotEmpty(all);
+        foreach (var command in all)
+        {
+            Assert.False(string.IsNullOrWhiteSpace(command.Id), "every command needs an Id");
+            Assert.False(string.IsNullOrWhiteSpace(command.Title), $"'{command.Id}' needs a Title");
+            Assert.False(string.IsNullOrWhiteSpace(command.Area), $"'{command.Id}' needs an Area");
+            Assert.False(string.IsNullOrWhiteSpace(command.Description), $"'{command.Id}' needs a Description");
+        }
+
+        var duplicateIds = all.GroupBy(c => c.Id).Where(g => g.Count() > 1).Select(g => g.Key).ToList();
+        Assert.Empty(duplicateIds);
     }
 
     [Fact]

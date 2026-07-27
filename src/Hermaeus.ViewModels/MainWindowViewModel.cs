@@ -97,6 +97,7 @@ public partial class MainWindowViewModel : ViewModelBase
         LogsViewModel logs,
         SetupWizardViewModel wizard,
         ProjectViewModel projects,
+        ICommandRegistry commands,
         ISettingsService settingsService,
         IToastService toasts,
         IRuntimeLogService runtimeLogs,
@@ -168,7 +169,61 @@ public partial class MainWindowViewModel : ViewModelBase
         Chat.ConversationSaved += OnConversationSaved;
         Services.ServerAvailabilityChanged += (_, _) => RunBackgroundTaskAsync("refresh models after server availability change", RefreshModelsAfterServerChangeAsync);
         _toasts.ToastRaised += OnToastRaised;
-        
+
+        Commands = commands;
+        RegisterNavigationCommands(commands);
+        Chat.RegisterCommands(commands);
+        Agent.RegisterCommands(commands);
+        Rag.RegisterCommands(commands);
+        Services.RegisterCommands(commands);
+        Doctor.RegisterCommands(commands);
+        Memories.RegisterCommands(commands);
+        Models.RegisterCommands(commands);
+        Benchmarks.RegisterCommands(commands);
+        SystemOverview.RegisterCommands(commands);
+        Logs.RegisterCommands(commands);
+        Projects.RegisterCommands(commands);
+    }
+
+    public ICommandRegistry Commands { get; }
+
+    /// <summary>doc 04 4.1: navigation is a user action like any other, so it lives in
+    /// the registry too. MainWindowViewModel owns ActivePanel, so these register here
+    /// rather than on each panel's own ViewModel.</summary>
+    private void RegisterNavigationCommands(ICommandRegistry registry)
+    {
+        void Nav(string id, string title, string area, string shortcut, string panel) => registry.Register(new AppCommand(
+            Id: id, Title: title, Area: area, Description: $"Open {title}.",
+            Keywords: [area.ToLowerInvariant(), panel],
+            Shortcut: shortcut,
+            CanExecute: () => true,
+            Execute: () => { ActivePanel = panel; return Task.CompletedTask; }));
+
+        Nav("nav.chat", "Chat", "Chat", "Ctrl+1", "chat");
+        Nav("nav.agent", "Agent", "Agent", "Ctrl+2", "agent");
+        Nav("nav.rag", "RAG", "RAG", "Ctrl+3", "rag");
+        Nav("nav.models", "Models", "Models", "Ctrl+4", "models");
+        Nav("nav.services", "Services", "Services", "Ctrl+5", "services");
+        Nav("nav.benchmarks", "Benchmarks", "Benchmarks", "", "benchmarks");
+        Nav("nav.system", "System overview", "System", "", "system");
+        Nav("nav.doctor", "Doctor", "Doctor", "", "doctor");
+        Nav("nav.memories", "Memories", "Memory", "", "memories");
+        Nav("nav.logs", "Logs", "System", "", "logs");
+        Nav("nav.settings", "Settings", "Settings", "", "settings");
+
+        registry.Register(new AppCommand(
+            Id: "chat.new-conversation", Title: "New conversation", Area: "Chat",
+            Description: "Start a new chat conversation.",
+            Keywords: ["new", "chat", "clear"], Shortcut: "Ctrl+N",
+            CanExecute: () => true,
+            Execute: () => { ActivePanel = "chat"; Chat.NewConversation(); return Task.CompletedTask; }));
+
+        registry.Register(new AppCommand(
+            Id: "system.toggle-sidebar", Title: "Toggle sidebar", Area: "Chat",
+            Description: "Show or hide the conversation list.",
+            Keywords: ["sidebar", "conversations", "toggle"], Shortcut: "",
+            CanExecute: () => true,
+            Execute: () => { IsSidebarOpen = !IsSidebarOpen; return Task.CompletedTask; }));
     }
 
     private void UpdateDoctorStatus()

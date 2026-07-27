@@ -59,6 +59,25 @@ public partial class MemoriesViewModel : ViewModelBase
         await RefreshEmbeddingMismatchAsync();
     }
 
+    /// <summary>doc 04 4.1: registered next to the ViewModel that owns the action.</summary>
+    public void RegisterCommands(ICommandRegistry registry)
+    {
+        registry.Register(new AppCommand(
+            Id: "memories.search", Title: "Search memories", Area: "Memory",
+            Description: "Search stored memories by text.",
+            Keywords: ["memory", "search", "find"], Shortcut: "",
+            CanExecute: () => true,
+            Execute: () => SearchCommand.ExecuteAsync(null)));
+
+        registry.Register(new AppCommand(
+            Id: "memories.reembed-mismatched", Title: "Re-embed mismatched memories", Area: "Memory",
+            Description: "Re-embed memories whose vectors came from a different embedding model.",
+            Keywords: ["memory", "embedding", "reembed", "mismatch"], Shortcut: "",
+            CanExecute: () => EmbeddingMismatchCount > 0,
+            DisabledReason: () => "No mismatched embeddings.",
+            Execute: () => ReembedMismatchedCommand.ExecuteAsync(null)));
+    }
+
     /// <summary>
     /// Surfaces the "old vectors after an embedding model switch" gap (r16
     /// 02-memory-integrity.md 2.4): recall degrades silently to FTS-only

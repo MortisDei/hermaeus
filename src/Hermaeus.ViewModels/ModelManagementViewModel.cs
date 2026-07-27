@@ -317,6 +317,25 @@ public partial class ModelManagementViewModel : ObservableObject
         }
     }
 
+    /// <summary>doc 04 4.1: registered next to the ViewModel that owns the action.</summary>
+    public void RegisterCommands(ICommandRegistry registry)
+    {
+        registry.Register(new AppCommand(
+            Id: "models.check-for-updates", Title: "Check for model updates", Area: "Models",
+            Description: "Check installed models for available updates.",
+            Keywords: ["models", "update", "check"], Shortcut: "",
+            CanExecute: () => true,
+            Execute: () => CheckForUpdatesCommand.ExecuteAsync(null)));
+
+        registry.Register(new AppCommand(
+            Id: "models.auto-tune-all", Title: "Auto-tune all models", Area: "Models",
+            Description: "Run auto-tune against every installed model.",
+            Keywords: ["models", "tune", "auto-tune"], Shortcut: "",
+            CanExecute: () => !_isTuneInProgress,
+            DisabledReason: () => "Auto-tune is already running.",
+            Execute: () => AutoTuneAllCommand.ExecuteAsync(null)));
+    }
+
     [RelayCommand]
     private async Task AutoTuneAllAsync()
     {

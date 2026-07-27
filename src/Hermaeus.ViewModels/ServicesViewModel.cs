@@ -1155,6 +1155,17 @@ public partial class ServicesViewModel : ViewModelBase
             await server.RefreshOrphanStatusAsync();
     }
 
+    /// <summary>doc 04 4.1: registered next to the ViewModel that owns the action.</summary>
+    public void RegisterCommands(ICommandRegistry registry)
+    {
+        registry.Register(new AppCommand(
+            Id: "services.refresh-orphan-detection", Title: "Check for leftover server processes", Area: "Services",
+            Description: "Re-check every stopped managed server's port for a leftover process.",
+            Keywords: ["services", "orphan", "port", "refresh"], Shortcut: "",
+            CanExecute: () => true,
+            Execute: () => RefreshOrphanDetectionCommand.ExecuteAsync(null)));
+    }
+
     /// <summary>
     /// r12 01-settings-lifecycle.md 1.4: <see cref="ISettingsService.SettingsChanged"/>
     /// fires after every save, so this used to run on every settings save of
