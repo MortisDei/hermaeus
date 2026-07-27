@@ -309,50 +309,9 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
     /// "what glob_files matches" and that divergence would be a security bug
     /// (r23 3.4).
     /// </summary>
-    internal static Regex GlobToRegex(string pattern)
-    {
-        var sb = new StringBuilder("^");
-        var normalized = pattern.Replace('\\', '/');
-        for (var i = 0; i < normalized.Length; i++)
-        {
-            var c = normalized[i];
-            if (c == '*')
-            {
-                if (i + 1 < normalized.Length && normalized[i + 1] == '*')
-                {
-                    // "**/" matches zero or more whole path segments (so
-                    // "src/**/*.cs" also matches "src/Foo.cs" directly, not
-                    // just files at least one directory deeper); a bare "**"
-                    // with no following separator matches anything.
-                    if (i + 2 < normalized.Length && normalized[i + 2] == '/')
-                    {
-                        sb.Append("(?:.*/)?");
-                        i += 2;
-                    }
-                    else
-                    {
-                        sb.Append(".*");
-                        i++;
-                    }
-                }
-                else
-                {
-                    sb.Append("[^/]*");
-                }
-            }
-            else if (c == '?')
-            {
-                sb.Append("[^/]");
-            }
-            else
-            {
-                sb.Append(Regex.Escape(c.ToString()));
-            }
-        }
-
-        sb.Append('$');
-        return new Regex(sb.ToString(), RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(500));
-    }
+    /// <summary>r24 doc 03: extracted to Hermaeus.Core.Services.GlobMatcher so
+    /// Hermaeus.Rag's watched sources can reuse the exact same matcher.</summary>
+    internal static Regex GlobToRegex(string pattern) => Hermaeus.Core.Services.GlobMatcher.ToRegex(pattern);
 
     private static int PathDepthBelow(string scope, string fullPath)
     {

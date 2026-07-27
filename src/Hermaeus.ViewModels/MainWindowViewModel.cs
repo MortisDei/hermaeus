@@ -18,6 +18,7 @@ public partial class MainWindowViewModel : ViewModelBase
     private readonly ISettingsService _settingsService;
     private bool _refreshingFolderFilters;
     private bool _postSetupInitialized;
+    private CancellationTokenSource? _watchedRefreshCts;
     private readonly Dictionary<string, CancellationTokenSource> _pendingMetadataSaves = new();
     private static readonly TimeSpan MetadataSaveDebounce = TimeSpan.FromMilliseconds(500);
 
@@ -328,6 +329,9 @@ public partial class MainWindowViewModel : ViewModelBase
         // r24 doc 02 2.1: shortly after startup, bounded, never on the send path.
         if (_recallIndexing is not null)
             RunBackgroundTaskAsync("recall startup backfill", RunRecallStartupBackfillAsync);
+        // r24 doc 03 3.4: only if the user opted in; well after startup, never on the send path.
+        if (_settingsService.Settings.Rag.RefreshWatchedSourcesOnStart || _settingsService.Settings.Rag.RefreshWatchedSourcesEveryHours > 0)
+            RunBackgroundTaskAsync("watched sources automatic refresh", RunWatchedSourceAutomationAsync);
     }
 
     private async Task RunRecallStartupBackfillAsync()
@@ -337,11 +341,40 @@ public partial class MainWindowViewModel : ViewModelBase
         await _recallIndexing!.RunStartupBackfillAsync(conversations, tasks);
     }
 
+    /// <summary>doc 03 3.4: optional, off by default. Runs one on-start pass after a
+    /// delay (well after startup, never on the send path) and then, if configured,
+    /// repeats on an interval until shutdown. Never deletes - see
+    /// RagViewModel.RunAutomaticWatchedRefreshAsync.</summary>
+    private async Task RunWatchedSourceAutomationAsync()
+    {
+        _watchedRefreshCts = new CancellationTokenSource();
+        var ct = _watchedRefreshCts.Token;
+
+        if (_settingsService.Settings.Rag.RefreshWatchedSourcesOnStart)
+        {
+            try { await Task.Delay(TimeSpan.FromSeconds(30), ct); }
+            catch (OperationCanceledException) { return; }
+            await Rag.RunAutomaticWatchedRefreshAsync(ct);
+        }
+
+        var hours = _settingsService.Settings.Rag.RefreshWatchedSourcesEveryHours;
+        while (hours > 0 && !ct.IsCancellationRequested)
+        {
+            try { await Task.Delay(TimeSpan.FromHours(hours), ct); }
+            catch (OperationCanceledException) { return; }
+            await Rag.RunAutomaticWatchedRefreshAsync(ct);
+            hours = _settingsService.Settings.Rag.RefreshWatchedSourcesEveryHours;
+        }
+    }
+
     public void Shutdown()
     {
         _searchCts?.Cancel();
         _searchCts?.Dispose();
         _searchCts = null;
+        _watchedRefreshCts?.Cancel();
+        _watchedRefreshCts?.Dispose();
+        _watchedRefreshCts = null;
         Services.StopAll();
         Settings.Shutdown();
     }

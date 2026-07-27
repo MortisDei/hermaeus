@@ -58,4 +58,13 @@ public class RagSettings
     /// panel's own query token budget.
     /// </summary>
     public int ChatInjectionTokenBudget { get; set; } = 2000;
+
+    /// <summary>r24 doc 03 3.4: off by default. An automatic refresh only ever ingests
+    /// new and changed files - never deletes, under any configuration.</summary>
+    public bool RefreshWatchedSourcesOnStart { get; set; } = false;
+
+    /// <summary>0 means the periodic refresh is off. Preference-only knob (r22 Settings
+    /// vs Services split), since it only ever adds; the port/process concerns
+    /// that would put a knob on Services don't apply here.</summary>
+    public int RefreshWatchedSourcesEveryHours { get; set; } = 0;
 }

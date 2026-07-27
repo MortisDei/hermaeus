@@ -160,6 +160,11 @@ public sealed class RagQueryService
     public async Task<List<RagChunk>> GetChunksForDatasetAsync(string datasetId, bool includeEmbeddings = false, CancellationToken ct = default)
         => await _store.GetChunksAsync(datasetId, includeEmbeddings, ct);
 
+    /// <summary>doc 03 3.1: save seam for dataset-config-only edits (adding/removing a
+    /// watched source) that do not go through the ingest pipeline.</summary>
+    public async Task SaveDatasetAsync(RagDataset dataset, CancellationToken ct = default)
+        => await _store.SaveDatasetAsync(dataset, ct);
+
     /// <summary>r10 02-rag-quality.md 2.5: the lightweight projection RagDatasetHealthService actually needs.</summary>
     public async Task<List<RagChunkHealthInfo>> GetChunkHealthInfoForDatasetAsync(string datasetId, CancellationToken ct = default)
         => await _store.GetChunkHealthInfoAsync(datasetId, ct);

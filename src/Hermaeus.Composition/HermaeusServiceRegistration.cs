@@ -81,6 +81,7 @@ public static class HermaeusServiceRegistration
         s.AddSingleton<IEmbeddingService, LlamaCppEmbeddingService>();
         s.AddSingleton<IReranker, OnnxCrossEncoderReranker>();
         s.AddSingleton<RagPipeline>();
+        s.AddSingleton<WatchedSourceService>();
         s.AddSingleton<RagQueryService>();
         s.AddSingleton<IAgentRetrievalService, AgentRetrievalService>();
         s.AddSingleton<RagEvalService>();
