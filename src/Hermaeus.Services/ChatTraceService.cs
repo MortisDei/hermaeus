@@ -24,7 +24,10 @@ public sealed record ChatTraceEntry(
     string PreStreamBreakdown = "",
     int RagContextItems = 0,
     long RagMs = 0,
-    string RagNote = "");
+    string RagNote = "",
+    int RecallContextItems = 0,
+    long RecallInjectionMs = 0,
+    string RecallNote = "");
 
 /// <summary>
 /// Persists and reloads chat traces through the shared <see cref="ITraceStore"/>.
@@ -45,7 +48,10 @@ public sealed class ChatTraceService
         string PreStreamBreakdown = "",
         int RagContextItems = 0,
         long RagMs = 0,
-        string RagNote = "");
+        string RagNote = "",
+        int RecallContextItems = 0,
+        long RecallInjectionMs = 0,
+        string RecallNote = "");
 
     private readonly ITraceStore? _traceStore;
     private readonly IRuntimeLogService _runtimeLogs;
@@ -79,7 +85,8 @@ public sealed class ChatTraceService
                 Error = trace.ErrorDetails,
                 DetailJson = JsonSerializer.Serialize(new ChatTraceDetail(
                     trace.Provider, trace.Runtime, trace.SystemPrompt, trace.AttachmentCount, trace.EstimatedTokens, trace.PreStreamBreakdown,
-                    trace.RagContextItems, trace.RagMs, trace.RagNote))
+                    trace.RagContextItems, trace.RagMs, trace.RagNote,
+                    trace.RecallContextItems, trace.RecallInjectionMs, trace.RecallNote))
             }, ct);
         }
         catch (Exception ex)
@@ -130,7 +137,10 @@ public sealed class ChatTraceService
             detail?.PreStreamBreakdown ?? string.Empty,
             detail?.RagContextItems ?? 0,
             detail?.RagMs ?? 0,
-            detail?.RagNote ?? string.Empty);
+            detail?.RagNote ?? string.Empty,
+            detail?.RecallContextItems ?? 0,
+            detail?.RecallInjectionMs ?? 0,
+            detail?.RecallNote ?? string.Empty);
     }
 
     private static ChatTraceDetail? TryParseDetail(string json)

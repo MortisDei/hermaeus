@@ -11,7 +11,12 @@ public enum ProvenanceKind
     Rag,
     Memory,
     Workspace,
-    AgentTool
+    AgentTool,
+
+    /// <summary>r24 doc 02 2.6: a Recall hit injected into chat context. Untrusted text
+    /// the model reads, never instruction the app acts on; cannot carry a memory id a
+    /// [MEMORY_UPDATE]/[MEMORY_FORGET] marker could target.</summary>
+    Recall
 }
 
 /// <summary>

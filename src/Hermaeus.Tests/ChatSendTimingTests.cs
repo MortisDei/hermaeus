@@ -29,7 +29,7 @@ public sealed class ChatSendTimingTests
 
         var formatted = timing.Format();
 
-        Assert.Equal("recall 0 ms, select 0 ms, lesson 0 ms, rag 0 ms, prompt build 0 ms, first token 0 ms, total 0 ms", formatted);
+        Assert.Equal("recall 0 ms, select 0 ms, lesson 0 ms, rag 0 ms, recall-inject 0 ms, prompt build 0 ms, first token 0 ms, total 0 ms", formatted);
     }
 
     [Fact]
