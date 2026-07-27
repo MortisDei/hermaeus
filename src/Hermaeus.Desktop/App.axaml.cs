@@ -232,6 +232,7 @@ public partial class App : Application
         s.AddSingleton<SetupWizardViewModel>();
         s.AddSingleton<ProjectViewModel>();
         s.AddSingleton<PaletteViewModel>();
+        s.AddSingleton<ActivityViewModel>();
         s.AddSingleton<MainWindowViewModel>();
     }
 }

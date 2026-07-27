@@ -92,10 +92,11 @@ public sealed class MainWindowViewModelStartupTests
         ], new FakeEmbeddingService());
         var commandRegistry = new CommandRegistry();
         var palette = new PaletteViewModel(commandRegistry, recallService);
+        var activity = new ActivityViewModel(toasts, new SqliteTraceStore(settings));
 
         var main = new MainWindowViewModel(
             convStore, chat, agent, settingsVm, models, rag, servicesVm, benchmarks, systemOverview, doctor, memories, logsVm, wizard, projects,
-            commandRegistry, palette, settings, toasts, logs, new ConversationExportService(), recallIndexing);
+            commandRegistry, palette, activity, settings, toasts, logs, new ConversationExportService(), recallIndexing);
 
         return new Harness(main, llm, logs, toasts, convStore);
     }

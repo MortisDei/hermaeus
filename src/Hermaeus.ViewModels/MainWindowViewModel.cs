@@ -35,6 +35,7 @@ public partial class MainWindowViewModel : ViewModelBase
     public SetupWizardViewModel     Wizard { get; }
     public ProjectViewModel         Projects { get; }
     public PaletteViewModel         Palette { get; }
+    public ActivityViewModel        Activity { get; }
 
     public UiBoundCollection<ConversationItemViewModel> Conversations { get; } = [];
     public UiBoundCollection<ToastViewModel> Toasts { get; } = [];
@@ -64,6 +65,7 @@ public partial class MainWindowViewModel : ViewModelBase
     public bool ShowDoctor => ActivePanel == "doctor";
     public bool ShowMemories => ActivePanel == "memories";
     public bool ShowLogs => ActivePanel == "logs";
+    public bool ShowActivity => ActivePanel == "activity";
     public bool ShowWizard => ActivePanel == "wizard";
     public object ActiveViewModel => ActivePanel switch
     {
@@ -77,6 +79,7 @@ public partial class MainWindowViewModel : ViewModelBase
         "doctor"   => Doctor,
         "memories" => Memories,
         "logs"     => Logs,
+        "activity" => Activity,
         "wizard"   => Wizard,
         _          => Chat
     };
@@ -101,6 +104,7 @@ public partial class MainWindowViewModel : ViewModelBase
         ProjectViewModel projects,
         ICommandRegistry commands,
         PaletteViewModel palette,
+        ActivityViewModel activity,
         ISettingsService settingsService,
         IToastService toasts,
         IRuntimeLogService runtimeLogs,
@@ -109,6 +113,7 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         _recallIndexing = recallIndexing;
         Palette = palette;
+        Activity = activity;
         _toasts = toasts;
         _logs = runtimeLogs;
         _exports = exports;
@@ -191,6 +196,7 @@ public partial class MainWindowViewModel : ViewModelBase
         SystemOverview.RegisterCommands(commands);
         Logs.RegisterCommands(commands);
         Projects.RegisterCommands(commands);
+        Activity.RegisterCommands(commands);
     }
 
     public ICommandRegistry Commands { get; }
@@ -217,6 +223,7 @@ public partial class MainWindowViewModel : ViewModelBase
         Nav("nav.doctor", "Doctor", "Doctor", "", "doctor");
         Nav("nav.memories", "Memories", "Memory", "", "memories");
         Nav("nav.logs", "Logs", "System", "", "logs");
+        Nav("nav.activity", "Activity", "Activity", "", "activity");
         Nav("nav.settings", "Settings", "Settings", "", "settings");
 
         registry.Register(new AppCommand(
@@ -657,6 +664,7 @@ public partial class MainWindowViewModel : ViewModelBase
         RunBackgroundTaskAsync("load memories", () => Memories.InitializeCommand.ExecuteAsync(null));
     }
     [RelayCommand] private void ShowLogsPanel()        => ActivePanel = "logs";
+    [RelayCommand] private void ShowActivityPanel()    { ActivePanel = "activity"; RunBackgroundTaskAsync("refresh activity", Activity.RefreshAsync); }
     [RelayCommand] private void ShowWizardPanel()      => ActivePanel = "wizard";
     [RelayCommand] private void ShowSettingsPanel()    { ActivePanel = "settings"; Settings.Reload(); }
 

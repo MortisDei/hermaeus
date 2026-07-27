@@ -18,6 +18,8 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     private readonly IRuntimeLogService    _runtimeLogs;
     private readonly OrphanServerDetector  _orphanDetector;
     private readonly ModelProfileService?  _modelProfiles;
+    private readonly IActivityRecorder?    _activity;
+    private ServerStatus _lastRecordedStatus = ServerStatus.Stopped;
     private ServerConfig                   _config;
     private OrphanServerInfo? _orphanInfo;
     private string? _lastModelPathForDefaults;
@@ -249,7 +251,8 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         IRuntimeLogService runtimeLogs,
         OrphanServerDetector? orphanDetector = null,
         HardwareProfile? hardwareProfile = null,
-        ModelProfileService? modelProfiles = null)
+        ModelProfileService? modelProfiles = null,
+        IActivityRecorder? activity = null)
     {
         _mgr = new ServerProcessManager(redactor);
         _config   = config;
@@ -260,6 +263,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _orphanDetector = orphanDetector ?? new OrphanServerDetector();
         _hardwareProfile = hardwareProfile;
         _modelProfiles = modelProfiles;
+        _activity = activity;
 
         _name           = config.Name;
         _executablePath = config.ExecutablePath;
@@ -294,6 +298,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
                 RuntimeLogCategory.Service,
                 $"{Name} status: {StatusLabel}"));
             NotifyStatusProps();
+            RecordServerActivity(s);
         });
 
         _mgr.LogLine += line => RunOnUi(() =>
@@ -306,6 +311,29 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         RefreshDetectedModels();
         RefreshDetectedMmprojPaths(ModelPath);
         ScheduleContextFitRefresh();
+    }
+
+    /// <summary>doc 04 4.2: managed server start, stop, and crash all record through
+    /// Activity, fire-and-forget, off any hot path. Only real transitions
+    /// (not construction-time no-ops) are recorded.</summary>
+    private void RecordServerActivity(ServerStatus s)
+    {
+        if (_activity is null || s == _lastRecordedStatus) return;
+        var previous = _lastRecordedStatus;
+        _lastRecordedStatus = s;
+
+        switch (s)
+        {
+            case ServerStatus.Running:
+                _ = _activity.RecordAsync("services.server-start", Id, ActivityOutcome.Succeeded, $"{Name} started");
+                break;
+            case ServerStatus.Error:
+                _ = _activity.RecordAsync("services.server-crash", Id, ActivityOutcome.Failed, $"{Name} failed", ErrorMessage);
+                break;
+            case ServerStatus.Stopped when previous == ServerStatus.Running:
+                _ = _activity.RecordAsync("services.server-stop", Id, ActivityOutcome.Succeeded, $"{Name} stopped");
+                break;
+        }
     }
 
     /// <summary>Called once by the parent <see cref="ServicesViewModel"/> when its
@@ -1072,6 +1100,7 @@ public partial class ServicesViewModel : ViewModelBase
     private readonly IRuntimeLogService _runtimeLogs;
     private readonly OrphanServerDetector _orphanDetector;
     private readonly ISystemInfoService? _systemInfo;
+    private readonly IActivityRecorder? _activity;
     private readonly ModelProfileService _modelProfiles;
     private HardwareProfile? _hardwareProfile;
 
@@ -1114,7 +1143,8 @@ public partial class ServicesViewModel : ViewModelBase
         TtsSettingsViewModel tts,
         OrphanServerDetector? orphanDetector = null,
         ISystemInfoService? systemInfo = null,
-        ModelProfileService? modelProfiles = null)
+        ModelProfileService? modelProfiles = null,
+        IActivityRecorder? activity = null)
     {
         _settings = settings;
         _runtimeProfiles = runtimeProfiles;
@@ -1125,6 +1155,7 @@ public partial class ServicesViewModel : ViewModelBase
         Tts = tts;
         _orphanDetector = orphanDetector ?? new OrphanServerDetector();
         _systemInfo = systemInfo;
+        _activity = activity;
         _modelProfiles = modelProfiles ?? new ModelProfileService(settings);
         Rebuild();
         _settings.SettingsChanged += (_, _) => RunOnUi(Rebuild);
@@ -1215,7 +1246,7 @@ public partial class ServicesViewModel : ViewModelBase
             }
             else
             {
-                var vm = new ServerProcessViewModel(cfg, _settings, _redactor, _trust, _toasts, _runtimeLogs, _orphanDetector, _hardwareProfile, _modelProfiles)
+                var vm = new ServerProcessViewModel(cfg, _settings, _redactor, _trust, _toasts, _runtimeLogs, _orphanDetector, _hardwareProfile, _modelProfiles, _activity)
                 {
                     BeforeStartAsync = StopSamePortPeersBeforeStartAsync
                 };

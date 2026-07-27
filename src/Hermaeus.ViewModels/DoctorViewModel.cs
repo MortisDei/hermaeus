@@ -15,6 +15,7 @@ public partial class DoctorViewModel : ObservableObject
     private readonly IToastService _toasts;
     private readonly ISettingsService _settingsService;
     private readonly IVoiceOrchestrator? _voice;
+    private readonly IActivityRecorder? _activity;
     private CancellationTokenSource? _installCts;
 
     [ObservableProperty] private bool _isScanning;
@@ -71,12 +72,13 @@ public partial class DoctorViewModel : ObservableObject
     /// </summary>
     public Action? RequestSyncServerExecutablePaths { get; set; }
 
-    public DoctorViewModel(IDoctorService doctor, IToastService toasts, ISettingsService settings, IVoiceOrchestrator? voice = null)
+    public DoctorViewModel(IDoctorService doctor, IToastService toasts, ISettingsService settings, IVoiceOrchestrator? voice = null, IActivityRecorder? activity = null)
     {
         _doctor = doctor;
         _toasts = toasts;
         _settingsService = settings;
         _voice = voice;
+        _activity = activity;
     }
 
     /// <summary>doc 04 4.1: registered next to the ViewModel that owns the action.</summary>
@@ -126,11 +128,19 @@ public partial class DoctorViewModel : ObservableObject
                 ShowStartupIssueToast(report);
             NarrateCriticalIssues(report);
             AlertOnNewUntunedModels(report);
+
+            var errors = report.Checks.Count(c => c.Status == DoctorCheckStatus.Error);
+            var warnings = report.Checks.Count(c => c.Status == DoctorCheckStatus.Warning);
+            _ = _activity?.RecordAsync("doctor.scan", string.Empty,
+                errors > 0 ? ActivityOutcome.Failed : warnings > 0 ? ActivityOutcome.Partial : ActivityOutcome.Succeeded,
+                "Doctor scan completed",
+                errors + warnings > 0 ? $"{errors} error(s), {warnings} warning(s)" : string.Empty);
         }
         catch (Exception ex)
         {
             Summary = "Doctor scan failed.";
             _toasts.Show("Doctor scan failed", ex.Message, ToastKind.Error, 7000);
+            _ = _activity?.RecordAsync("doctor.scan", string.Empty, ActivityOutcome.Failed, "Doctor scan failed", ex.Message);
         }
         finally
         {

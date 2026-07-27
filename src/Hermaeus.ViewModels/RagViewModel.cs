@@ -123,6 +123,7 @@ public partial class RagViewModel : ObservableObject
     private readonly ServicesViewModel? _services;
     private readonly XttsProcessManager? _xtts;
     private readonly KokoroProcessManager? _kokoro;
+    private readonly IActivityRecorder? _activity;
     private CancellationTokenSource? _cts;
     private CancellationTokenSource? _ingestCts;
     private CancellationTokenSource? _evalCts;
@@ -204,7 +205,7 @@ public partial class RagViewModel : ObservableObject
     public Action<RagDataset>? RequestOpenInChat { get; set; }
     public bool IsLocalIngest => !EnableWebLoader;
 
-    public RagViewModel(RagQueryService query, RagPipeline pipeline, RagEvalService eval, IToastService toasts, IRuntimeLogService logs, ISettingsService settings, ServicesViewModel? services = null, XttsProcessManager? xtts = null, KokoroProcessManager? kokoro = null)
+    public RagViewModel(RagQueryService query, RagPipeline pipeline, RagEvalService eval, IToastService toasts, IRuntimeLogService logs, ISettingsService settings, ServicesViewModel? services = null, XttsProcessManager? xtts = null, KokoroProcessManager? kokoro = null, IActivityRecorder? activity = null)
     {
         _query    = query;
         _pipeline = pipeline;
@@ -215,6 +216,7 @@ public partial class RagViewModel : ObservableObject
         _services = services;
         _xtts = xtts;
         _kokoro = kokoro;
+        _activity = activity;
     }
 
     public IEnumerable<IngestDuplicatePolicy> IngestPolicyOptions => Enum.GetValues<IngestDuplicatePolicy>();
@@ -391,6 +393,13 @@ public partial class RagViewModel : ObservableObject
             _toasts.Show("RAG ingest complete", $"{report.Summary()}", ToastKind.Success);
             _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Rag,
                 $"RAG ingest complete for dataset {ds.Name}. {report.Summary()}"));
+            if (!IngestDryRun)
+            {
+                var errorCount = report.Documents.Count(d => d.Status == Hermaeus.Rag.Models.DocumentIngestStatus.Error);
+                _ = _activity?.RecordAsync("rag.ingest", ds.Id,
+                    errorCount > 0 ? ActivityOutcome.Partial : ActivityOutcome.Succeeded,
+                    $"Ingest into {ds.Name}", errorCount > 0 ? $"{errorCount} file(s) errored" : string.Empty, ds.ProjectId);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -398,6 +407,7 @@ public partial class RagViewModel : ObservableObject
             _toasts.Show("RAG ingest cancelled", "Ingest was cancelled before completion.", ToastKind.Info, 5000);
             _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Rag,
                 "RAG ingest cancelled."));
+            _ = _activity?.RecordAsync("rag.ingest", string.Empty, ActivityOutcome.Cancelled, "Ingest cancelled");
         }
         catch (Exception ex)
         {
@@ -405,6 +415,7 @@ public partial class RagViewModel : ObservableObject
             _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Error, RuntimeLogCategory.Rag,
                 $"RAG ingest failed: {ex.Message}"));
             _toasts.Show("RAG ingest failed", ex.Message, ToastKind.Error, 7000);
+            _ = _activity?.RecordAsync("rag.ingest", string.Empty, ActivityOutcome.Failed, "Ingest failed", ex.Message);
         }
         finally
         {

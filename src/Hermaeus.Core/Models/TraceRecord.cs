@@ -6,7 +6,12 @@ public enum TraceKind
     Chat,
     Rag,
     Agent,
-    LocalApi
+    LocalApi,
+
+    /// <summary>r24 doc 04 4.2: background work outside a chat/RAG/agent send - managed
+    /// server lifecycle, downloads, ingest, Doctor scans, backup/restore, memory sweeps.
+    /// The Activity feed's primary source.</summary>
+    System
 }
 
 /// <summary>

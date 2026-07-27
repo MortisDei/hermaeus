@@ -43,6 +43,7 @@ public static class HermaeusServiceRegistration
         s.AddSingleton<BenchmarkService>();
         s.AddSingleton<IBenchmarkInsightsService, BenchmarkInsightsService>();
         s.AddSingleton<ITraceStore, SqliteTraceStore>();
+        s.AddSingleton<IActivityRecorder, ActivityRecorder>();
         s.AddSingleton<IModelUsageService, ModelUsageService>();
         s.AddSingleton<ChatTraceService>();
         s.AddSingleton<ICommandRegistry, CommandRegistry>();
