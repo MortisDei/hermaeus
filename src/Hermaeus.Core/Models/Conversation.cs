@@ -21,6 +21,10 @@ public class Conversation
     /// <summary>r24 doc 01: the project this conversation was created under, if any. A
     /// default it inherited at creation time, never retroactively assigned.</summary>
     public string ProjectId { get; set; } = string.Empty;
+
+    /// <summary>r24 doc 02 2.0: excludes this conversation from Recall indexing.
+    /// Setting it true removes its existing recall entries immediately.</summary>
+    public bool RecallExcluded { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     public List<Message> Messages { get; set; } = [];

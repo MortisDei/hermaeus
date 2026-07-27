@@ -9,6 +9,7 @@ using Hermaeus.Rag.Retrieval;
 using Hermaeus.Rag.Storage;
 using Hermaeus.Services;
 using Hermaeus.Services.ProcessManagement;
+using Hermaeus.Services.Recall;
 using Hermaeus.Voice;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -98,6 +99,13 @@ public static class HermaeusServiceRegistration
         s.AddSingleton<IPatchDiffService, PatchDiffService>();
         s.AddSingleton<IAgentScenarioStore, AgentScenarioStore>();
         s.AddSingleton<IAgentScenarioRunner, AgentScenarioRunner>();
+        s.AddSingleton<RecallIndexStore>();
+        s.AddSingleton<RecallIndexingService>();
+        s.AddSingleton<IRecallSource, ConversationRecallSource>();
+        s.AddSingleton<IRecallSource, TaskRecallSource>();
+        s.AddSingleton<IRecallSource, MemoryRecallSource>();
+        s.AddSingleton<IRecallSource, DocumentRecallSource>();
+        s.AddSingleton<RecallService>();
         return s;
     }
 }
