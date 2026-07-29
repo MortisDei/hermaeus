@@ -16,6 +16,7 @@ public partial class ChatView : UserControl
     private EventHandler? _scrollHandler;
     private EventHandler? _settingsChangedHandler;
     private EventHandler<ScrollChangedEventArgs>? _scrollChangedHandler;
+    private Action<string>? _micTranscriptHandler;
     // r19 6.3: content (action row, sources, memory pills, the incremental
     // MarkdownViewer re-render timer) keeps materializing AFTER the VM's last
     // ScrollToBottom raise, so a single programmatic scroll always lands
@@ -50,6 +51,8 @@ public partial class ChatView : UserControl
                 _vm.RequestCopyToClipboard = null;
                 _vm.RequestContextFilePicker = null;
                 _vm.RequestConversationExportPath = null;
+                if (_micTranscriptHandler is not null)
+                    _vm.ChatMic.TranscriptReady -= _micTranscriptHandler;
             }
 
             if (DataContext is not ChatViewModel vm)
@@ -58,10 +61,16 @@ public partial class ChatView : UserControl
                 _scrollHandler = null;
                 _settingsChangedHandler = null;
                 _scrollChangedHandler = null;
+                _micTranscriptHandler = null;
                 return;
             }
 
             _vm = vm;
+
+            if (this.FindControl<Controls.MicButton>("ChatMicButton") is { } micButton)
+                micButton.ViewModel = vm.ChatMic;
+            _micTranscriptHandler = InsertDictatedTextAtCursor;
+            vm.ChatMic.TranscriptReady += _micTranscriptHandler;
 
             _settingsChangedHandler = (_, _) => ApplyAcceptsReturn();
             vm.Settings.SettingsChanged += _settingsChangedHandler;
@@ -276,6 +285,27 @@ public partial class ChatView : UserControl
             if (_vm.SendCommand.CanExecute(null))
                 _vm.SendCommand.Execute(null);
         }
+    }
+
+    /// <summary>r24 doc 05 5.4: dictation inserts at the cursor for editing - it never
+    /// sends by itself. A single space is inserted before the transcript when the
+    /// cursor sits right after a non-space character, so two dictated phrases (or a
+    /// dictated phrase after typed text) don't run together with no separator.</summary>
+    private void InsertDictatedTextAtCursor(string text)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_vm is null || this.FindControl<TextBox>("InputBox") is not { } inputBox) return;
+
+            var current = _vm.InputText;
+            var caret = Math.Clamp(inputBox.CaretIndex, 0, current.Length);
+            var needsLeadingSpace = caret > 0 && !char.IsWhiteSpace(current[caret - 1]);
+            var insertion = needsLeadingSpace ? " " + text : text;
+
+            _vm.InputText = current.Insert(caret, insertion);
+            inputBox.CaretIndex = caret + insertion.Length;
+            inputBox.Focus();
+        });
     }
 
     /// <summary>

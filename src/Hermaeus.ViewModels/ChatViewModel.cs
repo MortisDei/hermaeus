@@ -299,6 +299,10 @@ public partial class ChatViewModel : ViewModelBase
     public Action<string>? RequestRevealInFolder { get; set; }
     public Action<string>? RequestOpenArtifactsFolder { get; set; }
 
+    /// <summary>r24 doc 05 5.4: dictation for the chat input. The View wires this into a
+    /// MicButton control and, on TranscriptReady, inserts the text at InputBox's cursor.</summary>
+    public MicButtonViewModel ChatMic { get; }
+
     [ObservableProperty] private bool _isArtifactsExpanded;
     public bool HasArtifacts => Artifacts.Count > 0;
     public string ArtifactsSummary => $"Artifacts: {Artifacts.Count}";
@@ -429,12 +433,15 @@ public partial class ChatViewModel : ViewModelBase
         ChatArtifactService? artifacts = null,
         RagQueryService? rag = null,
         Hermaeus.Services.Recall.RecallIndexingService? recallIndexing = null,
-        Hermaeus.Services.Recall.RecallService? recallSearch = null)
+        Hermaeus.Services.Recall.RecallService? recallSearch = null,
+        IAudioCapture? audioCapture = null,
+        ISpeechRecognitionProviderRegistry? sttProviders = null)
     {
         _artifacts = artifacts;
         _rag = rag;
         _recallIndexing = recallIndexing;
         _recallSearch = recallSearch;
+        ChatMic = new MicButtonViewModel(audioCapture, sttProviders, settings);
         SaveCodeBlockAction = (lang, code, markdown) => _ = SaveCodeBlockAsync(lang, code, markdown);
         _llm = llm; _store = store; _settings = settings; _tts = tts; _profiles = profiles; _toasts = toasts;
         _systemInfo = systemInfo;
