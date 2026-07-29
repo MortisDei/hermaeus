@@ -9,9 +9,19 @@ public sealed class BenchmarkInsightsMathTests
         string modelId, string modelName, string quantization, string runtimeKind,
         int caseCount, double quality, double tokensPerSecond, DateTime startedAt, string appVersion = "0.10.0.0")
     {
+        // r25 doc 04: real runs always carry a CaseId (BenchmarkService sets it from
+        // the suite case), and the overall ranking now needs case identity to tell
+        // whether two models sat the same exam. Fixtures match real data.
         var results = new List<BenchmarkResult>();
         for (var i = 0; i < caseCount; i++)
-            results.Add(new BenchmarkResult { QualityScore = quality, ApproxTokensPerSecond = tokensPerSecond, ResourceScore = 1 });
+            results.Add(new BenchmarkResult
+            {
+                CaseId = $"case-{i}",
+                CaseName = $"Case {i}",
+                QualityScore = quality,
+                ApproxTokensPerSecond = tokensPerSecond,
+                ResourceScore = 1
+            });
 
         return new BenchmarkRun
         {

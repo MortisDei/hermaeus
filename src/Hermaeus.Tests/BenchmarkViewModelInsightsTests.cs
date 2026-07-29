@@ -32,13 +32,16 @@ public sealed class BenchmarkViewModelInsightsTests
         settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
         var benchmarks = new BenchmarkService(settings, new FakeLlm(), new FakeSystemInfo(), new FakeEvalStore());
 
-        var best = new ModelAggregate("id-a", "Model A", "Q4", "llama.cpp", 3, 30, 0.9, 25, 1, 0.9, 4.5, DateTime.UtcNow, false);
+        var best = new ModelAggregate("id-a", "Model A", "Q4", "llama.cpp", 3, 30, 0.9, 25, 1, 0.9, 4.5, DateTime.UtcNow, false,
+            ComparedCaseCount: 30);
         var report = new BenchmarkInsightsReport(
             TotalRuns: 5, ComparableRuns: 4, ModelCount: 2, OldestComparableRun: DateTime.UtcNow.AddDays(-10),
             Models: [best],
             TagLeaderboards: [new TagLeaderboard("coding", [best])],
             Comparisons: [],
-            Caveats: ["1 run(s) from different hardware were ignored."]);
+            Caveats: ["1 run(s) from different hardware were ignored."],
+            // r25 doc 04 4.1: without a shared case basis there is no Best overall.
+            ComparisonBasisCaseCount: 30);
 
         var vm = new BenchmarkViewModel(benchmarks, new FakeLlm(), new ModelProfileService(settings), settings, new FakeToasts(),
             insights: new FakeInsightsService(report));
@@ -51,6 +54,41 @@ public sealed class BenchmarkViewModelInsightsTests
         Assert.Equal("Model A (Q4)", vm.InsightsBestOverall!.DisplayName);
         Assert.Single(vm.InsightsLeaderboards);
         Assert.Single(vm.InsightsCaveats);
+
+        // r25 doc 04 4.1: the ranking says what it rests on.
+        Assert.Contains("30 case(s)", vm.InsightsComparisonBasis);
+        Assert.False(vm.InsightsHasNoComparisonBasis);
+    }
+
+    /// <summary>
+    /// r25 doc 04 4.1: with runs recorded but no shared case set, the panel says
+    /// so instead of naming a winner from uneven exams.
+    /// </summary>
+    [Fact]
+    public async Task LoadInsightsAsync_reports_no_comparison_basis_instead_of_a_winner()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        var benchmarks = new BenchmarkService(settings, new FakeLlm(), new FakeSystemInfo(), new FakeEvalStore());
+
+        var report = new BenchmarkInsightsReport(
+            TotalRuns: 5, ComparableRuns: 4, ModelCount: 0, OldestComparableRun: DateTime.UtcNow.AddDays(-10),
+            Models: [],
+            TagLeaderboards: [],
+            Comparisons: [],
+            Caveats: ["No two models have run enough of the same cases to rank overall."],
+            ComparisonBasisCaseCount: 0);
+
+        var vm = new BenchmarkViewModel(benchmarks, new FakeLlm(), new ModelProfileService(settings), settings, new FakeToasts(),
+            insights: new FakeInsightsService(report));
+
+        await vm.LoadInsightsCommand.ExecuteAsync(null);
+
+        Assert.Null(vm.InsightsBestOverall);
+        Assert.True(vm.InsightsHasNoComparisonBasis);
+        Assert.Equal(string.Empty, vm.InsightsComparisonBasis);
+        Assert.Empty(vm.InsightsBestOverallCases);
     }
 
     [Fact]

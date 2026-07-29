@@ -162,14 +162,44 @@ public partial class ChatViewModel : ViewModelBase
     /// r25 doc 01: which leaf of the tree is being shown. Empty means the last
     /// message in stored order, which is what an unbranched conversation means.
     /// </summary>
-    private string _activeLeafId = string.Empty;
+    private string _activeLeafIdStorage = string.Empty;
+
+    /// <summary>Assigning through a property keeps <see cref="ActivePath"/>'s memo honest;
+    /// a stale path here renders the wrong conversation.</summary>
+    private string _activeLeafId
+    {
+        get => _activeLeafIdStorage;
+        set
+        {
+            _activeLeafIdStorage = value;
+            InvalidateActivePath();
+        }
+    }
 
     /// <summary>
     /// The root-to-leaf path currently being shown. Everything that reasons about
     /// "the conversation so far" uses this, not <see cref="Messages"/>.
+    ///
+    /// Memoized: this is read from a bound property (<see cref="HasEarlierMessages"/>),
+    /// from the per-keystroke context estimate, and from the send path, and
+    /// recomputing an O(n) walk plus a dictionary on every read would make a long
+    /// conversation pay for the tree on every keypress.
     /// </summary>
-    public IReadOnlyList<MessageViewModel> ActivePath =>
-        ConversationTree.ActivePath(Messages.ToList(), _activeLeafId);
+    public IReadOnlyList<MessageViewModel> ActivePath
+    {
+        get
+        {
+            if (_cachedActivePath is not null)
+                return _cachedActivePath;
+            _cachedActivePath = ConversationTree.ActivePath(Messages, _activeLeafId);
+            return _cachedActivePath;
+        }
+    }
+
+    private IReadOnlyList<MessageViewModel>? _cachedActivePath;
+
+    /// <summary>Invalidated whenever the tree or the active leaf changes.</summary>
+    private void InvalidateActivePath() => _cachedActivePath = null;
 
     /// <summary>
     /// r25 doc 01 1.4: set for exactly one send, when edit-and-resend needs the
@@ -521,6 +551,10 @@ public partial class ChatViewModel : ViewModelBase
         Messages.CollectionChanged += (_, e) =>
         {
             HasMessages = Messages.Count > 0;
+            // r25 doc 01: the tree changed, so the memoized active path is stale.
+            // This runs before anything else here, because ScheduleContextUsageRefresh
+            // and RefreshVisibleMessageWindow both read ActivePath.
+            InvalidateActivePath();
             ScheduleContextUsageRefresh();
             if (e.Action == NotifyCollectionChangedAction.Reset)
                 _revealedEarlierMessageCount = 0;
@@ -644,12 +678,38 @@ public partial class ChatViewModel : ViewModelBase
     /// </summary>
     private void RefreshBranchState(IReadOnlyList<MessageViewModel> path)
     {
-        var all = Messages.ToList();
+        if (path.Count == 0)
+            return;
+
+        // Index children once rather than scanning and sorting the whole message
+        // list per message in the path: that inner scan turned a refresh into
+        // O(n^2), and a refresh runs on every message added.
+        var childrenByParent = new Dictionary<string, List<MessageViewModel>>(StringComparer.Ordinal);
+        foreach (var message in Messages)
+        {
+            if (!childrenByParent.TryGetValue(message.ParentId, out var bucket))
+                childrenByParent[message.ParentId] = bucket = [];
+            bucket.Add(message);
+        }
+
+        foreach (var bucket in childrenByParent.Values)
+            bucket.Sort(static (a, b) =>
+            {
+                var byTime = a.CreatedAt.CompareTo(b.CreatedAt);
+                return byTime != 0 ? byTime : string.CompareOrdinal(a.Id, b.Id);
+            });
+
         foreach (var message in path)
         {
-            var siblings = ConversationTree.SiblingsOf(all, message);
+            if (!childrenByParent.TryGetValue(message.ParentId, out var siblings))
+            {
+                message.BranchCount = 1;
+                message.BranchIndex = 1;
+                continue;
+            }
+
             message.BranchCount = siblings.Count;
-            message.BranchIndex = Math.Max(1, siblings.ToList().FindIndex(
+            message.BranchIndex = Math.Max(1, siblings.FindIndex(
                 s => string.Equals(s.Id, message.Id, StringComparison.Ordinal)) + 1);
         }
     }
@@ -1480,7 +1540,7 @@ public partial class ChatViewModel : ViewModelBase
         foreach (var victim in Messages.Where(m => doomed.Contains(m.Id)).ToList())
             Messages.Remove(victim);
 
-        _activeLeafId = ConversationTree.NewestLeafUnder(Messages.ToList(), survivor);
+        _activeLeafId = ConversationTree.NewestLeafUnder(Messages, survivor);
         _revealedEarlierMessageCount = 0;
         RefreshVisibleMessageWindow();
         await PersistAsync();
