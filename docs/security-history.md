@@ -10,6 +10,64 @@ statement of a *current* control, that control has been copied into
 See `docs/security-review.md` for current controls and the threat model,
 and `docs/security-roadmap.md` for open hardening work.
 
+## r24: One Place, One Memory, One Voice (Projects, Recall, Watched Sources, Voice Input)
+
+Four features, the largest being two new local surfaces (Recall, speech
+recognition) that both hold or transmit user content, plus one real
+cryptographic fix found while testing an unrelated item.
+
+- **Recall indexes user content by design, and shipped with the controls
+  that requires from day one, not as a follow-up.** `recall.db` is a second
+  local, unencrypted searchable copy of conversations, agent tasks,
+  memories, and RAG chunks - the same shape of exposure
+  `ConversationStore`'s own FTS table already has, not a new category. The
+  owner caught the first draft of the spec building this with no on/off
+  switch, no clear action, and no per-conversation exclusion during pack
+  review, before any code existed; the shipped version has all three from
+  the start (Settings > Memory), plus honest size reporting and a hard
+  "not descopable at any budget" rule in the round's own spec. Indexing
+  runs as a bounded background pass, never on the chat send path. Optional
+  chat-side injection (off by default) reuses the same citation-pill UI
+  RAG/Memory injection already have, rather than a new prompt-assembly
+  path.
+- **Speech recognition adds a new local ONNX asset and a new remote-network
+  option, both following existing patterns rather than inventing new
+  ones.** The local backend (`facebook/wav2vec2-base-960h`, pinned,
+  SHA256-verified) uses the exact install/load posture native Kokoro TTS
+  already established: nothing downloads on the inference path, only
+  through an explicit install action. The remote OpenAI-compatible backend
+  reuses the existing `Llm.OpenAiApiKey`/`OpenAiBaseUrl` secret reference
+  rather than adding a second place to store the same kind of credential,
+  and is off by default with Privacy Audit disclosure when selected. Audio
+  capture (Windows `winmm`, Linux `parecord`/`arecord`/`ffmpeg`) never
+  persists what it records: a temp WAV is deleted after transcription on
+  every path, including failure and cancellation, and every capture
+  requires an explicit user action with a visible indicator for its
+  duration - no wake word, no background listening.
+- **Watched RAG sources add a scheduled/on-demand filesystem scan, not a
+  standing watcher.** `FileSystemWatcher` was explicitly rejected (no
+  persistent OS handle on user directories, platform-divergent behavior).
+  A refresh's apply step only ever ingests new/changed files; a missing
+  file is never removed without a second, separately confirmed action,
+  matching the existing "Remove missing sources" contract exactly.
+  Automatic refresh (off by default) inherits that same never-delete rule
+  unconditionally, and is skipped for a dataset whose embedding model has
+  drifted, closing the "background process bypasses the same guard a
+  manual ingest enforces" failure mode before it could exist.
+- **A real cryptographic gap in the local secret vault's fallback, found
+  while root-causing an intermittent test failure, not through directed
+  review.** `SecretStore`'s AES-CBC fallback encryption has no built-in
+  integrity check; decrypting under a replaced or corrupt local key does
+  not reliably throw, since PKCS7 padding validation alone has roughly a
+  1-in-256 chance of coincidentally passing on random post-decrypt
+  garbage. The existing test asserting "decrypt-with-wrong-key resolves
+  to empty" was flaking on exactly that coincidence. The primary decode
+  path now also requires the result to be structurally valid UTF8 (the
+  fallback fail path already had this discipline; the primary path
+  didn't), closing the practical gap without changing the on-disk format
+  or requiring a migration. Still not a formal AEAD/MAC construction - see
+  `docs/security-roadmap.md`.
+
 ## r23: Trust You Can Operate (Approval Integrity, Run Ledger And Rewind, Workspace Policy)
 
 Four independent security-relevant changes, none of which add a new network,
