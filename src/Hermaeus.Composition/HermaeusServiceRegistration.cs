@@ -73,6 +73,10 @@ public static class HermaeusServiceRegistration
         s.AddSingleton<ITtsService, VoiceRoutingTtsService>();
         s.AddSingleton<IVoiceOrchestrator, VoiceOrchestrator>();
         s.AddSingleton<VoiceNotificationBridge>();
+        s.AddSingleton<NativeSpeechRecognitionProvider>();
+        s.AddSingleton<OpenAiSpeechRecognitionProvider>();
+        s.AddSingleton<ISpeechRecognitionProviderRegistry, SpeechRecognitionProviderRegistry>();
+        s.AddSingleton<IAudioCapture>(_ => OperatingSystem.IsWindows() ? new WindowsAudioCapture() : new LinuxAudioCapture());
         s.AddSingleton<XttsProcessManager>();
         s.AddSingleton<KokoroProcessManager>();
         s.AddSingleton<LocalApiProcessManager>();

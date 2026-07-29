@@ -893,6 +893,8 @@ namespace Hermaeus.Tests
         public Task<bool> InstallNativeKokoroAssetsAsync(CancellationToken ct = default) => Task.FromResult(true);
 
         public Task<bool> InstallNativeKokoroAssetsAsync(IProgress<string> progress, CancellationToken ct = default) => Task.FromResult(true);
+
+        public Task<bool> InstallSpeechRecognitionAssetsAsync(IProgress<string> progress, CancellationToken ct = default) => Task.FromResult(true);
     }
 
     /// <summary>Records native-Kokoro install invocations so the wizard's "Install now" (r8 2.2)
@@ -922,6 +924,8 @@ namespace Hermaeus.Tests
             progress.Report(message);
             return Task.FromResult(InstallResult);
         }
+
+        public Task<bool> InstallSpeechRecognitionAssetsAsync(IProgress<string> progress, CancellationToken ct = default) => Task.FromResult(InstallResult);
     }
 
     internal static class PdfHelpers

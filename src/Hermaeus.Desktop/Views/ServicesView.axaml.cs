@@ -39,6 +39,8 @@ public partial class ServicesView : UserControl
         foreach (var srv in vm.Servers)
             WireFilePickers(srv);
         WireVoiceFilePickers(vm.Tts);
+        if (vm.Stt is not null)
+            WireSttFilePickers(vm.Stt);
 
         // Create and store handler to allow unsubscribing later
         _collectionChangedHandler = (_, e) =>
@@ -169,6 +171,26 @@ public partial class ServicesView : UserControl
                 Title = title,
                 AllowMultiple = false
             });
+    }
+
+    private void WireSttFilePickers(SttSettingsViewModel stt)
+    {
+        stt.RequestAudioFilePicker = async () =>
+        {
+            var files = await PickFileAsync(
+                "Choose a WAV file to transcribe",
+                [
+                    new FilePickerFileType("WAV audio") { Patterns = ["*.wav"] },
+                    new FilePickerFileType("All files") { Patterns = ["*"] }
+                ]);
+            return files.Count > 0 ? files[0].Path.LocalPath : null;
+        };
+
+        stt.RequestCopyToClipboard = async text =>
+        {
+            if (TopLevel.GetTopLevel(this)?.Clipboard is { } cb)
+                await cb.SetTextAsync(text);
+        };
     }
 
     private async Task<IReadOnlyList<IStorageFile>> PickFileAsync(string title, IReadOnlyList<FilePickerFileType> filters)

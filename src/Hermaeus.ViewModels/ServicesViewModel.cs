@@ -1109,6 +1109,9 @@ public partial class ServicesViewModel : ViewModelBase
     /// stay in Settings, reading the same live instance.</summary>
     public TtsSettingsViewModel Tts { get; }
 
+    /// <summary>r24 doc 05 5.7: speech recognition process/model/device config.</summary>
+    public SttSettingsViewModel? Stt { get; }
+
     public UiBoundCollection<ServerProcessViewModel> Servers { get; } = [];
     public UiBoundCollection<RuntimeProfileViewModel> RuntimeProfiles { get; } = [];
     public event EventHandler? ServerAvailabilityChanged;
@@ -1144,7 +1147,8 @@ public partial class ServicesViewModel : ViewModelBase
         OrphanServerDetector? orphanDetector = null,
         ISystemInfoService? systemInfo = null,
         ModelProfileService? modelProfiles = null,
-        IActivityRecorder? activity = null)
+        IActivityRecorder? activity = null,
+        SttSettingsViewModel? stt = null)
     {
         _settings = settings;
         _runtimeProfiles = runtimeProfiles;
@@ -1153,6 +1157,7 @@ public partial class ServicesViewModel : ViewModelBase
         _trust = trust;
         _runtimeLogs = runtimeLogs;
         Tts = tts;
+        Stt = stt;
         _orphanDetector = orphanDetector ?? new OrphanServerDetector();
         _systemInfo = systemInfo;
         _activity = activity;

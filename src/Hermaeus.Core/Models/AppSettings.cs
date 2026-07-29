@@ -112,4 +112,9 @@ public class AppSettings
     /// Agent workbench configuration (transcript budget, autonomous run limits).
     /// </summary>
     public AgentSettings Agent { get; set; } = new();
+
+    /// <summary>
+    /// Speech-to-text configuration (provider, device, dictation and hands-free preferences).
+    /// </summary>
+    public SttSettings Stt { get; set; } = new();
 }

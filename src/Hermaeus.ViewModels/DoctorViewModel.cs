@@ -31,6 +31,8 @@ public partial class DoctorViewModel : ObservableObject
     [ObservableProperty] private bool _embeddingModelProgressIsIndeterminate = true;
     [ObservableProperty] private bool _isInstallingNativeKokoro;
     [ObservableProperty] private string _nativeKokoroProgress = string.Empty;
+    [ObservableProperty] private bool _isInstallingSpeechRecognition;
+    [ObservableProperty] private string _speechRecognitionProgress = string.Empty;
 
     private readonly System.Text.StringBuilder _embeddingLogBuffer = new();
     private readonly object _embeddingLogFileLock = new();
@@ -458,6 +460,18 @@ public partial class DoctorViewModel : ObservableObject
                 (p, ct) => _doctor.InstallNativeKokoroAssetsAsync(p, ct),
                 "Kokoro (native) installed", "Kokoro native ONNX model and voices installed.",
                 "Kokoro (native) install failed", "Kokoro (native) install cancelled");
+            return;
+        }
+
+        if (check.Key == "speech-recognition")
+        {
+            await RunInstallAsync(
+                () => IsInstallingSpeechRecognition,
+                v => IsInstallingSpeechRecognition = v,
+                s => SpeechRecognitionProgress = s,
+                (p, ct) => _doctor.InstallSpeechRecognitionAssetsAsync(p, ct),
+                "Speech recognition installed", "Speech recognition ONNX model installed.",
+                "Speech recognition install failed", "Speech recognition install cancelled");
             return;
         }
 
