@@ -1,5 +1,6 @@
 using System.Collections.Specialized;
 using Hermaeus.Core.Models;
+using Hermaeus.Core.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace Hermaeus.ViewModels;
@@ -58,23 +59,19 @@ public partial class MessageViewModel : ObservableObject
     public UiBoundCollection<SourceReference> Sources { get; } = [];
 
     /// <summary>
-    /// Non-memory citations (RAG chunks today) - shown individually and clickable, unchanged
-    /// from before r18. Derived from <see cref="Sources"/>, split by <see cref="ProvenanceKind"/>.
+    /// r25 doc 02: one receipt of everything injected into this turn, grouped by
+    /// <see cref="ProvenanceKind"/> in a fixed order, replacing the three separate
+    /// strips this used to have (an always-visible citation strip, a collapsed
+    /// memory pill, and after r24 2.6 a Recall strip that leaked into the first
+    /// one and made collapsing the second hide nothing).
     /// </summary>
-    public UiBoundCollection<SourceReference> CitationSources { get; } = [];
+    public UiBoundCollection<ChatContextReceiptSection> ContextSections { get; } = [];
 
-    /// <summary>
-    /// r18 03-model-catalog-and-memory-ui.md 3.3: memory-sourced entries used to render as one
-    /// always-visible pill per recalled memory, indistinguishable from RAG citations, reading as
-    /// "all the memories loaded" even though the header line above already collapses this to a
-    /// count. Collapsed behind <see cref="MemorySourceSummary"/> and expanded on click instead.
-    /// </summary>
-    public UiBoundCollection<SourceReference> MemorySources { get; } = [];
+    /// <summary>Collapsed by default, and collapsed means no source item is visible at all.</summary>
+    [ObservableProperty] private bool _isContextExpanded;
 
-    [ObservableProperty] private bool _isMemorySourcesExpanded;
-
-    public bool HasMemorySources => MemorySources.Count > 0;
-    public string MemorySourceSummary => $"Memories used: {MemorySources.Count}";
+    public bool HasContext => ContextSections.Count > 0;
+    public string ContextSummary => ChatContextReceipt.Summarize(ContextSections);
 
     public MessageViewModel() => Sources.CollectionChanged += OnSourcesChanged;
 
@@ -82,18 +79,12 @@ public partial class MessageViewModel : ObservableObject
     {
         HasSources = Sources.Count > 0;
 
-        CitationSources.Clear();
-        MemorySources.Clear();
-        foreach (var source in Sources)
-        {
-            if (source.Kind == ProvenanceKind.Memory)
-                MemorySources.Add(source);
-            else
-                CitationSources.Add(source);
-        }
+        ContextSections.Clear();
+        foreach (var section in ChatContextReceipt.Build(Sources))
+            ContextSections.Add(section);
 
-        OnPropertyChanged(nameof(HasMemorySources));
-        OnPropertyChanged(nameof(MemorySourceSummary));
+        OnPropertyChanged(nameof(HasContext));
+        OnPropertyChanged(nameof(ContextSummary));
     }
 
     public string MetaDisplay

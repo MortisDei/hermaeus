@@ -63,9 +63,15 @@ public sealed class ChatRecallInjectionTests
             "the injected block should include the hit's title");
 
         var assistant = vm.Messages.Last(m => m.Role == "assistant");
-        True(assistant.CitationSources.Count > 0, "a Recall hit must render as a visible, clickable citation pill");
-        True(assistant.CitationSources.Any(s => s.Kind == ProvenanceKind.Recall),
-            "the pill must be tagged with ProvenanceKind.Recall, not Memory, so it can never be targeted by a [MEMORY_UPDATE]/[MEMORY_FORGET] marker");
+        True(assistant.HasContext, "a Recall hit must appear in the turn's context receipt");
+        True(assistant.ContextSections.Any(s => s.Kind == ProvenanceKind.Recall),
+            "the hit must be tagged with ProvenanceKind.Recall, not Memory, so it can never be targeted by a [MEMORY_UPDATE]/[MEMORY_FORGET] marker");
+        // r25 doc 02: it lands in its own receipt section rather than the old
+        // always-visible citation strip, which used to sit above the collapsed
+        // memory pill and defeat the collapse entirely.
+        False(assistant.ContextSections.Any(s => s.Kind == ProvenanceKind.Memory),
+            "a Recall hit carries no memory id and must never be grouped as a memory");
+        False(assistant.IsContextExpanded, "the receipt starts collapsed");
 
         var trace = Assert.Single(vm.ChatTraces);
         True(trace.RecallContextItems > 0, "trace RecallContextItems should be non-zero when a block was injected");

@@ -8,12 +8,13 @@ public partial class MessageControl : UserControl
 {
     /// <summary>
     /// r19 6.1: the memory pill flyout's "Open in Memories" link needs
-    /// ChatViewModel's command, but the pill sits inside a SECOND, nested
-    /// ItemsControl (MemorySources) so the usual $parent[ItemsControl]
-    /// ancestor-climb used elsewhere in this control would resolve to the
-    /// wrong (inner) ItemsControl. The caller (ChatView's MessagesList
-    /// DataTemplate, where only one ItemsControl ancestor is in scope) binds
-    /// this property to the real command instead.
+    /// ChatViewModel's command, but the pill sits inside nested ItemsControls
+    /// (r25 doc 02's context receipt: sections, then items within a section)
+    /// so the usual $parent[ItemsControl] ancestor-climb used elsewhere in
+    /// this control would resolve to the wrong (inner) ItemsControl. The
+    /// caller (ChatView's MessagesList DataTemplate, where only one
+    /// ItemsControl ancestor is in scope) binds this property to the real
+    /// command instead.
     /// </summary>
     public static readonly StyledProperty<ICommand?> OpenMemoryCommandProperty =
         AvaloniaProperty.Register<MessageControl, ICommand?>(nameof(OpenMemoryCommand));

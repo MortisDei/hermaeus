@@ -76,7 +76,8 @@ public sealed class ChatRagInjectionTests
             "the Knowledge Context header should name the attached dataset");
 
         var assistant = vm.Messages.Last(m => m.Role == "assistant");
-        True(assistant.CitationSources.Count > 0, "the reply should carry individually clickable RAG citation pills");
+        True(assistant.ContextSections.Any(s => s.Kind == ProvenanceKind.Rag),
+            "the reply should carry its RAG excerpts in the context receipt");
 
         var trace = Assert.Single(vm.ChatTraces);
         True(trace.RagContextItems > 0, "trace RagContextItems should be non-zero when a block was injected");

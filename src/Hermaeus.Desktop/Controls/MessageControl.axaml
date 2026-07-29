@@ -3,6 +3,8 @@
              xmlns:vm="using:Hermaeus.ViewModels"
              xmlns:controls="using:Hermaeus.Desktop.Controls"
              xmlns:core="using:Hermaeus.Core.Models"
+             xmlns:services="using:Hermaeus.Core.Services"
+             xmlns:conv="using:Hermaeus.Desktop.Views"
              x:Class="Hermaeus.Desktop.Controls.MessageControl"
              x:Name="Root"
              x:DataType="vm:MessageViewModel">
@@ -79,72 +81,69 @@
                                 Command="{Binding $parent[ItemsControl].DataContext.ContinueTruncatedCommand}" />
                     </StackPanel>
 
-                    <ItemsControl ItemsSource="{Binding CitationSources}"
-                                  IsVisible="{Binding HasSources}"
-                                  Margin="0,6,0,0">
-                        <ItemsControl.ItemsPanel>
-                            <ItemsPanelTemplate>
-                                <WrapPanel />
-                            </ItemsPanelTemplate>
-                        </ItemsControl.ItemsPanel>
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate DataType="core:SourceReference">
-                                <Border CornerRadius="10"
-                                        Margin="0,0,6,4"
-                                        Padding="8,3"
-                                        Background="{DynamicResource SubtleFillColorSecondaryBrush}"
-                                        ToolTip.Tip="{Binding Snippet}">
-                                    <TextBlock FontSize="11" Opacity="0.6" Text="{Binding Title}" />
-                                </Border>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-
-                    <!-- r18 03-model-catalog-and-memory-ui.md 3.3: memories used this turn collapse
-                         behind a single count pill instead of one always-visible pill per memory. -->
-                    <StackPanel IsVisible="{Binding HasMemorySources}" Spacing="4">
-                        <ToggleButton IsChecked="{Binding IsMemorySourcesExpanded, Mode=TwoWay}"
+                    <!-- r25 doc 02: one receipt for everything injected into this turn.
+                         Replaces the always-visible citation strip plus the separately
+                         collapsed memory pill, which between them meant collapsing the
+                         memory pill hid nothing once r24's Recall pills started landing
+                         in the citation strip above it. Collapsed means no source item
+                         is visible at all. -->
+                    <StackPanel IsVisible="{Binding HasContext}" Spacing="4" Margin="0,6,0,0">
+                        <ToggleButton IsChecked="{Binding IsContextExpanded, Mode=TwoWay}"
                                       HorizontalAlignment="Left"
                                       Padding="8,3"
                                       CornerRadius="10"
                                       Background="{DynamicResource SubtleFillColorSecondaryBrush}"
-                                      BorderThickness="0">
-                            <TextBlock FontSize="11" Opacity="0.6" Text="{Binding MemorySourceSummary}" />
+                                      BorderThickness="0"
+                                      ToolTip.Tip="What went into this answer">
+                            <TextBlock FontSize="11" Opacity="0.6" Text="{Binding ContextSummary}" />
                         </ToggleButton>
 
-                        <ItemsControl ItemsSource="{Binding MemorySources}"
-                                      IsVisible="{Binding IsMemorySourcesExpanded}">
-                            <ItemsControl.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                    <WrapPanel />
-                                </ItemsPanelTemplate>
-                            </ItemsControl.ItemsPanel>
+                        <ItemsControl ItemsSource="{Binding ContextSections}"
+                                      IsVisible="{Binding IsContextExpanded}">
                             <ItemsControl.ItemTemplate>
-                                <DataTemplate DataType="core:SourceReference">
-                                    <!-- r19 6.1: the pill used to show only the keyword-extracted
-                                         Title with the full content hidden behind a hover tooltip;
-                                         a click now opens a flyout with the actual memory content. -->
-                                    <Button CornerRadius="10"
-                                            Margin="0,0,6,4"
-                                            Padding="8,3"
-                                            Background="{DynamicResource SubtleFillColorSecondaryBrush}"
-                                            BorderThickness="0">
-                                        <TextBlock FontSize="11" Opacity="0.6" Text="{Binding Title}" />
-                                        <Button.Flyout>
-                                            <Flyout Placement="Top">
-                                                <StackPanel Width="320" Spacing="8">
-                                                    <TextBlock Text="{Binding Title}" FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap" />
-                                                    <SelectableTextBlock Text="{Binding Snippet}" FontSize="12" TextWrapping="Wrap" Opacity="0.85" />
-                                                    <Button Content="Open in Memories"
-                                                            HorizontalAlignment="Left"
-                                                            Padding="8,4"
-                                                            CornerRadius="6"
-                                                            Command="{Binding #Root.OpenMemoryCommand}"
-                                                            CommandParameter="{Binding}" />
-                                                </StackPanel>
-                                            </Flyout>
-                                        </Button.Flyout>
-                                    </Button>
+                                <DataTemplate DataType="services:ChatContextReceiptSection">
+                                    <StackPanel Margin="0,4,0,0" Spacing="2">
+                                        <TextBlock FontSize="10"
+                                                   Opacity="0.45"
+                                                   Text="{Binding Label}" />
+                                        <ItemsControl ItemsSource="{Binding Items}">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <WrapPanel />
+                                                </ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate DataType="core:SourceReference">
+                                                    <!-- r19 6.1: the pill shows only the keyword-extracted
+                                                         Title; a click opens a flyout with the actual
+                                                         content. Carried over unchanged from the memory
+                                                         pill, and now available for every source kind. -->
+                                                    <Button CornerRadius="10"
+                                                            Margin="0,0,6,4"
+                                                            Padding="8,3"
+                                                            Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                                                            BorderThickness="0">
+                                                        <TextBlock FontSize="11" Opacity="0.6" Text="{Binding Title}" />
+                                                        <Button.Flyout>
+                                                            <Flyout Placement="Top">
+                                                                <StackPanel Width="320" Spacing="8">
+                                                                    <TextBlock Text="{Binding Title}" FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                                    <SelectableTextBlock Text="{Binding Snippet}" FontSize="12" TextWrapping="Wrap" Opacity="0.85" />
+                                                                    <Button Content="Open in Memories"
+                                                                            HorizontalAlignment="Left"
+                                                                            Padding="8,4"
+                                                                            CornerRadius="6"
+                                                                            IsVisible="{Binding Kind, Converter={x:Static conv:ProvenanceConverters.IsMemory}}"
+                                                                            Command="{Binding #Root.OpenMemoryCommand}"
+                                                                            CommandParameter="{Binding}" />
+                                                                </StackPanel>
+                                                            </Flyout>
+                                                        </Button.Flyout>
+                                                    </Button>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
