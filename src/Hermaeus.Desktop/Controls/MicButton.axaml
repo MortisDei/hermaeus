@@ -1,0 +1,25 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Hermaeus.ViewModels"
+             xmlns:controls="using:Hermaeus.Desktop.Controls"
+             x:Class="Hermaeus.Desktop.Controls.MicButton">
+    <UserControl.Styles>
+        <Style Selector="PathIcon.mic-recording">
+            <Style.Animations>
+                <Animation Duration="0:0:1" IterationCount="Infinite">
+                    <KeyFrame Cue="0%"><Setter Property="Opacity" Value="1.0" /></KeyFrame>
+                    <KeyFrame Cue="50%"><Setter Property="Opacity" Value="0.4" /></KeyFrame>
+                    <KeyFrame Cue="100%"><Setter Property="Opacity" Value="1.0" /></KeyFrame>
+                </Animation>
+            </Style.Animations>
+        </Style>
+    </UserControl.Styles>
+    <Button Classes="icon-btn"
+            Command="{Binding ViewModel.ToggleCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+            IsEnabled="{Binding ViewModel.State, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={x:Static controls:MicButton.IsUsableConverter}}"
+            ToolTip.Tip="{Binding ViewModel.TooltipText, RelativeSource={RelativeSource AncestorType=UserControl}}">
+        <PathIcon Width="16" Height="16"
+                  Classes.mic-recording="{Binding ViewModel.State, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={x:Static controls:MicButton.IsRecordingConverter}}"
+                  Data="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z" />
+    </Button>
+</UserControl>

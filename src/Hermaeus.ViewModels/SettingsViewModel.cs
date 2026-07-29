@@ -129,7 +129,8 @@ public partial class SettingsViewModel : ViewModelBase
         KokoroProcessManager kokoroProcess,
         LocalApiProcessManager localApiProcess,
         LocalAiSetupService localAiSetup,
-        TrustService trust)
+        TrustService trust,
+        Hermaeus.Services.Recall.RecallIndexingService? recallIndexing = null)
     {
         _svc = svc;
         _toasts = toasts;
@@ -141,7 +142,7 @@ public partial class SettingsViewModel : ViewModelBase
         Rag = new RagSettingsViewModel(ResolveDataRoot);
         Data = new DataManagementSettingsViewModel(_svc, backups, _toasts, ResolveDataRoot);
         Ui = new UiSettingsViewModel();
-        Memory = new MemorySettingsViewModel();
+        Memory = new MemorySettingsViewModel(recallIndexing, _toasts);
         Mcp = new McpSettingsViewModel();
         LocalApi = new LocalApiSettingsViewModel(secrets, _svc);
         LocalApi.ProcessStatusLabel = _localApiProcess.StatusLabel;

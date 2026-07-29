@@ -8,7 +8,12 @@ public enum MemoryScope
 {
     Global,
     Conversation,
-    Workspace
+    Workspace,
+
+    /// <summary>r24 doc 01: keyed by project id. Appended last; the scope is
+    /// persisted by name (see <c>MemoryStore</c>), not ordinal, but new values
+    /// still append rather than insert to keep that guarantee obvious.</summary>
+    Project
 }
 
 /// <summary>
@@ -29,7 +34,7 @@ public class Memory
 
     /// <summary>
     /// Scope key: empty for Global, conversation id for Conversation,
-    /// normalized workspace root for Workspace.
+    /// normalized workspace root for Workspace, project id for Project.
     /// </summary>
     public string ScopeId { get; set; } = string.Empty;
 

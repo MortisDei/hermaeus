@@ -78,6 +78,29 @@ public sealed class AgentViewModelWorkspaceTests
         Assert.Same(vm.AvailableModels.Single(m => m.Id == "b"), vm.SelectedModel);
     }
 
+    // ── r24: a workspace root renamed/deleted out from under the app must never crash it ──
+
+    [Fact]
+    public async Task RefreshWorkspaceFiles_against_a_missing_workspace_root_reports_an_error_instead_of_throwing()
+    {
+        using var temp = new TempDir();
+        var (vm, _, _) = await NewViewModelAsync(temp, new ScriptedModelsLlm(() => [Model("a")]));
+
+        var missingRoot = temp.PathFor("was-a-workspace-but-got-renamed");
+        Directory.CreateDirectory(missingRoot);
+        vm.WorkspaceRoot = missingRoot;
+        Directory.Delete(missingRoot);
+
+        // This is the exact call shape AgentView.axaml's refresh button uses
+        // (a direct command binding, not a wrapping try/catch elsewhere) - it
+        // must complete, not throw, regardless of how RefreshWorkspaceFilesAsync
+        // is invoked.
+        await vm.RefreshWorkspaceFilesCommand.ExecuteAsync(null);
+
+        Assert.True(vm.IsError);
+        Assert.Empty(vm.WorkspaceFiles);
+    }
+
     // ── 2.5: overlapping LoadAsync calls must not duplicate models ──
 
     [Fact]

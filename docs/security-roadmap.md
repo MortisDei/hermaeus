@@ -36,6 +36,15 @@ item - they are not moved here.
 - **Clearer UI state when the local fallback secret vault is active** (as
   opposed to an OS credential store). Trigger: a support report tied to
   vault-readability confusion, or before public release.
+- **Migrate the local fallback vault's encryption from AES-CBC to an AEAD
+  cipher (AES-GCM).** r24 closed the practical "wrong-key decrypt silently
+  returns garbage instead of failing" gap with a UTF8 structural-validity
+  check, but that is not a formal cryptographic integrity guarantee - a real
+  authentication tag would be. Needs a versioned payload format (a new
+  prefix alongside the existing `v2:`) so already-encrypted secrets stay
+  readable without a forced re-encryption pass. Trigger: before public
+  release, or if the vault ever needs to defend against a more active
+  local threat than "the key file was corrupted or replaced."
 
 ## Backup and restore
 

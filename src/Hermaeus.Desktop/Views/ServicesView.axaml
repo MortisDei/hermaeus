@@ -3,6 +3,7 @@
              xmlns:vm="using:Hermaeus.ViewModels"
              xmlns:views="using:Hermaeus.Desktop.Views"
              xmlns:controls="using:Hermaeus.Desktop.Controls"
+             xmlns:conv="clr-namespace:Avalonia.Data.Converters;assembly=Avalonia.Base"
              x:Class="Hermaeus.Desktop.Views.ServicesView"
              x:DataType="vm:ServicesViewModel">
 
@@ -532,6 +533,7 @@
             </ListBox>
 
             <views:ServicesVoiceSectionView DataContext="{Binding Tts}" />
+            <views:ServicesSttSectionView DataContext="{Binding Stt}" IsVisible="{Binding Stt, Converter={x:Static conv:ObjectConverters.IsNotNull}}" />
 
         </StackPanel>
     </ScrollViewer>

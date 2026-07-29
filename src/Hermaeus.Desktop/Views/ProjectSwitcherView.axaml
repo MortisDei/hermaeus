@@ -1,0 +1,77 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Hermaeus.ViewModels"
+             xmlns:views="using:Hermaeus.Desktop.Views"
+             xmlns:models="using:Hermaeus.Core.Models"
+             xmlns:conv="using:Avalonia.Data.Converters"
+             x:Class="Hermaeus.Desktop.Views.ProjectSwitcherView"
+             x:DataType="vm:ProjectViewModel">
+    <UserControl.Resources>
+        <views:ProjectColorConverter x:Key="ProjectColor" />
+    </UserControl.Resources>
+
+    <Button Classes="icon-btn" Padding="8,4"
+            ToolTip.Tip="Switch project"
+            Command="{Binding OpenSwitcherCommand}">
+        <StackPanel Orientation="Horizontal" Spacing="6">
+            <Ellipse Width="10" Height="10"
+                     Fill="{Binding ActiveProject.Color, Converter={StaticResource ProjectColor}}"
+                     IsVisible="{Binding ActiveProject, Converter={x:Static conv:ObjectConverters.IsNotNull}}" />
+            <TextBlock Text="{Binding ActiveProjectLabel}" FontSize="12" MaxWidth="160" TextTrimming="CharacterEllipsis" />
+        </StackPanel>
+
+        <Button.Flyout>
+            <Flyout Placement="BottomEdgeAlignedLeft" IsOpen="{Binding IsSwitcherOpen, Mode=TwoWay}">
+                <StackPanel Width="280" Spacing="6">
+                    <TextBlock Text="Projects" FontSize="13" FontWeight="SemiBold" />
+
+                    <Button Content="No project"
+                            HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                            Command="{Binding SwitchToCommand}" CommandParameter="{x:Null}" />
+
+                    <ItemsControl ItemsSource="{Binding Projects}" MaxHeight="280">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="models:Project">
+                                <Grid ColumnDefinitions="*,Auto">
+                                    <Button Grid.Column="0" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                                            Command="{Binding $parent[ItemsControl].DataContext.SwitchToCommand}"
+                                            CommandParameter="{Binding}">
+                                        <Grid ColumnDefinitions="Auto,*,Auto">
+                                            <Ellipse Grid.Column="0" Width="10" Height="10" Margin="0,0,8,0"
+                                                     Fill="{Binding Color, Converter={StaticResource ProjectColor}}" />
+                                            <TextBlock Grid.Column="1" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Grid.Column="2" Text="Archived" FontSize="10" Opacity="0.6"
+                                                       Margin="6,0,0,0" IsVisible="{Binding IsArchived}" />
+                                        </Grid>
+                                    </Button>
+                                    <Button Grid.Column="1" Classes="icon-btn" Padding="4" Margin="4,0,0,0"
+                                            ToolTip.Tip="Edit project"
+                                            Command="{Binding $parent[ItemsControl].DataContext.OpenEditForCommand}"
+                                            CommandParameter="{Binding}">
+                                        <PathIcon Data="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"
+                                                  Width="12" Height="12" />
+                                    </Button>
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <Separator />
+
+                    <Button Content="New project..."
+                            HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                            Command="{Binding OpenNewProjectEmptyCommand}" />
+                    <Button Content="New project from this conversation..."
+                            HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                            FontSize="11"
+                            Command="{Binding OpenNewProjectFromCurrentConversationCommand}" />
+                    <Button Content="New project from Agent workspace..."
+                            HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                            FontSize="11"
+                            Command="{Binding OpenNewProjectFromAgentWorkspaceCommand}" />
+                    <CheckBox Content="Show archived" IsChecked="{Binding ShowArchivedInSwitcher, Mode=TwoWay}" />
+                </StackPanel>
+            </Flyout>
+        </Button.Flyout>
+    </Button>
+</UserControl>

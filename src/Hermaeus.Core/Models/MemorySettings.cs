@@ -58,4 +58,25 @@ public class MemorySettings
     /// they are read-only in chat, never editable via memory markers.
     /// </summary>
     public bool ConsumeAgentLessonsInChat { get; set; } = false;
+
+    /// <summary>
+    /// r24 doc 02 2.0: keeps a searchable copy of message and task text in
+    /// recall.db, included in backups. Default on (a flagship search feature
+    /// that ships off is one nobody finds), but visible: Settings > Memory
+    /// states this plainly next to the switch. Turning it off stops indexing
+    /// immediately and disables the recall half of the palette; the command
+    /// half keeps working.
+    /// </summary>
+    public bool RecallIndexingEnabled { get; set; } = true;
+
+    /// <summary>
+    /// r24 doc 02 2.6: whether a chat send may retrieve from Recall and
+    /// inject a bounded, citation-pilled block. Off by default, matching
+    /// <see cref="ConsumeAgentLessonsInChat"/>'s precedent - consuming one
+    /// subsystem's knowledge inside another, read-only, opt-in.
+    /// </summary>
+    public bool RecallInjectionEnabled { get; set; } = false;
+
+    /// <summary>Token budget for Recall injection, separate from <see cref="InjectionTokenBudget"/>.</summary>
+    public int RecallInjectionTokenBudget { get; set; } = 400;
 }

@@ -9,6 +9,10 @@ public class RagDataset
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? LastIngestUtc { get; set; }
     public string LastIngestPath { get; set; } = string.Empty;
+
+    /// <summary>r24 doc 01: project this dataset belongs to, or empty for none. A
+    /// default and a filter only; the dataset stays usable from anywhere.</summary>
+    public string ProjectId { get; set; } = string.Empty;
     public RagDatasetConfig Config { get; set; } = new();
 
     /// <summary>
@@ -46,6 +50,28 @@ public class RagDatasetConfig
         public float HybridSemanticWeight { get; set; } = 0.7f;
         public float HybridBm25Weight { get; set; } = 0.3f;
         public float HybridRrfK { get; set; } = 60f;
+
+        /// <summary>r24 doc 03 3.1: zero or more folders this dataset watches for drift.
+        /// Persisted as part of config_json - no schema migration needed.</summary>
+        public List<RagWatchedSource> WatchedSources { get; set; } = [];
+}
+
+/// <summary>r24 doc 03 3.1: one watched folder. Change detection prefers
+/// SourceHash on the dataset's existing chunk rows, falling back to
+/// SourceModifiedUtc only when a stored hash is absent.</summary>
+public sealed class RagWatchedSource
+{
+    public string Root { get; set; } = string.Empty;
+    public List<string> IncludeGlobs { get; set; } = [];
+
+    /// <summary>Ships non-empty by default (doc 03 3.1): a user who points a watched
+    /// source at a repo root and gets build output swept in will never use this again.</summary>
+    public List<string> ExcludeGlobs { get; set; } = DefaultExcludeGlobs();
+    public bool Recursive { get; set; } = true;
+    public DateTime? LastRefreshUtc { get; set; }
+
+    public static List<string> DefaultExcludeGlobs() =>
+        ["**/.git/**", "**/node_modules/**", "**/bin/**", "**/obj/**", "**/.venv/**", "**/__pycache__/**", "**/dist/**", "**/target/**"];
 }
 
 public enum RagExtractionMode

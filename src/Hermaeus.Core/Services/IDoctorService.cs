@@ -30,4 +30,5 @@ public interface IDoctorService
     long PruneLlamaServerVersions(IReadOnlyList<string> versionDirectories) => 0;
     Task<bool> InstallNativeKokoroAssetsAsync(CancellationToken ct = default);
     Task<bool> InstallNativeKokoroAssetsAsync(IProgress<string> progress, CancellationToken ct = default);
+    Task<bool> InstallSpeechRecognitionAssetsAsync(IProgress<string> progress, CancellationToken ct = default);
 }

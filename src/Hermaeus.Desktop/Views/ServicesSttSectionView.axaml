@@ -1,0 +1,70 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Hermaeus.ViewModels"
+             xmlns:m="using:Hermaeus.Core.Models"
+             xmlns:conv="clr-namespace:Avalonia.Data.Converters;assembly=Avalonia.Base"
+             x:Class="Hermaeus.Desktop.Views.ServicesSttSectionView"
+             x:DataType="vm:SttSettingsViewModel">
+    <Border Classes="settings-card" Padding="16">
+        <StackPanel Spacing="12">
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
+                    <CheckBox IsChecked="{Binding SttEnabled}" />
+                    <TextBlock Text="Speech recognition" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" />
+                </StackPanel>
+                <Button Grid.Column="1" Classes="icon-btn" Command="{Binding RefreshDevicesCommand}" ToolTip.Tip="Refresh input devices">
+                    <PathIcon Data="M17.65 6.35C16.2 4.9 14.21 4 12 4a8 8 0 0 0-8 8h2.5l-3.5 3.5L-.5 12H2a10 10 0 0 1 17.07-7.07l-1.42 1.42zM6.35 17.65C7.8 19.1 9.79 20 12 20a8 8 0 0 0 8-8h-2.5l3.5-3.5 3.5 3.5H22a10 10 0 0 1-17.07 7.07l1.42-1.42z"
+                              Width="15" Height="15" />
+                </Button>
+            </Grid>
+            <TextBlock Text="Speech to text for dictation and hands-free mode. Off by default; audio is transcribed and discarded, never stored. Push-to-talk, dictation, and hands-free preferences are in Settings > Voice."
+                       FontSize="12" Opacity="0.5" TextWrapping="Wrap" />
+
+            <Grid ColumnDefinitions="110,*" ColumnSpacing="12" RowDefinitions="Auto,Auto,Auto" RowSpacing="8">
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="Provider" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
+                <ComboBox Grid.Row="0" Grid.Column="1" ItemsSource="{Binding Providers}" SelectedItem="{Binding SelectedProvider}" FontSize="13" />
+
+                <TextBlock Grid.Row="1" Grid.Column="0" Text="Device" VerticalAlignment="Center" Opacity="0.6" FontSize="13" IsVisible="{Binding IsNativeProvider}" />
+                <ComboBox Grid.Row="1" Grid.Column="1" ItemsSource="{Binding Devices}" SelectedValueBinding="{Binding Id}"
+                          SelectedValue="{Binding SelectedDeviceId}" FontSize="13" IsVisible="{Binding IsNativeProvider}">
+                    <ComboBox.ItemTemplate>
+                        <DataTemplate DataType="m:AudioInputDevice">
+                            <TextBlock Text="{Binding Name}" FontSize="13" />
+                        </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                </ComboBox>
+
+                <TextBlock Grid.Row="2" Grid.Column="0" Text="Model" VerticalAlignment="Center" Opacity="0.6" FontSize="13" IsVisible="{Binding !IsNativeProvider}" />
+                <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding RemoteModel}" Watermark="whisper-1" FontSize="13" CornerRadius="6" Padding="10,6" IsVisible="{Binding !IsNativeProvider}" />
+            </Grid>
+
+            <TextBlock Text="{Binding MicrophoneStatus}" FontSize="12" Opacity="0.6" />
+
+            <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsNativeProvider}">
+                <Button Command="{Binding InstallCommand}" IsEnabled="{Binding !IsInstalling}" Content="Install model" FontSize="12" Padding="12,5" CornerRadius="6" />
+                <TextBlock Text="{Binding InstallProgress}" VerticalAlignment="Center" FontSize="12" Opacity="0.6" IsVisible="{Binding IsInstalling}" />
+            </StackPanel>
+
+            <Border BorderThickness="0,1,0,0" BorderBrush="{DynamicResource ThemeBorderLowBrush}" Margin="0,4,0,0" Padding="0,12,0,0">
+                <StackPanel Spacing="8">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                        <TextBlock Grid.Column="0" Text="Transcribe audio file..." FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" />
+                        <Button Grid.Column="1" Command="{Binding TranscribeFileCommand}" IsEnabled="{Binding !IsTranscribingFile}" Content="Choose file..." FontSize="12" Padding="12,5" CornerRadius="6" />
+                    </Grid>
+                    <TextBlock Text="{Binding TranscribeStatus}" FontSize="12" Opacity="0.6" IsVisible="{Binding TranscribeStatus, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}" />
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8" IsVisible="{Binding TranscribedText, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}">
+                        <TextBox Grid.Column="0" Text="{Binding TranscribedText}" IsReadOnly="True" TextWrapping="Wrap"
+                                 AcceptsReturn="True" MaxHeight="160" FontSize="13" CornerRadius="6" Padding="10,6" />
+                        <Button Grid.Column="1" Classes="icon-btn" Command="{Binding CopyTranscriptCommand}" ToolTip.Tip="Copy transcript" VerticalAlignment="Top">
+                            <PathIcon Data="M16 1H4C2.9 1 2 1.9 2 3v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"
+                                      Width="15" Height="15" />
+                        </Button>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <TextBlock Text="Captured and uploaded audio is transcribed and then deleted immediately; Hermaeus never stores recordings."
+                       FontSize="11" Opacity="0.45" TextWrapping="Wrap" />
+        </StackPanel>
+    </Border>
+</UserControl>

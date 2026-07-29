@@ -68,6 +68,34 @@ public partial class RagView : UserControl
                 var result = await dialog.ShowDialog<bool>(owner);
                 return result;
             };
+
+            _vm.RequestConfirmWatchedRefresh = async (item, plan) =>
+            {
+                if (TopLevel.GetTopLevel(this) is not Window owner)
+                    return false;
+
+                var warning = plan.MissingIsOverHalf(item.SourceCount)
+                    ? "\n\nMore than half this dataset's sources are missing - this usually means an unmounted drive or a wrong folder, not an intended purge. Missing files are never removed by this action."
+                    : string.Empty;
+                var dialog = new ConfirmActionDialog(
+                    "Refresh watched sources",
+                    $"Ingest {plan.NewFiles.Count} new and {plan.ChangedFiles.Count} changed file(s) into '{item.Name}'? " +
+                    $"{plan.MissingFiles.Count} missing file(s) are left untouched - remove them separately with \"Remove missing\" if intended.{warning}");
+                return await dialog.ShowDialog<bool>(owner);
+            };
+
+            _vm.RequestWatchedFolderPicker = async () =>
+            {
+                var top = TopLevel.GetTopLevel(this);
+                if (top is null) return null;
+
+                var folders = await top.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+                {
+                    Title = "Choose folder to watch",
+                    AllowMultiple = false
+                });
+                return folders.Count > 0 ? folders[0].Path.LocalPath : null;
+            };
         };
     }
 

@@ -10,6 +10,7 @@ namespace Hermaeus.ViewModels;
 public partial class MainWindowViewModel : ViewModelBase
 {
     private readonly IConversationStore _store;
+    private readonly Hermaeus.Services.Recall.RecallIndexingService? _recallIndexing;
     private readonly IToastService _toasts;
     private readonly IRuntimeLogService _logs;
     private readonly ConversationExportService _exports;
@@ -17,6 +18,7 @@ public partial class MainWindowViewModel : ViewModelBase
     private readonly ISettingsService _settingsService;
     private bool _refreshingFolderFilters;
     private bool _postSetupInitialized;
+    private CancellationTokenSource? _watchedRefreshCts;
     private readonly Dictionary<string, CancellationTokenSource> _pendingMetadataSaves = new();
     private static readonly TimeSpan MetadataSaveDebounce = TimeSpan.FromMilliseconds(500);
 
@@ -32,6 +34,9 @@ public partial class MainWindowViewModel : ViewModelBase
     public MemoriesViewModel        Memories { get; }
     public LogsViewModel            Logs { get; }
     public SetupWizardViewModel     Wizard { get; }
+    public ProjectViewModel         Projects { get; }
+    public PaletteViewModel         Palette { get; }
+    public ActivityViewModel        Activity { get; }
 
     public UiBoundCollection<ConversationItemViewModel> Conversations { get; } = [];
     public UiBoundCollection<ToastViewModel> Toasts { get; } = [];
@@ -61,6 +66,7 @@ public partial class MainWindowViewModel : ViewModelBase
     public bool ShowDoctor => ActivePanel == "doctor";
     public bool ShowMemories => ActivePanel == "memories";
     public bool ShowLogs => ActivePanel == "logs";
+    public bool ShowActivity => ActivePanel == "activity";
     public bool ShowWizard => ActivePanel == "wizard";
     public object ActiveViewModel => ActivePanel switch
     {
@@ -74,6 +80,7 @@ public partial class MainWindowViewModel : ViewModelBase
         "doctor"   => Doctor,
         "memories" => Memories,
         "logs"     => Logs,
+        "activity" => Activity,
         "wizard"   => Wizard,
         _          => Chat
     };
@@ -95,11 +102,19 @@ public partial class MainWindowViewModel : ViewModelBase
         MemoriesViewModel memories,
         LogsViewModel logs,
         SetupWizardViewModel wizard,
+        ProjectViewModel projects,
+        ICommandRegistry commands,
+        PaletteViewModel palette,
+        ActivityViewModel activity,
         ISettingsService settingsService,
         IToastService toasts,
         IRuntimeLogService runtimeLogs,
-        ConversationExportService exports)
+        ConversationExportService exports,
+        Hermaeus.Services.Recall.RecallIndexingService? recallIndexing = null)
     {
+        _recallIndexing = recallIndexing;
+        Palette = palette;
+        Activity = activity;
         _toasts = toasts;
         _logs = runtimeLogs;
         _exports = exports;
@@ -107,6 +122,21 @@ public partial class MainWindowViewModel : ViewModelBase
         _store = store; Chat = chat; Agent = agent; Settings = settings;
         Models = models; Rag = rag; Services = services;
         Benchmarks = benchmarks; SystemOverview = systemOverview; Doctor = doctor; Memories = memories; Logs = logs; Wizard = wizard;
+        Projects = projects;
+        // r24 doc 01 1.6: switching a project only ever changes what NEW work
+        // inherits. Existing conversations/tasks/datasets are never rewritten.
+        Chat.ActiveProjectProvider = () => Projects.ActiveProject;
+        Projects.ChatContextProvider = () => (Chat.ConversationTitle, Chat.RagDatasetId, Chat.SelectedModel?.Id ?? string.Empty);
+        Projects.AgentWorkspaceProvider = () => Agent.WorkspaceRoot;
+        Projects.ProjectSwitched += project =>
+        {
+            Agent.ActiveProjectId = project?.Id ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(project?.FolderRoot))
+                Agent.PrefillWorkspaceRootFromProject(project.FolderRoot);
+            Rag.SetDefaultDatasetFromProject(project?.DatasetId ?? string.Empty);
+            Palette.SetActiveProject(project?.Id ?? string.Empty, project?.Name ?? string.Empty);
+        };
+        Palette.RequestNavigate = NavigateToRecallHitAsync;
         Doctor.RequestNavigate = panel => ActivePanel = panel;
         Doctor.RequestOpenUrl = url =>
         {
@@ -153,7 +183,91 @@ public partial class MainWindowViewModel : ViewModelBase
         Chat.ConversationSaved += OnConversationSaved;
         Services.ServerAvailabilityChanged += (_, _) => RunBackgroundTaskAsync("refresh models after server availability change", RefreshModelsAfterServerChangeAsync);
         _toasts.ToastRaised += OnToastRaised;
-        
+
+        Commands = commands;
+        RegisterNavigationCommands(commands);
+        Chat.RegisterCommands(commands);
+        Agent.RegisterCommands(commands);
+        Rag.RegisterCommands(commands);
+        Services.RegisterCommands(commands);
+        Doctor.RegisterCommands(commands);
+        Memories.RegisterCommands(commands);
+        Models.RegisterCommands(commands);
+        Benchmarks.RegisterCommands(commands);
+        SystemOverview.RegisterCommands(commands);
+        Logs.RegisterCommands(commands);
+        Projects.RegisterCommands(commands);
+        Activity.RegisterCommands(commands);
+    }
+
+    public ICommandRegistry Commands { get; }
+
+    /// <summary>doc 04 4.1: navigation is a user action like any other, so it lives in
+    /// the registry too. MainWindowViewModel owns ActivePanel, so these register here
+    /// rather than on each panel's own ViewModel.</summary>
+    private void RegisterNavigationCommands(ICommandRegistry registry)
+    {
+        void Nav(string id, string title, string area, string shortcut, string panel) => registry.Register(new AppCommand(
+            Id: id, Title: title, Area: area, Description: $"Open {title}.",
+            Keywords: [area.ToLowerInvariant(), panel],
+            Shortcut: shortcut,
+            CanExecute: () => true,
+            Execute: () => { ActivePanel = panel; return Task.CompletedTask; }));
+
+        Nav("nav.chat", "Chat", "Chat", "Ctrl+1", "chat");
+        Nav("nav.agent", "Agent", "Agent", "Ctrl+2", "agent");
+        Nav("nav.rag", "RAG", "RAG", "Ctrl+3", "rag");
+        Nav("nav.models", "Models", "Models", "Ctrl+4", "models");
+        Nav("nav.services", "Services", "Services", "Ctrl+5", "services");
+        Nav("nav.benchmarks", "Benchmarks", "Benchmarks", "", "benchmarks");
+        Nav("nav.system", "System overview", "System", "", "system");
+        Nav("nav.doctor", "Doctor", "Doctor", "", "doctor");
+        Nav("nav.memories", "Memories", "Memory", "", "memories");
+        Nav("nav.logs", "Logs", "System", "", "logs");
+        Nav("nav.activity", "Activity", "Activity", "", "activity");
+        Nav("nav.settings", "Settings", "Settings", "", "settings");
+
+        registry.Register(new AppCommand(
+            Id: "chat.new-conversation", Title: "New conversation", Area: "Chat",
+            Description: "Start a new chat conversation.",
+            Keywords: ["new", "chat", "clear"], Shortcut: "Ctrl+N",
+            CanExecute: () => true,
+            Execute: () => { ActivePanel = "chat"; Chat.NewConversation(); return Task.CompletedTask; }));
+
+        registry.Register(new AppCommand(
+            Id: "system.toggle-sidebar", Title: "Toggle sidebar", Area: "Chat",
+            Description: "Show or hide the conversation list.",
+            Keywords: ["sidebar", "conversations", "toggle"], Shortcut: "",
+            CanExecute: () => true,
+            Execute: () => { IsSidebarOpen = !IsSidebarOpen; return Task.CompletedTask; }));
+    }
+
+    /// <summary>doc 02 2.4: every RecallHit.Target kind must land somewhere real.</summary>
+    private async Task NavigateToRecallHitAsync(RecallHit hit)
+    {
+        var target = hit.Target;
+        if (!string.IsNullOrWhiteSpace(target.ConversationId))
+        {
+            ActivePanel = "chat";
+            await Chat.LoadConversationAsync(target.ConversationId);
+        }
+        else if (!string.IsNullOrWhiteSpace(target.TaskId))
+        {
+            ActivePanel = "agent";
+            await Agent.LoadTaskCommand.ExecuteAsync(target.TaskId);
+        }
+        else if (!string.IsNullOrWhiteSpace(target.MemoryId))
+        {
+            ActivePanel = "memories";
+            Memories.SearchText = hit.Title;
+            await Memories.SearchAsync();
+        }
+        else if (!string.IsNullOrWhiteSpace(target.DatasetId))
+        {
+            ActivePanel = "rag";
+            var dataset = Rag.Datasets.FirstOrDefault(d => d.Id == target.DatasetId);
+            if (dataset is not null) Rag.SelectedDataset = dataset;
+        }
     }
 
     private void UpdateDoctorStatus()
@@ -174,6 +288,9 @@ public partial class MainWindowViewModel : ViewModelBase
             Settings.Reload();
             ShowQuickChat = Settings.ShowQuickChat;
             await LoadToastHistoryAsync();
+            await Projects.EnsureLoadedAsync();
+            Agent.ActiveProjectId = Projects.ActiveProject?.Id ?? string.Empty;
+            Palette.SetActiveProject(Projects.ActiveProject?.Id ?? string.Empty, Projects.ActiveProject?.Name ?? string.Empty);
             if (!_settingsService.Settings.SetupWizardCompleted)
             {
                 ActivePanel = "wizard";
@@ -209,6 +326,45 @@ public partial class MainWindowViewModel : ViewModelBase
         await RunBackgroundTaskCoreAsync("ensure Local API running state", () => Settings.EnsureLocalApiRunningStateAsync());
         await RunBackgroundTaskCoreAsync("load chat models", () => Chat.LoadModelsAsync());
         RunBackgroundTaskAsync("run startup doctor scan", () => Doctor.RunStartupScanAsync());
+        // r24 doc 02 2.1: shortly after startup, bounded, never on the send path.
+        if (_recallIndexing is not null)
+            RunBackgroundTaskAsync("recall startup backfill", RunRecallStartupBackfillAsync);
+        // r24 doc 03 3.4: only if the user opted in; well after startup, never on the send path.
+        if (_settingsService.Settings.Rag.RefreshWatchedSourcesOnStart || _settingsService.Settings.Rag.RefreshWatchedSourcesEveryHours > 0)
+            RunBackgroundTaskAsync("watched sources automatic refresh", RunWatchedSourceAutomationAsync);
+    }
+
+    private async Task RunRecallStartupBackfillAsync()
+    {
+        var conversations = await _store.GetAllAsync(includeArchived: true);
+        var tasks = await Agent.BuildRecallTaskInputsAsync();
+        await _recallIndexing!.RunStartupBackfillAsync(conversations, tasks);
+    }
+
+    /// <summary>doc 03 3.4: optional, off by default. Runs one on-start pass after a
+    /// delay (well after startup, never on the send path) and then, if configured,
+    /// repeats on an interval until shutdown. Never deletes - see
+    /// RagViewModel.RunAutomaticWatchedRefreshAsync.</summary>
+    private async Task RunWatchedSourceAutomationAsync()
+    {
+        _watchedRefreshCts = new CancellationTokenSource();
+        var ct = _watchedRefreshCts.Token;
+
+        if (_settingsService.Settings.Rag.RefreshWatchedSourcesOnStart)
+        {
+            try { await Task.Delay(TimeSpan.FromSeconds(30), ct); }
+            catch (OperationCanceledException) { return; }
+            await Rag.RunAutomaticWatchedRefreshAsync(ct);
+        }
+
+        var hours = _settingsService.Settings.Rag.RefreshWatchedSourcesEveryHours;
+        while (hours > 0 && !ct.IsCancellationRequested)
+        {
+            try { await Task.Delay(TimeSpan.FromHours(hours), ct); }
+            catch (OperationCanceledException) { return; }
+            await Rag.RunAutomaticWatchedRefreshAsync(ct);
+            hours = _settingsService.Settings.Rag.RefreshWatchedSourcesEveryHours;
+        }
     }
 
     public void Shutdown()
@@ -216,6 +372,9 @@ public partial class MainWindowViewModel : ViewModelBase
         _searchCts?.Cancel();
         _searchCts?.Dispose();
         _searchCts = null;
+        _watchedRefreshCts?.Cancel();
+        _watchedRefreshCts?.Dispose();
+        _watchedRefreshCts = null;
         Services.StopAll();
         Settings.Shutdown();
     }
@@ -312,7 +471,8 @@ public partial class MainWindowViewModel : ViewModelBase
         Folder = c.Folder,
         TagsText = string.Join(", ", c.Tags),
         IsPinned = c.IsPinned,
-        IsArchived = c.IsArchived
+        IsArchived = c.IsArchived,
+        IsRecallExcluded = c.RecallExcluded
     };
 
     [RelayCommand]
@@ -362,7 +522,21 @@ public partial class MainWindowViewModel : ViewModelBase
         await _store.DeleteAsync(item.Id);
         Conversations.Remove(item);
         if (Chat.CurrentConversationId == item.Id) Chat.NewConversation();
+        // r24 doc 02 2.0: deletion propagates, always - a record that survives
+        // its own source is treated as a bug of the highest severity in that doc.
+        if (_recallIndexing is not null)
+            _ = Task.Run(() => _recallIndexing.RemoveConversationAsync(item.Id));
         _toasts.Show("Conversation deleted", $"\"{item.Title}\" was removed.", ToastKind.Info);
+    }
+
+    [RelayCommand]
+    private async Task ToggleRecallExclusionAsync(ConversationItemViewModel item)
+    {
+        item.IsRecallExcluded = !item.IsRecallExcluded;
+        await SaveConversationMetadataAsync(item, showToast: false);
+        _toasts.Show(item.IsRecallExcluded ? "Excluded from Recall" : "Included in Recall",
+            $"\"{item.Title}\" was {(item.IsRecallExcluded ? "excluded from" : "re-included in")} Recall.",
+            ToastKind.Info);
     }
 
     [RelayCommand]
@@ -405,7 +579,10 @@ public partial class MainWindowViewModel : ViewModelBase
         conv.Tags = item.Tags;
         conv.IsPinned = item.IsPinned;
         conv.IsArchived = item.IsArchived;
+        conv.RecallExcluded = item.IsRecallExcluded;
         await _store.SaveAsync(conv);
+        if (_recallIndexing is not null)
+            _ = Task.Run(() => _recallIndexing.IndexConversationAsync(conv));
 
         // In-place update only: a full LoadConversationsAsync() reload here would replace every
         // ConversationItemViewModel instance out from under the open details flyout on each save
@@ -520,6 +697,7 @@ public partial class MainWindowViewModel : ViewModelBase
         RunBackgroundTaskAsync("load memories", () => Memories.InitializeCommand.ExecuteAsync(null));
     }
     [RelayCommand] private void ShowLogsPanel()        => ActivePanel = "logs";
+    [RelayCommand] private void ShowActivityPanel()    { ActivePanel = "activity"; RunBackgroundTaskAsync("refresh activity", Activity.RefreshAsync); }
     [RelayCommand] private void ShowWizardPanel()      => ActivePanel = "wizard";
     [RelayCommand] private void ShowSettingsPanel()    { ActivePanel = "settings"; Settings.Reload(); }
 

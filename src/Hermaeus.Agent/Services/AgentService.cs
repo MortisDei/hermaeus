@@ -167,7 +167,8 @@ public sealed class AgentService : IAgentService
     public async Task<AgentTaskState> CreateTaskAsync(
         string goal,
         AgentWorkspaceOptions options,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string projectId = "")
     {
         if (string.IsNullOrWhiteSpace(goal))
             throw new InvalidOperationException("Agent goal is required.");
@@ -175,6 +176,9 @@ public sealed class AgentService : IAgentService
         var root = AgentWorkspaceTools.ResolveWorkspaceRoot(options.WorkspaceRoot);
         var state = NewTaskState(goal, BaseTaskConstraints, parentTaskId: null);
         state.WorkspaceRoot = root;
+        // r24 doc 01 1.6: captured once at creation; switching the active
+        // project afterward never changes a task already in flight.
+        state.ProjectId = projectId;
 
         await _store.SaveAsync(state, ct);
         await _store.AppendLogAsync(state.TaskId, $"created task: {state.Goal}", ct);

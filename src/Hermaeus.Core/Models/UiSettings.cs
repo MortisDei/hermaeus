@@ -76,4 +76,11 @@ public class UiSettings
     /// embedded JetBrains Mono brand typeface).
     /// </summary>
     public string MonoFontFamily { get; set; } = string.Empty;
+
+    /// <summary>
+    /// r24 doc 01: the currently active project, or empty for "No project".
+    /// Switching never rewrites any existing record; it only changes what
+    /// new conversations, tasks, datasets and memories default to.
+    /// </summary>
+    public string ActiveProjectId { get; set; } = string.Empty;
 }

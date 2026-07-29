@@ -91,7 +91,7 @@ public interface IAgentContextBuilder
 
 public interface IAgentService
 {
-    Task<AgentTaskState> CreateTaskAsync(string goal, AgentWorkspaceOptions options, CancellationToken ct = default);
+    Task<AgentTaskState> CreateTaskAsync(string goal, AgentWorkspaceOptions options, CancellationToken ct = default, string projectId = "");
     Task<AgentStepResult> RunStepAsync(string taskId, AgentWorkspaceOptions options, CancellationToken ct = default);
     /// <summary>
     /// Runs steps back to back without waiting for a manual "run step" click,

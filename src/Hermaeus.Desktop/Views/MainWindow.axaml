@@ -2,6 +2,8 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:Hermaeus.ViewModels"
         xmlns:views="using:Hermaeus.Desktop.Views"
+        xmlns:models="using:Hermaeus.Core.Models"
+        xmlns:conv2="using:Avalonia.Data.Converters"
         x:Class="Hermaeus.Desktop.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Title="{Binding WindowTitle}"
@@ -9,6 +11,10 @@
         Width="1280"   Height="820"
         WindowStartupLocation="CenterScreen"
         Closing="OnWindowClosing">
+    <Window.KeyBindings>
+        <KeyBinding Gesture="Ctrl+K" Command="{Binding Palette.OpenCommand}" />
+    </Window.KeyBindings>
+
 
     <Grid ColumnDefinitions="Auto,*">
 
@@ -24,7 +30,7 @@
             <Border Grid.Row="0" Padding="8,6"
                     BorderThickness="0,0,0,1"
                     BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
-                <Grid ColumnDefinitions="Auto,*,Auto">
+                <Grid ColumnDefinitions="Auto,*,Auto,Auto">
 
                     <Button Grid.Column="0" Classes="icon-btn"
                             Command="{Binding ToggleSidebarCommand}"
@@ -147,6 +153,15 @@
                             </StackPanel>
                         </Button>
 
+                        <Button Classes="icon-btn" Command="{Binding ShowActivityPanelCommand}"
+                            ToolTip.Tip="Activity - what the app has been doing">
+                            <StackPanel Orientation="Horizontal" Spacing="4">
+                                <PathIcon Data="M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6a7 7 0 1 1 2.05 4.95l-1.42 1.42A9 9 0 1 0 13 3zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"
+                                          Width="17" Height="17" />
+                                <TextBlock Text="Activity" FontSize="11" VerticalAlignment="Center" IsVisible="{Binding Settings.Ui.ShowNavLabels}" />
+                            </StackPanel>
+                        </Button>
+
                         <Button Classes="icon-btn" Command="{Binding ToggleToastHistoryCommand}"
                             ToolTip.Tip="Toast notifications">
                             <StackPanel Orientation="Horizontal" Spacing="4">
@@ -182,6 +197,9 @@
                                Margin="0,0,12,0" Opacity="0.5"
                                FontSize="12" MaxWidth="220"
                                TextTrimming="CharacterEllipsis" />
+
+                    <views:ProjectSwitcherView Grid.Column="3" DataContext="{Binding Projects}"
+                                                VerticalAlignment="Center" Margin="0,0,4,0" />
                 </Grid>
             </Border>
 
@@ -216,6 +234,9 @@
                     </DataTemplate>
                     <DataTemplate DataType="vm:LogsViewModel">
                         <views:LogsView />
+                    </DataTemplate>
+                    <DataTemplate DataType="vm:ActivityViewModel">
+                        <views:ActivityView />
                     </DataTemplate>
                     <DataTemplate DataType="vm:SetupWizardViewModel">
                         <views:SetupWizardView />
@@ -292,6 +313,116 @@
                                 CornerRadius="8" />
                     </Grid>
                 </Grid>
+            </Border>
+
+            <!-- r24 doc 02 2.5: the command palette. Ctrl+K from anywhere (see Window.KeyBindings). -->
+            <Border Grid.Row="0" Grid.RowSpan="2"
+                    IsVisible="{Binding Palette.IsOpen}"
+                    Background="#88000000">
+                <Border MaxWidth="620" MaxHeight="480"
+                        HorizontalAlignment="Center" VerticalAlignment="Top"
+                        Margin="0,60,0,0"
+                        CornerRadius="10" Padding="0"
+                        BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        Background="{DynamicResource SolidBackgroundFillColorBaseBrush}">
+                    <Grid RowDefinitions="Auto,Auto,*,Auto">
+                        <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto" Margin="12">
+                            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6"
+                                        IsVisible="{Binding Palette.HasActiveProject}">
+                                <ToggleButton Content="{Binding Palette.ActiveProjectName}"
+                                              IsChecked="{Binding Palette.ScopeToActiveProject, Mode=TwoWay}"
+                                              ToolTip.Tip="Scope results to the active project" FontSize="11" Padding="8,3" />
+                            </StackPanel>
+                            <TextBox Grid.Column="1" Name="PaletteTextBox"
+                                     Text="{Binding Palette.QueryText, Mode=TwoWay}"
+                                     Watermark="Search everything, or type a command..."
+                                     BorderThickness="0" Background="Transparent" FontSize="15"
+                                     Margin="8,0" KeyDown="OnPaletteKeyDown" />
+                            <Button Grid.Column="2" Classes="icon-btn" Command="{Binding Palette.CloseCommand}"
+                                    ToolTip.Tip="Close palette">
+                                <PathIcon Data="M18.3 5.71 12 12l6.3 6.29-1.41 1.41L10.59 13.41 4.29 19.71 2.88 18.3 9.17 12 2.88 5.71 4.29 4.29l6.3 6.3 6.29-6.3z" Width="12" Height="12" />
+                            </Button>
+                        </Grid>
+                        <Separator Grid.Row="1" />
+
+                        <ScrollViewer Grid.Row="2" MaxHeight="360">
+                            <StackPanel Spacing="4" Margin="8">
+                                <!-- Empty query: the capability index, grouped by area -->
+                                <ItemsControl ItemsSource="{Binding Palette.CommandGroups}" IsVisible="{Binding Palette.IsEmptyQuery}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:DataType="vm:PaletteCommandGroup">
+                                            <StackPanel Margin="4,8,4,0" Spacing="2">
+                                                <TextBlock Text="{Binding Area}" FontSize="11" FontWeight="SemiBold" Opacity="0.5" />
+                                                <ItemsControl ItemsSource="{Binding Commands}">
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate x:DataType="models:AppCommand">
+                                                            <Button HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                                                                    Command="{Binding $parent[Window].DataContext.Palette.ExecuteCommandCommand}"
+                                                                    CommandParameter="{Binding}">
+                                                                <Grid ColumnDefinitions="*,Auto">
+                                                                    <StackPanel Grid.Column="0">
+                                                                        <TextBlock Text="{Binding Title}" FontSize="13" />
+                                                                        <TextBlock Text="{Binding Description}" FontSize="10" Opacity="0.5" TextWrapping="Wrap" />
+                                                                    </StackPanel>
+                                                                    <TextBlock Grid.Column="1" Text="{Binding Shortcut}" FontSize="10" Opacity="0.4" VerticalAlignment="Center" />
+                                                                </Grid>
+                                                            </Button>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <!-- Word or phrase: commands first -->
+                                <StackPanel IsVisible="{Binding !Palette.IsEmptyQuery}" Spacing="2">
+                                    <ItemsControl ItemsSource="{Binding Palette.MatchedCommands}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="models:AppCommand">
+                                                <Button HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                                                        Command="{Binding $parent[Window].DataContext.Palette.ExecuteCommandCommand}"
+                                                        CommandParameter="{Binding}">
+                                                    <Grid ColumnDefinitions="*,Auto">
+                                                        <TextBlock Grid.Column="0" Text="{Binding Title}" FontSize="13" />
+                                                        <TextBlock Grid.Column="1" Text="{Binding Area}" FontSize="10" Opacity="0.4" VerticalAlignment="Center" />
+                                                    </Grid>
+                                                </Button>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+
+                                    <!-- Recall results stream in underneath -->
+                                    <ItemsControl ItemsSource="{Binding Palette.RecallHits}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="models:RecallHit">
+                                                <Button HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                                                        Command="{Binding $parent[Window].DataContext.Palette.OpenHitCommand}"
+                                                        CommandParameter="{Binding}">
+                                                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                                                        <Border Grid.Column="0" CornerRadius="4" Padding="5,1" Background="{DynamicResource SubtleFillColorTertiaryBrush}">
+                                                            <TextBlock Text="{Binding Kind}" FontSize="9" />
+                                                        </Border>
+                                                        <StackPanel Grid.Column="1">
+                                                            <TextBlock Text="{Binding Title}" FontSize="13" TextTrimming="CharacterEllipsis" />
+                                                            <TextBlock Text="{Binding Snippet}" FontSize="10" Opacity="0.5" TextTrimming="CharacterEllipsis" />
+                                                        </StackPanel>
+                                                        <TextBlock Grid.Column="2" Text="{Binding Timestamp, StringFormat='{}{0:MMM d}'}" FontSize="10" Opacity="0.4" VerticalAlignment="Center" />
+                                                    </Grid>
+                                                </Button>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </StackPanel>
+                        </ScrollViewer>
+
+                        <TextBlock Grid.Row="3" Text="{Binding Palette.FooterText}" FontSize="10" Opacity="0.5"
+                                   Margin="12,4" TextWrapping="Wrap"
+                                   IsVisible="{Binding Palette.FooterText, Converter={x:Static conv2:StringConverters.IsNotNullOrEmpty}}" />
+                    </Grid>
+                </Border>
             </Border>
         </Grid>
 

@@ -12,6 +12,9 @@ public partial class ConversationItemViewModel : ObservableObject
     [ObservableProperty] private bool     _isPinned;
     [ObservableProperty] private bool     _isArchived;
 
+    /// <summary>r24 doc 02 2.0: "Exclude from Recall", alongside pin and archive.</summary>
+    [ObservableProperty] private bool     _isRecallExcluded;
+
     public event Action<ConversationItemViewModel>? MetadataChanged;
 
     public required string Id  { get; init; }
@@ -21,6 +24,7 @@ public partial class ConversationItemViewModel : ObservableObject
     public string TagsDisplay => string.Join("  ", Tags);
     public string ArchiveActionLabel => IsArchived ? "Unarchive" : "Archive";
     public string PinActionLabel => IsPinned ? "Unpin" : "Pin";
+    public string RecallExclusionActionLabel => IsRecallExcluded ? "Include in Recall" : "Exclude from Recall";
     public List<string> Tags => TagsText
         .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
         .Where(t => t.Length > 0)

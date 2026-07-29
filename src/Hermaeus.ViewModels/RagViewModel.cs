@@ -103,6 +103,23 @@ public sealed class RagDatasetManagerItemViewModel
     public int DuplicateSources { get; set; }
     public IReadOnlyList<string> MissingSourcePaths { get; set; } = [];
     public string LastIngestLabel => CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+
+    /// <summary>doc 03 3.5: watched-source surfacing on the Dataset Manager card.</summary>
+    public int WatchedSourceCount => Dataset.Config.WatchedSources.Count;
+    public RagRefreshPlan? DriftPlan { get; set; }
+    public string WatchedLastRefreshLabel
+    {
+        get
+        {
+            var last = Dataset.Config.WatchedSources.Where(w => w.LastRefreshUtc.HasValue).Select(w => w.LastRefreshUtc!.Value).DefaultIfEmpty().Max();
+            return last == default ? "never refreshed" : $"checked {last.ToLocalTime():yyyy-MM-dd HH:mm}";
+        }
+    }
+    public string WatchedDriftSummary => DriftPlan is null
+        ? string.Empty
+        : DriftPlan.HasDrift
+            ? $"{DriftPlan.ChangedFiles.Count} changed, {DriftPlan.NewFiles.Count} new, {DriftPlan.MissingFiles.Count} missing"
+            : "up to date";
     public string DimensionsLabel => EmbeddingDimensions <= 0 ? "unknown dimensions" : $"{EmbeddingDimensions:N0} dimensions";
     public bool ReindexRequired => !string.IsNullOrWhiteSpace(CurrentEmbeddingModel)
         && !string.Equals(EmbeddingModel, "unknown", StringComparison.OrdinalIgnoreCase)
@@ -123,6 +140,8 @@ public partial class RagViewModel : ObservableObject
     private readonly ServicesViewModel? _services;
     private readonly XttsProcessManager? _xtts;
     private readonly KokoroProcessManager? _kokoro;
+    private readonly IActivityRecorder? _activity;
+    private readonly WatchedSourceService? _watchedSources;
     private CancellationTokenSource? _cts;
     private CancellationTokenSource? _ingestCts;
     private CancellationTokenSource? _evalCts;
@@ -137,6 +156,19 @@ public partial class RagViewModel : ObservableObject
 
     [ObservableProperty] private RagDataset? _selectedDataset;
     [ObservableProperty] private string      _questionText    = string.Empty;
+
+    /// <summary>r24 doc 01 1.6: pre-selects the newly activated project's dataset for
+    /// the next query or add-documents action, but only when nothing is already
+    /// selected - never overrides a dataset the user is actively working in.</summary>
+    public void SetDefaultDatasetFromProject(string datasetId)
+    {
+        if (SelectedDataset is not null || string.IsNullOrWhiteSpace(datasetId))
+            return;
+
+        var match = Datasets.FirstOrDefault(d => d.Id == datasetId);
+        if (match is not null)
+            SelectedDataset = match;
+    }
     [ObservableProperty] private string      _answerText      = string.Empty;
     [ObservableProperty] private bool        _isQuerying;
     [ObservableProperty] private bool        _isIngesting;
@@ -186,12 +218,17 @@ public partial class RagViewModel : ObservableObject
     public Func<RagDatasetManagerItemViewModel, Task<bool>>? RequestDeleteDatasetConfirmation { get; set; }
     public Func<RagDatasetManagerItemViewModel, Task<bool>>? RequestRemoveMissingSourcesConfirmation { get; set; }
 
+    /// <summary>doc 03 3.3: a separate confirmation from RequestRemoveMissingSourcesConfirmation
+    /// - confirming new/changed ingest is not confirming a deletion.</summary>
+    public Func<RagDatasetManagerItemViewModel, RagRefreshPlan, Task<bool>>? RequestConfirmWatchedRefresh { get; set; }
+    public Func<Task<string?>>? RequestWatchedFolderPicker { get; set; }
+
     /// <summary>r21 3.3: "Open in chat" handoff, wired by MainWindowViewModel (which owns
     /// view switching and ChatViewModel access) - RagViewModel has no direct chat reference.</summary>
     public Action<RagDataset>? RequestOpenInChat { get; set; }
     public bool IsLocalIngest => !EnableWebLoader;
 
-    public RagViewModel(RagQueryService query, RagPipeline pipeline, RagEvalService eval, IToastService toasts, IRuntimeLogService logs, ISettingsService settings, ServicesViewModel? services = null, XttsProcessManager? xtts = null, KokoroProcessManager? kokoro = null)
+    public RagViewModel(RagQueryService query, RagPipeline pipeline, RagEvalService eval, IToastService toasts, IRuntimeLogService logs, ISettingsService settings, ServicesViewModel? services = null, XttsProcessManager? xtts = null, KokoroProcessManager? kokoro = null, IActivityRecorder? activity = null, WatchedSourceService? watchedSources = null)
     {
         _query    = query;
         _pipeline = pipeline;
@@ -202,6 +239,8 @@ public partial class RagViewModel : ObservableObject
         _services = services;
         _xtts = xtts;
         _kokoro = kokoro;
+        _activity = activity;
+        _watchedSources = watchedSources;
     }
 
     public IEnumerable<IngestDuplicatePolicy> IngestPolicyOptions => Enum.GetValues<IngestDuplicatePolicy>();
@@ -378,6 +417,13 @@ public partial class RagViewModel : ObservableObject
             _toasts.Show("RAG ingest complete", $"{report.Summary()}", ToastKind.Success);
             _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Rag,
                 $"RAG ingest complete for dataset {ds.Name}. {report.Summary()}"));
+            if (!IngestDryRun)
+            {
+                var errorCount = report.Documents.Count(d => d.Status == Hermaeus.Rag.Models.DocumentIngestStatus.Error);
+                _ = _activity?.RecordAsync("rag.ingest", ds.Id,
+                    errorCount > 0 ? ActivityOutcome.Partial : ActivityOutcome.Succeeded,
+                    $"Ingest into {ds.Name}", errorCount > 0 ? $"{errorCount} file(s) errored" : string.Empty, ds.ProjectId);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -385,6 +431,7 @@ public partial class RagViewModel : ObservableObject
             _toasts.Show("RAG ingest cancelled", "Ingest was cancelled before completion.", ToastKind.Info, 5000);
             _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Rag,
                 "RAG ingest cancelled."));
+            _ = _activity?.RecordAsync("rag.ingest", string.Empty, ActivityOutcome.Cancelled, "Ingest cancelled");
         }
         catch (Exception ex)
         {
@@ -392,6 +439,7 @@ public partial class RagViewModel : ObservableObject
             _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Error, RuntimeLogCategory.Rag,
                 $"RAG ingest failed: {ex.Message}"));
             _toasts.Show("RAG ingest failed", ex.Message, ToastKind.Error, 7000);
+            _ = _activity?.RecordAsync("rag.ingest", string.Empty, ActivityOutcome.Failed, "Ingest failed", ex.Message);
         }
         finally
         {
@@ -559,6 +607,150 @@ public partial class RagViewModel : ObservableObject
         }
     }
 
+    /// <summary>doc 03 3.1/1.5: quick-add a watched folder using the same folder
+    /// picker/validation as everywhere else a root is chosen.</summary>
+    [RelayCommand]
+    private async Task AddWatchedSourceAsync(RagDatasetManagerItemViewModel? item)
+    {
+        if (item?.Dataset is null || RequestWatchedFolderPicker is null) return;
+        var picked = await RequestWatchedFolderPicker();
+        if (string.IsNullOrWhiteSpace(picked)) return;
+
+        if (!PathRootValidator.TryValidate(picked, out var root, out var error))
+        {
+            SetError($"Cannot watch that folder: {error}");
+            return;
+        }
+
+        item.Dataset.Config.WatchedSources.Add(new RagWatchedSource { Root = root });
+        await _query.SaveDatasetAsync(item.Dataset);
+        await RefreshDatasetManagerAsync();
+    }
+
+    [RelayCommand]
+    private async Task RemoveWatchedSourceAsync((RagDatasetManagerItemViewModel Item, RagWatchedSource Source) args)
+    {
+        if (args.Item?.Dataset is null) return;
+        args.Item.Dataset.Config.WatchedSources.Remove(args.Source);
+        await _query.SaveDatasetAsync(args.Item.Dataset);
+        await RefreshDatasetManagerAsync();
+    }
+
+    /// <summary>doc 03 3.2: walks watched roots and classifies drift. Changes nothing.</summary>
+    [RelayCommand]
+    private async Task ScanWatchedSourcesAsync(RagDatasetManagerItemViewModel? item)
+    {
+        if (item?.Dataset is null || _watchedSources is null || item.WatchedSourceCount == 0) return;
+
+        try
+        {
+            item.DriftPlan = await _watchedSources.ScanAsync(item.Dataset, _ingestCts?.Token ?? CancellationToken.None);
+            // RagDatasetManagerItemViewModel is a plain, non-reactive class
+            // (matching MissingFiles/StaleFiles's existing pattern) - a
+            // same-reference re-set still raises CollectionChanged.Replace,
+            // which is enough to make the ItemsControl re-bind this row.
+            var index = DatasetManagerItems.IndexOf(item);
+            if (index >= 0) DatasetManagerItems[index] = item;
+        }
+        catch (Exception ex)
+        {
+            SetError($"Watched-source scan failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>doc 03 3.3: applies new and changed files only, through the ingest
+    /// pipeline, after confirmation. Missing files are never touched here - that is
+    /// RemoveMissingSourcesAsync's job, a second, separate confirmation.</summary>
+    [RelayCommand]
+    private async Task RefreshWatchedSourcesAsync(RagDatasetManagerItemViewModel? item)
+    {
+        if (item?.Dataset is null || _watchedSources is null) return;
+        if (_watchedSources.IsRefreshing(item.Dataset.Id))
+        {
+            _toasts.Show("Refresh already running", $"A refresh for '{item.Dataset.Name}' is already in progress.", ToastKind.Warning);
+            return;
+        }
+
+        var plan = item.DriftPlan ?? await _watchedSources.ScanAsync(item.Dataset);
+        item.DriftPlan = plan;
+        if (!plan.HasDrift)
+        {
+            _toasts.Show("Up to date", $"'{item.Dataset.Name}' has no drift to refresh.", ToastKind.Info);
+            return;
+        }
+
+        var confirmed = RequestConfirmWatchedRefresh is null || await RequestConfirmWatchedRefresh(item, plan);
+        if (!confirmed) return;
+
+        try
+        {
+            var report = await _watchedSources.ApplyNewAndChangedAsync(item.Dataset, plan);
+            _query.ClearCache(item.Dataset.Id);
+            await LoadDatasetsAsync();
+            await RefreshDatasetManagerAsync();
+
+            var errorCount = report.Documents.Count(d => d.Status == DocumentIngestStatus.Error);
+            _ = _activity?.RecordAsync("rag.watched-refresh", item.Dataset.Id,
+                errorCount > 0 ? ActivityOutcome.Partial : ActivityOutcome.Succeeded,
+                $"Watched refresh for {item.Dataset.Name}",
+                errorCount > 0 ? $"{errorCount} file(s) errored" : string.Empty, item.Dataset.ProjectId);
+
+            _toasts.Show("Watched sources refreshed", $"{plan.NewFiles.Count} new, {plan.ChangedFiles.Count} changed.", ToastKind.Success);
+        }
+        catch (Exception ex)
+        {
+            SetError($"Watched-source refresh failed: {ex.Message}");
+            _ = _activity?.RecordAsync("rag.watched-refresh", item.Dataset.Id, ActivityOutcome.Failed, $"Watched refresh for {item.Dataset.Name} failed", ex.Message, item.Dataset.ProjectId);
+        }
+    }
+
+    /// <summary>doc 03 3.4: unattended refresh triggered by the app (on start, or on
+    /// an interval). Ingests new and changed files only - it never deletes, under any
+    /// configuration - and skips datasets a manual refresh is already running against
+    /// or ones whose embedding model has drifted, so it can never bypass that guard.
+    /// Per-dataset failures are recorded and swallowed so one bad dataset does not stop
+    /// the rest from refreshing.</summary>
+    public async Task RunAutomaticWatchedRefreshAsync(CancellationToken ct = default)
+    {
+        if (_watchedSources is null) return;
+
+        var datasets = await _query.GetDatasetsAsync();
+        foreach (var dataset in datasets)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (dataset.Config.WatchedSources.Count == 0) continue;
+            if (_watchedSources.IsRefreshing(dataset.Id)) continue;
+            var mismatched = !string.IsNullOrWhiteSpace(dataset.Config.EmbeddingModel)
+                && !string.Equals(dataset.Config.EmbeddingModel, _settings.Settings.Rag.EmbeddingModel, StringComparison.OrdinalIgnoreCase);
+            if (mismatched) continue;
+
+            try
+            {
+                var plan = await _watchedSources.ScanAsync(dataset, ct);
+                if (plan.NewFiles.Count == 0 && plan.ChangedFiles.Count == 0) continue;
+
+                var report = await _watchedSources.ApplyNewAndChangedAsync(dataset, plan, ct);
+                _query.ClearCache(dataset.Id);
+
+                var errorCount = report.Documents.Count(d => d.Status == DocumentIngestStatus.Error);
+                _ = _activity?.RecordAsync("rag.watched-refresh", dataset.Id,
+                    errorCount > 0 ? ActivityOutcome.Partial : ActivityOutcome.Succeeded,
+                    $"Automatic watched refresh for {dataset.Name}",
+                    $"{plan.NewFiles.Count} new, {plan.ChangedFiles.Count} changed" + (errorCount > 0 ? $", {errorCount} errored" : string.Empty),
+                    dataset.ProjectId);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                _ = _activity?.RecordAsync("rag.watched-refresh", dataset.Id, ActivityOutcome.Failed,
+                    $"Automatic watched refresh for {dataset.Name} failed", ex.Message, dataset.ProjectId);
+            }
+        }
+
+        await LoadDatasetsAsync();
+        await RefreshDatasetManagerAsync();
+    }
+
     /// <summary>
     /// r10 01-rag-correctness.md 1.4: re-embeds every chunk of a dataset
     /// with the current embedding model, from stored content only (no
@@ -674,6 +866,25 @@ public partial class RagViewModel : ObservableObject
         var path = SelectedSource?.Path;
         if (!string.IsNullOrWhiteSpace(path))
             RequestCopyToClipboard?.Invoke(path);
+    }
+
+    /// <summary>doc 04 4.1: registered next to the ViewModel that owns the action.</summary>
+    public void RegisterCommands(ICommandRegistry registry)
+    {
+        registry.Register(new AppCommand(
+            Id: "rag.refresh-datasets", Title: "Refresh datasets", Area: "RAG",
+            Description: "Reload the list of RAG datasets from disk.",
+            Keywords: ["rag", "dataset", "refresh", "reload"], Shortcut: "",
+            CanExecute: () => true,
+            Execute: () => RefreshDatasetManagerCommand.ExecuteAsync(null)));
+
+        registry.Register(new AppCommand(
+            Id: "rag.warm-cache", Title: "Warm query cache", Area: "RAG",
+            Description: "Pre-warm the selected dataset's query cache.",
+            Keywords: ["rag", "cache", "warm"], Shortcut: "",
+            CanExecute: () => SelectedDataset is not null,
+            DisabledReason: () => "No dataset selected.",
+            Execute: () => WarmCacheCommand.ExecuteAsync(null)));
     }
 
     [RelayCommand]

@@ -1,4 +1,8 @@
-# Voice Providers
+# Voice
+
+Text-to-speech (output) and, as of r24, speech-to-text (input). Both are
+off-by-default, local-first by default, and never persist audio beyond the
+moment they need it.
 
 ## Voice Architecture and Providers
 
@@ -160,6 +164,94 @@ a per-message speak/stop icon swap wired to this.
 - Imported clone samples are copied only when explicitly imported.
 - Voice sample import is available in Services under the Voice card.
 
+## Speech Recognition (Input)
+
+Local speech-to-text, off by default. Everything here is transient: a
+captured or uploaded WAV is transcribed and its temp file deleted
+immediately, on every path including failure and cancellation - never
+persisted, backed up, logged, or attached to a conversation. There is no
+wake word and no always-on listening: every capture is started by an
+explicit user action and has a visible recording indicator for its entire
+duration.
+
+### Providers
+
+- **Native (default, local)** - in-process ONNX, no managed subprocess. The
+  backend is `facebook/wav2vec2-base-960h` (official Meta repository, pinned
+  commit, SHA256-verified, English-only, roughly 360 MB), a CTC acoustic
+  model: one forward pass over the raw waveform, one argmax per output
+  frame, and a 32-symbol character vocabulary in place of a tokenizer. This
+  was chosen over porting Whisper's own architecture (an autoregressive
+  decoder with a KV cache and a ~50k-token BPE tokenizer) specifically to
+  keep the in-process design the ONNX-first codebase already uses for Kokoro
+  TTS without taking on that complexity in the same round as several other
+  large features; a multilingual model is future work. Same asset posture as
+  native Kokoro: nothing downloads until the explicit install action in
+  **Services -> Voice**, and inference then runs fully offline.
+- **Remote, OpenAI-compatible** - available, never the default. Calls
+  `/v1/audio/transcriptions` and reuses the same OpenAI base URL and API key
+  Chat and OpenAI voice already use, rather than asking for the same
+  credential a second time. Off by default; selecting it sends microphone
+  audio to that endpoint, called out explicitly in Privacy Audit.
+
+### Capture
+
+- **Windows**: the `winmm` `waveIn` API directly (no NuGet package),
+  double-buffered with an OS event so a background thread polls for
+  buffer-ready state rather than marshaling a native callback delegate.
+- **Linux**: the same subprocess fallback chain `AudioPlayback` already uses
+  for output - `parecord`, then `arecord`, then `ffmpeg`, first one found on
+  PATH, launched with `ArgumentList` (never a shell string). If none are
+  installed, the unavailable message names which three it looked for.
+- **No device, no silent failure.** When no input device exists or access is
+  denied, every mic affordance shows disabled with the actual reason instead
+  of looking like it is listening.
+- **Hot-mic rules, enforced in code**: a visible recording indicator for the
+  full duration of any capture; a hard maximum utterance length (default 60
+  seconds, plus an unconditional 5-minute safety ceiling in the capture
+  engine itself, independent of any caller-side timer); deterministic
+  session disposal; temp WAV cleanup on every path.
+
+### Where it shows up
+
+- **Services -> Voice**: provider, input device, remote model name, and the
+  native model install action (process/model/device config, so Services not
+  Settings, per the same split TTS already uses).
+- **Transcribe audio file...** (Services -> Voice): pick a `.wav`, transcribe
+  it, copy the transcript. Exercises the whole pipeline except capture - the
+  one path verifiable with no live microphone in the building - and
+  validates the picked path defensively (normalized, no symlink, `.wav`
+  only, size-capped) even though it came from a native file picker.
+- **Dictation**: a shared mic-button control, currently wired into the chat
+  input. Press to start, press again to stop; the transcript is inserted at
+  the cursor for you to edit, never sent automatically. A dictated phrase
+  after existing text gets a separating space if the cursor was not already
+  after whitespace.
+- **Doctor** gains a speech-recognition backend check (model installed and
+  loadable) and a microphone check (input device enumerable), alongside the
+  existing voice checks.
+- **Privacy Audit** shows the active speech-recognition provider and,
+  whenever the remote one is selected, an explicit line naming that
+  microphone audio leaves the machine and where it goes - the same
+  disclosure pattern already used for a remote chat/voice provider, given
+  its own line because voice is a strictly higher-sensitivity case.
+
+### Not yet wired
+
+Disclosed rather than silently absent:
+
+- **Hands-free conversation mode** has a complete, tested state machine
+  (`HandsFreeStateMachine`: Idle -> Listening -> Transcribing -> Sending ->
+  Speaking -> Listening, silence-based endpointing, hard Stop from any
+  state, never auto-sends an empty or low-confidence transcript) but is not
+  yet wired into Chat's UI or a live capture/orchestrator loop.
+- **Dictation** is wired into the chat input only; the agent goal/reply box,
+  the RAG query box, the workspace memory note editor, and the command
+  palette do not have a mic button yet. The shared control and wiring
+  pattern exist for each of those to pick up.
+- **Push-to-talk** (a held hotkey instead of click-to-toggle) is not wired;
+  dictation today is click-to-start, click-to-stop only.
+
 ## Settings vs. Services
 
 The Voice card was split the same way RAG's embeddings config was -
@@ -173,3 +265,10 @@ provider that cannot enumerate voices) - none of which start or stop a
 process. `TtsSettingsViewModel` is a single DI-shared
 instance (`ServicesViewModel.Tts` and `SettingsViewModel.Tts` are the same
 object), so both pages always reflect the same live state.
+
+Speech recognition follows the identical split: provider/device/model/install
+on **Services -> Voice** (`SttSettingsViewModel`, its own DI-shared
+instance); push-to-talk key, insert-at-cursor behavior, hands-free enable,
+and silence/utterance-length thresholds are preference-only fields on
+**Settings -> Voice** (`SttSettings`) reserved for when those flows are
+wired to the UI.

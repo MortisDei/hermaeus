@@ -1,5 +1,8 @@
+using System.ComponentModel;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
+using Avalonia.Threading;
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
 using Hermaeus.Services;
@@ -11,6 +14,7 @@ public partial class MainWindow : Window
 {
     public DesktopIntegrationService? DesktopIntegration { get; set; }
     public IPatchDiffService? PatchDiffService { get; set; }
+    private IInputElement? _prePaletteFocus;
 
     public MainWindow()
     {
@@ -36,8 +40,50 @@ public partial class MainWindow : Window
                     $"Permanently delete \"{item.Title}\"? This cannot be undone.");
                 return await dialog.ShowDialog<bool>(this);
             };
+            vm.Projects.RequestOpenEditor = () =>
+            {
+                var editor = new ProjectEditorWindow { DataContext = vm.Projects };
+                _ = editor.ShowDialog(this);
+            };
+            vm.Projects.RequestConfirmDelete = async name =>
+            {
+                var dialog = new ConfirmActionDialog(
+                    "Delete project",
+                    $"Delete \"{name}\"? This removes only the project label and its defaults. " +
+                    "Every conversation, agent task, RAG dataset and memory that pointed at it is " +
+                    "kept exactly as it is - nothing is deleted.");
+                return await dialog.ShowDialog<bool>(this);
+            };
+            vm.Palette.PropertyChanged += OnPaletteViewModelPropertyChanged;
+
             if (vm.Settings.StartMinimized)
                 WindowState = WindowState.Minimized;
+        }
+    }
+
+    private void OnPaletteViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(PaletteViewModel.IsOpen) || sender is not PaletteViewModel palette)
+            return;
+
+        if (palette.IsOpen)
+        {
+            _prePaletteFocus = FocusManager?.GetFocusedElement();
+            Dispatcher.UIThread.Post(() => PaletteTextBox.Focus());
+        }
+        else
+        {
+            _prePaletteFocus?.Focus();
+            _prePaletteFocus = null;
+        }
+    }
+
+    private void OnPaletteKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape && DataContext is MainWindowViewModel vm)
+        {
+            vm.Palette.CloseCommand.Execute(null);
+            e.Handled = true;
         }
     }
 

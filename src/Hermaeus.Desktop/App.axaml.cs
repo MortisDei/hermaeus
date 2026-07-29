@@ -220,6 +220,7 @@ public partial class App : Application
         // Shared between SettingsViewModel (Voice orchestration/channels/profiles) and
         // ServicesViewModel (Voice providers card) so both pages see the same live state.
         s.AddSingleton<TtsSettingsViewModel>();
+        s.AddSingleton<SttSettingsViewModel>();
         s.AddSingleton<SettingsViewModel>();
         s.AddSingleton<ModelManagementViewModel>();
         s.AddSingleton<RagViewModel>();
@@ -230,6 +231,9 @@ public partial class App : Application
         s.AddSingleton<MemoriesViewModel>();
         s.AddSingleton<LogsViewModel>();
         s.AddSingleton<SetupWizardViewModel>();
+        s.AddSingleton<ProjectViewModel>();
+        s.AddSingleton<PaletteViewModel>();
+        s.AddSingleton<ActivityViewModel>();
         s.AddSingleton<MainWindowViewModel>();
     }
 }

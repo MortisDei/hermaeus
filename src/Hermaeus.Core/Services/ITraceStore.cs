@@ -19,4 +19,9 @@ public interface ITraceStore
     /// from the durable model_usage rollup (unaffected by trace pruning).
     /// </summary>
     Task<List<ModelUsageRow>> GetModelUsageAsync(TraceKind? kind, int days, CancellationToken ct = default);
+
+    /// <summary>r24 doc 04 4.2: deletes every trace row of one kind, returning the count
+    /// removed. Never touches the durable model_usage rollup, which is aggregate and
+    /// separately owned.</summary>
+    Task<int> DeleteByKindAsync(TraceKind kind, CancellationToken ct = default);
 }

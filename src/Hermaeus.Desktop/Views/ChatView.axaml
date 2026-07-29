@@ -625,7 +625,7 @@
                             FontSize="11"
                             Padding="8,4" />
                 </Grid>
-                <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="8">
+                <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto" ColumnSpacing="8">
                     <Button Grid.Column="0" Classes="icon-btn"
                             Command="{Binding AttachContextFilesCommand}"
                             ToolTip.Tip="Attach text/code files as direct context">
@@ -640,7 +640,9 @@
                              Watermark="Message or drop text/code files here..."
                              KeyDown="OnInputKeyDown" />
 
-                    <TextBlock Grid.Column="2"
+                    <controls:MicButton Grid.Column="2" x:Name="ChatMicButton" VerticalAlignment="Center" />
+
+                    <TextBlock Grid.Column="3"
                                Text="{Binding ContextUsageLabel}"
                                ToolTip.Tip="{Binding ContextUsageTooltip}"
                                Classes.context-usage-warning="{Binding IsContextUsageWarning}"
@@ -651,17 +653,17 @@
                                MinWidth="112"
                                TextAlignment="Right" />
 
-                    <Button Grid.Column="3" Classes="send-btn"
+                    <Button Grid.Column="4" Classes="send-btn"
                             Command="{Binding SendCommand}"
                             IsVisible="{Binding !IsGenerating}"
                             Content="Send" />
 
-                    <Button Grid.Column="3" Classes="send-btn"
+                    <Button Grid.Column="4" Classes="send-btn"
                             Command="{Binding StopCommand}"
                             IsVisible="{Binding IsGenerating}"
                             Content="Stop" />
 
-                    <Button Grid.Column="4" Classes="icon-btn"
+                    <Button Grid.Column="5" Classes="icon-btn"
                             Command="{Binding RegenerateCommand}"
                             IsEnabled="{Binding !IsGenerating}"
                             IsVisible="{Binding HasMessages}"

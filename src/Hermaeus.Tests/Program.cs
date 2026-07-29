@@ -213,7 +213,7 @@ internal static class AgentTests
         await c.OpenAsync();
         await using var cmd = c.CreateCommand();
         cmd.CommandText = "SELECT version FROM hermaeus_schema_versions WHERE scope = 'agent_task_index'";
-        Equal(4L, (long)(await cmd.ExecuteScalarAsync() ?? 0L), "agent task index should record schema version");
+        Equal(5L, (long)(await cmd.ExecuteScalarAsync() ?? 0L), "agent task index should record schema version");
     }
 
     File.Delete(Path.Combine(store.GetTaskDirectory("indexed-task"), "task_state.json"));

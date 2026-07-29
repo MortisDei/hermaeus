@@ -61,14 +61,20 @@ public sealed class RagPipeline
         string directory,
         IProgress<IngestProgress>? progress = null,
         CancellationToken ct = default,
-        IngestOptions? options = null)
+        IngestOptions? options = null,
+        IReadOnlyList<string>? explicitFiles = null)
     {
         options ??= new IngestOptions();
         ValidateIngestConfig(dataset.Config);
         if (dataset.Config.ExtractionMode is not RagExtractionMode.TextMarkdown)
             throw new NotSupportedException($"{dataset.Config.ExtractionMode} is configured but not yet implemented. The provider slot is ready; install a concrete extractor before ingesting this profile.");
 
-        var files = Directory.GetFiles(directory, "*.txt", SearchOption.AllDirectories)
+        // r24 doc 03 3.3: a watched-source refresh passes its own computed
+        // new+changed file list (already filtered by include/exclude globs)
+        // instead of the directory-wide .txt/.md/.pdf scan below, so the same
+        // pipeline - chunking, embedding, BM25 rebuild, cache invalidation -
+        // runs for both a manual ingest and a refresh with no parallel path.
+        var files = explicitFiles?.OrderBy(f => f).ToList() ?? Directory.GetFiles(directory, "*.txt", SearchOption.AllDirectories)
             .Concat(Directory.GetFiles(directory, "*.md", SearchOption.AllDirectories))
             .Concat(Directory.GetFiles(directory, "*.pdf", SearchOption.AllDirectories))
             .OrderBy(f => f)

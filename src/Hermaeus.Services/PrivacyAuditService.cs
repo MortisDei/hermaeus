@@ -19,6 +19,8 @@ public sealed class PrivacyAuditService
     private readonly ITraceStore _traces;
     private readonly SqliteRagStore? _ragStore;
     private readonly ModelManifestStore? _modelManifest;
+    private readonly ISpeechRecognitionProviderRegistry? _sttProviders;
+    private readonly IAudioCapture? _audioCapture;
 
     public PrivacyAuditService(
         ISettingsService settings,
@@ -27,7 +29,9 @@ public sealed class PrivacyAuditService
         IVoiceProviderRegistry voiceProviders,
         ITraceStore traces,
         SqliteRagStore? ragStore = null,
-        ModelManifestStore? modelManifest = null)
+        ModelManifestStore? modelManifest = null,
+        ISpeechRecognitionProviderRegistry? sttProviders = null,
+        IAudioCapture? audioCapture = null)
     {
         _settings = settings;
         _secrets = secrets;
@@ -36,6 +40,8 @@ public sealed class PrivacyAuditService
         _traces = traces;
         _ragStore = ragStore;
         _modelManifest = modelManifest;
+        _sttProviders = sttProviders;
+        _audioCapture = audioCapture;
     }
 
     /// <summary>Whether the model manifest has at least one repo-linked entry, meaning the
@@ -175,12 +181,34 @@ public sealed class PrivacyAuditService
             }
         }
 
+        if (_sttProviders is not null && settings.Stt.Enabled)
+            items.Add(BuildSpeechRecognitionItem(settings));
+
         items.Add(new PrivacyAuditItem(
             "Features that may send data remotely",
             anyRemote ? "Review" : "Local",
             "Remote chat/voice providers can send prompt, document, image, or voice data outside the local machine when explicitly configured. RAG web ingest remains dataset-scoped and approval driven."));
 
         return items;
+    }
+
+    /// <summary>r24 doc 05 5.6: voice input is a strictly higher-sensitivity case than
+    /// the image-attachment disclosure above it, so it gets a line of its own naming
+    /// where microphone audio goes, plus current microphone access state.</summary>
+    private PrivacyAuditItem BuildSpeechRecognitionItem(AppSettings settings)
+    {
+        var provider = _sttProviders!.GetActiveProvider();
+        var isRemote = provider == SttProvider.OpenAi;
+        var deviceConfigured = _audioCapture?.IsAvailable ?? false;
+        var deviceDetail = deviceConfigured
+            ? "A microphone is configured and available."
+            : $"No microphone available{(_audioCapture?.UnavailableReason is { Length: > 0 } reason ? $": {reason}" : ".")}";
+
+        var detail = isRemote
+            ? $"Speech recognition provider: OpenAI-compatible (remote, model {settings.Stt.RemoteModel}). Microphone audio leaves this machine and is sent to {settings.Llm.OpenAiBaseUrl} for transcription. {deviceDetail}"
+            : $"Speech recognition provider: native (in-process ONNX, local). Audio never leaves this machine; transcription runs fully offline. {deviceDetail}";
+
+        return new PrivacyAuditItem("Speech recognition", isRemote ? "Review" : "Local", detail);
     }
 
     /// <summary>

@@ -3048,6 +3048,7 @@ namespace Hermaeus.Tests
             public Task<bool> InstallLlamaServerUpdateAsync(IProgress<string> progress, System.Threading.CancellationToken ct = default) => Task.FromResult(true);
             public Task<bool> InstallNativeKokoroAssetsAsync(System.Threading.CancellationToken ct = default) => Task.FromResult(true);
             public Task<bool> InstallNativeKokoroAssetsAsync(IProgress<string> progress, System.Threading.CancellationToken ct = default) => Task.FromResult(true);
+            public Task<bool> InstallSpeechRecognitionAssetsAsync(IProgress<string> progress, System.Threading.CancellationToken ct = default) => Task.FromResult(true);
         }
 
         private sealed class FakeBenchmarkInsightsService : IBenchmarkInsightsService

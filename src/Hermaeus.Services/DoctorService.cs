@@ -42,6 +42,8 @@ public sealed partial class DoctorService : IDoctorService
     private readonly IRuntimeLogService? _runtimeLogs;
     private readonly AppLifecycleJournalService? _lifecycleJournal;
     private readonly IBenchmarkInsightsService? _benchmarkInsights;
+    private readonly ISpeechRecognitionProviderRegistry? _sttProviders;
+    private readonly IAudioCapture? _audioCapture;
 
     /// <summary>
     /// Caches GitHub API release lookups (llama.cpp's update check, Hermaeus's
@@ -72,7 +74,9 @@ public sealed partial class DoctorService : IDoctorService
         LlamaServerSetupService? llamaSetup = null,
         IRuntimeLogService? runtimeLogs = null,
         AppLifecycleJournalService? lifecycleJournal = null,
-        IBenchmarkInsightsService? benchmarkInsights = null)
+        IBenchmarkInsightsService? benchmarkInsights = null,
+        ISpeechRecognitionProviderRegistry? sttProviders = null,
+        IAudioCapture? audioCapture = null)
     {
         _settings = settings;
         _runtimes = runtimes;
@@ -89,6 +93,8 @@ public sealed partial class DoctorService : IDoctorService
         _runtimeLogs = runtimeLogs;
         _lifecycleJournal = lifecycleJournal;
         _benchmarkInsights = benchmarkInsights;
+        _sttProviders = sttProviders;
+        _audioCapture = audioCapture;
     }
 
     public async Task<DoctorReport> ScanAsync(CancellationToken ct = default)
@@ -116,6 +122,8 @@ public sealed partial class DoctorService : IDoctorService
                 : CheckEmbeddingBackendSkipped(embeddingModelCheck),
             CheckRerankerAssets(),
             CheckNativeKokoroAssets(),
+            await CheckSpeechRecognitionAsync(ct),
+            CheckMicrophoneAsync(),
             await CheckGpuAsync(ct),
             await CheckSecretsAsync(ct),
             CheckTraySupport()

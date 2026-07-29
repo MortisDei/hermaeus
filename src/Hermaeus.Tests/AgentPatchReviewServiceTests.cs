@@ -10,7 +10,7 @@ public sealed class AgentPatchReviewServiceTests
     {
         public readonly List<string> Actions = [];
 
-        public Task<AgentTaskState> CreateTaskAsync(string goal, AgentWorkspaceOptions options, CancellationToken ct = default) =>
+        public Task<AgentTaskState> CreateTaskAsync(string goal, AgentWorkspaceOptions options, CancellationToken ct = default, string projectId = "") =>
             throw new NotSupportedException();
 
         public Task<AgentStepResult> RunStepAsync(string taskId, AgentWorkspaceOptions options, CancellationToken ct = default) =>

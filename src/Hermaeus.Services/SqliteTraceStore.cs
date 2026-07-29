@@ -230,4 +230,15 @@ public sealed class SqliteTraceStore : ITraceStore
 
         return result;
     }
+
+    public async Task<int> DeleteByKindAsync(TraceKind kind, CancellationToken ct = default)
+    {
+        await EnsureInitializedAsync(ct);
+        await using var c = new SqliteConnection(Cs);
+        await c.OpenAsync(ct);
+        var cmd = c.CreateCommand();
+        cmd.CommandText = "DELETE FROM traces WHERE kind = $kind";
+        cmd.Parameters.AddWithValue("$kind", kind.ToString());
+        return await cmd.ExecuteNonQueryAsync(ct);
+    }
 }

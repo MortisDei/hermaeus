@@ -18,7 +18,8 @@ public readonly record struct ChatSendTiming(
     long TotalMs,
     ChatServerTimings? ServerTimings = null,
     long FirstEventMs = 0,
-    long RagMs = 0)
+    long RagMs = 0,
+    long RecallInjectionMs = 0)
 {
     /// <summary>A send whose pre-first-token wait exceeds this is worth a WARNING, not just an Info line.</summary>
     public const long SlowSendThresholdMs = 10_000;
@@ -31,7 +32,7 @@ public readonly record struct ChatSendTiming(
     public const double CpuSpeedPromptThreshold = 200;
 
     /// <summary>Everything the user experienced as "silence" before the first token: recall through first token.</summary>
-    public long PreFirstTokenMs => RecallMs + SelectMs + LessonMs + RagMs + PromptBuildMs + FirstTokenMs;
+    public long PreFirstTokenMs => RecallMs + SelectMs + LessonMs + RagMs + RecallInjectionMs + PromptBuildMs + FirstTokenMs;
 
     /// <summary>
     /// Time between the first streamed event of any kind and the first visible
@@ -51,6 +52,7 @@ public readonly record struct ChatSendTiming(
     public string Format()
     {
         var s = $"recall {RecallMs} ms, select {SelectMs} ms, lesson {LessonMs} ms, rag {RagMs} ms, " +
+                $"recall-inject {RecallInjectionMs} ms, " +
                 $"prompt build {PromptBuildMs} ms, first token {FirstTokenMs} ms, total {TotalMs} ms";
 
         if (NonContentStreamMs > 0)

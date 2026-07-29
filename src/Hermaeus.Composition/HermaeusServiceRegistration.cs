@@ -9,6 +9,7 @@ using Hermaeus.Rag.Retrieval;
 using Hermaeus.Rag.Storage;
 using Hermaeus.Services;
 using Hermaeus.Services.ProcessManagement;
+using Hermaeus.Services.Recall;
 using Hermaeus.Voice;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -42,9 +43,12 @@ public static class HermaeusServiceRegistration
         s.AddSingleton<BenchmarkService>();
         s.AddSingleton<IBenchmarkInsightsService, BenchmarkInsightsService>();
         s.AddSingleton<ITraceStore, SqliteTraceStore>();
+        s.AddSingleton<IActivityRecorder, ActivityRecorder>();
         s.AddSingleton<IModelUsageService, ModelUsageService>();
         s.AddSingleton<ChatTraceService>();
+        s.AddSingleton<ICommandRegistry, CommandRegistry>();
         s.AddSingleton<IConversationStore, ConversationStore>();
+        s.AddSingleton<IProjectStore, ProjectStore>();
         s.AddSingleton<ConversationExportService>();
         s.AddSingleton<ChatArtifactService>();
         s.AddSingleton<IMemoryStore, MemoryStore>();
@@ -69,6 +73,10 @@ public static class HermaeusServiceRegistration
         s.AddSingleton<ITtsService, VoiceRoutingTtsService>();
         s.AddSingleton<IVoiceOrchestrator, VoiceOrchestrator>();
         s.AddSingleton<VoiceNotificationBridge>();
+        s.AddSingleton<NativeSpeechRecognitionProvider>();
+        s.AddSingleton<OpenAiSpeechRecognitionProvider>();
+        s.AddSingleton<ISpeechRecognitionProviderRegistry, SpeechRecognitionProviderRegistry>();
+        s.AddSingleton<IAudioCapture>(_ => OperatingSystem.IsWindows() ? new WindowsAudioCapture() : new LinuxAudioCapture());
         s.AddSingleton<XttsProcessManager>();
         s.AddSingleton<KokoroProcessManager>();
         s.AddSingleton<LocalApiProcessManager>();
@@ -77,6 +85,7 @@ public static class HermaeusServiceRegistration
         s.AddSingleton<IEmbeddingService, LlamaCppEmbeddingService>();
         s.AddSingleton<IReranker, OnnxCrossEncoderReranker>();
         s.AddSingleton<RagPipeline>();
+        s.AddSingleton<WatchedSourceService>();
         s.AddSingleton<RagQueryService>();
         s.AddSingleton<IAgentRetrievalService, AgentRetrievalService>();
         s.AddSingleton<RagEvalService>();
@@ -96,6 +105,13 @@ public static class HermaeusServiceRegistration
         s.AddSingleton<IPatchDiffService, PatchDiffService>();
         s.AddSingleton<IAgentScenarioStore, AgentScenarioStore>();
         s.AddSingleton<IAgentScenarioRunner, AgentScenarioRunner>();
+        s.AddSingleton<RecallIndexStore>();
+        s.AddSingleton<RecallIndexingService>();
+        s.AddSingleton<IRecallSource, ConversationRecallSource>();
+        s.AddSingleton<IRecallSource, TaskRecallSource>();
+        s.AddSingleton<IRecallSource, MemoryRecallSource>();
+        s.AddSingleton<IRecallSource, DocumentRecallSource>();
+        s.AddSingleton<RecallService>();
         return s;
     }
 }

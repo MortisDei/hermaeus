@@ -433,6 +433,7 @@ public partial class AgentViewModel : ViewModelBase
     public Func<AgentTaskRewindConfirmation, Task<bool>>? RequestRewindConfirmation { get; set; }
     private readonly IAgentService _agent;
     private readonly IAgentTaskStateStore _store;
+    private readonly Hermaeus.Services.Recall.RecallIndexingService? _recallIndexing;
     private readonly IAgentWorkspaceMemoryStore _workspaceMemory;
     private readonly IAgentWorkspaceTools _workspaceTools;
     private readonly ILlmService _llm;
@@ -509,6 +510,20 @@ public partial class AgentViewModel : ViewModelBase
     public Action? RequestWorkspaceRootPicker { get; set; }
     /// <summary>Opens a path with the OS default handler (same shape as LogsViewModel.RequestOpenFolder); used here for the synthesis report.md (r15 02-orchestration-ui.md 2.4).</summary>
     public Action<string>? RequestOpenFolder { get; set; }
+
+    /// <summary>r24 doc 01 1.6: id of the active project, captured onto every new task at
+    /// creation time. Wired by MainWindowViewModel; a running task never rereads this.</summary>
+    public string ActiveProjectId { get; set; } = string.Empty;
+
+    /// <summary>r24 doc 01 1.6: pre-fills the workspace root box from a newly activated
+    /// project's folder root. Pre-fill only, never auto-select: it never overwrites a
+    /// root the user already has typed, and starting a task still requires the user's
+    /// own confirmation exactly as before (docs/features.md 300-303).</summary>
+    public void PrefillWorkspaceRootFromProject(string folderRoot)
+    {
+        if (string.IsNullOrWhiteSpace(WorkspaceRoot) && !string.IsNullOrWhiteSpace(folderRoot))
+            WorkspaceRoot = folderRoot;
+    }
 
     /// <summary>Drives the "no workspace selected" empty state (r8 02-onboarding-and-usability.md 2.6).</summary>
     public bool HasWorkspace => !string.IsNullOrWhiteSpace(WorkspaceRoot) && Directory.Exists(WorkspaceRoot);
@@ -652,10 +667,12 @@ public partial class AgentViewModel : ViewModelBase
         ISettingsService? settings = null,
         ILessonStore? lessons = null,
         IVoiceOrchestrator? voice = null,
-        AgentScenarioSuiteViewModel? scenarioSuite = null)
+        AgentScenarioSuiteViewModel? scenarioSuite = null,
+        Hermaeus.Services.Recall.RecallIndexingService? recallIndexing = null)
     {
         _agent = agent;
         _store = store;
+        _recallIndexing = recallIndexing;
         _workspaceMemory = workspaceMemory;
         _workspaceTools = workspaceTools;
         _llm = llm;
@@ -790,6 +807,34 @@ public partial class AgentViewModel : ViewModelBase
         }
     }
 
+    /// <summary>doc 04 4.1: registered next to the ViewModel that owns the action.</summary>
+    public void RegisterCommands(ICommandRegistry registry)
+    {
+        registry.Register(new AppCommand(
+            Id: "agent.start-task", Title: "Start agent task", Area: "Agent",
+            Description: "Start a new agent task with the current goal.",
+            Keywords: ["agent", "task", "start", "run"], Shortcut: "",
+            CanExecute: () => StartCommand.CanExecute(null),
+            DisabledReason: () => string.IsNullOrWhiteSpace(GoalText) ? "No goal entered." : "Agent is already running.",
+            Execute: () => StartCommand.ExecuteAsync(null)));
+
+        registry.Register(new AppCommand(
+            Id: "agent.stop-task", Title: "Stop agent task", Area: "Agent",
+            Description: "Stop the running agent task.",
+            Keywords: ["agent", "stop", "cancel"], Shortcut: "",
+            CanExecute: () => IsRunning,
+            DisabledReason: () => "No agent task is running.",
+            Execute: () => { StopCommand.Execute(null); return Task.CompletedTask; }));
+
+        registry.Register(new AppCommand(
+            Id: "agent.choose-workspace-root", Title: "Choose workspace folder", Area: "Agent",
+            Description: "Pick the folder the agent works in.",
+            Keywords: ["agent", "workspace", "folder", "root"], Shortcut: "",
+            CanExecute: () => RequestWorkspaceRootPicker is not null,
+            DisabledReason: () => "Workspace picker is not available.",
+            Execute: () => { RequestWorkspaceRootPicker?.Invoke(); return Task.CompletedTask; }));
+    }
+
     [RelayCommand(CanExecute = nameof(CanStart))]
     private async Task StartAsync()
     {
@@ -801,7 +846,7 @@ public partial class AgentViewModel : ViewModelBase
         {
             _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Agent,
                 $"Agent started: {GoalText}"));
-            CurrentTask = await _agent.CreateTaskAsync(GoalText, BuildOptions(), _cts.Token);
+            CurrentTask = await _agent.CreateTaskAsync(GoalText, BuildOptions(), _cts.Token, ActiveProjectId);
             _openedTaskId = CurrentTask.TaskId;
             _currentTaskParentGoal = string.Empty;
             Narrate("Agent task started.", VoicePriority.Normal, $"{CurrentTask.TaskId}:started");
@@ -1275,6 +1320,11 @@ public partial class AgentViewModel : ViewModelBase
     private void SelectLedgerFile(AgentLedgerFileEntryViewModel? file) =>
         SelectedLedgerFile = SelectedLedgerFile == file ? null : file;
 
+    /// <summary>Bound directly to a refresh button (AgentView.axaml) as well as called
+    /// from several other commands here, so it must never let an exception escape - a
+    /// workspace root renamed or deleted out from under the app must surface as a status
+    /// message, not an unobserved AsyncRelayCommand fault that crashes the whole app
+    /// (that exact crash was reported against a workspace folder renamed after selection).</summary>
     [RelayCommand]
     private async Task RefreshWorkspaceFilesAsync()
     {
@@ -1286,23 +1336,30 @@ public partial class AgentViewModel : ViewModelBase
         if (string.IsNullOrWhiteSpace(WorkspaceRoot))
             return;
 
-        var files = await Task.Run(() =>
+        try
         {
-            var options = BuildOptions();
-            return string.IsNullOrWhiteSpace(WorkspaceFileQuery)
-                ? _workspaceTools.ListFiles(options)
-                    .Select(path => new AgentWorkspaceFileViewModel(path, string.Empty, DateTime.MinValue))
-                    .ToList()
-                : _workspaceTools.SearchFiles(options, WorkspaceFileQuery)
-                    .Select(result => new AgentWorkspaceFileViewModel(result.RelativePath, result.Snippet, result.ModifiedUtc))
-                    .ToList();
-        });
+            var files = await Task.Run(() =>
+            {
+                var options = BuildOptions();
+                return string.IsNullOrWhiteSpace(WorkspaceFileQuery)
+                    ? _workspaceTools.ListFiles(options)
+                        .Select(path => new AgentWorkspaceFileViewModel(path, string.Empty, DateTime.MinValue))
+                        .ToList()
+                    : _workspaceTools.SearchFiles(options, WorkspaceFileQuery)
+                        .Select(result => new AgentWorkspaceFileViewModel(result.RelativePath, result.Snippet, result.ModifiedUtc))
+                        .ToList();
+            });
 
-        foreach (var file in files)
-            WorkspaceFiles.Add(file);
+            foreach (var file in files)
+                WorkspaceFiles.Add(file);
 
-        OnPropertyChanged(nameof(WorkspaceFileCount));
-        OnPropertyChanged(nameof(HasWorkspaceFiles));
+            OnPropertyChanged(nameof(WorkspaceFileCount));
+            OnPropertyChanged(nameof(HasWorkspaceFiles));
+        }
+        catch (Exception ex)
+        {
+            SetError($"Could not list workspace files: {ex.Message}");
+        }
     }
 
     /// <summary>
@@ -1980,6 +2037,55 @@ public partial class AgentViewModel : ViewModelBase
         OnPropertyChanged(nameof(HasPlanRevision));
         _ = RefreshQueuedPatchesAsync();
         _ = RefreshRunLedgerAsync();
+
+        // r24 doc 02 2.3: re-index on terminal transition only, never per step.
+        if (value is { Status: AgentTaskStatus.Complete or AgentTaskStatus.Failed })
+            _ = IndexTaskForRecallAsync(value);
+    }
+
+    /// <summary>Used by MainWindowViewModel's startup Recall backfill (doc 02 2.1/2.3):
+    /// only terminal tasks are indexable material.</summary>
+    public async Task<IReadOnlyList<Hermaeus.Core.Models.RecallTaskInput>> BuildRecallTaskInputsAsync()
+    {
+        var recent = await _store.ListRecentAsync(limit: 200);
+        var inputs = new List<Hermaeus.Core.Models.RecallTaskInput>();
+        foreach (var item in recent.Where(t => t.Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed))
+        {
+            var full = await _store.LoadAsync(item.TaskId);
+            if (full is null) continue;
+            var parts = new List<string> { full.Goal, full.Summary };
+            if (full.Reservations.Count > 0) parts.Add(string.Join("; ", full.Reservations));
+            if (full.Plan.Count > 0) parts.Add(string.Join(" ", full.Plan.Select(p => p.Description)));
+            var body = string.Join("\n", parts.Where(p => !string.IsNullOrWhiteSpace(p)));
+            inputs.Add(new Hermaeus.Core.Models.RecallTaskInput(full.TaskId, full.ParentTaskId, full.Goal, body, full.ProjectId, full.CreatedAt));
+        }
+        return inputs;
+    }
+
+    private async Task IndexTaskForRecallAsync(AgentTaskState task)
+    {
+        if (_recallIndexing is null) return;
+        try
+        {
+            var parts = new List<string> { task.Goal, task.Summary };
+            if (task.Reservations.Count > 0)
+                parts.Add("Reservations: " + string.Join("; ", task.Reservations));
+            if (task.Plan.Count > 0)
+                parts.Add(string.Join(" ", task.Plan.Select(p => p.Description)));
+
+            var reportPath = Path.Combine(_store.GetTaskDirectory(task.TaskId), "report.md");
+            if (File.Exists(reportPath))
+                parts.Add(await File.ReadAllTextAsync(reportPath));
+
+            var body = string.Join("\n", parts.Where(p => !string.IsNullOrWhiteSpace(p)));
+            await _recallIndexing.IndexTaskAsync(new Hermaeus.Core.Models.RecallTaskInput(
+                task.TaskId, task.ParentTaskId, task.Goal, body, task.ProjectId, task.CreatedAt));
+        }
+        catch (Exception ex)
+        {
+            _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Agent,
+                $"Recall indexing failed for task {task.TaskId}: {ex.Message}"));
+        }
     }
     partial void OnReplyTextChanged(string value) => SendReplyCommand.NotifyCanExecuteChanged();
     partial void OnIsRunningChanged(bool value)

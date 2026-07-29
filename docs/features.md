@@ -178,6 +178,22 @@
 - Chat header now shows a live memory status line so you can see whether memory
   is enabled and how many recent memories are available.
 
+## Recall
+
+Recall (r24) is a single local search index over the words you have already
+produced in Hermaeus - past messages, agent tasks, memories, and RAG document
+chunks - fused into one ranked result via reciprocal rank fusion, distinct
+from RAG (which answers questions from documents you deliberately ingested).
+On by default, indexing every conversation and agent task locally as they are
+created; a visible switch, a genuine "Clear index" action, and honest size
+reporting live in Settings > Memory. Per-conversation exclusion is available
+from the conversation list. The command palette (**Ctrl+K**) searches Recall
+alongside registered app commands from a single box; an empty query shows
+commands grouped by area. Selecting a hit navigates straight to it (the
+conversation, task, memory, or dataset). Optional chat-side injection (off by
+default) can pull relevant Recall hits into a turn's context, separate from
+and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
+
 ## Agent Workbench
 
 - Local task workbench with explicit task state, a persisted step transcript,
@@ -514,6 +530,18 @@
 
 ## RAG
 
+- **Watched sources** (r24): a dataset can watch zero or more folders. A
+  deterministic, cancellable scan classifies drift against stored source rows
+  (hash-preferred, mtime-fallback) without changing anything; **Refresh now**
+  on a dataset card shows the plan (N new, N changed, N missing) and applies
+  new/changed files through the normal ingest pipeline after confirmation.
+  Missing files are never removed by a watched refresh - that stays "Remove
+  missing sources"' separate, explicitly-confirmed job. A refresh that would
+  drop more than half a dataset's sources warns prominently first (almost
+  always an unmounted drive or a bad glob, not an intended purge). Optional
+  automatic refresh (off by default, Settings > RAG) can run on app start
+  and/or every N hours; it only ever ingests new/changed files, never
+  deletes, and its outcome is recorded as an Activity event.
 - Dataset Manager lists each dataset's chunk count, source count, embedding
   model, embedding dimensions, last ingest time, missing source files, stale
   local files, duplicate source/chunk entries, and reindex warnings when the
@@ -561,6 +589,29 @@
   with that dataset pre-attached (same "new conversation" path as Ctrl+N, so
   an unsent draft in the current chat is handled exactly as that path
   already handles it).
+
+## Speech input
+
+Local speech-to-text (r24), off by default. The local backend is in-process
+ONNX (no managed subprocess) - a CTC acoustic model
+(`facebook/wav2vec2-base-960h`, pinned and SHA256-verified, English), the
+same posture as the native Kokoro TTS voice: nothing downloads until an
+explicit install action, and inference then runs fully offline. A remote,
+OpenAI-compatible backend is available but never the default, and reuses the
+same OpenAI credential Chat and TTS already use rather than asking for it
+twice. Configured from **Services > Voice**: provider, input device, model,
+and an install action, alongside a **Transcribe audio file...** action that
+runs the whole pipeline against a file you pick - the one path that is
+verifiable with no live microphone. A shared dictation control (the
+microphone icon next to the chat input) records on click, transcribes on a
+second click, and inserts the result at the cursor for you to edit and send
+yourself - it never sends on your behalf. Doctor gains backend and
+microphone checks; Privacy Audit names the destination explicitly whenever
+the remote provider is selected, since voice is a higher-sensitivity case
+than the image-attachment disclosure it already has. Audio is always
+transient: a capture (or an uploaded file for remote transcription) is
+processed and its temp copy deleted immediately, never persisted, logged, or
+attached to a conversation. See [docs/voice.md](voice.md).
 
 ## Local AI Setup
 
@@ -648,6 +699,22 @@
   completed session load) are not mistaken for the operation that was
   actually in flight when a crash happened.
 
+## Activity
+
+A reverse-chronological local record (r24) of what Hermaeus actually did and
+whether it worked - managed server start/stop/crash, Doctor scan results,
+and RAG ingest/refresh outcomes - each row an explicit outcome (Succeeded,
+Partial, Failed, Cancelled, Running), never collapsed to a boolean. Answers
+the "did that actually work" question the palette and per-panel status text
+alone cannot: a plain list, not a new dashboard. "Clear activity history"
+(Settings-style confirm dialog, plain-language copy) removes trace rows
+only. Shares the existing trace store rather than a parallel one, so
+per-kind pruning and exclusion from usage-count rollups fall out of the
+existing mechanisms; entries are redacted before being persisted. Coverage
+is a representative subset this round, not yet every possible event source
+(model downloads, backup/restore, memory auto-archive, and the voice
+backend are not yet wired in).
+
 ## System Integration
 
 - App shutdown disposes the service container asynchronously so an
@@ -724,19 +791,30 @@
 Hermaeus connects its local-first systems around a workspace root so chat, RAG,
 agent state, project instructions, and local safety checks can share context.
 
-### Workspace Profiles
+### Projects
 
-The Agent workspace now records a profile around a project root:
+A Project (r24) is a named container - folder root, default chat model,
+default RAG dataset, default system prompt, and a brand-palette color - that
+Chat, Agent, and RAG all read from and write into. Switching the active
+project (Ctrl+K or the switcher) sets that context everywhere at once: a new
+conversation inherits the project's default model/prompt/dataset, the Agent
+panel pre-fills (never auto-selects) the project's folder root as the
+workspace, and RAG's default dataset follows. Conversations, RAG datasets,
+and agent tasks each carry an optional project id so they can be scoped and
+filtered later. A project can be created empty, from an existing
+conversation, or by adopting an already-selected Agent workspace (including
+its accumulated workspace-memory notes). See [docs/projects.md](projects.md)
+for the full model and switcher/editor behaviour.
 
-- Root folder
-- Preferred chat model
-- Linked RAG dataset
-- Workspace memory count
-- Trust and safety status
-- Last workspace summary
+This absorbs and supersedes the per-workspace "root folder / preferred
+model / linked dataset" sketch this section used to describe as an Agent-only
+concept; that data now lives on the Project itself, shared across every
+subsystem rather than pinned to the Agent panel alone.
 
-Planned profile fields include preferred embedding model, recent chats,
-benchmark history, and richer trust status.
+The Agent panel's own **Explain Workspace** scan (below) still produces a
+separate, per-folder repo analysis (languages, frameworks, risks) saved to
+workspace memory - a Project's folder root is what that scan runs against,
+not a replacement for it.
 
 ### Workspace Understanding
 
