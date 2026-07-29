@@ -13,6 +13,99 @@ From 0.29.0-alpha onward, every minor version is tagged and released on
 GitHub (see `docs/packaging.md` "Releases"); patch versions are tagged only
 for urgent hotfixes.
 
+## [0.31.0-alpha] - 2026-07-29
+
+Implements docs/review r24: Projects, Recall and the command palette, living
+knowledge (watched RAG sources), Activity ("did that actually work"), and
+local speech recognition.
+
+### Added
+
+- **Projects.** A named container - folder root, default chat model, default
+  RAG dataset, default system prompt, a brand-palette color - that Chat,
+  Agent, and RAG all read from. Switching the active project (Ctrl+K or the
+  switcher) sets that context everywhere at once; a new conversation
+  inherits the project's defaults, the Agent panel pre-fills (never
+  auto-selects) its folder root as the workspace, and RAG's default dataset
+  follows. Create empty, from an existing conversation, or by adopting the
+  currently-selected Agent workspace (including its workspace-memory notes).
+  See `docs/projects.md`.
+- **Recall.** A single local search index over your own words in
+  Hermaeus - past messages, agent tasks, memories, and RAG document chunks -
+  fused via reciprocal rank fusion into one ranked result. On by default,
+  with a visible switch, a genuine "Clear index" action, per-conversation
+  exclusion, and honest size reporting from day one. The command palette
+  (**Ctrl+K**) searches Recall alongside registered app commands; an empty
+  query shows commands grouped by area, and selecting a hit navigates
+  straight to it. Optional chat-side injection (off by default). See
+  `docs/recall.md`.
+- **Watched RAG sources.** A dataset can watch folders for drift instead of
+  being a photograph taken once at ingest. A cancellable scan classifies
+  new/changed/missing files without touching anything; "Refresh now"
+  applies new/changed files through the normal ingest pipeline after
+  confirmation, and never removes missing files without a second, separate
+  confirmation. Optional automatic refresh (off by default) can run on app
+  start and/or every N hours, and never deletes under any configuration.
+  Reuses the exact glob engine (`GlobMatcher`) the Agent's `glob_files`
+  already uses, now shared from `Hermaeus.Core`.
+- **Activity.** A reverse-chronological local record of managed server
+  start/stop/crash, Doctor scan results, and RAG ingest/refresh outcomes,
+  each an explicit outcome (Succeeded/Partial/Failed/Cancelled/Running)
+  rather than a boolean. Shares the existing trace store; entries are
+  redacted before persistence.
+- **Local speech recognition, off by default.** In-process ONNX (no managed
+  subprocess) using a CTC acoustic model
+  (`facebook/wav2vec2-base-960h`, pinned, SHA256-verified, English) - the
+  same in-process posture as native Kokoro TTS, chosen over porting
+  Whisper's own decoder architecture to keep this round's complexity
+  proportionate. A remote OpenAI-compatible backend is available but never
+  the default. Windows capture via `winmm` (no NuGet package); Linux capture
+  via the same `parecord`/`arecord`/`ffmpeg` fallback chain output already
+  uses. "Transcribe audio file..." in Services > Voice exercises the whole
+  pipeline without a live microphone. A dictation mic button (chat input
+  today; other locations pending) inserts the transcript at the cursor -
+  never sends automatically. Doctor and Privacy Audit both gained checks.
+  Audio is always transient: transcribed and deleted immediately, never
+  persisted. Hands-free conversation mode has a complete, tested state
+  machine but is not yet wired to a live capture loop or Chat's UI. See
+  `docs/voice.md`.
+- **One command registry.** Every panel's actions register through a shared
+  `ICommandRegistry`; the palette's empty-query view lists them grouped by
+  area.
+
+### Fixed
+
+- **A workspace folder renamed or deleted out from under the app, followed
+  by a refresh-files click, crashed the whole process.** Every other command
+  in `AgentViewModel` catches its own exceptions; the one bound directly to
+  the refresh button didn't, so an unhandled `DirectoryNotFoundException`
+  propagated through `AsyncRelayCommand` unobserved. Now caught and reported
+  as a status message.
+- **The Agent panel's reply/continue box sat below two JSON diagnostic
+  panels and a reservations list**, often requiring a scroll past ~300-400px
+  of secondary detail just to reply to the agent. Reordered to sit directly
+  below the response.
+- **A code block saved to a chat artifact before a brand-new conversation's
+  first persist could silently disappear from the artifacts panel** on the
+  next load: it landed in a separate "unsaved" bucket folder that the
+  conversation's real (later-assigned) id could never resolve back to. Now
+  assigns the real id immediately, matching how RAG dataset attachment
+  already handles the identical early-attachment problem.
+- **A markdown heading that was only an inline-code-wrapped filename** (e.g.
+  `` # `calculator.cs` ``) produced a saved artifact literally named
+  `` `calculator.cs`.cs `` - the trailing-extension strip didn't fire
+  because a backtick sat after the extension. Backticks are now stripped
+  first.
+- **`SecretStoreLogsWarningWhenStoredSecretCannotBeDecrypted` flaked
+  intermittently.** Root cause: AES-CBC has no built-in integrity check, so
+  decrypting under a replaced/corrupt key does not reliably throw - PKCS7
+  padding validation alone has roughly a 1-in-256 chance of coincidentally
+  passing on random garbage, and the lenient `Encoding.UTF8.GetString` used
+  on the primary decode path let that garbage through as a "successfully
+  decrypted" (but wrong) string instead of falling through to the failure
+  path. Now uses strict UTF8 decoding on that path too, matching the
+  fallback path's existing discipline.
+
 ## [0.30.0-alpha] - 2026-07-25
 
 Implements docs/review r23 in full: "Trust You Can Operate", a round about
@@ -464,49 +557,4 @@ subsection. `docs/review/` archived to `docs/review/archived/r21/`.
   send now starts from a random point in the word list (still advancing
   deterministically from there within that send, so it doesn't flicker).
 
-## [0.25.2-alpha] - 2026-07-22
-
-Field-report fixes from the owner's first real dogfooding session against a
-local Gemma model.
-
-### Fixed
-
-- **Saved code-block artifacts could double up their extension**
-  (`calculator.cs.cs`): when the reply's markdown heading already named the
-  file (e.g. "# calculator.cs"), `DeriveArtifactStem` handed that back
-  verbatim and the language extension got appended on top. The stem now
-  strips a trailing extension-shaped suffix first.
-- **Long syntax-highlighted code blocks could render as an empty box with
-  the Save button scrolled out of view**: the AvaloniaEdit code viewer had
-  an unbounded `MinHeight` (scaling with line count) fighting a fixed
-  `MaxHeight="420"` with internal scrolling disabled, so a block taller than
-  420px was either stretched far past the visible area or clipped with no
-  way to reach the rest. Capped to the same bound and enabled the scrollbar.
-- **Attaching an image required manually switching the file picker's filter
-  dropdown**: the picker's first filter entry (which the OS dialog opens to
-  by default) only listed text/code extensions, so images were invisible
-  until the user noticed and switched it themselves. A combined "All
-  supported files" filter is now first.
-- **Pasting an image into chat did nothing**: `TextBox` only ever knew how
-  to paste text. Ctrl+V (or right-click Paste) with an image on the
-  clipboard now attaches it the same way a dragged-in file would; plain
-  text paste is unaffected.
-- **A failed send only ever showed a bare HTTP status** ("Response status
-  code does not indicate success: 500"), discarding whatever llama.cpp
-  actually said about why - often the one clue that matters (e.g. a
-  `--mmproj` mismatched to the loaded model). The response body is now read
-  and included, bounded to 500 characters.
-- **The last chat message's action row (copy/speak buttons) sat right
-  against the input box** with no breathing room. Added bottom padding to
-  the message list.
-
-### Changed
-
-- **Chat artifact folders are now named after the conversation title**
-  (sanitized, deduped against same-titled conversations), not the raw
-  conversation GUID, so `{DataRoot}/chat-artifacts/` means something when
-  browsed in a file manager. A hidden per-folder marker file keeps the
-  folder stable if the conversation is renamed later; folders created
-  before this change (bare GUID names) are still found via the same lookup,
-  so no existing artifacts are orphaned.
 

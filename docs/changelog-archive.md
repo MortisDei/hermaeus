@@ -2,6 +2,52 @@
 
 The CHANGELOG.md in root only contains the current 10 versions of changelogs. The rest are archived here in line with the 10 version limit in the main changelog.
 
+## [0.25.2-alpha] - 2026-07-22
+
+Field-report fixes from the owner's first real dogfooding session against a
+local Gemma model.
+
+### Fixed
+
+- **Saved code-block artifacts could double up their extension**
+  (`calculator.cs.cs`): when the reply's markdown heading already named the
+  file (e.g. "# calculator.cs"), `DeriveArtifactStem` handed that back
+  verbatim and the language extension got appended on top. The stem now
+  strips a trailing extension-shaped suffix first.
+- **Long syntax-highlighted code blocks could render as an empty box with
+  the Save button scrolled out of view**: the AvaloniaEdit code viewer had
+  an unbounded `MinHeight` (scaling with line count) fighting a fixed
+  `MaxHeight="420"` with internal scrolling disabled, so a block taller than
+  420px was either stretched far past the visible area or clipped with no
+  way to reach the rest. Capped to the same bound and enabled the scrollbar.
+- **Attaching an image required manually switching the file picker's filter
+  dropdown**: the picker's first filter entry (which the OS dialog opens to
+  by default) only listed text/code extensions, so images were invisible
+  until the user noticed and switched it themselves. A combined "All
+  supported files" filter is now first.
+- **Pasting an image into chat did nothing**: `TextBox` only ever knew how
+  to paste text. Ctrl+V (or right-click Paste) with an image on the
+  clipboard now attaches it the same way a dragged-in file would; plain
+  text paste is unaffected.
+- **A failed send only ever showed a bare HTTP status** ("Response status
+  code does not indicate success: 500"), discarding whatever llama.cpp
+  actually said about why - often the one clue that matters (e.g. a
+  `--mmproj` mismatched to the loaded model). The response body is now read
+  and included, bounded to 500 characters.
+- **The last chat message's action row (copy/speak buttons) sat right
+  against the input box** with no breathing room. Added bottom padding to
+  the message list.
+
+### Changed
+
+- **Chat artifact folders are now named after the conversation title**
+  (sanitized, deduped against same-titled conversations), not the raw
+  conversation GUID, so `{DataRoot}/chat-artifacts/` means something when
+  browsed in a file manager. A hidden per-folder marker file keeps the
+  folder stable if the conversation is renamed later; folders created
+  before this change (bare GUID names) are still found via the same lookup,
+  so no existing artifacts are orphaned.
+
 ## [0.25.1-alpha] - 2026-07-22
 
 ### Changed

@@ -99,6 +99,51 @@ sources all clear the in-memory query cache for that dataset, so a query
 immediately after any of these actions sees the new state without needing an
 app restart.
 
+### Watched Sources
+
+A dataset can watch zero or more folders so it stops being a photograph of
+those folders taken once at ingest time.
+
+- **Add a watched folder** from the Dataset Manager card. Exclude globs ship
+  non-empty by default (`.git`, `node_modules`, `bin`, `obj`, `.venv`,
+  `__pycache__`, `dist`, `target`) so pointing a watched source at a repo
+  root does not flood the dataset with build output. Globs reuse the exact
+  same engine (`GlobMatcher`) as the Agent's `glob_files` tool, so what a
+  watched source matches never diverges from what the rest of Hermaeus means
+  by a glob.
+- **Scan** walks every watched root under its globs and classifies drift
+  against the dataset's stored source rows - new, changed, missing, or
+  unchanged - without changing anything. Change detection prefers a stored
+  content hash; it falls back to modification time (with a one-second
+  tolerance) only when no hash was recorded. The scan is cancellable.
+- **Refresh now** runs the scan, shows the plan, and applies it after
+  confirmation. New and changed files are ingested through the normal
+  pipeline (`IngestDuplicatePolicy.Replace`) - the same chunking, embedding,
+  BM25 rebuild, and cache invalidation as a manual ingest. Missing files are
+  listed and, only if you confirm that part separately, their chunks are
+  removed - the same two-step contract as **Remove missing** above. A
+  refresh that would remove more than half a dataset's sources warns
+  prominently before that second confirmation: that shape is almost always
+  an unmounted drive or a bad glob, not an intended purge. One refresh runs
+  per dataset at a time; a second request while one is in flight is refused
+  with a clear reason, not queued.
+- **Automatic refresh** (Settings > RAG, off by default): refresh watched
+  sources on app start and/or every N hours. Automatic refresh only ever
+  ingests new and changed files - it never deletes, under any configuration
+  - runs well after startup and never on the chat send path, and its
+  outcome is recorded as an Activity event rather than a toast you could
+  miss. A dataset whose embedding model has drifted from the current setting
+  is skipped, the same guard a manual ingest already enforces.
+- The Dataset Manager card shows watched root count, last-refresh time, and
+  a live drift summary; "up to date, checked 20 minutes ago" when there is
+  nothing to do.
+
+There is no filesystem watcher (no `FileSystemWatcher`): watching is a
+deterministic, on-demand or scheduled scan, not an always-open OS handle.
+Watchers differ meaningfully between Windows and Linux, drop events under
+load, and fire multiple times for one logical save; a scan gives the same
+outcome without holding anything open for the life of the process.
+
 ### Web Loading
 
 - The optional web loader is off by default.

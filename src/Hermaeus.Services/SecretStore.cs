@@ -214,7 +214,19 @@ public sealed class SecretStore : ISecretStore
             encrypted = encrypted[EncryptedPrefix.Length..];
             var encryptedBytes = Convert.FromBase64String(encrypted);
             var plainBytes = DecryptWithAes(encryptedBytes);
-            return Encoding.UTF8.GetString(plainBytes);
+
+            // r24: AES-CBC has no built-in integrity check, so a decrypt under the
+            // wrong key (a replaced/corrupt secrets.local.key) does not reliably
+            // throw - PKCS7 padding validation alone has roughly a 1-in-256 chance
+            // of coincidentally passing on random garbage. The lenient
+            // Encoding.UTF8.GetString below used to let that garbage through as a
+            // "successfully decrypted" (but wrong) string instead of falling through
+            // to the failure path, which is what made the equivalent test flake
+            // intermittently. Strict decoding closes the gap: real structured UTF8
+            // (any actual stored secret) always round-trips; random post-decrypt
+            // garbage overwhelmingly fails UTF8's structural byte-sequence rules.
+            var strictUtf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+            return strictUtf8.GetString(plainBytes);
         }
         catch
         {
