@@ -1320,6 +1320,11 @@ public partial class AgentViewModel : ViewModelBase
     private void SelectLedgerFile(AgentLedgerFileEntryViewModel? file) =>
         SelectedLedgerFile = SelectedLedgerFile == file ? null : file;
 
+    /// <summary>Bound directly to a refresh button (AgentView.axaml) as well as called
+    /// from several other commands here, so it must never let an exception escape - a
+    /// workspace root renamed or deleted out from under the app must surface as a status
+    /// message, not an unobserved AsyncRelayCommand fault that crashes the whole app
+    /// (that exact crash was reported against a workspace folder renamed after selection).</summary>
     [RelayCommand]
     private async Task RefreshWorkspaceFilesAsync()
     {
@@ -1331,23 +1336,30 @@ public partial class AgentViewModel : ViewModelBase
         if (string.IsNullOrWhiteSpace(WorkspaceRoot))
             return;
 
-        var files = await Task.Run(() =>
+        try
         {
-            var options = BuildOptions();
-            return string.IsNullOrWhiteSpace(WorkspaceFileQuery)
-                ? _workspaceTools.ListFiles(options)
-                    .Select(path => new AgentWorkspaceFileViewModel(path, string.Empty, DateTime.MinValue))
-                    .ToList()
-                : _workspaceTools.SearchFiles(options, WorkspaceFileQuery)
-                    .Select(result => new AgentWorkspaceFileViewModel(result.RelativePath, result.Snippet, result.ModifiedUtc))
-                    .ToList();
-        });
+            var files = await Task.Run(() =>
+            {
+                var options = BuildOptions();
+                return string.IsNullOrWhiteSpace(WorkspaceFileQuery)
+                    ? _workspaceTools.ListFiles(options)
+                        .Select(path => new AgentWorkspaceFileViewModel(path, string.Empty, DateTime.MinValue))
+                        .ToList()
+                    : _workspaceTools.SearchFiles(options, WorkspaceFileQuery)
+                        .Select(result => new AgentWorkspaceFileViewModel(result.RelativePath, result.Snippet, result.ModifiedUtc))
+                        .ToList();
+            });
 
-        foreach (var file in files)
-            WorkspaceFiles.Add(file);
+            foreach (var file in files)
+                WorkspaceFiles.Add(file);
 
-        OnPropertyChanged(nameof(WorkspaceFileCount));
-        OnPropertyChanged(nameof(HasWorkspaceFiles));
+            OnPropertyChanged(nameof(WorkspaceFileCount));
+            OnPropertyChanged(nameof(HasWorkspaceFiles));
+        }
+        catch (Exception ex)
+        {
+            SetError($"Could not list workspace files: {ex.Message}");
+        }
     }
 
     /// <summary>

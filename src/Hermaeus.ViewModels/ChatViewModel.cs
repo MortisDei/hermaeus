@@ -317,7 +317,17 @@ public partial class ChatViewModel : ViewModelBase
     private async Task SaveCodeBlockAsync(string? language, string code, string messageMarkdown)
     {
         if (_artifacts is null || string.IsNullOrWhiteSpace(code)) return;
-        var conversationId = string.IsNullOrWhiteSpace(CurrentConversationId) ? "unsaved" : CurrentConversationId;
+
+        // r24: must not fall back to a separate literal "unsaved" bucket - a code
+        // block saved before the conversation's first persist used to land there,
+        // then silently vanish from the panel once PersistAsync later assigned a
+        // real id and RefreshArtifactsAsync started looking in that folder instead.
+        // Assigning the real id immediately (mirroring AttachRagDatasetAndPersistAsync's
+        // identical early-attachment problem) means PersistAsync reuses this same id
+        // rather than generating a different one, so every future lookup agrees.
+        if (string.IsNullOrEmpty(CurrentConversationId))
+            CurrentConversationId = Guid.NewGuid().ToString();
+        var conversationId = CurrentConversationId;
         var fileName = DeriveArtifactStem(messageMarkdown) + ChatArtifactService.ExtensionForLanguage(language);
 
         try
@@ -345,6 +355,12 @@ public partial class ChatViewModel : ViewModelBase
         var raw = heading.Success ? heading.Groups[1].Value : conversationTitle;
         if (string.IsNullOrWhiteSpace(raw))
             return "artifact";
+
+        // A heading that is just an inline-code-wrapped filename (e.g. "# `calculator.cs`")
+        // must have its backticks stripped before the trailing-extension check below, or
+        // the check misses (the extension is not actually at the string's end) and the
+        // saved file ends up literally named "`calculator.cs`.cs".
+        raw = raw.Trim('`');
 
         raw = TrailingExtensionPattern.Replace(raw, string.Empty);
         if (string.IsNullOrWhiteSpace(raw))

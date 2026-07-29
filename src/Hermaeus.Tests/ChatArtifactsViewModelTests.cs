@@ -88,6 +88,43 @@ public sealed class ChatArtifactsViewModelTests
         Assert.Equal("b.txt", Assert.Single(vm.Artifacts).FileName);
     }
 
+    // ── r24: saving a code block before the conversation's first persist ──────
+
+    [Fact]
+    public async Task Saving_a_code_block_before_the_first_persist_assigns_a_real_conversation_id_that_later_lookups_agree_with()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        var artifacts = new ChatArtifactService(settings);
+        var store = new ThrowingSaveConversationStore();
+        var vm = NewChatViewModel(settings, artifacts, store);
+
+        Assert.Equal(string.Empty, vm.CurrentConversationId);
+        vm.SaveCodeBlockAction("csharp", "class Foo {}", "# My Heading\n\nSome text");
+        await WaitForAsync(() => vm.Artifacts.Count > 0);
+
+        // The artifact must not be orphaned in a separate "unsaved" bucket the
+        // conversation's real id can never resolve back to.
+        Assert.NotEqual(string.Empty, vm.CurrentConversationId);
+        var assignedId = vm.CurrentConversationId;
+
+        await store.SaveAsync(new Conversation { Id = assignedId, Title = "My Heading" });
+        vm.NewConversation();
+        Assert.Empty(vm.Artifacts);
+
+        await vm.LoadConversationAsync(assignedId);
+        Assert.Single(vm.Artifacts);
+    }
+
+    // ── r24: a heading that is only an inline-code-wrapped filename ───────────
+
+    [Fact]
+    public void DeriveArtifactStem_strips_backticks_around_an_inline_code_filename_heading()
+    {
+        Assert.Equal("calculator", ChatViewModel.DeriveArtifactStem("# `calculator.cs`\n\nbody", ""));
+    }
+
     [Fact]
     public async Task NewConversation_clears_the_artifacts_strip()
     {
