@@ -5,7 +5,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace Hermaeus.ViewModels;
 
-public partial class MessageViewModel : ObservableObject
+public partial class MessageViewModel : ObservableObject, IConversationNode
 {
     [ObservableProperty] private string _content = string.Empty;
     [ObservableProperty] private string _originalContent = string.Empty;
@@ -40,8 +40,19 @@ public partial class MessageViewModel : ObservableObject
     public required string Role { get; init; }
     public bool IsUser      => Role == "user";
     public bool IsAssistant => Role == "assistant";
-    public string Id { get; init; } = Guid.NewGuid().ToString();
-    public DateTime CreatedAt { get; init; } = DateTime.UtcNow;
+
+    /// <summary>
+    /// r25 doc 01: settable (was init-only) because identity now has to survive
+    /// a save/load round trip. Before r25 a reloaded message got a fresh Guid,
+    /// which was harmless when nothing referred to a message by id and is not
+    /// harmless once <see cref="ParentId"/> does.
+    /// </summary>
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+
+    /// <summary>r25 doc 01: the message this one replies to. Empty for the first message.</summary>
+    public string ParentId { get; set; } = string.Empty;
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     /// <summary>
     /// Stores attachment file paths when this is a user message with context attachments.
@@ -69,6 +80,37 @@ public partial class MessageViewModel : ObservableObject
 
     /// <summary>Collapsed by default, and collapsed means no source item is visible at all.</summary>
     [ObservableProperty] private bool _isContextExpanded;
+
+    // ── r25 doc 01: branch switcher state ───────────────────────────────────
+    // Recomputed by ChatViewModel whenever the tree changes, rather than derived
+    // here, because a message cannot see its own siblings.
+
+    /// <summary>1-based position among this message's siblings.</summary>
+    [ObservableProperty] private int _branchIndex = 1;
+
+    /// <summary>How many siblings this message has, itself included.</summary>
+    [ObservableProperty] private int _branchCount = 1;
+
+    /// <summary>
+    /// Hidden for every message in a conversation that has never been branched,
+    /// which is every message in every conversation written before r25.
+    /// </summary>
+    public bool HasSiblings => BranchCount > 1;
+    public string BranchLabel => $"{BranchIndex}/{BranchCount}";
+
+    partial void OnBranchIndexChanged(int value) => OnPropertyChanged(nameof(BranchLabel));
+
+    partial void OnBranchCountChanged(int value)
+    {
+        OnPropertyChanged(nameof(HasSiblings));
+        OnPropertyChanged(nameof(BranchLabel));
+    }
+
+    /// <summary>r25 doc 01 1.4: user messages can be edited into a sibling; assistant
+    /// messages cannot, because a transcript you can rewrite is not a transcript.</summary>
+    [ObservableProperty] private bool _isEditing;
+
+    [ObservableProperty] private string _editText = string.Empty;
 
     public bool HasContext => ContextSections.Count > 0;
     public string ContextSummary => ChatContextReceipt.Summarize(ContextSections);

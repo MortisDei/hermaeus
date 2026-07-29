@@ -137,19 +137,60 @@ public partial class ChatViewModel : ViewModelBase
     private Task? _loadModelsTask;
     private bool _suppressModelProfileDefaults;
 
+    /// <summary>
+    /// Every message across every branch, flat (r25 doc 01). The tree lives in
+    /// <see cref="MessageViewModel.ParentId"/>. Persistence writes this whole
+    /// list, so a branch you navigated away from is still saved, still
+    /// searchable and still in Recall.
+    /// </summary>
     public UiBoundCollection<MessageViewModel> Messages        { get; } = [];
 
     /// <summary>
-    /// Windowed view over <see cref="Messages"/> that the chat view actually
-    /// renders (r8 03-performance.md 3.4): opening a long conversation only
-    /// materializes the most recent <see cref="MessageWindowSize"/> message
-    /// controls instead of every message ever sent. Persistence, memory
-    /// extraction, and prompt-history truncation all continue to operate on
-    /// the full <see cref="Messages"/> list, never this window.
+    /// Windowed view over the ACTIVE PATH that the chat view actually renders
+    /// (r8 03-performance.md 3.4, retargeted from the flat list by r25 doc 01):
+    /// opening a long conversation only materializes the most recent
+    /// <see cref="MessageWindowSize"/> message controls instead of every message
+    /// ever sent. Persistence operates on the full <see cref="Messages"/> tree;
+    /// prompt history, token accounting and memory extraction operate on the
+    /// active path, never on this window.
     /// </summary>
     public UiBoundCollection<MessageViewModel> VisibleMessages { get; } = [];
     private const int MessageWindowSize = 100;
     private int _revealedEarlierMessageCount;
+
+    /// <summary>
+    /// r25 doc 01: which leaf of the tree is being shown. Empty means the last
+    /// message in stored order, which is what an unbranched conversation means.
+    /// </summary>
+    private string _activeLeafId = string.Empty;
+
+    /// <summary>
+    /// The root-to-leaf path currently being shown. Everything that reasons about
+    /// "the conversation so far" uses this, not <see cref="Messages"/>.
+    /// </summary>
+    public IReadOnlyList<MessageViewModel> ActivePath =>
+        ConversationTree.ActivePath(Messages.ToList(), _activeLeafId);
+
+    /// <summary>
+    /// r25 doc 01 1.4: set for exactly one send, when edit-and-resend needs the
+    /// new user message to become a SIBLING of the edited one rather than
+    /// extending the active path. Cleared as soon as that send consumes it.
+    /// </summary>
+    private string? _pendingParentIdOverride;
+
+    /// <summary>
+    /// r25 doc 01 1.3: set for exactly one send, by regenerate, so the existing
+    /// question is reused and only the answer branches. Without this a
+    /// regenerate would duplicate the question as a sibling of itself.
+    /// </summary>
+    private MessageViewModel? _reuseUserMessage;
+
+    /// <summary>The id the next message should hang off: the tail of the active path.</summary>
+    private string CurrentLeafId()
+    {
+        var path = ActivePath;
+        return path.Count == 0 ? string.Empty : path[^1].Id;
+    }
 
     // Tracks the skip offset and total Messages count used to build the
     // current VisibleMessages, so a plain send (append at the tail) can add
@@ -160,7 +201,7 @@ public partial class ChatViewModel : ViewModelBase
     private int _visibleWindowSkip = -1;
     private int _visibleWindowMessageCount;
 
-    public bool HasEarlierMessages => Messages.Count > MessageWindowSize + _revealedEarlierMessageCount;
+    public bool HasEarlierMessages => ActivePath.Count > MessageWindowSize + _revealedEarlierMessageCount;
     public UiBoundCollection<LlmModel>         AvailableModels { get; } = [];
 
     /// <summary>r21 1.2: "Knowledge" dataset picker list, refreshed only when
@@ -564,29 +605,53 @@ public partial class ChatViewModel : ViewModelBase
 
     private void RefreshVisibleMessageWindow()
     {
+        // r25 doc 01: the window is over the active path, not the flat tree. An
+        // unbranched conversation has exactly one path, so this is byte-identical
+        // to the pre-r25 behaviour for every conversation that never branches.
+        var path = ActivePath;
+        RefreshBranchState(path);
+
         var windowSize = MessageWindowSize + _revealedEarlierMessageCount;
-        var skip = Math.Max(0, Messages.Count - windowSize);
+        var skip = Math.Max(0, path.Count - windowSize);
 
         var canAppendInPlace = skip == _visibleWindowSkip
-            && Messages.Count > _visibleWindowMessageCount
-            && VisibleMessages.Count == _visibleWindowMessageCount - _visibleWindowSkip;
+            && path.Count > _visibleWindowMessageCount
+            && VisibleMessages.Count == _visibleWindowMessageCount - _visibleWindowSkip
+            && VisibleMessages.Count > 0
+            && ReferenceEquals(VisibleMessages[^1], path[_visibleWindowMessageCount - 1]);
 
         if (canAppendInPlace)
         {
-            for (var i = _visibleWindowMessageCount; i < Messages.Count; i++)
-                VisibleMessages.Add(Messages[i]);
+            for (var i = _visibleWindowMessageCount; i < path.Count; i++)
+                VisibleMessages.Add(path[i]);
         }
         else
         {
             VisibleMessages.Clear();
-            for (var i = skip; i < Messages.Count; i++)
-                VisibleMessages.Add(Messages[i]);
+            for (var i = skip; i < path.Count; i++)
+                VisibleMessages.Add(path[i]);
         }
 
         _visibleWindowSkip = skip;
-        _visibleWindowMessageCount = Messages.Count;
+        _visibleWindowMessageCount = path.Count;
 
         OnPropertyChanged(nameof(HasEarlierMessages));
+    }
+
+    /// <summary>
+    /// r25 doc 01 1.5: a message cannot see its own siblings, so the switcher's
+    /// "2/3" is computed here whenever the tree or the active path changes.
+    /// </summary>
+    private void RefreshBranchState(IReadOnlyList<MessageViewModel> path)
+    {
+        var all = Messages.ToList();
+        foreach (var message in path)
+        {
+            var siblings = ConversationTree.SiblingsOf(all, message);
+            message.BranchCount = siblings.Count;
+            message.BranchIndex = Math.Max(1, siblings.ToList().FindIndex(
+                s => string.Equals(s.Id, message.Id, StringComparison.Ordinal)) + 1);
+        }
     }
 
     [RelayCommand]
@@ -624,12 +689,23 @@ public partial class ChatViewModel : ViewModelBase
             SelectedModel = AvailableModels.FirstOrDefault(m => m.Id == conv.ModelId) ?? SelectedModel;
         RagDatasetId = conv.RagDatasetId;
         _currentProjectId = conv.ProjectId;
+        // r25 doc 01: give a conversation with no parent chain the one its stored
+        // order implies. ConversationStore does this on load too, but the backfill
+        // must not depend on which IConversationStore implementation supplied the
+        // conversation: a chainless list would otherwise resolve to a single-message
+        // active path and render as though the history had vanished. Idempotent, so
+        // doing it in both places is free.
+        ConversationTree.BackfillLinearChain(conv.Messages);
+        _activeLeafId = conv.ActiveLeafId;
         Messages.Clear();
         foreach (var msg in conv.Messages)
         {
             var viewModel = new MessageViewModel
             {
                 Role = msg.Role,
+                Id = msg.Id,
+                ParentId = msg.ParentId,
+                CreatedAt = msg.CreatedAt,
                 Content = msg.Content,
                 OriginalContent = msg.OriginalContent,
                 IsError = msg.IsError,
@@ -672,6 +748,7 @@ public partial class ChatViewModel : ViewModelBase
     {
         CurrentConversationId = string.Empty;
         ConversationTitle     = "New Conversation";
+        _activeLeafId = string.Empty;
         Messages.Clear();
         Artifacts.Clear();
         OnPropertyChanged(nameof(HasArtifacts));
@@ -786,12 +863,37 @@ public partial class ChatViewModel : ViewModelBase
         var displayText = ChatContextAttachment.BuildDisplayMessage(text, attachments);
         UpdateContextUsage(new ChatTokenUsage(snapshot.EstimatedTokens, 0, snapshot.EstimatedTokens), "Estimated");
         
-        var userMessage = new MessageViewModel { Role = "user", Content = displayText, OriginalContent = text };
-        // Store attachment paths for regeneration; only include ready attachments
-        foreach (var attachment in attachments.Where(a => a.IsReady))
-            userMessage.AttachedFilePaths.Add(attachment.FullPath);
-        Messages.Add(userMessage);
-        
+        // r25 doc 01: a plain send extends the active path, so the new user
+        // message hangs off whichever leaf is currently being shown. Regenerate
+        // instead reuses the question that is already there and only branches
+        // the answer, so a regenerate does not duplicate the question.
+        MessageViewModel userMessage;
+        if (_reuseUserMessage is not null)
+        {
+            userMessage = _reuseUserMessage;
+            _reuseUserMessage = null;
+        }
+        else
+        {
+            userMessage = new MessageViewModel
+            {
+                Role = "user",
+                Content = displayText,
+                OriginalContent = text,
+                ParentId = _pendingParentIdOverride ?? CurrentLeafId()
+            };
+            // Store attachment paths for regeneration; only include ready attachments
+            foreach (var attachment in attachments.Where(a => a.IsReady))
+                userMessage.AttachedFilePaths.Add(attachment.FullPath);
+            // The leaf moves BEFORE the add, because the add is what triggers the
+            // window and branch-state refresh; moving it after would leave the
+            // switcher showing the previous path's sibling counts.
+            _activeLeafId = userMessage.Id;
+            Messages.Add(userMessage);
+        }
+        _pendingParentIdOverride = null;
+        _activeLeafId = userMessage.Id;
+
         InputText = string.Empty;
         ClearContextAttachments();
 
@@ -801,8 +903,10 @@ public partial class ChatViewModel : ViewModelBase
             Role = "assistant",
             Content = "",
             IsStreaming = true,
-            ModelId = selectedModelId
+            ModelId = selectedModelId,
+            ParentId = userMessage.Id
         };
+        _activeLeafId = asst.Id;
         Messages.Add(asst);
         ScrollToBottom?.Invoke(this, EventArgs.Empty);
 
@@ -833,7 +937,9 @@ public partial class ChatViewModel : ViewModelBase
             var promptBuildSw = Stopwatch.StartNew();
             var systemPromptTokens = EstimateTokens(SystemPrompt) + EstimateTokens(memoryContext) + EstimateTokens(ragAndRecallContext);
             var history = TruncateHistoryToContextWindow(
-                Messages.Where(m => !m.IsStreaming).ToList(),
+                // r25 doc 01 1.6: the prompt is the conversation the user is
+                // actually having, not every branch they ever abandoned.
+                ActivePath.Where(m => !m.IsStreaming).ToList(),
                 ResolveContextWindowLimit(),
                 systemPromptTokens,
                 Math.Max(0, snapshot.EstimatedTokens - snapshot.HistoryTokens - systemPromptTokens));
@@ -913,7 +1019,7 @@ public partial class ChatViewModel : ViewModelBase
             {
                 if (string.IsNullOrWhiteSpace(asst.Content))
                 {
-                    Messages.Remove(asst);
+                    RemoveAndReanchor(asst);
                 }
                 else
                 {
@@ -979,7 +1085,7 @@ public partial class ChatViewModel : ViewModelBase
             asst.StreamingStatus = string.Empty;
             if (string.IsNullOrWhiteSpace(asst.Content))
             {
-                Messages.Remove(asst);
+                RemoveAndReanchor(asst);
             }
             else
             {
@@ -1047,11 +1153,20 @@ public partial class ChatViewModel : ViewModelBase
         }
     }
 
+    /// <summary>
+    /// r25 doc 01 1.6: exports the ACTIVE PATH. A transcript that silently
+    /// interleaves three abandoned drafts is not a transcript.
+    /// </summary>
     private async Task<Conversation> BuildExportConversationAsync()
     {
         if (!string.IsNullOrWhiteSpace(CurrentConversationId)
             && await _store.GetByIdAsync(CurrentConversationId) is { } stored)
+        {
+            stored.Messages = ConversationTree
+                .ActivePath(stored.Messages, stored.ActiveLeafId)
+                .ToList();
             return stored;
+        }
 
         return new Conversation
         {
@@ -1204,32 +1319,184 @@ public partial class ChatViewModel : ViewModelBase
         }
     }
 
+    /// <summary>
+    /// r25 doc 01 1.3: regenerating produces a SIBLING of the current answer and
+    /// moves the active leaf to it. Nothing is deleted.
+    ///
+    /// Before r25 this removed the assistant message and the user message, put
+    /// the text back in the input box and re-sent: the previous answer was gone,
+    /// including from disk on the next save. That is data loss on a button that
+    /// reads as "try again", and it is not preserved behind a setting, because a
+    /// preference whose off position destroys data is not a preference.
+    /// </summary>
     [RelayCommand]
     private async Task RegenerateAsync()
     {
-        if (IsGenerating || Messages.Count == 0) return;
-        var lastAsst = Messages.LastOrDefault(m => m.IsAssistant);
-        if (lastAsst is not null) Messages.Remove(lastAsst);
-        var lastUser = Messages.LastOrDefault(m => m.IsUser);
-        if (lastUser is null) return;
+        if (IsGenerating) return;
 
-        // Recover from structured fields rather than parsing the display-only attachment summary.
-        var userText = lastUser.OriginalContent ?? lastUser.Content ?? string.Empty;
-        var paths = lastUser.AttachedFilePaths.ToList();
+        var path = ActivePath;
+        var lastAsst = path.LastOrDefault(m => m.IsAssistant);
+        var userMessage = lastAsst is not null
+            ? Messages.FirstOrDefault(m => string.Equals(m.Id, lastAsst.ParentId, StringComparison.Ordinal))
+            : path.LastOrDefault(m => m.IsUser);
+        if (userMessage is null || !userMessage.IsUser) return;
 
-        Messages.Remove(lastUser);
-        InputText = userText;
-        
-        if (paths.Count > 0)
+        // Recover from structured fields rather than parsing the display-only
+        // attachment summary, exactly as the pre-r25 path did.
+        var userText = userMessage.OriginalContent ?? userMessage.Content ?? string.Empty;
+        var paths = userMessage.AttachedFilePaths.ToList();
+
+        _reuseUserMessage = userMessage;
+        await ResendFromAsync(userMessage.ParentId, userText, paths);
+    }
+
+    /// <summary>
+    /// r25 doc 01 1.4: send <paramref name="text"/> as a new child of
+    /// <paramref name="parentId"/>, which makes it a sibling of whatever is
+    /// already there. Shared by regenerate and edit-and-resend.
+    ///
+    /// Deliberately does not touch <see cref="InputText"/>: a half-typed next
+    /// message survives a regenerate, which it did not before r25.
+    /// </summary>
+    private async Task ResendFromAsync(string parentId, string text, IReadOnlyList<string> attachmentPaths)
+    {
+        var savedInput = InputText;
+        var savedAttachments = ContextAttachments.ToList();
+        ClearContextAttachments();
+
+        InputText = text;
+        if (attachmentPaths.Count > 0)
         {
             try
             {
-                await AddContextFilesAsync(paths);
+                await AddContextFilesAsync(attachmentPaths.ToList());
             }
             catch { }
         }
 
+        _pendingParentIdOverride = parentId;
         await SendAsync();
+
+        // SendAsync clears the input box as part of a normal send; put back what
+        // the user had actually been typing.
+        InputText = savedInput;
+        foreach (var attachment in savedAttachments)
+            ContextAttachments.Add(attachment);
+        OnPropertyChanged(nameof(HasContextAttachments));
+    }
+
+    /// <summary>r25 doc 01 1.4: only user messages are editable. Editing an assistant
+    /// message would mean the transcript no longer records what the model said.</summary>
+    [RelayCommand]
+    private void BeginEditMessage(MessageViewModel? message)
+    {
+        if (message is null || !message.IsUser || IsGenerating) return;
+        foreach (var other in Messages)
+            other.IsEditing = false;
+        message.EditText = message.OriginalContent ?? message.Content ?? string.Empty;
+        message.IsEditing = true;
+    }
+
+    [RelayCommand]
+    private void CancelEditMessage(MessageViewModel? message)
+    {
+        if (message is null) return;
+        message.IsEditing = false;
+        message.EditText = string.Empty;
+    }
+
+    /// <summary>
+    /// Sends the edited text as a sibling of the original. The original user
+    /// message and its whole subtree are untouched and reachable through the
+    /// branch switcher.
+    /// </summary>
+    [RelayCommand]
+    private async Task SubmitEditMessageAsync(MessageViewModel? message)
+    {
+        if (message is null || !message.IsUser || IsGenerating) return;
+
+        var edited = (message.EditText ?? string.Empty).Trim();
+        message.IsEditing = false;
+        message.EditText = string.Empty;
+        if (edited.Length == 0) return;
+
+        await ResendFromAsync(message.ParentId, edited, message.AttachedFilePaths.ToList());
+    }
+
+    /// <summary>r25 doc 01 1.5: move the active leaf into the previous or next sibling's
+    /// subtree, landing on the newest leaf beneath it.</summary>
+    [RelayCommand]
+    private void PreviousBranch(MessageViewModel? message) => SwitchBranch(message, -1);
+
+    [RelayCommand]
+    private void NextBranch(MessageViewModel? message) => SwitchBranch(message, +1);
+
+    private void SwitchBranch(MessageViewModel? message, int delta)
+    {
+        if (message is null || IsGenerating) return;
+
+        var all = Messages.ToList();
+        var siblings = ConversationTree.SiblingsOf(all, message);
+        if (siblings.Count < 2) return;
+
+        var current = siblings.ToList().FindIndex(s => string.Equals(s.Id, message.Id, StringComparison.Ordinal));
+        if (current < 0) return;
+
+        var next = current + delta;
+        if (next < 0 || next >= siblings.Count) return;
+
+        _activeLeafId = ConversationTree.NewestLeafUnder(all, siblings[next]);
+        _revealedEarlierMessageCount = 0;
+        RefreshVisibleMessageWindow();
+        _ = PersistAsync();
+    }
+
+    /// <summary>
+    /// r25 doc 01 1.5: removes the subtree rooted at this message. The one
+    /// deliberately destructive branch operation, so it is confirmed by the
+    /// caller and refuses to remove the last remaining path.
+    /// </summary>
+    public int CountBranchDeletion(MessageViewModel message) =>
+        ConversationTree.Subtree(Messages.ToList(), message.Id).Count;
+
+    [RelayCommand]
+    private async Task DeleteBranchAsync(MessageViewModel? message)
+    {
+        if (message is null || IsGenerating) return;
+
+        var all = Messages.ToList();
+        var siblings = ConversationTree.SiblingsOf(all, message);
+        if (siblings.Count < 2)
+        {
+            // Deleting the last branch is deleting the conversation, and there is
+            // already a way to do that.
+            _toasts.Show("Nothing to delete", "This is the only version of this message.", ToastKind.Info);
+            return;
+        }
+
+        var doomed = ConversationTree.Subtree(all, message.Id).Select(m => m.Id).ToHashSet(StringComparer.Ordinal);
+        var survivor = siblings.First(s => !string.Equals(s.Id, message.Id, StringComparison.Ordinal));
+
+        foreach (var victim in Messages.Where(m => doomed.Contains(m.Id)).ToList())
+            Messages.Remove(victim);
+
+        _activeLeafId = ConversationTree.NewestLeafUnder(Messages.ToList(), survivor);
+        _revealedEarlierMessageCount = 0;
+        RefreshVisibleMessageWindow();
+        await PersistAsync();
+    }
+
+    /// <summary>
+    /// Removes a message and re-anchors the active leaf on its parent, so an
+    /// empty assistant bubble that failed or was cancelled does not leave the
+    /// pointer dangling at a message that no longer exists.
+    /// </summary>
+    private void RemoveAndReanchor(MessageViewModel message)
+    {
+        var parentId = message.ParentId;
+        Messages.Remove(message);
+        if (string.Equals(_activeLeafId, message.Id, StringComparison.Ordinal))
+            _activeLeafId = parentId;
     }
 
     /// <summary>
@@ -1249,6 +1516,7 @@ public partial class ChatViewModel : ViewModelBase
     private void ClearChat()
     {
         if (IsGenerating) return;
+        _activeLeafId = string.Empty;
         Messages.Clear();
         CurrentConversationId = string.Empty;
         ConversationTitle = "New Conversation";
@@ -1620,7 +1888,7 @@ public partial class ChatViewModel : ViewModelBase
     private ChatContextSnapshot BuildContextSnapshot(string text, IReadOnlyList<ChatContextAttachment> attachments)
     {
         var promptText = ChatContextAttachment.BuildPrompt(text, attachments);
-        var historyTokens = Messages.Where(m => !m.IsStreaming).Sum(m => EstimateTokens(m.Content));
+        var historyTokens = ActivePath.Where(m => !m.IsStreaming).Sum(m => EstimateTokens(m.Content));
 
         var contextParts = new List<ContextPart>();
         if (!string.IsNullOrWhiteSpace(SystemPrompt))
@@ -1643,7 +1911,7 @@ public partial class ChatViewModel : ViewModelBase
 
     private List<ChatMessage> BuildHistory(string promptText)
     {
-        var history = Messages.Where(m => !m.IsStreaming)
+        var history = ActivePath.Where(m => !m.IsStreaming)
             .Select(m => new ChatMessage(m.Role, m.Content)).ToList();
         history.Add(new ChatMessage("user", promptText));
         return history;
@@ -1778,7 +2046,7 @@ public partial class ChatViewModel : ViewModelBase
     {
         _contextUsageCts?.Cancel();
         var total = EstimateTokens(SystemPrompt) + EstimateTokens(InputText);
-        foreach (var message in Messages.Where(m => !m.IsStreaming))
+        foreach (var message in ActivePath.Where(m => !m.IsStreaming))
             total += EstimateTokens(message.Content);
         foreach (var attachment in ContextAttachments.Where(a => a.IsReady))
             total += EstimateTokens(attachment.Content);
@@ -1945,9 +2213,14 @@ public partial class ChatViewModel : ViewModelBase
             ProjectId = existing?.ProjectId ?? _currentProjectId,
             RecallExcluded = existing?.RecallExcluded ?? false,
             CreatedAt = existing?.CreatedAt ?? DateTime.UtcNow,
+            // r25 doc 01: every branch persists. A branch you navigated away from
+            // is still your words, so it stays searchable and stays in Recall.
+            ActiveLeafId = _activeLeafId,
             Messages = Messages.Where(m => !m.IsStreaming).Select(m => new Message
             {
                 Id = m.Id, ConversationId = CurrentConversationId,
+                ParentId = m.ParentId,
+                CreatedAt = m.CreatedAt,
                 Role = m.Role,
                 Content = m.Content,
                 OriginalContent = m.OriginalContent,

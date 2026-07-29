@@ -9,21 +9,106 @@
              x:Name="Root"
              x:DataType="vm:MessageViewModel">
 
+    <UserControl.Resources>
+        <!-- r25 doc 01 1.5: shown only on a message that actually has siblings, so
+             an unbranched conversation gains no chrome at all. The arrows read as
+             icons and carry tooltips; the count is plain text, not a menu. -->
+        <DataTemplate x:Key="BranchSwitcherTemplate" DataType="vm:MessageViewModel">
+            <StackPanel Orientation="Horizontal"
+                        Spacing="1"
+                        VerticalAlignment="Center"
+                        IsVisible="{Binding HasSiblings}">
+                <Button Classes="icon-btn"
+                        Opacity="0.45"
+                        ToolTip.Tip="Previous version"
+                        Command="{Binding $parent[ItemsControl].DataContext.PreviousBranchCommand}"
+                        CommandParameter="{Binding}">
+                    <PathIcon Data="M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12z" Width="10" Height="10" />
+                </Button>
+                <TextBlock Text="{Binding BranchLabel}"
+                           FontSize="10"
+                           Opacity="0.45"
+                           VerticalAlignment="Center" />
+                <Button Classes="icon-btn"
+                        Opacity="0.45"
+                        ToolTip.Tip="Next version"
+                        Command="{Binding $parent[ItemsControl].DataContext.NextBranchCommand}"
+                        CommandParameter="{Binding}">
+                    <PathIcon Data="M10 6 8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z" Width="10" Height="10" />
+                </Button>
+                <Button Classes="icon-btn"
+                        Opacity="0.45"
+                        ToolTip.Tip="Delete this version"
+                        Command="{Binding $parent[ItemsControl].DataContext.DeleteBranchCommand}"
+                        CommandParameter="{Binding}">
+                    <PathIcon Data="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"
+                              Width="10" Height="10" />
+                </Button>
+            </StackPanel>
+        </DataTemplate>
+    </UserControl.Resources>
+
     <Grid>
         <!-- ── User bubble ────────────────────────────────────────────────── -->
-        <Border IsVisible="{Binding IsUser}"
-                HorizontalAlignment="Right"
-                MaxWidth="680"
-                CornerRadius="14,14,2,14"
-                Padding="14,10"
-                Background="{DynamicResource AccentFillColorDefaultBrush}"
-                Margin="60,0,0,0">
-            <SelectableTextBlock Text="{Binding Content}"
+        <StackPanel IsVisible="{Binding IsUser}"
+                    HorizontalAlignment="Right"
+                    MaxWidth="680"
+                    Margin="60,0,0,0"
+                    Spacing="2">
+            <Border CornerRadius="14,14,2,14"
+                    Padding="14,10"
+                    Background="{DynamicResource AccentFillColorDefaultBrush}">
+                <Grid>
+                    <SelectableTextBlock Text="{Binding Content}"
+                                         IsVisible="{Binding !IsEditing}"
+                                         TextWrapping="Wrap"
+                                         FontSize="{DynamicResource AppChatFontSize}"
+                                         LineHeight="22"
+                                         Foreground="{DynamicResource TextOnAccentFillColorPrimaryBrush}" />
+
+                    <!-- r25 doc 01 1.4: editing sends a SIBLING of this message; the
+                         original and everything under it stays reachable through the
+                         switcher below. -->
+                    <StackPanel IsVisible="{Binding IsEditing}" Spacing="6">
+                        <TextBox Text="{Binding EditText, Mode=TwoWay}"
+                                 AcceptsReturn="True"
                                  TextWrapping="Wrap"
-                                 FontSize="{DynamicResource AppChatFontSize}"
-                                 LineHeight="22"
-                                 Foreground="{DynamicResource TextOnAccentFillColorPrimaryBrush}" />
-        </Border>
+                                 MinWidth="320"
+                                 MaxHeight="220"
+                                 FontSize="{DynamicResource AppChatFontSize}" />
+                        <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right">
+                            <Button Content="Cancel"
+                                    Padding="10,4"
+                                    CornerRadius="6"
+                                    Command="{Binding $parent[ItemsControl].DataContext.CancelEditMessageCommand}"
+                                    CommandParameter="{Binding}" />
+                            <Button Content="Send as new version"
+                                    Padding="10,4"
+                                    CornerRadius="6"
+                                    Classes="accent"
+                                    Command="{Binding $parent[ItemsControl].DataContext.SubmitEditMessageCommand}"
+                                    CommandParameter="{Binding}" />
+                        </StackPanel>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <StackPanel Orientation="Horizontal"
+                        Spacing="2"
+                        HorizontalAlignment="Right"
+                        IsVisible="{Binding !IsEditing}">
+                <ContentControl Content="{Binding}"
+                                ContentTemplate="{StaticResource BranchSwitcherTemplate}" />
+                <Button Classes="icon-btn"
+                        Opacity="0.45"
+                        ToolTip.Tip="Edit and send as a new version"
+                        Command="{Binding $parent[ItemsControl].DataContext.BeginEditMessageCommand}"
+                        CommandParameter="{Binding}">
+                    <PathIcon Data="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"
+                              Width="11" Height="11" />
+                </Button>
+            </StackPanel>
+        </StackPanel>
 
         <!-- ── Assistant message ─────────────────────────────────────────── -->
         <StackPanel IsVisible="{Binding IsAssistant}"
@@ -153,6 +238,8 @@
 
             <Grid Margin="0,4,0,0" ColumnDefinitions="Auto,*">
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="2">
+                    <ContentControl Content="{Binding}"
+                                    ContentTemplate="{StaticResource BranchSwitcherTemplate}" />
                     <Button Classes="icon-btn"
                             Opacity="0.45"
                             ToolTip.Tip="Copy"
