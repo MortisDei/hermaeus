@@ -56,6 +56,10 @@ expect to land somewhere around 1408 to 1434.
 | 04 Benchmarks you can trust | 12 to 16 |
 | 05 Docs that match the app | 4 to 6 |
 
+Doc 05 also carries a mid-round test-health pass (5.4) added at the owner's
+request. It removes cost and nondeterminism rather than adding cases, so it
+does not move the estimate.
+
 All new harness-style methods register in `XunitHarnessTests.HarnessCases`
 or the reflection guard fails the suite. Tests stay sequential.
 
@@ -66,7 +70,10 @@ large share of this round is pure functions over arrays and lists
 decode loop, `BenchmarkInsightsMath`), which is where the coverage should
 concentrate.
 
-Watch suite runtime: 1m31s locally at 1316 tests. The FFT and mel tests
+Watch suite runtime, but do not trust a single reading of it: wall clock on
+this machine varies by roughly a minute run to run, which is enough to
+manufacture a regression that is not there (see doc 05 5.4). Compare
+back-to-back against a known commit before acting. The FFT and mel tests
 must use small fixtures, not sweeps over sample rates.
 
 ## Descope order (if the round overruns)

@@ -128,7 +128,55 @@ Everything twenty-four rounds deferred, verified against `1bd3f2d`.
   design. User-owned file sync of the data root remains the answer and
   needs no code.
 
-## 5.4 Reconcile the stale passages
+## 5.4 Test-suite health (added mid-round, at the owner's request)
+
+Three defects in the test infrastructure itself, all found while
+investigating suite runtime. Recorded here because they are the same class
+of problem as the rest of this doc: the tooling was reporting something it
+could not actually support.
+
+- **`TempDir.Dispose` slept for up to 3.4 seconds per temp root.** It
+  retried `Directory.Delete` with a growing backoff over 10 attempts
+  (`Thread.Sleep(75 * attempt)`) and still rethrew on the last one, so it
+  paid a large, unbounded cost and kept the failure mode it was added to
+  prevent. Deleting a temp directory is housekeeping, not an assertion. Now:
+  try, clear the SQLite pools, one 25ms retry, then defer the path to a
+  single process-exit sweep. Cleanup can no longer fail a test.
+
+- **`WaitForAsync` existed in five near-identical private copies** with
+  three different timeout policies, and **two of them returned silently on
+  timeout**. A wait helper that gives up quietly converts a real failure
+  into a confusing downstream assertion, or into a silent pass. Consolidated
+  into one `Helpers.WaitForAsync` that always asserts and names what it was
+  waiting for. The polling itself stays: it is the documented workaround for
+  `RunOnUi` posting rather than running inline under xUnit's
+  `AsyncTestSyncContext` (r12 02-async-and-threading.md), not a smell.
+
+- **One genuinely flaky test.**
+  `AcceptanceTests.AgentUiAcceptance_PatchQueueMetadataIsRendered` fired an
+  async `[RelayCommand]` via `ICommand.Execute` (fire and forget) and then
+  polled a 3000ms wall clock for the result. It failed in 2 of 4 full-suite
+  runs and passed in isolation. Fixed by awaiting the command's own task,
+  not by widening the budget.
+
+**Measurement discipline for future rounds.** Suite wall clock on this
+machine varies by roughly a minute run to run, which is enough to invent a
+regression that is not there. A controlled back-to-back check is the only
+reliable comparison: this round recorded 2m47s at `0142f9f` against 3m06s at
+the doc 04 commit, which is inside the noise, while earlier readings of
+1m20s on the same code turned out to be a quiet machine rather than a
+faster suite. Do not act on a single timing observation.
+
+**Not fixed, recorded deliberately.** Two tests assert that something has
+*not* happened yet after a fixed `Task.Delay`
+(`MainWindowViewModelStartupTests` asserting a debounce has not fired at
+150ms; `McpTests` asserting a call fails in under 5000ms rather than waiting
+out a 30s timeout). Both are races in principle. Making them deterministic
+needs an injectable clock in production code, which is a larger change than
+the risk justifies and is not what this round is for. Neither has been
+observed to fail.
+
+## 5.5 Reconcile the stale passages
 
 Do these as part of the round's close-out, once the features they describe
 exist:
@@ -145,7 +193,8 @@ exist:
 
 ## Testing
 
-Roughly 4 to 6.
+Roughly 4 to 6, plus the test-health work in 5.4 which removes cost and
+nondeterminism rather than adding cases.
 
 The panel-coverage guard itself. A test that the guard actually fails when
 given a fixture README missing a panel name, because a guard test that
