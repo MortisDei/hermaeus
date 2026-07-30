@@ -74,6 +74,23 @@ benchmarks answer "best across every suite".
   names every suite and model it left out. Fewer than two comparable suites, or
   no model present in all of them, produces no winner and a sentence saying
   which case applies.
+- **The Agent panel shows that it is working.** A run in flight now drives an
+  indeterminate progress bar and a rotating activity line in the status bar
+  ("Step 3: Weighing the plan... 12s"), naming the current step and its
+  elapsed time. The panel set one status message when the run started and did
+  not touch it again until a step finished, so a long model call left every
+  label frozen and read as a hung app. The clock and word rotation restart per
+  step, and nothing shows for the first 1.5s so a fast step does not flicker.
+- **Dismiss, on a review queue row.** Discards the task's pending action
+  without executing it and closes the task as `cancelled`, so a run you are
+  done with can leave the queue. Rejecting returned a task to
+  `waiting_for_review`, so a row the user had finished with had no action that
+  could ever clear it. Dismiss records no approval (walking away from a
+  decision is not making one), keeps the ledger, approval history and
+  transcript, leaves the task reopenable through the Continue box, and is
+  refused on a running task or a sub-task child. `AgentTaskStatus.Cancelled`
+  is new and terminal; `docs/agent.md` already documented `cancelled` as a
+  task state, so this closes that drift too.
 - **`GET /v1/capabilities`** on the local API, deferred since r1. Reports the
   routes it exposes, the app version, and per feature (chat, RAG, memory,
   embeddings) whether it is usable right now with a reason when it is not. It

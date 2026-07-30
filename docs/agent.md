@@ -30,6 +30,14 @@ explicit user approval before it executes.
 - An approval or rejection sent to a task with nothing pending is refused and
   says so. It appends no approval record, changes no status, and never
   restarts a finished run.
+- **Dismiss** is the way out of the queue for a run you are done with. It
+  discards the pending action without executing it and closes the task as
+  `cancelled`, so the row leaves the queue for good; the task stays in Recent
+  Tasks with its run ledger, approval history and transcript intact, and the
+  Continue box can still reopen it. Dismiss records no approval, because
+  walking away from a decision is not making one. It is refused on a task that
+  is still running (stop it first) and on a sub-task child (dismiss the parent,
+  or its orchestration would wait forever on a child that never finished).
 - Shows a Recent Tasks list (status chip, goal, relative time, pending step
   count; sub-task children indented with a tag) so a completed task's
   report, a failed task's blockers, or an orphaned task is reachable after a
@@ -61,6 +69,13 @@ The panel is a fixed status line, a pinned decision strip, and four tabs.
 - **Status line.** One row: task status, step count, goal, the latest status
   message, and the New task / Run Step / Stop controls. It is a fixed set of
   scalars, so a long plan can no longer squeeze the working area toward zero.
+  While a run is in flight it also carries an indeterminate progress bar and a
+  rotating activity line ("Step 3: Weighing the plan... 12s"), naming the
+  current step and how long it has been going. Without it a long model call
+  left every label frozen and the panel read as hung. The clock and the word
+  rotation restart on each step, so the line reports the current step's wait
+  rather than the age of the whole run, and it stays empty for the first
+  second and a half so a fast step never flickers a placeholder.
 - **Decision strip.** Sits above the tabs and collapses to nothing when
   nothing is waiting on you. It carries the review queue, the reply box, and
   the Continue box. This is the rule that makes tabs safe here: the thing the
@@ -702,7 +717,9 @@ Tasks are tracked with explicit states to make automation predictable:
 - `blocked`
 - `completed`
 - `failed`
-- `cancelled`
+- `cancelled` - terminal, and the only state the user assigns directly: what
+  Dismiss puts a task into when they are done with it. Every other state is
+  the run's own account of itself.
 
 `failed` is a real, reachable terminal state, not just a nominal one: a model
 whose response fails to parse as valid JSON three steps in a row fails the

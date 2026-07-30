@@ -584,6 +584,21 @@ public partial class AgentViewModel : ViewModelBase
     [ObservableProperty] private RagDataset? _selectedDataset;
     [ObservableProperty] private AgentTaskState? _currentTask;
     [ObservableProperty] private bool _isRunning;
+
+    /// <summary>
+    /// The rotating "still working" line shown while a run is in flight
+    /// ("Step 3: Weighing the plan... 12s"). Empty when idle, and for the
+    /// first <see cref="AgentActivityPhase.GraceMs"/> of a step so a fast step
+    /// never flickers a placeholder.
+    /// </summary>
+    [ObservableProperty] private string _activityStatus = string.Empty;
+    public bool HasActivityStatus => ActivityStatus.Length > 0;
+    partial void OnActivityStatusChanged(string value) => OnPropertyChanged(nameof(HasActivityStatus));
+
+    private const int ActivityTickMs = 500;
+    private readonly System.Diagnostics.Stopwatch _activityClock = new();
+    private CancellationTokenSource? _activityCts;
+    private int _activityWordOffset;
     [ObservableProperty] private string _statusMessage = string.Empty;
     [ObservableProperty] private string _currentStep = string.Empty;
     [ObservableProperty] private string _taskStatePreview = string.Empty;
@@ -642,7 +657,8 @@ public partial class AgentViewModel : ViewModelBase
 
     /// <summary>r19 3.1/3.3: a task that will not resume its own loop without user action - the
     /// Continue affordance and New task button both key off this.</summary>
-    public bool IsTaskTerminal => CurrentTask?.Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed or AgentTaskStatus.Blocked;
+    public bool IsTaskTerminal => CurrentTask?.Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed
+        or AgentTaskStatus.Blocked or AgentTaskStatus.Cancelled;
 
     /// <summary>r19 3.3: presentation only - a terminal task whose own plan still lists pending
     /// steps declared victory prematurely; pairs with the Continue box (3.1) to answer
@@ -702,7 +718,8 @@ public partial class AgentViewModel : ViewModelBase
 
     private static readonly HashSet<AgentTaskStatus> RewindEligibleStatuses =
     [
-        AgentTaskStatus.Complete, AgentTaskStatus.Failed, AgentTaskStatus.Blocked, AgentTaskStatus.WaitingForUser
+        AgentTaskStatus.Complete, AgentTaskStatus.Failed, AgentTaskStatus.Blocked,
+        AgentTaskStatus.WaitingForUser, AgentTaskStatus.Cancelled
     ];
 
     public bool HasLedgerEntries => LedgerFiles.Count > 0 || LedgerCommands.Count > 0 || LedgerApprovals.Count > 0;
@@ -1195,6 +1212,24 @@ public partial class AgentViewModel : ViewModelBase
             RunStepCommand.NotifyCanExecuteChanged();
             SendReplyCommand.NotifyCanExecuteChanged();
         }
+    }
+
+    /// <summary>
+    /// Abandons a queued task the user is done with: the pending action is
+    /// discarded without executing, the task becomes terminal, and the row
+    /// leaves the queue for good. Distinct from Reject, which decides the
+    /// action but leaves the task waiting; a rejected task with nothing else
+    /// to say had no way out of the queue before this.
+    /// </summary>
+    [RelayCommand]
+    private async Task DismissReviewAsync(AgentReviewQueueItemViewModel? item)
+    {
+        if (item is null) return;
+        var result = await _agent.DismissTaskAsync(item.TaskId);
+        await RefreshReviewQueueAsync();
+        await RefreshRecentAsync();
+        await LoadTaskIfOpenAsync(item.TaskId);
+        StatusMessage = result.Applied ? "Task dismissed." : result.Message;
     }
 
     [RelayCommand]
@@ -1931,6 +1966,11 @@ public partial class AgentViewModel : ViewModelBase
         if (!isChildStep)
             CurrentTask = result.State;
         NarrateStatusTransition(previousStatus, result.State);
+        // A step just landed, so the next wait is a new one: restart the clock
+        // and the word rotation rather than letting the line report the age of
+        // the whole run.
+        if (IsRunning)
+            RestartActivityClock();
         CurrentStep = label + result.State.ActiveStep;
         StatusMessage = label + result.LogEntry;
         NextActionPreview = JsonSerializer.Serialize(result.PlannerResponse.NextAction, new JsonSerializerOptions { WriteIndented = true });
@@ -2149,7 +2189,7 @@ public partial class AgentViewModel : ViewModelBase
         _ = RefreshRunLedgerAsync();
 
         // r24 doc 02 2.3: re-index on terminal transition only, never per step.
-        if (value is { Status: AgentTaskStatus.Complete or AgentTaskStatus.Failed })
+        if (value is { Status: AgentTaskStatus.Complete or AgentTaskStatus.Failed or AgentTaskStatus.Cancelled })
             _ = IndexTaskForRecallAsync(value);
     }
 
@@ -2159,7 +2199,7 @@ public partial class AgentViewModel : ViewModelBase
     {
         var recent = await _store.ListRecentAsync(limit: 200);
         var inputs = new List<Hermaeus.Core.Models.RecallTaskInput>();
-        foreach (var item in recent.Where(t => t.Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed))
+        foreach (var item in recent.Where(t => t.Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed or AgentTaskStatus.Cancelled))
         {
             var full = await _store.LoadAsync(item.TaskId);
             if (full is null) continue;
@@ -2203,5 +2243,71 @@ public partial class AgentViewModel : ViewModelBase
         NewTaskCommand.NotifyCanExecuteChanged();
         ContinueTaskCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(CanShowNewTaskButton));
+
+        if (value)
+            StartActivityTicker();
+        else
+            StopActivityTicker();
+    }
+
+    /// <summary>
+    /// Drives <see cref="ActivityStatus"/> while a run is in flight. The
+    /// workbench set one status message when the run started and did not touch
+    /// it again until a step finished, so a long model call showed frozen text
+    /// and read as a hung app. Unlike chat there is no token stream to end the
+    /// wait, so this ticks until the run stops.
+    /// </summary>
+    private void StartActivityTicker()
+    {
+        StopActivityTicker();
+        _activityCts = new CancellationTokenSource();
+        var token = _activityCts.Token;
+        RestartActivityClock();
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                while (!token.IsCancellationRequested)
+                {
+                    await Task.Delay(ActivityTickMs, token);
+                    if (token.IsCancellationRequested) return;
+                    RunOnUi(UpdateActivityStatus);
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (ObjectDisposedException) { }
+        }, token);
+    }
+
+    private void StopActivityTicker()
+    {
+        _activityCts?.Cancel();
+        _activityCts?.Dispose();
+        _activityCts = null;
+        _activityClock.Reset();
+        ActivityStatus = string.Empty;
+    }
+
+    /// <summary>
+    /// Each step restarts the clock and picks a new starting word, so the line
+    /// reports how long the CURRENT step has taken rather than the whole run,
+    /// and a long run does not show the same rotation over and over.
+    /// </summary>
+    private void RestartActivityClock()
+    {
+        _activityWordOffset = Random.Shared.Next(AgentActivityPhase.WhimsyWords.Count);
+        _activityClock.Restart();
+        UpdateActivityStatus();
+    }
+
+    private void UpdateActivityStatus()
+    {
+        var elapsed = _activityClock.ElapsedMilliseconds;
+        ActivityStatus = AgentActivityPhase.Describe(
+            elapsed,
+            IsRunning,
+            CurrentTask?.StepCount ?? 0,
+            _activityWordOffset + (int)(elapsed / 2_500));
     }
 }

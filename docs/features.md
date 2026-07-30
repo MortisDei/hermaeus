@@ -317,7 +317,12 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
   approved in the past is not in it, and an approval sent to a task with
   nothing pending is refused with a reason rather than recorded: it changes
   no status and cannot restart a finished run. The queue refreshes itself
-  when a run pauses.
+  when a run pauses. Dismiss discards a queued task's pending action without
+  running it and closes the task as cancelled, so a run you are done with can
+  actually leave the queue; it stays in Recent Tasks with its ledger intact.
+- While a run is in flight the status line shows a progress bar and a rotating
+  activity line naming the current step and how long it has been going, so a
+  long model call no longer looks like a hung app.
 - A finished run says what it did, from the run ledger: files changed (split
   created and edited, with the line delta), commands run and how many failed,
   approvals asked for and how they went, any unfinished plan steps, and the

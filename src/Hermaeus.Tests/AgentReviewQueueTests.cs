@@ -214,6 +214,140 @@ public sealed class AgentReviewQueueTests
         Assert.Single(reloaded.ApprovalHistory);
     }
 
+    // ── Dismissing a task the user is done with ──
+
+    [Fact]
+    public async Task Dismissing_a_task_discards_the_pending_action_without_executing_it()
+    {
+        using var temp = new TempDir();
+        var (agent, store, options) = await BuildAsync(temp);
+
+        var created = await agent.CreateTaskAsync("Change a file", options);
+        var stepped = await agent.RunStepAsync(created.TaskId, options);
+        Assert.NotNull(stepped.State.PendingToolAction);
+
+        var result = await agent.DismissTaskAsync(created.TaskId);
+
+        Assert.True(result.Applied);
+        var reloaded = await store.LoadAsync(created.TaskId);
+        Assert.NotNull(reloaded);
+        Assert.Null(reloaded!.PendingToolAction);
+        Assert.Equal(AgentTaskStatus.Cancelled, reloaded.Status);
+        // Dismissing is walking away, not deciding: no approval is recorded.
+        Assert.Empty(reloaded.ApprovalHistory);
+        // The draft_patch the pending action would have written never ran.
+        Assert.Empty(reloaded.DraftPatches);
+    }
+
+    [Fact]
+    public async Task A_dismissed_task_leaves_the_review_queue_for_good()
+    {
+        using var temp = new TempDir();
+        var (agent, store, options) = await BuildAsync(temp);
+
+        var created = await agent.CreateTaskAsync("Change a file", options);
+        await agent.RunStepAsync(created.TaskId, options);
+        Assert.Contains(await store.ListReviewQueueAsync(), item => item.TaskId == created.TaskId);
+
+        await agent.DismissTaskAsync(created.TaskId);
+
+        Assert.DoesNotContain(await store.ListReviewQueueAsync(), item => item.TaskId == created.TaskId);
+    }
+
+    [Fact]
+    public async Task A_task_waiting_on_a_question_can_also_be_dismissed()
+    {
+        using var temp = new TempDir();
+        var (agent, store, options) = await BuildAsync(temp);
+
+        // The dead end this closes: nothing pending, so there is no action to
+        // approve or reject, and the row could never leave the queue.
+        await store.SaveAsync(TaskWithApprovals("asked", AgentTaskStatus.WaitingForUser, 0));
+        Assert.Contains(await store.ListReviewQueueAsync(), item => item.TaskId == "asked");
+
+        var result = await agent.DismissTaskAsync("asked");
+
+        Assert.True(result.Applied);
+        Assert.DoesNotContain(await store.ListReviewQueueAsync(), item => item.TaskId == "asked");
+    }
+
+    [Fact]
+    public async Task Dismissing_a_running_task_is_refused()
+    {
+        using var temp = new TempDir();
+        var (agent, store, _) = await BuildAsync(temp);
+
+        await store.SaveAsync(TaskWithApprovals("busy", AgentTaskStatus.Running, 0));
+
+        var result = await agent.DismissTaskAsync("busy");
+
+        Assert.False(result.Applied);
+        Assert.Contains("running", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(AgentTaskStatus.Running, (await store.LoadAsync("busy"))!.Status);
+    }
+
+    [Fact]
+    public async Task Dismissing_an_already_dismissed_task_is_refused()
+    {
+        using var temp = new TempDir();
+        var (agent, store, _) = await BuildAsync(temp);
+
+        await store.SaveAsync(TaskWithApprovals("gone", AgentTaskStatus.Cancelled, 0));
+
+        var result = await agent.DismissTaskAsync("gone");
+
+        Assert.False(result.Applied);
+        Assert.Contains("already", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Dismissing_a_sub_task_is_refused_and_names_the_parent()
+    {
+        using var temp = new TempDir();
+        var (agent, store, _) = await BuildAsync(temp);
+
+        // A child is not independently disposable: dismissing one would strand
+        // the parent's orchestration loop waiting on it.
+        var child = TaskWithApprovals("child", AgentTaskStatus.WaitingForUser, 0);
+        child.ParentTaskId = "parent";
+        await store.SaveAsync(child);
+
+        var result = await agent.DismissTaskAsync("child");
+
+        Assert.False(result.Applied);
+        Assert.Contains("parent", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(AgentTaskStatus.WaitingForUser, (await store.LoadAsync("child"))!.Status);
+    }
+
+    [Fact]
+    public async Task A_dismissed_task_cannot_be_stepped_again()
+    {
+        using var temp = new TempDir();
+        var (agent, store, options) = await BuildAsync(temp);
+
+        var created = await agent.CreateTaskAsync("Change a file", options);
+        await agent.RunStepAsync(created.TaskId, options);
+        await agent.DismissTaskAsync(created.TaskId);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => agent.RunStepAsync(created.TaskId, options));
+    }
+
+    [Fact]
+    public async Task A_dismissed_task_can_still_be_reopened_with_an_instruction()
+    {
+        using var temp = new TempDir();
+        var (agent, store, options) = await BuildAsync(temp);
+
+        var created = await agent.CreateTaskAsync("Change a file", options);
+        await agent.RunStepAsync(created.TaskId, options);
+        await agent.DismissTaskAsync(created.TaskId);
+
+        var reopened = await agent.ContinueTaskAsync(created.TaskId, "actually, keep going", options);
+
+        Assert.Equal(AgentTaskStatus.Running, reopened.Status);
+    }
+
     private static AgentReviewQueueItemViewModel Row(AgentTaskStatus status, AgentPendingToolAction? pending) =>
         new(new AgentReviewQueueItem(
             "task", "goal", status, DateTime.UtcNow, "step", "summary",

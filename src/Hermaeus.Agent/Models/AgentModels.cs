@@ -9,7 +9,19 @@ public enum AgentTaskStatus
     WaitingForUser,
     Blocked,
     Complete,
-    Failed
+    Failed,
+
+    /// <summary>
+    /// The user abandoned the task instead of answering it. Terminal, and the
+    /// only status the user assigns directly (every other one is the run's own
+    /// account of itself). Appended last deliberately: status is persisted by
+    /// name, but an appended member keeps any numeric reading stable too.
+    ///
+    /// Exists because a paused task had no way out. Rejecting a pending action
+    /// returned the task to WaitingForUser, so a run the user had finished
+    /// with sat in the review queue forever with no action that could clear it.
+    /// </summary>
+    Cancelled
 }
 
 public enum AgentRiskLevel

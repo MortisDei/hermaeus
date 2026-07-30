@@ -14,7 +14,8 @@ public static class AgentRunOutcome
 {
     public static AgentRunOutcomeSummary Describe(AgentRunLedger ledger, AgentTaskState state)
     {
-        var terminal = state.Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed or AgentTaskStatus.Blocked;
+        var terminal = state.Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed
+            or AgentTaskStatus.Blocked or AgentTaskStatus.Cancelled;
         if (!terminal)
             return AgentRunOutcomeSummary.None;
 
@@ -40,11 +41,18 @@ public static class AgentRunOutcome
             : $"Asked for {Plural(ledger.Approvals.Count, "approval")}: {approved} approved, {ledger.Approvals.Count - approved} rejected.";
 
         var changedNothing = ledger.Files.Count == 0 && ledger.Commands.Count == 0;
-        var headline = changedNothing
-            ? "This run changed no files and ran no commands."
-            : failedCommands > 0
-                ? "This run finished with a failed command."
-                : "This run finished.";
+        var headline = state.Status == AgentTaskStatus.Cancelled
+            // A dismissed run did not finish, and saying it did would be the
+            // kind of small lie this whole block exists to remove. What it did
+            // before being dismissed is still reported below.
+            ? changedNothing
+                ? "You dismissed this run. It changed no files and ran no commands."
+                : "You dismissed this run. What it had already done is below."
+            : changedNothing
+                ? "This run changed no files and ran no commands."
+                : failedCommands > 0
+                    ? "This run finished with a failed command."
+                    : "This run finished.";
 
         var unfinished = state.PendingSteps.Count > 0
             ? $"Finished with {Plural(state.PendingSteps.Count, "planned step")} not run."

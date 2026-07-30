@@ -229,7 +229,7 @@ public sealed class AgentService : IAgentService
     {
         var state = await _store.LoadAsync(taskId, ct)
             ?? throw new InvalidOperationException("Agent task was not found.");
-        if (state.Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed)
+        if (state.Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed or AgentTaskStatus.Cancelled)
             throw new InvalidOperationException("Agent task is already finished.");
         if (state.SubTaskPlan.Any(s => s.Status is AgentSubTaskStatus.Pending or AgentSubTaskStatus.Running))
         {
@@ -1071,6 +1071,47 @@ public sealed class AgentService : IAgentService
         }
         await _store.SaveAsync(state, ct);
         await _store.AppendLogAsync(taskId, $"approval recorded: {action} approved={approved}", ct);
+        return new AgentApprovalResult(true, string.Empty);
+    }
+
+    public async Task<AgentApprovalResult> DismissTaskAsync(string taskId, CancellationToken ct = default)
+    {
+        var state = await _store.LoadAsync(taskId, ct)
+            ?? throw new InvalidOperationException("Agent task was not found.");
+
+        if (state.Status == AgentTaskStatus.Running)
+            return new AgentApprovalResult(false, "This task is still running. Stop it before dismissing it.");
+
+        if (state.Status == AgentTaskStatus.Cancelled)
+            return new AgentApprovalResult(false, "This task was already dismissed.");
+
+        // Same rule ContinueTaskAsync applies, for the same reason: a child is
+        // not an independently disposable unit of work. Dismissing one would
+        // leave its parent's orchestration loop waiting on a child that is
+        // neither complete nor failed. The parent is the thing to dismiss.
+        if (!string.IsNullOrWhiteSpace(state.ParentTaskId))
+            return new AgentApprovalResult(false, "This is a sub-task. Dismiss its parent task instead.");
+
+        // Discarding, not deciding: no approval record is written, because the
+        // user did not approve or reject the action, they walked away from it.
+        // The trace records that so the history stays readable.
+        var dismissedTool = state.PendingToolAction?.ToolName ?? string.Empty;
+        state.PendingToolAction = null;
+        state.PlanApprovalPending = false;
+        state.Status = AgentTaskStatus.Cancelled;
+        await _store.SaveAsync(state, ct);
+
+        await _store.AppendTraceAsync(taskId, new
+        {
+            task_id = taskId,
+            type = "task_dismissed",
+            tool = dismissedTool,
+            logged_at = DateTime.UtcNow
+        }, ct);
+        await _store.AppendLogAsync(taskId, dismissedTool.Length > 0
+            ? $"task dismissed by user; pending {dismissedTool} discarded without executing"
+            : "task dismissed by user", ct);
+
         return new AgentApprovalResult(true, string.Empty);
     }
 
