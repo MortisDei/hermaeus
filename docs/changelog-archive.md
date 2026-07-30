@@ -2,6 +2,25 @@
 
 The CHANGELOG.md in root only contains the current 10 versions of changelogs. The rest are archived here in line with the 10 version limit in the main changelog.
 
+## [0.25.3-alpha] - 2026-07-22
+
+### Fixed
+
+- **The "changing status messages while thinking" feature (r19 6.4) never
+  actually changed in practice.** The rotating whimsy words only activated
+  after the server's first stream event arrived, with "Reading prompt" held
+  separately as fixed text before that. For llama.cpp specifically, no
+  event of any kind arrives during prompt eval - the first SSE line to show
+  up already carries the first visible token - so the rotation gate never
+  opened and the whole wait (which can run 15+ seconds on a long prompt)
+  showed only a static "Reading prompt... Ns". "Reading prompt" is now just
+  one word in the same rotating pool as the rest, so the label actually
+  varies through the entire wait, not just an occasionally-reached tail end
+  of it.
+- **The rotation showed the identical word sequence on every send.** Each
+  send now starts from a random point in the word list (still advancing
+  deterministically from there within that send, so it doesn't flicker).
+
 ## [0.25.2-alpha] - 2026-07-22
 
 Field-report fixes from the owner's first real dogfooding session against a

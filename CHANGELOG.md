@@ -13,6 +13,94 @@ From 0.29.0-alpha onward, every minor version is tagged and released on
 GitHub (see `docs/packaging.md` "Releases"); patch versions are tagged only
 for urgent hotfixes.
 
+## [0.32.0-alpha] - 2026-07-30
+
+Implements docs/review r25: conversation branching, one context receipt,
+in-process Whisper, benchmark comparisons that are actually comparable, and a
+guard against documentation drift.
+
+### Added
+
+- **Conversation branching.** A conversation is now a tree rather than a line.
+  Regenerating an answer adds a new version alongside the old one, and editing
+  one of your own messages sends the edit as a new version while leaving the
+  original and its replies intact. Any message with more than one version gets a
+  compact `< 2/3 >` switcher; a conversation that has never been branched looks
+  exactly as it did before. Deleting a version is explicit, says how many
+  messages go, and refuses when only one version remains. Every branch is saved,
+  so conversation search and Recall still find a message you navigated away
+  from, while the prompt, token accounting, memory extraction and export follow
+  the version on screen. See `docs/features.md`.
+- **One context receipt per answer.** Memories, Recall hits and knowledge
+  excerpts now collapse behind a single line (`Context: 3 memories, 2 recall
+  hits...`) that expands to the individual items.
+- **Whisper speech recognition, in-process.** The local speech backend is now a
+  pinned Whisper base model: transcripts carry punctuation and casing, and the
+  language is detected from 98 languages rather than assumed. Settings > Voice
+  can force a language instead. Long recordings are transcribed in fixed
+  30-second windows with per-window progress, so memory no longer grows with
+  recording length. See `docs/voice.md`.
+- **Per-case benchmark breakdown.** The Best overall card opens onto its own
+  evidence: each case's score with the runner-up's score for the same case
+  beside it, and cases the runner-up won highlighted.
+- **`docs/review/deferred.md`**, a standing ledger of every item a review round
+  postponed rather than rejected, with the reason and current status. Seeded
+  from an audit of all twenty-four previous rounds.
+
+### Changed
+
+- **Best overall is now ranked only on cases every ranked model actually ran**,
+  keyed on case id and case version, and the card states that basis. When no two
+  models share enough cases there is deliberately no winner: the panel says so
+  and explains that running the same suite on each model is the fix. A model
+  with far less shared coverage is excluded and reported in the caveats instead
+  of shrinking the comparison for everyone. The card also names the axis, since
+  the ranking blends quality with speed and the overall leader can be second on
+  quality. Hermaeus Doctor reads the same report, so the two never disagree.
+  See `docs/benchmarks.md`.
+- The audio-file transcription limit is stated as a duration (90 minutes)
+  instead of a byte count.
+- README's feature narrative now covers Projects, Recall and the command
+  palette, Activity, Memories, watched RAG sources, Logs, Settings and speech
+  input, and a guard test fails the build if a navigation panel is missing from
+  README or `docs/features.md`.
+
+### Fixed
+
+- **Regenerate destroyed the previous answer.** It removed both the assistant
+  message and the question, put the text back in the input box and re-sent, so
+  the earlier answer was gone from the conversation and from disk on the next
+  save. It now creates a new version and deletes nothing. It also no longer
+  overwrites a half-typed message in the input box.
+- **Collapsing the memory pill on a chat message hid nothing.** Memory sources
+  collapsed behind a count, but Recall hits from 0.31.0 rendered in a separate,
+  always-visible strip directly above that control. Both are now sections of one
+  collapsed receipt.
+- **"Open in Memories" was offered for items that are not memories**, where it
+  would search the Memories panel for a Recall hit or a document excerpt.
+- **Transcribing a long audio file could exhaust memory and kill the app.** The
+  file picker accepted up to 200 MB, about 1.7 hours, and fed it to a
+  full-self-attention model as a single tensor. Fixed-window decoding makes
+  length structurally safe.
+- **A low-confidence transcript now means something.** The flag previously only
+  meant "the text came back empty", so hands-free mode could not refuse to
+  auto-send a hallucinated turn; repetition loops are now detected.
+- Message timestamps were lost when a conversation was saved.
+- Test-suite health: temp-directory cleanup could spend up to 3.4 seconds
+  sleeping per test and still fail the test it was cleaning up after; five
+  near-identical wait helpers (two of which gave up silently on timeout) are now
+  one that always asserts and says what it was waiting for; and one acceptance
+  test polled a wall clock for work it never awaited.
+
+### Removed
+
+- The `facebook/wav2vec2-base-960h` speech model is no longer used. Its
+  vocabulary contained 26 uppercase letters and an apostrophe, with no lowercase
+  and no punctuation at all, so every transcript read `HELLO CAN YOU CHECK THE
+  BUILD` and no post-processing could restore what was never produced. **An
+  already-downloaded copy is never deleted:** Hermaeus Doctor reports it as
+  superseded, with its size and location, and leaves it alone.
+
 ## [0.31.0-alpha] - 2026-07-29
 
 Implements docs/review r24: Projects, Recall and the command palette, living
@@ -537,24 +625,3 @@ subsection. `docs/review/` archived to `docs/review/archived/r21/`.
   `Consolas`/`Courier New`/`Cascadia Code` font-family reference across the
   Desktop views was normalized to the embedded JetBrains Mono with the same
   fallback chain. See `NOTICE.md` for font licensing (SIL OFL 1.1).
-
-## [0.25.3-alpha] - 2026-07-22
-
-### Fixed
-
-- **The "changing status messages while thinking" feature (r19 6.4) never
-  actually changed in practice.** The rotating whimsy words only activated
-  after the server's first stream event arrived, with "Reading prompt" held
-  separately as fixed text before that. For llama.cpp specifically, no
-  event of any kind arrives during prompt eval - the first SSE line to show
-  up already carries the first visible token - so the rotation gate never
-  opened and the whole wait (which can run 15+ seconds on a long prompt)
-  showed only a static "Reading prompt... Ns". "Reading prompt" is now just
-  one word in the same rotating pool as the rest, so the label actually
-  varies through the entire wait, not just an occasionally-reached tail end
-  of it.
-- **The rotation showed the identical word sequence on every send.** Each
-  send now starts from a random point in the word list (still advancing
-  deterministically from there within that send, so it doesn't flicker).
-
-

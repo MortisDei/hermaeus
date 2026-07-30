@@ -34,10 +34,38 @@ Core design principles:
 - Virtualized conversations
 - Syntax-highlighted code blocks
 - File attachments
-- Context Inspector
+- Context Inspector and a per-answer context receipt
+- Conversation branching: regenerate and edit without losing the original
 - Conversation search
 - Long-term memory integration
 - Token and context tracking
+
+### Projects
+
+A named container - folder root, default chat model, default RAG dataset,
+default system prompt - that Chat, the Agent Workbench and RAG all read from.
+Switching the active project sets that context everywhere at once.
+
+### Recall and the command palette
+
+One local search index over your own words in Hermaeus: past messages, agent
+tasks, memories and document chunks, fused into a single ranked result. The
+command palette (**Ctrl+K**) searches Recall alongside every registered app
+command, so an empty query is a browsable index of what the app can do.
+
+Recall ships with a visible switch, a real "Clear index" action, per-conversation
+exclusion and honest size reporting.
+
+### Activity
+
+An outcome record for work that finishes somewhere you are not looking:
+ingests, refreshes, agent runs, backups. Facts the app observed, not a
+model-written summary.
+
+### Memories
+
+A reviewable store of durable facts, with hybrid retrieval, per-scope
+organisation, and explicit control over what is kept and what is forgotten.
 
 ### Local AI Runtime Management
 
@@ -58,6 +86,8 @@ Core design principles:
 - Multi-variant query planning
 - ONNX reranking
 - Budget-aware context packing
+- Watched sources: datasets notice when their source files change instead of
+  rotting silently
 - Source citations
 - Retrieval traces
 - Native evaluation harness
@@ -89,6 +119,12 @@ Pluggable voice providers including:
 
 Supports local playback, cloning workflows, provider-specific configuration, and managed runtime setup.
 
+Speech recognition runs in-process on a local Whisper model: dictation anywhere
+text goes, transcription of an audio file, and an optional hands-free
+conversation mode. Transcripts carry punctuation and casing, and the language is
+detected rather than assumed. Captured audio is transient - transcribed, then
+deleted, never persisted and never attached to a conversation.
+
 ### Benchmarking
 
 Evaluate models using practical local benchmark suites.
@@ -98,7 +134,7 @@ Includes:
 - First-token latency
 - Throughput
 - Deterministic quality checks
-- Ranking profiles
+- Ranking profiles, compared only across cases every model actually ran
 - Historical comparisons
 - CSV / JSON / Markdown export
 - Managed model switching
@@ -112,11 +148,13 @@ Includes:
 
 - Hermaeus Doctor
 - Trust & Safety checks
-- Runtime health
+- Runtime health and runtime Logs
 - GPU detection
 - Storage analysis
 - Backup and restore
 - Migration tools
+- A Settings page for preferences, kept separate from the Services page that
+  manages processes and files on disk
 
 ---
 
@@ -215,6 +253,7 @@ See:
 - `docs/security-review.md` (current controls and threat model)
 - `docs/security-history.md` (per-round security history)
 - `docs/security-roadmap.md` (open security hardening work)
+- `docs/review/deferred.md` (work a review round postponed, and why)
 
 ---
 

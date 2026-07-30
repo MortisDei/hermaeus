@@ -2,6 +2,26 @@
 
 ## Chat
 
+- **Conversation branching.** A conversation is a tree, not a line. Regenerating
+  an answer adds a new version alongside the old one instead of replacing it, and
+  editing one of your own messages sends the edit as a new version while leaving
+  the original and everything under it intact. Any message with more than one
+  version shows a compact `< 2/3 >` switcher; messages that have never been
+  branched show nothing new. Deleting a version is explicit, confirms how many
+  messages go, and refuses when only one version is left.
+
+  Before this, Regenerate deleted both the previous answer and the question and
+  put the text back in the input box, so the earlier answer was gone from the
+  conversation and from disk on the next save.
+
+  Every branch is saved, so conversation search and Recall still find a message
+  you navigated away from. The prompt sent to the model, token accounting, memory
+  extraction and export all follow the version you are currently looking at.
+- **One context receipt per answer.** Everything injected into a turn - memories,
+  Recall hits, knowledge excerpts - collapses behind a single line reading, for
+  example, `Context: 3 memories, 2 recall hits, 4 knowledge excerpts`, expandable
+  to the individual items. Collapsed means nothing from any source is shown.
+  Inline `[1]`, `[2]` citation markers in the answer itself are unaffected.
 - Chat history with rename, delete, fast FTS-backed search, folders, tags,
   pins, archive, and direct file context injection for selected text/code files.
 - Conversation management via right-click context menu with delete, archive,
@@ -86,7 +106,8 @@
   showing every supported type (text/code, `.docx`/`.pdf`, images) at once
   rather than defaulting to a narrower filter that hides the others.
 - Attachment file paths are also persisted with each user message so regenerate
-  can reattach context files after an app restart when those files still exist.
+  and edit-and-resend can reattach context files after an app restart when those
+  files still exist.
 - Every fenced code block in a rendered assistant reply has a Save button that
   writes it to that conversation's artifacts folder
   (`{DataRoot}/chat-artifacts/{sanitized conversation title}/`, falling back
@@ -592,11 +613,13 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
 
 ## Speech input
 
-Local speech-to-text (r24), off by default. The local backend is in-process
-ONNX (no managed subprocess) - a CTC acoustic model
-(`facebook/wav2vec2-base-960h`, pinned and SHA256-verified, English), the
-same posture as the native Kokoro TTS voice: nothing downloads until an
-explicit install action, and inference then runs fully offline. A remote,
+Local speech-to-text, off by default. The local backend is in-process ONNX (no
+managed subprocess): Whisper base (`onnx-community/whisper-base`, pinned
+revision, every file SHA256-verified), the same posture as the native Kokoro TTS
+voice - nothing downloads until an explicit install action, and inference then
+runs fully offline. Transcripts include punctuation and casing, and the language
+is detected rather than assumed. Long recordings are transcribed in fixed
+30-second windows, so memory is constant in file length. A remote,
 OpenAI-compatible backend is available but never the default, and reuses the
 same OpenAI credential Chat and TTS already use rather than asking for it
 twice. Configured from **Services > Voice**: provider, input device, model,

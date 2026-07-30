@@ -10,6 +10,57 @@ statement of a *current* control, that control has been copied into
 See `docs/security-review.md` for current controls and the threat model,
 and `docs/security-roadmap.md` for open hardening work.
 
+## r25: Change Your Mind, And Trust What It Tells You (Branching, Context Receipt, Whisper, Benchmark Honesty)
+
+Four security-relevant changes, one of which closes a real availability bug.
+
+- **A denial-of-service reachable from the app's own file picker, fixed.** The
+  audio-file transcription path accepted up to 200 MB, roughly 1.7 hours of
+  16 kHz mono PCM16, and fed it to a full-self-attention model as one tensor,
+  giving quadratic memory growth in input length. An ordinary podcast-length
+  recording could therefore exhaust memory and kill the process, with no
+  malicious input required. r25's fixed 30-second window decoding makes peak
+  memory constant in input length; the remaining limit is a 90-minute duration
+  cap on the user's time, not on survival.
+
+- **New pinned model assets.** Speech recognition moved from
+  `facebook/wav2vec2-base-960h` to `onnx-community/whisper-base`: five files,
+  pinned by repository and revision, every one SHA256-verified before every
+  load and after every download, with a failed hash refusing to load rather
+  than falling back. The two ONNX graphs are pinned to the Git LFS content
+  hashes published by the Hugging Face tree API (the mechanism r11 and r13
+  already use); the four small JSON assets are not LFS objects, so their git
+  blob ids are not content hashes and those were downloaded and hashed
+  directly. Getting that distinction wrong would have pinned four assets to
+  values that could never match, which fails closed but for the wrong reason.
+
+- **Tokenizer and generation config are parsed data, not code.** The decode
+  loop reads special token ids, suppression lists and the language map from the
+  model's own `generation_config.json` and `added_tokens.json`. These are
+  hash-verified files parsed with `System.Text.Json` into integers and strings;
+  nothing in them is executed or used to construct a path. The decode loop is
+  bounded by the model's own `max_length`, so a crafted config cannot produce
+  an unbounded loop, and a missing or malformed field falls back to a
+  conservative default rather than throwing inside a transcription.
+
+- **An already-downloaded superseded model is never deleted.** Doctor reports
+  the retired wav2vec2 directory with its size and location and takes no
+  action. Silently removing hundreds of megabytes a user chose to download is
+  not this app's posture, even for a model it no longer uses.
+
+- **Conversation branching keeps more of the user's data, not less.** Every
+  branch persists, and the one destructive operation (deleting a version) is
+  explicit, states how many messages it will remove, and refuses when only one
+  version remains. The change also removes an existing data-loss path:
+  Regenerate previously deleted both the answer and the question. The tree walk
+  is cycle-safe by construction, because `messages_json` is a text blob the
+  user owns, syncs and can hand-edit, and it is walked on the UI thread with no
+  cancel; a cyclic parent chain truncates and logs rather than hanging the app.
+
+No new network surface beyond the pinned Hugging Face download that the
+existing approval-gated install action already performs, and no new process
+launches.
+
 ## r24: One Place, One Memory, One Voice (Projects, Recall, Watched Sources, Voice Input)
 
 Four features, the largest being two new local surfaces (Recall, speech
