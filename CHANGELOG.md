@@ -13,7 +13,7 @@ From 0.29.0-alpha onward, every minor version is tagged and released on
 GitHub (see `docs/packaging.md` "Releases"); patch versions are tagged only
 for urgent hotfixes.
 
-## [0.32.0-alpha] - 2026-07-30
+## [0.32.0-alpha] - 2026-07-31
 
 Implements docs/review r25: conversation branching, one context receipt,
 in-process Whisper, benchmark comparisons that are actually comparable, and a
