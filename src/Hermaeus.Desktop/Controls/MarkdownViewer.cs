@@ -481,39 +481,38 @@ public sealed class MarkdownViewer : ContentControl, IDisposable
         const double maxEditorHeight = 420;
         var minHeight = Math.Max(28, (FontSize + 4) * Math.Max(1, lineCount));
 
-        // AvaloniaEdit's TextEditor is used strictly read-only, and only when there's
-        // a recognized language and enough lines to make syntax coloring worth the
-        // heavier control; short or unrecognized-language blocks get a plain text run.
-        Control codeBlock = lineCount > 20 && !string.IsNullOrWhiteSpace(normalizedLanguage)
-            ? new TextEditor
-            {
-                Text = code,
-                FontFamily = MonoFamily,
-                FontSize = codeFontSize,
-                IsReadOnly = true,
-                ShowLineNumbers = false,
-                SyntaxHighlighting = HighlightingManager.Instance.GetDefinition(normalizedLanguage),
-                Background = Brushes.Transparent,
-                Foreground = Brushes.WhiteSmoke,
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-                // Was Disabled with an unbounded MinHeight fighting a 420px MaxHeight -
-                // long blocks (calculator.cs-length code) either grew far past the
-                // visible viewport with no way to scroll to the Save button, or got
-                // silently clipped. Capping MinHeight to the same bound as MaxHeight
-                // and enabling the scrollbar lets the block scroll internally instead.
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                MinHeight = Math.Min(minHeight, maxEditorHeight),
-                MaxHeight = maxEditorHeight
-            }
-            : new SelectableTextBlock
-            {
-                Text = code,
-                FontFamily = MonoFamily,
-                FontSize = codeFontSize,
-                TextWrapping = TextWrapping.NoWrap,
-                Foreground = Brushes.WhiteSmoke,
-                MinHeight = minHeight
-            };
+        // Every code block renders as a SelectableTextBlock inside a bounded
+        // ScrollViewer, regardless of length or language.
+        //
+        // This used to switch to AvaloniaEdit's TextEditor for blocks over 20 lines
+        // with a recognized language, to get syntax colouring. That path rendered
+        // *nothing*: the block reserved its full height and painted no text, so a
+        // 47-line C# file looked like a large empty panel while its Save button and
+        // the saved artifact both worked fine. The configuration was not the problem
+        // (csharp does map to a real "C#" definition), so the cause is AvaloniaEdit's
+        // TextView being realized inside the virtualized chat message list with an
+        // unbounded measure from its parent StackPanel.
+        //
+        // Colourless code the user can read beats colourful code they cannot, and the
+        // short-block path was already proving this control renders correctly here.
+        // Syntax highlighting is worth revisiting, but not by keeping a branch that
+        // silently swallows the content.
+        var codeText = new SelectableTextBlock
+        {
+            Text = code,
+            FontFamily = MonoFamily,
+            FontSize = codeFontSize,
+            TextWrapping = TextWrapping.NoWrap,
+            Foreground = Brushes.WhiteSmoke
+        };
+
+        Control codeBlock = new ScrollViewer
+        {
+            Content = codeText,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            MaxHeight = maxEditorHeight
+        };
 
         Control child = new StackPanel { Spacing = 0, Children = { header, codeBlock } };
 

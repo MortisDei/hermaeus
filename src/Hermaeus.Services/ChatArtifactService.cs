@@ -148,11 +148,33 @@ public sealed class ChatArtifactService
     /// always a bare file name) and replaces characters the filesystem would reject.</summary>
     internal static string SanitizeFileName(string suggested)
     {
-        var name = Path.GetFileName(suggested.Trim());
+        var name = Path.GetFileName(StripMarkdownDecoration(suggested.Trim()));
         foreach (var c in Path.GetInvalidFileNameChars())
             name = name.Replace(c, '_');
         name = name.Trim('.', ' ');
         return string.IsNullOrWhiteSpace(name) ? "artifact.txt" : name;
+    }
+
+    /// <summary>
+    /// Strips the markdown a model wraps a filename in when it mentions one in prose,
+    /// e.g. `` `calculator.cs` `` or **calculator.cs**.
+    ///
+    /// Backticks are legal filename characters on Windows, so they survived
+    /// sanitization and produced a literal "`calculator.cs`.cs" on disk. The trailing
+    /// backtick also defeated extension detection (Path.GetExtension returns ".cs`",
+    /// which does not match ".cs"), so the language extension was appended a second
+    /// time. Removing the decoration fixes both the name and the doubled extension.
+    /// </summary>
+    internal static string StripMarkdownDecoration(string suggested)
+    {
+        var name = suggested.Replace("`", string.Empty).Trim();
+        while (name.Length > 2 && name.StartsWith("**", StringComparison.Ordinal) && name.EndsWith("**", StringComparison.Ordinal))
+            name = name[2..^2].Trim();
+        while (name.Length > 2 && name.StartsWith('*') && name.EndsWith('*'))
+            name = name[1..^1].Trim();
+        while (name.Length > 2 && name.StartsWith('_') && name.EndsWith('_'))
+            name = name[1..^1].Trim();
+        return name;
     }
 
     private static string DedupeFileName(string dir, string fileName)

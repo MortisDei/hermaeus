@@ -119,10 +119,16 @@
                                                            Opacity="0.4" />
                                             </Grid>
 
-                                            <!-- Memory Content -->
+                                            <!-- Memory Content.
+                                                 The Foreground was bound to a DynamicResource
+                                                 "TextFillColorPrimaryBrush", which is a WinUI key that
+                                                 Avalonia's Fluent theme does not define and that appeared
+                                                 nowhere else in this app. The lookup failed, the brush fell
+                                                 back to black, and every memory's text was invisible against
+                                                 the dark theme while still reserving its full height. Inherit
+                                                 the foreground like every sibling TextBlock here does. -->
                                             <TextBlock Text="{Binding Content}"
-                                                       FontSize="13" TextWrapping="Wrap"
-                                                       Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                                                       FontSize="13" TextWrapping="Wrap" />
 
                                             <!-- Tags -->
                                             <TextBlock Text="{Binding Tags}"

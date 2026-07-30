@@ -166,16 +166,53 @@ public sealed partial class DoctorService
         IsServerRespondingAsync($"http://127.0.0.1:{port}", ct);
 
     /// <summary>Same probe as the port overload, for a config-supplied base URL
-    /// (e.g. RAG's EmbeddingBaseUrl) rather than a known-localhost port.</summary>
+    /// (e.g. RAG's EmbeddingBaseUrl) rather than a known-localhost port.
+    ///
+    /// Reported a running embedding server as "not started". Two causes, both fixed
+    /// here:
+    ///
+    /// 1. **"localhost" resolves to IPv6 ::1 first on Windows**, while llama-server
+    ///    binds IPv4 127.0.0.1 only. A base URL of http://localhost:39202 therefore
+    ///    failed to connect even with the server live and serving. The port overload
+    ///    above never hit this because it hardcodes 127.0.0.1. A localhost host is
+    ///    now retried against 127.0.0.1 before concluding anything.
+    /// 2. **Only 2xx counted as responding.** A server still loading its model
+    ///    answers /health with 503; that is a started server, and reporting it as
+    ///    "not started" sends the user to go start the thing that is already running.
+    ///    Any HTTP response now means something is listening.
+    /// </summary>
     private static async Task<bool> IsServerRespondingAsync(string baseUrl, CancellationToken ct)
+    {
+        if (await ProbeAsync(baseUrl, ct))
+            return true;
+
+        var loopback = RewriteLocalhostToLoopback(baseUrl);
+        return loopback is not null && await ProbeAsync(loopback, ct);
+    }
+
+    /// <summary>Returns the same URL with a "localhost" host swapped for 127.0.0.1, or
+    /// null when the host was not localhost and there is nothing to retry.</summary>
+    internal static string? RewriteLocalhostToLoopback(string baseUrl)
+    {
+        if (!Uri.TryCreate(baseUrl.TrimEnd('/'), UriKind.Absolute, out var uri))
+            return null;
+        if (!string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        return new UriBuilder(uri) { Host = "127.0.0.1" }.Uri.ToString().TrimEnd('/');
+    }
+
+    private static async Task<bool> ProbeAsync(string baseUrl, CancellationToken ct)
     {
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeout.CancelAfter(TimeSpan.FromSeconds(1.5));
-            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(1.5) };
-            var response = await http.GetAsync($"{baseUrl.TrimEnd('/')}/health", timeout.Token);
-            return response.IsSuccessStatusCode;
+            timeout.CancelAfter(TimeSpan.FromSeconds(3));
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
+            // Any status answers the question this probe is actually asking, which is
+            // "is a server listening", not "is it healthy".
+            await http.GetAsync($"{baseUrl.TrimEnd('/')}/health", timeout.Token);
+            return true;
         }
         catch
         {
