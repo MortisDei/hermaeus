@@ -147,18 +147,11 @@ public sealed class MainWindowViewModelStartupTests
         // Mirrors a real Finish/Skip click: the wizard marks setup complete
         // and raises WizardCompleted, which is what MainWindowViewModel reacts to.
         await harness.Main.Wizard.SkipCommand.ExecuteAsync(null);
-        await WaitForAsync(() => harness.Main.Chat.AvailableModels.Count > 0);
+        await WaitForAsync(() => harness.Main.Chat.AvailableModels.Count > 0, "chat models loading at startup");
 
         Assert.Equal("chat", harness.Main.ActivePanel);
         Assert.Single(harness.Main.Chat.AvailableModels);
         Assert.True(harness.Llm.GetModelsCallCount > 0, "chat models must load once the wizard finishes on a first run, not stay empty until a restart");
-    }
-
-    private static async Task WaitForAsync(Func<bool> condition, int timeoutMs = 3000)
-    {
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        while (!condition() && sw.ElapsedMilliseconds < timeoutMs)
-            await Task.Delay(10);
     }
 
     /// <summary>r16 03-workbench-and-desktop.md 3.3: every other destructive action of this weight is confirm-gated; a raw context-menu click was the one exception.</summary>
@@ -212,7 +205,7 @@ public sealed class MainWindowViewModelStartupTests
         // (OnShowArchivedConversationsChanged), populating Conversations with a real item whose
         // MetadataChanged is wired up exactly like the details flyout would drive it.
         harness.Main.ShowArchivedConversations = true;
-        await WaitForAsync(() => harness.Main.Conversations.Count > 0);
+        await WaitForAsync(() => harness.Main.Conversations.Count > 0, "the conversation list loading");
         var item = Assert.Single(harness.Main.Conversations);
 
         item.Title = "F";

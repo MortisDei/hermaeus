@@ -11,14 +11,6 @@ namespace Hermaeus.Tests;
 /// or ONNX session, per the round's "no live microphone in the building" constraint.</summary>
 public sealed class MicButtonViewModelTests
 {
-    private static async Task WaitForAsync(Func<bool> condition, int timeoutMs = 3000)
-    {
-        var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
-        while (!condition() && DateTime.UtcNow < deadline)
-            await Task.Delay(10);
-        Assert.True(condition(), "Condition was not met within the timeout.");
-    }
-
     [Fact]
     public void State_is_Unavailable_when_Stt_is_disabled()
     {
@@ -68,7 +60,7 @@ public sealed class MicButtonViewModelTests
         Assert.Equal(MicButtonState.Recording, vm.State);
 
         await vm.ToggleCommand.ExecuteAsync(null);
-        await WaitForAsync(() => vm.State == MicButtonState.Ready);
+        await WaitForAsync(() => vm.State == MicButtonState.Ready, "the mic button returning to Ready");
 
         Assert.Equal("hello there", received);
         Assert.True(capture.LastSession!.Disposed);
@@ -87,7 +79,7 @@ public sealed class MicButtonViewModelTests
 
         await vm.ToggleCommand.ExecuteAsync(null);
         await vm.ToggleCommand.ExecuteAsync(null);
-        await WaitForAsync(() => vm.State == MicButtonState.Ready);
+        await WaitForAsync(() => vm.State == MicButtonState.Ready, "the mic button returning to Ready");
 
         Assert.False(fired, "a low-confidence/empty transcript must never be handed to the host");
     }
@@ -103,7 +95,7 @@ public sealed class MicButtonViewModelTests
 
         await vm.ToggleCommand.ExecuteAsync(null);
         await vm.ToggleCommand.ExecuteAsync(null);
-        await WaitForAsync(() => vm.State == MicButtonState.Ready);
+        await WaitForAsync(() => vm.State == MicButtonState.Ready, "the mic button returning to Ready");
 
         Assert.Equal(0, stt.CallCount);
     }

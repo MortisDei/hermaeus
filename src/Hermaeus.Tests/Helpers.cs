@@ -32,6 +32,48 @@ namespace Hermaeus.Tests
         public static ServicesViewModel NewServicesViewModel(ISettingsService settings, TtsSettingsViewModel? tts = null) =>
             new(settings, new RuntimeProfileService(settings), new FakeToasts(), new RedactionService(), new TrustService(), new RuntimeLogService(settings), tts ?? NewTtsSettingsViewModel(settings));
 
+        /// <summary>
+        /// Polls until <paramref name="condition"/> holds, then asserts it.
+        ///
+        /// Needed because <c>RunOnUi</c> posts rather than running inline under
+        /// xUnit's AsyncTestSyncContext: a handler fired from deep inside an
+        /// awaited call chain (e.g. ISettingsService.SettingsChanged during
+        /// SaveAsync) can land after the awaited call already returned. See
+        /// r12 02-async-and-threading.md.
+        ///
+        /// r25 consolidated four near-identical private copies of this. Two of
+        /// them returned silently on timeout, which turned a genuine failure into
+        /// a confusing downstream assertion or, worse, a silent pass. This one
+        /// always asserts, and says what it was waiting for.
+        /// </summary>
+        public static async Task WaitForAsync(
+            Func<bool> condition, string description = "condition", int timeoutMs = 3000)
+        {
+            var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+            while (DateTime.UtcNow < deadline)
+            {
+                if (Evaluate(condition))
+                    return;
+                await Task.Delay(10);
+            }
+
+            True(Evaluate(condition), $"{description} was not met within {timeoutMs}ms.");
+        }
+
+        /// <summary>A condition that reads a UI-bound collection can throw while that
+        /// collection is mid-mutation; that means "not settled yet", not "failed".</summary>
+        private static bool Evaluate(Func<bool> condition)
+        {
+            try
+            {
+                return condition();
+            }
+            catch (InvalidOperationException)
+            {
+                return false;
+            }
+        }
+
         public static async Task ThrowsAsync<T>(Func<Task> action) where T : Exception
         {
             try
@@ -154,48 +196,76 @@ namespace Hermaeus.Tests
 
     sealed class TempDir : IDisposable
     {
+        // r25: temp roots that were still locked when their test finished. Deleted
+        // once at process exit instead of being waited on inside the test, so
+        // cleanup never costs test time and never fails a test.
+        private static readonly System.Collections.Concurrent.ConcurrentBag<string> _deferred = [];
+
+        static TempDir() =>
+            AppDomain.CurrentDomain.ProcessExit += (_, _) =>
+            {
+                SqliteConnection.ClearAllPools();
+                foreach (var path in _deferred)
+                    TryDelete(path);
+            };
+
         private readonly string _root = Path.Combine(Path.GetTempPath(), $"hermaeus-tests-{Guid.NewGuid():N}");
 
         public TempDir() => Directory.CreateDirectory(_root);
 
         public string PathFor(string relative) => Path.Combine(_root, relative);
 
+        /// <summary>
+        /// Pooled SQLite connections keep file handles open on Windows, and a
+        /// fire-and-forget background task a test never awaited (e.g.
+        /// ChatViewModel's memory-status refresh) can still be mid-query against a
+        /// db under this root when the test method returns. An atomic temp+move
+        /// write to a plain file (Agent's task_state.json) can also still be
+        /// settling, and CI's shared Windows runners hold a freshly-written file
+        /// open a beat longer than a dev machine does (observed in r23/r24 CI).
+        ///
+        /// This used to retry with a growing backoff, up to 10 attempts and 3.4
+        /// SECONDS of Thread.Sleep per temp root, and still rethrew on the last
+        /// attempt. That made cleanup the single largest cost in the suite
+        /// (AgentPatchReviewServiceTests averaged 1.7s per test doing almost no
+        /// work) while leaving the failure mode it was added to prevent.
+        ///
+        /// Deleting a temp directory is housekeeping, not an assertion: a leftover
+        /// directory under %TEMP% harms nothing, and no test result depends on it.
+        /// So try briefly, then hand it to process exit and move on.
+        /// </summary>
         public void Dispose()
         {
             if (!Directory.Exists(_root))
                 return;
 
-            // Pooled SQLite connections keep file handles open on Windows, and a
-            // fire-and-forget background task a test never awaited (e.g.
-            // ChatViewModel's memory-status refresh) can still be mid-query
-            // against a db under this root when the test method returns.
-            // ClearAllPools() only releases idle pooled connections, not one
-            // actively in use, so a single retry is not always enough under
-            // full-suite thread-pool contention - retry a few times with a
-            // growing backoff before giving up for real.
-            //
-            // This is not SQLite-specific: an atomic temp+move write to a plain
-            // file (e.g. Agent's task_state.json) under this root can also still
-            // be settling, and CI's shared Windows runners occasionally hold a
-            // freshly-written file open a beat longer than any local dev machine
-            // does (observed in practice: r23/r24 CI, "task_state.json ... being
-            // used by another process" a few hundred ms into a full-suite run
-            // that never reproduced locally, in isolation or in full-suite
-            // repeats). 5 attempts (750ms total backoff) was not always enough
-            // under that contention; 10 attempts widens the worst case to a few
-            // seconds without adding any latency to the common, uncontended case.
-            for (var attempt = 1; ; attempt++)
+            SqliteConnection.ClearAllPools();
+            if (TryDelete(_root))
+                return;
+
+            // One short breath covers the overwhelmingly common case: a handle
+            // that is already closing as the test returns.
+            Thread.Sleep(25);
+            if (TryDelete(_root))
+                return;
+
+            _deferred.Add(_root);
+        }
+
+        private static bool TryDelete(string path)
+        {
+            try
             {
-                SqliteConnection.ClearAllPools();
-                try
-                {
-                    Directory.Delete(_root, recursive: true);
-                    return;
-                }
-                catch (Exception ex) when ((ex is IOException or UnauthorizedAccessException) && attempt < 10)
-                {
-                    Thread.Sleep(75 * attempt);
-                }
+                Directory.Delete(path, recursive: true);
+                return true;
+            }
+            catch (IOException)
+            {
+                return false;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return false;
             }
         }
     }
