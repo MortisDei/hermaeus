@@ -130,6 +130,14 @@ public sealed class ConversationMemoryService : IConversationMemoryService
         if (conversation is null)
             return;
 
+        // r25 doc 01 1.6: summarize the active path only. Extracting a durable
+        // memory from an answer the user branched away from would be the app
+        // silently reclassifying the user's own records, which r24 rejected
+        // outright for project assignment and which is no better here.
+        conversation.Messages = ConversationTree
+            .ActivePath(conversation.Messages, conversation.ActiveLeafId)
+            .ToList();
+
         if (!IsEligibleForSummary(conversation))
             return;
 

@@ -11,7 +11,14 @@ public sealed record SpeechTranscript(
     bool IsLowConfidence,
     string? Error = null);
 
-public sealed record SpeechTranscribeOptions(string? LanguageHint = null);
+/// <summary>
+/// <paramref name="Progress"/> is r25 doc 03 3.4: long audio is transcribed in
+/// fixed 30-second windows, and a forty-minute file must be able to say which
+/// part it is on rather than looking frozen.
+/// </summary>
+public sealed record SpeechTranscribeOptions(
+    string? LanguageHint = null,
+    IProgress<string>? Progress = null);
 
 public sealed record AudioInputDevice(string Id, string Name);
 

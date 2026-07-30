@@ -177,6 +177,34 @@ use named profiles instead of one universal score.
 - RAG Answering: citation correctness and grounding weighted high
 - Low VRAM: memory usage and stability weighted high
 
+### Comparing Models Fairly
+
+The Insights tab's **Best overall** card ranks models only on the cases every
+ranked model has actually run, keyed on both case id and case version, and says
+what that basis was ("across 24 case(s) run by all 3 ranked model(s)").
+
+This matters because a per-model average is not a comparison. Before r25 each
+model was averaged over whatever cases it happened to have run, gated only by a
+volume floor of 2 runs and 10 cases, so a model that ran one short easy suite
+could outrank a model that ran everything.
+
+Consequences worth knowing:
+
+- When no two models share enough cases, there is **no** Best overall. The card
+  says so and explains that running the same suite on each model is the fix. An
+  honest "not enough shared results" is the correct answer, not a fallback.
+- A model that has run far fewer of the shared cases is excluded from the
+  ranking and reported in the caveats, rather than shrinking the comparison for
+  everyone else.
+- A single benchmarked model is still ranked over its own cases: there is no
+  comparison to be unfair about.
+- The card names the axis. The ranking blends quality with speed, so the overall
+  leader can be second on quality; when that happens it is stated explicitly.
+- Clicking the card opens a per-case breakdown with the runner-up's score for
+  the same case beside it, so the ranking can be checked rather than trusted.
+- Hermaeus Doctor reads the same report, so its advisory never disagrees with
+  the panel.
+
 ### Baseline Comparison
 
 Every benchmark run should be compared against a chosen baseline model so the

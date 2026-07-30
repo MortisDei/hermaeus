@@ -99,7 +99,7 @@ public sealed class AgentReviewQueueItemViewModel
 
     public string LatestApprovalLabel => LastApprovalAt is null
         ? string.Empty
-        : $"Last review {LastApprovalAt:yyyy-MM-dd HH:mm} UTC";
+        : $"Last review {LocalTimeFormat.DateTimeMinutes(LastApprovalAt.Value)}";
 
     /// <summary>Name of the gated tool waiting on approval, e.g. "run_command"; empty if this queue entry has none (r6 1.7).</summary>
     public string PendingToolName { get; }
@@ -250,7 +250,7 @@ public sealed class AgentWorkspaceFileViewModel
     public string RelativePath { get; }
     public string Snippet { get; }
     public DateTime ModifiedUtc { get; }
-    public string ModifiedLabel => $"{ModifiedUtc:yyyy-MM-dd HH:mm} UTC";
+    public string ModifiedLabel => LocalTimeFormat.DateTimeMinutes(ModifiedUtc);
 }
 
 public sealed class ProjectInstructionFileViewModel
@@ -319,7 +319,7 @@ public sealed class AgentDraftPatchViewModel
     public DateTime? RevertedAt { get; }
     public string? RevertedBy { get; }
     public string StatusLabel => Status.ToString();
-    public string CreatedLabel => $"Created {CreatedAt:yyyy-MM-dd HH:mm} UTC";
+    public string CreatedLabel => $"Created {LocalTimeFormat.DateTimeMinutes(CreatedAt)}";
     public bool CanReview => Status != AgentDraftPatchStatus.Applied && Status != AgentDraftPatchStatus.Reverted;
     /// <summary>Only an applied patch that came with a captured pre-image can be reverted (r6 1.8); pre-r6 applied patches have none.</summary>
     public bool CanRevert => Status == AgentDraftPatchStatus.Applied;
@@ -931,6 +931,14 @@ public partial class AgentViewModel : ViewModelBase
         if (string.IsNullOrWhiteSpace(taskId)) return;
         CurrentTask = await _store.LoadAsync(taskId);
         _openedTaskId = CurrentTask?.TaskId;
+
+        // r25 follow-up: r16 1.4 persists the workspace a task was created against,
+        // precisely so an approval executes where it was approved. Resuming the task
+        // never restored it into the workbench, so the box still showed whatever was
+        // there before and the user had to remember and retype it.
+        if (CurrentTask?.WorkspaceRoot is { Length: > 0 } persistedRoot
+            && !string.Equals(WorkspaceRoot, persistedRoot, StringComparison.OrdinalIgnoreCase))
+            WorkspaceRoot = persistedRoot;
 
         // Opening a child directly (recent-tasks list, review queue Open) has
         // no other cue that it belongs to a parent orchestration run (r16

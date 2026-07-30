@@ -40,9 +40,17 @@
 
             <TextBlock Text="{Binding MicrophoneStatus}" FontSize="12" Opacity="0.6" />
 
-            <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsNativeProvider}">
-                <Button Command="{Binding InstallCommand}" IsEnabled="{Binding !IsInstalling}" Content="Install model" FontSize="12" Padding="12,5" CornerRadius="6" />
-                <TextBlock Text="{Binding InstallProgress}" VerticalAlignment="Center" FontSize="12" Opacity="0.6" IsVisible="{Binding IsInstalling}" />
+            <!-- r25 follow-up: Services reports what is installed; installing is a
+                 Doctor action, where every other "something is missing, fix it"
+                 action already lives. Previously this button was unconditional and
+                 stayed put after a successful install, because the card had no
+                 notion of whether the model was present. -->
+            <StackPanel Spacing="6" IsVisible="{Binding IsNativeProvider}">
+                <TextBlock Text="{Binding ModelStatus}" FontSize="12" Opacity="0.6" />
+                <Button Command="{Binding OpenDoctorToInstallCommand}"
+                        Content="Install model in Doctor"
+                        IsVisible="{Binding !IsModelInstalled}"
+                        FontSize="12" Padding="12,5" CornerRadius="6" />
             </StackPanel>
 
             <Border BorderThickness="0,1,0,0" BorderBrush="{DynamicResource ThemeBorderLowBrush}" Margin="0,4,0,0" Padding="0,12,0,0">

@@ -9,14 +9,6 @@ namespace Hermaeus.Tests;
 /// <summary>r19 5.4: saving a chat code block lands in the right conversation's artifacts folder and shows up in the strip; switching conversations reloads the right list.</summary>
 public sealed class ChatArtifactsViewModelTests
 {
-    private static async Task WaitForAsync(Func<bool> condition, int timeoutMs = 3000)
-    {
-        var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
-        while (!condition() && DateTime.UtcNow < deadline)
-            await Task.Delay(10);
-        Assert.True(condition(), "Condition was not met within the timeout.");
-    }
-
     private static ChatViewModel NewChatViewModel(SettingsService settings, ChatArtifactService artifacts, ThrowingSaveConversationStore store)
     {
         // FakeMemoryStore, not a real MemoryStore: this suite never asserts on
@@ -41,7 +33,7 @@ public sealed class ChatArtifactsViewModelTests
         vm.CurrentConversationId = "conv-under-test";
 
         vm.SaveCodeBlockAction("csharp", "class Foo {}", "# My Heading\n\nSome text");
-        await WaitForAsync(() => vm.Artifacts.Count > 0);
+        await WaitForAsync(() => vm.Artifacts.Count > 0, "an artifact appearing in the chat artifact list");
 
         var saved = Assert.Single(vm.Artifacts);
         Assert.Equal("My-Heading.cs", saved.FileName);
@@ -60,7 +52,7 @@ public sealed class ChatArtifactsViewModelTests
         vm.CurrentConversationId = "conv-under-test";
 
         vm.SaveCodeBlockAction("csharp", "class Calculator {}", "# calculator.cs\n\nHere it is.");
-        await WaitForAsync(() => vm.Artifacts.Count > 0);
+        await WaitForAsync(() => vm.Artifacts.Count > 0, "an artifact appearing in the chat artifact list");
 
         Assert.Equal("calculator.cs", Assert.Single(vm.Artifacts).FileName);
     }
@@ -102,7 +94,7 @@ public sealed class ChatArtifactsViewModelTests
 
         Assert.Equal(string.Empty, vm.CurrentConversationId);
         vm.SaveCodeBlockAction("csharp", "class Foo {}", "# My Heading\n\nSome text");
-        await WaitForAsync(() => vm.Artifacts.Count > 0);
+        await WaitForAsync(() => vm.Artifacts.Count > 0, "an artifact appearing in the chat artifact list");
 
         // The artifact must not be orphaned in a separate "unsaved" bucket the
         // conversation's real id can never resolve back to.
@@ -136,7 +128,7 @@ public sealed class ChatArtifactsViewModelTests
         vm.CurrentConversationId = "conv-under-test";
 
         vm.SaveCodeBlockAction(null, "print('hi')", "no heading here");
-        await WaitForAsync(() => vm.Artifacts.Count > 0);
+        await WaitForAsync(() => vm.Artifacts.Count > 0, "an artifact appearing in the chat artifact list");
 
         vm.NewConversation();
 

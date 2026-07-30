@@ -35,6 +35,33 @@ public partial class BenchmarkViewModel : ObservableObject
     [ObservableProperty] private bool _insightsHasData;
     [ObservableProperty] private ModelAggregateViewModel? _insightsBestOverall;
 
+    /// <summary>
+    /// r25 doc 04 4.1: what the overall ranking actually rests on, e.g. "across
+    /// 24 case(s) run by all 3 model(s)". A ranking whose basis is invisible is a
+    /// ranking you cannot check.
+    /// </summary>
+    [ObservableProperty] private string _insightsComparisonBasis = string.Empty;
+
+    /// <summary>
+    /// Shown instead of the Best overall card when benchmark runs exist but no
+    /// two models have run enough of the same cases. An honest "not enough
+    /// shared results" beats a confident wrong winner.
+    /// </summary>
+    [ObservableProperty] private bool _insightsHasNoComparisonBasis;
+
+    /// <summary>r25 doc 04 4.3: set when the quality leader is not the blend leader.</summary>
+    [ObservableProperty] private string _insightsQualityLeaderNote = string.Empty;
+    public bool HasInsightsQualityLeaderNote => !string.IsNullOrEmpty(InsightsQualityLeaderNote);
+    partial void OnInsightsQualityLeaderNoteChanged(string value) =>
+        OnPropertyChanged(nameof(HasInsightsQualityLeaderNote));
+
+    /// <summary>r25 doc 04 4.2: per-case rows behind Best overall, with the runner-up
+    /// beside it so the comparison is visible rather than asserted.</summary>
+    public UiBoundCollection<ModelCaseComparisonViewModel> InsightsBestOverallCases { get; } = [];
+
+    [ObservableProperty] private bool _isInsightsBreakdownExpanded;
+    [ObservableProperty] private string _insightsRunnerUpName = string.Empty;
+
     public Func<Task<bool>>? RequestClearRunHistoryConfirmation { get; set; }
     public Func<BenchmarkResultViewModel, Task>? RequestShowCaseInfo { get; set; }
     public Func<BenchmarkRunViewModel, Task>? RequestShowRunInfo { get; set; }
@@ -317,6 +344,15 @@ public partial class BenchmarkViewModel : ObservableObject
                 ? $"You've run {report.TotalRuns} benchmark(s) across {report.ModelCount} model(s) on this hardware."
                 : $"No comparable benchmark data yet ({report.TotalRuns} run(s) recorded). Run a starter suite to get recommendations.";
             InsightsBestOverall = report.BestOverall is null ? null : new ModelAggregateViewModel(report.BestOverall);
+            InsightsHasNoComparisonBasis = report.HasData && report.ComparisonBasisCaseCount <= 0;
+            InsightsComparisonBasis = report.ComparisonBasisCaseCount <= 0
+                ? string.Empty
+                : $"across {report.ComparisonBasisCaseCount} case(s) run by all {report.Models.Count} ranked model(s)";
+            InsightsQualityLeaderNote = report.QualityLeaderDiffersFromBest
+                ? $"{report.QualityLeader!.ModelName} scores higher on quality alone; " +
+                  "this ranking blends quality with speed."
+                : string.Empty;
+            BuildInsightsBreakdown(report);
 
             InsightsLeaderboards.Clear();
             foreach (var board in report.TagLeaderboards)
@@ -339,6 +375,38 @@ public partial class BenchmarkViewModel : ObservableObject
             IsLoadingInsights = false;
         }
     }
+
+    /// <summary>
+    /// r25 doc 04 4.2: the per-case rows behind Best overall, paired with the
+    /// runner-up's row for the same case. Not a new panel; an expander inside the
+    /// Insights tab, per r24's rejection of a nav panel per feature.
+    /// </summary>
+    private void BuildInsightsBreakdown(BenchmarkInsightsReport report)
+    {
+        InsightsBestOverallCases.Clear();
+        InsightsRunnerUpName = string.Empty;
+
+        var best = report.BestOverall;
+        if (best is null)
+            return;
+
+        var runnerUp = report.Models.Skip(1).FirstOrDefault();
+        InsightsRunnerUpName = runnerUp?.ModelName ?? string.Empty;
+
+        var runnerUpByCase = runnerUp?.CasesOrEmpty
+            .GroupBy(c => c.CaseId, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+        foreach (var caseResult in best.CasesOrEmpty)
+        {
+            ModelCaseResult? paired = null;
+            runnerUpByCase?.TryGetValue(caseResult.CaseId, out paired);
+            InsightsBestOverallCases.Add(new ModelCaseComparisonViewModel(caseResult, paired));
+        }
+    }
+
+    [RelayCommand]
+    private void ToggleInsightsBreakdown() => IsInsightsBreakdownExpanded = !IsInsightsBreakdownExpanded;
 
     [RelayCommand]
     private async Task RerunFromInsightsAsync(ModelAggregateViewModel? model)
@@ -584,6 +652,38 @@ public sealed class BenchmarkResultViewModel
     public BenchmarkResultViewModel(BenchmarkResult result) => Result = result;
 }
 
+/// <summary>
+/// r25 doc 04 4.2: one case, with the leader's score and the runner-up's score
+/// for the same case side by side, so "best overall" can be checked instead of
+/// taken on trust.
+/// </summary>
+public sealed class ModelCaseComparisonViewModel
+{
+    public ModelCaseComparisonViewModel(ModelCaseResult best, ModelCaseResult? runnerUp)
+    {
+        Best = best;
+        RunnerUp = runnerUp;
+    }
+
+    public ModelCaseResult Best { get; }
+    public ModelCaseResult? RunnerUp { get; }
+
+    public string CaseName => Best.CaseName;
+    public string TagsLabel => Best.Tags.Count == 0 ? string.Empty : string.Join(", ", Best.Tags);
+    public string BestLabel => Describe(Best);
+    public string RunnerUpLabel => RunnerUp is null ? "not run" : Describe(RunnerUp);
+    public bool HasRunnerUp => RunnerUp is not null;
+
+    /// <summary>True when the runner-up actually beat the leader on this case, which
+    /// is exactly the kind of detail a single headline number hides.</summary>
+    public bool RunnerUpWonThisCase =>
+        RunnerUp is not null && RunnerUp.QualityScore > Best.QualityScore;
+
+    private static string Describe(ModelCaseResult result) => result.Succeeded
+        ? $"{result.QualityScore:P0} - {result.TokensPerSecond:F1} tok/s"
+        : $"{result.QualityScore:P0} - failed";
+}
+
 public sealed class ModelAggregateViewModel
 {
     public ModelAggregate Aggregate { get; }
@@ -593,7 +693,11 @@ public sealed class ModelAggregateViewModel
         : $"{Aggregate.ModelName} ({Aggregate.Quantization})";
     public string QualityLabel => $"{Aggregate.QualityScore:P0}";
     public string SpeedLabel => $"{Aggregate.TokensPerSecond:F1} tok/s";
-    public string EvidenceLabel => $"{Aggregate.RunCount} run(s), {Aggregate.CaseCount} case(s)";
+    /// <summary>r25 doc 04 4.1: reports the cases the ranking was scored over, not just
+    /// everything the model happened to run, when the two differ.</summary>
+    public string EvidenceLabel => Aggregate.ComparedCaseCount > 0
+        ? $"{Aggregate.RunCount} run(s), {Aggregate.ComparedCaseCount} shared case(s) compared of {Aggregate.CaseCount} result(s) recorded"
+        : $"{Aggregate.RunCount} run(s), {Aggregate.CaseCount} case(s)";
     public string StaleLabel => Aggregate.IsStale ? "Stale - consider re-running" : string.Empty;
     public bool IsStale => Aggregate.IsStale;
     public ModelAggregateViewModel(ModelAggregate aggregate) => Aggregate = aggregate;

@@ -87,27 +87,10 @@ public sealed class ServicesViewModelModelPathBindingTests
         // SaveConfigCommand call already returned (see ServicesViewModelTests's own
         // WaitForAsync for the same, already-diagnosed timing gap). Poll instead of
         // asserting immediately.
-        await WaitForAsync(() => !string.IsNullOrWhiteSpace(server.ModelPath));
+        await WaitForAsync(() => !string.IsNullOrWhiteSpace(server.ModelPath), "the settings-changed rebuild settling");
 
         Assert.False(string.IsNullOrWhiteSpace(server.ModelPath), "ModelPath was cleared by Save Config's settings-changed rebuild.");
         Assert.Equal(modelPath, server.ModelPath);
         Assert.Equal(modelPath, settings.Settings.ManagedServers[0].ModelPath);
-    }
-
-    private static async Task WaitForAsync(Func<bool> condition, int timeoutMs = 2000)
-    {
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        while (sw.ElapsedMilliseconds < timeoutMs)
-        {
-            try
-            {
-                if (condition()) return;
-            }
-            catch (InvalidOperationException)
-            {
-                // Collection mutated mid-enumeration; treat as not-yet-settled.
-            }
-            await Task.Delay(10);
-        }
     }
 }

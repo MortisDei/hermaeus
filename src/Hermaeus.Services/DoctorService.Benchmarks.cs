@@ -49,7 +49,8 @@ public sealed partial class DoctorService
                         DoctorCheckStatus.Info,
                         $"Benchmark data suggests {best.ModelName} may serve you better overall than {current.ModelName}.",
                         $"{best.ModelName} ranks {gap:F0} points higher (ranking score {best.RankingScore:P0} vs {current.RankingScore:P0}) " +
-                        $"across {best.RunCount} comparable run(s). This is informational only; nothing switches automatically.",
+                        $"across the {report.ComparisonBasisCaseCount} case(s) both models have run. " +
+                        "This is informational only; nothing switches automatically.",
                         "Open Benchmarks",
                         false,
                         string.Empty,
@@ -80,6 +81,25 @@ public sealed partial class DoctorService
                         "Benchmarks")
                     : check with { Detail = $"{check.Detail} {usageSentence}" };
             }
+
+            // r25 doc 04 4.4: Doctor and the Insights panel must not disagree about
+            // which model is best. When runs exist but no two models sat the same
+            // exam, the panel says so and this says the same thing rather than
+            // staying quiet. Last, so it never displaces a real advisory: a
+            // usage-aware recommendation is still valid without a shared exam,
+            // because it compares against the tag leaderboards.
+            if (check is null && report.HasData && report.ComparisonBasisCaseCount <= 0)
+                check = BuildCheck(
+                    "benchmark-advisory",
+                    "Not enough shared benchmark results to compare models",
+                    DoctorCheckStatus.Info,
+                    "Benchmark runs are recorded, but no two models have run enough of the same cases to rank them against each other.",
+                    "A model's average across cases it happened to run is not comparable to another model's average over different cases. " +
+                    "Run the same suite on each model you want to compare.",
+                    "Open Benchmarks",
+                    false,
+                    string.Empty,
+                    "Benchmarks");
 
             return check;
         }

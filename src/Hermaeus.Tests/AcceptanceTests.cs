@@ -93,10 +93,12 @@ namespace Hermaeus.Tests
             vm.DraftRationale = "Fix header";
             vm.DraftProposedContent = "# Updated\n\ncontent";
 
-            // Queue the patch via command and wait for it to appear in the view model
-            vm.QueueDraftPatchCommand.Execute(null);
-            var sw = System.Diagnostics.Stopwatch.StartNew();
-            while (vm.QueuedPatches.Count == 0 && sw.ElapsedMilliseconds < 3000) await Task.Delay(10);
+            // Await the command's own task rather than polling a wall clock.
+            // ICommand.Execute is fire-and-forget on an [RelayCommand] async method,
+            // so the previous 3000ms poll loop was a race that lost whenever the
+            // rest of the suite happened to be contending for the disk. Awaiting
+            // the actual work makes this deterministic under any load.
+            await vm.QueueDraftPatchCommand.ExecuteAsync(null);
 
             if (vm.QueuedPatches.Count == 0) throw new InvalidOperationException("Queued patch did not appear");
             var patch = vm.QueuedPatches[0];

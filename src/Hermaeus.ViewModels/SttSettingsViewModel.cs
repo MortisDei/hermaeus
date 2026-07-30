@@ -14,7 +14,21 @@ namespace Hermaeus.ViewModels;
 /// </summary>
 public partial class SttSettingsViewModel : ViewModelBase
 {
-    private const long MaxFileBytes = 200L * 1024 * 1024;
+    /// <summary>
+    /// r25 doc 03: stated as a duration, because that is what the user is holding.
+    ///
+    /// The old cap was 200 MB of bytes, about 1.7 hours of 16 kHz mono PCM16, fed
+    /// to wav2vec2 as ONE full-self-attention tensor. That was not a slow
+    /// transcription, it was an out-of-memory kill of the whole application,
+    /// reachable by picking an ordinary podcast file in a picker the app itself
+    /// offered. Whisper decodes fixed 30-second windows, so memory no longer grows
+    /// with length at all and this cap is about respecting the user's time rather
+    /// than about survival.
+    /// </summary>
+    private const int MaxAudioMinutes = 90;
+
+    private const long MaxFileBytes =
+        (long)MaxAudioMinutes * 60 * 16000 * 2;
 
     private readonly ISettingsService _settings;
     private readonly ISpeechRecognitionProviderRegistry _providers;
@@ -40,6 +54,49 @@ public partial class SttSettingsViewModel : ViewModelBase
     public string MicrophoneStatus => MicrophoneAvailable
         ? "Microphone available."
         : _audioCapture?.UnavailableReason ?? "No microphone checked.";
+
+    /// <summary>
+    /// r25 follow-up: whether the local model is actually on disk. The card had no
+    /// such state at all, so "Install model" sat there unconditionally and was
+    /// still sitting there after a successful install.
+    /// </summary>
+    public bool IsModelInstalled
+    {
+        get
+        {
+            try
+            {
+                return _providers.GetActiveService().IsAvailable;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+    }
+
+    public string ModelStatus => IsModelInstalled
+        ? "Speech recognition model installed."
+        : "Speech recognition model is not installed.";
+
+    /// <summary>
+    /// r25 follow-up: installing is a Doctor action. Doctor is where this app's
+    /// "something is missing, fix it" actions already live, and it already carries
+    /// a speech-recognition check with its own install fix, so Services offering a
+    /// second, independent install button meant two entry points where only one
+    /// reported progress or completion. Services now reports state and hands off.
+    /// </summary>
+    public Action<string>? RequestNavigate { get; set; }
+
+    [RelayCommand]
+    private void OpenDoctorToInstall() => RequestNavigate?.Invoke("doctor");
+
+    /// <summary>Re-reads model presence. Called on load and after Doctor reports an install.</summary>
+    public void RefreshModelStatus()
+    {
+        OnPropertyChanged(nameof(IsModelInstalled));
+        OnPropertyChanged(nameof(ModelStatus));
+    }
 
     /// <summary>Wired by the View's code-behind to a native file picker filtered to .wav.</summary>
     public Func<Task<string?>>? RequestAudioFilePicker { get; set; }
@@ -88,6 +145,7 @@ public partial class SttSettingsViewModel : ViewModelBase
             Devices.Add(device);
         OnPropertyChanged(nameof(MicrophoneAvailable));
         OnPropertyChanged(nameof(MicrophoneStatus));
+        RefreshModelStatus();
     }
 
     partial void OnSttEnabledChanged(bool value) => SaveIfNotLoading();
@@ -180,13 +238,16 @@ public partial class SttSettingsViewModel : ViewModelBase
             }
             if (info.Length > MaxFileBytes)
             {
-                TranscribeStatus = $"File is too large (max {MaxFileBytes / 1024 / 1024} MB).";
+                TranscribeStatus =
+                    $"That recording is longer than the {MaxAudioMinutes}-minute limit for a single transcription.";
                 return;
             }
 
             await using var stream = File.OpenRead(fullPath);
             var service = _providers.GetActiveService();
-            var result = await service.TranscribeAsync(stream, new SpeechTranscribeOptions());
+            var progress = new Progress<string>(message => RunOnUi(() => TranscribeStatus = message));
+            var result = await service.TranscribeAsync(
+                stream, new SpeechTranscribeOptions(Progress: progress));
 
             if (result.Error is not null)
             {

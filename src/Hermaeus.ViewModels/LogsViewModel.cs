@@ -15,7 +15,7 @@ public class LogEntryDisplayViewModel
     public LogEntryDisplayViewModel(RuntimeLogEntry entry)
     {
         Entry = entry;
-        Formatted = $"{entry.Timestamp:HH:mm:ss} [{entry.Level}] [{entry.Category}] {entry.Message}";
+        Formatted = $"{LocalTimeFormat.ClockSeconds(entry.Timestamp)} [{entry.Level}] [{entry.Category}] {entry.Message}";
     }
 }
 
@@ -194,7 +194,7 @@ public partial class LogsViewModel : ViewModelBase
     }
 
     private static string FormatEntry(RuntimeLogEntry entry)
-        => $"{entry.Timestamp:HH:mm:ss} [{entry.Level}] [{entry.Category}] {entry.Message}";
+        => $"{LocalTimeFormat.ClockSeconds(entry.Timestamp)} [{entry.Level}] [{entry.Category}] {entry.Message}";
 
     partial void OnSelectedFilterChanged(string value) => Refresh();
 }

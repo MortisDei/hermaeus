@@ -710,7 +710,9 @@ namespace Hermaeus.Tests
             var report = new BenchmarkInsightsReport(
                 TotalRuns: 6, ComparableRuns: 6, ModelCount: 2, OldestComparableRun: DateTime.UtcNow.AddDays(-5),
                 Models: [better, dominant], TagLeaderboards: [], Comparisons: [], Caveats: [],
-                UsageInsights: [usageInsight]);
+                UsageInsights: [usageInsight],
+                // r25 doc 04 4.1: a report with ranked models always has a shared case basis.
+                ComparisonBasisCaseCount: 30);
 
             var doctor = new DoctorService(
                 settings,

@@ -125,7 +125,7 @@ public partial class DoctorViewModel : ObservableObject
             foreach (var check in report.Checks)
                 Checks.Add(check);
             Summary = report.Summary;
-            LastScanned = $"Last scan: {report.ScannedAt:yyyy-MM-dd HH:mm} UTC";
+            LastScanned = $"Last scan: {LocalTimeFormat.DateTimeMinutes(report.ScannedAt)}";
             if (showIssueToast)
                 ShowStartupIssueToast(report);
             NarrateCriticalIssues(report);

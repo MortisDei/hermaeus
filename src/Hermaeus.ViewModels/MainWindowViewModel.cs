@@ -150,6 +150,11 @@ public partial class MainWindowViewModel : ViewModelBase
             }
         };
         Chat.RequestNavigate = panel => ActivePanel = panel;
+        // r25 follow-up: Services reports whether the speech model is installed and
+        // sends the user to Doctor to install it, rather than carrying a second,
+        // independent install button that never learned it had succeeded.
+        if (Services.Stt is { } stt)
+            stt.RequestNavigate = panel => ActivePanel = panel;
         // r19 6.1: memory pill flyout's "Open in Memories" navigates and prefills search.
         Chat.RequestNavigateToMemory = title =>
         {

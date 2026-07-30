@@ -543,27 +543,77 @@ public sealed class BenchmarkService
         }
     }
 
+    /// <summary>
+    /// Built-in starter suite ids that no longer ship, mapped to the id that
+    /// replaced them. The r20 rename changed the workflows suite's id along with its
+    /// name, which orphaned the old row instead of replacing it: an existing install
+    /// ended up carrying BOTH the pre-rename workflows suite and its replacement,
+    /// with the dead one sorting first alphabetically. Retired only once its replacement is present, so a
+    /// mapping typo cannot delete a suite and leave nothing behind.
+    /// </summary>
+    private static readonly (string Retired, string ReplacedBy)[] RetiredStarterSuiteIds =
+    [
+        ("aether-workflows", "hermaeus-workflows")
+    ];
+
+    /// <summary>
+    /// Seeds the built-in suites and reconciles them with what currently ships.
+    ///
+    /// This used to seed by absence only, so a shipped change to a built-in suite
+    /// never reached an existing install. That was not merely cosmetic: the
+    /// "Instruction Following" suite kept a case that prompted the model to use the
+    /// pre-rename product name, and expected that name back as a keyword, so the app
+    /// was still benchmarking against the old brand long after the rename.
+    ///
+    /// Built-in suites are app-owned starter content and are refreshed to the
+    /// shipped definition. Suites the user created are never touched; to customise
+    /// a starter suite, duplicate it under a new id.
+    /// </summary>
     private async Task EnsureStarterSuitesAsync(CancellationToken ct)
     {
         await using var c = new SqliteConnection(Cs); await c.OpenAsync(ct);
-        var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var stored = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         await using (var cmd = c.CreateCommand())
         {
-            cmd.CommandText = "SELECT id FROM benchmark_suites";
+            cmd.CommandText = "SELECT id, suite_json FROM benchmark_suites";
             await using var reader = await cmd.ExecuteReaderAsync(ct);
             while (await reader.ReadAsync(ct))
             {
                 if (!reader.IsDBNull(0))
-                    existing.Add(reader.GetString(0));
+                    stored[reader.GetString(0)] = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
             }
         }
 
-        foreach (var suite in StarterSuites())
+        var shipped = StarterSuites();
+        foreach (var suite in shipped)
         {
-            if (!existing.Contains(suite.Id))
+            // Compare against the shipped definition serialized the same way it is
+            // stored, so an unchanged suite is not rewritten on every launch.
+            var serialized = JsonSerializer.Serialize(suite, JsonOpts);
+            if (!stored.TryGetValue(suite.Id, out var current) || !JsonEquivalent(current, serialized))
                 await SaveSuiteAsync(suite, ct);
         }
+
+        var shippedIds = shipped.Select(s => s.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var (retired, replacedBy) in RetiredStarterSuiteIds)
+        {
+            if (!stored.ContainsKey(retired) || !shippedIds.Contains(replacedBy))
+                continue;
+
+            await using var delete = c.CreateCommand();
+            delete.CommandText = "DELETE FROM benchmark_suites WHERE id = $id";
+            delete.Parameters.AddWithValue("$id", retired);
+            await delete.ExecuteNonQueryAsync(ct);
+        }
     }
+
+    /// <summary>Whitespace-insensitive comparison, because the stored copy was written
+    /// with the line endings of whichever machine wrote it.</summary>
+    private static bool JsonEquivalent(string a, string b) =>
+        string.Equals(Compact(a), Compact(b), StringComparison.Ordinal);
+
+    private static string Compact(string json) =>
+        new string(json.Where(c => !char.IsWhiteSpace(c)).ToArray());
 
     public static IReadOnlyList<BenchmarkSuite> StarterSuites() =>
     [

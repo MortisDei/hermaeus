@@ -177,17 +177,30 @@ duration.
 ### Providers
 
 - **Native (default, local)** - in-process ONNX, no managed subprocess. The
-  backend is `facebook/wav2vec2-base-960h` (official Meta repository, pinned
-  commit, SHA256-verified, English-only, roughly 360 MB), a CTC acoustic
-  model: one forward pass over the raw waveform, one argmax per output
-  frame, and a 32-symbol character vocabulary in place of a tokenizer. This
-  was chosen over porting Whisper's own architecture (an autoregressive
-  decoder with a KV cache and a ~50k-token BPE tokenizer) specifically to
-  keep the in-process design the ONNX-first codebase already uses for Kokoro
-  TTS without taking on that complexity in the same round as several other
-  large features; a multilingual model is future work. Same asset posture as
-  native Kokoro: nothing downloads until the explicit install action in
-  **Services -> Voice**, and inference then runs fully offline.
+  backend is Whisper base (`onnx-community/whisper-base`, pinned revision,
+  every file SHA256-verified, roughly 291 MB across an encoder, a decoder and
+  its tokenizer and generation config). Transcripts carry **punctuation and
+  casing**, and the **language is detected** from 98 supported languages
+  rather than assumed; Settings > Voice can force a specific language instead
+  of auto-detecting.
+
+  Audio is processed in fixed 30-second windows, so memory does not grow with
+  recording length: a forty-minute file costs the same per window as a
+  five-second one, and progress is reported per window.
+
+  r25 replaced the `facebook/wav2vec2-base-960h` CTC model r24 shipped here.
+  The in-process design was right and is unchanged; the model was not. Its
+  vocabulary held 26 uppercase letters and an apostrophe, with no lowercase
+  and no punctuation anywhere in it, so every transcript read
+  `HELLO CAN YOU CHECK THE BUILD` and no post-processing could restore what
+  was never produced. Whisper's own decoder turned out to be tractable
+  in-process because an exported ONNX graph carries its key/value cache as
+  named tensors rather than requiring the attention arithmetic to be written
+  by hand.
+
+  Same asset posture as native Kokoro: nothing downloads until the explicit
+  install action in **Services -> Voice**, and inference then runs fully
+  offline.
 - **Remote, OpenAI-compatible** - available, never the default. Calls
   `/v1/audio/transcriptions` and reuses the same OpenAI base URL and API key
   Chat and OpenAI voice already use, rather than asking for the same

@@ -3,25 +3,112 @@
              xmlns:vm="using:Hermaeus.ViewModels"
              xmlns:controls="using:Hermaeus.Desktop.Controls"
              xmlns:core="using:Hermaeus.Core.Models"
+             xmlns:services="using:Hermaeus.Core.Services"
+             xmlns:conv="using:Hermaeus.Desktop.Views"
              x:Class="Hermaeus.Desktop.Controls.MessageControl"
              x:Name="Root"
              x:DataType="vm:MessageViewModel">
 
+    <UserControl.Resources>
+        <!-- r25 doc 01 1.5: shown only on a message that actually has siblings, so
+             an unbranched conversation gains no chrome at all. The arrows read as
+             icons and carry tooltips; the count is plain text, not a menu. -->
+        <DataTemplate x:Key="BranchSwitcherTemplate" DataType="vm:MessageViewModel">
+            <StackPanel Orientation="Horizontal"
+                        Spacing="1"
+                        VerticalAlignment="Center"
+                        IsVisible="{Binding HasSiblings}">
+                <Button Classes="icon-btn"
+                        Opacity="0.45"
+                        ToolTip.Tip="Previous version"
+                        Command="{Binding $parent[ItemsControl].DataContext.PreviousBranchCommand}"
+                        CommandParameter="{Binding}">
+                    <PathIcon Data="M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12z" Width="10" Height="10" />
+                </Button>
+                <TextBlock Text="{Binding BranchLabel}"
+                           FontSize="10"
+                           Opacity="0.45"
+                           VerticalAlignment="Center" />
+                <Button Classes="icon-btn"
+                        Opacity="0.45"
+                        ToolTip.Tip="Next version"
+                        Command="{Binding $parent[ItemsControl].DataContext.NextBranchCommand}"
+                        CommandParameter="{Binding}">
+                    <PathIcon Data="M10 6 8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z" Width="10" Height="10" />
+                </Button>
+                <Button Classes="icon-btn"
+                        Opacity="0.45"
+                        ToolTip.Tip="Delete this version"
+                        Command="{Binding $parent[ItemsControl].DataContext.DeleteBranchCommand}"
+                        CommandParameter="{Binding}">
+                    <PathIcon Data="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"
+                              Width="10" Height="10" />
+                </Button>
+            </StackPanel>
+        </DataTemplate>
+    </UserControl.Resources>
+
     <Grid>
         <!-- ── User bubble ────────────────────────────────────────────────── -->
-        <Border IsVisible="{Binding IsUser}"
-                HorizontalAlignment="Right"
-                MaxWidth="680"
-                CornerRadius="14,14,2,14"
-                Padding="14,10"
-                Background="{DynamicResource AccentFillColorDefaultBrush}"
-                Margin="60,0,0,0">
-            <SelectableTextBlock Text="{Binding Content}"
+        <StackPanel IsVisible="{Binding IsUser}"
+                    HorizontalAlignment="Right"
+                    MaxWidth="680"
+                    Margin="60,0,0,0"
+                    Spacing="2">
+            <Border CornerRadius="14,14,2,14"
+                    Padding="14,10"
+                    Background="{DynamicResource AccentFillColorDefaultBrush}">
+                <Grid>
+                    <SelectableTextBlock Text="{Binding Content}"
+                                         IsVisible="{Binding !IsEditing}"
+                                         TextWrapping="Wrap"
+                                         FontSize="{DynamicResource AppChatFontSize}"
+                                         LineHeight="22"
+                                         Foreground="{DynamicResource TextOnAccentFillColorPrimaryBrush}" />
+
+                    <!-- r25 doc 01 1.4: editing sends a SIBLING of this message; the
+                         original and everything under it stays reachable through the
+                         switcher below. -->
+                    <StackPanel IsVisible="{Binding IsEditing}" Spacing="6">
+                        <TextBox Text="{Binding EditText, Mode=TwoWay}"
+                                 AcceptsReturn="True"
                                  TextWrapping="Wrap"
-                                 FontSize="{DynamicResource AppChatFontSize}"
-                                 LineHeight="22"
-                                 Foreground="{DynamicResource TextOnAccentFillColorPrimaryBrush}" />
-        </Border>
+                                 MinWidth="320"
+                                 MaxHeight="220"
+                                 FontSize="{DynamicResource AppChatFontSize}" />
+                        <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right">
+                            <Button Content="Cancel"
+                                    Padding="10,4"
+                                    CornerRadius="6"
+                                    Command="{Binding $parent[ItemsControl].DataContext.CancelEditMessageCommand}"
+                                    CommandParameter="{Binding}" />
+                            <Button Content="Send as new version"
+                                    Padding="10,4"
+                                    CornerRadius="6"
+                                    Classes="accent"
+                                    Command="{Binding $parent[ItemsControl].DataContext.SubmitEditMessageCommand}"
+                                    CommandParameter="{Binding}" />
+                        </StackPanel>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <StackPanel Orientation="Horizontal"
+                        Spacing="2"
+                        HorizontalAlignment="Right"
+                        IsVisible="{Binding !IsEditing}">
+                <ContentControl Content="{Binding}"
+                                ContentTemplate="{StaticResource BranchSwitcherTemplate}" />
+                <Button Classes="icon-btn"
+                        Opacity="0.45"
+                        ToolTip.Tip="Edit and send as a new version"
+                        Command="{Binding $parent[ItemsControl].DataContext.BeginEditMessageCommand}"
+                        CommandParameter="{Binding}">
+                    <PathIcon Data="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"
+                              Width="11" Height="11" />
+                </Button>
+            </StackPanel>
+        </StackPanel>
 
         <!-- ── Assistant message ─────────────────────────────────────────── -->
         <StackPanel IsVisible="{Binding IsAssistant}"
@@ -79,72 +166,69 @@
                                 Command="{Binding $parent[ItemsControl].DataContext.ContinueTruncatedCommand}" />
                     </StackPanel>
 
-                    <ItemsControl ItemsSource="{Binding CitationSources}"
-                                  IsVisible="{Binding HasSources}"
-                                  Margin="0,6,0,0">
-                        <ItemsControl.ItemsPanel>
-                            <ItemsPanelTemplate>
-                                <WrapPanel />
-                            </ItemsPanelTemplate>
-                        </ItemsControl.ItemsPanel>
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate DataType="core:SourceReference">
-                                <Border CornerRadius="10"
-                                        Margin="0,0,6,4"
-                                        Padding="8,3"
-                                        Background="{DynamicResource SubtleFillColorSecondaryBrush}"
-                                        ToolTip.Tip="{Binding Snippet}">
-                                    <TextBlock FontSize="11" Opacity="0.6" Text="{Binding Title}" />
-                                </Border>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-
-                    <!-- r18 03-model-catalog-and-memory-ui.md 3.3: memories used this turn collapse
-                         behind a single count pill instead of one always-visible pill per memory. -->
-                    <StackPanel IsVisible="{Binding HasMemorySources}" Spacing="4">
-                        <ToggleButton IsChecked="{Binding IsMemorySourcesExpanded, Mode=TwoWay}"
+                    <!-- r25 doc 02: one receipt for everything injected into this turn.
+                         Replaces the always-visible citation strip plus the separately
+                         collapsed memory pill, which between them meant collapsing the
+                         memory pill hid nothing once r24's Recall pills started landing
+                         in the citation strip above it. Collapsed means no source item
+                         is visible at all. -->
+                    <StackPanel IsVisible="{Binding HasContext}" Spacing="4" Margin="0,6,0,0">
+                        <ToggleButton IsChecked="{Binding IsContextExpanded, Mode=TwoWay}"
                                       HorizontalAlignment="Left"
                                       Padding="8,3"
                                       CornerRadius="10"
                                       Background="{DynamicResource SubtleFillColorSecondaryBrush}"
-                                      BorderThickness="0">
-                            <TextBlock FontSize="11" Opacity="0.6" Text="{Binding MemorySourceSummary}" />
+                                      BorderThickness="0"
+                                      ToolTip.Tip="What went into this answer">
+                            <TextBlock FontSize="11" Opacity="0.6" Text="{Binding ContextSummary}" />
                         </ToggleButton>
 
-                        <ItemsControl ItemsSource="{Binding MemorySources}"
-                                      IsVisible="{Binding IsMemorySourcesExpanded}">
-                            <ItemsControl.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                    <WrapPanel />
-                                </ItemsPanelTemplate>
-                            </ItemsControl.ItemsPanel>
+                        <ItemsControl ItemsSource="{Binding ContextSections}"
+                                      IsVisible="{Binding IsContextExpanded}">
                             <ItemsControl.ItemTemplate>
-                                <DataTemplate DataType="core:SourceReference">
-                                    <!-- r19 6.1: the pill used to show only the keyword-extracted
-                                         Title with the full content hidden behind a hover tooltip;
-                                         a click now opens a flyout with the actual memory content. -->
-                                    <Button CornerRadius="10"
-                                            Margin="0,0,6,4"
-                                            Padding="8,3"
-                                            Background="{DynamicResource SubtleFillColorSecondaryBrush}"
-                                            BorderThickness="0">
-                                        <TextBlock FontSize="11" Opacity="0.6" Text="{Binding Title}" />
-                                        <Button.Flyout>
-                                            <Flyout Placement="Top">
-                                                <StackPanel Width="320" Spacing="8">
-                                                    <TextBlock Text="{Binding Title}" FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap" />
-                                                    <SelectableTextBlock Text="{Binding Snippet}" FontSize="12" TextWrapping="Wrap" Opacity="0.85" />
-                                                    <Button Content="Open in Memories"
-                                                            HorizontalAlignment="Left"
-                                                            Padding="8,4"
-                                                            CornerRadius="6"
-                                                            Command="{Binding #Root.OpenMemoryCommand}"
-                                                            CommandParameter="{Binding}" />
-                                                </StackPanel>
-                                            </Flyout>
-                                        </Button.Flyout>
-                                    </Button>
+                                <DataTemplate DataType="services:ChatContextReceiptSection">
+                                    <StackPanel Margin="0,4,0,0" Spacing="2">
+                                        <TextBlock FontSize="10"
+                                                   Opacity="0.45"
+                                                   Text="{Binding Label}" />
+                                        <ItemsControl ItemsSource="{Binding Items}">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <WrapPanel />
+                                                </ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate DataType="core:SourceReference">
+                                                    <!-- r19 6.1: the pill shows only the keyword-extracted
+                                                         Title; a click opens a flyout with the actual
+                                                         content. Carried over unchanged from the memory
+                                                         pill, and now available for every source kind. -->
+                                                    <Button CornerRadius="10"
+                                                            Margin="0,0,6,4"
+                                                            Padding="8,3"
+                                                            Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                                                            BorderThickness="0">
+                                                        <TextBlock FontSize="11" Opacity="0.6" Text="{Binding Title}" />
+                                                        <Button.Flyout>
+                                                            <Flyout Placement="Top">
+                                                                <StackPanel Width="320" Spacing="8">
+                                                                    <TextBlock Text="{Binding Title}" FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                                    <SelectableTextBlock Text="{Binding Snippet}" FontSize="12" TextWrapping="Wrap" Opacity="0.85" />
+                                                                    <Button Content="Open in Memories"
+                                                                            HorizontalAlignment="Left"
+                                                                            Padding="8,4"
+                                                                            CornerRadius="6"
+                                                                            IsVisible="{Binding Kind, Converter={x:Static conv:ProvenanceConverters.IsMemory}}"
+                                                                            Command="{Binding #Root.OpenMemoryCommand}"
+                                                                            CommandParameter="{Binding}" />
+                                                                </StackPanel>
+                                                            </Flyout>
+                                                        </Button.Flyout>
+                                                    </Button>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
@@ -154,6 +238,8 @@
 
             <Grid Margin="0,4,0,0" ColumnDefinitions="Auto,*">
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="2">
+                    <ContentControl Content="{Binding}"
+                                    ContentTemplate="{StaticResource BranchSwitcherTemplate}" />
                     <Button Classes="icon-btn"
                             Opacity="0.45"
                             ToolTip.Tip="Copy"

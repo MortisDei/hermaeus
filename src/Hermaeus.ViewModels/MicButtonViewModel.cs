@@ -37,7 +37,12 @@ public sealed partial class MicButtonViewModel : ViewModelBase, IDisposable
             ? "Speech recognition is not configured."
             : !_settings.Settings.Stt.Enabled
                 ? "Speech recognition is off. Enable it in Services > Voice."
-                : _capture.UnavailableReason ?? "No microphone available.",
+                : !_capture.IsAvailable
+                    ? _capture.UnavailableReason ?? "No microphone available."
+                    // r25 follow-up: pressing a live mic only to fail at transcription
+                    // is a worse answer than saying up front that there is nothing to
+                    // transcribe with.
+                    : "Speech recognition model is not installed. Install it from Hermaeus Doctor.",
         MicButtonState.Ready => "Start dictation",
         MicButtonState.Recording => "Stop dictation",
         MicButtonState.Transcribing => "Transcribing...",
@@ -49,8 +54,20 @@ public sealed partial class MicButtonViewModel : ViewModelBase, IDisposable
         _capture = capture;
         _sttProviders = sttProviders;
         _settings = settings;
+
+        // r25 follow-up: without this the control's state is whatever it was at
+        // app startup, forever. Speech recognition is off by default, so enabling
+        // it (or installing the model) left every mic button in the app disabled
+        // until the next restart, with no indication why. The doc comment on
+        // Refresh already said "call after Settings > Voice changes"; nothing
+        // ever did.
+        _settingsChanged = (_, _) => RunOnUi(Refresh);
+        _settings.SettingsChanged += _settingsChanged;
+
         Refresh();
     }
+
+    private readonly EventHandler? _settingsChanged;
 
     /// <summary>Re-evaluates availability; call after Settings > Voice changes. A no-op
     /// while a recording/transcription is in flight so a settings change mid-dictation
@@ -70,9 +87,29 @@ public sealed partial class MicButtonViewModel : ViewModelBase, IDisposable
     /// refuse to move it, leaving the control stuck).</summary>
     private void RefreshCore()
     {
-        var available = _settings.Settings.Stt.Enabled && _capture is { IsAvailable: true } && _sttProviders is not null;
+        var available = _settings.Settings.Stt.Enabled
+            && _capture is { IsAvailable: true }
+            && _sttProviders is not null
+            && ProviderIsUsable();
         State = available ? MicButtonState.Ready : MicButtonState.Unavailable;
         OnPropertyChanged(nameof(TooltipText));
+    }
+
+    /// <summary>
+    /// r25 follow-up: an enabled mic with no installed model is not "ready", it is
+    /// a button that records and then fails. Treated as unavailable, with a
+    /// tooltip that says which of the two things is missing.
+    /// </summary>
+    private bool ProviderIsUsable()
+    {
+        try
+        {
+            return _sttProviders?.GetActiveService().IsAvailable == true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     [RelayCommand]
@@ -160,6 +197,8 @@ public sealed partial class MicButtonViewModel : ViewModelBase, IDisposable
 
     public void Dispose()
     {
+        if (_settingsChanged is not null)
+            _settings.SettingsChanged -= _settingsChanged;
         _maxUtteranceTimer?.Dispose();
         _session?.Dispose();
     }

@@ -16,55 +16,20 @@ namespace Hermaeus.Tests;
 /// checks (never downloads in a test).</summary>
 public sealed class SpeechRecognitionTests
 {
-    // ── Wav2Vec2OnnxModel: CTC decode is pure and independently testable ──────
+    // r25 doc 03 replaced the wav2vec2 CTC model with Whisper, so the CTC collapse
+    // and waveform-normalization tests that used to live here are gone with the
+    // code they covered. Whisper's front end, decode policy and detokenizer are
+    // covered in WhisperTests.
 
     [Fact]
-    public void GreedyCtcDecode_collapses_repeats_drops_blank_and_maps_delimiter_to_space()
+    public void Pinned_asset_hashes_are_well_formed_and_distinct()
     {
-        // Vocab: 0=<pad>(blank), 4="|"(space), 5="E", 6="T"
-        var frames = new[] { 0, 5, 5, 0, 6, 4, 4, 5, 5, 5 };
-        var text = InvokeGreedyCtcDecode(frames);
-        Assert.Equal("ET E", text);
-    }
-
-    [Fact]
-    public void GreedyCtcDecode_of_all_blank_frames_is_empty()
-    {
-        Assert.Equal(string.Empty, InvokeGreedyCtcDecode(new[] { 0, 0, 0 }));
-    }
-
-    private static string InvokeGreedyCtcDecode(int[] frameIds)
-    {
-        var method = typeof(Wav2Vec2OnnxModel).GetMethod("GreedyCtcDecode", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
-        return (string)method.Invoke(null, [frameIds])!;
-    }
-
-    [Fact]
-    public void NormalizeZeroMeanUnitVariance_produces_zero_mean_output()
-    {
-        var samples = new[] { 0.1f, 0.2f, -0.1f, 0.4f, -0.3f };
-        var normalized = Wav2Vec2OnnxModel_NormalizeZeroMeanUnitVariance(samples);
-
-        var mean = normalized.Average();
-        Assert.True(Math.Abs(mean) < 1e-4, $"expected ~zero mean, got {mean}");
-    }
-
-    [Fact]
-    public void NormalizeZeroMeanUnitVariance_of_empty_input_does_not_throw()
-    {
-        Assert.Empty(Wav2Vec2OnnxModel_NormalizeZeroMeanUnitVariance([]));
-    }
-
-    private static float[] Wav2Vec2OnnxModel_NormalizeZeroMeanUnitVariance(float[] samples)
-    {
-        var method = typeof(Wav2Vec2OnnxModel).GetMethod("NormalizeZeroMeanUnitVariance", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
-        return (float[])method.Invoke(null, [samples])!;
-    }
-
-    [Fact]
-    public void Pinned_model_hash_constant_is_a_well_formed_sha256_hex_string()
-    {
-        Assert.Matches("^[0-9a-f]{64}$", Wav2Vec2OnnxModel.ModelSha256);
+        var assets = WhisperOnnxModel.AllAssets;
+        Assert.Equal(5, assets.Length);
+        Assert.All(assets, a => Assert.Matches("^[0-9a-f]{64}$", a.Sha256));
+        Assert.All(assets, a => Assert.True(a.SizeBytes > 0, $"{a.LocalName} needs a real pinned size"));
+        Assert.Equal(assets.Length, assets.Select(a => a.Sha256).Distinct().Count());
+        Assert.Equal(assets.Length, assets.Select(a => a.LocalName).Distinct().Count());
     }
 
     // ── WavFile: read must round-trip Write and reject malformed input clearly ──
@@ -264,17 +229,18 @@ public sealed class SpeechRecognitionTests
         var vm = NewSttSettingsViewModel(temp, out _);
         var path = temp.PathFor("huge.wav");
         // Sparse-ish large file: seek then write one byte, avoiding actually
-        // allocating 200+MB of real content for the test.
+        // allocating the content. r25 doc 03 states the cap as a duration (90
+        // minutes of 16 kHz mono PCM16), so this needs to exceed that.
         using (var fs = new FileStream(path, FileMode.Create))
         {
-            fs.Seek(210L * 1024 * 1024, SeekOrigin.Begin);
+            fs.Seek(200L * 60 * 16000 * 2, SeekOrigin.Begin);
             fs.WriteByte(0);
         }
         vm.RequestAudioFilePicker = () => Task.FromResult<string?>(path);
 
         await vm.TranscribeFileCommand.ExecuteAsync(null);
 
-        Assert.Contains("too large", vm.TranscribeStatus, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("minute limit", vm.TranscribeStatus, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

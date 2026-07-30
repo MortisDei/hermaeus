@@ -7,7 +7,7 @@ namespace Hermaeus.Services;
 
 public sealed class ConversationStore : IConversationStore
 {
-    private const int SchemaVersion = 4;
+    private const int SchemaVersion = 5;
     private readonly ISettingsService _settings;
     private string _initializedPath = string.Empty;
     private readonly SemaphoreSlim _initGate = new(1, 1);
@@ -78,7 +78,12 @@ public sealed class ConversationStore : IConversationStore
                 new SqliteMigration(3, async (db, token) =>
                     await EnsureColumnAsync(db, "project_id", "TEXT NOT NULL DEFAULT ''", token)),
                 new SqliteMigration(4, async (db, token) =>
-                    await EnsureColumnAsync(db, "recall_excluded", "INTEGER NOT NULL DEFAULT 0", token))
+                    await EnsureColumnAsync(db, "recall_excluded", "INTEGER NOT NULL DEFAULT 0", token)),
+                // r25 doc 01: which leaf of the message tree the conversation is showing.
+                // The tree itself needs no migration - Message.ParentId is additive JSON
+                // inside the existing messages_json blob.
+                new SqliteMigration(5, async (db, token) =>
+                    await EnsureColumnAsync(db, "active_leaf_id", "TEXT NOT NULL DEFAULT ''", token))
             ], ct);
             if (!ftsExisted || schemaChanged)
                 await RebuildFtsAsync(c, ct);
@@ -171,8 +176,8 @@ public sealed class ConversationStore : IConversationStore
         await using var c = new SqliteConnection(Cs); await c.OpenAsync(ct);
         var cmd = c.CreateCommand();
         cmd.CommandText = @"
-            INSERT INTO conversations (id,title,model_id,system_prompt,created_at,updated_at,messages_json,folder,tags_json,is_pinned,is_archived,rag_dataset_id,project_id,recall_excluded)
-            VALUES ($id,$title,$mid,$sp,$ca,$ua,$mj,$folder,$tags,$pin,$archived,$ragDatasetId,$projectId,$recallExcluded)
+            INSERT INTO conversations (id,title,model_id,system_prompt,created_at,updated_at,messages_json,folder,tags_json,is_pinned,is_archived,rag_dataset_id,project_id,recall_excluded,active_leaf_id)
+            VALUES ($id,$title,$mid,$sp,$ca,$ua,$mj,$folder,$tags,$pin,$archived,$ragDatasetId,$projectId,$recallExcluded,$activeLeafId)
             ON CONFLICT(id) DO UPDATE SET
                 title=excluded.title, model_id=excluded.model_id,
                 system_prompt=excluded.system_prompt,
@@ -182,7 +187,8 @@ public sealed class ConversationStore : IConversationStore
                 is_archived=excluded.is_archived,
                 rag_dataset_id=excluded.rag_dataset_id,
                 project_id=excluded.project_id,
-                recall_excluded=excluded.recall_excluded";
+                recall_excluded=excluded.recall_excluded,
+                active_leaf_id=excluded.active_leaf_id";
         cmd.Parameters.AddWithValue("$id",    conv.Id);
         cmd.Parameters.AddWithValue("$title", conv.Title);
         cmd.Parameters.AddWithValue("$mid",   conv.ModelId);
@@ -197,6 +203,7 @@ public sealed class ConversationStore : IConversationStore
         cmd.Parameters.AddWithValue("$ragDatasetId", conv.RagDatasetId.Trim());
         cmd.Parameters.AddWithValue("$projectId", conv.ProjectId.Trim());
         cmd.Parameters.AddWithValue("$recallExcluded", conv.RecallExcluded ? 1 : 0);
+        cmd.Parameters.AddWithValue("$activeLeafId", conv.ActiveLeafId.Trim());
         await cmd.ExecuteNonQueryAsync(ct);
 
         await UpsertFtsAsync(c, conv, json, tagsJson, ct);
@@ -302,23 +309,34 @@ public sealed class ConversationStore : IConversationStore
         return string.Join(" AND ", terms.Select(t => $"\"{t}\"*"));
     }
 
-    private static Conversation Map(SqliteDataReader r) => new()
+    private static Conversation Map(SqliteDataReader r)
     {
-        Id = GetString(r, "id"),
-        Title = GetString(r, "title"),
-        ModelId = GetString(r, "model_id"),
-        SystemPrompt = GetString(r, "system_prompt"),
-        CreatedAt = SqliteDateTime.Parse(GetString(r, "created_at")),
-        UpdatedAt = SqliteDateTime.Parse(GetString(r, "updated_at")),
-        Messages = JsonSerializer.Deserialize<List<Message>>(GetString(r, "messages_json")) ?? [],
-        Folder = GetString(r, "folder"),
-        Tags = JsonSerializer.Deserialize<List<string>>(GetString(r, "tags_json", "[]")) ?? [],
-        IsPinned = GetInt(r, "is_pinned") != 0,
-        IsArchived = GetInt(r, "is_archived") != 0,
-        RagDatasetId = GetString(r, "rag_dataset_id"),
-        ProjectId = GetString(r, "project_id"),
-        RecallExcluded = GetInt(r, "recall_excluded") != 0
-    };
+        var conversation = new Conversation
+        {
+            Id = GetString(r, "id"),
+            Title = GetString(r, "title"),
+            ModelId = GetString(r, "model_id"),
+            SystemPrompt = GetString(r, "system_prompt"),
+            CreatedAt = SqliteDateTime.Parse(GetString(r, "created_at")),
+            UpdatedAt = SqliteDateTime.Parse(GetString(r, "updated_at")),
+            Messages = JsonSerializer.Deserialize<List<Message>>(GetString(r, "messages_json")) ?? [],
+            Folder = GetString(r, "folder"),
+            Tags = JsonSerializer.Deserialize<List<string>>(GetString(r, "tags_json", "[]")) ?? [],
+            IsPinned = GetInt(r, "is_pinned") != 0,
+            IsArchived = GetInt(r, "is_archived") != 0,
+            RagDatasetId = GetString(r, "rag_dataset_id"),
+            ProjectId = GetString(r, "project_id"),
+            RecallExcluded = GetInt(r, "recall_excluded") != 0,
+            ActiveLeafId = GetString(r, "active_leaf_id")
+        };
+
+        // r25 doc 01: a conversation written before r25 has no parent chain. Infer
+        // the one its stored order already implies, so it renders identically to
+        // how 0.31.0 rendered it. Conversations that already carry parents are a
+        // real tree and are left untouched.
+        ConversationTree.BackfillLinearChain(conversation.Messages);
+        return conversation;
+    }
 
     private static string GetString(SqliteDataReader r, string name, string fallback = "")
     {

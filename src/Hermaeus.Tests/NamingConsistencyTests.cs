@@ -55,6 +55,13 @@ public sealed class NamingConsistencyTests
         // (illustrated mockup, needs real art, not a programmatic redraw);
         // the note describing it necessarily names the old mark.
         ["docs/mascot.md"] = ["old Aether \"A\" mark"],
+
+        // The r20 rename changed the workflows suite's ID as well as its name, which
+        // orphaned the old row in every existing benchmarks.db rather than replacing
+        // it. Retiring that row requires naming the dead id exactly. Note this guard
+        // scans source files, so it never could have caught the stale row itself:
+        // that data lived in the user's database, not in the repository.
+        ["src/Hermaeus.Services/BenchmarkService.cs"] = ["aether-workflows"],
     };
 
     private static readonly HashSet<string> AllowlistedPaths = new(StringComparer.OrdinalIgnoreCase)

@@ -187,11 +187,13 @@ public sealed class ChatWorkbenchTests
         Assert.NotNull(capturing.LastOptions?.SystemPrompt);
         Assert.Contains("concise summaries", capturing.LastOptions!.SystemPrompt, StringComparison.OrdinalIgnoreCase);
 
-        // r18 03-model-catalog-and-memory-ui.md 3.3: a recalled memory must land in
-        // MemorySources (collapsed-by-default pill), not the always-visible CitationSources list.
-        Assert.True(assistantMessage.HasMemorySources);
-        Assert.Contains(assistantMessage.MemorySources, s => s.Locator == "conv-1");
-        Assert.DoesNotContain(assistantMessage.CitationSources, s => s.Locator == "conv-1");
+        // r25 doc 02: a recalled memory lands in the Memories section of the
+        // collapsed-by-default context receipt, and there is no second,
+        // always-visible strip for it to leak into.
+        Assert.True(assistantMessage.HasContext);
+        Assert.False(assistantMessage.IsContextExpanded);
+        var memorySection = Assert.Single(assistantMessage.ContextSections, s => s.Kind == ProvenanceKind.Memory);
+        Assert.Contains(memorySection.Items, s => s.Locator == "conv-1");
     }
 
     [Fact]

@@ -25,7 +25,21 @@ public class Conversation
     /// <summary>r24 doc 02 2.0: excludes this conversation from Recall indexing.
     /// Setting it true removes its existing recall entries immediately.</summary>
     public bool RecallExcluded { get; set; }
+    /// <summary>
+    /// r25 doc 01: which leaf of the message tree the conversation is currently
+    /// showing. Empty means the last message in stored order, which is exactly
+    /// what an unbranched conversation means.
+    /// </summary>
+    public string ActiveLeafId { get; set; } = string.Empty;
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    /// <summary>
+    /// Every message across every branch, flat. The tree lives in
+    /// <see cref="Message.ParentId"/> only, so conversation FTS, Recall
+    /// indexing, export and backup keep seeing everything without needing to
+    /// know branches exist.
+    /// </summary>
     public List<Message> Messages { get; set; } = [];
 }
