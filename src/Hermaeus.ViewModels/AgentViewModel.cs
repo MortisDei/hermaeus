@@ -99,7 +99,7 @@ public sealed class AgentReviewQueueItemViewModel
 
     public string LatestApprovalLabel => LastApprovalAt is null
         ? string.Empty
-        : $"Last review {LastApprovalAt:yyyy-MM-dd HH:mm} UTC";
+        : $"Last review {LocalTimeFormat.DateTimeMinutes(LastApprovalAt.Value)}";
 
     /// <summary>Name of the gated tool waiting on approval, e.g. "run_command"; empty if this queue entry has none (r6 1.7).</summary>
     public string PendingToolName { get; }
@@ -250,7 +250,7 @@ public sealed class AgentWorkspaceFileViewModel
     public string RelativePath { get; }
     public string Snippet { get; }
     public DateTime ModifiedUtc { get; }
-    public string ModifiedLabel => $"{ModifiedUtc:yyyy-MM-dd HH:mm} UTC";
+    public string ModifiedLabel => LocalTimeFormat.DateTimeMinutes(ModifiedUtc);
 }
 
 public sealed class ProjectInstructionFileViewModel
@@ -319,7 +319,7 @@ public sealed class AgentDraftPatchViewModel
     public DateTime? RevertedAt { get; }
     public string? RevertedBy { get; }
     public string StatusLabel => Status.ToString();
-    public string CreatedLabel => $"Created {CreatedAt:yyyy-MM-dd HH:mm} UTC";
+    public string CreatedLabel => $"Created {LocalTimeFormat.DateTimeMinutes(CreatedAt)}";
     public bool CanReview => Status != AgentDraftPatchStatus.Applied && Status != AgentDraftPatchStatus.Reverted;
     /// <summary>Only an applied patch that came with a captured pre-image can be reverted (r6 1.8); pre-r6 applied patches have none.</summary>
     public bool CanRevert => Status == AgentDraftPatchStatus.Applied;

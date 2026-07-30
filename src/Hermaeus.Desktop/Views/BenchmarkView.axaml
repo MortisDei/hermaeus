@@ -187,11 +187,15 @@
                 CornerRadius="8"
                 Padding="0">
             <TabControl SelectedIndex="{Binding SelectedTabIndex}">
-                <TabItem Header="Rankings">
+                <!-- Named for what it actually lists: one row per benchmark RUN, which is
+                     one suite against one model. It was called "Rankings", which read
+                     as a cross-suite verdict it never provided. The cross-suite answer
+                     lives on the Insights tab's Best overall card. -->
+                <TabItem Header="Per-Suite Rankings">
                     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
                         <Border Padding="14" MinWidth="720" MaxWidth="1000" HorizontalAlignment="Center">
                             <StackPanel Spacing="10">
-                                <TextBlock Text="Score = quality on the suite's checks (0-100). Speed and pass rate are shown separately."
+                                <TextBlock Text="One row per run: a single suite against a single model. Score = quality on that suite's checks (0-100); speed and pass rate are shown separately. For a verdict across all suites, see Best overall on the Insights tab."
                                            FontSize="11" Opacity="0.55" TextWrapping="Wrap"
                                            IsVisible="{Binding HasComparableRankings}" />
 
