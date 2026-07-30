@@ -111,7 +111,13 @@ public sealed class FileAgentTaskStateStore : IAgentTaskStateStore
                    p.goal, t.parent_task_id
             FROM agent_task_index t
             LEFT JOIN agent_task_index p ON p.task_id = t.parent_task_id
-            WHERE t.status IN ('WaitingForUser', 'Blocked') OR t.approval_count > 0
+            -- The queue lists what needs a decision now (r26 01 1.1). It used
+            -- to also list every task that had ever been approved
+            -- (OR t.approval_count > 0), which made an archive out of a queue:
+            -- approving incremented the count, so a row could never leave.
+            -- Approval history lives in the run ledger and on each row's own
+            -- approval labels.
+            WHERE t.status IN ('WaitingForUser', 'Blocked')
             ORDER BY t.updated_at DESC
             LIMIT $limit";
         cmd.Parameters.AddWithValue("$limit", Math.Max(1, limit));

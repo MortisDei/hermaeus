@@ -367,7 +367,11 @@ public static class HarnessCases
         [new HarnessCase("embeddings endpoint returns vectors for each input", LocalApiTests.EmbeddingsEndpointReturnsVectorsForEachInput)],
         [new HarnessCase("embeddings endpoint rejects empty input", LocalApiTests.EmbeddingsEndpointRejectsEmptyInput)],
         [new HarnessCase("calls are logged to trace store with caller name", LocalApiTests.CallsAreLoggedToTraceStoreWithCallerName)],
-        [new HarnessCase("chat completion applies model profile sampling defaults and honors explicit overrides", LocalApiTests.ChatCompletionAppliesModelProfileSamplingDefaultsAndHonorsExplicitOverrides)]
+        [new HarnessCase("chat completion applies model profile sampling defaults and honors explicit overrides", LocalApiTests.ChatCompletionAppliesModelProfileSamplingDefaultsAndHonorsExplicitOverrides)],
+        [new HarnessCase("capabilities endpoint reports routes and version", LocalApiTests.CapabilitiesEndpointReportsRoutesAndVersion)],
+        [new HarnessCase("capabilities reports an unusable feature with a reason rather than omitting it", LocalApiTests.CapabilitiesReportsAnUnusableFeatureWithAReasonRatherThanOmittingIt)],
+        [new HarnessCase("capabilities requires a token", LocalApiTests.CapabilitiesRequiresAToken)],
+        [new HarnessCase("capabilities leaks no secret or path values", LocalApiTests.CapabilitiesLeaksNoSecretOrPathValues)]
     ];
 
     public static IEnumerable<object[]> Voice =>

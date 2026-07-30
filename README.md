@@ -96,9 +96,18 @@ organisation, and explicit control over what is kept and what is forgotten.
 
 A supervised local agent designed around explicit user control.
 
+The workbench is a status line, a pinned strip for whatever decision the agent
+is waiting on, and four tabs: Run, Changes, Workspace, History. The decision is
+never behind a tab, the panel opens on Run every time, and it never switches
+tabs under you.
+
 Features include:
 
 - Read-first workflow
+- A review queue that lists only what needs a decision now
+- A finished run that says what it did: files, commands, approvals, and what it
+  could not confirm
+- Capability text derived from the real tool set and this workspace's own rules
 - Workspace memory
 - Context packs
 - Safety gates
@@ -135,6 +144,8 @@ Includes:
 - Throughput
 - Deterministic quality checks
 - Ranking profiles, compared only across cases every model actually ran
+- Best across every suite, by mean per-suite standing, so a large suite cannot
+  outvote a small one and there is no winner when there cannot honestly be one
 - Historical comparisons
 - CSV / JSON / Markdown export
 - Managed model switching

@@ -934,6 +934,16 @@ public sealed class AgentService : IAgentService
         var state = await _store.LoadAsync(taskId, ct)
             ?? throw new InvalidOperationException("Agent task was not found.");
 
+        // A task with nothing pending has no decision to record (r26 01 1.2).
+        // Before this, an approval here appended a history record and set the
+        // status to Running, which un-completed a finished task and let the
+        // caller restart the agent loop on it. Nothing is written and the task
+        // is left exactly as it was found. This sits before the fingerprint
+        // block deliberately: that block treats a null pending action as a
+        // legitimate no-op, and it is a caller error instead.
+        if (state.PendingToolAction is null)
+            return new AgentApprovalResult(false, "This task has no action waiting for a decision.");
+
         // Binds the approval to the pending action as it exists right now,
         // not as it was when the UI rendered it (r23 4.1). A concurrent step,
         // a crash-restore race, or a tampered task_state.json could otherwise
@@ -1053,12 +1063,11 @@ public sealed class AgentService : IAgentService
         }
         else
         {
-            if (!approved && state.PendingToolAction is not null)
-                await RecordApprovalRejectionLessonAsync(state, options, state.PendingToolAction.ToolName, ct);
-
-            state.Status = approved ? AgentTaskStatus.Running : AgentTaskStatus.WaitingForUser;
-            if (!approved)
-                state.PendingToolAction = null;
+            // Rejection: the guard above guarantees there is a pending action
+            // here, so this branch is only ever the rejected case.
+            await RecordApprovalRejectionLessonAsync(state, options, state.PendingToolAction!.ToolName, ct);
+            state.Status = AgentTaskStatus.WaitingForUser;
+            state.PendingToolAction = null;
         }
         await _store.SaveAsync(state, ct);
         await _store.AppendLogAsync(taskId, $"approval recorded: {action} approved={approved}", ct);

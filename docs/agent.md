@@ -19,9 +19,17 @@ explicit user approval before it executes.
   task state. Initialization reconciles JSON task files back into the index.
 - Validates task IDs with a short alphanumeric, dash, and underscore allowlist
   before resolving task directories.
-- Shows a review queue for waiting or blocked tasks with approve/reject
-  actions for recorded approvals, plus an Open button that loads the queued
-  task into the workbench.
+- Shows a review queue of tasks that need a decision right now: those
+  `waiting_for_review` or `blocked`, and nothing else. A task that has been
+  approved in the past is not in the queue; its approvals live in the run
+  ledger and in that task's own approval labels. A row with a gated action
+  pending offers Approve and Reject; a row waiting on an answer or a blocked
+  run says so and offers Open, which loads the task into the workbench where
+  the reply and Continue boxes are. The queue refreshes itself whenever a run
+  pauses, so there is no manual refresh to remember.
+- An approval or rejection sent to a task with nothing pending is refused and
+  says so. It appends no approval record, changes no status, and never
+  restarts a finished run.
 - Shows a Recent Tasks list (status chip, goal, relative time, pending step
   count; sub-task children indented with a tag) so a completed task's
   report, a failed task's blockers, or an orphaned task is reachable after a
@@ -46,17 +54,69 @@ explicit user approval before it executes.
 - Surfaces relevant lessons from the self-learning store (see below).
 - Classifies risky actions before execution.
 
-The agent panel surfaces a compact summary strip with current task state, step
-count, goal, summary, recent task history, review queue counts, workspace
-memory counts, and retrieved context counts so the workbench is easy to scan
-at a glance.
+### Workbench layout
 
-A compact capability disclosure sits under the summary strip so the current
-scope is explicit: read-only tools run locally, writes and commands are
-approval-gated, and shell, network, and remote-control actions remain out of
-scope.
+The panel is a fixed status line, a pinned decision strip, and four tabs.
 
-The same panel includes a workspace file browser with query, list, preview,
+- **Status line.** One row: task status, step count, goal, the latest status
+  message, and the New task / Run Step / Stop controls. It is a fixed set of
+  scalars, so a long plan can no longer squeeze the working area toward zero.
+- **Decision strip.** Sits above the tabs and collapses to nothing when
+  nothing is waiting on you. It carries the review queue, the reply box, and
+  the Continue box. This is the rule that makes tabs safe here: the thing the
+  agent is waiting on is never behind a tab.
+- **Run.** Goal, workspace, model and RAG dataset; the Start Agent button; the
+  run outcome for a finished task; the agent's own response; sub-tasks and
+  plan; and the task state, context receipt and retrieved context, collapsed.
+- **Changes.** The draft patch queue and the run ledger (files, before/after,
+  commands, approvals, and Rewind run). Carries a count when patches are
+  waiting on you; no other tab has a badge.
+- **Workspace.** What the agent can do here, the workspace policy, the
+  workspace profile, the file browser with its draft patch composer, and
+  workspace memory. Re-analyse workspace and Save as workspace defaults are
+  here, next to what they write.
+- **History.** Recent tasks, new lessons from this task, the lesson store,
+  scenario evals, and the agent log.
+
+The panel opens on Run every time and never switches tabs on its own. A
+finished run lights the Changes badge and says so in the run outcome; it does
+not move the page under you.
+
+### What the agent can do here
+
+The Workspace tab's capability list is derived, not written down: it is built
+from the executor's actual tool set, this workspace's declared command
+recipes, its workspace policy, and whether an MCP bridge is configured. With
+no recipes declared it says commands cannot run here and names
+`.hermaeus/workspace.json` as where recipes are declared; with recipes
+declared it names them. With no MCP bridge it says the agent cannot reach
+outside the folder; with one it says calls go through the servers you
+configured and each one is gated. With no workspace selected it says the
+answer depends on the workspace, and that nothing runs without an approval you
+give.
+
+A test asserts that every tool the executor accepts is accounted for by
+exactly one line, so the text cannot drift away from the code again.
+
+### Did that actually work
+
+When a task reaches a terminal state, the Run tab shows a short outcome above
+the fold, composed entirely from the run ledger and the task's own state:
+
+- files changed, split created and edited, with the summed line delta,
+- commands run and how many failed (a failed command is reported even when the
+  task itself completed),
+- approvals asked for, split approved and rejected,
+- the unfinished-plan note when a terminal task still has pending steps,
+- the model's own reservations, and
+- a plain "this run changed no files and ran no commands" when that is what
+  happened.
+
+It computes no new facts, calls no service, and carries no score, grade or
+percentage. The model's own account of the run is separate, under "Agent
+response".
+
+The Workspace tab includes a workspace file browser with query, list, preview,
 and summary support so you can inspect local workspace files without leaving
 the workbench.
 
@@ -119,9 +179,9 @@ answered separately, on their own explicit approve/reject path.
   or finish. This is never a numeric confidence score - a self-reported
   percentage is theatre, not measurement - and never required or nagged
   for; an empty or absent list shows nothing. A task completing with
-  reservations shows "Completed with reservations" in the summary strip and
-  the recent-tasks list (status stays `Complete`); the reservations render
-  as their own list under the final answer, and orchestration synthesis
+  reservations shows "Completed with reservations" in the recent-tasks list
+  (status stays `Complete`); the reservations render as part of the Run tab's
+  run outcome for that task, and orchestration synthesis
   carries a child's reservations into the parent's `report.md` under a
   "Reservations" heading.
 - **Context receipt**: a collapsed-by-default "Context receipt" expander in
@@ -561,7 +621,7 @@ enforce the same write rules through the same code path; a Rewind of a file
 the current policy denies writing is refused per file with the policy named,
 and the ledger still shows it.
 
-The workbench's capability disclosure strip shows one line when a policy is
+The Workspace tab's capability list shows one line when a policy is
 active (for example "Workspace policy: reads limited to 2 rules, writes to
 2, 3 paths off limits."); expanding it lists the raw globs, read-only. There
 is no policy editor; the manifest is hand-edited, like `AllowedCommands`

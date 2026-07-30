@@ -13,6 +13,86 @@ From 0.29.0-alpha onward, every minor version is tagged and released on
 GitHub (see `docs/packaging.md` "Releases"); patch versions are tagged only
 for urgent hotfixes.
 
+## [0.33.0-alpha] - 2026-07-31
+
+Implements docs/review r26: the review queue is a queue, the Agent workbench
+has a shape, the panel says what it can do and whether the run worked, and
+benchmarks answer "best across every suite".
+
+### Fixed
+
+- **Approving a finished task un-completed it and spent tokens restarting it.**
+  The review queue listed every task that had ever been approved, not just
+  tasks needing a decision, and `AppendApprovalAsync` accepted an approval on a
+  task with nothing pending: it appended an approval record and set the task's
+  status back to `Running`, which the workbench then resumed the agent loop on.
+  The owner's report was "I can endlessly keep clicking approve"; each of those
+  clicks was writing to `task_state.json`. An approval or rejection with
+  nothing pending is now refused with a reason and changes nothing at all.
+- **The review queue lists only what needs a decision now**: tasks
+  `waiting_for_review` or `blocked`. Approval history is unchanged and still
+  visible in the run ledger and on each row. A queue row with no pending action
+  no longer renders Approve and Reject; it says whether it is waiting on a
+  reply or an instruction and offers Open.
+- **The queue refreshes itself** when a run pauses, after a run, a step, and a
+  resumed loop. The manual "Refresh Queue" button is gone, along with "Refresh
+  Memory", which could only ever have been a no-op.
+- **The Agent header could eat the window.** It was an `Auto` row holding the
+  stat tiles, the new-lessons strip, the capability notes, the full sub-task
+  list and the full plan, none of it inside a `ScrollViewer`, so a long plan
+  squeezed the working area toward zero height with no scrollbar to recover it.
+- `ServicesViewModelTests.Removing_a_managed_server_disposes_its_view_model`
+  drains the posted rebuild instead of waiting on a timeout, so it is
+  deterministic rather than probable under full-suite load.
+
+### Added
+
+- **The Agent workbench is four tabs** (Run, Changes, Workspace, History) under
+  a one-line status bar, each tab scrolling on its own. Every panel that
+  existed before still exists, one click away. The decision the agent is
+  waiting on lives in a pinned strip above the tabs and is never behind one.
+  The panel opens on Run every time, never switches tabs on its own, and only
+  the Changes tab carries a badge (pending patches, suppressed at zero).
+- **A finished run says what it did**, on the Run tab, composed from the run
+  ledger: files changed split created and edited with the line delta, commands
+  run and how many failed, approvals asked for and how they went, unfinished
+  plan steps, and the model's reservations. A run that changed nothing says so.
+  A failed command is reported even when the task status is `Complete`. No
+  score, no grade, no percentage.
+- **Capability text derived from the code it describes.** The five hardcoded
+  sentences under the old header are replaced by lines built from the
+  executor's real tool set, this workspace's declared command recipes, its
+  policy, and whether an MCP bridge is configured. A test asserts every tool
+  the executor accepts is classified by exactly one line, so it cannot drift
+  again.
+- **Best across every suite**, on the Benchmarks Insights tab. Each suite gets
+  its own leaderboard ranked by the same shared-case-set rule the overall board
+  uses, and the cross-suite winner is the model with the best mean position
+  across those suites, so each suite counts once and a 40 case suite cannot
+  outvote a 5 case suite. The card names the suites it rests on, shows the
+  leader's placing in each with the suite's full board one click away, and
+  names every suite and model it left out. Fewer than two comparable suites, or
+  no model present in all of them, produces no winner and a sentence saying
+  which case applies.
+- **`GET /v1/capabilities`** on the local API, deferred since r1. Reports the
+  routes it exposes, the app version, and per feature (chat, RAG, memory,
+  embeddings) whether it is usable right now with a reason when it is not. It
+  reports rather than probes: no model load, no server start, no network call.
+  It leaks no paths, keys, tokens or dataset names, and is authenticated and
+  traced like every other route.
+
+### Changed
+
+- The header's review count reads "N waiting on you" rather than "N queued
+  reviews", which is now true rather than merely worded differently.
+- "Save Memory" is "Save this run as a workspace note" and sits with the run
+  outcome it saves; "Explain Workspace" is "Re-analyse workspace" and sits on
+  the Workspace tab with the profile it rebuilds; "Save as Workspace Defaults"
+  moved next to the profile it writes.
+- `BenchmarkInsightsReport` gained `SuiteLeaderboards` and `CrossSuite` as
+  optional trailing parameters; a report constructed without them behaves
+  exactly as it did at 0.32.0.
+
 ## [0.32.0-alpha] - 2026-07-31
 
 Implements docs/review r25: conversation branching, one context receipt,
@@ -587,41 +667,3 @@ subsection. `docs/review/` archived to `docs/review/archived/r21/`.
   small-size treatment. Neither option is fully clean at 16x16 - fine
   medallion detail is tight at that size regardless of which mark is used;
   32px and up read clearly.
-
-## [0.26.0-alpha] - 2026-07-23
-
-### Changed
-
-- **Real Hermaeus branding replaces the placeholder art shipped in the r20
-  rename.** `docs/hermaeus-branding.png` and the new `docs/hermaeus-icons.png`
-  are the first illustrated brand sheets for the product; this release wires
-  their choices into the app instead of leaving them as reference-only mockups.
-- **App icon, taskbar icon, and system tray icon now use the "Tree Ring"
-  mark** (Option 4 of 4 on `docs/hermaeus-icons.png`: a gold "H" monogram with
-  a leaf sprout, set in a wood-grain medallion) instead of the placeholder
-  goggle-eye glyph: `hermaeus.ico` (16/32/48/256px), `hermaeus-app.png`, and
-  `hermaeus-tray.png` are all cropped and resized from the same source
-  artwork. Sizes at or below 32px use a contrast-boosted crop so the "H"
-  stays legible once the fine wood-grain texture anti-aliases into mud. The
-  unused `hermaeus-tray-dark.png`/`hermaeus-tray-light.png` fallback assets
-  were refreshed the same way and normalized to 256x256 (previously an
-  inconsistent 1254x1254 left over from the r20 rename).
-- **`Controls/MossIcon.axaml` redesigned** to match the illustrated Moss
-  character (round face, pointed ears, mushroom/leaf tuft, big eyes) instead
-  of the retired mechanical-tinkerer goggle design. Still plain Avalonia
-  shapes at 16x16 icon scale, no new rendering dependency.
-- **`docs/mascot.md` rewritten** to match the actual illustrated character
-  and personality ("Keeper of Knowledge": curious, diligent, loyal) instead
-  of the earlier "mechanical tinkerer" placeholder concept that predated any
-  real art. Documents the formal brand colour palette, typography, and why
-  Tree Ring (not the full Moss face) was chosen for the app icon.
-- **Brand colour palette and typography wired into the UI theme**
-  (`App.axaml`, `Styles/AppStyles.axaml`): FluentTheme's accent colors now
-  use the brand Forest green instead of Avalonia's default blue; the primary
-  send button uses Forest fill with Parchment text, the sidebar new-chat
-  button uses a Forest outline. Three brand typefaces are embedded under
-  `Assets/Fonts/` (Cinzel for headings, Source Sans 3 for body text,
-  JetBrains Mono for code) and applied app-wide - every hardcoded
-  `Consolas`/`Courier New`/`Cascadia Code` font-family reference across the
-  Desktop views was normalized to the embedded JetBrains Mono with the same
-  fallback chain. See `NOTICE.md` for font licensing (SIL OFL 1.1).

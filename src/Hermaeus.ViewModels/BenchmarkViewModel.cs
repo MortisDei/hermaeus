@@ -59,6 +59,20 @@ public partial class BenchmarkViewModel : ObservableObject
     /// beside it so the comparison is visible rather than asserted.</summary>
     public UiBoundCollection<ModelCaseComparisonViewModel> InsightsBestOverallCases { get; } = [];
 
+    /// <summary>
+    /// r26 doc 04: best across all suites, by mean per-suite standing. Distinct
+    /// from Best overall, which ranks on one shared case set; this one gives
+    /// each suite a single vote so a large suite cannot outvote a small one.
+    /// </summary>
+    [ObservableProperty] private string _crossSuiteLeaderName = string.Empty;
+    [ObservableProperty] private string _crossSuiteBasis = string.Empty;
+    [ObservableProperty] private string _crossSuiteExplanation = string.Empty;
+    public bool HasCrossSuiteLeader => CrossSuiteLeaderName.Length > 0;
+    partial void OnCrossSuiteLeaderNameChanged(string value) => OnPropertyChanged(nameof(HasCrossSuiteLeader));
+    public UiBoundCollection<CrossSuitePlacementViewModel> CrossSuitePlacements { get; } = [];
+    public UiBoundCollection<string> CrossSuiteCaveats { get; } = [];
+    public bool HasCrossSuiteCaveats => CrossSuiteCaveats.Count > 0;
+
     [ObservableProperty] private bool _isInsightsBreakdownExpanded;
     [ObservableProperty] private string _insightsRunnerUpName = string.Empty;
 
@@ -353,6 +367,7 @@ public partial class BenchmarkViewModel : ObservableObject
                   "this ranking blends quality with speed."
                 : string.Empty;
             BuildInsightsBreakdown(report);
+            BuildCrossSuiteCard(report);
 
             InsightsLeaderboards.Clear();
             foreach (var board in report.TagLeaderboards)
@@ -403,6 +418,39 @@ public partial class BenchmarkViewModel : ObservableObject
             runnerUpByCase?.TryGetValue(caseResult.CaseId, out paired);
             InsightsBestOverallCases.Add(new ModelCaseComparisonViewModel(caseResult, paired));
         }
+    }
+
+    /// <summary>
+    /// r26 doc 04 4.3: the cross-suite leader, the number of suites it rests
+    /// on, and its standing in each of them. When there is no honest answer the
+    /// card shows the explanation instead of a name.
+    /// </summary>
+    private void BuildCrossSuiteCard(BenchmarkInsightsReport report)
+    {
+        CrossSuitePlacements.Clear();
+        CrossSuiteCaveats.Clear();
+
+        var crossSuite = report.CrossSuiteOrNone;
+        var boards = report.SuiteLeaderboardsOrEmpty;
+
+        CrossSuiteExplanation = crossSuite.Explanation;
+        CrossSuiteLeaderName = crossSuite.Leader is null ? string.Empty : crossSuite.Leader.ModelName;
+        CrossSuiteBasis = crossSuite.HasAnswer
+            ? $"across {crossSuite.SuiteCount} suite(s), each counting once"
+            : string.Empty;
+
+        if (crossSuite.Leader is { } leader)
+        {
+            foreach (var placement in leader.Placements)
+            {
+                var board = boards.FirstOrDefault(b => string.Equals(b.SuiteId, placement.SuiteId, StringComparison.OrdinalIgnoreCase));
+                CrossSuitePlacements.Add(new CrossSuitePlacementViewModel(placement, board));
+            }
+        }
+
+        foreach (var caveat in crossSuite.Caveats)
+            CrossSuiteCaveats.Add(caveat);
+        OnPropertyChanged(nameof(HasCrossSuiteCaveats));
     }
 
     [RelayCommand]
@@ -701,6 +749,31 @@ public sealed class ModelAggregateViewModel
     public string StaleLabel => Aggregate.IsStale ? "Stale - consider re-running" : string.Empty;
     public bool IsStale => Aggregate.IsStale;
     public ModelAggregateViewModel(ModelAggregate aggregate) => Aggregate = aggregate;
+}
+
+/// <summary>
+/// One suite row under the cross-suite card (r26 doc 04 4.3): where the
+/// cross-suite leader placed in that suite, expandable to the suite's own full
+/// leaderboard.
+/// </summary>
+public sealed class CrossSuitePlacementViewModel
+{
+    public CrossSuitePlacementViewModel(CrossSuitePlacement placement, SuiteLeaderboard? board)
+    {
+        Placement = placement;
+        Ranked = board is null ? [] : [.. board.Ranked.Select(a => new ModelAggregateViewModel(a))];
+        BasisLabel = board is null || board.ComparisonBasisCaseCount <= 0
+            ? string.Empty
+            : $"ranked on {board.ComparisonBasisCaseCount} case(s) every model here ran";
+    }
+
+    public CrossSuitePlacement Placement { get; }
+    public string SuiteName => Placement.SuiteName;
+    public string PositionLabel => $"#{Placement.Position}";
+    public string ScoreLabel => $"{Placement.QualityScore:P0} quality, {Placement.TokensPerSecond:F1} tok/s";
+    public string BasisLabel { get; }
+    public IReadOnlyList<ModelAggregateViewModel> Ranked { get; }
+    public bool HasRanked => Ranked.Count > 0;
 }
 
 public sealed class TagLeaderboardViewModel
