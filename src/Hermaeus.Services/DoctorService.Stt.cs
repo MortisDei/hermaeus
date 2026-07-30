@@ -76,6 +76,51 @@ public sealed partial class DoctorService
             "Voice");
     }
 
+    /// <summary>
+    /// r25 doc 03 3.6: r24's wav2vec2 model is superseded by Whisper. Its files are
+    /// reported as no longer used, with their size and an explicit way to remove
+    /// them. They are never deleted automatically: the user chose to download
+    /// several hundred megabytes and silently throwing that away is not this app's
+    /// posture, even for a model it no longer uses.
+    ///
+    /// Returns null when there is nothing there, so a normal install shows no row.
+    /// </summary>
+    private DoctorCheck? CheckSupersededSpeechModel()
+    {
+        var directory = Hermaeus.Voice.NativeSpeechRecognitionProvider
+            .ResolveSupersededAssetsDirectory(_settings.Settings);
+        if (!Directory.Exists(directory))
+            return null;
+
+        long bytes;
+        try
+        {
+            bytes = new DirectoryInfo(directory)
+                .EnumerateFiles("*", SearchOption.AllDirectories)
+                .Sum(f => f.Length);
+        }
+        catch
+        {
+            return null;
+        }
+
+        if (bytes <= 0)
+            return null;
+
+        return BuildCheck(
+            "speech-recognition-superseded",
+            "Superseded speech recognition model",
+            DoctorCheckStatus.Info,
+            $"An older speech recognition model is still on disk ({bytes / 1024 / 1024} MB)",
+            $"Speech recognition now uses Whisper, which produces punctuation and casing. " +
+            $"The previous wav2vec2 model is no longer used and can be removed: {directory}. " +
+            "Nothing has been deleted.",
+            "Open Services",
+            false,
+            directory,
+            "Voice");
+    }
+
     public async Task<bool> InstallSpeechRecognitionAssetsAsync(IProgress<string> progress, CancellationToken ct = default)
     {
         if (_sttProviders?.GetActiveService() is not Hermaeus.Voice.NativeSpeechRecognitionProvider native)

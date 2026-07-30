@@ -65,11 +65,19 @@ cap is the fallback if this doc is cut (see doc 06).
 
 ## 3.1 Assets
 
-- Pin a Whisper ONNX export by repository, revision and file name. **Verify
-  the SHA256 by downloading and hashing at implementation time**, and
-  record the verification date in a comment exactly as
-  `Wav2Vec2OnnxModel.cs:25-32` and `KokoroOnnxModel` do. Do not copy a hash
-  from a listing, a README or this document.
+- Pin a Whisper ONNX export by repository, revision and file name, and record
+  the verification date in a comment as `KokoroOnnxModel` does. Do not copy a
+  hash out of a README or this document.
+
+  **How it was actually verified**, since the pack said "download and hash"
+  and that is only half right: the two large ONNX files are Git LFS objects,
+  and for those the Hugging Face tree API publishes `lfs.oid`, which IS the
+  content SHA256. That is the same mechanism r11's starter-model catalog and
+  r13's model manifest already use, precisely because downloading hundreds of
+  megabytes to compute a hash by hand is not practical. The four small JSON
+  assets are NOT LFS objects, so their `oid` is a git blob hash and not a
+  content hash at all; those were downloaded and hashed directly. Getting this
+  distinction wrong would pin four assets to values that can never match.
 - Whisper exports as separate graphs: an encoder, and a decoder that takes
   and returns `past_key_values` (some exports merge the with-past and
   without-past decoders into one graph with a flag). Either shape is fine;
@@ -101,12 +109,21 @@ Whisper needs 80-bin log-Mel spectrogram input, not raw samples:
   to 8 dB below the maximum, scaled to roughly [-1, 1].
 - Pad or trim to exactly 30 seconds, which is 3000 frames.
 
-This needs an FFT. There is none in the base class library and **no new
-NuGet package**. An iterative radix-2 complex FFT is about sixty lines and
-is completely pure, which makes it one of the most testable things in the
-codebase: check it against a hand-computed DFT for small inputs, check
-Parseval's identity on random input, check a pure tone lands in the
-expected bin.
+This needs a transform, and **the pack's original claim that a radix-2 FFT
+would do was wrong**, which is worth recording rather than quietly fixing:
+`n_fft` is 400 = 2^4 * 5^2, so it is not a power of two and radix-2 does not
+apply. Zero-padding to 512 is not a substitute either, because it computes a
+512-point DFT whose bins sit at different frequencies than the 201 bins the
+mel filterbank is defined over.
+
+The real choice is between a mixed-radix (2 and 5) transform and a direct DFT
+over only the 201 bins actually needed. Take the direct DFT with a precomputed
+twiddle table: 241M multiply-adds per 30-second window, a fraction of what the
+encoder consuming it costs, in exchange for code that is obviously correct.
+Still no new NuGet package, still completely pure, and still one of the most
+testable things in the codebase: check it against an independently computed
+DFT, check Parseval's identity, check a pure tone lands in the expected bin.
+If mel ever appears in a profile, mixed-radix is the optimization.
 
 Compute the mel filterbank from the standard formula at load time rather
 than embedding it as an opaque blob, so its shape, monotonically increasing

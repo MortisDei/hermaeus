@@ -35,6 +35,13 @@ public class SttSettings
     /// <summary>Dictation inserts the transcript at the cursor for editing; it never sends by itself.</summary>
     public bool InsertAtCursor { get; set; } = true;
 
+    /// <summary>
+    /// r25 doc 03 3.5: transcription language. Empty or "auto" lets the model
+    /// detect it, which is the default; a two-letter code forces it. The local
+    /// model is multilingual, so this is a real choice rather than a label.
+    /// </summary>
+    public string Language { get; set; } = "auto";
+
     /// <summary>Hands-free conversation mode (5.5), Chat only. Off by default.</summary>
     public bool HandsFreeEnabled { get; set; } = false;
 

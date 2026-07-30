@@ -132,6 +132,11 @@ public sealed partial class DoctorService : IDoctorService
         if (!OperatingSystem.IsLinux())
             checks.Add(CheckHotkeySupport());
 
+        // r25 doc 03 3.6: only appears when a superseded model is actually on disk.
+        var supersededSpeechModel = CheckSupersededSpeechModel();
+        if (supersededSpeechModel is not null)
+            checks.Add(supersededSpeechModel);
+
         var benchmarkAdvisory = await CheckBenchmarkAdvisoryAsync(ct);
         if (benchmarkAdvisory is not null)
             checks.Add(benchmarkAdvisory);

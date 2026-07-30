@@ -14,7 +14,21 @@ namespace Hermaeus.ViewModels;
 /// </summary>
 public partial class SttSettingsViewModel : ViewModelBase
 {
-    private const long MaxFileBytes = 200L * 1024 * 1024;
+    /// <summary>
+    /// r25 doc 03: stated as a duration, because that is what the user is holding.
+    ///
+    /// The old cap was 200 MB of bytes, about 1.7 hours of 16 kHz mono PCM16, fed
+    /// to wav2vec2 as ONE full-self-attention tensor. That was not a slow
+    /// transcription, it was an out-of-memory kill of the whole application,
+    /// reachable by picking an ordinary podcast file in a picker the app itself
+    /// offered. Whisper decodes fixed 30-second windows, so memory no longer grows
+    /// with length at all and this cap is about respecting the user's time rather
+    /// than about survival.
+    /// </summary>
+    private const int MaxAudioMinutes = 90;
+
+    private const long MaxFileBytes =
+        (long)MaxAudioMinutes * 60 * 16000 * 2;
 
     private readonly ISettingsService _settings;
     private readonly ISpeechRecognitionProviderRegistry _providers;
@@ -180,13 +194,16 @@ public partial class SttSettingsViewModel : ViewModelBase
             }
             if (info.Length > MaxFileBytes)
             {
-                TranscribeStatus = $"File is too large (max {MaxFileBytes / 1024 / 1024} MB).";
+                TranscribeStatus =
+                    $"That recording is longer than the {MaxAudioMinutes}-minute limit for a single transcription.";
                 return;
             }
 
             await using var stream = File.OpenRead(fullPath);
             var service = _providers.GetActiveService();
-            var result = await service.TranscribeAsync(stream, new SpeechTranscribeOptions());
+            var progress = new Progress<string>(message => RunOnUi(() => TranscribeStatus = message));
+            var result = await service.TranscribeAsync(
+                stream, new SpeechTranscribeOptions(Progress: progress));
 
             if (result.Error is not null)
             {
