@@ -77,9 +77,10 @@ The panel is a fixed status line, a pinned decision strip, and four tabs.
   rather than the age of the whole run, and it stays empty for the first
   second and a half so a fast step never flickers a placeholder.
 - **Decision strip.** Sits above the tabs and collapses to nothing when
-  nothing is waiting on you. It carries the review queue, the reply box, and
-  the Continue box. This is the rule that makes tabs safe here: the thing the
-  agent is waiting on is never behind a tab.
+  nothing is waiting on you. It carries the review queue, the reply box (with
+  the agent's actual question shown above it) and the Continue box. This is the
+  rule that makes tabs safe here: the thing the agent is waiting on is never
+  behind a tab.
 - **Run.** Goal, workspace, model and RAG dataset; the Start Agent button; the
   run outcome for a finished task; the agent's own response; sub-tasks and
   plan; and the task state, context receipt and retrieved context, collapsed.
@@ -163,6 +164,22 @@ proceeds, and Stop cancels mid-run at any point. A manual "Run step" advance is
 still available for stepping through a task one model call at a time. Nothing
 about this changes what is allowed to execute without approval; the loop only
 removes the need to click through every read-only step by hand.
+
+An unreadable model response does not stop the run. The response is recorded,
+a corrective note is appended to the transcript naming what was wrong with it,
+and the loop takes another step; three unreadable responses in a row still fail
+the task. Before this, one bad response synthesized an `ask_user`, which parked
+the task in `waiting_for_review` and showed the user a reply box for a question
+the agent had never asked, while the three-strike budget was unreachable
+because reaching it took three manual Run Step clicks.
+
+A response that names a tool in `next_action.type` (for example
+`"type": "set_plan"` with a null `tool_name`) is repaired into the protocol's
+own shape and executed, rather than being rejected as unparseable. This is a
+common local-model mistake and the response is otherwise complete and valid.
+The repair corrects the shape of the request, never its authority: the safety
+gate classifies the resulting tool exactly as if the model had named it
+correctly, so a repaired action can no more skip approval than any other.
 
 A task waiting on `ask_user` shows a reply box in the workbench; answering it
 appends the reply to the transcript and resumes the run, the same

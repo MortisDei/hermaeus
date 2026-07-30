@@ -18,6 +18,8 @@ public partial class BenchmarkViewModel : ObservableObject
     private readonly IVoiceOrchestrator? _voice;
     private CancellationTokenSource? _runCts;
     private bool _isLoading;
+    /// <summary>Set while the app reassigns SelectedRun itself, so a bookkeeping selection never moves the user's tab.</summary>
+    private bool _suppressRunDetailJump;
     private Task? _loadTask;
 
     public UiBoundCollection<BenchmarkSuite> Suites { get; } = [];
@@ -491,9 +493,24 @@ public partial class BenchmarkViewModel : ObservableObject
             Runs.Add(run);
 
         UpdateRankedRuns(runs);
-        if (SelectedRun is not null && Runs.All(r => r.Id != SelectedRun.Id))
-            SelectedRun = null;
-        SelectedRun ??= Runs.FirstOrDefault();
+
+        // Reselecting a run here is bookkeeping, not the user asking for it.
+        // Picking a different suite reloads the runs, which reassigned
+        // SelectedRun, which OnSelectedRunChanged could not tell apart from a
+        // row click, so choosing a suite threw the user onto the Run Detail
+        // tab when they were reading Per-Suite Rankings.
+        _suppressRunDetailJump = true;
+        try
+        {
+            if (SelectedRun is not null && Runs.All(r => r.Id != SelectedRun.Id))
+                SelectedRun = null;
+            SelectedRun ??= Runs.FirstOrDefault();
+        }
+        finally
+        {
+            _suppressRunDetailJump = false;
+        }
+
         ExportAllRunsCommand.NotifyCanExecuteChanged();
     }
 
@@ -567,9 +584,10 @@ public partial class BenchmarkViewModel : ObservableObject
             SelectedResults.Add(result);
         SelectedResult = SelectedResults.FirstOrDefault();
 
-        // Only jump tabs for a deliberate selection (row click, run/rerun completing),
-        // not the initial-load default pick in ReloadRunsAsync.
-        if (!_isLoading)
+        // Only jump tabs for a deliberate selection: a row click, or a run or
+        // rerun the user just started finishing. Never for a selection the app
+        // made on its own while reloading (initial load, or a suite change).
+        if (!_isLoading && !_suppressRunDetailJump)
             SelectedTabIndex = RunDetailTabIndex;
     }
 

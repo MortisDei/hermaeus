@@ -21,6 +21,40 @@ benchmarks answer "best across every suite".
 
 ### Fixed
 
+- **A valid model response was rejected as unparseable JSON, stalling the run.**
+  A local model that names a tool in `next_action.type` (`"type": "set_plan"`,
+  `"tool_name": null`) produced a complete, well-formed response that the
+  strict enum threw out whole. The user was told the response "could not be
+  parsed as valid JSON" when it parsed fine, and the run stopped. Observed
+  eight times across two real tasks. That one shape is now repaired into the
+  protocol's own form and executed. The repair corrects the shape of the
+  request, never its authority: the safety gate classifies the resulting tool
+  exactly as if the model had named it correctly.
+- **An unreadable response asked the user a question that did not exist.** It
+  synthesized an `ask_user`, which parked the task in `waiting_for_review` and
+  showed a reply box with nothing to reply to, and stopped the autonomous loop
+  dead. It also made the existing three-strike budget unreachable, since
+  reaching it took three manual Run Step clicks. The loop now retries by
+  itself, with a corrective note appended to the transcript telling the model
+  what was wrong; three unreadable responses in a row still fail the task.
+- **The agent's question was never shown.** The planner's `user_message` went
+  only to the log and the transcript, so a task paused on a question rendered
+  a reply box with no question next to it. It is persisted on the task now and
+  shown above the reply box.
+- **A conversation title overran the timestamp and the details button** in the
+  sidebar. The title sat in a horizontal `StackPanel`, which measures children
+  with infinite width, so `TextTrimming` never fired. It now wraps to at most
+  two lines and then ellipsizes.
+- **The cursor flickered between hand and arrow** on the boundary of a nav bar
+  icon. The 4px `Spacing` between those buttons was dead space with a
+  different cursor, so the smallest movement on an edge flipped back and
+  forth. The buttons now carry that gap as internal padding instead, making
+  the row one continuous hand-cursor region.
+- **Choosing a benchmark suite threw the user onto the Run Detail tab.**
+  Changing suite reloads the runs, which reassigns the selected run, which was
+  indistinguishable from the user clicking a run row. Selections the app makes
+  for its own bookkeeping no longer move the tab; a row click and a finished
+  run still do.
 - **Approving a finished task un-completed it and spent tokens restarting it.**
   The review queue listed every task that had ever been approved, not just
   tasks needing a decision, and `AppendApprovalAsync` accepted an approval on a

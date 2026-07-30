@@ -323,6 +323,16 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
 - While a run is in flight the status line shows a progress bar and a rotating
   activity line naming the current step and how long it has been going, so a
   long model call no longer looks like a hung app.
+- When the agent asks a question, the question itself is shown above the reply
+  box. It previously reached only the log and the transcript, so the workbench
+  asked for an answer without saying what had been asked.
+- An unreadable model response is retried automatically with a corrective note
+  instead of parking the task on a question it never asked; three in a row
+  still fail it. A response that names a tool in the action's `type` field is
+  repaired into the protocol's shape and executed, which is a common
+  local-model mistake in an otherwise valid response. The repair changes the
+  shape of the request, never its authority: the safety gate still classifies
+  the tool exactly as before.
 - A finished run says what it did, from the run ledger: files changed (split
   created and edited, with the line delta), commands run and how many failed,
   approvals asked for and how they went, any unfinished plan steps, and the

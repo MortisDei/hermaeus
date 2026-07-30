@@ -569,6 +569,28 @@ public sealed class AgentService : IAgentService
             state.Reservations = response.Reservations?.Where(r => !string.IsNullOrWhiteSpace(r)).Select(r => r.Trim()).ToList() ?? [];
         }
 
+        if (parseFailed && state.ConsecutiveStepErrors < 3)
+        {
+            // An unreadable response is the model's problem to fix, not the
+            // user's. The synthesized response above is an ask_user, which set
+            // the task WaitingForUser and stopped the autonomous loop dead -
+            // so the user was shown "the agent is waiting for your reply" with
+            // no question to answer, and the three-strike budget below was
+            // effectively unreachable because reaching it needed three manual
+            // Run Step clicks. Stay Running so the loop takes another step; the
+            // corrective note appended to the transcript tells the model what
+            // was wrong with the last one.
+            state.Status = AgentTaskStatus.Running;
+            response.UserMessage =
+                $"The model's last response could not be read (attempt {state.ConsecutiveStepErrors} of 3). Trying again.";
+            await _store.AppendTranscriptEntryAsync(taskId, new AgentTranscriptEntry(
+                state.StepCount, "user", null,
+                "Your last response could not be parsed. Reply with ONLY the JSON object described in the system "
+                + "prompt: no prose around it, and next_action.type must be exactly one of none, tool, ask_user or "
+                + "final, with the tool's name in next_action.tool_name.",
+                DateTime.UtcNow), ct);
+        }
+
         if (parseFailed && state.ConsecutiveStepErrors >= 3)
         {
             state.Status = AgentTaskStatus.Failed;
@@ -586,6 +608,9 @@ public sealed class AgentService : IAgentService
             ? response.ThoughtSummary
             : response.UserMessage;
         await _store.AppendLogAsync(taskId, logEntry, ct);
+        // Persisted, not just logged: on an ask_user step this IS the question,
+        // and the workbench had no way to show it.
+        state.LastUserMessage = response.UserMessage ?? string.Empty;
 
         state.StepCount++;
         if (state.StepCount == 1)
@@ -1479,7 +1504,26 @@ public sealed class AgentService : IAgentService
     private static AgentPlannerResponse ParseResponse(string raw)
     {
         var json = ExtractJson(raw);
-        var response = JsonSerializer.Deserialize<AgentPlannerResponse>(json, AgentJson.Options);
+        AgentPlannerResponse? response;
+        try
+        {
+            response = JsonSerializer.Deserialize<AgentPlannerResponse>(json, AgentJson.Options);
+        }
+        catch (JsonException)
+        {
+            // The document itself is fine; one field is not. Overwhelmingly the
+            // field is next_action.type carrying a TOOL NAME ("set_plan")
+            // instead of one of the four action kinds, with tool_name left
+            // null. The strict enum rejected the whole response for it, the
+            // step was reported to the user as unparseable JSON (which it was
+            // not), and the run stalled. Repair that one shape and retry once;
+            // anything else still throws.
+            if (!TryRepairActionType(json, out var repaired))
+                throw;
+
+            response = JsonSerializer.Deserialize<AgentPlannerResponse>(repaired, AgentJson.Options);
+        }
+
         return response ?? new AgentPlannerResponse
         {
             ThoughtSummary = "The model returned an empty response.",
@@ -1492,6 +1536,68 @@ public sealed class AgentService : IAgentService
             },
             UserMessage = "The agent could not parse the model response."
         };
+    }
+
+    /// <summary>
+    /// The four action kinds the protocol defines. Anything else in
+    /// <c>next_action.type</c> is the model naming a tool where it should have
+    /// said "tool".
+    /// </summary>
+    private static readonly HashSet<string> KnownActionKinds =
+        new(["none", "tool", "ask_user", "final"], StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Rewrites <c>next_action.type: "&lt;tool name&gt;"</c> into the protocol's
+    /// own shape (<c>type: "tool"</c>, <c>tool_name: "&lt;tool name&gt;"</c>).
+    ///
+    /// Observed against real local-model runs: four stalls in one task, all of
+    /// them a complete, well-formed response whose only fault was
+    /// <c>"type": "set_plan", "tool_name": null</c>. The safety gate still
+    /// classifies whatever tool comes out of this exactly as if the model had
+    /// named it correctly, so a repaired response can no more skip approval
+    /// than an unrepaired one; only the shape of the request is corrected,
+    /// never its authority.
+    ///
+    /// Returns false, changing nothing, when the type is already a known kind
+    /// (so the failure was something else), when tool_name is already set to
+    /// something different (ambiguous, and guessing at authority is not this
+    /// method's job), or when the document cannot be read at all.
+    /// </summary>
+    internal static bool TryRepairActionType(string json, out string repaired)
+    {
+        repaired = json;
+        try
+        {
+            var node = System.Text.Json.Nodes.JsonNode.Parse(json);
+            if (node?["next_action"] is not System.Text.Json.Nodes.JsonObject action)
+                return false;
+
+            if (action["type"]?.GetValue<string>() is not { Length: > 0 } declared)
+                return false;
+
+            if (KnownActionKinds.Contains(declared))
+                return false;
+
+            var existingToolName = action["tool_name"]?.GetValue<string>();
+            if (!string.IsNullOrWhiteSpace(existingToolName)
+                && !string.Equals(existingToolName, declared, StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            action["type"] = "tool";
+            action["tool_name"] = declared;
+            repaired = node!.ToJsonString();
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+        catch (InvalidOperationException)
+        {
+            // A non-string type/tool_name (a number, an object). Not the shape
+            // this repairs.
+            return false;
+        }
     }
 
     /// <summary>

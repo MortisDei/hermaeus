@@ -677,6 +677,14 @@ public partial class AgentViewModel : ViewModelBase
     public bool HasPlanRevision => PlanRevisedLabel.Length > 0;
     /// <summary>True when the task is asking a question, not waiting on a tool approval; only then does the reply box apply.</summary>
     public bool IsWaitingForReply => CurrentTask is { Status: AgentTaskStatus.WaitingForUser, PendingToolAction: null };
+
+    /// <summary>
+    /// What the agent actually asked, shown with the reply box. The question
+    /// only ever reached the log and the transcript, so the workbench offered
+    /// somewhere to answer without saying what the question was.
+    /// </summary>
+    public string CurrentQuestion => CurrentTask?.LastUserMessage ?? string.Empty;
+    public bool HasCurrentQuestion => CurrentQuestion.Length > 0;
     public int RecentTaskCount => RecentTasks.Count;
     public int ReviewQueueCount => ReviewQueue.Count;
 
@@ -2176,6 +2184,8 @@ public partial class AgentViewModel : ViewModelBase
         NewTaskCommand.NotifyCanExecuteChanged();
         ContinueTaskCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(IsWaitingForReply));
+        OnPropertyChanged(nameof(CurrentQuestion));
+        OnPropertyChanged(nameof(HasCurrentQuestion));
         OnPropertyChanged(nameof(CanShowNewTaskButton));
         OnPropertyChanged(nameof(IsTaskTerminal));
         OnPropertyChanged(nameof(PrematureCompleteNote));

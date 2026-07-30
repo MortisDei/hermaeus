@@ -115,6 +115,17 @@ public sealed class AgentTaskState
     public List<AgentDraftPatch> DraftPatches { get; set; } = [];
     public AgentPendingToolAction? PendingToolAction { get; set; }
     public string Summary { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The model's own last message to the user (the planner's
+    /// <c>user_message</c>), which is what an <c>ask_user</c> step's question
+    /// actually is. It used to go only to the log and the transcript, so a
+    /// task paused on a question showed a reply box with no question next to
+    /// it and the user had no way to see what they were being asked. Empty
+    /// for pre-existing task files (JSON-additive).
+    /// </summary>
+    public string LastUserMessage { get; set; } = string.Empty;
+
     public int StepCount { get; set; }
     /// <summary>
     /// Consecutive steps in a row whose model response could not be parsed

@@ -39,8 +39,24 @@
                                   Width="18" Height="18" />
                     </Button>
 
+                    <!-- Spacing="4" between these buttons was a dead strip that
+                         reverted the cursor to an arrow, so moving along the row
+                         (or the smallest jitter on a button's edge) flickered
+                         hand/arrow/hand. The buttons now touch and carry the same
+                         gap as internal padding, so the whole row is one
+                         continuous hand-cursor region and there is no boundary to
+                         flicker on. Cursor on the panel covers the rounding at the
+                         seams. Scoped here rather than changing .icon-btn
+                         globally: every other icon button in the app keeps its
+                         current padding. -->
                     <StackPanel Grid.Column="1" Orientation="Horizontal"
-                                HorizontalAlignment="Center" Spacing="4">
+                                HorizontalAlignment="Center" Spacing="0"
+                                Cursor="Hand">
+                        <StackPanel.Styles>
+                            <Style Selector="Button.icon-btn">
+                                <Setter Property="Padding" Value="8,6" />
+                            </Style>
+                        </StackPanel.Styles>
 
                         <Button Classes="icon-btn" Command="{Binding ShowChatPanelCommand}"
                                 ToolTip.Tip="Chat">

@@ -193,6 +193,15 @@
                     <TextBlock Text="The agent is waiting for your reply"
                                FontWeight="SemiBold"
                                FontSize="12" />
+                    <!-- The question itself. It used to reach only the log and the
+                         transcript, so this box asked for an answer without ever
+                         saying what the question was. -->
+                    <SelectableTextBlock Text="{Binding CurrentQuestion}"
+                                         IsVisible="{Binding HasCurrentQuestion}"
+                                         FontSize="12"
+                                         Opacity="0.85"
+                                         MaxHeight="160"
+                                         TextWrapping="Wrap" />
                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
                         <TextBox Grid.Column="0"
                                  Text="{Binding ReplyText}"
