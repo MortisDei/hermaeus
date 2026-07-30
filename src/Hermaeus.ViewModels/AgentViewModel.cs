@@ -932,6 +932,14 @@ public partial class AgentViewModel : ViewModelBase
         CurrentTask = await _store.LoadAsync(taskId);
         _openedTaskId = CurrentTask?.TaskId;
 
+        // r25 follow-up: r16 1.4 persists the workspace a task was created against,
+        // precisely so an approval executes where it was approved. Resuming the task
+        // never restored it into the workbench, so the box still showed whatever was
+        // there before and the user had to remember and retype it.
+        if (CurrentTask?.WorkspaceRoot is { Length: > 0 } persistedRoot
+            && !string.Equals(WorkspaceRoot, persistedRoot, StringComparison.OrdinalIgnoreCase))
+            WorkspaceRoot = persistedRoot;
+
         // Opening a child directly (recent-tasks list, review queue Open) has
         // no other cue that it belongs to a parent orchestration run (r16
         // 03-workbench-and-desktop.md 3.1's "clicking a child shows its

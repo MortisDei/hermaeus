@@ -307,7 +307,7 @@ public sealed class AgentService : IAgentService
             state.TotalStepErrors++;
             response = new AgentPlannerResponse
             {
-                ThoughtSummary = "The model's response could not be parsed as valid JSON.",
+                ThoughtSummary = DescribeParseFailure(raw.ToString()),
                 CurrentStep = state.ActiveStep,
                 NextAction = new AgentNextAction
                 {
@@ -317,6 +317,25 @@ public sealed class AgentService : IAgentService
                 },
                 UserMessage = "The agent could not parse the model's response."
             };
+
+            // r25 follow-up: the raw response was discarded here, so a parse
+            // failure was undiagnosable after the fact. The transcript records the
+            // summary, not the model's actual output, and the runtime log recorded
+            // only that it happened. Trace a bounded excerpt of both ends: a
+            // truncation shows up as a response that stops mid-structure, which is
+            // invisible from the summary alone.
+            var rawText = raw.ToString();
+            await _store.AppendTraceAsync(state.TaskId, new
+            {
+                task_id = state.TaskId,
+                step = state.StepCount,
+                @event = "parse_failed",
+                diagnosis = response.ThoughtSummary,
+                raw_length = rawText.Length,
+                raw_head = Excerpt(rawText, fromStart: true),
+                raw_tail = Excerpt(rawText, fromStart: false),
+                logged_at = DateTime.UtcNow
+            }, ct);
         }
         ApplyResponse(state, response);
         await RecordStatedLessonsAsync(state, options, response, ct);
@@ -1471,6 +1490,52 @@ public sealed class AgentService : IAgentService
             },
             UserMessage = $"Requested tool {call.Name}."
         };
+    }
+
+    /// <summary>
+    /// r25 follow-up: "could not be parsed as valid JSON" told the user nothing
+    /// they could act on, and the three underlying causes need three different
+    /// responses from them. Classifies which one it was.
+    ///
+    /// The extraction in <see cref="ExtractJson"/> already strips markdown fences
+    /// and brace-matches, so reaching here means the output was genuinely not
+    /// recoverable rather than merely untidy.
+    /// </summary>
+    /// <summary>Bounded excerpt so a huge malformed response cannot bloat the trace file.</summary>
+    private const int ParseFailureExcerptChars = 600;
+
+    internal static string Excerpt(string text, bool fromStart)
+    {
+        var trimmed = (text ?? string.Empty).Trim();
+        if (trimmed.Length <= ParseFailureExcerptChars)
+            return fromStart ? trimmed : string.Empty;
+
+        return fromStart
+            ? trimmed[..ParseFailureExcerptChars]
+            : trimmed[^ParseFailureExcerptChars..];
+    }
+
+    internal static string DescribeParseFailure(string raw)
+    {
+        var trimmed = (raw ?? string.Empty).Trim();
+
+        if (trimmed.Length == 0)
+            return "The model returned an empty response. If this repeats, the runtime may have "
+                + "stopped mid-generation; check the Services log for the model server.";
+
+        if (!trimmed.Contains('{'))
+            return "The model replied in prose instead of the JSON action format it was asked for. "
+                + "Smaller local models do this; a model with stronger instruction following, or one "
+                + "that supports native tool calling, avoids it.";
+
+        var opens = trimmed.Count(c => c == '{');
+        var closes = trimmed.Count(c => c == '}');
+        if (opens > closes)
+            return "The model's JSON response was cut off before it finished "
+                + $"({opens} opening braces to {closes} closing). This is usually the response token "
+                + "limit; raise it for the agent model and try again.";
+
+        return "The model's response could not be parsed as valid JSON.";
     }
 
     private static string ExtractJson(string raw)

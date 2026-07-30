@@ -55,6 +55,49 @@ public partial class SttSettingsViewModel : ViewModelBase
         ? "Microphone available."
         : _audioCapture?.UnavailableReason ?? "No microphone checked.";
 
+    /// <summary>
+    /// r25 follow-up: whether the local model is actually on disk. The card had no
+    /// such state at all, so "Install model" sat there unconditionally and was
+    /// still sitting there after a successful install.
+    /// </summary>
+    public bool IsModelInstalled
+    {
+        get
+        {
+            try
+            {
+                return _providers.GetActiveService().IsAvailable;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+    }
+
+    public string ModelStatus => IsModelInstalled
+        ? "Speech recognition model installed."
+        : "Speech recognition model is not installed.";
+
+    /// <summary>
+    /// r25 follow-up: installing is a Doctor action. Doctor is where this app's
+    /// "something is missing, fix it" actions already live, and it already carries
+    /// a speech-recognition check with its own install fix, so Services offering a
+    /// second, independent install button meant two entry points where only one
+    /// reported progress or completion. Services now reports state and hands off.
+    /// </summary>
+    public Action<string>? RequestNavigate { get; set; }
+
+    [RelayCommand]
+    private void OpenDoctorToInstall() => RequestNavigate?.Invoke("doctor");
+
+    /// <summary>Re-reads model presence. Called on load and after Doctor reports an install.</summary>
+    public void RefreshModelStatus()
+    {
+        OnPropertyChanged(nameof(IsModelInstalled));
+        OnPropertyChanged(nameof(ModelStatus));
+    }
+
     /// <summary>Wired by the View's code-behind to a native file picker filtered to .wav.</summary>
     public Func<Task<string?>>? RequestAudioFilePicker { get; set; }
     public Func<string, Task>? RequestCopyToClipboard { get; set; }
@@ -102,6 +145,7 @@ public partial class SttSettingsViewModel : ViewModelBase
             Devices.Add(device);
         OnPropertyChanged(nameof(MicrophoneAvailable));
         OnPropertyChanged(nameof(MicrophoneStatus));
+        RefreshModelStatus();
     }
 
     partial void OnSttEnabledChanged(bool value) => SaveIfNotLoading();

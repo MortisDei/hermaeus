@@ -319,6 +319,93 @@
                         </ScrollViewer>
                     </StackPanel>
                 </Border>
+                <!-- r25 follow-up: the review queue sits between the agent's response and
+                     the reply box, because it is the action the response is asking for. It
+                     used to live far below the Task State and Reservations expanders, so a
+                     run waiting on an approval looked like a run that had simply stalled
+                     unless the user thought to scroll. Hidden entirely when the queue is
+                     empty, so it costs nothing on a task waiting for nothing. -->
+                <Expander Header="Review Queue" HorizontalAlignment="Stretch" IsExpanded="True"
+                          IsVisible="{Binding HasReviewQueue}">
+                    <ItemsControl ItemsSource="{Binding ReviewQueue}" Margin="0,8,0,0">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="6"
+                                        Padding="10"
+                                        Margin="0,0,0,6">
+                                    <StackPanel Spacing="3">
+                                        <Grid ColumnDefinitions="*,Auto">
+                                            <TextBlock Grid.Column="0"
+                                                       Text="{Binding Goal}"
+                                                       FontWeight="SemiBold"
+                                                       FontSize="13"
+                                                       TextWrapping="Wrap" />
+                                            <TextBlock Grid.Column="1"
+                                                       Text="{Binding StatusLabel}"
+                                                       FontSize="11"
+                                                       Opacity="0.5" />
+                                        </Grid>
+                                        <TextBlock Text="{Binding ActiveStep}"
+                                                   FontSize="11"
+                                                   Opacity="0.6"
+                                                   TextWrapping="Wrap" />
+                                        <TextBlock Text="{Binding ParentGoalLabel}"
+                                                   FontSize="11"
+                                                   FontStyle="Italic"
+                                                   Opacity="0.6"
+                                                   TextWrapping="Wrap"
+                                                   IsVisible="{Binding IsSubTask}" />
+                                        <TextBlock Text="{Binding Summary}"
+                                                   FontSize="11"
+                                                   Opacity="0.5"
+                                                   TextWrapping="Wrap" />
+                                        <TextBlock Text="{Binding ApprovalLabel}"
+                                                   FontSize="11"
+                                                   Opacity="0.55" />
+                                        <TextBlock Text="{Binding LatestApprovalLabel}"
+                                                   FontSize="11"
+                                                   Opacity="0.45" />
+                                        <StackPanel Spacing="2" IsVisible="{Binding HasPendingAction}">
+                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                <Border CornerRadius="4" Padding="6,1" Background="{DynamicResource SubtleFillColorSecondaryBrush}">
+                                                    <TextBlock Text="{Binding PendingToolName}" FontSize="10" FontFamily="{DynamicResource AppMonoFont}" />
+                                                </Border>
+                                                <Border CornerRadius="4" Padding="6,1" Background="{DynamicResource SubtleFillColorSecondaryBrush}">
+                                                    <TextBlock Text="{Binding PendingRiskLabel}" FontSize="10" FontWeight="SemiBold" />
+                                                </Border>
+                                            </StackPanel>
+                                            <TextBlock Text="{Binding PendingReason}" FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
+                                            <TextBlock Text="{Binding RecipePreview}" FontSize="11" Opacity="0.75" TextWrapping="Wrap"
+                                                       FontFamily="{DynamicResource AppMonoFont}" IsVisible="{Binding HasRecipePreview}" />
+                                        </StackPanel>
+                                        <TextBlock Text="{Binding DifferentWorkspaceLabel}"
+                                                   FontSize="10"
+                                                   Opacity="0.5"
+                                                   IsVisible="{Binding HasDifferentWorkspace}"
+                                                   ToolTip.Tip="This task's own workspace, shown because it differs from the active one. Approvals execute against the task's workspace, not the active one." />
+                                        <StackPanel Orientation="Horizontal" Spacing="8" x:CompileBindings="False">
+                                            <Button Content="Approve"
+                                                    ToolTip.Tip="Approves the pending action shown above (if any) and resumes this task."
+                                                    Command="{Binding DataContext.ApproveReviewCommand, ElementName=Root}"
+                                                    CommandParameter="{Binding}" />
+                                            <Button Content="Reject"
+                                                    ToolTip.Tip="Denies the pending action shown above (if any). The task stays paused."
+                                                    Command="{Binding DataContext.RejectReviewCommand, ElementName=Root}"
+                                                    CommandParameter="{Binding}" />
+                                            <Button Content="Open"
+                                                    Command="{Binding DataContext.LoadTaskCommand, ElementName=Root}"
+                                                    CommandParameter="{Binding TaskId}"
+                                                    ToolTip.Tip="Loads this task into the workbench above (its own goal, plan, and reply box)." />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </Expander>
+
 
                 <!-- r24: the reply/continue boxes are the immediate next action after
                      reading the agent's response, so they sit directly below it - the
@@ -922,86 +1009,6 @@
                                              IconSize="28"
                                              IsVisible="{Binding !HasTaskHistory}" Margin="0,8,0,0" />
                   </StackPanel>
-                </Expander>
-
-                <Expander Header="Review Queue" HorizontalAlignment="Stretch" IsExpanded="True">
-                    <ItemsControl ItemsSource="{Binding ReviewQueue}" Margin="0,8,0,0">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
-                                        BorderThickness="1"
-                                        CornerRadius="6"
-                                        Padding="10"
-                                        Margin="0,0,0,6">
-                                    <StackPanel Spacing="3">
-                                        <Grid ColumnDefinitions="*,Auto">
-                                            <TextBlock Grid.Column="0"
-                                                       Text="{Binding Goal}"
-                                                       FontWeight="SemiBold"
-                                                       FontSize="13"
-                                                       TextWrapping="Wrap" />
-                                            <TextBlock Grid.Column="1"
-                                                       Text="{Binding StatusLabel}"
-                                                       FontSize="11"
-                                                       Opacity="0.5" />
-                                        </Grid>
-                                        <TextBlock Text="{Binding ActiveStep}"
-                                                   FontSize="11"
-                                                   Opacity="0.6"
-                                                   TextWrapping="Wrap" />
-                                        <TextBlock Text="{Binding ParentGoalLabel}"
-                                                   FontSize="11"
-                                                   FontStyle="Italic"
-                                                   Opacity="0.6"
-                                                   TextWrapping="Wrap"
-                                                   IsVisible="{Binding IsSubTask}" />
-                                        <TextBlock Text="{Binding Summary}"
-                                                   FontSize="11"
-                                                   Opacity="0.5"
-                                                   TextWrapping="Wrap" />
-                                        <TextBlock Text="{Binding ApprovalLabel}"
-                                                   FontSize="11"
-                                                   Opacity="0.55" />
-                                        <TextBlock Text="{Binding LatestApprovalLabel}"
-                                                   FontSize="11"
-                                                   Opacity="0.45" />
-                                        <StackPanel Spacing="2" IsVisible="{Binding HasPendingAction}">
-                                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                                <Border CornerRadius="4" Padding="6,1" Background="{DynamicResource SubtleFillColorSecondaryBrush}">
-                                                    <TextBlock Text="{Binding PendingToolName}" FontSize="10" FontFamily="{DynamicResource AppMonoFont}" />
-                                                </Border>
-                                                <Border CornerRadius="4" Padding="6,1" Background="{DynamicResource SubtleFillColorSecondaryBrush}">
-                                                    <TextBlock Text="{Binding PendingRiskLabel}" FontSize="10" FontWeight="SemiBold" />
-                                                </Border>
-                                            </StackPanel>
-                                            <TextBlock Text="{Binding PendingReason}" FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
-                                            <TextBlock Text="{Binding RecipePreview}" FontSize="11" Opacity="0.75" TextWrapping="Wrap"
-                                                       FontFamily="{DynamicResource AppMonoFont}" IsVisible="{Binding HasRecipePreview}" />
-                                        </StackPanel>
-                                        <TextBlock Text="{Binding DifferentWorkspaceLabel}"
-                                                   FontSize="10"
-                                                   Opacity="0.5"
-                                                   IsVisible="{Binding HasDifferentWorkspace}"
-                                                   ToolTip.Tip="This task's own workspace, shown because it differs from the active one. Approvals execute against the task's workspace, not the active one." />
-                                        <StackPanel Orientation="Horizontal" Spacing="8" x:CompileBindings="False">
-                                            <Button Content="Approve"
-                                                    ToolTip.Tip="Approves the pending action shown above (if any) and resumes this task."
-                                                    Command="{Binding DataContext.ApproveReviewCommand, ElementName=Root}"
-                                                    CommandParameter="{Binding}" />
-                                            <Button Content="Reject"
-                                                    ToolTip.Tip="Denies the pending action shown above (if any). The task stays paused."
-                                                    Command="{Binding DataContext.RejectReviewCommand, ElementName=Root}"
-                                                    CommandParameter="{Binding}" />
-                                            <Button Content="Open"
-                                                    Command="{Binding DataContext.LoadTaskCommand, ElementName=Root}"
-                                                    CommandParameter="{Binding TaskId}"
-                                                    ToolTip.Tip="Loads this task into the workbench above (its own goal, plan, and reply box)." />
-                                        </StackPanel>
-                                    </StackPanel>
-                                </Border>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
                 </Expander>
 
                 <Expander Header="Scenario Evals" HorizontalAlignment="Stretch" IsExpanded="False">
