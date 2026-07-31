@@ -131,8 +131,10 @@ small items, including a README that has been nine releases out of date.
 - Moss-attributed copy follows `docs/mascot.md` "Voice in UI copy".
   Icon-only controls need tooltips; the guard test scans axaml and fails
   without one.
-- `docs/review/deferred.md` is updated at close-out. Two rows move to
-  Closed. See 06's housekeeping.
+- `docs/review/deferred.md` is updated at close-out. One row moves to
+  Closed (draft-model speculative decoding, r18 4.4). Every other Open row
+  keeps its status; do not quietly mark anything else closed. See 06's
+  housekeeping.
 - This round lands via pull request per `docs/pull-requests.md`: branch
   `r27/round` from `main`, commit there, open the PR with the template,
   merge after CI is green on both matrix legs. One open PR at a time. No AI
