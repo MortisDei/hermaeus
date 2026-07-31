@@ -59,8 +59,19 @@ exclusion and honest size reporting.
 ### Activity
 
 An outcome record for work that finishes somewhere you are not looking:
-ingests, refreshes, agent runs, backups. Facts the app observed, not a
-model-written summary.
+ingests, refreshes, model downloads, backups and restores, memory sweeps, the
+voice backend, managed servers. Facts the app observed, not a model-written
+summary. A row that names a specific artifact opens it; one that does not stays
+inert rather than offering a link that goes nowhere.
+
+### Constrained output
+
+Where Hermaeus needs a reply in a particular shape, the shape is enforced by
+the provider's sampler rather than requested in the prompt. The agent's action
+protocol and memory auto-summary both use it, which is what makes a small local
+model a viable driver for them. Providers that cannot enforce a shape say so at
+the call site instead of silently sending an unconstrained request, and every
+existing fallback stays for them.
 
 ### Memories
 
@@ -336,7 +347,7 @@ For commercial licensing requests, see the Contact section of COMMERCIAL.md.
 
 Current version:
 
-**0.34.0-alpha**
+**0.35.0-alpha**
 
 Major systems currently implemented include:
 

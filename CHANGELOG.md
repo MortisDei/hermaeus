@@ -13,6 +13,109 @@ From 0.29.0-alpha onward, every minor version is tagged and released on
 GitHub (see `docs/packaging.md` "Releases"); patch versions are tagged only
 for urgent hotfixes.
 
+## [0.35.0-alpha] - 2026-07-31
+
+Implements docs/review r28: small models, kept honest. Where Hermaeus needs a
+reply in a particular shape it now enforces the shape instead of asking for
+one, the Speed Check can tell a null result from a no-op, Activity rows take
+you to what they describe, and the Windows CI gap was measured before anything
+was changed about it.
+
+### Added
+
+- **Output that cannot be malformed.** A request can carry a JSON schema or a
+  GBNF grammar, and the provider's sampler enforces it while the tokens are
+  chosen. llama.cpp enforces both forms, Ollama enforces a schema, and
+  OpenAI-compatible endpoints get one only against `api.openai.com`, where
+  structured outputs are documented. Anywhere else, a constraint is refused in
+  words at the point of use rather than sent as a field the server may quietly
+  drop: a caller that sets a constraint intends to parse the answer without
+  defending against prose. Both llama.cpp field names were confirmed against a
+  running b10195 before the code was written.
+
+- **Memory auto-summary asks for a schema.** On a provider that can enforce
+  one, the extraction shape is required rather than requested. All three of
+  the existing fallbacks stay, because they are what runs everywhere else;
+  what changes is that they stop being the common path.
+
+- **A planner protocol a small model cannot get wrong.** The agent's action
+  protocol was a schema written in prose at the end of a system prompt, asked
+  for on every step and defended by an extractor, one targeted repair and an
+  error budget. It is now a real schema sent as a constraint whenever the
+  selected model's provider can enforce one, which includes every local
+  llama.cpp and Ollama model. This matters most for MCP tools, which reach the
+  model only through that text protocol regardless of provider.
+
+- **Draft acceptance, reported.** llama-server counts the tokens it drafts and
+  the tokens the target model accepts, and both are now read and shown beside
+  the speed. `0 drafted` means drafting never engaged and a comparison was run
+  between two identical configurations. A provider that reports no counters
+  shows nothing rather than a zero. Hermaeus Doctor reports the same fact
+  without needing a benchmark run, and reports "never measured" as its own
+  separate state.
+
+- **The Speed Check runs five iterations per case** instead of one, and a
+  comparison reports the median with the range observed, written as
+  `70.2 tok/s (66.8 to 71.9 over 5 runs)`. A description of what was seen, not
+  a confidence interval.
+
+- **Activity rows take you where they point.** A row that names a specific
+  artifact opens it, routing through the same navigation the command palette
+  uses. A row with nothing specific to open stays inert rather than offering a
+  link that goes nowhere. Consecutive rows within a minute sit under one time
+  heading, which is arithmetic on the clock and not a claim that they are
+  related.
+
+- **The four Activity sources r24 named and never wired.** Model downloads (a
+  partial file set records as Partial with the reason naming what is missing),
+  backup and restore in both directions, memory auto-archive sweeps including
+  the ones that archive nothing, and the managed voice backend's start, stop
+  and failure.
+
+- **The chat trace records whether a turn's shape was enforced**, or
+  "unconstrained", so a reply that parsed cleanly can be told apart from one
+  that was made to.
+
+### Changed
+
+- **The agent stops telling local users their model is too small.** When a
+  planner reply cannot be parsed, the message now distinguishes a provider
+  that could not enforce a shape from a model that missed a shape that was
+  enforced. Those are different problems with different answers, and only one
+  of them is solved by downloading a bigger model. Each task records whether
+  its planner calls were constrained, so "did this help" is answerable from
+  real runs.
+
+- **`docs/agent.md`'s risk table names the tools the gate actually holds**, and
+  records that `run_command` is Review because the dispatch path sends it to
+  `EvaluateCommand`, which blocks any command family the workspace has not
+  declared. The per-task remembered-approval nuance is documented beside it. A
+  guard test now fails if the table and the gate's two tool sets disagree,
+  along with two more enumerated facts: `docs/benchmarks.md`'s recorded run
+  metadata against `BenchmarkMetadata`, and CLAUDE.md's settings-section list
+  against `AppSettings`, in both directions.
+
+- **CI writes per-test timings on both matrix legs** and uploads them, and
+  NuGet packages are cached. The Windows test step takes about 3.5 times as
+  long as the Linux one, and the timings say the gap is broad rather than
+  concentrated: the 20 test classes with the largest delta own 86% of it and
+  every one of them touches the filesystem, SQLite, or a spawned process. That
+  makes the lever per-write cost rather than parallelism, so an opt-in
+  parallel test collection was descoped on the evidence rather than attempted.
+  Tests stay serial by default. The measurement and what was done about it are
+  recorded in `docs/pull-requests.md`.
+
+### Fixed
+
+- **A `Process` object that was constructed but never started made `Stop()`
+  throw.** `Process.HasExited` raises for a process with no OS process behind
+  it, which is exactly the state the voice process managers are in when
+  `Stop()` runs from a failed start.
+
+- **`SqliteEvalStore` committed a saved run and its retention prune
+  separately.** Two durable commits per save, and a crash between them left
+  the table over its cap. One transaction now, matching the trace store.
+
 ## [0.34.0-alpha] - 2026-07-31
 
 Implements docs/review r27: fast, and honest about it. Startup stops waiting

@@ -405,6 +405,44 @@ falls straight back to the existing "return JSON" text protocol automatically
 support remain fully supported. MCP (`mcp:`) tools are not declared natively;
 they remain reachable only through the JSON protocol.
 
+### Constrained planner protocol
+
+The JSON text protocol is therefore not a legacy path for weak models. It is
+the only path to every MCP tool, for every model, whenever the provider does
+not return native tool calls.
+
+Since r28, that protocol has a real JSON schema, and the schema is sent as an
+output constraint whenever the selected model's provider can enforce one
+(`docs/features.md`, "Constrained output"), which includes every local
+llama.cpp and Ollama model. The sampler is what keeps `next_action.type` to
+the four action kinds and `risk_level` to its four values, rather than a
+prompt asking politely and an extractor cleaning up afterwards.
+
+Order of precedence is unchanged: a provider that returns native `tool_calls`
+still takes that path, and the constraint applies to the text protocol that
+runs otherwise.
+
+**A constrained response is exactly as untrusted as an unconstrained one.**
+Constraining a shape makes an answer parseable, not authoritative. Every
+action still goes through the same classification from the tool name, and a
+schema-valid response asserting `"requires_approval": false` for a high-risk
+tool is blocked, with the gate's own reason, exactly as before. A regression
+test pins that across the constrained and unconstrained paths side by side.
+
+Nothing was removed to make room for this. `ExtractJson`, the targeted
+`next_action.type` repair described above, the error budget and the `AskUser`
+fallback all still run, because they are what a provider that cannot constrain
+falls back to. What changes is how often they are reached. Each task records
+whether its planner calls were constrained, visible in the task's own trace, so
+"did this help" can be answered from real runs rather than claimed.
+
+The message shown when a response cannot be parsed now depends on that:
+unconstrained, it says the provider could not enforce a shape and that a local
+llama.cpp or Ollama model has it enforced for it; constrained, it says the
+shape was enforced and the model missed anyway, which is a different problem
+with a different answer. It no longer tells a local-first user their only
+option is a bigger model.
+
 ## Lessons (self-learning)
 
 The agent keeps a per-machine lesson store (`agent/lessons.db`) of

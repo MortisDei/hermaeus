@@ -43,10 +43,10 @@ plus `git log --oneline main..HEAD` and know exactly where to resume.
 | 24 | 4.2 Fix what 4.1 named | yes |
 | 25 | 4.3 Parallel collection (only if justified) | descoped by 4.1 |
 | 26 | 4.4 CI note recorded | yes |
-| 27 | 6.2 Docs guard over enumerable facts | no |
+| 27 | 6.2 Docs guard over enumerable facts | yes |
 | 28 | 6.3 NuGet caching | yes |
-| 29 | 6.4 Speed Check forward pointer | no |
-| 30 | 6.5 Docs, changelog, deferred ledger | no |
+| 29 | 6.4 Speed Check forward pointer | yes |
+| 30 | 6.5 Docs, changelog, deferred ledger | yes |
 | 31 | Close-out: archive pack, PR | no |
 
 ## Sequencing (strict)

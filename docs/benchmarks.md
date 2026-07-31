@@ -36,6 +36,20 @@ Runs record the following metrics and metadata:
 Runs are exported to JSON, Markdown, and CSV so the full metadata set can be
 reviewed later.
 
+### Recorded run metadata, field by field
+
+The prose above describes the shape; this is the actual set, and a guard test
+(`DocsCoverageGuardTests`) fails if a field is added to `BenchmarkMetadata`
+without appearing here.
+
+`AppVersion`, `ModelPath`, `ModelHash`, `Quantization`, `Backend`,
+`RuntimeVersion`, `RuntimeKind`, `ContextSize`, `PromptTemplate`,
+`SamplerSettings`, `Temperature`, `TopP`, `TopK`, `RepeatPenalty`, `Seed`,
+`GpuLayers`, `Threads`, `BatchSize`, `EmbeddingModel`, `RerankerEnabled`,
+`OS`, `CPU`, `RAM`, `GPU`, `SpeculativeTypes`, `SpeculativeDraftModel`,
+`SpeculativeNMax`, `SpeculativeNMin`, `SpeculativePMin`,
+`SpeculativeDraftGpuLayers`.
+
 The default action is a one-click benchmark pass. With **Run all suites**
 enabled, Hermaeus runs every built-in suite for the selected model. Turning it off
 runs only the highlighted suite. Selecting a discovered local GGUF model in the
@@ -319,7 +333,24 @@ answer genuinely varies.
 first token, taken from llama-server's own `timings` rather than estimated. Four
 fixed prompts, chosen because drafting behaves differently across them:
 structured output and repetitive output, where a draft's proposals are accepted
-often, and code and free prose, where they are accepted less often.
+often, and code and free prose, where they are accepted less often. Each case
+runs five iterations, so a result carries a range rather than a single sample.
+
+**Draft acceptance.** When speculative decoding is active, llama-server reports
+how many tokens it drafted and how many the target model accepted, and both are
+shown beside the speed. This is the number that separates "drafting engaged and
+did not help" from "drafting never engaged". `0 drafted` means the latter, and
+means a comparison was run between two identical configurations. A provider
+that reports no draft counters shows nothing rather than a zero: a missing
+measurement and a measured zero are different facts. No recommendation is
+attached to an acceptance rate; `12%` is a fact, "12%, consider disabling
+drafting" is not the app's call.
+
+Hermaeus Doctor reports the same thing without needing a benchmark run: if
+speculative decoding is configured and the most recent Speed Check for the
+model recorded zero drafted tokens, it says so. If the model has never been
+through a Speed Check, it says that instead, because "never measured" and
+"measured and found dead" are different answers.
 
 **What it does not measure.** Quality. No case carries an expected keyword, an
 expected pattern, or a refusal expectation, because a throughput number should
@@ -328,7 +359,11 @@ not quietly become a pass or a fail.
 **Comparing two runs.** Two Speed Check runs of the same suite against the same
 model can be shown side by side, with the difference in tokens per second,
 prompt tokens per second and time to first token, and the configuration
-difference that separates them. A run records the speculative settings that
+difference that separates them. Each side reports the median across its
+iterations and the range observed, written as
+`70.2 tok/s (66.8 to 71.9 over 5 runs)`. If the two ranges overlap, the reader
+can see that for themselves, which is the whole point and where the app's job
+ends. A run records the speculative settings that
 produced it, which is what the comparison keys on. Runs of different models or
 different suites are refused rather than compared.
 
@@ -377,6 +412,29 @@ actually loaded when the server started. Uniform tok/s across content shapes as
 different as these is consistent with decode being memory-bandwidth-bound, and
 equally consistent with drafting never having engaged at all, in which case
 both columns measured the same configuration.
+
+### What r28 changed about repeating it
+
+The entry above stands as written; it is an honest record of what was known
+when it was taken. What has changed is that the ambiguity it ends on is now
+answerable without reading a server log.
+
+- **Draft acceptance is recorded** (r28 doc 02 2.1 and 2.4). llama-server
+	reports `draft_n` and `draft_n_accepted` in its timings whenever
+	speculative decoding is active, and a run's results now carry both. A
+	result showing `0 drafted` means drafting never engaged and the two columns
+	compared the same configuration. A result showing a healthy acceptance rate
+	beside a flat tok/s means the bottleneck is somewhere else. A run where the
+	server reported no counters at all shows nothing rather than a zero, because
+	a missing measurement is not a measured zero.
+- **The Speed Check runs five iterations per case** (r28 doc 02 2.2), and a
+	comparison reports the median with the range observed across them, in the
+	form `70.2 tok/s (66.8 to 71.9 over 5 runs)`. That is a description of what
+	was seen. It is not a confidence interval and no significance is claimed.
+
+A rerun is the owner's to do and the owner's to write up, exactly as this one
+was. There is no rerun result here and nothing above has been edited to look
+better in hindsight.
 
 ## System Overview
 

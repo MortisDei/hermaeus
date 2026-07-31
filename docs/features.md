@@ -193,6 +193,13 @@
   tags) instead of parsing `[MEMORY: ...]` markers with keyword heuristics,
   giving model-supplied metadata directly; the marker format remains the
   fallback if a model doesn't follow the JSON instruction.
+- On a provider that can enforce a response shape (llama.cpp and Ollama
+  locally, and api.openai.com), auto-summary no longer asks for that JSON, it
+  requires it: the schema goes to the sampler, so the reply is the right
+  shape by construction. The marker fallback and the salvage parser both stay
+  exactly as they were, because they are what runs for every provider that
+  cannot enforce a shape. What changes is that they stop being the common
+  path. See "Constrained output" below.
 - Dedicated Memories panel to review, search, pin, archive, and delete
   memories, sorted by effective importance and showing recall stats. When an
   embedding-model switch leaves older memories at a different vector
@@ -610,6 +617,40 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
   assets root, and the models folder's own casing (`llm` vs `LLM`), are both
   detected against what actually exists on disk rather than assumed.
 
+### Constrained output (r28)
+
+When Hermaeus needs a reply in a particular shape, it stops asking for one and
+requires it. A caller attaches a JSON schema (or a GBNF grammar) to a request,
+and the provider's sampler enforces it while the tokens are being chosen, so a
+malformed reply is not something to recover from, it is something the model
+cannot produce.
+
+- **llama.cpp** enforces both forms: a JSON schema through `response_format`
+  and a grammar through a top-level `grammar` field.
+- **Ollama** enforces a JSON schema through its `format` field.
+- **OpenAI-compatible endpoints** vary by server and model, and Hermaeus does
+  not guess. Structured outputs are used against `api.openai.com`, where they
+  are documented; against any other base URL a constraint is **refused in
+  words at the point of use** rather than sent as a field the server may
+  silently ignore. That refusal is deliberate: a caller that sets a constraint
+  intends to parse the answer without defending against prose, and an
+  unconstrained reply that happens to parse looks exactly like success.
+
+Nothing is probed to find this out. A provider reports what it knows about
+itself, and a capability check that loads a model to find out whether a model
+loads is a denial-of-service handle wearing a health check's name.
+
+Two callers use it today: **memory auto-summary** (see Memory above) and the
+**agent's planner protocol** (`docs/agent.md`). Every existing parse-and-repair
+fallback in both places stays, because they are what runs on providers that
+cannot constrain. The Chat trace records which shape a turn enforced, or
+"unconstrained", so a reply that parsed cleanly can be told apart from one that
+was made to.
+
+There is no user-facing grammar or schema editor. The grammar form exists
+because llama.cpp's own surface has it, not because anything asks you to write
+one.
+
 ### Speculative decoding (r27)
 
 A small cheap model proposes the next few tokens and the large model verifies
@@ -905,10 +946,27 @@ alone cannot: a plain list, not a new dashboard. "Clear activity history"
 (Settings-style confirm dialog, plain-language copy) removes trace rows
 only. Shares the existing trace store rather than a parallel one, so
 per-kind pruning and exclusion from usage-count rollups fall out of the
-existing mechanisms; entries are redacted before being persisted. Coverage
-is a representative subset this round, not yet every possible event source
-(model downloads, backup/restore, memory auto-archive, and the voice
-backend are not yet wired in).
+existing mechanisms; entries are redacted before being persisted.
+
+Coverage is now the full set the recorder was written for: managed servers,
+model downloads (a partially downloaded file set records as Partial, with the
+reason naming what is missing), RAG ingest and watched-source refresh, Doctor
+scans, backup and restore in both directions, memory auto-archive sweeps
+including the ones that archive nothing, and the managed voice backend's
+start, stop and failure. A recorder failure never fails the operation it is
+describing.
+
+A row that names a specific artifact is activatable and opens it, routing
+through the same navigation the command palette uses so there is one answer
+to where a task or a dataset lives. Agent rows open their task, RAG rows
+their dataset, chat rows their conversation, memory rows their memory. A row
+with nothing specific to open (a Doctor scan, a server start) stays inert and
+looks inert rather than offering a link that goes nowhere.
+
+Consecutive rows within a minute of each other sit under one time heading.
+That is arithmetic on the clock: it says these things happened together, not
+that they are related, and there is deliberately no model-written summary of
+a group, no "likely cause" field, and no correlation claim.
 
 ## System Integration
 
