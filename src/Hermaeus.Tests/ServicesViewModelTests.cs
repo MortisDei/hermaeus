@@ -241,18 +241,34 @@ public sealed class ServicesViewModelTests
     public async Task Removing_a_managed_server_disposes_its_view_model()
     {
         using var temp = new TempDir();
-        var vm = NewServicesVm(temp, out var settings);
+
+        // Rebuild reaches this view model through RunOnUi, which is
+        // fire-and-forget by design in production, so waiting on a timeout made
+        // this assertion probable rather than certain: under full-suite load the
+        // wait expired and the suite went red for a reason that was not a bug.
+        // Installing the queueing context for construction captures those posts
+        // instead, so the test drains the work it is waiting on. Widening the
+        // timeout would only have converted an occasional red into a slower one.
+        var sync = new QueueingSynchronizationContext();
+        var previous = SynchronizationContext.Current;
+        SynchronizationContext.SetSynchronizationContext(sync);
+        ServicesViewModel vm;
+        ISettingsService settings;
+        try
+        {
+            vm = NewServicesVm(temp, out settings);
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previous);
+        }
+
         var chatRow = vm.Servers.First(s => !s.EmbeddingsMode);
 
         settings.Settings.ManagedServers.RemoveAll(s => s.Id == chatRow.Id);
         settings.Settings.ManagedServers.Add(new ServerConfig { Name = "Chat", Port = 39201 });
         await settings.SaveAsync();
-        await WaitForAsync(() => chatRow.IsDisposed, "the removed server row being disposed");
-        // Disposal happens after Servers.Remove() within the same Rebuild() pass, but
-        // under xUnit's AsyncTestSyncContext that pass can still be finishing up on
-        // another thread the instant IsDisposed flips - wait for the collection itself
-        // to settle too before enumerating it directly below.
-        await WaitForAsync(() => !vm.Servers.Any(s => s.Id == chatRow.Id), "the removed server leaving the list");
+        sync.DrainAll();
 
         Assert.True(chatRow.IsDisposed, "a row whose config was removed must be disposed, not just dropped");
         Assert.DoesNotContain(vm.Servers, s => s.Id == chatRow.Id);

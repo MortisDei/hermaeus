@@ -377,6 +377,64 @@
                                     </StackPanel>
                                 </Border>
 
+                                <!-- r26 doc 04: best across all suites, keyed by suite. Best overall
+                                     above ranks on one shared case set; this ranks each suite
+                                     separately and then averages the standings, so every suite gets
+                                     one vote and a large suite cannot outvote a small one. -->
+                                <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                        BorderThickness="1" CornerRadius="8" Padding="12"
+                                        IsVisible="{Binding InsightsHasData}">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="Best across every suite" FontWeight="SemiBold" FontSize="12" Opacity="0.6" />
+                                        <TextBlock Text="{Binding CrossSuiteLeaderName}" FontWeight="SemiBold" FontSize="15"
+                                                   IsVisible="{Binding HasCrossSuiteLeader}" />
+                                        <TextBlock Text="{Binding CrossSuiteBasis}" FontSize="11" Opacity="0.55" TextWrapping="Wrap"
+                                                   IsVisible="{Binding HasCrossSuiteLeader}" />
+                                        <TextBlock Text="{Binding CrossSuiteExplanation}" FontSize="12" Opacity="0.75" TextWrapping="Wrap" />
+
+                                        <ItemsControl ItemsSource="{Binding CrossSuitePlacements}" Margin="0,6,0,0">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate DataType="vm:CrossSuitePlacementViewModel">
+                                                    <Expander Margin="0,0,0,4" HorizontalAlignment="Stretch">
+                                                        <Expander.Header>
+                                                            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+                                                                <TextBlock Grid.Column="0" Text="{Binding PositionLabel}" FontSize="12" FontWeight="SemiBold" />
+                                                                <TextBlock Grid.Column="1" Text="{Binding SuiteName}" FontSize="12" TextTrimming="CharacterEllipsis" />
+                                                                <TextBlock Grid.Column="2" Text="{Binding ScoreLabel}" FontSize="11" Opacity="0.6" />
+                                                            </Grid>
+                                                        </Expander.Header>
+                                                        <StackPanel Spacing="2" Margin="0,6,0,0">
+                                                            <TextBlock Text="{Binding BasisLabel}" FontSize="10" Opacity="0.5" TextWrapping="Wrap" />
+                                                            <ItemsControl ItemsSource="{Binding Ranked}">
+                                                                <ItemsControl.ItemTemplate>
+                                                                    <DataTemplate DataType="vm:ModelAggregateViewModel">
+                                                                        <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10" Margin="0,1">
+                                                                            <TextBlock Grid.Column="0" Text="{Binding DisplayName}" FontSize="11" TextTrimming="CharacterEllipsis" />
+                                                                            <TextBlock Grid.Column="1" Text="{Binding QualityLabel}" FontSize="11" Opacity="0.75" />
+                                                                            <TextBlock Grid.Column="2" Text="{Binding SpeedLabel}" FontSize="11" Opacity="0.75" />
+                                                                        </Grid>
+                                                                    </DataTemplate>
+                                                                </ItemsControl.ItemTemplate>
+                                                            </ItemsControl>
+                                                        </StackPanel>
+                                                    </Expander>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+
+                                        <StackPanel Spacing="2" Margin="0,6,0,0" IsVisible="{Binding HasCrossSuiteCaveats}">
+                                            <TextBlock Text="Left out of this ranking" FontSize="11" Opacity="0.5" />
+                                            <ItemsControl ItemsSource="{Binding CrossSuiteCaveats}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <TextBlock Text="{Binding}" FontSize="11" Opacity="0.6" TextWrapping="Wrap" Margin="0,1" />
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+
                                 <!-- 4.1: an honest "not enough shared results" is the correct output
                                      when no two models sat the same exam. -->
                                 <Border IsVisible="{Binding InsightsHasNoComparisonBasis}"

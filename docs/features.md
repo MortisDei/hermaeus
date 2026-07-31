@@ -308,12 +308,47 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
   task reachable after a restart, not just ones currently waiting in the
   review queue, which also gained an Open button; opening a child directly
   shows its parent's goal.
-- The agent panel surfaces a compact summary strip with task state, step
-  count, goal, summary, recent task history, review queue counts, workspace
-  memory counts, and retrieved context counts for quick scanning.
-- The agent panel also shows a capability disclosure callout so users can see
-  the current scope: local workspace inspection, approval-gated writes and
-  commands, and no shell or network execution outside the fixed set.
+- The workbench is a one-line status bar, a pinned decision strip, and four
+  tabs (Run, Changes, Workspace, History), each scrolling on its own. The
+  decision the agent is waiting on lives in the strip and is never behind a
+  tab. The panel opens on Run every time and never switches tabs on its own;
+  a finished run lights the Changes tab's pending-patch count instead.
+- The review queue lists only tasks that need a decision now. A task that was
+  approved in the past is not in it, and an approval sent to a task with
+  nothing pending is refused with a reason rather than recorded: it changes
+  no status and cannot restart a finished run. The queue refreshes itself
+  when a run pauses. Dismiss discards a queued task's pending action without
+  running it and closes the task as cancelled, so a run you are done with can
+  actually leave the queue; it stays in Recent Tasks with its ledger intact.
+- While a run is in flight the status line shows a progress bar and a rotating
+  activity line naming the current step and how long it has been going, so a
+  long model call no longer looks like a hung app.
+- Command recipes are editable from the Workspace tab: pick one of the fixed
+  command families the safety gate accepts, optionally narrow it with an
+  argument, and it is saved to `.hermaeus/workspace.json` immediately; Remove
+  takes it away again. A workspace that declares none can run nothing, and
+  declaring one previously meant hand-editing a file the user had no reason to
+  know about. The picker cannot express a command the gate would refuse, and
+  every run still asks for approval.
+- When the agent asks a question, the question itself is shown above the reply
+  box. It previously reached only the log and the transcript, so the workbench
+  asked for an answer without saying what had been asked.
+- An unreadable model response is retried automatically with a corrective note
+  instead of parking the task on a question it never asked; three in a row
+  still fail it. A response that names a tool in the action's `type` field is
+  repaired into the protocol's shape and executed, which is a common
+  local-model mistake in an otherwise valid response. The repair changes the
+  shape of the request, never its authority: the safety gate still classifies
+  the tool exactly as before.
+- A finished run says what it did, from the run ledger: files changed (split
+  created and edited, with the line delta), commands run and how many failed,
+  approvals asked for and how they went, any unfinished plan steps, and the
+  model's reservations. A run that changed nothing says so. No score, no
+  grade, no percentage.
+- The workbench says what the agent can do in this workspace, derived from the
+  real tool set, the workspace's own declared command recipes, its policy, and
+  whether an MCP bridge is configured, rather than from a fixed list of
+  sentences.
 - The agent panel also includes a workspace file browser with query, list,
   preview, and summary behaviour for faster inspection.
 - Draft patch proposal UI: users can draft file edits with a rationale, propose
@@ -447,6 +482,14 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
 - Benchmark views expose the test-details modal from both the per-result list
   and the best-run ranking rows, and saved benchmark history can be exported
   in bulk as one timestamped folder.
+- The Insights tab answers "best across every suite" as well as "best
+  overall": each suite gets its own leaderboard ranked on the cases every
+  model in it actually ran, and the cross-suite winner is the model with the
+  best mean position across those suites, so each suite counts once and a
+  large suite cannot outvote a small one. The card names the suites it rests
+  on, shows the leader's placing in each (expandable to that suite's full
+  board), and names every suite and model it left out. When there is no
+  honest answer, it says which case applies instead of naming a winner.
 - Doctor checks for untuned GGUF files, stale `llama.cpp` binaries, and pinned
   `nomic-embed-text-v1.5` hash drift, with install actions where available.
 - Doctor advises when a real GPU is present but inference is still configured
@@ -937,6 +980,12 @@ Endpoints:
 - `POST /v1/embeddings` - one vector per input string, using the app's
   configured embedding provider.
 - `GET /v1/memory/query`, `POST /v1/rag/query`, `GET /v1/models`.
+- `GET /v1/capabilities` - what this instance can currently serve: the routes
+  it exposes, the app version, and per feature (chat, RAG, memory,
+  embeddings) whether it is usable right now with one sentence saying why not
+  when it is not. It reports rather than probes: no model load, no server
+  start, no network call, no embedding pass. It names no paths, keys, tokens
+  or dataset names, only counts.
 
 ## Mascot and branding
 

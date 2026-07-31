@@ -21,7 +21,12 @@ public sealed class AgentService : IAgentService
         edit_file, create_file, set_plan, plan_subtasks, and run_command.
         Read-only tools
         (list_files, search_files, glob_files, read_file, summarize_file,
-        inspect_git_diff, set_plan) execute immediately. Prefer edit_file
+        inspect_git_diff, set_plan) execute immediately. A read_file result
+        marked truncated is not the whole file and is not a dead end: call
+        read_file again with line_offset set past what you already have (and a
+        line_limit of a few hundred lines) until you have read what you need.
+        Never conclude a file cannot be read because one read came back
+        truncated. Prefer edit_file
         (relative_path, old_string, new_string) for changing part of an
         existing file over draft_patch/apply_draft_patch, which rewrite the
         whole file; old_string must match the file's current content exactly
@@ -97,7 +102,7 @@ public sealed class AgentService : IAgentService
                 Schema("""{"type":"object","properties":{"query":{"type":"string"},"regex":{"type":"boolean"},"context_lines":{"type":"integer"}},"required":["query"]}""")),
             new("glob_files", "Match workspace files against a glob pattern (supports * and **).",
                 Schema("""{"type":"object","properties":{"pattern":{"type":"string"}},"required":["pattern"]}""")),
-            new("read_file", "Read a workspace file, optionally a bounded line range via line_offset/line_limit.",
+            new("read_file", "Read a workspace file, optionally a bounded line range via line_offset/line_limit. If the result is marked truncated, call again with line_offset past what you already read to get the rest.",
                 Schema("""{"type":"object","properties":{"relative_path":{"type":"string"},"line_offset":{"type":"integer"},"line_limit":{"type":"integer"}},"required":["relative_path"]}""")),
             new("summarize_file", "Summarize a workspace file's readable content.",
                 Schema("""{"type":"object","properties":{"relative_path":{"type":"string"}},"required":["relative_path"]}""")),
@@ -229,7 +234,7 @@ public sealed class AgentService : IAgentService
     {
         var state = await _store.LoadAsync(taskId, ct)
             ?? throw new InvalidOperationException("Agent task was not found.");
-        if (state.Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed)
+        if (state.Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed or AgentTaskStatus.Cancelled)
             throw new InvalidOperationException("Agent task is already finished.");
         if (state.SubTaskPlan.Any(s => s.Status is AgentSubTaskStatus.Pending or AgentSubTaskStatus.Running))
         {
@@ -569,6 +574,28 @@ public sealed class AgentService : IAgentService
             state.Reservations = response.Reservations?.Where(r => !string.IsNullOrWhiteSpace(r)).Select(r => r.Trim()).ToList() ?? [];
         }
 
+        if (parseFailed && state.ConsecutiveStepErrors < 3)
+        {
+            // An unreadable response is the model's problem to fix, not the
+            // user's. The synthesized response above is an ask_user, which set
+            // the task WaitingForUser and stopped the autonomous loop dead -
+            // so the user was shown "the agent is waiting for your reply" with
+            // no question to answer, and the three-strike budget below was
+            // effectively unreachable because reaching it needed three manual
+            // Run Step clicks. Stay Running so the loop takes another step; the
+            // corrective note appended to the transcript tells the model what
+            // was wrong with the last one.
+            state.Status = AgentTaskStatus.Running;
+            response.UserMessage =
+                $"The model's last response could not be read (attempt {state.ConsecutiveStepErrors} of 3). Trying again.";
+            await _store.AppendTranscriptEntryAsync(taskId, new AgentTranscriptEntry(
+                state.StepCount, "user", null,
+                "Your last response could not be parsed. Reply with ONLY the JSON object described in the system "
+                + "prompt: no prose around it, and next_action.type must be exactly one of none, tool, ask_user or "
+                + "final, with the tool's name in next_action.tool_name.",
+                DateTime.UtcNow), ct);
+        }
+
         if (parseFailed && state.ConsecutiveStepErrors >= 3)
         {
             state.Status = AgentTaskStatus.Failed;
@@ -586,6 +613,9 @@ public sealed class AgentService : IAgentService
             ? response.ThoughtSummary
             : response.UserMessage;
         await _store.AppendLogAsync(taskId, logEntry, ct);
+        // Persisted, not just logged: on an ask_user step this IS the question,
+        // and the workbench had no way to show it.
+        state.LastUserMessage = response.UserMessage ?? string.Empty;
 
         state.StepCount++;
         if (state.StepCount == 1)
@@ -703,6 +733,10 @@ public sealed class AgentService : IAgentService
             // explicitly instead of leaving it silently stalled.
             var note = $"step budget exhausted after {steps} step(s)";
             result.State.Status = AgentTaskStatus.WaitingForUser;
+            // This pause has its own reason, and it is not whatever the model
+            // last asked. Saying so here stops a stale question standing in for
+            // it in the workbench.
+            result.State.LastUserMessage = note;
             await _store.AppendLogAsync(taskId, note, ct);
             await _store.AppendTranscriptEntryAsync(taskId, new AgentTranscriptEntry(
                 result.State.StepCount, "assistant", null, note, DateTime.UtcNow), ct);
@@ -934,6 +968,16 @@ public sealed class AgentService : IAgentService
         var state = await _store.LoadAsync(taskId, ct)
             ?? throw new InvalidOperationException("Agent task was not found.");
 
+        // A task with nothing pending has no decision to record (r26 01 1.2).
+        // Before this, an approval here appended a history record and set the
+        // status to Running, which un-completed a finished task and let the
+        // caller restart the agent loop on it. Nothing is written and the task
+        // is left exactly as it was found. This sits before the fingerprint
+        // block deliberately: that block treats a null pending action as a
+        // legitimate no-op, and it is a caller error instead.
+        if (state.PendingToolAction is null)
+            return new AgentApprovalResult(false, "This task has no action waiting for a decision.");
+
         // Binds the approval to the pending action as it exists right now,
         // not as it was when the UI rendered it (r23 4.1). A concurrent step,
         // a crash-restore race, or a tampered task_state.json could otherwise
@@ -1053,15 +1097,55 @@ public sealed class AgentService : IAgentService
         }
         else
         {
-            if (!approved && state.PendingToolAction is not null)
-                await RecordApprovalRejectionLessonAsync(state, options, state.PendingToolAction.ToolName, ct);
-
-            state.Status = approved ? AgentTaskStatus.Running : AgentTaskStatus.WaitingForUser;
-            if (!approved)
-                state.PendingToolAction = null;
+            // Rejection: the guard above guarantees there is a pending action
+            // here, so this branch is only ever the rejected case.
+            await RecordApprovalRejectionLessonAsync(state, options, state.PendingToolAction!.ToolName, ct);
+            state.Status = AgentTaskStatus.WaitingForUser;
+            state.PendingToolAction = null;
         }
         await _store.SaveAsync(state, ct);
         await _store.AppendLogAsync(taskId, $"approval recorded: {action} approved={approved}", ct);
+        return new AgentApprovalResult(true, string.Empty);
+    }
+
+    public async Task<AgentApprovalResult> DismissTaskAsync(string taskId, CancellationToken ct = default)
+    {
+        var state = await _store.LoadAsync(taskId, ct)
+            ?? throw new InvalidOperationException("Agent task was not found.");
+
+        if (state.Status == AgentTaskStatus.Running)
+            return new AgentApprovalResult(false, "This task is still running. Stop it before dismissing it.");
+
+        if (state.Status == AgentTaskStatus.Cancelled)
+            return new AgentApprovalResult(false, "This task was already dismissed.");
+
+        // Same rule ContinueTaskAsync applies, for the same reason: a child is
+        // not an independently disposable unit of work. Dismissing one would
+        // leave its parent's orchestration loop waiting on a child that is
+        // neither complete nor failed. The parent is the thing to dismiss.
+        if (!string.IsNullOrWhiteSpace(state.ParentTaskId))
+            return new AgentApprovalResult(false, "This is a sub-task. Dismiss its parent task instead.");
+
+        // Discarding, not deciding: no approval record is written, because the
+        // user did not approve or reject the action, they walked away from it.
+        // The trace records that so the history stays readable.
+        var dismissedTool = state.PendingToolAction?.ToolName ?? string.Empty;
+        state.PendingToolAction = null;
+        state.PlanApprovalPending = false;
+        state.Status = AgentTaskStatus.Cancelled;
+        await _store.SaveAsync(state, ct);
+
+        await _store.AppendTraceAsync(taskId, new
+        {
+            task_id = taskId,
+            type = "task_dismissed",
+            tool = dismissedTool,
+            logged_at = DateTime.UtcNow
+        }, ct);
+        await _store.AppendLogAsync(taskId, dismissedTool.Length > 0
+            ? $"task dismissed by user; pending {dismissedTool} discarded without executing"
+            : "task dismissed by user", ct);
+
         return new AgentApprovalResult(true, string.Empty);
     }
 
@@ -1081,6 +1165,11 @@ public sealed class AgentService : IAgentService
         await _store.AppendTranscriptEntryAsync(taskId, new AgentTranscriptEntry(
             state.StepCount, "user", null, trimmed, DateTime.UtcNow), ct);
         state.Status = AgentTaskStatus.Running;
+        // The question has been answered, so it stops being the task's open
+        // question. Leaving it set meant a later pause that sets no message of
+        // its own (the step budget running out, for one) re-displayed a
+        // question the user had already dealt with.
+        state.LastUserMessage = string.Empty;
         await _store.SaveAsync(state, ct);
         await _store.AppendLogAsync(taskId, "user reply recorded", ct);
     }
@@ -1117,6 +1206,9 @@ public sealed class AgentService : IAgentService
         state.Status = AgentTaskStatus.Running;
         state.ConsecutiveStepErrors = 0;
         state.PlanApprovalPending = false;
+        // Reopening the task settles whatever it was last asking; the
+        // instruction just given is the answer.
+        state.LastUserMessage = string.Empty;
         await _store.SaveAsync(state, ct);
         await _store.AppendLogAsync(taskId, $"continued: {trimmedInstruction}", ct);
         return state;
@@ -1429,7 +1521,26 @@ public sealed class AgentService : IAgentService
     private static AgentPlannerResponse ParseResponse(string raw)
     {
         var json = ExtractJson(raw);
-        var response = JsonSerializer.Deserialize<AgentPlannerResponse>(json, AgentJson.Options);
+        AgentPlannerResponse? response;
+        try
+        {
+            response = JsonSerializer.Deserialize<AgentPlannerResponse>(json, AgentJson.Options);
+        }
+        catch (JsonException)
+        {
+            // The document itself is fine; one field is not. Overwhelmingly the
+            // field is next_action.type carrying a TOOL NAME ("set_plan")
+            // instead of one of the four action kinds, with tool_name left
+            // null. The strict enum rejected the whole response for it, the
+            // step was reported to the user as unparseable JSON (which it was
+            // not), and the run stalled. Repair that one shape and retry once;
+            // anything else still throws.
+            if (!TryRepairActionType(json, out var repaired))
+                throw;
+
+            response = JsonSerializer.Deserialize<AgentPlannerResponse>(repaired, AgentJson.Options);
+        }
+
         return response ?? new AgentPlannerResponse
         {
             ThoughtSummary = "The model returned an empty response.",
@@ -1442,6 +1553,68 @@ public sealed class AgentService : IAgentService
             },
             UserMessage = "The agent could not parse the model response."
         };
+    }
+
+    /// <summary>
+    /// The four action kinds the protocol defines. Anything else in
+    /// <c>next_action.type</c> is the model naming a tool where it should have
+    /// said "tool".
+    /// </summary>
+    private static readonly HashSet<string> KnownActionKinds =
+        new(["none", "tool", "ask_user", "final"], StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Rewrites <c>next_action.type: "&lt;tool name&gt;"</c> into the protocol's
+    /// own shape (<c>type: "tool"</c>, <c>tool_name: "&lt;tool name&gt;"</c>).
+    ///
+    /// Observed against real local-model runs: four stalls in one task, all of
+    /// them a complete, well-formed response whose only fault was
+    /// <c>"type": "set_plan", "tool_name": null</c>. The safety gate still
+    /// classifies whatever tool comes out of this exactly as if the model had
+    /// named it correctly, so a repaired response can no more skip approval
+    /// than an unrepaired one; only the shape of the request is corrected,
+    /// never its authority.
+    ///
+    /// Returns false, changing nothing, when the type is already a known kind
+    /// (so the failure was something else), when tool_name is already set to
+    /// something different (ambiguous, and guessing at authority is not this
+    /// method's job), or when the document cannot be read at all.
+    /// </summary>
+    internal static bool TryRepairActionType(string json, out string repaired)
+    {
+        repaired = json;
+        try
+        {
+            var node = System.Text.Json.Nodes.JsonNode.Parse(json);
+            if (node?["next_action"] is not System.Text.Json.Nodes.JsonObject action)
+                return false;
+
+            if (action["type"]?.GetValue<string>() is not { Length: > 0 } declared)
+                return false;
+
+            if (KnownActionKinds.Contains(declared))
+                return false;
+
+            var existingToolName = action["tool_name"]?.GetValue<string>();
+            if (!string.IsNullOrWhiteSpace(existingToolName)
+                && !string.Equals(existingToolName, declared, StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            action["type"] = "tool";
+            action["tool_name"] = declared;
+            repaired = node!.ToJsonString();
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+        catch (InvalidOperationException)
+        {
+            // A non-string type/tool_name (a number, an object). Not the shape
+            // this repairs.
+            return false;
+        }
     }
 
     /// <summary>

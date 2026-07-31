@@ -110,9 +110,34 @@ public sealed class AgentReviewQueueItemViewModel
     /// <summary>The pending action's fingerprint as rendered here; passed back to AppendApprovalAsync so approval executes only what was actually shown (r23 4.1).</summary>
     public string PendingFingerprint { get; }
     public bool HasPendingAction => !string.IsNullOrEmpty(PendingToolName);
+
+    /// <summary>r26 01 1.3: WaitingForUser with nothing pending means the agent asked a
+    /// question; the row offers Open (which reaches the reply box), not Approve.</summary>
+    public bool NeedsReply => !HasPendingAction && Status == AgentTaskStatus.WaitingForUser;
+
+    /// <summary>r26 01 1.3: a Blocked run needs an instruction, not a decision; Open reaches
+    /// the Continue box.</summary>
+    public bool NeedsInstruction => !HasPendingAction && Status == AgentTaskStatus.Blocked;
+
+    /// <summary>The single honest line that replaces Approve/Reject on a row with no pending action.</summary>
+    public string NoDecisionLabel => NeedsReply
+        ? "The agent asked you a question. Open it to reply."
+        : NeedsInstruction ? "This run stopped and needs an instruction. Open it to continue." : string.Empty;
+
     /// <summary>What a pending run_command approval will actually execute (r6 3.2); empty for non-command tools.</summary>
     public string RecipePreview { get; }
     public bool HasRecipePreview => !string.IsNullOrWhiteSpace(RecipePreview);
+
+    /// <summary>
+    /// The command family this row is blocked on, when the agent asked for a
+    /// real family this workspace simply has not declared. Empty when the
+    /// request was not a command at all, or was not a family the agent can
+    /// ever run: there is nothing to offer in that case, and offering
+    /// something would imply an approval that will never exist.
+    /// </summary>
+    public string UndeclaredCommandFamily { get; init; } = string.Empty;
+    public bool CanDeclareCommandFamily => UndeclaredCommandFamily.Length > 0;
+    public string DeclareCommandFamilyLabel => $"Allow '{UndeclaredCommandFamily}' in this workspace";
 }
 
 /// <summary>
@@ -284,6 +309,24 @@ public sealed class WorkspaceCommandRecipeViewModel
     public AgentRiskLevel RiskLevel { get; }
     public string RiskLabel => RiskLevel.ToString();
     public bool IsElevatedRisk => RiskLevel is AgentRiskLevel.Medium or AgentRiskLevel.High;
+}
+
+/// <summary>
+/// One pickable command family in the workbench's recipe editor. The list is
+/// fixed by the safety gate, so this is a chooser, never a free-text field:
+/// anything outside these families is refused at run time regardless.
+/// </summary>
+public sealed class CommandFamilyOptionViewModel
+{
+    public CommandFamilyOptionViewModel(string family)
+    {
+        Family = family;
+        Description = WorkspaceCommandRecipes.DescribeFamily(family);
+    }
+
+    public string Family { get; }
+    public string Description { get; }
+    public string Display => Description.Length == 0 ? Family : $"{Family} - {Description}";
 }
 
 public sealed class AgentDraftPatchViewModel
@@ -485,18 +528,33 @@ public partial class AgentViewModel : ViewModelBase
     public UiBoundCollection<string> WorkspacePolicyRules { get; } = [];
     [ObservableProperty] private string _workspacePolicySummary = string.Empty;
     public bool HasWorkspacePolicy => WorkspacePolicySummary.Length > 0;
-    partial void OnWorkspacePolicySummaryChanged(string value) => OnPropertyChanged(nameof(HasWorkspacePolicy));
+    partial void OnWorkspacePolicySummaryChanged(string value)
+    {
+        OnPropertyChanged(nameof(HasWorkspacePolicy));
+        RefreshCapabilityNotes();
+    }
 
-    public IReadOnlyList<string> CapabilityNotes { get; } =
-    [
-        "Read-first workspace inspection: list, search, read, and summarise local files.",
-        "Approval-gated patch drafting: propose content, queue it for review, and apply only after approval.",
-        "Approval-gated command execution: only the workspace's own declared build/test recipes can run, never freeform shell text.",
-        "No network, install, commit, push, or remote-control actions in this slice.",
-        "Workspace memory and review queues remain local and explicit."
-    ];
+    /// <summary>
+    /// r26 03 3.1: derived from the executor's tool set, this workspace's own
+    /// declared command recipes, its policy summary and whether an MCP bridge
+    /// is configured, instead of the five hardcoded sentences this used to be.
+    /// Rebuilt by <see cref="RefreshCapabilityNotes"/> whenever any of those change.
+    /// </summary>
+    public UiBoundCollection<string> CapabilityNotes { get; } = [];
 
-    public string CapabilityLabel => "Current agent scope";
+    public string CapabilityLabel => "What the agent can do here";
+
+    private void RefreshCapabilityNotes()
+    {
+        var notes = AgentCapabilityNotes.Describe(new AgentCapabilityContext(
+            HasWorkspace: !string.IsNullOrWhiteSpace(WorkspaceRoot),
+            CommandRecipes: [.. CommandRecipes.Select(recipe => recipe.Command)],
+            WorkspacePolicySummary: WorkspacePolicySummary,
+            HasMcpBridge: _settings?.Settings.Mcp.Servers.Any(server => server.Enabled) == true));
+
+        CapabilityNotes.Clear();
+        foreach (var note in notes) CapabilityNotes.Add(note);
+    }
 
     /// <summary>
     /// Drives the workbench's Scenario Evals panel (r7): deterministic
@@ -555,6 +613,24 @@ public partial class AgentViewModel : ViewModelBase
     [ObservableProperty] private RagDataset? _selectedDataset;
     [ObservableProperty] private AgentTaskState? _currentTask;
     [ObservableProperty] private bool _isRunning;
+
+    /// <summary>
+    /// The rotating "still working" line shown while a run is in flight
+    /// ("Step 3: Weighing the plan... 12s"). Empty when idle, and for the
+    /// first <see cref="AgentActivityPhase.GraceMs"/> of a step so a fast step
+    /// never flickers a placeholder.
+    /// </summary>
+    [ObservableProperty] private string _activityStatus = string.Empty;
+    public bool HasActivityStatus => ActivityStatus.Length > 0;
+    partial void OnActivityStatusChanged(string value) => OnPropertyChanged(nameof(HasActivityStatus));
+
+    /// <summary>Steps taken by the autonomous run currently in flight, which is what MaxAutoSteps actually caps.</summary>
+    private int _stepsThisRun;
+
+    private const int ActivityTickMs = 500;
+    private readonly System.Diagnostics.Stopwatch _activityClock = new();
+    private CancellationTokenSource? _activityCts;
+    private int _activityWordOffset;
     [ObservableProperty] private string _statusMessage = string.Empty;
     [ObservableProperty] private string _currentStep = string.Empty;
     [ObservableProperty] private string _taskStatePreview = string.Empty;
@@ -600,7 +676,18 @@ public partial class AgentViewModel : ViewModelBase
         {
             if (CurrentTask is null) return string.Empty;
             if (CurrentTask.SubTaskPlan.Count == 0)
-                return $"step {CurrentTask.StepCount}/{Math.Max(_settings?.Settings.Agent.MaxAutoSteps ?? 20, 1)}";
+            {
+                // StepCount is the task's whole life; MaxAutoSteps caps ONE
+                // autonomous run. Printing them as "step 111/20" compared two
+                // different things and read as a broken counter. The budget is
+                // only shown while a run is actually spending it.
+                var total = $"step {CurrentTask.StepCount}";
+                if (!IsRunning || _stepsThisRun <= 0)
+                    return total;
+
+                var budget = Math.Max(_settings?.Settings.Agent.MaxAutoSteps ?? 20, 1);
+                return $"{total} ({_stepsThisRun} of {budget} this run)";
+            }
 
             var specs = CurrentTask.SubTaskPlan;
             var firstUnfinished = specs.FindIndex(s => s.Status is AgentSubTaskStatus.Pending or AgentSubTaskStatus.Running);
@@ -613,7 +700,8 @@ public partial class AgentViewModel : ViewModelBase
 
     /// <summary>r19 3.1/3.3: a task that will not resume its own loop without user action - the
     /// Continue affordance and New task button both key off this.</summary>
-    public bool IsTaskTerminal => CurrentTask?.Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed or AgentTaskStatus.Blocked;
+    public bool IsTaskTerminal => CurrentTask?.Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed
+        or AgentTaskStatus.Blocked or AgentTaskStatus.Cancelled;
 
     /// <summary>r19 3.3: presentation only - a terminal task whose own plan still lists pending
     /// steps declared victory prematurely; pairs with the Continue box (3.1) to answer
@@ -632,8 +720,23 @@ public partial class AgentViewModel : ViewModelBase
     public bool HasPlanRevision => PlanRevisedLabel.Length > 0;
     /// <summary>True when the task is asking a question, not waiting on a tool approval; only then does the reply box apply.</summary>
     public bool IsWaitingForReply => CurrentTask is { Status: AgentTaskStatus.WaitingForUser, PendingToolAction: null };
+
+    /// <summary>
+    /// What the agent actually asked, shown with the reply box. The question
+    /// only ever reached the log and the transcript, so the workbench offered
+    /// somewhere to answer without saying what the question was.
+    /// </summary>
+    public string CurrentQuestion => CurrentTask?.LastUserMessage ?? string.Empty;
+    public bool HasCurrentQuestion => CurrentQuestion.Length > 0;
     public int RecentTaskCount => RecentTasks.Count;
     public int ReviewQueueCount => ReviewQueue.Count;
+
+    /// <summary>r26 01 1.5: the queue now lists only what needs a decision, so the label
+    /// names the decision rather than the object it used to over-count.</summary>
+    public string ReviewQueueLabel => ReviewQueueCount == 0
+        ? "Nothing waiting on you"
+        : $"{ReviewQueueCount} waiting on you";
+
     public int WorkspaceMemoryCount => WorkspaceMemory.Count;
     public int RetrievedContextCount => RetrievedContext.Count;
     public int QueuedPatchCount => QueuedPatches.Count;
@@ -643,12 +746,42 @@ public partial class AgentViewModel : ViewModelBase
     public int BlockedPatchCount => QueuedPatches.Count(patch => patch.Status == AgentDraftPatchStatus.Blocked);
     public bool HasQueuedPatches => QueuedPatchCount > 0;
 
+    /// <summary>
+    /// Which workbench tab is showing. Not persisted: the Agent panel opens on
+    /// Run every time, because Run is what the panel is for. Nothing in the
+    /// app moves this on the user's behalf; a finished run lights the Changes
+    /// badge and says so in the run outcome instead of jumping the page.
+    /// </summary>
+    [ObservableProperty] private int _selectedTabIndex = RunTabIndex;
+
+    public const int RunTabIndex = 0;
+    public const int ChangesTabIndex = 1;
+    public const int WorkspaceTabIndex = 2;
+    public const int HistoryTabIndex = 3;
+
+    /// <summary>The Changes tab's badge: a patch waiting for review is work assigned to the
+    /// user, so it earns a count. The other tabs get none; a badge that is always lit
+    /// teaches the user to ignore badges.</summary>
+    public bool ShowPendingPatchBadge => PendingPatchCount > 0;
+
+    [RelayCommand]
+    private void ShowChangesTab() => SelectedTabIndex = ChangesTabIndex;
+
     private static readonly HashSet<AgentTaskStatus> RewindEligibleStatuses =
     [
-        AgentTaskStatus.Complete, AgentTaskStatus.Failed, AgentTaskStatus.Blocked, AgentTaskStatus.WaitingForUser
+        AgentTaskStatus.Complete, AgentTaskStatus.Failed, AgentTaskStatus.Blocked,
+        AgentTaskStatus.WaitingForUser, AgentTaskStatus.Cancelled
     ];
 
     public bool HasLedgerEntries => LedgerFiles.Count > 0 || LedgerCommands.Count > 0 || LedgerApprovals.Count > 0;
+
+    /// <summary>
+    /// r26 03 3.2: the deterministic counterpart to the model's own summary.
+    /// <see cref="AgentRunOutcomeSummary.None"/> until the open task reaches a
+    /// terminal status, so a running task shows no outcome block at all.
+    /// </summary>
+    [ObservableProperty] private AgentRunOutcomeSummary _runOutcome = AgentRunOutcomeSummary.None;
+
     [ObservableProperty] private AgentLedgerFileEntryViewModel? _selectedLedgerFile;
     public bool HasSelectedLedgerFile => SelectedLedgerFile is not null;
     partial void OnSelectedLedgerFileChanged(AgentLedgerFileEntryViewModel? value) => OnPropertyChanged(nameof(HasSelectedLedgerFile));
@@ -703,7 +836,9 @@ public partial class AgentViewModel : ViewModelBase
         ReviewQueue.CollectionChanged += (_, _) =>
         {
             OnPropertyChanged(nameof(ReviewQueueCount));
+            OnPropertyChanged(nameof(ReviewQueueLabel));
             OnPropertyChanged(nameof(HasReviewQueue));
+            OnPropertyChanged(nameof(HasDecisionWaiting));
         };
 
         WorkspaceMemory.CollectionChanged += (_, _) =>
@@ -728,6 +863,7 @@ public partial class AgentViewModel : ViewModelBase
         {
             OnPropertyChanged(nameof(QueuedPatchCount));
             OnPropertyChanged(nameof(PendingPatchCount));
+            OnPropertyChanged(nameof(ShowPendingPatchBadge));
             OnPropertyChanged(nameof(AppliedPatchCount));
             OnPropertyChanged(nameof(RejectedPatchCount));
             OnPropertyChanged(nameof(BlockedPatchCount));
@@ -735,13 +871,30 @@ public partial class AgentViewModel : ViewModelBase
         };
 
         ProjectInstructions.CollectionChanged += (_, _) => OnPropertyChanged(nameof(ProjectInstructionCount));
-        CommandRecipes.CollectionChanged += (_, _) => OnPropertyChanged(nameof(CommandRecipeCount));
+        CommandRecipes.CollectionChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(CommandRecipeCount));
+            // The capability text names this workspace's declared recipes
+            // (r26 03 3.1), so it is derived state over this collection.
+            RefreshCapabilityNotes();
+        };
         WorkspaceRisks.CollectionChanged += (_, _) => OnPropertyChanged(nameof(WorkspaceRiskCount));
         NewLessons.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasNewLessons));
+
+        RefreshCapabilityNotes();
     }
 
     public bool HasTaskHistory => RecentTaskCount > 0;
     public bool HasReviewQueue => ReviewQueueCount > 0;
+
+    /// <summary>
+    /// Whether the pinned decision strip has anything to show. It sits outside
+    /// the tabs so that what the agent is waiting on is never behind one,
+    /// whether that is an approval, a question, or a blocked run needing an
+    /// instruction.
+    /// </summary>
+    public bool HasDecisionWaiting => HasReviewQueue || IsWaitingForReply || ShowContinueBox;
+
     public bool HasNewLessons => NewLessons.Count > 0;
     public bool HasWorkspaceMemory => WorkspaceMemoryCount > 0;
     public bool HasWorkspaceFiles => WorkspaceFileCount > 0;
@@ -852,6 +1005,9 @@ public partial class AgentViewModel : ViewModelBase
             Narrate("Agent task started.", VoicePriority.Normal, $"{CurrentTask.TaskId}:started");
             await RunAgentLoopAsync();
             await RefreshRecentAsync();
+            // A run that pauses for approval belongs in the queue immediately
+            // (r26 01 1.4); it used to wait for a manual refresh click.
+            await RefreshReviewQueueAsync();
         }
         catch (OperationCanceledException) { StatusMessage = "Agent stopped."; }
         catch (Exception ex) { SetError(ex.Message); }
@@ -878,6 +1034,7 @@ public partial class AgentViewModel : ViewModelBase
                 $"Agent step started for task {CurrentTask?.TaskId}"));
             await RunCurrentStepAsync();
             await RefreshRecentAsync();
+            await RefreshReviewQueueAsync();
         }
         catch (OperationCanceledException) { StatusMessage = "Agent stopped."; }
         catch (Exception ex) { SetError(ex.Message); }
@@ -972,8 +1129,52 @@ public partial class AgentViewModel : ViewModelBase
             // workbench's active one (r16 01-orchestration-hardening.md 1.4).
             var previewOptions = item.WorkspaceRoot is { Length: > 0 } root ? options with { WorkspaceRoot = root } : options;
             var preview = item.PendingToolAction is null ? string.Empty : AgentApprovalPreview.Describe(item.PendingToolAction, previewOptions);
-            ReviewQueue.Add(new AgentReviewQueueItemViewModel(item, preview, WorkspaceRoot));
+            ReviewQueue.Add(new AgentReviewQueueItemViewModel(item, preview, WorkspaceRoot)
+            {
+                UndeclaredCommandFamily = ResolveUndeclaredFamily(item)
+            });
         }
+    }
+
+    /// <summary>
+    /// A blocked run_command whose family the agent CAN run but this workspace
+    /// has not declared. Anything else returns empty: a command outside the
+    /// fixed families has nothing the user could usefully allow, and pretending
+    /// otherwise would offer a button that cannot help.
+    /// </summary>
+    private string ResolveUndeclaredFamily(AgentReviewQueueItem item)
+    {
+        if (item.PendingToolAction is not { } pending
+            || !string.Equals(pending.ToolName, "run_command", StringComparison.OrdinalIgnoreCase))
+            return string.Empty;
+
+        var requested = pending.Arguments.TryGetValue("command", out var value) ? value?.ToString() ?? string.Empty : string.Empty;
+        var family = WorkspaceCommandRecipes.ExtractFamily(requested);
+        if (family is null)
+            return string.Empty;
+
+        var declared = CommandRecipes.Any(r =>
+            string.Equals(WorkspaceCommandRecipes.ExtractFamily(r.Command) ?? r.Command.Trim(), family, StringComparison.OrdinalIgnoreCase));
+        return declared ? string.Empty : family;
+    }
+
+    /// <summary>
+    /// Declares the family the blocked row named, from the row itself. This
+    /// grants nothing beyond what the Command Recipes editor already grants:
+    /// the family was always one the gate accepts, the workspace just had not
+    /// said yes to it, and the action still needs its own approval afterwards.
+    /// </summary>
+    [RelayCommand]
+    private async Task DeclareCommandFamilyAsync(AgentReviewQueueItemViewModel? item)
+    {
+        if (item is null || !item.CanDeclareCommandFamily) return;
+
+        var family = item.UndeclaredCommandFamily;
+        CommandRecipes.Add(new WorkspaceCommandRecipeViewModel(
+            new WorkspaceCommandRecipe(family, WorkspaceCommandRecipes.DescribeFamily(family), AgentRiskLevel.Medium)));
+        await SaveWorkspaceManifestAsync();
+        await RefreshReviewQueueAsync();
+        StatusMessage = $"'{family}' is now allowed in this workspace. The agent still needs your approval to run it.";
     }
 
     [RelayCommand]
@@ -1019,6 +1220,11 @@ public partial class AgentViewModel : ViewModelBase
             await _agent.AppendUserReplyAsync(taskId, ReplyText);
             ReplyText = string.Empty;
             await LoadTaskIfOpenAsync(taskId);
+            // The task has left the queue as of this moment, so the strip has
+            // to say so now. Refreshing only after the resumed run finished
+            // left "1 waiting on you" on screen, with the answered question
+            // still under it, for the whole length of the run.
+            await RefreshReviewQueueAsync();
             // Same approve-and-continue shape as ApproveReviewAsync: a
             // reply that unblocked the task should resume the loop instead
             // of requiring a separate manual step.
@@ -1047,6 +1253,7 @@ public partial class AgentViewModel : ViewModelBase
             await _agent.ContinueTaskAsync(taskId, ContinueInstructionText, options);
             ContinueInstructionText = string.Empty;
             await LoadTaskIfOpenAsync(taskId);
+            await RefreshReviewQueueAsync();
             // Same approve-and-continue shape as ApproveReviewAsync/SendReplyAsync:
             // a reopened task that AgentService just returned to Running should
             // resume the loop instead of requiring a separate manual step.
@@ -1093,6 +1300,7 @@ public partial class AgentViewModel : ViewModelBase
             var options = target.WorkspaceRoot is { Length: > 0 } root ? BuildOptions() with { WorkspaceRoot = root } : BuildOptions();
             await RunAgentLoopAsync(taskId, options);
             await RefreshRecentAsync();
+            await RefreshReviewQueueAsync();
         }
         catch (OperationCanceledException) { StatusMessage = "Agent stopped."; }
         catch (Exception ex) { SetError(ex.Message); }
@@ -1107,13 +1315,35 @@ public partial class AgentViewModel : ViewModelBase
         }
     }
 
+    /// <summary>
+    /// Abandons a queued task the user is done with: the pending action is
+    /// discarded without executing, the task becomes terminal, and the row
+    /// leaves the queue for good. Distinct from Reject, which decides the
+    /// action but leaves the task waiting; a rejected task with nothing else
+    /// to say had no way out of the queue before this.
+    /// </summary>
+    [RelayCommand]
+    private async Task DismissReviewAsync(AgentReviewQueueItemViewModel? item)
+    {
+        if (item is null) return;
+        var result = await _agent.DismissTaskAsync(item.TaskId);
+        await RefreshReviewQueueAsync();
+        await RefreshRecentAsync();
+        await LoadTaskIfOpenAsync(item.TaskId);
+        StatusMessage = result.Applied ? "Task dismissed." : result.Message;
+    }
+
     [RelayCommand]
     private async Task RejectReviewAsync(AgentReviewQueueItemViewModel? item)
     {
         if (item is null) return;
-        await _agent.AppendApprovalAsync(item.TaskId, "review_queue", approved: false, item.PendingFingerprint, BuildOptions());
+        var result = await _agent.AppendApprovalAsync(item.TaskId, "review_queue", approved: false, item.PendingFingerprint, BuildOptions());
         await RefreshReviewQueueAsync();
         await LoadTaskIfOpenAsync(item.TaskId);
+        // Same contract ApproveReviewAsync uses (r23 4.1, r26 01 1.2): a
+        // rejection that applied to nothing says why instead of looking done.
+        if (!result.Applied)
+            StatusMessage = result.Message;
     }
 
     [RelayCommand]
@@ -1239,6 +1469,7 @@ public partial class AgentViewModel : ViewModelBase
 
         if (CurrentTask is null)
         {
+            RunOutcome = AgentRunOutcomeSummary.None;
             OnPropertyChanged(nameof(HasLedgerEntries));
             RewindTaskCommand.NotifyCanExecuteChanged();
             return;
@@ -1282,6 +1513,10 @@ public partial class AgentViewModel : ViewModelBase
             LedgerCommands.Add(new AgentLedgerCommandEntryViewModel(command));
         foreach (var approval in ledger.Approvals)
             LedgerApprovals.Add(new AgentLedgerApprovalEntryViewModel(approval));
+
+        // r26 03 3.2: what the finished run actually did, above the fold on the
+        // Run tab, composed from the ledger just built and the task's own state.
+        RunOutcome = AgentRunOutcome.Describe(ledger, CurrentTask);
 
         OnPropertyChanged(nameof(HasLedgerEntries));
         RewindTaskCommand.NotifyCanExecuteChanged();
@@ -1703,6 +1938,72 @@ public partial class AgentViewModel : ViewModelBase
     private static string DescribePolicyAllowCount(int count) =>
         count == 0 ? "unrestricted" : $"limited to {count} rule{(count == 1 ? string.Empty : "s")}";
 
+    // ── Command recipes the user can actually manage ──
+    //
+    // A workspace with no declared recipes cannot run anything, and until now
+    // the only way to declare one was to hand-edit .hermaeus/workspace.json,
+    // which assumes the user knows both that the file exists and which command
+    // families the safety gate will accept. Both are now on screen: pick a
+    // family, optionally narrow it with an argument, add it. Nothing here
+    // widens what the gate allows; it only lets the user say which of the
+    // fixed, already-safe families this workspace is permitted to use.
+
+    /// <summary>The complete set of families the gate can ever allow, as pickable rows.</summary>
+    public IReadOnlyList<CommandFamilyOptionViewModel> AvailableCommandFamilies { get; } =
+        [.. WorkspaceCommandRecipes.KnownFamilies.Select(f => new CommandFamilyOptionViewModel(f))];
+
+    [ObservableProperty] private CommandFamilyOptionViewModel? _selectedCommandFamily;
+    /// <summary>Optional argument narrowing the recipe, e.g. the project path on "dotnet test".</summary>
+    [ObservableProperty] private string _newRecipeArgument = string.Empty;
+
+    public bool CanAddCommandRecipe => SelectedCommandFamily is not null && HasWorkspace;
+    partial void OnSelectedCommandFamilyChanged(CommandFamilyOptionViewModel? value)
+    {
+        OnPropertyChanged(nameof(CanAddCommandRecipe));
+        AddCommandRecipeCommand.NotifyCanExecuteChanged();
+    }
+
+    [RelayCommand(CanExecute = nameof(CanAddCommandRecipe))]
+    private async Task AddCommandRecipeAsync()
+    {
+        if (SelectedCommandFamily is null) return;
+
+        var argument = NewRecipeArgument.Trim();
+        var command = argument.Length == 0
+            ? SelectedCommandFamily.Family
+            : $"{SelectedCommandFamily.Family} {argument}";
+
+        // The gate is the authority on what counts as a recipe, so ask it
+        // rather than trusting the composed string.
+        if (WorkspaceCommandRecipes.ExtractFamily(command) is null)
+        {
+            SetError($"'{command}' is not one of the command families the agent can run.");
+            return;
+        }
+
+        if (CommandRecipes.Any(r => string.Equals(r.Command, command, StringComparison.OrdinalIgnoreCase)))
+        {
+            StatusMessage = "That recipe is already declared for this workspace.";
+            return;
+        }
+
+        CommandRecipes.Add(new WorkspaceCommandRecipeViewModel(
+            new WorkspaceCommandRecipe(command, SelectedCommandFamily.Description, AgentRiskLevel.Medium)));
+        NewRecipeArgument = string.Empty;
+
+        await SaveWorkspaceManifestAsync();
+        StatusMessage = $"Added '{command}'. The agent can now request it, and it still needs your approval each time.";
+    }
+
+    [RelayCommand]
+    private async Task RemoveCommandRecipeAsync(WorkspaceCommandRecipeViewModel? recipe)
+    {
+        if (recipe is null) return;
+        CommandRecipes.Remove(recipe);
+        await SaveWorkspaceManifestAsync();
+        StatusMessage = $"Removed '{recipe.Command}'. The agent can no longer run it here.";
+    }
+
     [RelayCommand]
     private async Task SaveWorkspaceManifestAsync()
     {
@@ -1784,6 +2085,7 @@ public partial class AgentViewModel : ViewModelBase
     {
         var openedTaskId = _openedTaskId = taskId;
         var viewedTaskId = CurrentTask?.TaskId;
+        _stepsThisRun = 0;
         StatusMessage = "Running agent...";
         var result = await _agent.RunAsync(
             openedTaskId,
@@ -1832,6 +2134,15 @@ public partial class AgentViewModel : ViewModelBase
         if (!isChildStep)
             CurrentTask = result.State;
         NarrateStatusTransition(previousStatus, result.State);
+        // A step just landed, so the next wait is a new one: restart the clock
+        // and the word rotation rather than letting the line report the age of
+        // the whole run.
+        if (IsRunning)
+        {
+            _stepsThisRun++;
+            RestartActivityClock();
+        }
+        OnPropertyChanged(nameof(CurrentStepCountLabel));
         CurrentStep = label + result.State.ActiveStep;
         StatusMessage = label + result.LogEntry;
         NextActionPreview = JsonSerializer.Serialize(result.PlannerResponse.NextAction, new JsonSerializerOptions { WriteIndented = true });
@@ -1955,6 +2266,7 @@ public partial class AgentViewModel : ViewModelBase
         OnPropertyChanged(nameof(CurrentTaskSummaryLabel));
         OnPropertyChanged(nameof(QueuedPatchCount));
         OnPropertyChanged(nameof(PendingPatchCount));
+        OnPropertyChanged(nameof(ShowPendingPatchBadge));
         OnPropertyChanged(nameof(AppliedPatchCount));
         OnPropertyChanged(nameof(RejectedPatchCount));
         OnPropertyChanged(nameof(BlockedPatchCount));
@@ -1992,6 +2304,12 @@ public partial class AgentViewModel : ViewModelBase
         StartCommand.NotifyCanExecuteChanged();
         ExplainWorkspaceCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(HasWorkspace));
+        RefreshCapabilityNotes();
+        // The file list only ever populated on panel load, so choosing a
+        // workspace (or opening a task belonging to a different one) left an
+        // empty list behind until the user found the Refresh button. The list
+        // describes this root, so it follows the root.
+        _ = RunOnUiAsync(RefreshWorkspaceFilesAsync);
     }
     /// <summary>
     /// r12 02-async-and-threading.md 2.3: reuses the 300 ms + CTS debounce
@@ -2035,19 +2353,22 @@ public partial class AgentViewModel : ViewModelBase
         NewTaskCommand.NotifyCanExecuteChanged();
         ContinueTaskCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(IsWaitingForReply));
+        OnPropertyChanged(nameof(CurrentQuestion));
+        OnPropertyChanged(nameof(HasCurrentQuestion));
         OnPropertyChanged(nameof(CanShowNewTaskButton));
         OnPropertyChanged(nameof(IsTaskTerminal));
         OnPropertyChanged(nameof(PrematureCompleteNote));
         OnPropertyChanged(nameof(HasPrematureCompleteNote));
         OnPropertyChanged(nameof(IsWaitingForPlanApproval));
         OnPropertyChanged(nameof(ShowContinueBox));
+        OnPropertyChanged(nameof(HasDecisionWaiting));
         OnPropertyChanged(nameof(PlanRevisedLabel));
         OnPropertyChanged(nameof(HasPlanRevision));
         _ = RefreshQueuedPatchesAsync();
         _ = RefreshRunLedgerAsync();
 
         // r24 doc 02 2.3: re-index on terminal transition only, never per step.
-        if (value is { Status: AgentTaskStatus.Complete or AgentTaskStatus.Failed })
+        if (value is { Status: AgentTaskStatus.Complete or AgentTaskStatus.Failed or AgentTaskStatus.Cancelled })
             _ = IndexTaskForRecallAsync(value);
     }
 
@@ -2057,7 +2378,7 @@ public partial class AgentViewModel : ViewModelBase
     {
         var recent = await _store.ListRecentAsync(limit: 200);
         var inputs = new List<Hermaeus.Core.Models.RecallTaskInput>();
-        foreach (var item in recent.Where(t => t.Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed))
+        foreach (var item in recent.Where(t => t.Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed or AgentTaskStatus.Cancelled))
         {
             var full = await _store.LoadAsync(item.TaskId);
             if (full is null) continue;
@@ -2101,5 +2422,73 @@ public partial class AgentViewModel : ViewModelBase
         NewTaskCommand.NotifyCanExecuteChanged();
         ContinueTaskCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(CanShowNewTaskButton));
+
+        OnPropertyChanged(nameof(CurrentStepCountLabel));
+
+        if (value)
+            StartActivityTicker();
+        else
+            StopActivityTicker();
+    }
+
+    /// <summary>
+    /// Drives <see cref="ActivityStatus"/> while a run is in flight. The
+    /// workbench set one status message when the run started and did not touch
+    /// it again until a step finished, so a long model call showed frozen text
+    /// and read as a hung app. Unlike chat there is no token stream to end the
+    /// wait, so this ticks until the run stops.
+    /// </summary>
+    private void StartActivityTicker()
+    {
+        StopActivityTicker();
+        _activityCts = new CancellationTokenSource();
+        var token = _activityCts.Token;
+        RestartActivityClock();
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                while (!token.IsCancellationRequested)
+                {
+                    await Task.Delay(ActivityTickMs, token);
+                    if (token.IsCancellationRequested) return;
+                    RunOnUi(UpdateActivityStatus);
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (ObjectDisposedException) { }
+        }, token);
+    }
+
+    private void StopActivityTicker()
+    {
+        _activityCts?.Cancel();
+        _activityCts?.Dispose();
+        _activityCts = null;
+        _activityClock.Reset();
+        ActivityStatus = string.Empty;
+    }
+
+    /// <summary>
+    /// Each step restarts the clock and picks a new starting word, so the line
+    /// reports how long the CURRENT step has taken rather than the whole run,
+    /// and a long run does not show the same rotation over and over.
+    /// </summary>
+    private void RestartActivityClock()
+    {
+        _activityWordOffset = Random.Shared.Next(AgentActivityPhase.WhimsyWords.Count);
+        _activityClock.Restart();
+        UpdateActivityStatus();
+    }
+
+    private void UpdateActivityStatus()
+    {
+        var elapsed = _activityClock.ElapsedMilliseconds;
+        ActivityStatus = AgentActivityPhase.Describe(
+            elapsed,
+            IsRunning,
+            CurrentTask?.StepCount ?? 0,
+            _activityWordOffset + (int)(elapsed / 2_500));
     }
 }

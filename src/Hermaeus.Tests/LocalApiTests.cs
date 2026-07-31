@@ -56,10 +56,15 @@ internal static class LocalApiTests
         public Task<int> ClearMismatchedEmbeddingsAsync(CancellationToken ct = default) => Task.FromResult(0);
     }
 
-    private static async Task<(IHost Host, HttpClient Client)> StartTestHostAsync(TempDir temp, bool configureToken = true, IReadOnlyList<(string Name, string Token)>? tokens = null)
+    private static async Task<(IHost Host, HttpClient Client)> StartTestHostAsync(
+        TempDir temp,
+        bool configureToken = true,
+        IReadOnlyList<(string Name, string Token)>? tokens = null,
+        Action<AppSettings>? configure = null)
     {
         var settingsService = NewSettings(temp);
         await settingsService.LoadAsync();
+        configure?.Invoke(settingsService.Settings);
         if (tokens is not null)
         {
             foreach (var (name, token) in tokens)
@@ -462,5 +467,85 @@ internal static class LocalApiTests
             new ChatCompletionRequest("no-profile-model", [new ChatMessageDto("user", "hi")], null, null));
         True(response.IsSuccessStatusCode, "chat completion should succeed");
         Equal(0.5, capturing.LastOptions?.TopP, "with no profile and no explicit value, the global LLM setting should be used");
+    }
+
+    // ── r26 doc 05 5.1: GET /v1/capabilities, deferred since r1 ──
+
+    public static async Task CapabilitiesEndpointReportsRoutesAndVersion()
+    {
+        using var temp = new TempDir();
+        var (host, client) = await StartTestHostAsync(temp);
+        using (host)
+        {
+            client.DefaultRequestHeaders.Add(LocalApiTokenAuth.TokenHeaderName, TestToken);
+            var response = await client.GetAsync("/v1/capabilities");
+            True(response.IsSuccessStatusCode, "capabilities should be served with a valid token.");
+
+            var body = await response.Content.ReadFromJsonAsync<CapabilitiesResponse>();
+            True(body is not null, "capabilities should round-trip as JSON.");
+            True(!string.IsNullOrWhiteSpace(body!.Version), "capabilities should report the app version.");
+            True(body.Routes.Contains("GET /v1/capabilities"), "capabilities should list itself among the routes.");
+            True(body.Routes.Contains("POST /v1/chat/completions"), "capabilities should list the chat route.");
+            True(body.Capabilities.Count > 0, "capabilities should report at least one feature.");
+        }
+    }
+
+    public static async Task CapabilitiesReportsAnUnusableFeatureWithAReasonRatherThanOmittingIt()
+    {
+        using var temp = new TempDir();
+        var (host, client) = await StartTestHostAsync(temp, configure: settings =>
+        {
+            settings.Rag.Enabled = true;
+            settings.Memory.Enabled = false;
+            settings.Llm.DefaultModel = string.Empty;
+        });
+        using (host)
+        {
+            client.DefaultRequestHeaders.Add(LocalApiTokenAuth.TokenHeaderName, TestToken);
+            var body = await (await client.GetAsync("/v1/capabilities")).Content.ReadFromJsonAsync<CapabilitiesResponse>();
+
+            var rag = body!.Capabilities.Single(c => c.Name == "rag");
+            True(!rag.Usable, "with no datasets ingested, RAG is not usable.");
+            True(rag.Reason.Length > 0, "an unusable feature states a reason instead of being omitted.");
+
+            var memory = body.Capabilities.Single(c => c.Name == "memory");
+            True(!memory.Usable && memory.Reason.Length > 0, "a disabled memory store says so.");
+
+            var chat = body.Capabilities.Single(c => c.Name == "chat");
+            True(!chat.Usable && chat.Reason.Length > 0, "chat with no default model selected says so.");
+        }
+    }
+
+    public static async Task CapabilitiesRequiresAToken()
+    {
+        using var temp = new TempDir();
+        var (host, client) = await StartTestHostAsync(temp);
+        using (host)
+        {
+            var response = await client.GetAsync("/v1/capabilities");
+            Equal(HttpStatusCode.Unauthorized, response.StatusCode,
+                "capabilities is authenticated like every route except /health.");
+        }
+    }
+
+    public static async Task CapabilitiesLeaksNoSecretOrPathValues()
+    {
+        using var temp = new TempDir();
+        const string secret = "sk-not-a-real-key-000111222333";
+        var (host, client) = await StartTestHostAsync(temp, configure: settings =>
+        {
+            settings.Llm.OpenAiApiKey = secret;
+            settings.Rag.Enabled = true;
+            settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        });
+        using (host)
+        {
+            client.DefaultRequestHeaders.Add(LocalApiTokenAuth.TokenHeaderName, TestToken);
+            var raw = await (await client.GetAsync("/v1/capabilities")).Content.ReadAsStringAsync();
+
+            True(!raw.Contains(secret, StringComparison.Ordinal), "no settings value that could be a secret may appear in the body.");
+            True(!raw.Contains(TestToken, StringComparison.Ordinal), "no local API token may appear in the body.");
+            True(!raw.Contains(temp.PathFor("data").Replace("\\", "\\\\"), StringComparison.Ordinal), "no file path may appear in the body.");
+        }
     }
 }

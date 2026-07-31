@@ -203,7 +203,38 @@ Consequences worth knowing:
 - Clicking the card opens a per-case breakdown with the runner-up's score for
   the same case beside it, so the ranking can be checked rather than trusted.
 - Hermaeus Doctor reads the same report, so its advisory never disagrees with
-  the panel.
+  the panel. Its advisory is scoped to the shared case set it names; it makes
+  no cross-suite claim.
+
+### Best Across Every Suite
+
+Beside Best overall, the Insights tab answers a different question: which
+model is best across **all** your suites, rather than across one shared set of
+cases.
+
+**The method is mean per-suite standing.** Each suite gets its own leaderboard,
+ranked by the same shared-case-set rule above. Suites with a usable leaderboard
+then each cast one vote: models are ranked by their mean position across those
+suites, ties broken on mean quality-per-second and then on model id, so the
+same data always gives the same answer. The card states how many suites the
+result rests on, and lists the leader's position in each of them; expanding a
+suite row shows that suite's full leaderboard.
+
+The obvious alternative, pooling every case from every suite, is wrong here: a
+40 case suite would outvote a 5 case suite eight to one, so "best across all
+suites" would silently mean "best on the biggest suite". Ranking per suite and
+then averaging gives each suite one vote, which is what the phrase means in
+English.
+
+There is deliberately **no answer** when there cannot be an honest one, and the
+card says which case applies:
+
+- Fewer than two suites have two models with enough shared cases to rank on.
+- No model has run every one of the comparable suites.
+
+Suites and models left out are named: a suite whose models share no cases, a
+suite only one model ever ran, and a model that ran three of five suites are
+each listed under "Left out of this ranking" rather than quietly dropped.
 
 ### Baseline Comparison
 

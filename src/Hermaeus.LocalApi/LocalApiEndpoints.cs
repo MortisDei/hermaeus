@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using Hermaeus.Core.Models;
@@ -152,7 +153,78 @@ public static class LocalApiEndpoints
             await LogCallAsync(traces, client, selfReported, "embeddings", sw, string.Empty, ct);
             return Results.Ok(new EmbeddingsResponse(data, embeddings.Dimensions));
         });
+
+        // Deferred since r1: a caller could ask what models exist but not
+        // whether RAG had a dataset, whether memory was on, or whether
+        // embeddings would work, so the only way to find out was to send a
+        // real request and read the failure. Authenticated like every route
+        // except /health, traced like every other route, and it reports
+        // rather than probes: settings and one cheap count, no model load and
+        // no network call.
+        app.MapGet("/v1/capabilities", async (ISettingsService settingsService, RagQueryService rag, ITraceStore traces, HttpContext http, CancellationToken ct) =>
+        {
+            var (client, selfReported) = Caller(http);
+            var sw = Stopwatch.StartNew();
+            var settings = settingsService.Settings;
+
+            var chatModel = settings.Llm.DefaultModel;
+            var chat = new CapabilityDto("chat", !string.IsNullOrWhiteSpace(chatModel),
+                string.IsNullOrWhiteSpace(chatModel) ? "No default chat model is selected." : string.Empty);
+
+            var datasetCount = 0;
+            var ragReason = string.Empty;
+            if (!settings.Rag.Enabled)
+            {
+                ragReason = "RAG is turned off in settings.";
+            }
+            else
+            {
+                try
+                {
+                    datasetCount = (await rag.GetDatasetsAsync(ct)).Count;
+                    if (datasetCount == 0)
+                        ragReason = "No RAG datasets have been created yet.";
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    ragReason = "The RAG store could not be read.";
+                }
+            }
+
+            var ragCapability = new CapabilityDto("rag", ragReason.Length == 0, ragReason);
+            var datasets = new CapabilityDto("rag.datasets", datasetCount > 0, $"{datasetCount} dataset(s).");
+
+            var memory = new CapabilityDto("memory", settings.Memory.Enabled,
+                settings.Memory.Enabled ? string.Empty : "The memory store is turned off in settings.");
+
+            var embeddingModel = settings.Rag.EmbeddingModel;
+            var embeddingsCapability = new CapabilityDto("embeddings", !string.IsNullOrWhiteSpace(embeddingModel),
+                string.IsNullOrWhiteSpace(embeddingModel) ? "No embedding model is configured." : string.Empty);
+
+            var response = new CapabilitiesResponse(
+                CurrentVersion(),
+                [
+                    "GET /health",
+                    "POST /v1/chat/completions",
+                    "GET /v1/memory/query",
+                    "POST /v1/rag/query",
+                    "GET /v1/models",
+                    "POST /v1/embeddings",
+                    "GET /v1/capabilities"
+                ],
+                [chat, ragCapability, datasets, memory, embeddingsCapability]);
+
+            await LogCallAsync(traces, client, selfReported, "capabilities", sw, string.Empty, ct);
+            return Results.Ok(response);
+        });
     }
+
+    /// <summary>The same informational version the rest of the app reports.</summary>
+    private static string CurrentVersion() =>
+        Assembly.GetEntryAssembly()
+            ?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+        ?? typeof(LocalApiEndpoints).Assembly.GetName().Version?.ToString()
+        ?? "unknown";
 
     /// <summary>
     /// Mirrors ChatViewModel's precedence for the sampling parameters added in

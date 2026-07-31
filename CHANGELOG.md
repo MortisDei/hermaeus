@@ -13,6 +13,199 @@ From 0.29.0-alpha onward, every minor version is tagged and released on
 GitHub (see `docs/packaging.md` "Releases"); patch versions are tagged only
 for urgent hotfixes.
 
+## [0.33.0-alpha] - 2026-07-31
+
+Implements docs/review r26: the review queue is a queue, the Agent workbench
+has a shape, the panel says what it can do and whether the run worked, and
+benchmarks answer "best across every suite".
+
+### Fixed
+
+- **A valid model response was rejected as unparseable JSON, stalling the run.**
+  A local model that names a tool in `next_action.type` (`"type": "set_plan"`,
+  `"tool_name": null`) produced a complete, well-formed response that the
+  strict enum threw out whole. The user was told the response "could not be
+  parsed as valid JSON" when it parsed fine, and the run stopped. Observed
+  eight times across two real tasks. That one shape is now repaired into the
+  protocol's own form and executed. The repair corrects the shape of the
+  request, never its authority: the safety gate classifies the resulting tool
+  exactly as if the model had named it correctly.
+- **An unreadable response asked the user a question that did not exist.** It
+  synthesized an `ask_user`, which parked the task in `waiting_for_review` and
+  showed a reply box with nothing to reply to, and stopped the autonomous loop
+  dead. It also made the existing three-strike budget unreachable, since
+  reaching it took three manual Run Step clicks. The loop now retries by
+  itself, with a corrective note appended to the transcript telling the model
+  what was wrong; three unreadable responses in a row still fail the task.
+- **The agent's question was never shown.** The planner's `user_message` went
+  only to the log and the transcript, so a task paused on a question rendered
+  a reply box with no question next to it. It is persisted on the task now and
+  shown above the reply box.
+- **A command containing shell metacharacters could reach an approval prompt.**
+  `dotnet test && rm -rf /` matched the family prefix, so the gate offered it
+  as approvable; execution would have refused it (nothing is launched through a
+  shell, and the argument fails path validation), but it should never have
+  looked legitimate. Such a string now matches no family at all.
+- **`list_files` hid whole folders.** It shared the *search* result cap of 20,
+  and the workspace walk is a LIFO stack, so a listing of a real workspace
+  returned 20 entries from whichever subtree was popped first and said nothing
+  about the rest. A run listed the workspace root, never saw a top-level folder
+  that was genuinely there, and told the user the directory did not exist.
+  Listings now have their own budget, are sorted so they are stable and shallow
+  entries are not buried, include directories (a folder is never invisible
+  because its own files were filtered out), and say plainly when they stopped
+  early.
+- **The workspace file list only populated on panel load**, so choosing a
+  workspace, or opening a task belonging to a different one, left an empty list
+  until the user found the Refresh button. It follows the workspace root now.
+- **"step 111/20" compared two different things.** The numerator is the task's
+  whole life and the denominator caps a single autonomous run, so a long task
+  looked broken. The step count now reads "step 111", with "(4 of 20 this run)"
+  added only while a run is actually spending that budget.
+- **The cursor flickered between hand and arrow on the nav icons.** Avalonia
+  places a tooltip at the pointer by default, so the popup opened under the
+  cursor, the cursor reverted to an arrow, the control counted as exited, the
+  tooltip closed, and the cycle repeated. Tooltips are placed below the control
+  they describe now. (The earlier fix removed the dead gap between buttons,
+  which was a real problem but not this one.)
+- **A truncated file read read as a dead end.** The result said only
+  `"truncated": true`, and a real run concluded the tool "cannot return the
+  entire file content in one go" and abandoned the file. Results now carry the
+  line range they cover and name the exact `line_offset` to ask for next, the
+  oversized-result notice says the same, and the system prompt states it.
+- **A file over the whole-file byte cap could not be read at all**, in slices
+  or otherwise: the size gate ran before the line-ranged path, so `line_offset`
+  could not rescue it. A bounded line range now has its own, much larger
+  ceiling, which is what ranged reading is for. Every other check (ignored
+  directory, symlink, text extension, read policy) is unchanged.
+- **The plan panel stopped updating.** Same cause as the parse failure above:
+  the model updates it with `set_plan`, and every one of those calls was being
+  thrown away. The owner's task showed a plan last revised at step 36 while the
+  run was on step 82, with exactly four discarded responses.
+- **A conversation title overran the timestamp and the details button** in the
+  sidebar. The title sat in a horizontal `StackPanel`, which measures children
+  with infinite width, so `TextTrimming` never fired. It now wraps to at most
+  two lines and then ellipsizes.
+- **The cursor flickered between hand and arrow** on the boundary of a nav bar
+  icon. The 4px `Spacing` between those buttons was dead space with a
+  different cursor, so the smallest movement on an edge flipped back and
+  forth. The buttons now carry that gap as internal padding instead, making
+  the row one continuous hand-cursor region.
+- **Choosing a benchmark suite threw the user onto the Run Detail tab.**
+  Changing suite reloads the runs, which reassigns the selected run, which was
+  indistinguishable from the user clicking a run row. Selections the app makes
+  for its own bookkeeping no longer move the tab; a row click and a finished
+  run still do.
+- **Approving a finished task un-completed it and spent tokens restarting it.**
+  The review queue listed every task that had ever been approved, not just
+  tasks needing a decision, and `AppendApprovalAsync` accepted an approval on a
+  task with nothing pending: it appended an approval record and set the task's
+  status back to `Running`, which the workbench then resumed the agent loop on.
+  The owner's report was "I can endlessly keep clicking approve"; each of those
+  clicks was writing to `task_state.json`. An approval or rejection with
+  nothing pending is now refused with a reason and changes nothing at all.
+- **The review queue lists only what needs a decision now**: tasks
+  `waiting_for_review` or `blocked`. Approval history is unchanged and still
+  visible in the run ledger and on each row. A queue row with no pending action
+  no longer renders Approve and Reject; it says whether it is waiting on a
+  reply or an instruction and offers Open.
+- **The queue refreshes itself** when a run pauses, after a run, a step, and a
+  resumed loop. The manual "Refresh Queue" button is gone, along with "Refresh
+  Memory", which could only ever have been a no-op.
+- **The Agent header could eat the window.** It was an `Auto` row holding the
+  stat tiles, the new-lessons strip, the capability notes, the full sub-task
+  list and the full plan, none of it inside a `ScrollViewer`, so a long plan
+  squeezed the working area toward zero height with no scrollbar to recover it.
+- `ServicesViewModelTests.Removing_a_managed_server_disposes_its_view_model`
+  drains the posted rebuild instead of waiting on a timeout, so it is
+  deterministic rather than probable under full-suite load.
+
+### Added
+
+- **The Agent workbench is four tabs** (Run, Changes, Workspace, History) under
+  a one-line status bar, each tab scrolling on its own. Every panel that
+  existed before still exists, one click away. The decision the agent is
+  waiting on lives in a pinned strip above the tabs and is never behind one.
+  The panel opens on Run every time, never switches tabs on its own, and only
+  the Changes tab carries a badge (pending patches, suppressed at zero).
+- **A finished run says what it did**, on the Run tab, composed from the run
+  ledger: files changed split created and edited with the line delta, commands
+  run and how many failed, approvals asked for and how they went, unfinished
+  plan steps, and the model's reservations. A run that changed nothing says so.
+  A failed command is reported even when the task status is `Complete`. No
+  score, no grade, no percentage.
+- **Capability text derived from the code it describes.** The five hardcoded
+  sentences under the old header are replaced by lines built from the
+  executor's real tool set, this workspace's declared command recipes, its
+  policy, and whether an MCP bridge is configured. A test asserts every tool
+  the executor accepts is classified by exactly one line, so it cannot drift
+  again.
+- **Best across every suite**, on the Benchmarks Insights tab. Each suite gets
+  its own leaderboard ranked by the same shared-case-set rule the overall board
+  uses, and the cross-suite winner is the model with the best mean position
+  across those suites, so each suite counts once and a 40 case suite cannot
+  outvote a 5 case suite. The card names the suites it rests on, shows the
+  leader's placing in each with the suite's full board one click away, and
+  names every suite and model it left out. Fewer than two comparable suites, or
+  no model present in all of them, produces no winner and a sentence saying
+  which case applies.
+- **The Agent panel shows that it is working.** A run in flight now drives an
+  indeterminate progress bar and a rotating activity line in the status bar
+  ("Step 3: Weighing the plan... 12s"), naming the current step and its
+  elapsed time. The panel set one status message when the run started and did
+  not touch it again until a step finished, so a long model call left every
+  label frozen and read as a hung app. The clock and word rotation restart per
+  step, and nothing shows for the first 1.5s so a fast step does not flicker.
+- **Dismiss, on a review queue row.** Discards the task's pending action
+  without executing it and closes the task as `cancelled`, so a run you are
+  done with can leave the queue. Rejecting returned a task to
+  `waiting_for_review`, so a row the user had finished with had no action that
+  could ever clear it. Dismiss records no approval (walking away from a
+  decision is not making one), keeps the ledger, approval history and
+  transcript, leaves the task reopenable through the Continue box, and is
+  refused on a running task or a sub-task child. `AgentTaskStatus.Cancelled`
+  is new and terminal; `docs/agent.md` already documented `cancelled` as a
+  task state, so this closes that drift too.
+- **Ten more command families**, so an ordinary dev workflow is covered rather
+  than only .NET, npm, cargo and pytest: `pnpm`/`yarn` test and run,
+  `cargo check`, `cargo clippy`, `go build`, `go test`, `go vet` (including
+  Go's `./...` pattern) and `python -m pytest`. Installers, formatters,
+  long-running processes and `make`/`mvn`/`gradle` stay out, each for a stated
+  reason rather than by omission; see `docs/agent.md`.
+- **A blocked command says what can be done about it.** If the agent asks for a
+  family this workspace has not declared, the row names it and offers to
+  declare it in one click, after which the action still needs its own approval.
+  If it asks for something outside the families entirely, the refusal says so
+  and offers nothing, because nothing the user could allow would make it
+  runnable. No new execution power either way.
+- **A command recipe editor** on the Workspace tab. A workspace that declares
+  no recipes can run nothing, and declaring one meant hand-editing
+  `.hermaeus/workspace.json`, which assumed the user knew both that the file
+  existed and which command families the safety gate accepts. Pick a family
+  from the fixed list, optionally narrow it with an argument, and it is saved
+  immediately; Remove takes it back off. The picker can only express families
+  the gate already accepts, so a recipe cannot be declared that would be
+  refused at run time, and every run still requires approval. Command Recipes
+  and Project Instructions both gained explanatory text and tooltips.
+- **`GET /v1/capabilities`** on the local API, deferred since r1. Reports the
+  routes it exposes, the app version, and per feature (chat, RAG, memory,
+  embeddings) whether it is usable right now with a reason when it is not. It
+  reports rather than probes: no model load, no server start, no network call.
+  It leaks no paths, keys, tokens or dataset names, and is authenticated and
+  traced like every other route.
+
+### Changed
+
+- The header's review count reads "N waiting on you" rather than "N queued
+  reviews", which is now true rather than merely worded differently.
+- "Save Memory" is "Save this run as a workspace note" and sits with the run
+  outcome it saves; "Explain Workspace" is "Re-analyse workspace" and sits on
+  the Workspace tab with the profile it rebuilds; "Save as Workspace Defaults"
+  moved next to the profile it writes.
+- `BenchmarkInsightsReport` gained `SuiteLeaderboards` and `CrossSuite` as
+  optional trailing parameters; a report constructed without them behaves
+  exactly as it did at 0.32.0.
+
 ## [0.32.0-alpha] - 2026-07-31
 
 Implements docs/review r25: conversation branching, one context receipt,
@@ -587,41 +780,3 @@ subsection. `docs/review/` archived to `docs/review/archived/r21/`.
   small-size treatment. Neither option is fully clean at 16x16 - fine
   medallion detail is tight at that size regardless of which mark is used;
   32px and up read clearly.
-
-## [0.26.0-alpha] - 2026-07-23
-
-### Changed
-
-- **Real Hermaeus branding replaces the placeholder art shipped in the r20
-  rename.** `docs/hermaeus-branding.png` and the new `docs/hermaeus-icons.png`
-  are the first illustrated brand sheets for the product; this release wires
-  their choices into the app instead of leaving them as reference-only mockups.
-- **App icon, taskbar icon, and system tray icon now use the "Tree Ring"
-  mark** (Option 4 of 4 on `docs/hermaeus-icons.png`: a gold "H" monogram with
-  a leaf sprout, set in a wood-grain medallion) instead of the placeholder
-  goggle-eye glyph: `hermaeus.ico` (16/32/48/256px), `hermaeus-app.png`, and
-  `hermaeus-tray.png` are all cropped and resized from the same source
-  artwork. Sizes at or below 32px use a contrast-boosted crop so the "H"
-  stays legible once the fine wood-grain texture anti-aliases into mud. The
-  unused `hermaeus-tray-dark.png`/`hermaeus-tray-light.png` fallback assets
-  were refreshed the same way and normalized to 256x256 (previously an
-  inconsistent 1254x1254 left over from the r20 rename).
-- **`Controls/MossIcon.axaml` redesigned** to match the illustrated Moss
-  character (round face, pointed ears, mushroom/leaf tuft, big eyes) instead
-  of the retired mechanical-tinkerer goggle design. Still plain Avalonia
-  shapes at 16x16 icon scale, no new rendering dependency.
-- **`docs/mascot.md` rewritten** to match the actual illustrated character
-  and personality ("Keeper of Knowledge": curious, diligent, loyal) instead
-  of the earlier "mechanical tinkerer" placeholder concept that predated any
-  real art. Documents the formal brand colour palette, typography, and why
-  Tree Ring (not the full Moss face) was chosen for the app icon.
-- **Brand colour palette and typography wired into the UI theme**
-  (`App.axaml`, `Styles/AppStyles.axaml`): FluentTheme's accent colors now
-  use the brand Forest green instead of Avalonia's default blue; the primary
-  send button uses Forest fill with Parchment text, the sidebar new-chat
-  button uses a Forest outline. Three brand typefaces are embedded under
-  `Assets/Fonts/` (Cinzel for headings, Source Sans 3 for body text,
-  JetBrains Mono for code) and applied app-wide - every hardcoded
-  `Consolas`/`Courier New`/`Cascadia Code` font-family reference across the
-  Desktop views was normalized to the embedded JetBrains Mono with the same
-  fallback chain. See `NOTICE.md` for font licensing (SIL OFL 1.1).

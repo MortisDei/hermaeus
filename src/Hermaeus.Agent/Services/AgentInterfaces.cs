@@ -121,6 +121,17 @@ public interface IAgentService
     Task AppendUserReplyAsync(string taskId, string reply, CancellationToken ct = default);
 
     /// <summary>
+    /// Abandons a paused task: discards any pending tool action without
+    /// executing it and moves the task to the terminal
+    /// <see cref="Hermaeus.Agent.Models.AgentTaskStatus.Cancelled"/>, so it
+    /// leaves the review queue for good. Nothing is executed, nothing is
+    /// approved, and the run ledger, approval history and transcript are left
+    /// exactly as they were. Refuses (no state change) on a task that is
+    /// actively running: stop it first.
+    /// </summary>
+    Task<AgentApprovalResult> DismissTaskAsync(string taskId, CancellationToken ct = default);
+
+    /// <summary>
     /// r19 3.1: reopens a terminal or stalled task with a user instruction,
     /// so a task that finished (prematurely or not), failed, or got blocked
     /// can keep going without the user retyping the whole goal as a brand

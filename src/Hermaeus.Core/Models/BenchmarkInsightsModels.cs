@@ -43,6 +43,62 @@ public sealed record ModelCaseResult(
 
 public sealed record TagLeaderboard(string Tag, IReadOnlyList<ModelAggregate> Ranked);
 
+/// <summary>
+/// One suite's own leaderboard, ranked by the same shared-case-set rule the
+/// overall board uses: only cases every ranked model in this suite actually
+/// ran, keyed on case id and case version. <see cref="ComparisonBasisCaseCount"/>
+/// of 0 means the suite has no shared exam to rank on and is reported as such
+/// rather than dropped silently.
+/// </summary>
+public sealed record SuiteLeaderboard(
+    string SuiteId,
+    string SuiteName,
+    IReadOnlyList<ModelAggregate> Ranked,
+    int ComparisonBasisCaseCount)
+{
+    public bool IsUsable => ComparisonBasisCaseCount > 0 && Ranked.Count > 0;
+    public bool IsSingleModel => Ranked.Count == 1;
+}
+
+/// <summary>Where one model placed in one suite, and the numbers that put it there.</summary>
+public sealed record CrossSuitePlacement(
+    string SuiteId,
+    string SuiteName,
+    int Position,
+    double QualityScore,
+    double TokensPerSecond);
+
+/// <summary>One model's cross-suite standing: its mean position over the suites every ranked model ran.</summary>
+public sealed record CrossSuiteStanding(
+    string ModelId,
+    string ModelName,
+    double MeanPosition,
+    double MeanQualityPerSecond,
+    IReadOnlyList<CrossSuitePlacement> Placements);
+
+/// <summary>
+/// Best across all suites, computed from the per-suite standings rather than
+/// from a pool of every case. Pooling would let a 40 case suite outvote a 5
+/// case suite eight to one, so "best across all suites" would silently mean
+/// "best on the biggest suite"; ranking per suite and then averaging gives
+/// each suite one vote, which is what the phrase means in English.
+///
+/// When there is no honest answer, <see cref="Ranked"/> is empty and
+/// <see cref="Explanation"/> says which case it is and what would fix it.
+/// </summary>
+public sealed record CrossSuiteRanking(
+    IReadOnlyList<CrossSuiteStanding> Ranked,
+    int SuiteCount,
+    string Explanation,
+    IReadOnlyList<string> Caveats)
+{
+    public static readonly CrossSuiteRanking None =
+        new([], 0, "No benchmark runs to compare across suites yet.", []);
+
+    public bool HasAnswer => Ranked.Count > 0;
+    public CrossSuiteStanding? Leader => Ranked.Count == 0 ? null : Ranked[0];
+}
+
 public sealed record ModelComparison(
     string ModelA,
     string ModelB,
@@ -66,9 +122,16 @@ public sealed record BenchmarkInsightsReport(
     /// overall ranking rests on exactly these cases, and 0 means there was no
     /// shared exam to rank on.
     /// </summary>
-    int ComparisonBasisCaseCount = 0)
+    int ComparisonBasisCaseCount = 0,
+    /// <summary>One board per suite (r26 doc 04 4.1). Optional and trailing so every existing construction site keeps compiling.</summary>
+    IReadOnlyList<SuiteLeaderboard>? SuiteLeaderboards = null,
+    /// <summary>Best across all suites, by mean per-suite standing (r26 doc 04 4.2). Null on a report built before suite boards existed.</summary>
+    CrossSuiteRanking? CrossSuite = null)
 {
     public bool HasData => ComparableRuns > 0;
+
+    public IReadOnlyList<SuiteLeaderboard> SuiteLeaderboardsOrEmpty => SuiteLeaderboards ?? [];
+    public CrossSuiteRanking CrossSuiteOrNone => CrossSuite ?? CrossSuiteRanking.None;
 
     /// <summary>
     /// r25 doc 04 4.1: null when there is no shared case set big enough to name
@@ -230,6 +293,8 @@ public static class BenchmarkInsightsMath
         var (overallRanked, basisCaseCount) =
             BuildOverallRanking(comparableRuns, now, currentAppVersion, caveats);
         var tagLeaderboards = BuildTagLeaderboards(comparableRuns);
+        var suiteLeaderboards = BuildSuiteLeaderboards(comparableRuns, now, currentAppVersion);
+        var crossSuite = BuildCrossSuiteRanking(suiteLeaderboards);
 
         var comparisons = BuildComparisons(overallRanked, string.Empty)
             .Concat(tagLeaderboards.SelectMany(t => BuildComparisons(t.Ranked, t.Tag)))
@@ -247,7 +312,131 @@ public static class BenchmarkInsightsMath
             comparisons,
             caveats,
             usageInsights,
-            basisCaseCount);
+            basisCaseCount,
+            suiteLeaderboards,
+            crossSuite);
+    }
+
+    /// <summary>
+    /// r26 doc 04 4.1: one board per suite, built by the same
+    /// <see cref="BuildOverallRanking"/> path the overall board uses, so
+    /// "which cases did they both sit" has exactly one implementation. A
+    /// suite whose models share no exam keeps its row with a basis of 0
+    /// rather than disappearing.
+    /// </summary>
+    private static List<SuiteLeaderboard> BuildSuiteLeaderboards(
+        IReadOnlyList<BenchmarkRun> comparableRuns, DateTime now, string currentAppVersion)
+    {
+        var boards = new List<SuiteLeaderboard>();
+        foreach (var suite in comparableRuns
+                     .Where(r => r.Results.Count > 0)
+                     .GroupBy(r => r.SuiteId, StringComparer.OrdinalIgnoreCase)
+                     .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            var runs = suite.ToList();
+            // Per-suite shortfall notes are noise on the report's own caveat
+            // list (a suite one model has barely run is not a finding about
+            // the whole install), so they are collected and discarded here.
+            // The cross-suite record names the suites and models it excluded.
+            var (ranked, basis) = BuildOverallRanking(runs, now, currentAppVersion, []);
+            var name = runs.Select(r => r.SuiteName).FirstOrDefault(n => !string.IsNullOrWhiteSpace(n)) ?? suite.Key;
+            boards.Add(new SuiteLeaderboard(suite.Key, name, ranked, basis));
+        }
+
+        return boards;
+    }
+
+    /// <summary>
+    /// r26 doc 04 4.2: mean per-suite standing, over the suites every ranked
+    /// model ran. See <see cref="CrossSuiteRanking"/> for why this is not a
+    /// pooled-case ranking.
+    /// </summary>
+    private static CrossSuiteRanking BuildCrossSuiteRanking(IReadOnlyList<SuiteLeaderboard> boards)
+    {
+        var caveats = new List<string>();
+        foreach (var unusable in boards.Where(b => !b.IsUsable))
+            caveats.Add($"{unusable.SuiteName} is excluded: its models have not run enough of the same cases to rank on.");
+
+        // A suite only one model ever ran is not a comparison, so it cannot
+        // cast a vote about which model is better.
+        foreach (var single in boards.Where(b => b.IsUsable && b.IsSingleModel))
+            caveats.Add($"{single.SuiteName} is excluded: only one model has run it, so it is not a comparison.");
+
+        var usable = boards.Where(b => b.IsUsable && !b.IsSingleModel).ToList();
+        if (usable.Count == 0)
+        {
+            return new CrossSuiteRanking([], 0,
+                "No suite has two models with enough shared cases to rank on, so there is no cross-suite answer yet. Run the same suite against the same models.",
+                caveats);
+        }
+
+        if (usable.Count == 1)
+        {
+            return new CrossSuiteRanking([], 1,
+                $"A single suite is not a cross-suite comparison. Run a second suite against the same models that ran {usable[0].SuiteName}.",
+                caveats);
+        }
+
+        var everySuite = usable
+            .Select(b => b.Ranked.Select(a => a.ModelId).ToHashSet(StringComparer.OrdinalIgnoreCase))
+            .Aggregate((a, b) => { a.IntersectWith(b); return a; });
+
+        foreach (var excluded in usable.SelectMany(b => b.Ranked)
+                     .Select(a => (a.ModelId, a.ModelName))
+                     .Where(m => !everySuite.Contains(m.ModelId))
+                     .DistinctBy(m => m.ModelId, StringComparer.OrdinalIgnoreCase)
+                     .OrderBy(m => m.ModelId, StringComparer.Ordinal))
+        {
+            var ran = usable.Count(b => b.Ranked.Any(a => string.Equals(a.ModelId, excluded.ModelId, StringComparison.OrdinalIgnoreCase)));
+            caveats.Add($"{excluded.ModelName} is excluded from the cross-suite ranking: it ran {ran} of the {usable.Count} comparable suites.");
+        }
+
+        if (everySuite.Count == 0)
+        {
+            return new CrossSuiteRanking([], usable.Count,
+                $"No model has run all {usable.Count} comparable suites, so there is nothing to rank across them. Run the same suites against the same models.",
+                caveats);
+        }
+
+        var standings = new List<CrossSuiteStanding>();
+        foreach (var modelId in everySuite)
+        {
+            var placements = new List<CrossSuitePlacement>();
+            foreach (var board in usable)
+            {
+                var index = board.Ranked.ToList().FindIndex(a => string.Equals(a.ModelId, modelId, StringComparison.OrdinalIgnoreCase));
+                var aggregate = board.Ranked[index];
+                placements.Add(new CrossSuitePlacement(
+                    board.SuiteId, board.SuiteName, index + 1, aggregate.QualityScore, aggregate.TokensPerSecond));
+            }
+
+            var name = usable
+                .SelectMany(b => b.Ranked)
+                .First(a => string.Equals(a.ModelId, modelId, StringComparison.OrdinalIgnoreCase))
+                .ModelName;
+
+            var meanQualityPerSecond = usable
+                .SelectMany(b => b.Ranked.Where(a => string.Equals(a.ModelId, modelId, StringComparison.OrdinalIgnoreCase)))
+                .Average(a => a.QualityPerSecond);
+
+            standings.Add(new CrossSuiteStanding(
+                modelId, name,
+                Math.Round(placements.Average(p => (double)p.Position), 4),
+                Math.Round(meanQualityPerSecond, 4),
+                placements.OrderBy(p => p.SuiteName, StringComparer.OrdinalIgnoreCase).ToList()));
+        }
+
+        // Ties break on mean QualityPerSecond, then on model id ordinally, so
+        // the same input in a different order gives the same answer.
+        var ranked = standings
+            .OrderBy(s => s.MeanPosition)
+            .ThenByDescending(s => s.MeanQualityPerSecond)
+            .ThenBy(s => s.ModelId, StringComparer.Ordinal)
+            .ToList();
+
+        return new CrossSuiteRanking(ranked, usable.Count,
+            $"Ranked by mean position across {usable.Count} suites, each suite counting once.",
+            caveats);
     }
 
     /// <summary>A case's comparison identity. <see cref="BenchmarkResult.CaseVersion"/> is part of

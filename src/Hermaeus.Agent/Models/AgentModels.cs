@@ -9,7 +9,19 @@ public enum AgentTaskStatus
     WaitingForUser,
     Blocked,
     Complete,
-    Failed
+    Failed,
+
+    /// <summary>
+    /// The user abandoned the task instead of answering it. Terminal, and the
+    /// only status the user assigns directly (every other one is the run's own
+    /// account of itself). Appended last deliberately: status is persisted by
+    /// name, but an appended member keeps any numeric reading stable too.
+    ///
+    /// Exists because a paused task had no way out. Rejecting a pending action
+    /// returned the task to WaitingForUser, so a run the user had finished
+    /// with sat in the review queue forever with no action that could clear it.
+    /// </summary>
+    Cancelled
 }
 
 public enum AgentRiskLevel
@@ -103,6 +115,17 @@ public sealed class AgentTaskState
     public List<AgentDraftPatch> DraftPatches { get; set; } = [];
     public AgentPendingToolAction? PendingToolAction { get; set; }
     public string Summary { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The model's own last message to the user (the planner's
+    /// <c>user_message</c>), which is what an <c>ask_user</c> step's question
+    /// actually is. It used to go only to the log and the transcript, so a
+    /// task paused on a question showed a reply box with no question next to
+    /// it and the user had no way to see what they were being asked. Empty
+    /// for pre-existing task files (JSON-additive).
+    /// </summary>
+    public string LastUserMessage { get; set; } = string.Empty;
+
     public int StepCount { get; set; }
     /// <summary>
     /// Consecutive steps in a row whose model response could not be parsed
@@ -601,6 +624,14 @@ public sealed record AgentWorkspaceOptions(
     string ModelId = "",
     int MaxFileBytes = 128 * 1024,
     int MaxSearchResults = 20,
+    /// <summary>
+    /// Cap for a directory listing, which is a different job from a search hit
+    /// list and needs a far bigger budget. Sharing MaxSearchResults meant
+    /// list_files returned 20 entries for an entire workspace and said nothing
+    /// about the rest, so a real run concluded a top-level folder did not exist
+    /// when the listing had simply stopped before reaching it.
+    /// </summary>
+    int MaxListResults = 500,
     int MaxContextItems = 6,
     /// <summary>The active workspace's manifest policy, if any (r23 3.1); null means unrestricted. Set by the caller from a loaded WorkspaceManifest, never by AgentWorkspaceTools itself.</summary>
     WorkspacePolicy? Policy = null,
@@ -661,7 +692,33 @@ public sealed record AgentFileSearchResult(
 public sealed record AgentFileReadResult(
     string RelativePath,
     string Content,
-    bool Truncated);
+    bool Truncated,
+    /// <summary>Total lines in the file, when known (a line-ranged read always knows).</summary>
+    int? TotalLines = null,
+    /// <summary>First line index this result covers, 0-based.</summary>
+    int? LineOffset = null,
+    /// <summary>
+    /// Lines returned in this result. With <see cref="LineOffset"/> this is
+    /// exactly what the model needs to ask for the next slice.
+    /// </summary>
+    int? LineCount = null)
+{
+    /// <summary>
+    /// What to do about a truncated read, in the result itself. A bare
+    /// "truncated": true told the model only that content was missing, and a
+    /// real run concluded "the tool cannot return the entire file content in
+    /// one go" and gave up on the file entirely. It can: this says how.
+    /// </summary>
+    public string ContinuationHint => !Truncated
+        ? string.Empty
+        : LineOffset is { } offset && LineCount is { } count
+            ? $"Truncated. This is lines {offset + 1} to {offset + count}"
+                + (TotalLines is { } total ? $" of {total}" : string.Empty)
+                + $". Call read_file again with line_offset={offset + count} to continue from where this stopped."
+            : "Truncated: the file was too large to return whole. Call read_file again with line_offset and "
+                + "line_limit (for example line_offset=0, line_limit=400, then line_offset=400) to read it in "
+                + "slices, or use search_files to find a symbol without reading the whole file.";
+}
 
 public sealed record AgentFileSummaryResult(
     string RelativePath,

@@ -17,15 +17,25 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
         _mcpBridge = mcpBridge;
     }
 
+    /// <summary>
+    /// Every built-in tool this executor accepts, in one enumerable place so
+    /// that text describing the agent's capabilities can be derived from the
+    /// tool set instead of restating it (r26 03 3.1). MCP tools are not here:
+    /// they are named by the configured bridge, not by this list.
+    /// </summary>
+    public static readonly IReadOnlyList<string> KnownTools =
+    [
+        "list_files", "search_files", "read_file", "summarize_file", "draft_patch", "inspect_git_diff",
+        "apply_draft_patch", "run_command", "edit_file", "create_file", "glob_files", "plan_subtasks"
+    ];
+
     public bool CanExecute(string toolName)
     {
         var trimmed = toolName.Trim();
         if (trimmed.StartsWith("mcp:", StringComparison.OrdinalIgnoreCase))
             return _mcpBridge?.CanExecute(trimmed) == true;
 
-        return Normalize(toolName) is
-            "list_files" or "search_files" or "read_file" or "summarize_file" or "draft_patch" or "inspect_git_diff"
-            or "apply_draft_patch" or "run_command" or "edit_file" or "create_file" or "glob_files" or "plan_subtasks";
+        return KnownTools.Contains(Normalize(toolName), StringComparer.Ordinal);
     }
 
     public async Task<AgentToolResult> ExecuteAsync(
@@ -326,7 +336,18 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
         if (json.Length <= cap)
             return json;
 
-        return json[..cap] + $"\n[truncated: {json.Length - cap} of {json.Length} chars omitted]";
+        // Says what to do about it, not just that it happened. A real run read
+        // this as "the tool cannot return the entire file content in one go"
+        // and abandoned the file, when reading it in slices was available all
+        // along.
+        var advice = normalizedTool switch
+        {
+            "read_file" => " Read it in slices: call read_file again with line_offset and line_limit"
+                + " (for example line_offset=0, line_limit=400, then line_offset=400).",
+            "search_files" => " Narrow the query, or use glob_files to find candidate files first.",
+            _ => string.Empty
+        };
+        return json[..cap] + $"\n[truncated: {json.Length - cap} of {json.Length} chars omitted.{advice}]";
     }
 
     private static string Normalize(string toolName) => toolName.Trim().Replace('-', '_').ToLowerInvariant();

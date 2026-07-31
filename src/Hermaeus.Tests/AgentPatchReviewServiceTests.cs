@@ -31,6 +31,9 @@ public sealed class AgentPatchReviewServiceTests
         public Task AppendUserReplyAsync(string taskId, string reply, CancellationToken ct = default) =>
             throw new NotSupportedException();
 
+        public Task<AgentApprovalResult> DismissTaskAsync(string taskId, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
         public Task<AgentTaskState> ContinueTaskAsync(string taskId, string instruction, AgentWorkspaceOptions options, CancellationToken ct = default) =>
             throw new NotSupportedException();
     }

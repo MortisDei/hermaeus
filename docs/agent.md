@@ -19,9 +19,25 @@ explicit user approval before it executes.
   task state. Initialization reconciles JSON task files back into the index.
 - Validates task IDs with a short alphanumeric, dash, and underscore allowlist
   before resolving task directories.
-- Shows a review queue for waiting or blocked tasks with approve/reject
-  actions for recorded approvals, plus an Open button that loads the queued
-  task into the workbench.
+- Shows a review queue of tasks that need a decision right now: those
+  `waiting_for_review` or `blocked`, and nothing else. A task that has been
+  approved in the past is not in the queue; its approvals live in the run
+  ledger and in that task's own approval labels. A row with a gated action
+  pending offers Approve and Reject; a row waiting on an answer or a blocked
+  run says so and offers Open, which loads the task into the workbench where
+  the reply and Continue boxes are. The queue refreshes itself whenever a run
+  pauses, so there is no manual refresh to remember.
+- An approval or rejection sent to a task with nothing pending is refused and
+  says so. It appends no approval record, changes no status, and never
+  restarts a finished run.
+- **Dismiss** is the way out of the queue for a run you are done with. It
+  discards the pending action without executing it and closes the task as
+  `cancelled`, so the row leaves the queue for good; the task stays in Recent
+  Tasks with its run ledger, approval history and transcript intact, and the
+  Continue box can still reopen it. Dismiss records no approval, because
+  walking away from a decision is not making one. It is refused on a task that
+  is still running (stop it first) and on a sub-task child (dismiss the parent,
+  or its orchestration would wait forever on a child that never finished).
 - Shows a Recent Tasks list (status chip, goal, relative time, pending step
   count; sub-task children indented with a tag) so a completed task's
   report, a failed task's blockers, or an orphaned task is reachable after a
@@ -46,17 +62,80 @@ explicit user approval before it executes.
 - Surfaces relevant lessons from the self-learning store (see below).
 - Classifies risky actions before execution.
 
-The agent panel surfaces a compact summary strip with current task state, step
-count, goal, summary, recent task history, review queue counts, workspace
-memory counts, and retrieved context counts so the workbench is easy to scan
-at a glance.
+### Workbench layout
 
-A compact capability disclosure sits under the summary strip so the current
-scope is explicit: read-only tools run locally, writes and commands are
-approval-gated, and shell, network, and remote-control actions remain out of
-scope.
+The panel is a fixed status line, a pinned decision strip, and four tabs.
 
-The same panel includes a workspace file browser with query, list, preview,
+- **Status line.** One row: task status, step count, goal, the latest status
+  message, and the New task / Run Step / Stop controls. It is a fixed set of
+  scalars, so a long plan can no longer squeeze the working area toward zero.
+  The step count is the task's whole life ("step 111"); the `Agent.MaxAutoSteps`
+  budget caps one autonomous run, so it is shown as "(4 of 20 this run)" only
+  while a run is spending it, rather than as a denominator on a lifetime count.
+  While a run is in flight it also carries an indeterminate progress bar and a
+  rotating activity line ("Step 3: Weighing the plan... 12s"), naming the
+  current step and how long it has been going. Without it a long model call
+  left every label frozen and the panel read as hung. The clock and the word
+  rotation restart on each step, so the line reports the current step's wait
+  rather than the age of the whole run, and it stays empty for the first
+  second and a half so a fast step never flickers a placeholder.
+- **Decision strip.** Sits above the tabs and collapses to nothing when
+  nothing is waiting on you. It carries the review queue, the reply box (with
+  the agent's actual question shown above it) and the Continue box. This is the
+  rule that makes tabs safe here: the thing the agent is waiting on is never
+  behind a tab.
+- **Run.** Goal, workspace, model and RAG dataset; the Start Agent button; the
+  run outcome for a finished task; the agent's own response; sub-tasks and
+  plan; and the task state, context receipt and retrieved context, collapsed.
+- **Changes.** The draft patch queue and the run ledger (files, before/after,
+  commands, approvals, and Rewind run). Carries a count when patches are
+  waiting on you; no other tab has a badge.
+- **Workspace.** What the agent can do here, the workspace policy, the
+  workspace profile, the file browser with its draft patch composer, and
+  workspace memory. Re-analyse workspace and Save as workspace defaults are
+  here, next to what they write.
+- **History.** Recent tasks, new lessons from this task, the lesson store,
+  scenario evals, and the agent log.
+
+The panel opens on Run every time and never switches tabs on its own. A
+finished run lights the Changes badge and says so in the run outcome; it does
+not move the page under you.
+
+### What the agent can do here
+
+The Workspace tab's capability list is derived, not written down: it is built
+from the executor's actual tool set, this workspace's declared command
+recipes, its workspace policy, and whether an MCP bridge is configured. With
+no recipes declared it says commands cannot run here and names
+`.hermaeus/workspace.json` as where recipes are declared; with recipes
+declared it names them. With no MCP bridge it says the agent cannot reach
+outside the folder; with one it says calls go through the servers you
+configured and each one is gated. With no workspace selected it says the
+answer depends on the workspace, and that nothing runs without an approval you
+give.
+
+A test asserts that every tool the executor accepts is accounted for by
+exactly one line, so the text cannot drift away from the code again.
+
+### Did that actually work
+
+When a task reaches a terminal state, the Run tab shows a short outcome above
+the fold, composed entirely from the run ledger and the task's own state:
+
+- files changed, split created and edited, with the summed line delta,
+- commands run and how many failed (a failed command is reported even when the
+  task itself completed),
+- approvals asked for, split approved and rejected,
+- the unfinished-plan note when a terminal task still has pending steps,
+- the model's own reservations, and
+- a plain "this run changed no files and ran no commands" when that is what
+  happened.
+
+It computes no new facts, calls no service, and carries no score, grade or
+percentage. The model's own account of the run is separate, under "Agent
+response".
+
+The Workspace tab includes a workspace file browser with query, list, preview,
 and summary support so you can inspect local workspace files without leaving
 the workbench.
 
@@ -89,6 +168,38 @@ still available for stepping through a task one model call at a time. Nothing
 about this changes what is allowed to execute without approval; the loop only
 removes the need to click through every read-only step by hand.
 
+An unreadable model response does not stop the run. The response is recorded,
+a corrective note is appended to the transcript naming what was wrong with it,
+and the loop takes another step; three unreadable responses in a row still fail
+the task. Before this, one bad response synthesized an `ask_user`, which parked
+the task in `waiting_for_review` and showed the user a reply box for a question
+the agent had never asked, while the three-strike budget was unreachable
+because reaching it took three manual Run Step clicks.
+
+A directory listing describes the workspace, so it gets a budget suited to that
+rather than sharing the search-hit cap. `list_files` returns entries sorted, and
+includes directories (with a trailing separator) so a folder is never invisible
+just because its own files were filtered out. When a listing stops early it says
+so and says how to narrow it, because "not in this list" is not the same as "not
+present" and a real run drew exactly that wrong conclusion about a folder that
+existed.
+
+A truncated read is never a dead end. `read_file` results carry the line range
+they cover and a continuation hint naming the exact `line_offset` to ask for
+next, and a file over the whole-file byte cap can still be read in slices (the
+size ceiling applies to reading a file whole, not to a bounded line range). The
+system prompt says so too. Before this, a result said only `"truncated": true`
+and a real run concluded the tool "cannot return the entire file content in one
+go" and abandoned the file.
+
+A response that names a tool in `next_action.type` (for example
+`"type": "set_plan"` with a null `tool_name`) is repaired into the protocol's
+own shape and executed, rather than being rejected as unparseable. This is a
+common local-model mistake and the response is otherwise complete and valid.
+The repair corrects the shape of the request, never its authority: the safety
+gate classifies the resulting tool exactly as if the model had named it
+correctly, so a repaired action can no more skip approval than any other.
+
 A task waiting on `ask_user` shows a reply box in the workbench; answering it
 appends the reply to the transcript and resumes the run, the same
 approve-and-continue shape as a gated-action approval. A reply is never
@@ -119,9 +230,9 @@ answered separately, on their own explicit approve/reject path.
   or finish. This is never a numeric confidence score - a self-reported
   percentage is theatre, not measurement - and never required or nagged
   for; an empty or absent list shows nothing. A task completing with
-  reservations shows "Completed with reservations" in the summary strip and
-  the recent-tasks list (status stays `Complete`); the reservations render
-  as their own list under the final answer, and orchestration synthesis
+  reservations shows "Completed with reservations" in the recent-tasks list
+  (status stays `Complete`); the reservations render as part of the Run tab's
+  run outcome for that task, and orchestration synthesis
   carries a child's reservations into the parent's `report.md` under a
   "Reservations" heading.
 - **Context receipt**: a collapsed-by-default "Context receipt" expander in
@@ -232,11 +343,37 @@ the model sees next step that only the first one ran.
   - `apply_draft_patch` - whole-file rewrite, for the cases `edit_file` isn't
     a fit.
 - Approval-gated command execution (`run_command`): a fixed set of template
-  families (`dotnet build`/`dotnet test` with an optional project path,
-  `npm test`, `npm run <script>` where the script must already exist in the
-  workspace's own `package.json`, `cargo build`, `cargo test`, `pytest` with
-  an optional path), and only when the workspace itself declared that family
-  safe in `.hermaeus/workspace.json`. Optional path arguments go through the
+  families, and only when the workspace itself declared that family safe in
+  `.hermaeus/workspace.json`. The families are the verbs a developer runs to
+  check their own work: `dotnet build`/`dotnet test` with an optional project
+  path; `npm`/`pnpm`/`yarn` `test` and `run <script>`, where the script must
+  already exist in the workspace's own `package.json`; `cargo build`,
+  `cargo test`, `cargo check`, `cargo clippy`; `go build`, `go test`, `go vet`,
+  which also accept Go's `./...` package pattern; and `pytest` /
+  `python -m pytest` with an optional path. A command containing shell
+  metacharacters (`&`, `|`, `;`, backtick, `$`, `<`, `>`, a newline) matches no
+  family at all: nothing is ever launched through a shell, so they could not
+  have been interpreted, but such a string must not reach an approval prompt
+  looking legitimate either.
+
+  Absent by decision, not oversight: installers (`npm install`,
+  `dotnet restore`, `pip install`) reach the network and pull in third-party
+  code; formatters (`cargo fmt`, `dotnet format`) rewrite source outside the
+  patch queue where the user would see the diff; long-running processes
+  (`dotnet run`, `npm start`) are not a verification step; and `make`, `mvn`
+  and `gradle` can run arbitrary targets with no cheap declared-target check
+  equivalent to `package.json`'s scripts. Those declarations are editable from the
+  Workspace tab's Command Recipes panel: pick a family from the fixed list,
+  optionally narrow it with an argument, and it is written to the manifest
+  straight away; Remove takes it back off. The picker offers only families the
+  safety gate can accept, so a recipe cannot be declared that would be refused
+  at run time, and nothing about the editor widens what the gate allows. When
+  the agent asks for a family the workspace has not declared, the blocked row
+  names that family and offers to declare it in one click; the action still
+  needs its own approval afterwards. When it asks for something outside the
+  families entirely, the refusal says so and offers nothing, because there is
+  nothing the user could allow that would make it runnable.
+  Optional path arguments go through the
   same containment checks as every other workspace file path. Always requires
   approval, even for a declared-safe family. After the user approves a given
   command string once in a task, an identical repeat of that exact string may
@@ -561,11 +698,13 @@ enforce the same write rules through the same code path; a Rewind of a file
 the current policy denies writing is refused per file with the policy named,
 and the ledger still shows it.
 
-The workbench's capability disclosure strip shows one line when a policy is
+The Workspace tab's capability list shows one line when a policy is
 active (for example "Workspace policy: reads limited to 2 rules, writes to
 2, 3 paths off limits."); expanding it lists the raw globs, read-only. There
-is no policy editor; the manifest is hand-edited, like `AllowedCommands`
-already is.
+is no policy editor; the policy block of the manifest is hand-edited.
+`AllowedCommands` is the exception: it has an editor on the Workspace tab,
+because a workspace that declares no recipes can run nothing and the user had
+no way to discover either the file or the families it accepts.
 
 ## Context Packs
 
@@ -642,7 +781,9 @@ Tasks are tracked with explicit states to make automation predictable:
 - `blocked`
 - `completed`
 - `failed`
-- `cancelled`
+- `cancelled` - terminal, and the only state the user assigns directly: what
+  Dismiss puts a task into when they are done with it. Every other state is
+  the run's own account of itself.
 
 `failed` is a real, reachable terminal state, not just a nominal one: a model
 whose response fails to parse as valid JSON three steps in a row fails the

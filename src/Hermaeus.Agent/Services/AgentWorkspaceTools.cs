@@ -6,6 +6,15 @@ namespace Hermaeus.Agent.Services;
 
 public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
 {
+    /// <summary>
+    /// Size ceiling for a line-ranged read, which returns a bounded window
+    /// rather than the whole file. Deliberately far above the whole-file cap
+    /// so that a large generated source file can still be read in slices, and
+    /// still bounded so a runaway path cannot pull an arbitrary file into
+    /// memory.
+    /// </summary>
+    internal const int RangedReadMaxBytes = 8 * 1024 * 1024;
+
     private static readonly HashSet<string> IgnoredDirectories = new(StringComparer.OrdinalIgnoreCase)
     {
         ".git",
@@ -26,12 +35,58 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
         var root = ResolveWorkspaceRoot(options.WorkspaceRoot);
         var scope = string.IsNullOrWhiteSpace(subdirectory) ? root : ResolveSafePath(root, subdirectory);
         var depth = maxDepth is > 0 ? maxDepth.Value : int.MaxValue;
-        return EnumerateSafeFiles(scope, options.MaxFileBytes)
+        // Directories are listed too, with a trailing separator. Without them a
+        // folder whose own files are all filtered out (or simply beyond the
+        // cap) is indistinguishable from a folder that does not exist, and a
+        // real run drew exactly that conclusion about a folder sitting in the
+        // workspace root.
+        var directories = EnumerateSafeDirectories(scope)
             .Where(path => PathDepthBelow(scope, path) <= depth)
             .Select(path => ToRelative(root, path))
             .Where(relative => WorkspacePolicyEvaluator.EvaluateRead(options.Policy, relative).Allowed)
-            .Take(options.MaxSearchResults)
+            .Select(relative => relative + "/");
+
+        var files = EnumerateSafeFiles(scope, options.MaxFileBytes)
+            .Where(path => PathDepthBelow(scope, path) <= depth)
+            .Select(path => ToRelative(root, path))
+            .Where(relative => WorkspacePolicyEvaluator.EvaluateRead(options.Policy, relative).Allowed);
+
+        // Sorted, so a listing is stable between calls and shallow entries are
+        // not buried by whichever subtree the walk happened to reach first.
+        var entries = directories.Concat(files)
+            .OrderBy(entry => entry, StringComparer.OrdinalIgnoreCase)
             .ToList();
+
+        var cap = Math.Max(1, options.MaxListResults);
+        if (entries.Count <= cap)
+            return entries;
+
+        // Says it stopped early rather than implying the rest is not there.
+        var shown = entries.Take(cap).ToList();
+        shown.Add($"[listing truncated: {entries.Count - cap} more entries not shown. "
+            + "Narrow it with the subdirectory or max_depth argument; do not conclude a path is absent from this list alone.]");
+        return shown;
+    }
+
+    private static IEnumerable<string> EnumerateSafeDirectories(string root)
+    {
+        var pending = new Stack<string>();
+        pending.Push(root);
+        while (pending.Count > 0)
+        {
+            var dir = pending.Pop();
+            IEnumerable<string> childDirs;
+            try { childDirs = Directory.EnumerateDirectories(dir); }
+            catch { continue; }
+
+            foreach (var child in childDirs)
+            {
+                if (IgnoredDirectories.Contains(Path.GetFileName(child)) || IsSymlink(child))
+                    continue;
+                pending.Push(child);
+                yield return child;
+            }
+        }
     }
 
     public IReadOnlyList<AgentFileSearchResult> SearchFiles(AgentWorkspaceOptions options, string query, bool regex = false, int contextLines = 0)
@@ -117,16 +172,35 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
             throw new FileNotFoundException("Agent file read target does not exist.", relativePath);
 
         var info = new FileInfo(full);
-        if (!IsSafeTextFile(info, options.MaxFileBytes))
-            throw new InvalidOperationException("Agent file read target is ignored, too large, or not a supported text file.");
+        // A line-ranged read is bounded by its own line limit, so the
+        // whole-file byte cap is the wrong gate for it. Applying it anyway
+        // meant a large file could not be read at ALL, in slices or
+        // otherwise: the caller was told the file was "too large" and had no
+        // way to make progress on it. Every other safety check (ignored
+        // directory, symlink, text extension, read policy) still applies
+        // unchanged; only the size ceiling is raised, and only for the path
+        // that reads a bounded window.
+        var ranged = lineOffset is not null || lineLimit is not null;
+        if (!IsSafeTextFile(info, ranged ? RangedReadMaxBytes : options.MaxFileBytes))
+        {
+            throw new InvalidOperationException(
+                info.Exists && info.Length > options.MaxFileBytes && !ranged
+                    ? $"Agent file read target is {info.Length / 1024} KB, over the {options.MaxFileBytes / 1024} KB "
+                      + "whole-file limit. Read it in slices instead: call read_file again with line_offset and line_limit."
+                    : "Agent file read target is ignored, too large, or not a supported text file.");
+        }
 
-        if (lineOffset is not null || lineLimit is not null)
+        if (ranged)
             return ReadFileByLines(root, full, Math.Max(lineOffset ?? 0, 0), lineLimit is > 0 ? lineLimit.Value : int.MaxValue);
 
         using var fs = File.OpenRead(full);
         var max = Math.Max(1024, options.MaxFileBytes);
         var buffer = new byte[Math.Min(max, (int)Math.Min(info.Length, int.MaxValue))];
         var read = fs.Read(buffer, 0, buffer.Length);
+        // Unreachable in practice: IsSafeTextFile above already refused
+        // anything larger than MaxFileBytes, so the buffer always spans the
+        // whole file. Kept as a belt-and-braces guard, and honest about what
+        // to do if it ever does fire.
         var truncated = fs.Position < fs.Length;
         var content = Encoding.UTF8.GetString(buffer, 0, read);
         if (content.Contains('\0'))
@@ -143,7 +217,9 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
 
         var slice = allLines.Skip(lineOffset).Take(lineLimit).ToList();
         var truncated = lineOffset + slice.Count < allLines.Length;
-        return new AgentFileReadResult(ToRelative(root, full), string.Join('\n', slice), truncated);
+        return new AgentFileReadResult(
+            ToRelative(root, full), string.Join('\n', slice), truncated,
+            TotalLines: allLines.Length, LineOffset: lineOffset, LineCount: slice.Count);
     }
 
     public AgentFileSummaryResult SummarizeFile(AgentWorkspaceOptions options, string relativePath)

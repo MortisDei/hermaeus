@@ -36,3 +36,22 @@ public sealed record EmbeddingsRequest(List<string> Input);
 public sealed record EmbeddingItemDto(int Index, float[] Embedding);
 
 public sealed record EmbeddingsResponse(List<EmbeddingItemDto> Data, int Dimensions);
+
+/// <summary>
+/// One feature's readiness. <see cref="Reason"/> is empty when the feature is
+/// usable and one sentence saying why not when it is not. It never names a
+/// path, a key, a token or a dataset: a caller learns whether a request will
+/// work, not how this instance is configured.
+/// </summary>
+public sealed record CapabilityDto(string Name, bool Usable, string Reason);
+
+/// <summary>
+/// What this instance can currently serve. Reports, never probes: no model
+/// load, no server start, no network call, no embedding pass. A capabilities
+/// endpoint that warms a GPU is a denial-of-service handle wearing a health
+/// check's name.
+/// </summary>
+public sealed record CapabilitiesResponse(
+    string Version,
+    List<string> Routes,
+    List<CapabilityDto> Capabilities);

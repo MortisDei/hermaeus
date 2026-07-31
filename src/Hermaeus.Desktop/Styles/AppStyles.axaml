@@ -23,6 +23,19 @@
         </ResourceDictionary>
     </Styles.Resources>
 
+    <!-- Avalonia places a tooltip at the pointer by default, so the popup
+         opens directly under the cursor. The pointer is then over the popup,
+         not the control: the cursor reverts to an arrow, the control counts as
+         exited, the tooltip closes, the cursor returns to a hand, and the
+         tooltip opens again. That loop is the cursor flicker on the nav icons,
+         and it is worst near an edge where the popup lands right under the
+         pointer. Placing tooltips below the control they describe takes the
+         popup out from under the cursor entirely. -->
+    <Style Selector=":is(Control)">
+        <Setter Property="ToolTip.Placement" Value="Bottom" />
+        <Setter Property="ToolTip.VerticalOffset" Value="6" />
+    </Style>
+
     <Style Selector="ToolTip">
         <Setter Property="Background" Value="{DynamicResource AppToolTipBackgroundBrush}" />
         <Setter Property="Foreground" Value="{DynamicResource AppToolTipForegroundBrush}" />

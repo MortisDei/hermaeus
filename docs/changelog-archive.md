@@ -2,6 +2,44 @@
 
 The CHANGELOG.md in root only contains the current 10 versions of changelogs. The rest are archived here in line with the 10 version limit in the main changelog.
 
+## [0.26.0-alpha] - 2026-07-23
+
+### Changed
+
+- **Real Hermaeus branding replaces the placeholder art shipped in the r20
+  rename.** `docs/hermaeus-branding.png` and the new `docs/hermaeus-icons.png`
+  are the first illustrated brand sheets for the product; this release wires
+  their choices into the app instead of leaving them as reference-only mockups.
+- **App icon, taskbar icon, and system tray icon now use the "Tree Ring"
+  mark** (Option 4 of 4 on `docs/hermaeus-icons.png`: a gold "H" monogram with
+  a leaf sprout, set in a wood-grain medallion) instead of the placeholder
+  goggle-eye glyph: `hermaeus.ico` (16/32/48/256px), `hermaeus-app.png`, and
+  `hermaeus-tray.png` are all cropped and resized from the same source
+  artwork. Sizes at or below 32px use a contrast-boosted crop so the "H"
+  stays legible once the fine wood-grain texture anti-aliases into mud. The
+  unused `hermaeus-tray-dark.png`/`hermaeus-tray-light.png` fallback assets
+  were refreshed the same way and normalized to 256x256 (previously an
+  inconsistent 1254x1254 left over from the r20 rename).
+- **`Controls/MossIcon.axaml` redesigned** to match the illustrated Moss
+  character (round face, pointed ears, mushroom/leaf tuft, big eyes) instead
+  of the retired mechanical-tinkerer goggle design. Still plain Avalonia
+  shapes at 16x16 icon scale, no new rendering dependency.
+- **`docs/mascot.md` rewritten** to match the actual illustrated character
+  and personality ("Keeper of Knowledge": curious, diligent, loyal) instead
+  of the earlier "mechanical tinkerer" placeholder concept that predated any
+  real art. Documents the formal brand colour palette, typography, and why
+  Tree Ring (not the full Moss face) was chosen for the app icon.
+- **Brand colour palette and typography wired into the UI theme**
+  (`App.axaml`, `Styles/AppStyles.axaml`): FluentTheme's accent colors now
+  use the brand Forest green instead of Avalonia's default blue; the primary
+  send button uses Forest fill with Parchment text, the sidebar new-chat
+  button uses a Forest outline. Three brand typefaces are embedded under
+  `Assets/Fonts/` (Cinzel for headings, Source Sans 3 for body text,
+  JetBrains Mono for code) and applied app-wide - every hardcoded
+  `Consolas`/`Courier New`/`Cascadia Code` font-family reference across the
+  Desktop views was normalized to the embedded JetBrains Mono with the same
+  fallback chain. See `NOTICE.md` for font licensing (SIL OFL 1.1).
+
 ## [0.25.3-alpha] - 2026-07-22
 
 ### Fixed
