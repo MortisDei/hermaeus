@@ -3,6 +3,15 @@
 **/obj/
 **/dist/
 
+# Test run output. A .trx names the machine and the account that ran it
+# (runUser="MACHINE\user" in its header), so it must never reach a public
+# repo. dotnet test writes here by default whenever a logger or a coverage
+# collector is passed without an explicit results directory.
+**/TestResults/
+*.trx
+*.coverage
+*.cobertura.xml
+
 # Visual Studio / Rider
 .vs/
 *.user

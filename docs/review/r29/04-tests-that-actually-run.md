@@ -19,6 +19,14 @@ v0.35.0-alpha), TRX artifacts `test-results-windows-latest` and
 `test-results-ubuntu-latest`. Local figures are from this machine
 (Windows 11, Release, `--no-build`) on the same tree.
 
+**Before reproducing any of this:** send test output outside the repository.
+A `.trx` header contains `runUser="MACHINE\user"`, and a coverage report
+contains absolute local paths; both are personal identifiers on a repository
+that is going public. `dotnet test` defaults to
+`src/Hermaeus.Tests/TestResults/` whenever `--logger` or `--collect` is
+passed without `--results-directory`. Pass one. `.gitignore:6-13` catches the
+mistake, but do not rely on it.
+
 | | ubuntu-latest | windows-latest |
 | --- | --- | --- |
 | Job wall time | 2m57s | 13m06s |

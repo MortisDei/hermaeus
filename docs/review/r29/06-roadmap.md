@@ -78,6 +78,17 @@ in the commit message so the next reader of a CI summary is not alarmed.
 - **The TRX artifacts are how any of this is verified.** They are already
   uploaded (`ci.yml:52-56`). Do not remove that step while tidying.
 
+- **Never let test output land in the working tree.** A `.trx` header carries
+  `runUser="MACHINE\user"` and a run name of `user@machine`, and a coverage
+  report carries absolute local paths. On a repository that is going public
+  those are personal identifiers. `dotnet test` writes to
+  `src/Hermaeus.Tests/TestResults/` by default the moment a `--logger` or
+  `--collect` is passed without an explicit results directory, and it did
+  exactly that during this pack's own measurement work. The ignore rules
+  added alongside this pack (`.gitignore:6-13`) now catch it, but the habit
+  is the real fix: pass an out-of-tree results directory when measuring, and
+  check `git status --untracked-files=all` before every `git add`.
+
 ## Descope order
 
 If the round runs long, drop from the bottom of this list first. Nothing
