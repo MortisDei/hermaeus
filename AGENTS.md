@@ -44,7 +44,7 @@ Any compiler warning fails the build. Fix the warning; do not suppress it withou
 ## Conventions
 
 - C#: file-scoped namespaces, nullable enabled, `sealed` by default for new classes, records for immutable models/DTOs.
-- Settings live in domain sections on `AppSettings` (Llm, Tts, Rag, Ui, DataManagement, Memory, Mcp, LocalApi, Agent, plus trust models); one save flow via `SettingsService`. Add fields to the matching section; never write `settings.json` directly. Placement rule: process/server/runtime configuration belongs on the Services page; preference-only knobs belong on the Settings page.
+- Settings live in domain sections on `AppSettings` (Llm, Tts, Rag, Ui, DataManagement, Memory, Mcp, LocalApi, Agent, Stt, plus trust models); one save flow via `SettingsService`. A guard test fails if this list and `AppSettings` disagree in either direction. Add fields to the matching section; never write `settings.json` directly. Placement rule: process/server/runtime configuration belongs on the Services page; preference-only knobs belong on the Settings page.
 - Secrets: never store raw keys in settings or logs. Use `ISecretStore`
   references. Runtime log output goes through `RedactionService`.
 - User-facing state files: write via atomic replacement (temp + move), like existing code in `SettingsService`/`BackupService`.

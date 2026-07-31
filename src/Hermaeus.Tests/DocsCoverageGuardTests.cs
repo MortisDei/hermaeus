@@ -195,15 +195,19 @@ public sealed class DocsCoverageGuardTests
     }
 
     /// <summary>
-    /// CLAUDE.md enumerates the settings domain sections. Assert the list and
-    /// <c>AppSettings</c> agree in both directions: a section CLAUDE.md does
+    /// AGENTS.md enumerates the settings domain sections. Assert the list and
+    /// <c>AppSettings</c> agree in both directions: a section AGENTS.md does
     /// not name is as much a drift as a name with no section behind it.
+    ///
+    /// AGENTS.md, not CLAUDE.md: the latter is a local, gitignored copy, so a
+    /// guard reading it passes on the author's machine and fails in CI with a
+    /// missing file. This test found that the first time it ran on a runner.
     /// </summary>
     [Fact]
     public void The_settings_section_list_and_AppSettings_agree_in_both_directions()
     {
         var source = File.ReadAllText(Path.Combine(RepoRoot, "src", "Hermaeus.Core", "Models", "AppSettings.cs"));
-        var claude = File.ReadAllText(Path.Combine(RepoRoot, "CLAUDE.md"));
+        var claude = File.ReadAllText(Path.Combine(RepoRoot, "AGENTS.md"));
 
         var sections = Regex.Matches(source, @"public\s+(\w+Settings)\s+(\w+)\s*\{\s*get;\s*set;\s*\}\s*=\s*new\(\);")
             .Select(m => m.Groups[2].Value)

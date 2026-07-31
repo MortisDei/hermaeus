@@ -32,6 +32,26 @@ public class LlmSettings
     public bool OpenAiEnabled { get; set; } = false;
 
     /// <summary>
+    /// Whether the configured OpenAI-compatible endpoint can enforce a
+    /// response shape through <c>response_format</c> (r28 doc 01 1.3/1.4).
+    ///
+    /// Off by default and ignored for <c>api.openai.com</c>, which is always
+    /// treated as capable because structured outputs are documented there.
+    /// It exists for the servers that support the field and cannot say so:
+    /// LM Studio, vLLM, llama.cpp behind a proxy, and anything else pointed
+    /// at by <see cref="OpenAiBaseUrl"/>. Without it, Hermaeus refuses a
+    /// constraint against an unknown endpoint rather than sending a field the
+    /// server may silently drop, which would turn unconstrained output into
+    /// something indistinguishable from success.
+    ///
+    /// This is a declaration, never a probe: the user is asserting what their
+    /// own server does. If the assertion is wrong the server rejects the
+    /// request, and that rejection is surfaced rather than retried
+    /// unconstrained.
+    /// </summary>
+    public bool OpenAiSupportsStructuredOutputs { get; set; } = false;
+
+    /// <summary>
     /// Default model to use for chat completions.
     /// </summary>
     public string DefaultModel { get; set; } = string.Empty;

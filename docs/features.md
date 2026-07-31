@@ -636,9 +636,18 @@ cannot produce.
   intends to parse the answer without defending against prose, and an
   unconstrained reply that happens to parse looks exactly like success.
 
+  Plenty of compatible servers do support the field and have no way to say so
+  (LM Studio, vLLM, llama.cpp behind a proxy), so **Settings > LLM has a
+  "This endpoint enforces response_format" checkbox** beside the OpenAI base
+  URL. It is off by default, ignored for `api.openai.com`, and it is a
+  declaration rather than a probe: you are telling Hermaeus what your own
+  server does. If the claim is wrong, the server rejects the request and the
+  rejection is surfaced, not retried unconstrained.
+
 Nothing is probed to find this out. A provider reports what it knows about
-itself, and a capability check that loads a model to find out whether a model
-loads is a denial-of-service handle wearing a health check's name.
+itself, or the user reports it on the provider's behalf, and a capability
+check that loads a model to find out whether a model loads is a
+denial-of-service handle wearing a health check's name.
 
 Two callers use it today: **memory auto-summary** (see Memory above) and the
 **agent's planner protocol** (`docs/agent.md`). Every existing parse-and-repair

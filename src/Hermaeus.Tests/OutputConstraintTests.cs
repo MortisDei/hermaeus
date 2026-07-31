@@ -3,6 +3,7 @@ using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
 using Hermaeus.Services;
 using Xunit;
+using static Hermaeus.Tests.Helpers;
 
 namespace Hermaeus.Tests;
 
@@ -183,5 +184,49 @@ public sealed class OutputConstraintTests
     public void No_constraint_is_never_a_refusal()
     {
         Assert.Null(LlmOutputConstraintWire.DescribeRefusal(null, LlmConstraintSupport.None, "OpenAI"));
+    }
+
+    // ── the OpenAI-compatible declaration ──
+
+    private static OpenAiService Endpoint(TempDir temp, string baseUrl, bool declared)
+    {
+        var settings = NewSettings(temp);
+        settings.Settings.Llm.OpenAiBaseUrl = baseUrl;
+        settings.Settings.Llm.OpenAiSupportsStructuredOutputs = declared;
+        return new OpenAiService(settings, new FakeSecretStore());
+    }
+
+    [Fact]
+    public void Real_openai_can_always_constrain()
+    {
+        using var temp = new TempDir();
+
+        Assert.Equal(LlmConstraintSupport.JsonSchema, Endpoint(temp, "https://api.openai.com", declared: false).ConstraintSupport);
+    }
+
+    [Fact]
+    public void An_undeclared_compatible_endpoint_cannot_constrain()
+    {
+        using var temp = new TempDir();
+
+        // The important half: silence is not a yes. Without a declaration the
+        // request is refused rather than sent as a field the server may drop.
+        Assert.Equal(LlmConstraintSupport.None, Endpoint(temp, "http://localhost:1234/v1", declared: false).ConstraintSupport);
+    }
+
+    [Fact]
+    public void A_declared_compatible_endpoint_can_constrain()
+    {
+        using var temp = new TempDir();
+
+        // LM Studio, vLLM and friends: the server supports the field and has
+        // no way to say so, so the user says so instead.
+        Assert.Equal(LlmConstraintSupport.JsonSchema, Endpoint(temp, "http://localhost:1234/v1", declared: true).ConstraintSupport);
+    }
+
+    [Fact]
+    public void The_declaration_defaults_to_off()
+    {
+        Assert.False(new Hermaeus.Core.Models.LlmSettings().OpenAiSupportsStructuredOutputs);
     }
 }

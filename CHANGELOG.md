@@ -33,6 +33,13 @@ was changed about it.
   defending against prose. Both llama.cpp field names were confirmed against a
   running b10195 before the code was written.
 
+  Plenty of compatible servers support the field and cannot say so, so
+  **Settings > LLM carries a "This endpoint enforces response_format"
+  checkbox** beside the OpenAI base URL, off by default. It is a declaration,
+  not a probe: you are telling Hermaeus what your own server does, and if the
+  claim is wrong the server's rejection is surfaced rather than retried
+  unconstrained.
+
 - **Memory auto-summary asks for a schema.** On a provider that can enforce
   one, the extraction shape is required rather than requested. All three of
   the existing fallbacks stay, because they are what runs everywhere else;
@@ -92,7 +99,7 @@ was changed about it.
   declared. The per-task remembered-approval nuance is documented beside it. A
   guard test now fails if the table and the gate's two tool sets disagree,
   along with two more enumerated facts: `docs/benchmarks.md`'s recorded run
-  metadata against `BenchmarkMetadata`, and CLAUDE.md's settings-section list
+  metadata against `BenchmarkMetadata`, and AGENTS.md's settings-section list
   against `AppSettings`, in both directions.
 
 - **CI writes per-test timings on both matrix legs** and uploads them, and

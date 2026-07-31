@@ -58,9 +58,17 @@ public sealed class OpenAiService : IDisposable
     /// endpoint that has not declared itself: a constraint aimed at an
     /// arbitrary compatible server is refused in words rather than sent as a
     /// field that server may silently drop (r28 doc 01 1.3/1.4).
+    ///
+    /// The declaration can come from the user instead, through
+    /// <see cref="LlmSettings.OpenAiSupportsStructuredOutputs"/>, for the many
+    /// servers that support the field and have no way to say so. That is a
+    /// user asserting what their own server does, which is still a
+    /// declaration and still not a probe.
     /// </summary>
     public LlmConstraintSupport ConstraintSupport =>
-        IsRealOpenAiEndpoint ? LlmConstraintSupport.JsonSchema : LlmConstraintSupport.None;
+        IsRealOpenAiEndpoint || _settings.Settings.Llm.OpenAiSupportsStructuredOutputs
+            ? LlmConstraintSupport.JsonSchema
+            : LlmConstraintSupport.None;
 
     private async Task<AuthenticationHeaderValue> BuildAuthHeaderAsync(CancellationToken ct) =>
         new("Bearer", await _secrets.ResolveAsync(_settings.Settings.Llm.OpenAiApiKey, ct));
