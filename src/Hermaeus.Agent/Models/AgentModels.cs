@@ -142,6 +142,14 @@ public sealed class AgentTaskState
     /// </summary>
     public int TotalStepErrors { get; set; }
     /// <summary>
+    /// Whether the most recent planner call was sent with the protocol schema
+    /// enforced by the provider's sampler (r28 doc 05 5.6). Read beside
+    /// <see cref="TotalStepErrors"/>: it is the only way to tell a run whose
+    /// shape was guaranteed from one that was asked nicely, without running a
+    /// benchmark. Not a metric panel, not a comparison view.
+    /// </summary>
+    public bool PlannerConstrained { get; set; }
+    /// <summary>
     /// Ids of every lesson that has appeared in this task's context pack
     /// across all steps. On a successful completion, each is confirmed
     /// (evidence bumped) via <see cref="Hermaeus.Agent.Services.ILessonStore"/> -

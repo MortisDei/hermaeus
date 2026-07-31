@@ -25,12 +25,12 @@ plus `git log --oneline main..HEAD` and know exactly where to resume.
 | 6 | 1.4 `SupportsOutputConstraints` capability flag | yes |
 | 7 | 1.5 Memory auto-summary asks for a schema | yes |
 | 8 | 1.6 Trace records whether shape was enforced | yes |
-| 9 | 5.1 Planner protocol schema | no |
-| 10 | 5.2 Planner call sends the constraint | no |
-| 11 | 5.5 Gate provably unchanged | no |
-| 12 | 5.3 Fallbacks confirmed intact | no |
-| 13 | 5.4 Parse-failure message stops blaming the model | no |
-| 14 | 5.6 Parse failures countable | no |
+| 9 | 5.1 Planner protocol schema | yes |
+| 10 | 5.2 Planner call sends the constraint | yes |
+| 11 | 5.5 Gate provably unchanged | yes |
+| 12 | 5.3 Fallbacks confirmed intact | yes |
+| 13 | 5.4 Parse-failure message stops blaming the model | yes |
+| 14 | 5.6 Parse failures countable | yes |
 | 15 | 2.1 `ChatServerTimings` carries draft counters | no |
 | 16 | 2.2 Speed Check runs repeated iterations | no |
 | 17 | 2.3 Observed spread reported | no |
