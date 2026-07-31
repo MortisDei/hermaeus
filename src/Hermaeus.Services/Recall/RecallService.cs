@@ -14,17 +14,30 @@ namespace Hermaeus.Services.Recall;
 /// </summary>
 public sealed class RecallService
 {
-    private static readonly TimeSpan SourceTimeout = TimeSpan.FromSeconds(3);
+    /// <summary>
+    /// How long one recall source may take before it is omitted and named.
+    ///
+    /// r29 doc 04 4.5: injectable, because the test that proves a slow source
+    /// is omitted proved it by waiting out the real three seconds on every run,
+    /// on both CI legs. Production behaviour is unchanged: the default is this
+    /// value.
+    /// </summary>
+    private static readonly TimeSpan DefaultSourceTimeout = TimeSpan.FromSeconds(3);
     private const double RrfK = 60.0;
     private const int TopK = 50;
 
     private readonly IReadOnlyList<IRecallSource> _sources;
     private readonly IEmbeddingService? _embeddings;
+    private readonly TimeSpan _sourceTimeout;
 
-    public RecallService(IEnumerable<IRecallSource> sources, IEmbeddingService? embeddings = null)
+    public RecallService(
+        IEnumerable<IRecallSource> sources,
+        IEmbeddingService? embeddings = null,
+        TimeSpan? sourceTimeout = null)
     {
         _sources = sources.ToList();
         _embeddings = embeddings;
+        _sourceTimeout = sourceTimeout ?? DefaultSourceTimeout;
     }
 
     public async Task<RecallResult> SearchAsync(string query, string projectScope = "", CancellationToken ct = default)
@@ -45,13 +58,13 @@ public sealed class RecallService
         return new RecallResult(Fuse(ranked), omitted, _embeddings is null);
     }
 
-    private static async Task<(IRecallSource Source, IReadOnlyList<RecallHit> Hits, bool Failed)> RunOneAsync(
+    private async Task<(IRecallSource Source, IReadOnlyList<RecallHit> Hits, bool Failed)> RunOneAsync(
         IRecallSource source, string query, string projectScope, CancellationToken ct)
     {
         try
         {
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeoutCts.CancelAfter(SourceTimeout);
+            timeoutCts.CancelAfter(_sourceTimeout);
             var hits = await source.SearchAsync(query, projectScope, timeoutCts.Token);
             return (source, hits, false);
         }

@@ -22,11 +22,9 @@ public sealed class LocalApiProcessManagerJobObjectTests
     }
 
     /// <summary>r11 4.1: unlike ServerProcessManager/KokoroProcessManager/XttsProcessManager, LocalApiProcessManager never joined the app's job object, so an app crash orphaned the LocalApi process holding its port and per-app tokens alive in memory.</summary>
-    [Fact]
+    [WindowsOnlyFact]
     public async Task StartAsync_assigns_the_child_process_to_the_job_object()
     {
-        if (!OperatingSystem.IsWindows()) return;
-
         var jobObject = new FakeProcessJobObject(succeeds: true);
         var manager = new LocalApiProcessManager(jobObject, launchTargetResolver: () => (ImmediateExitExecutable, []));
 

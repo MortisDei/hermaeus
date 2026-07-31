@@ -32,11 +32,9 @@ public sealed class ModelManifestStoreTests
         Assert.Equal("abc123", found.Sha256);
     }
 
-    [Fact]
+    [WindowsOnlyFact]
     public async Task Upsert_is_case_insensitive_on_the_file_path_key_on_windows()
     {
-        if (!OperatingSystem.IsWindows()) return;
-
         using var temp = new TempDir();
         var settings = Helpers.NewSettings(temp);
         settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");

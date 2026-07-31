@@ -76,7 +76,11 @@ public sealed class RecallServiceTests
     {
         var fast = new FakeSource("Conversations", [Hit(RecallKind.Message, "m1")]);
         var slow = new FakeSource("Agent tasks", [Hit(RecallKind.Task, "t1")], delay: TimeSpan.FromSeconds(10));
-        var service = new RecallService([fast, slow], new FakeEmbeddingService());
+        // r29 doc 04 4.5: this used to wait out the real 3 s source timeout on
+        // every run, on both CI legs. The timeout is injectable now; what the
+        // test asserts is unchanged.
+        var service = new RecallService([fast, slow], new FakeEmbeddingService(),
+            sourceTimeout: TimeSpan.FromMilliseconds(50));
 
         var result = await service.SearchAsync("query");
 

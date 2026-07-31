@@ -49,11 +49,9 @@ public sealed class PythonHealthValidatorTests
         return path;
     }
 
-    [Fact]
+    [WindowsOnlyFact]
     public async Task ValidateAsync_rejects_a_version_at_or_above_the_providers_max_exclusive()
     {
-        if (!OperatingSystem.IsWindows()) return;
-
         using var temp = new TempDir();
         var fakePython = WriteFakePython(temp, "3.13.5");
         var xtts = new FakeVoiceProvider((3, 9), (3, 12));
@@ -65,11 +63,9 @@ public sealed class PythonHealthValidatorTests
         Assert.Contains(report.Issues, i => i.Code == "version");
     }
 
-    [Fact]
+    [WindowsOnlyFact]
     public async Task ValidateAsync_accepts_a_version_inside_the_providers_range()
     {
-        if (!OperatingSystem.IsWindows()) return;
-
         using var temp = new TempDir();
         var fakePython = WriteFakePython(temp, "3.11.4");
         var xtts = new FakeVoiceProvider((3, 9), (3, 12));
@@ -81,11 +77,9 @@ public sealed class PythonHealthValidatorTests
     }
 
     /// <summary>Kokoro has a 3.12 floor and no ceiling; a newer interpreter must still be accepted.</summary>
-    [Fact]
+    [WindowsOnlyFact]
     public async Task ValidateAsync_accepts_any_newer_minor_when_the_provider_names_no_ceiling()
     {
-        if (!OperatingSystem.IsWindows()) return;
-
         using var temp = new TempDir();
         var fakePython = WriteFakePython(temp, "3.15.0");
         var kokoro = new FakeVoiceProvider((3, 12), maxExclusive: null);

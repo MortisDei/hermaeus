@@ -49,11 +49,9 @@ public sealed class LocalAiSetupXttsPythonGateTests
         return path;
     }
 
-    [Fact]
+    [WindowsOnlyFact]
     public async Task ValidatePythonForXttsAsync_rejects_a_version_outside_the_supported_range()
     {
-        if (!OperatingSystem.IsWindows()) return;
-
         using var temp = new TempDir();
         var workDir = temp.PathFor("work");
         Directory.CreateDirectory(workDir);
@@ -64,11 +62,9 @@ public sealed class LocalAiSetupXttsPythonGateTests
         Assert.True(!result, $"a 3.13 interpreter must fail the XTTS 3.9-3.11 version gate. Log:\n{string.Join('\n', log)}");
     }
 
-    [Fact]
+    [WindowsOnlyFact]
     public async Task ValidatePythonForXttsAsync_accepts_a_version_inside_the_supported_range()
     {
-        if (!OperatingSystem.IsWindows()) return;
-
         using var temp = new TempDir();
         var workDir = temp.PathFor("work");
         Directory.CreateDirectory(workDir);

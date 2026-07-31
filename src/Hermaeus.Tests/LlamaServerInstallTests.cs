@@ -10,11 +10,9 @@ namespace Hermaeus.Tests;
 public sealed class LlamaServerInstallTests
 {
     /// <summary>r11 1.1/1.2: InstallAsync must download the real pinned archive, extract it (zip-slip guarded), and hand back a path ServerProcessManager can actually start, not a raw archive moved into place as an .exe.</summary>
-    [Fact]
+    [WindowsOnlyFact]
     public async Task InstallAsync_extracts_the_pinned_archive_and_produces_a_runnable_executable()
     {
-        if (!OperatingSystem.IsWindows()) return;
-
         using var temp = new TempDir();
         var installDir = temp.PathFor("install");
 
@@ -41,11 +39,9 @@ public sealed class LlamaServerInstallTests
         Assert.Empty(Directory.EnumerateFiles(installDir, "*.zip", SearchOption.AllDirectories));
     }
 
-    [Fact]
+    [WindowsOnlyFact]
     public async Task InstallAsync_is_idempotent_when_the_executable_already_exists()
     {
-        if (!OperatingSystem.IsWindows()) return;
-
         using var temp = new TempDir();
         var installDir = temp.PathFor("install");
         Directory.CreateDirectory(installDir);

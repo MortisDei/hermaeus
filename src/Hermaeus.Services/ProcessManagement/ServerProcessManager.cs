@@ -767,20 +767,55 @@ public sealed class ServerProcessManager : IDisposable
             if (process is { HasExited: true })
                 throw new InvalidOperationException($"llama-server exited before it became ready. Exit code: {process.ExitCode}.");
 
+            // r29 doc 04 4.4: both the probe and the poll interval are raced
+            // against process exit. Before this, a server that died on launch
+            // was still diagnosed only after the in-flight probe ran out the
+            // HttpClient's 2 s timeout (which is what happens when something
+            // else holds the port open but never answers) and then the 600 ms
+            // interval elapsed on top. The app already had the answer and sat
+            // on it, and the user waited seconds to be told the launch failed.
+            using var iterationCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             try
             {
-                var r = await http.GetAsync(url, ct);
-                if (r.IsSuccessStatusCode) return;
-            }
-            // The HttpClient's own 2 s timeout throws OperationCanceledException too, indistinguishable
-            // from a real cancellation by type alone; only a genuinely cancelled ct should escape this
-            // retry loop (r9 02-server-lifecycle.md 2.4: an HTTP timeout must not masquerade as a
-            // user-initiated cancel and overwrite an already-diagnosed Error state with a silent Stopped).
-            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested) { }
+                var exited  = WhenProcessExitsAsync(process, iterationCts.Token);
+                var request = http.GetAsync(url, iterationCts.Token);
 
-            await Task.Delay(600, ct);
+                if (await Task.WhenAny(request, exited) != request)
+                    continue;   // the process is gone; the top of the loop reports it
+
+                try
+                {
+                    var r = await request;
+                    if (r.IsSuccessStatusCode) return;
+                }
+                // The HttpClient's own 2 s timeout throws OperationCanceledException too, indistinguishable
+                // from a real cancellation by type alone; only a genuinely cancelled ct should escape this
+                // retry loop (r9 02-server-lifecycle.md 2.4: an HTTP timeout must not masquerade as a
+                // user-initiated cancel and overwrite an already-diagnosed Error state with a silent Stopped).
+                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested) { }
+
+                await Task.WhenAny(Task.Delay(600, iterationCts.Token), exited);
+            }
+            finally
+            {
+                // Abandons whichever of the probe, the exit watch and the poll
+                // delay is still outstanding, so nothing survives the iteration.
+                iterationCts.Cancel();
+            }
         }
         throw new TimeoutException($"llama-server on port {port} did not respond within 5 minutes");
+    }
+
+    /// <summary>Completes when the process exits, or never for a null process.</summary>
+    private static Task WhenProcessExitsAsync(Process? process, CancellationToken ct)
+    {
+        var task = process is null
+            ? Task.Delay(Timeout.Infinite, ct)
+            : process.WaitForExitAsync(ct);
+        // Abandoned at the end of every poll iteration; observe the resulting
+        // cancellation so it is not an unobserved task exception.
+        _ = task.ContinueWith(static t => _ = t.Exception, TaskScheduler.Default);
+        return task;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

@@ -13,13 +13,23 @@ public sealed class MemoryStore : IMemoryStore
 {
     private const int SchemaVersion = 5;
     private const int MaxBackfillAttemptsPerRow = 5;
-    private static readonly TimeSpan QueryEmbedTimeout = TimeSpan.FromSeconds(3);
+    /// <summary>
+    /// r9 01-send-path-latency.md 1.3: how long the query and save paths wait
+    /// on the embedder before falling back, rather than inheriting the HTTP
+    /// client's 60 s timeout.
+    ///
+    /// r29 doc 04 4.5: injectable, because the two tests that prove the fallback
+    /// happens proved it by waiting out the real three seconds, on both CI legs,
+    /// every run. Production behaviour is unchanged: the default is this value.
+    /// </summary>
+    private static readonly TimeSpan DefaultQueryEmbedTimeout = TimeSpan.FromSeconds(3);
 
     private readonly ISettingsService _settings;
     private readonly IEmbeddingService? _embeddings;
     private readonly IRuntimeLogService? _runtimeLogs;
     private readonly TimeProvider _timeProvider;
     private readonly TimeSpan _backfillCooldown;
+    private readonly TimeSpan _queryEmbedTimeout;
     private string _initializedPath = string.Empty;
     private readonly SemaphoreSlim _initGate = new(1, 1);
     private readonly SemaphoreSlim _backfillGate = new(1, 1);
@@ -43,13 +53,15 @@ public sealed class MemoryStore : IMemoryStore
         IEmbeddingService? embeddings = null,
         IRuntimeLogService? runtimeLogs = null,
         TimeProvider? timeProvider = null,
-        TimeSpan? backfillCooldown = null)
+        TimeSpan? backfillCooldown = null,
+        TimeSpan? queryEmbedTimeout = null)
     {
         _settings = settings;
         _embeddings = embeddings;
         _runtimeLogs = runtimeLogs;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _backfillCooldown = backfillCooldown ?? TimeSpan.FromMinutes(10);
+        _queryEmbedTimeout = queryEmbedTimeout ?? DefaultQueryEmbedTimeout;
     }
 
     public async Task InitializeAsync(CancellationToken ct = default)
@@ -235,7 +247,7 @@ public sealed class MemoryStore : IMemoryStore
         // requirement: if no embedding model is configured or the call
         // fails, save proceeds with a null blob and COALESCE below keeps
         // whatever embedding (if any) the row already had rather than
-        // clobbering it. Bounded by the same QueryEmbedTimeout the query path
+        // clobbering it. Bounded by the same query-embed timeout the query path
         // uses (r11 3.2): this save runs on the post-response path
         // (ConversationMemoryService.ApplyInjectedMemoryMarkersAsync /
         // MergeAndSaveAsync), so a hung embedding endpoint must not stall it
@@ -248,7 +260,7 @@ public sealed class MemoryStore : IMemoryStore
             try
             {
                 using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                timeoutCts.CancelAfter(QueryEmbedTimeout);
+                timeoutCts.CancelAfter(_queryEmbedTimeout);
                 var vector = await _embeddings.EmbedAsync(memory.Content, timeoutCts.Token);
                 embeddingBlob = ToBlob(vector);
                 embeddingDim = vector.Length;
@@ -410,7 +422,7 @@ public sealed class MemoryStore : IMemoryStore
         try
         {
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeoutCts.CancelAfter(QueryEmbedTimeout);
+            timeoutCts.CancelAfter(_queryEmbedTimeout);
             queryVector = await _embeddings!.EmbedAsync(q, timeoutCts.Token);
         }
         catch (Exception ex)
@@ -662,7 +674,7 @@ public sealed class MemoryStore : IMemoryStore
         try
         {
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeoutCts.CancelAfter(QueryEmbedTimeout);
+            timeoutCts.CancelAfter(_queryEmbedTimeout);
             var probe = await _embeddings!.EmbedAsync("hermaeus-memory-dimension-probe", timeoutCts.Token);
             return probe.Length;
         }

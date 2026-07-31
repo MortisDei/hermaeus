@@ -105,7 +105,11 @@ public sealed class MemoryEmbeddingBackfillTests
         settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
 
         var hangingEmbeddings = new HangOnceThenFailEmbeddingService();
-        var store = new MemoryStore(settings, hangingEmbeddings);
+        // r29 doc 04 4.5: this used to wait out the real 3 s query-embed timeout
+        // on every run, on both CI legs. The timeout is injectable now; what the
+        // test asserts is unchanged.
+        var store = new MemoryStore(settings, hangingEmbeddings,
+            queryEmbedTimeout: TimeSpan.FromMilliseconds(50));
         await store.InitializeAsync();
 
         var sw = Stopwatch.StartNew();
@@ -252,7 +256,10 @@ public sealed class MemoryEmbeddingBackfillTests
         settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
 
         var embeddings = new CountingEmbeddingService();
-        var store = new MemoryStore(settings, embeddings);
+        // r29 doc 04 4.5: injectable query-embed timeout, so proving the
+        // fallback happens no longer costs the real three seconds.
+        var store = new MemoryStore(settings, embeddings,
+            queryEmbedTimeout: TimeSpan.FromMilliseconds(50));
         await store.InitializeAsync();
         await store.SaveAsync(new Memory { Id = "m1", Content = "dotnet build fails without restore" });
 
