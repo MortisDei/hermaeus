@@ -41,7 +41,8 @@ public sealed class RagQueryService
 
     // In-memory chunk cache per dataset  (dataset_id → chunks)
     private const int MaxCachedDatasets = 8;
-    private const long MaxCacheBytes = 128L * 1024L * 1024L;
+    public const long DefaultMaxCacheBytes = 128L * 1024L * 1024L;
+    private readonly long _maxCacheBytes;
     private readonly Dictionary<string, List<RagChunk>> _cache = [];
     private readonly Dictionary<string, long> _cacheSizes = [];
     private readonly LinkedList<string> _cacheOrder = new();
@@ -55,19 +56,58 @@ public sealed class RagQueryService
         ISettingsService settings,
         IReranker reranker,
         IRuntimeLogService? logs = null,
-        ITraceStore? traces = null)
+        ITraceStore? traces = null,
+        // r27 2.1: the cache budget is a policy of this service, not a constant
+        // of the universe. Injectable so the over-budget path can be exercised
+        // without a 128 MiB fixture; production always takes the default.
+        long? maxCacheBytes = null)
     {
         _store = store; _embed = embed; _llm = llm; _settings = settings; _reranker = reranker; _logs = logs;
         _traces = traces;
+        _maxCacheBytes = maxCacheBytes is > 0 ? maxCacheBytes.Value : DefaultMaxCacheBytes;
     }
 
     /// <summary>Warm the in-memory embedding cache for a dataset.</summary>
     public async Task WarmCacheAsync(string datasetId, CancellationToken ct = default)
+        => await LoadScanChunksAsync(datasetId, ct);
+
+    /// <summary>
+    /// r27 02-retrieval-that-scales.md 2.1: reads a dataset's chunks and caches
+    /// them when they fit. A dataset over the cache budget is still
+    /// returned to the caller so it can be queried from the store; before this
+    /// item, <see cref="StoreCache"/> dropped it and the query silently scanned
+    /// an empty list.
+    /// </summary>
+    private async Task<ScanChunks> LoadScanChunksAsync(string datasetId, CancellationToken ct)
     {
         var chunks = await _store.GetChunksAsync(datasetId, includeEmbeddings: true, ct);
-        StoreCache(datasetId, chunks);
+        var cached = StoreCache(datasetId, chunks);
         _logs?.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Rag,
-            $"RAG cache warmed for {datasetId}: {chunks.Count} chunk(s), {GetCacheBytes() / 1024 / 1024} MiB cached."));
+            cached
+                ? $"RAG cache warmed for {datasetId}: {chunks.Count} chunk(s), {GetCacheBytes() / 1024 / 1024} MiB cached."
+                : $"RAG dataset {datasetId} is too large to cache ({chunks.Count} chunk(s), {EstimateCacheSize(chunks) / 1024 / 1024} MiB over a {_maxCacheBytes / 1024 / 1024} MiB budget); queries scan from storage."));
+        return new ScanChunks(chunks, cached);
+    }
+
+    /// <summary>Chunks available for a scan, and whether they came from (or reached) the cache.</summary>
+    private readonly record struct ScanChunks(List<RagChunk> Chunks, bool Cached);
+
+    /// <summary>
+    /// r27 2.7: per-dataset scan-index state for the RAG panel, so the cache
+    /// ceiling is visible before a query runs into it.
+    /// </summary>
+    public RagScanIndexInfo GetScanIndexInfo(string datasetId)
+    {
+        lock (_cacheSync)
+        {
+            var cached = _cache.TryGetValue(datasetId, out var chunks);
+            return new RagScanIndexInfo(
+                datasetId,
+                cached,
+                cached ? _cacheSizes.GetValueOrDefault(datasetId) : 0,
+                cached ? chunks!.Count : 0,
+                _maxCacheBytes);
+        }
     }
 
     public void ClearCache(string datasetId)
@@ -83,26 +123,28 @@ public sealed class RagQueryService
         }
     }
 
-    private void StoreCache(string datasetId, List<RagChunk> chunks)
+    /// <summary>Returns true when the dataset fitted the budget and is now cached.</summary>
+    private bool StoreCache(string datasetId, List<RagChunk> chunks)
     {
         lock (_cacheSync)
         {
             if (_cacheSizes.Remove(datasetId, out var oldSize))
                 _cacheBytes -= oldSize;
             var size = EstimateCacheSize(chunks);
-            if (size > MaxCacheBytes)
+            if (size > _maxCacheBytes)
             {
                 _cache.Remove(datasetId);
                 var oldNode = _cacheOrder.Find(datasetId);
                 if (oldNode is not null)
                     _cacheOrder.Remove(oldNode);
-                return;
+                return false;
             }
 
             _cache[datasetId] = chunks;
             _cacheSizes[datasetId] = size;
             _cacheBytes += size;
             TouchCacheUnsafe(datasetId);
+            return _cache.ContainsKey(datasetId);
         }
     }
 
@@ -110,12 +152,6 @@ public sealed class RagQueryService
     {
         lock (_cacheSync)
             return _cacheBytes;
-    }
-
-    private void TouchCache(string datasetId)
-    {
-        lock (_cacheSync)
-            TouchCacheUnsafe(datasetId);
     }
 
     private void TouchCacheUnsafe(string datasetId)
@@ -126,7 +162,7 @@ public sealed class RagQueryService
             _cacheOrder.Remove(existing);
         _cacheOrder.AddLast(datasetId);
 
-        while ((_cacheOrder.Count > MaxCachedDatasets || (_cacheBytes > MaxCacheBytes && _cacheOrder.Count > 1)) && _cacheOrder.First is not null)
+        while ((_cacheOrder.Count > MaxCachedDatasets || (_cacheBytes > _maxCacheBytes && _cacheOrder.Count > 1)) && _cacheOrder.First is not null)
         {
             var oldest = _cacheOrder.First.Value;
             _cache.Remove(oldest);
@@ -217,19 +253,25 @@ public sealed class RagQueryService
         opts ??= new RagQueryOptions();
         var sw = Stopwatch.StartNew();
 
+        // r27 2.1: "absent from the cache" and "cached and genuinely empty" are
+        // different states. Only the first one needs a load, and a dataset that
+        // does not fit the budget is scanned from the loaded list rather than
+        // from a cache entry that was never written.
         List<RagChunk> chunks;
+        bool cacheHit;
         lock (_cacheSync)
         {
-            _cache.TryGetValue(datasetId, out chunks!);
+            cacheHit = _cache.TryGetValue(datasetId, out chunks!);
+            if (cacheHit)
+                TouchCacheUnsafe(datasetId);
         }
 
-        if (chunks is null || chunks.Count == 0)
-            await WarmCacheAsync(datasetId, ct);
-
-        lock (_cacheSync)
+        var scannedUncached = false;
+        if (!cacheHit)
         {
-            chunks = _cache.GetValueOrDefault(datasetId, []);
-            TouchCacheUnsafe(datasetId);
+            var loaded = await LoadScanChunksAsync(datasetId, ct);
+            chunks = loaded.Chunks;
+            scannedUncached = !loaded.Cached;
         }
 
         var plan = await BuildQueryPlanAsync(datasetId, question, ct);
@@ -250,10 +292,16 @@ public sealed class RagQueryService
         var semanticK = Math.Max(opts.TopK * 10, 50);
         List<ScoredChunk> semantic = [];
         var plannerNotes = plan.PlannerNotes;
+        if (scannedUncached)
+        {
+            plannerNotes = AppendNote(plannerNotes,
+                $"dataset too large to cache ({chunks.Count} chunk(s), budget {_maxCacheBytes / 1024 / 1024} MiB); queries scan from storage and will be slower");
+        }
+
         if (embeddingModelMismatch)
         {
             var note = $"semantic search skipped: dataset embedded with {ds!.Config.EmbeddingModel}, current model is {currentEmbeddingModel}; reindex to re-enable";
-            plannerNotes = string.IsNullOrWhiteSpace(plannerNotes) ? note : $"{plannerNotes}; {note}";
+            plannerNotes = AppendNote(plannerNotes, note);
         }
         else
         {
@@ -273,7 +321,7 @@ public sealed class RagQueryService
                 // the next query probes again in case the server came back.
                 var oneLine = ex.Message.Replace('\r', ' ').Replace('\n', ' ');
                 var note = $"semantic search unavailable: {oneLine}; used keyword search only";
-                plannerNotes = string.IsNullOrWhiteSpace(plannerNotes) ? note : $"{plannerNotes}; {note}";
+                plannerNotes = AppendNote(plannerNotes, note);
                 _logs?.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Rag,
                     $"RAG semantic search failed for dataset {datasetId}: {ex.Message}"));
             }
@@ -440,6 +488,10 @@ public sealed class RagQueryService
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
+
+    /// <summary>Appends one planner note to the running list, keeping the existing "; " separator.</summary>
+    private static string AppendNote(string notes, string note) =>
+        string.IsNullOrWhiteSpace(notes) ? note : $"{notes}; {note}";
 
     private async Task PersistTraceAsync(RagQueryTrace trace, CancellationToken ct)
     {
@@ -806,6 +858,17 @@ public sealed record RagRetrievalResult(
     List<ScoredChunk> Selected,
     long LatencyMs,
     RagDatasetConfig? DatasetConfig);
+
+/// <summary>
+/// r27 2.7: the scan-index state of one dataset, so the RAG panel can show the
+/// cache ceiling as a fact rather than the user discovering it as a slow query.
+/// </summary>
+public sealed record RagScanIndexInfo(
+    string DatasetId,
+    bool Cached,
+    long IndexBytes,
+    int ChunkCount,
+    long BudgetBytes);
 
 internal sealed record QueryPlan(string PrimaryQuery, List<string> QueryVariants, string PlannerNotes);
 

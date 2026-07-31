@@ -213,7 +213,12 @@ public static class HarnessCases
         [new HarnessCase("RAG retrieval falls back to BM25 only when embedding service throws", RagTests.RagRetrievalFallsBackToBm25OnlyWhenEmbeddingServiceThrows)],
         [new HarnessCase("RAG retrieval cancellation during embedding is not swallowed into fallback", RagTests.RagRetrievalCancellationDuringEmbeddingIsNotSwallowedIntoFallback)],
         [new HarnessCase("RAG retrieval recovers to full semantic after a transient embedding failure", RagTests.RagRetrievalRecoversToFullSemanticAfterATransientEmbeddingFailure)],
-        [new HarnessCase("RAG GetDatasetAsync returns single dataset or null when absent", RagTests.RagGetDatasetAsyncReturnsSingleDatasetOrNullWhenAbsent)]
+        [new HarnessCase("RAG GetDatasetAsync returns single dataset or null when absent", RagTests.RagGetDatasetAsyncReturnsSingleDatasetOrNullWhenAbsent)],
+        [new HarnessCase("RAG oversized dataset still answers a phrase that is present", RagCacheCeilingTests.OversizedDatasetStillAnswersAPhraseThatIsPresent)],
+        [new HarnessCase("RAG uncached query reports the reason in planner notes", RagCacheCeilingTests.UncachedQueryReportsTheReasonInPlannerNotes)],
+        [new HarnessCase("RAG cached dataset does not report the uncached note", RagCacheCeilingTests.CachedDatasetDoesNotReportTheUncachedNote)],
+        [new HarnessCase("RAG genuinely empty dataset is distinguished from an uncached one", RagCacheCeilingTests.GenuinelyEmptyDatasetIsDistinguishedFromAnUncachedOne)],
+        [new HarnessCase("RAG scan index info reports the budget it was measured against", RagCacheCeilingTests.ScanIndexInfoReportsTheBudgetItWasMeasuredAgainst)]
     ];
 
     public static IEnumerable<object[]> Tts =>

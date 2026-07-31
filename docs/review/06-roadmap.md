@@ -17,7 +17,7 @@ with no memory of any conversation should be able to read this table plus
 
 | # | Item | Landed |
 | --- | --- | --- |
-| 1 | 2.1 Oversized dataset returns results | no |
+| 1 | 2.1 Oversized dataset returns results | yes |
 | 2 | 1.1 Post-setup chain stops serialising | no |
 | 3 | 1.2 Servers auto-start concurrently | no |
 | 4 | 1.6 Delete dead `IsLoading` | no |
