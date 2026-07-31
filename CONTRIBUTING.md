@@ -1,12 +1,25 @@
 # Contributing
 
-Hermaeus is currently a source-available product project, not an open-governance
-open-source project. Contributions are welcome only when they align with the
-project direction and licensing model.
+Hermaeus is a source-available product project maintained by one person, not an
+open-governance open-source project. Outside code contributions are not being
+accepted.
+
+**Issues and bug reports are welcome and useful.** So are feature suggestions,
+though the answer to most of them will be no or not yet, and the "Explicit
+non-goals" section below explains several of those in advance.
+
+If you want to build on Hermaeus for yourself, the licence already allows that
+for private and noncommercial use. Fork it and enjoy.
+
+The rest of this file documents how the project is built and the conventions it
+holds itself to. It is written for the maintainer and for the AI agents working
+in this repository, and it is public because the reasoning is worth reading even
+if you are only here to look.
 
 ## Contribution Terms
 
-By submitting a contribution, you certify that:
+These apply to any contribution accepted by prior arrangement with the project
+owner. By submitting a contribution, you certify that:
 
 - you have the right to submit the contribution
 - the contribution is your own work or is submitted with permission
@@ -27,8 +40,10 @@ and noncommercial use but may also be commercially licensed.
 - Run `dotnet build Hermaeus.sln` before submitting changes.
 - Run `dotnet test src/Hermaeus.Tests/Hermaeus.Tests.csproj` when changes
   affect storage, settings, security, RAG, backup, restore, or runtime launch.
-- Submit changes as pull requests; see `docs/pull-requests.md`. One open pull
-  request per maintainer at any one time.
+- Changes land as pull requests, never direct pushes to `main`; see
+  `docs/pull-requests.md`. One open pull request per maintainer at any one
+  time. Documentation-only changes may go straight to `main` when the owner
+  says so.
 
 ## Vocabulary
 
@@ -57,8 +72,10 @@ introducing a fifth meaning for any of these words.
 ## Explicit non-goals
 
 The following are deliberately not part of Hermaeus's design, decided during
-the 2026-07 architecture review (see `docs/review/02`, `03`, `08` for the
-reasoning behind each): hosted services, user accounts, telemetry, an
+the July 2026 architecture review (r1). The reasoning behind each is in
+`docs/review/archived/r1/`: `02-dependency-review.md`,
+`03-architectural-opportunities.md` and `08-brutal-critique.md`. The
+non-goals are: hosted services, user accounts, telemetry, an
 in-process plugin API, provider failover (silently answering with a
 different model than the user chose is a bug, not resilience, for a
 local-first/privacy-focused app), vector databases, an ORM, and a web UI.
