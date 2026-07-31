@@ -35,12 +35,58 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
         var root = ResolveWorkspaceRoot(options.WorkspaceRoot);
         var scope = string.IsNullOrWhiteSpace(subdirectory) ? root : ResolveSafePath(root, subdirectory);
         var depth = maxDepth is > 0 ? maxDepth.Value : int.MaxValue;
-        return EnumerateSafeFiles(scope, options.MaxFileBytes)
+        // Directories are listed too, with a trailing separator. Without them a
+        // folder whose own files are all filtered out (or simply beyond the
+        // cap) is indistinguishable from a folder that does not exist, and a
+        // real run drew exactly that conclusion about a folder sitting in the
+        // workspace root.
+        var directories = EnumerateSafeDirectories(scope)
             .Where(path => PathDepthBelow(scope, path) <= depth)
             .Select(path => ToRelative(root, path))
             .Where(relative => WorkspacePolicyEvaluator.EvaluateRead(options.Policy, relative).Allowed)
-            .Take(options.MaxSearchResults)
+            .Select(relative => relative + "/");
+
+        var files = EnumerateSafeFiles(scope, options.MaxFileBytes)
+            .Where(path => PathDepthBelow(scope, path) <= depth)
+            .Select(path => ToRelative(root, path))
+            .Where(relative => WorkspacePolicyEvaluator.EvaluateRead(options.Policy, relative).Allowed);
+
+        // Sorted, so a listing is stable between calls and shallow entries are
+        // not buried by whichever subtree the walk happened to reach first.
+        var entries = directories.Concat(files)
+            .OrderBy(entry => entry, StringComparer.OrdinalIgnoreCase)
             .ToList();
+
+        var cap = Math.Max(1, options.MaxListResults);
+        if (entries.Count <= cap)
+            return entries;
+
+        // Says it stopped early rather than implying the rest is not there.
+        var shown = entries.Take(cap).ToList();
+        shown.Add($"[listing truncated: {entries.Count - cap} more entries not shown. "
+            + "Narrow it with the subdirectory or max_depth argument; do not conclude a path is absent from this list alone.]");
+        return shown;
+    }
+
+    private static IEnumerable<string> EnumerateSafeDirectories(string root)
+    {
+        var pending = new Stack<string>();
+        pending.Push(root);
+        while (pending.Count > 0)
+        {
+            var dir = pending.Pop();
+            IEnumerable<string> childDirs;
+            try { childDirs = Directory.EnumerateDirectories(dir); }
+            catch { continue; }
+
+            foreach (var child in childDirs)
+            {
+                if (IgnoredDirectories.Contains(Path.GetFileName(child)) || IsSymlink(child))
+                    continue;
+                pending.Push(child);
+                yield return child;
+            }
+        }
     }
 
     public IReadOnlyList<AgentFileSearchResult> SearchFiles(AgentWorkspaceOptions options, string query, bool regex = false, int contextLines = 0)

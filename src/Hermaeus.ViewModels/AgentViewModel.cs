@@ -613,6 +613,9 @@ public partial class AgentViewModel : ViewModelBase
     public bool HasActivityStatus => ActivityStatus.Length > 0;
     partial void OnActivityStatusChanged(string value) => OnPropertyChanged(nameof(HasActivityStatus));
 
+    /// <summary>Steps taken by the autonomous run currently in flight, which is what MaxAutoSteps actually caps.</summary>
+    private int _stepsThisRun;
+
     private const int ActivityTickMs = 500;
     private readonly System.Diagnostics.Stopwatch _activityClock = new();
     private CancellationTokenSource? _activityCts;
@@ -662,7 +665,18 @@ public partial class AgentViewModel : ViewModelBase
         {
             if (CurrentTask is null) return string.Empty;
             if (CurrentTask.SubTaskPlan.Count == 0)
-                return $"step {CurrentTask.StepCount}/{Math.Max(_settings?.Settings.Agent.MaxAutoSteps ?? 20, 1)}";
+            {
+                // StepCount is the task's whole life; MaxAutoSteps caps ONE
+                // autonomous run. Printing them as "step 111/20" compared two
+                // different things and read as a broken counter. The budget is
+                // only shown while a run is actually spending it.
+                var total = $"step {CurrentTask.StepCount}";
+                if (!IsRunning || _stepsThisRun <= 0)
+                    return total;
+
+                var budget = Math.Max(_settings?.Settings.Agent.MaxAutoSteps ?? 20, 1);
+                return $"{total} ({_stepsThisRun} of {budget} this run)";
+            }
 
             var specs = CurrentTask.SubTaskPlan;
             var firstUnfinished = specs.FindIndex(s => s.Status is AgentSubTaskStatus.Pending or AgentSubTaskStatus.Running);
@@ -2016,6 +2030,7 @@ public partial class AgentViewModel : ViewModelBase
     {
         var openedTaskId = _openedTaskId = taskId;
         var viewedTaskId = CurrentTask?.TaskId;
+        _stepsThisRun = 0;
         StatusMessage = "Running agent...";
         var result = await _agent.RunAsync(
             openedTaskId,
@@ -2068,7 +2083,11 @@ public partial class AgentViewModel : ViewModelBase
         // and the word rotation rather than letting the line report the age of
         // the whole run.
         if (IsRunning)
+        {
+            _stepsThisRun++;
             RestartActivityClock();
+        }
+        OnPropertyChanged(nameof(CurrentStepCountLabel));
         CurrentStep = label + result.State.ActiveStep;
         StatusMessage = label + result.LogEntry;
         NextActionPreview = JsonSerializer.Serialize(result.PlannerResponse.NextAction, new JsonSerializerOptions { WriteIndented = true });
@@ -2231,6 +2250,11 @@ public partial class AgentViewModel : ViewModelBase
         ExplainWorkspaceCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(HasWorkspace));
         RefreshCapabilityNotes();
+        // The file list only ever populated on panel load, so choosing a
+        // workspace (or opening a task belonging to a different one) left an
+        // empty list behind until the user found the Refresh button. The list
+        // describes this root, so it follows the root.
+        _ = RunOnUiAsync(RefreshWorkspaceFilesAsync);
     }
     /// <summary>
     /// r12 02-async-and-threading.md 2.3: reuses the 300 ms + CTS debounce
@@ -2343,6 +2367,8 @@ public partial class AgentViewModel : ViewModelBase
         NewTaskCommand.NotifyCanExecuteChanged();
         ContinueTaskCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(CanShowNewTaskButton));
+
+        OnPropertyChanged(nameof(CurrentStepCountLabel));
 
         if (value)
             StartActivityTicker();

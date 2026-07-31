@@ -41,6 +41,28 @@ benchmarks answer "best across every suite".
   only to the log and the transcript, so a task paused on a question rendered
   a reply box with no question next to it. It is persisted on the task now and
   shown above the reply box.
+- **`list_files` hid whole folders.** It shared the *search* result cap of 20,
+  and the workspace walk is a LIFO stack, so a listing of a real workspace
+  returned 20 entries from whichever subtree was popped first and said nothing
+  about the rest. A run listed the workspace root, never saw a top-level folder
+  that was genuinely there, and told the user the directory did not exist.
+  Listings now have their own budget, are sorted so they are stable and shallow
+  entries are not buried, include directories (a folder is never invisible
+  because its own files were filtered out), and say plainly when they stopped
+  early.
+- **The workspace file list only populated on panel load**, so choosing a
+  workspace, or opening a task belonging to a different one, left an empty list
+  until the user found the Refresh button. It follows the workspace root now.
+- **"step 111/20" compared two different things.** The numerator is the task's
+  whole life and the denominator caps a single autonomous run, so a long task
+  looked broken. The step count now reads "step 111", with "(4 of 20 this run)"
+  added only while a run is actually spending that budget.
+- **The cursor flickered between hand and arrow on the nav icons.** Avalonia
+  places a tooltip at the pointer by default, so the popup opened under the
+  cursor, the cursor reverted to an arrow, the control counted as exited, the
+  tooltip closed, and the cycle repeated. Tooltips are placed below the control
+  they describe now. (The earlier fix removed the dead gap between buttons,
+  which was a real problem but not this one.)
 - **A truncated file read read as a dead end.** The result said only
   `"truncated": true`, and a real run concluded the tool "cannot return the
   entire file content in one go" and abandoned the file. Results now carry the

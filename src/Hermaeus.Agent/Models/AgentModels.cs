@@ -624,6 +624,14 @@ public sealed record AgentWorkspaceOptions(
     string ModelId = "",
     int MaxFileBytes = 128 * 1024,
     int MaxSearchResults = 20,
+    /// <summary>
+    /// Cap for a directory listing, which is a different job from a search hit
+    /// list and needs a far bigger budget. Sharing MaxSearchResults meant
+    /// list_files returned 20 entries for an entire workspace and said nothing
+    /// about the rest, so a real run concluded a top-level folder did not exist
+    /// when the listing had simply stopped before reaching it.
+    /// </summary>
+    int MaxListResults = 500,
     int MaxContextItems = 6,
     /// <summary>The active workspace's manifest policy, if any (r23 3.1); null means unrestricted. Set by the caller from a loaded WorkspaceManifest, never by AgentWorkspaceTools itself.</summary>
     WorkspacePolicy? Policy = null,

@@ -69,6 +69,9 @@ The panel is a fixed status line, a pinned decision strip, and four tabs.
 - **Status line.** One row: task status, step count, goal, the latest status
   message, and the New task / Run Step / Stop controls. It is a fixed set of
   scalars, so a long plan can no longer squeeze the working area toward zero.
+  The step count is the task's whole life ("step 111"); the `Agent.MaxAutoSteps`
+  budget caps one autonomous run, so it is shown as "(4 of 20 this run)" only
+  while a run is spending it, rather than as a denominator on a lifetime count.
   While a run is in flight it also carries an indeterminate progress bar and a
   rotating activity line ("Step 3: Weighing the plan... 12s"), naming the
   current step and how long it has been going. Without it a long model call
@@ -172,6 +175,14 @@ the task. Before this, one bad response synthesized an `ask_user`, which parked
 the task in `waiting_for_review` and showed the user a reply box for a question
 the agent had never asked, while the three-strike budget was unreachable
 because reaching it took three manual Run Step clicks.
+
+A directory listing describes the workspace, so it gets a budget suited to that
+rather than sharing the search-hit cap. `list_files` returns entries sorted, and
+includes directories (with a trailing separator) so a folder is never invisible
+just because its own files were filtered out. When a listing stops early it says
+so and says how to narrow it, because "not in this list" is not the same as "not
+present" and a real run drew exactly that wrong conclusion about a folder that
+existed.
 
 A truncated read is never a dead end. `read_file` results carry the line range
 they cover and a continuation hint naming the exact `line_offset` to ask for
