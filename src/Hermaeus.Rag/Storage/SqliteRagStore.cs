@@ -2,6 +2,7 @@ using System.Text.Json;
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
 using Hermaeus.Rag.Models;
+using Hermaeus.Rag.Retrieval;
 using Microsoft.Data.Sqlite;
 
 namespace Hermaeus.Rag.Storage;
@@ -114,6 +115,16 @@ public sealed class SqliteRagStore
                 created_at   TEXT NOT NULL
             );
 
+            -- r27 02-retrieval-that-scales.md 2.2: candidate generation for BM25.
+            -- Mirrors what ConversationStore already does for conversations.
+            -- FTS5 finds the candidates; Bm25Scorer still scores them, so the
+            -- ranking among chunks that matter does not move.
+            CREATE VIRTUAL TABLE IF NOT EXISTS rag_chunks_fts USING fts5(
+                id UNINDEXED,
+                dataset_id UNINDEXED,
+                content
+            );
+
             CREATE INDEX IF NOT EXISTS idx_rag_chunks_ds     ON rag_chunks(dataset_id);
             CREATE INDEX IF NOT EXISTS idx_rag_chunks_parent ON rag_chunks(parent_id);
             CREATE INDEX IF NOT EXISTS idx_rag_chunks_source ON rag_chunks(dataset_id, source_path);
@@ -218,6 +229,11 @@ public sealed class SqliteRagStore
         chunksCmd.CommandText = "DELETE FROM rag_chunks WHERE dataset_id NOT IN (SELECT id FROM rag_datasets)";
         var orphanedChunks = await chunksCmd.ExecuteNonQueryAsync(ct);
 
+        await using var ftsCmd = c.CreateCommand();
+        ftsCmd.Transaction = (SqliteTransaction)tx;
+        ftsCmd.CommandText = "DELETE FROM rag_chunks_fts WHERE id NOT IN (SELECT id FROM rag_chunks)";
+        await ftsCmd.ExecuteNonQueryAsync(ct);
+
         await using var statsCmd = c.CreateCommand();
         statsCmd.Transaction = (SqliteTransaction)tx;
         statsCmd.CommandText = "DELETE FROM rag_bm25_stats WHERE dataset_id NOT IN (SELECT id FROM rag_datasets)";
@@ -310,6 +326,14 @@ public sealed class SqliteRagStore
             await chunksCmd.ExecuteNonQueryAsync(ct);
         }
 
+        await using (var ftsCmd = c.CreateCommand())
+        {
+            ftsCmd.Transaction = (SqliteTransaction)tx;
+            ftsCmd.CommandText = "DELETE FROM rag_chunks_fts WHERE dataset_id = $id";
+            ftsCmd.Parameters.AddWithValue("$id", datasetId);
+            await ftsCmd.ExecuteNonQueryAsync(ct);
+        }
+
         await using (var statsCmd = c.CreateCommand())
         {
             statsCmd.Transaction = (SqliteTransaction)tx;
@@ -390,8 +414,33 @@ public sealed class SqliteRagStore
             pEt.Value   = (object?)chunk.EventType ?? DBNull.Value;
             pSu.Value   = (object?)chunk.SourceUrl ?? DBNull.Value;
             await cmd.ExecuteNonQueryAsync(ct);
+            // r27 2.2: the FTS mirror is written in the same transaction as the
+            // row it mirrors, delete-then-insert so a re-ingest of the same
+            // chunk id replaces rather than duplicates.
+            if (!chunk.IsParent)
+                await UpsertChunkFtsAsync(c, (SqliteTransaction)tx, chunk.Id, chunk.DatasetId, chunk.Content, ct);
         }
         await tx.CommitAsync(ct);
+    }
+
+    private static async Task UpsertChunkFtsAsync(
+        SqliteConnection c, SqliteTransaction tx, string id, string datasetId, string content, CancellationToken ct)
+    {
+        await using (var del = c.CreateCommand())
+        {
+            del.Transaction = tx;
+            del.CommandText = "DELETE FROM rag_chunks_fts WHERE id = $id";
+            del.Parameters.AddWithValue("$id", id);
+            await del.ExecuteNonQueryAsync(ct);
+        }
+
+        await using var ins = c.CreateCommand();
+        ins.Transaction = tx;
+        ins.CommandText = "INSERT INTO rag_chunks_fts (id, dataset_id, content) VALUES ($id, $ds, $content)";
+        ins.Parameters.AddWithValue("$id", id);
+        ins.Parameters.AddWithValue("$ds", datasetId);
+        ins.Parameters.AddWithValue("$content", content);
+        await ins.ExecuteNonQueryAsync(ct);
     }
 
     public async Task<List<RagChunk>> GetChunksAsync(string datasetId, bool includeEmbeddings = true, CancellationToken ct = default)
@@ -434,6 +483,215 @@ public sealed class SqliteRagStore
         return list;
     }
 
+    /// <summary>
+    /// r27 02-retrieval-that-scales.md 2.3: the semantic scan index for a
+    /// dataset: chunk ids and one contiguous embedding block, without content.
+    /// This is the only read the in-memory cache needs.
+    /// </summary>
+    public async Task<RagScanIndex> GetScanIndexAsync(string datasetId, string embeddingModel, CancellationToken ct = default)
+    {
+        await EnsureInitializedAsync(ct);
+        await using var c = new SqliteConnection(Cs); await c.OpenAsync(ct);
+        var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT id, embedding FROM rag_chunks WHERE dataset_id=$ds AND is_parent = 0 ORDER BY source_file, chunk_index";
+        cmd.Parameters.AddWithValue("$ds", datasetId);
+
+        var ids = new List<string>();
+        var vectors = new List<float[]>();
+        await using (var r = await cmd.ExecuteReaderAsync(ct))
+        {
+            while (await r.ReadAsync(ct))
+            {
+                if (r.IsDBNull(1))
+                    continue;
+                var vector = BytesToEmbedding((byte[])r[1]);
+                if (vector.Length == 0)
+                    continue;
+                ids.Add(r.GetString(0));
+                vectors.Add(vector);
+            }
+        }
+
+        return BuildScanIndex(ids, vectors, embeddingModel);
+    }
+
+    private static RagScanIndex BuildScanIndex(List<string> ids, List<float[]> vectors, string embeddingModel)
+    {
+        if (vectors.Count == 0)
+            return new RagScanIndex([], [], 0, embeddingModel);
+
+        // One contiguous block means one dimension per dataset by construction,
+        // which is what lets the mismatch check move from the chunk to the block.
+        var dimension = vectors
+            .GroupBy(v => v.Length)
+            .OrderByDescending(g => g.Count())
+            .ThenBy(g => g.Key)
+            .First().Key;
+
+        var keptIds = new List<string>(ids.Count);
+        var kept = new List<float[]>(vectors.Count);
+        for (var i = 0; i < vectors.Count; i++)
+        {
+            if (vectors[i].Length != dimension)
+                continue;
+            keptIds.Add(ids[i]);
+            kept.Add(vectors[i]);
+        }
+
+        var block = new float[(long)kept.Count * dimension];
+        for (var i = 0; i < kept.Count; i++)
+            kept[i].CopyTo(block, i * dimension);
+
+        return new RagScanIndex([.. keptIds], block, dimension, embeddingModel);
+    }
+
+    /// <summary>
+    /// r27 2.5: content for the handful of chunks that survived ranking, read by
+    /// id in one query. Same shape as GetChunksAsync's includeEmbeddings: false
+    /// projection: everything except the embedding blob.
+    /// </summary>
+    public async Task<List<RagChunk>> GetChunksByIdsAsync(IReadOnlyCollection<string> ids, CancellationToken ct = default)
+    {
+        if (ids.Count == 0)
+            return [];
+
+        await EnsureInitializedAsync(ct);
+        await using var c = new SqliteConnection(Cs); await c.OpenAsync(ct);
+        var cmd = c.CreateCommand();
+        var names = new List<string>(ids.Count);
+        var index = 0;
+        foreach (var id in ids)
+        {
+            var name = $"$id{index++}";
+            names.Add(name);
+            cmd.Parameters.AddWithValue(name, id);
+        }
+
+        cmd.CommandText =
+            "SELECT id,dataset_id,source_file,source_path,source_hash,source_modified_utc,source_title,content,chunk_index,chunk_total," +
+            "parent_id,is_parent,token_count,NULL AS embedding,created_at,chunk_kind,heading_path,code_symbol_info,page_number,event_type,source_url " +
+            $"FROM rag_chunks WHERE id IN ({string.Join(",", names)})";
+
+        var list = new List<RagChunk>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct)) list.Add(MapChunk(reader));
+        return list;
+    }
+
+    /// <summary>
+    /// r27 2.2: BM25 candidate ids from the FTS index rather than by tokenising
+    /// the whole corpus once per query variant. Falls back to LIKE for malformed
+    /// user input or unsupported MATCH syntax, exactly as ConversationStore does.
+    /// </summary>
+    public async Task<List<string>> SearchChunkIdsAsync(string datasetId, string query, int limit, CancellationToken ct = default)
+    {
+        var terms = query?.Trim() ?? string.Empty;
+        if (terms.Length == 0 || limit <= 0)
+            return [];
+
+        await EnsureInitializedAsync(ct);
+        await EnsureFtsBackfilledAsync(datasetId, ct);
+
+        await using var c = new SqliteConnection(Cs); await c.OpenAsync(ct);
+        var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT id FROM rag_chunks_fts WHERE dataset_id = $ds AND rag_chunks_fts MATCH $q LIMIT $limit";
+        cmd.Parameters.AddWithValue("$ds", datasetId);
+        cmd.Parameters.AddWithValue("$q", BuildMatchQuery(terms));
+        cmd.Parameters.AddWithValue("$limit", limit);
+
+        try
+        {
+            var ids = new List<string>();
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            while (await r.ReadAsync(ct)) ids.Add(r.GetString(0));
+            return ids;
+        }
+        catch (SqliteException)
+        {
+            return await SearchChunkIdsLikeAsync(c, datasetId, terms, limit, ct);
+        }
+    }
+
+    /// <summary>
+    /// Each token as its own OR term, quoted so punctuation cannot be read as
+    /// FTS5 syntax. Candidate generation wants recall; Bm25Scorer does the
+    /// ranking, so an over-wide candidate set costs time, not quality.
+    /// </summary>
+    private static string BuildMatchQuery(string query)
+    {
+        var tokens = Bm25Scorer.Tokenize(query)
+            .Where(t => t.Length > 1)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(24)
+            .Select(t => $"\"{t}\"")
+            .ToList();
+
+        return tokens.Count == 0 ? $"\"{query.Replace("\"", string.Empty)}\"" : string.Join(" OR ", tokens);
+    }
+
+    private static async Task<List<string>> SearchChunkIdsLikeAsync(
+        SqliteConnection c, string datasetId, string query, int limit, CancellationToken ct)
+    {
+        var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT id FROM rag_chunks WHERE dataset_id = $ds AND is_parent = 0 AND content LIKE $like LIMIT $limit";
+        cmd.Parameters.AddWithValue("$ds", datasetId);
+        cmd.Parameters.AddWithValue("$like", $"%{query}%");
+        cmd.Parameters.AddWithValue("$limit", limit);
+
+        var ids = new List<string>();
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct)) ids.Add(r.GetString(0));
+        return ids;
+    }
+
+    /// <summary>
+    /// r27 2.2: existing datasets predate the FTS table. Backfilled lazily on
+    /// first search of a dataset rather than at startup, so an install that
+    /// never opens the RAG panel never pays for it. Idempotent: rows are keyed
+    /// by chunk id and deleted before insert, so running it twice cannot
+    /// duplicate anything.
+    /// </summary>
+    private async Task EnsureFtsBackfilledAsync(string datasetId, CancellationToken ct)
+    {
+        if (_ftsBackfilled.ContainsKey(datasetId))
+            return;
+
+        await using var c = new SqliteConnection(Cs); await c.OpenAsync(ct);
+
+        await using (var check = c.CreateCommand())
+        {
+            check.CommandText =
+                "SELECT (SELECT COUNT(*) FROM rag_chunks WHERE dataset_id=$ds AND is_parent = 0) - " +
+                "(SELECT COUNT(*) FROM rag_chunks_fts WHERE dataset_id=$ds)";
+            check.Parameters.AddWithValue("$ds", datasetId);
+            var missing = Convert.ToInt64(await check.ExecuteScalarAsync(ct) ?? 0L);
+            if (missing <= 0)
+            {
+                _ftsBackfilled[datasetId] = true;
+                return;
+            }
+        }
+
+        await using (var tx = await c.BeginTransactionAsync(ct))
+        {
+            await using var backfill = c.CreateCommand();
+            backfill.Transaction = (SqliteTransaction)tx;
+            backfill.CommandText =
+                "DELETE FROM rag_chunks_fts WHERE dataset_id = $ds;" +
+                "INSERT INTO rag_chunks_fts (id, dataset_id, content) " +
+                "SELECT id, dataset_id, content FROM rag_chunks WHERE dataset_id = $ds AND is_parent = 0;";
+            backfill.Parameters.AddWithValue("$ds", datasetId);
+            await backfill.ExecuteNonQueryAsync(ct);
+            await tx.CommitAsync(ct);
+        }
+
+        _ftsBackfilled[datasetId] = true;
+        _logs?.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Rag,
+            $"RAG search index backfilled for dataset {datasetId}."));
+    }
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> _ftsBackfilled = new();
+
     public async Task<RagChunk?> GetParentChunkAsync(string parentId, CancellationToken ct = default)
     {
         await EnsureInitializedAsync(ct);
@@ -450,9 +708,10 @@ public sealed class SqliteRagStore
         await EnsureInitializedAsync(ct);
         await using var c = new SqliteConnection(Cs); await c.OpenAsync(ct);
         var cmd = c.CreateCommand();
-        cmd.CommandText = "DELETE FROM rag_chunks WHERE dataset_id=$ds";
+        cmd.CommandText = "DELETE FROM rag_chunks WHERE dataset_id=$ds; DELETE FROM rag_chunks_fts WHERE dataset_id=$ds;";
         cmd.Parameters.AddWithValue("$ds", datasetId);
         await cmd.ExecuteNonQueryAsync(ct);
+        _ftsBackfilled.TryRemove(datasetId, out _);
     }
 
     public async Task DeleteChunksForSourcesAsync(string datasetId, IEnumerable<string> sourcePaths, CancellationToken ct = default)
@@ -467,7 +726,9 @@ public sealed class SqliteRagStore
         {
             var cmd = c.CreateCommand();
             cmd.Transaction = (SqliteTransaction)tx;
-            cmd.CommandText = "DELETE FROM rag_chunks WHERE dataset_id=$ds AND (source_path=$path OR (source_path='' AND source_file=$file))";
+            cmd.CommandText =
+                "DELETE FROM rag_chunks_fts WHERE id IN (SELECT id FROM rag_chunks WHERE dataset_id=$ds AND (source_path=$path OR (source_path='' AND source_file=$file)));" +
+                "DELETE FROM rag_chunks WHERE dataset_id=$ds AND (source_path=$path OR (source_path='' AND source_file=$file));";
             cmd.Parameters.AddWithValue("$ds", datasetId);
             cmd.Parameters.AddWithValue("$path", path);
             cmd.Parameters.AddWithValue("$file", Path.GetFileName(path));

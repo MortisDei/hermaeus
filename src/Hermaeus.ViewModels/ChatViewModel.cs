@@ -1179,17 +1179,34 @@ public partial class ChatViewModel : ViewModelBase
         var chunker = streamingSpeech ? new SentenceChunker() : null;
         try
         {
-            var (memoryContext, memorySources, injectedMemoryIds, recallMs, selectMs, lessonMs) = await BuildMemoryInjectionAsync(text, _cts.Token);
+            // r27 02-retrieval-that-scales.md 2.6: the three injections are
+            // independent, and r21 1.3's reason for keeping them sequential (a
+            // legible trace breakdown) survives concurrency untouched, because
+            // each already carries its own stopwatch and each timer still
+            // measures only its own task. The pre-stream wait becomes the
+            // slowest of the three rather than their sum.
+            var memoryTask = BuildMemoryInjectionAsync(text, _cts.Token);
+            var ragTask = BuildRagInjectionAsync(text, _cts.Token);
+            var recallTask = BuildRecallInjectionAsync(text, _cts.Token);
+
+            // Let all three settle before observing any of them: one throwing
+            // must not leave the other two unobserved or cancelled. The awaits
+            // below then surface a failure in exactly the order it surfaced when
+            // this was a sequence.
+            try { await Task.WhenAll(memoryTask, ragTask, recallTask); }
+            catch { /* observed individually below, in the original order */ }
+
+            var (memoryContext, memorySources, injectedMemoryIds, recallMs, selectMs, lessonMs) = await memoryTask;
+            var (ragContext, ragSources, ragMs, ragContextItems, ragNote) = await ragTask;
+            var (recallContext, recallSources, recallInjectionMs, recallItems, recallNote) = await recallTask;
+
+            // The order sources appear in is memory, then RAG, then recall,
+            // regardless of which finished first. Concurrency is an
+            // implementation detail; the user sees a stable ordering.
             foreach (var source in memorySources)
                 asst.Sources.Add(source);
-
-            // r21 1.3: runs after memory recall in the pre-stream phase
-            // (sequential is fine and keeps the trace breakdown legible).
-            var (ragContext, ragSources, ragMs, ragContextItems, ragNote) = await BuildRagInjectionAsync(text, _cts.Token);
             foreach (var source in ragSources)
                 asst.Sources.Add(source);
-
-            var (recallContext, recallSources, recallInjectionMs, recallItems, recallNote) = await BuildRecallInjectionAsync(text, _cts.Token);
             foreach (var source in recallSources)
                 asst.Sources.Add(source);
             var ragAndRecallContext = ragContext + recallContext;

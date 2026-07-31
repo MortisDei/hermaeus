@@ -24,12 +24,12 @@ with no memory of any conversation should be able to read this table plus
 | 5 | 1.3 Chat warming state | yes |
 | 6 | 1.4 Held message | yes |
 | 7 | 1.5 Startup breakdown visible (with 5.3) | yes |
-| 8 | 2.2 FTS5 candidate generation | no |
-| 9 | 2.3 Cache holds embeddings only | no |
-| 10 | 2.4 Bounded top-K scan | no |
-| 11 | 2.5 Content loaded for candidates only | no |
-| 12 | 2.6 Concurrent send-path injections | no |
-| 13 | 2.7 Index size visible in the RAG panel | no |
+| 8 | 2.2 FTS5 candidate generation | yes |
+| 9 | 2.3 Cache holds embeddings only | yes |
+| 10 | 2.4 Bounded top-K scan | yes |
+| 11 | 2.5 Content loaded for candidates only | yes |
+| 12 | 2.6 Concurrent send-path injections | yes |
+| 13 | 2.7 Index size visible in the RAG panel | yes |
 | 14 | 3.1 Composable speculative-decoding section | no |
 | 15 | 3.2 Verified launch flags | no |
 | 16 | 3.3 Draft model validated before launch | no |
