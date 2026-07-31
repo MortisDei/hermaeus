@@ -1,48 +1,55 @@
-# 05. Small open items
+# 06. Small open items
 
 Items that do not need a document of their own. Each is independent and each
 can be cut without affecting anything else in the round.
 
-## 6.1 Resolve the `run_command` risk-table discrepancy
+## 6.1 Pin the `run_command` risk classification
 
-**This one first, because it may be a real defect in a security document.**
+**Resolved during planning. This item records the answer and pins it; it is
+not an investigation.**
 
-`docs/agent.md:529-536` documents the risk levels as a table naming tools:
+`docs/agent.md:529-536` documents the risk levels as a table naming tools,
+listing `run_command` under Review ("queue for approval"). `AgentSafetyGate`
+appears to disagree: `run_command` is in `HighRiskTools`
+(`AgentSafetyGate.cs:19-30`) and `Evaluate` tests that set at `:55-56`,
+returning `Blocked`, before reaching the mutating-substring heuristics at
+`:58-66`.
 
-| Level | Examples | Behaviour |
-| --- | --- | --- |
-| Safe | list files, search, glob, read, `set_plan` | execute directly |
-| Review | edit_file, create_file, apply_draft_patch, **run_command**, mcp: calls | queue for approval |
-| Blocked | shell, network, install, commit, push | do not execute |
+**The documentation is correct.** `run_command` never reaches `Evaluate`.
+`AgentService.cs:382-384` dispatches it explicitly:
 
-`AgentSafetyGate` disagrees on its face. `run_command` is in `HighRiskTools`
-(`AgentSafetyGate.cs:19-30`), and `Evaluate` tests `HighRiskTools` at
-`:55-56`, returning `Blocked`, before reaching the mutating-substring
-heuristics at `:58-66`. So `Evaluate("run_command")` returns Blocked while
-the documentation says Review.
+```csharp
+else if (string.Equals(nextTool, "run_command", StringComparison.OrdinalIgnoreCase))
+{
+    var requestedCommand = AgentToolExecutor.Arg(response.NextAction.Arguments, "command");
+    decision = _safetyGate.EvaluateCommand(requestedCommand, manifest?.AllowedCommands ?? []);
+```
 
-There is a second method. `EvaluateCommand` (`:71`) resolves a command
-family, refuses undeclared families, and returns `RequiresApproval` for a
-declared one (`:102`). If real `run_command` dispatch goes through
-`EvaluateCommand`, the documentation describes the effective behaviour and
-`Evaluate`'s `HighRiskTools` entry is either defence in depth or dead.
+`EvaluateCommand` (`AgentSafetyGate.cs:71`) resolves a command family,
+blocks anything the workspace has not declared, and returns
+`RequiresApproval` for a declared family (`:102`). That is Review, exactly
+as documented. The `HighRiskTools` entry is defence in depth for any future
+caller reaching the generic path, not dead code and not a contradiction.
 
-**Planning did not determine which.** Trace the actual dispatch path in
-`AgentService` and then do exactly one of:
+One nuance the table does not capture and should:
+`AgentService.cs:386-394` can flip that `RequiresApproval` to `Allowed` when
+the identical command string was already approved once in this task
+(`RememberedCommandApprovals`). The comment there is explicit that this
+never widens to the template family. r26 rejected widening it further; this
+item only documents that it exists.
 
-- If `EvaluateCommand` governs: the table is right. Add a comment at
-  `AgentSafetyGate.cs:19` naming which method governs `run_command` so the
-  next reader does not repeat this. If the `Evaluate` path is genuinely
-  unreachable for `run_command`, say so in the comment rather than deleting
-  the entry.
-- If `Evaluate` governs: the table is wrong in a security document, and
-  `docs/agent.md` is corrected in the same commit.
+Work:
 
-Either way, add the regression test that pins the answer.
-
-The table also omits `summarize_file`, `draft_patch` and `inspect_git_diff`
-from Safe, though all three are in `ReadOnlyTools`
-(`AgentSafetyGate.cs:7-16`). Fix the table.
+- Add a comment at `AgentSafetyGate.cs:19` naming `EvaluateCommand` as the
+  method that governs `run_command`, so the next reader does not repeat this
+  trace.
+- Add a regression test pinning both halves: `Evaluate("run_command")`
+  returns Blocked, and the dispatch path routes through `EvaluateCommand`
+  and yields RequiresApproval for a declared family.
+- Fix the table's Safe row, which omits `summarize_file`, `draft_patch` and
+  `inspect_git_diff` though all three are in `ReadOnlyTools`
+  (`AgentSafetyGate.cs:7-16`).
+- Add the remembered-approval nuance to `docs/agent.md` beside the table.
 
 ## 6.2 The docs guard covers enumerable facts
 

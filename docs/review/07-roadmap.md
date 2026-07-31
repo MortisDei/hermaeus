@@ -17,7 +17,7 @@ plus `git log --oneline main..HEAD` and know exactly where to resume.
 
 | # | Item | Landed |
 | --- | --- | --- |
-| 1 | 6.1 `run_command` risk-table discrepancy resolved | no |
+| 1 | 6.1 `run_command` classification pinned | no |
 | 2 | 4.1 Per-test timing in CI, both legs | no |
 | 3 | 1.1 `LlmOutputConstraint` on `LlmChatOptions` | no |
 | 4 | 1.2 llama.cpp sends the constraint | no |
@@ -51,10 +51,10 @@ plus `git log --oneline main..HEAD` and know exactly where to resume.
 
 ## Sequencing (strict)
 
-1. **6.1 first.** It is the only item in the round that might be an active
-   defect in a security document, it is small, and 6.2's guard cannot be
-   written until its answer is known. If it turns out to be a documentation
-   error, that is a one-line fix that should not wait behind a feature.
+1. **6.1 first.** Resolved during planning: the documentation is correct and
+   `run_command` routes through `EvaluateCommand`, so this is now a comment,
+   a table fix and a regression test rather than an investigation. It goes
+   first because 6.2's guard asserts against the table it corrects.
 
 2. **4.1 second, and then leave it alone.** It must be pushed early because
    its output is a CI artifact from a real run, and every later decision in
@@ -135,9 +135,8 @@ Cut from the bottom:
 7. **3.3** (four event sources). Genuinely valuable and genuinely
    independent; it survives to a later round intact.
 
-**Do not descope 6.1.** It is potentially a wrong statement about what the
-agent's safety gate does, in the document people read to understand the
-safety gate.
+**Do not descope 6.1.** It is small, it is already answered, and it pins a
+classification in the document people read to understand the safety gate.
 
 **Do not descope 4.1.** It is a workflow change and a table in a PR
 description. If the rest of doc 04 is cut, 4.1 still leaves the next round
