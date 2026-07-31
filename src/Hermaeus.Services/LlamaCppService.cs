@@ -351,7 +351,8 @@ public sealed class LlamaCppService : IDisposable
             : new ChatTokenUsage(chunk.Usage.PromptTokens, chunk.Usage.CompletionTokens, chunk.Usage.TotalTokens);
         var serverTimings = chunk?.Timings is null
             ? null
-            : new ChatServerTimings(chunk.Timings.PromptN, chunk.Timings.PromptMs, chunk.Timings.PredictedN, chunk.Timings.PredictedMs);
+            : new ChatServerTimings(chunk.Timings.PromptN, chunk.Timings.PromptMs, chunk.Timings.PredictedN, chunk.Timings.PredictedMs,
+                chunk.Timings.DraftN, chunk.Timings.DraftNAccepted);
         var finishReason = chunk?.Choices?.FirstOrDefault()?.FinishReason;
         var isFinal = usage is not null || finishReason is not null;
         if (string.IsNullOrEmpty(c) && usage is null && serverTimings is null && !isFinal)
@@ -378,10 +379,25 @@ public sealed class LlamaCppService : IDisposable
         [property: JsonPropertyName("prompt_tokens")] int PromptTokens,
         [property: JsonPropertyName("completion_tokens")] int CompletionTokens,
         [property: JsonPropertyName("total_tokens")] int TotalTokens);
-    /// <summary>llama-server's own prompt/generation timing, present on the final streamed chunk.</summary>
+    /// <summary>
+    /// llama-server's own prompt/generation timing, present on the final
+    /// streamed chunk. <c>draft_n</c> and <c>draft_n_accepted</c> appear only
+    /// when speculative decoding is active, and are absent (null) otherwise,
+    /// which is how the app tells "drafting produced nothing" apart from
+    /// "nothing was drafting".
+    /// </summary>
+    /// <remarks>
+    /// The two draft field names were read off the installed b10195 build
+    /// before this was written (r28 doc 02 2.1): a server started with
+    /// <c>--spec-type ngram-mod</c> returned
+    /// <c>"draft_n": 64, "draft_n_accepted": 31</c> beside the four fields
+    /// that were already parsed here.
+    /// </remarks>
     private record TimingsData(
         [property: JsonPropertyName("prompt_n")] int? PromptN,
         [property: JsonPropertyName("prompt_ms")] double? PromptMs,
         [property: JsonPropertyName("predicted_n")] int? PredictedN,
-        [property: JsonPropertyName("predicted_ms")] double? PredictedMs);
+        [property: JsonPropertyName("predicted_ms")] double? PredictedMs,
+        [property: JsonPropertyName("draft_n")] int? DraftN = null,
+        [property: JsonPropertyName("draft_n_accepted")] int? DraftNAccepted = null);
 }

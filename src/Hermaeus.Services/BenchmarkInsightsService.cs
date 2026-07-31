@@ -24,6 +24,20 @@ public sealed class BenchmarkInsightsService : IBenchmarkInsightsService
         _modelUsage = modelUsage;
     }
 
+    public async Task<BenchmarkRun?> GetLatestSpeedCheckRunAsync(string modelId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(modelId))
+            return null;
+
+        var runs = await _benchmarks.GetRunsAsync(ct);
+        return runs
+            .Where(r => string.Equals(r.SuiteId, SpeedCheck.SuiteId, StringComparison.Ordinal)
+                && string.Equals(r.ModelId, modelId, StringComparison.OrdinalIgnoreCase)
+                && r.Results.Count > 0)
+            .OrderByDescending(r => r.StartedAt)
+            .FirstOrDefault();
+    }
+
     public async Task<BenchmarkInsightsReport> LoadReportAsync(CancellationToken ct = default)
     {
         var runs = await _benchmarks.GetRunsAsync(ct);

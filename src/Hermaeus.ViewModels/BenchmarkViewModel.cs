@@ -711,6 +711,21 @@ public sealed class BenchmarkResultViewModel
     public BenchmarkResult Result { get; }
     public string Title => $"{Result.Phase} {Result.IterationIndex + 1} · {(Result.Passed ? "PASS" : "FAIL")} · {Result.CaseName}";
     public string Timings => $"{Result.FirstTokenMs} ms first · {Result.TotalMs} ms total · {Result.ApproxTokensPerSecond:F1} tok/s";
+
+    /// <summary>
+    /// Draft acceptance beside the speed (r28 doc 02 2.4), because tok/s alone
+    /// cannot tell "drafting engaged and did not help" from "drafting never
+    /// engaged". Empty when the server reported no draft counters, which is
+    /// not the same fact as a measured zero and is never shown as one. No
+    /// interpretation is attached: the number is the whole contribution.
+    /// </summary>
+    public string DraftAcceptance => Result.DraftTokens switch
+    {
+        null => string.Empty,
+        0 => "0 drafted (drafting did not engage)",
+        var drafted => $"{drafted:N0} drafted, {Result.DraftTokensAccepted ?? 0:N0} accepted ({(double)(Result.DraftTokensAccepted ?? 0) / drafted.Value:P0})"
+    };
+    public bool HasDraftAcceptance => Result.DraftTokens.HasValue;
     public string Quality => $"{Result.QualityScore:P0}";
     public string Checks => $"keyword {Result.KeywordHit} · regex {Result.RegexHit} · refusal {Result.RefusalCorrect} · failure {Result.FailureCategory}";
     public string Error => Result.Error;

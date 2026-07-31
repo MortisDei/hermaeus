@@ -31,11 +31,11 @@ plus `git log --oneline main..HEAD` and know exactly where to resume.
 | 12 | 5.3 Fallbacks confirmed intact | yes |
 | 13 | 5.4 Parse-failure message stops blaming the model | yes |
 | 14 | 5.6 Parse failures countable | yes |
-| 15 | 2.1 `ChatServerTimings` carries draft counters | no |
-| 16 | 2.2 Speed Check runs repeated iterations | no |
-| 17 | 2.3 Observed spread reported | no |
-| 18 | 2.4 Acceptance shown beside speed | no |
-| 19 | 2.5 Doctor check for drafting that never engages | no |
+| 15 | 2.1 `ChatServerTimings` carries draft counters | yes |
+| 16 | 2.2 Speed Check runs repeated iterations | yes |
+| 17 | 2.3 Observed spread reported | yes |
+| 18 | 2.4 Acceptance shown beside speed | yes |
+| 19 | 2.5 Doctor check for drafting that never engages | yes |
 | 20 | 3.1 Activity target resolver | no |
 | 21 | 3.2 Activity view navigates | no |
 | 22 | 3.3 Four missing event sources | no |

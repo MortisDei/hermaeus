@@ -845,6 +845,11 @@ public sealed class BenchmarkService
         result.OutputChars = result.Output.Length;
         var totalSeconds = Math.Max(totalMs / 1000d, 0.001d);
         result.CharsPerSecond = Math.Round(result.OutputChars / totalSeconds, 2);
+        // Relayed, never derived: a provider that reports nothing keeps
+        // reporting nothing, so "not measured" and "measured zero" stay
+        // distinguishable all the way to the display (r28 doc 02 2.1).
+        result.DraftTokens = timings?.DraftTokens;
+        result.DraftTokensAccepted = timings?.DraftTokensAccepted;
 
         if (timings is { PredictedTokens: > 0, PredictedMs: > 0 })
         {

@@ -39,11 +39,20 @@ public sealed record LlmToolCallRequest(string Id, string Name, string Arguments
 /// before evaluation". Providers that do not report this leave it null; no
 /// per-provider special cases beyond llama.cpp.
 /// </summary>
+/// <param name="DraftTokens">
+/// Tokens the speculative decoder drafted, from llama-server's own
+/// <c>draft_n</c> (r28 doc 02 2.1). Null when the provider reports nothing,
+/// which is a different fact from a measured zero: zero means drafting ran and
+/// produced nothing, null means nobody counted.
+/// </param>
+/// <param name="DraftTokensAccepted">Drafted tokens the target model accepted, from <c>draft_n_accepted</c>.</param>
 public sealed record ChatServerTimings(
     int? PromptTokens,
     double? PromptMs,
     int? PredictedTokens,
-    double? PredictedMs);
+    double? PredictedMs,
+    int? DraftTokens = null,
+    int? DraftTokensAccepted = null);
 
 /// <param name="FinishReason">
 /// Provider-reported reason the stream ended (e.g. "stop", "length",
