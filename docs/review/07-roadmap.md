@@ -40,9 +40,9 @@ plus `git log --oneline main..HEAD` and know exactly where to resume.
 | 21 | 3.2 Activity view navigates | no |
 | 22 | 3.3 Four missing event sources | no |
 | 23 | 3.4 Adjacent rows grouped | no |
-| 24 | 4.2 Fix what 4.1 named | no |
-| 25 | 4.3 Parallel collection (only if justified) | no |
-| 26 | 4.4 CI note recorded | no |
+| 24 | 4.2 Fix what 4.1 named | yes |
+| 25 | 4.3 Parallel collection (only if justified) | descoped by 4.1 |
+| 26 | 4.4 CI note recorded | yes |
 | 27 | 6.2 Docs guard over enumerable facts | no |
 | 28 | 6.3 NuGet caching | yes |
 | 29 | 6.4 Speed Check forward pointer | no |
