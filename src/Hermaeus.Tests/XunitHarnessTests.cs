@@ -213,7 +213,27 @@ public static class HarnessCases
         [new HarnessCase("RAG retrieval falls back to BM25 only when embedding service throws", RagTests.RagRetrievalFallsBackToBm25OnlyWhenEmbeddingServiceThrows)],
         [new HarnessCase("RAG retrieval cancellation during embedding is not swallowed into fallback", RagTests.RagRetrievalCancellationDuringEmbeddingIsNotSwallowedIntoFallback)],
         [new HarnessCase("RAG retrieval recovers to full semantic after a transient embedding failure", RagTests.RagRetrievalRecoversToFullSemanticAfterATransientEmbeddingFailure)],
-        [new HarnessCase("RAG GetDatasetAsync returns single dataset or null when absent", RagTests.RagGetDatasetAsyncReturnsSingleDatasetOrNullWhenAbsent)]
+        [new HarnessCase("RAG GetDatasetAsync returns single dataset or null when absent", RagTests.RagGetDatasetAsyncReturnsSingleDatasetOrNullWhenAbsent)],
+        [new HarnessCase("RAG oversized dataset still answers a phrase that is present", RagCacheCeilingTests.OversizedDatasetStillAnswersAPhraseThatIsPresent)],
+        [new HarnessCase("RAG uncached query reports the reason in planner notes", RagCacheCeilingTests.UncachedQueryReportsTheReasonInPlannerNotes)],
+        [new HarnessCase("RAG cached dataset does not report the uncached note", RagCacheCeilingTests.CachedDatasetDoesNotReportTheUncachedNote)],
+        [new HarnessCase("RAG genuinely empty dataset is distinguished from an uncached one", RagCacheCeilingTests.GenuinelyEmptyDatasetIsDistinguishedFromAnUncachedOne)],
+        [new HarnessCase("RAG scan index info reports the budget it was measured against", RagCacheCeilingTests.ScanIndexInfoReportsTheBudgetItWasMeasuredAgainst)],
+        [new HarnessCase("RAG FTS candidate generation returns chunks containing the query terms", RagScanIndexTests.FtsCandidateGenerationReturnsChunksContainingTheQueryTerms)],
+        [new HarnessCase("RAG malformed MATCH input falls back rather than throwing", RagScanIndexTests.MalformedMatchInputFallsBackRatherThanThrowing)],
+        [new HarnessCase("RAG FTS backfill is idempotent and does not duplicate rows", RagScanIndexTests.TheFtsBackfillIsIdempotentAndDoesNotDuplicateRows)],
+        [new HarnessCase("RAG re-ingesting the same chunk replaces its search row", RagScanIndexTests.ReIngestingTheSameChunkReplacesItsSearchRowRatherThanAddingOne)],
+        [new HarnessCase("RAG deleting a dataset removes its search rows", RagScanIndexTests.DeletingADatasetRemovesItsSearchRows)],
+        [new HarnessCase("RAG scoring FTS candidates ranks identically to scoring the whole corpus", RagScanIndexTests.ScoringFtsCandidatesRanksIdenticallyToScoringTheWholeCorpus)],
+        [new HarnessCase("RAG scan index size is exact arithmetic over count and dimension", RagScanIndexTests.ScanIndexSizeIsExactArithmeticOverCountAndDimension)],
+        [new HarnessCase("RAG scan index carries every embedded chunk as one contiguous block", RagScanIndexTests.TheScanIndexCarriesEveryEmbeddedChunkAsOneContiguousBlock)],
+        [new HarnessCase("RAG LRU eviction still evicts oldest first and respects the budget", RagScanIndexTests.LruEvictionStillEvictsOldestFirstAndRespectsTheBudget)],
+        [new HarnessCase("RAG top-K selection matches the full sort for a fixed fixture", RagScanIndexTests.TopKSelectionMatchesTheFullSortForAFixedFixture)],
+        [new HarnessCase("RAG query of a different dimension than the block returns no semantic results", RagScanIndexTests.AQueryWhoseDimensionDiffersFromTheBlockReturnsNoSemanticResults)],
+        [new HarnessCase("RAG tie ordering is deterministic across runs", RagScanIndexTests.TieOrderingIsDeterministicAcrossRuns)],
+        [new HarnessCase("RAG candidate content is loaded for exactly the requested ids", RagScanIndexTests.CandidateContentIsLoadedForExactlyTheRequestedIdsAndNoOthers)],
+        [new HarnessCase("RAG citations, parent upgrade and the trace still carry content", RagScanIndexTests.CitationsParentUpgradeAndTheTraceStillCarryContent)],
+        [new HarnessCase("RAG retrieval still answers across both signals after the scan rework", RagScanIndexTests.RetrievalStillAnswersAcrossBothSignalsAfterTheScanRework)]
     ];
 
     public static IEnumerable<object[]> Tts =>

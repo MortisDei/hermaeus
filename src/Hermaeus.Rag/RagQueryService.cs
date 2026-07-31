@@ -41,8 +41,12 @@ public sealed class RagQueryService
 
     // In-memory chunk cache per dataset  (dataset_id → chunks)
     private const int MaxCachedDatasets = 8;
-    private const long MaxCacheBytes = 128L * 1024L * 1024L;
-    private readonly Dictionary<string, List<RagChunk>> _cache = [];
+    public const long DefaultMaxCacheBytes = 128L * 1024L * 1024L;
+    private readonly long _maxCacheBytes;
+    // r27 2.3: the cache holds a scan index (ids + one contiguous embedding
+    // block), not documents. Content, paths and titles stay in SQLite and are
+    // read for the handful of chunks that survive ranking (2.5).
+    private readonly Dictionary<string, RagScanIndex> _cache = [];
     private readonly Dictionary<string, long> _cacheSizes = [];
     private readonly LinkedList<string> _cacheOrder = new();
     private long _cacheBytes;
@@ -55,20 +59,62 @@ public sealed class RagQueryService
         ISettingsService settings,
         IReranker reranker,
         IRuntimeLogService? logs = null,
-        ITraceStore? traces = null)
+        ITraceStore? traces = null,
+        // r27 2.1: the cache budget is a policy of this service, not a constant
+        // of the universe. Injectable so the over-budget path can be exercised
+        // without a 128 MiB fixture; production always takes the default.
+        long? maxCacheBytes = null)
     {
         _store = store; _embed = embed; _llm = llm; _settings = settings; _reranker = reranker; _logs = logs;
         _traces = traces;
+        _maxCacheBytes = maxCacheBytes is > 0 ? maxCacheBytes.Value : DefaultMaxCacheBytes;
     }
 
-    /// <summary>Warm the in-memory embedding cache for a dataset.</summary>
+    /// <summary>Warm the in-memory scan index for a dataset.</summary>
     public async Task WarmCacheAsync(string datasetId, CancellationToken ct = default)
+        => await LoadScanIndexAsync(datasetId, ct);
+
+    /// <summary>
+    /// r27 02-retrieval-that-scales.md 2.1: reads a dataset's scan index and
+    /// caches it when it fits. An index over the cache budget is still returned
+    /// to the caller so the dataset can be queried; before this item,
+    /// <see cref="StoreCache"/> dropped it and the query silently scanned an
+    /// empty list and returned nothing, forever.
+    /// </summary>
+    private async Task<ScanLoad> LoadScanIndexAsync(string datasetId, CancellationToken ct)
     {
-        var chunks = await _store.GetChunksAsync(datasetId, includeEmbeddings: true, ct);
-        StoreCache(datasetId, chunks);
+        var index = await _store.GetScanIndexAsync(datasetId, _settings.Settings.Rag.EmbeddingModel, ct);
+        var cached = StoreCache(datasetId, index);
         _logs?.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Rag,
-            $"RAG cache warmed for {datasetId}: {chunks.Count} chunk(s), {GetCacheBytes() / 1024 / 1024} MiB cached."));
+            cached
+                ? $"RAG scan index warmed for {datasetId}: {index.Count} chunk(s), {index.ByteSize / 1024 / 1024} MiB."
+                : $"RAG dataset {datasetId} is too large to cache ({index.Count} chunk(s), {index.ByteSize / 1024 / 1024} MiB over a {_maxCacheBytes / 1024 / 1024} MiB budget); queries scan from storage."));
+        return new ScanLoad(index, cached);
     }
+
+    /// <summary>A scan index, and whether it reached (or came from) the cache.</summary>
+    private readonly record struct ScanLoad(RagScanIndex Index, bool Cached);
+
+    /// <summary>
+    /// r27 2.7: per-dataset scan-index state for the RAG panel, so the cache
+    /// ceiling is visible before a query runs into it.
+    /// </summary>
+    public RagScanIndexInfo GetScanIndexInfo(string datasetId)
+    {
+        lock (_cacheSync)
+        {
+            var cached = _cache.TryGetValue(datasetId, out var index);
+            return new RagScanIndexInfo(
+                datasetId,
+                cached,
+                cached ? _cacheSizes.GetValueOrDefault(datasetId) : 0,
+                cached ? index!.Count : 0,
+                _maxCacheBytes);
+        }
+    }
+
+    /// <summary>r27 2.7: the budget a dataset's scan index is measured against.</summary>
+    public long ScanIndexBudgetBytes => _maxCacheBytes;
 
     public void ClearCache(string datasetId)
     {
@@ -83,26 +129,28 @@ public sealed class RagQueryService
         }
     }
 
-    private void StoreCache(string datasetId, List<RagChunk> chunks)
+    /// <summary>Returns true when the index fitted the budget and is now cached.</summary>
+    private bool StoreCache(string datasetId, RagScanIndex index)
     {
         lock (_cacheSync)
         {
             if (_cacheSizes.Remove(datasetId, out var oldSize))
                 _cacheBytes -= oldSize;
-            var size = EstimateCacheSize(chunks);
-            if (size > MaxCacheBytes)
+            var size = index.ByteSize;
+            if (size > _maxCacheBytes)
             {
                 _cache.Remove(datasetId);
                 var oldNode = _cacheOrder.Find(datasetId);
                 if (oldNode is not null)
                     _cacheOrder.Remove(oldNode);
-                return;
+                return false;
             }
 
-            _cache[datasetId] = chunks;
+            _cache[datasetId] = index;
             _cacheSizes[datasetId] = size;
             _cacheBytes += size;
             TouchCacheUnsafe(datasetId);
+            return _cache.ContainsKey(datasetId);
         }
     }
 
@@ -110,12 +158,6 @@ public sealed class RagQueryService
     {
         lock (_cacheSync)
             return _cacheBytes;
-    }
-
-    private void TouchCache(string datasetId)
-    {
-        lock (_cacheSync)
-            TouchCacheUnsafe(datasetId);
     }
 
     private void TouchCacheUnsafe(string datasetId)
@@ -126,7 +168,7 @@ public sealed class RagQueryService
             _cacheOrder.Remove(existing);
         _cacheOrder.AddLast(datasetId);
 
-        while ((_cacheOrder.Count > MaxCachedDatasets || (_cacheBytes > MaxCacheBytes && _cacheOrder.Count > 1)) && _cacheOrder.First is not null)
+        while ((_cacheOrder.Count > MaxCachedDatasets || (_cacheBytes > _maxCacheBytes && _cacheOrder.Count > 1)) && _cacheOrder.First is not null)
         {
             var oldest = _cacheOrder.First.Value;
             _cache.Remove(oldest);
@@ -135,15 +177,6 @@ public sealed class RagQueryService
             _cacheOrder.RemoveFirst();
         }
     }
-
-    private static long EstimateCacheSize(IEnumerable<RagChunk> chunks) =>
-        chunks.Sum(chunk =>
-            (long)chunk.Content.Length * sizeof(char)
-            + (long)chunk.SourceFile.Length * sizeof(char)
-            + (long)chunk.SourcePath.Length * sizeof(char)
-            + (long)chunk.SourceTitle.Length * sizeof(char)
-            + (long)chunk.Embedding.Length * sizeof(float)
-            + 256);
 
     public async Task<List<RagDataset>> GetDatasetsAsync(CancellationToken ct = default)
         => await _store.GetDatasetsAsync(ct);
@@ -217,19 +250,25 @@ public sealed class RagQueryService
         opts ??= new RagQueryOptions();
         var sw = Stopwatch.StartNew();
 
-        List<RagChunk> chunks;
+        // r27 2.1: "absent from the cache" and "cached and genuinely empty" are
+        // different states. Only the first one needs a load, and a dataset that
+        // does not fit the budget is scanned from the loaded list rather than
+        // from a cache entry that was never written.
+        RagScanIndex scanIndex;
+        bool cacheHit;
         lock (_cacheSync)
         {
-            _cache.TryGetValue(datasetId, out chunks!);
+            cacheHit = _cache.TryGetValue(datasetId, out scanIndex!);
+            if (cacheHit)
+                TouchCacheUnsafe(datasetId);
         }
 
-        if (chunks is null || chunks.Count == 0)
-            await WarmCacheAsync(datasetId, ct);
-
-        lock (_cacheSync)
+        var scannedUncached = false;
+        if (!cacheHit)
         {
-            chunks = _cache.GetValueOrDefault(datasetId, []);
-            TouchCacheUnsafe(datasetId);
+            var loaded = await LoadScanIndexAsync(datasetId, ct);
+            scanIndex = loaded.Index;
+            scannedUncached = !loaded.Cached;
         }
 
         var plan = await BuildQueryPlanAsync(datasetId, question, ct);
@@ -248,19 +287,28 @@ public sealed class RagQueryService
             && !string.Equals(ds!.Config.EmbeddingModel, currentEmbeddingModel, StringComparison.OrdinalIgnoreCase);
 
         var semanticK = Math.Max(opts.TopK * 10, 50);
-        List<ScoredChunk> semantic = [];
+        List<ScoredChunkId> semanticIds = [];
         var plannerNotes = plan.PlannerNotes;
+        if (scannedUncached)
+        {
+            plannerNotes = AppendNote(plannerNotes,
+                $"dataset too large to cache ({scanIndex.Count} chunk(s), budget {_maxCacheBytes / 1024 / 1024} MiB); queries scan from storage and will be slower");
+        }
+
         if (embeddingModelMismatch)
         {
             var note = $"semantic search skipped: dataset embedded with {ds!.Config.EmbeddingModel}, current model is {currentEmbeddingModel}; reindex to re-enable";
-            plannerNotes = string.IsNullOrWhiteSpace(plannerNotes) ? note : $"{plannerNotes}; {note}";
+            plannerNotes = AppendNote(plannerNotes, note);
         }
         else
         {
             try
             {
                 var qEmbed = await _embed.EmbedAsync(plan.PrimaryQuery, ct);
-                semantic = HybridRetriever.CosineScan(qEmbed, chunks, semanticK);
+                // r27 2.4: one pass over the contiguous block with a bounded
+                // min-heap, instead of allocating a ScoredChunk per chunk and
+                // sorting the whole corpus to select fifty of them.
+                semanticIds = HybridRetriever.CosineScan(qEmbed, scanIndex, semanticK);
             }
             catch (OperationCanceledException)
             {
@@ -273,20 +321,33 @@ public sealed class RagQueryService
                 // the next query probes again in case the server came back.
                 var oneLine = ex.Message.Replace('\r', ' ').Replace('\n', ' ');
                 var note = $"semantic search unavailable: {oneLine}; used keyword search only";
-                plannerNotes = string.IsNullOrWhiteSpace(plannerNotes) ? note : $"{plannerNotes}; {note}";
+                plannerNotes = AppendNote(plannerNotes, note);
                 _logs?.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Rag,
                     $"RAG semantic search failed for dataset {datasetId}: {ex.Message}"));
             }
         }
 
+        // r27 2.2: BM25 candidates come from the FTS index rather than from
+        // tokenising every chunk in the dataset once per query variant. FTS5
+        // generates candidates; Bm25Scorer still scores them, so ranking among
+        // the chunks that matter does not move. The only chunks that stop being
+        // scored are ones FTS5 did not match at all, which share no query term
+        // and therefore scored essentially zero.
         var bm25Stats = await _store.GetBm25StatsAsync(datasetId, ct);
+        var candidates = await LoadBm25CandidatesAsync(datasetId, plan.QueryVariants, ct);
         List<ScoredChunk> bm25 = [];
-        if (bm25Stats is not null)
+        if (bm25Stats is not null && candidates.Count > 0)
         {
-            bm25 = ScoreQueryVariants(plan.QueryVariants, chunks, bm25Stats)
+            bm25 = ScoreQueryVariants(plan.QueryVariants, candidates, bm25Stats)
                 .Take(semanticK)
                 .ToList();
         }
+
+        // r27 2.5: content is loaded for the ids that survived scanning, in one
+        // query, not for the corpus. Everything downstream of fusion (parent
+        // upgrade, the reranker, the context packer, citations, the trace) still
+        // reads Chunk.Content and is untouched by this.
+        var semantic = await AttachContentAsync(semanticIds, candidates, ct);
 
         var topFuse = Math.Max(opts.TopK * 2, opts.TopK);
         var fused = HybridRetriever.Fuse(
@@ -441,6 +502,64 @@ public sealed class RagQueryService
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// r27 2.2: at most a few hundred chunk ids per query, matched by FTS5
+    /// across every query variant, then read once with their content. This is
+    /// the candidate set BM25 scores.
+    /// </summary>
+    private const int Bm25CandidateCap = 400;
+
+    private async Task<List<RagChunk>> LoadBm25CandidatesAsync(
+        string datasetId, IReadOnlyList<string> variants, CancellationToken ct)
+    {
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var variant in variants.Where(v => !string.IsNullOrWhiteSpace(v)))
+        {
+            foreach (var id in await _store.SearchChunkIdsAsync(datasetId, variant, Bm25CandidateCap, ct))
+            {
+                if (ids.Count >= Bm25CandidateCap)
+                    break;
+                ids.Add(id);
+            }
+        }
+
+        return ids.Count == 0 ? [] : await _store.GetChunksByIdsAsync(ids, ct);
+    }
+
+    /// <summary>
+    /// r27 2.5: turns scored ids into scored chunks, reusing content already
+    /// read for the BM25 candidate set and fetching only what is genuinely
+    /// missing. An id whose row has since been deleted is dropped rather than
+    /// carried forward as an empty chunk.
+    /// </summary>
+    private async Task<List<ScoredChunk>> AttachContentAsync(
+        IReadOnlyList<ScoredChunkId> scored, IReadOnlyList<RagChunk> alreadyLoaded, CancellationToken ct)
+    {
+        if (scored.Count == 0)
+            return [];
+
+        var byId = alreadyLoaded.ToDictionary(c => c.Id, StringComparer.Ordinal);
+        var missing = scored.Where(s => !byId.ContainsKey(s.ChunkId)).Select(s => s.ChunkId).ToHashSet(StringComparer.Ordinal);
+        if (missing.Count > 0)
+        {
+            foreach (var chunk in await _store.GetChunksByIdsAsync(missing, ct))
+                byId[chunk.Id] = chunk;
+        }
+
+        var result = new List<ScoredChunk>(scored.Count);
+        foreach (var entry in scored)
+        {
+            if (byId.TryGetValue(entry.ChunkId, out var chunk))
+                result.Add(new ScoredChunk(chunk, entry.Score, ScoreSource.Semantic));
+        }
+
+        return result;
+    }
+
+    /// <summary>Appends one planner note to the running list, keeping the existing "; " separator.</summary>
+    private static string AppendNote(string notes, string note) =>
+        string.IsNullOrWhiteSpace(notes) ? note : $"{notes}; {note}";
+
     private async Task PersistTraceAsync(RagQueryTrace trace, CancellationToken ct)
     {
         if (_traces is null)
@@ -555,7 +674,7 @@ public sealed class RagQueryService
 
     private static string NormalizeQuery(string query) => Regex.Replace(query ?? string.Empty, "\\s+", " ").Trim();
 
-    private static List<ScoredChunk> ScoreQueryVariants(IEnumerable<string> variants, List<RagChunk> chunks, Bm25Stats stats)
+    private static List<ScoredChunk> ScoreQueryVariants(IEnumerable<string> variants, IReadOnlyList<RagChunk> chunks, Bm25Stats stats)
     {
         var scorer = new Bm25Scorer();
         var best = new Dictionary<string, ScoredChunk>(StringComparer.Ordinal);
@@ -806,6 +925,17 @@ public sealed record RagRetrievalResult(
     List<ScoredChunk> Selected,
     long LatencyMs,
     RagDatasetConfig? DatasetConfig);
+
+/// <summary>
+/// r27 2.7: the scan-index state of one dataset, so the RAG panel can show the
+/// cache ceiling as a fact rather than the user discovering it as a slow query.
+/// </summary>
+public sealed record RagScanIndexInfo(
+    string DatasetId,
+    bool Cached,
+    long IndexBytes,
+    int ChunkCount,
+    long BudgetBytes);
 
 internal sealed record QueryPlan(string PrimaryQuery, List<string> QueryVariants, string PlannerNotes);
 

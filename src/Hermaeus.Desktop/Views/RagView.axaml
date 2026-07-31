@@ -103,6 +103,14 @@
                                                 <TextBlock Text="{Binding Description}" FontSize="11" Opacity="0.55" TextWrapping="Wrap" />
                                                 <TextBlock Text="{Binding ReindexStatus}" FontSize="11" Opacity="0.7" TextWrapping="Wrap" />
                                                 <TextBlock Text="{Binding DimensionsLabel}" FontSize="11" Opacity="0.55" />
+                                                <!-- r27 02 2.7: the memory ceiling as a fact, in the same
+                                                     register as the rest of the dataset health line, so it is
+                                                     visible while a corpus grows rather than discovered as a
+                                                     slow query afterwards. -->
+                                                <TextBlock Text="{Binding ScanIndexLabel}"
+                                                           FontSize="11"
+                                                           Opacity="0.55"
+                                                           TextWrapping="Wrap" />
                                                 <TextBlock FontSize="11" Opacity="0.6" IsVisible="{Binding WatchedSourceCount, Converter={x:Static views:RagView.IsNonZero}}">
                                                     <Run Text="{Binding WatchedSourceCount, StringFormat='{}{0} watched folder(s),'}" />
                                                     <Run Text="{Binding WatchedLastRefreshLabel}" />

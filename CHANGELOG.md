@@ -13,6 +13,126 @@ From 0.29.0-alpha onward, every minor version is tagged and released on
 GitHub (see `docs/packaging.md` "Releases"); patch versions are tagged only
 for urgent hotfixes.
 
+## [0.34.0-alpha] - 2026-07-31
+
+Implements docs/review r27: fast, and honest about it. Startup stops waiting
+for a model, retrieval scales with the answer instead of the corpus,
+speculative decoding ships with a way to measure whether it helped, and a
+downloaded model arrives complete.
+
+### Fixed
+
+- **A RAG dataset above the cache ceiling silently answered nothing.** A
+  dataset whose scan index did not fit the 128 MiB in-memory budget was
+  dropped by the cache without being cached, and the query then read that
+  empty cache entry back and scored nothing. It returned no results and
+  reported no error, after reading every chunk and every embedding out of
+  SQLite, and it did that again on the next query and the one after. An
+  over-budget dataset is now scanned from storage and says so in the
+  retrieval result's planner notes. "Not cached" and "cached and genuinely
+  empty" are different states.
+
+- **A message typed before the chat server was ready vanished.** Pressing
+  send with no model selected returned silently, so a question the user
+  typed and submitted did nothing and said nothing. It is now held, shown as
+  held with its reason, and sent once when a model lists.
+
+- **The README said 0.24.0-alpha.** Nine releases out of date, on the front
+  page. `DocsCoverageGuardTests` now parses `VersionPrefix` out of
+  `Directory.Build.props` and requires it in the README, with a failure
+  message that names the line to edit.
+
+### Added
+
+- **Speculative decoding, as one composable section.** `--spec-type` takes a
+  comma-separated list, so drafting and n-gram speculation can run together
+  rather than fighting over one bool. Flags were read from the installed
+  llama-server's own `--help` rather than recalled: `--draft-max`,
+  `--draft-min` and the `--spec-ngram-size-*` family have been removed
+  upstream and now do nothing while printing that they were removed, and a
+  test asserts none of them is ever emitted. A legacy `NgramSpeculative:
+  true` upgrades to `Types = ["ngram-mod"]` exactly once and produces
+  byte-identical launch arguments.
+
+- **A draft model is checked before the server starts.** Path traversal,
+  symlinks, existence, and a GGUF vocabulary-size comparison against the
+  target. A mismatch refuses the start naming both models and both
+  vocabulary sizes; a draft larger than half its target warns instead,
+  because that is a bad idea rather than a broken one.
+
+- **A Speed Check suite, and a comparison between two of its runs.** The first
+  recorded result is in `docs/benchmarks.md` and is a null result: on
+  gemma-4-E4B-it-qat-UD-Q4_K_XL, `draft-mtp` measured 70.2 median tok/s against
+  `ngram-mod`'s 69.7, with time to first token 175 ms worse, which one
+  iteration per case cannot distinguish from noise. That is what the check is
+  for.
+  Structured, repetitive, code and free-prose prompts, chosen because
+  drafting behaves differently across those shapes. It measures speed, so no
+  case asserts anything about quality. A run records the speculative settings
+  that produced it, and two runs of the same suite and model can be put side
+  by side with the configuration difference between them. No verdict, no
+  grade, no significance claim.
+
+- **The startup breakdown is readable in System Overview.** Phases with
+  their milliseconds, the concurrent block labelled as concurrent so nobody
+  adds up three overlapping numbers, and per-server auto-start times reported
+  separately because they are no longer part of the total.
+
+- **Chat says the server is warming.** One factual line above the composer
+  with the server name and elapsed time, and past 90 seconds that this is
+  longer than usual, with a way to open the Services log. No progress bar:
+  llama-server reports nothing between launch and healthy.
+
+- **Each dataset's search-index size against the memory budget** is shown in
+  the RAG panel, so the ceiling is visible while a corpus grows rather than
+  discovered afterwards as a slow query.
+
+### Changed
+
+- **Startup stops waiting for a model that nothing needed.** The three
+  independent store loads run concurrently, each still isolated so a failure
+  names its own operation in the log, and auto-starting managed servers has
+  left the awaited chain entirely. Listing chat models never depended on it:
+  a server reaching Running already re-lists models on its own. Servers now
+  start at once rather than each waiting out the previous one's
+  five-minute-capable health check, grouped by port so two servers sharing
+  one port cannot both pass the preflight.
+
+- **Retrieval scales with the answer rather than the corpus.** BM25
+  candidates come from a new FTS5 index over chunk content instead of
+  tokenising every chunk once per query variant; `Bm25Scorer` still does the
+  scoring, and a test proves the FTS candidate set ranks identically to
+  scoring the whole corpus. The in-memory cache holds a contiguous embedding
+  block rather than documents, so its size is exact arithmetic over count and
+  dimension instead of a sum over strings. The cosine scan is one pass with a
+  bounded heap instead of allocating a record per chunk and sorting the
+  corpus to select fifty. Content is read by id for the chunks that survive.
+
+- **The three send-path injections run concurrently.** Memory, RAG and recall
+  are independent and each already carried its own stopwatch. The pre-stream
+  wait is now the slowest of the three rather than their sum, and sources
+  still appear in a fixed memory, RAG, recall order regardless of which
+  finished first.
+
+- **A downloaded model arrives complete, in its own folder.** Selecting a
+  GGUF resolves its file set from the repository tree: shard siblings
+  (required, because a partial shard set will not load), an `mmproj`
+  projector, and an `mtp` draft head, the last two offered and on by default.
+  Destinations are `<models>/llm/<repo folder>/<file>`, which is what lets
+  companion files with the same name from different repositories coexist and
+  what makes the projector sibling scan find the right projector. Organize
+  produces the same layout and moves companions with their model.
+
+- **The conversation sidebar stops reading every message.** It drew titles,
+  folders, tags and flags by deserialising every message of every
+  conversation and then walking them again to backfill parent links. It now
+  reads a column projection. Opening a conversation is unchanged.
+
+### Removed
+
+- `MainWindowViewModel.IsLoading`, which was set on every startup, bound by
+  nothing in any axaml file, and had never gated a control.
+
 ## [0.33.0-alpha] - 2026-07-31
 
 Implements docs/review r26: the review queue is a queue, the Agent workbench
@@ -744,39 +864,3 @@ after they proved hard to read in daily chat use.
 12 new tests. `ConversationStore` schema version 1 to 2 (additive
 `rag_dataset_id` column). `docs/security-review.md` gained an r21
 subsection. `docs/review/` archived to `docs/review/archived/r21/`.
-
-## [0.26.1-alpha] - 2026-07-23
-
-### Fixed
-
-- **Repointing `DataManagement.DataRootDirectory` at a folder that already
-  held a full, real copy of the data threw "already exists" and left the
-  setting permanently stuck reverted to blank.** `SettingsService.MigrateDataRoot`
-  treated any existing file at the destination as a blocking conflict, with
-  no way to just repoint without a move - so once the data root setting was
-  blanked by any means (this shipped alongside a real field incident: the
-  app fell back to the default root, created fresh stray database files
-  there, and every subsequent attempt to point back at the real root failed
-  the same way, silently re-saving blank each retry). A conflict on *every*
-  migratable file now means "the target already has its own copy" and is
-  treated as a plain repoint (nothing moved, nothing deleted on either
-  side); a conflict on *some but not all* files stays genuinely ambiguous
-  and still refuses, matching the original safety intent. Both
-  `SettingsViewModel.SaveAsync` (Settings page) and
-  `SetupWizardViewModel.ApplyDataRootStepAsync` (wizard) share this fix
-  through `PreviewDataRootMigration`/`MigrateDataRoot`. Two new regression
-  tests cover the repoint case at both layers; one existing test per layer
-  was updated to a genuine partial-conflict scenario since a single-file
-  full conflict is no longer a refusal case.
-
-### Changed
-
-- **App icon switched from Tree Ring to the "Archivist's Seal" mark**
-  (Option 1 of 4 on `docs/hermaeus-icons.png`: a gold "H" monogram grown
-  through with a tree and open book, in a circular medallion) - Tree Ring
-  (shipped in 0.26.0-alpha) read worse at tray/taskbar size. `hermaeus.ico`,
-  `hermaeus-app.png`, `hermaeus-tray.png`, and the tray-dark/light fallbacks
-  were regenerated from the new artwork with the same contrast-boosted
-  small-size treatment. Neither option is fully clean at 16x16 - fine
-  medallion detail is tight at that size regardless of which mark is used;
-  32px and up read clearly.

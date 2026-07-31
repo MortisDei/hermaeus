@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 using Hermaeus.Core.Models;
@@ -64,9 +65,24 @@ public sealed class ServerProcessManager : IDisposable
             return;
         }
 
+        // r27 03-drafting-and-proof.md 3.3: a draft model that cannot verify
+        // against this target is refused here, with the cause named, rather than
+        // launching a doomed process. Same precedent as the port refusal above.
+        var speculative = SpeculativeDecodingValidator.Validate(cfg);
+        if (speculative.IsRefusal)
+        {
+            ErrorMessage = speculative.Message;
+            ClearLog();
+            SetStatus(ServerStatus.Error);
+            Emit($"[hermaeus] ERROR: {ErrorMessage}");
+            return;
+        }
+
         ErrorMessage = string.Empty;
         ClearLog();
         SetStatus(ServerStatus.Starting);
+        if (speculative.HasMessage)
+            Emit($"[hermaeus] Warning: {speculative.Message}");
 
         try
         {
@@ -579,12 +595,60 @@ public sealed class ServerProcessManager : IDisposable
         if (cfg.NoMemoryMap && !HasArg("--no-mmap") && !HasArg("--mmap"))
             parts.Add("--no-mmap");
 
-        // r18 04-llama-server-engine-options.md 4.4: zero-VRAM n-gram speculative decoding,
-        // drafts from the prompt/history itself rather than a second model.
-        if (cfg.NgramSpeculative && !HasArg("--spec-type"))
+        // r27 03-drafting-and-proof.md 3.2: speculative decoding, with the flag
+        // names the installed binary (b10195) actually lists. --draft-max,
+        // --draft-min, --draft-n, --spec-ngram-size-n and friends have been
+        // REMOVED upstream: they now print "the argument has been removed" and
+        // do nothing, so emitting one would look like it worked and change
+        // nothing measurable. Only flags read from --help appear here.
+        // r18 4.4's NgramSpeculative bool is upgraded into Speculative.Types by
+        // SettingsService.NormalizeManagedServers before this ever runs.
+        var speculative = cfg.Speculative;
+        if (speculative is { Types.Count: > 0 } && !HasArg("--spec-type"))
         {
-            parts.Add("--spec-type");
-            parts.Add("ngram-mod");
+            var types = speculative.Types
+                .Select(t => t.Trim())
+                .Where(t => t.Length > 0)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (types.Count > 0)
+            {
+                // --spec-type takes a comma-separated list, which is why this is
+                // one section rather than a bool per technique.
+                parts.Add("--spec-type");
+                parts.Add(string.Join(",", types));
+
+                if (speculative.RequiresDraftModel && !string.IsNullOrWhiteSpace(speculative.DraftModelPath) && !HasArg("--spec-draft-model") && !HasArg("-md") && !HasArg("--model-draft"))
+                {
+                    parts.Add("--spec-draft-model");
+                    parts.Add(speculative.DraftModelPath);
+                }
+
+                if (speculative.RequiresDraftModel && speculative.DraftGpuLayers is { } draftLayers && draftLayers >= 0 && !HasArg("-ngld") && !HasArg("--gpu-layers-draft") && !HasArg("--spec-draft-ngl"))
+                {
+                    parts.Add("-ngld");
+                    parts.Add(draftLayers == 0 ? "0" : draftLayers.ToString(CultureInfo.InvariantCulture));
+                }
+
+                if (speculative.NMax is { } nMax && nMax >= 0 && !HasArg("--spec-draft-n-max"))
+                {
+                    parts.Add("--spec-draft-n-max");
+                    parts.Add(nMax.ToString(CultureInfo.InvariantCulture));
+                }
+
+                if (speculative.NMin is { } nMin && nMin >= 0 && !HasArg("--spec-draft-n-min"))
+                {
+                    parts.Add("--spec-draft-n-min");
+                    parts.Add(nMin.ToString(CultureInfo.InvariantCulture));
+                }
+
+                if (speculative.PMin is { } pMin && pMin >= 0 && !HasArg("--spec-draft-p-min") && !HasArg("--draft-p-min"))
+                {
+                    parts.Add("--spec-draft-p-min");
+                    parts.Add(pMin.ToString("0.###", CultureInfo.InvariantCulture));
+                }
+            }
         }
 
         // r19 5.3: enables llama-server's multimodal chat mode (image content parts).

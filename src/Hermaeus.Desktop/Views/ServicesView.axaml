@@ -444,11 +444,74 @@
                                                       Content="--no-mmap"
                                                       FontSize="12"
                                                       IsEnabled="{Binding CanEdit}" />
-                                            <CheckBox IsChecked="{Binding NgramSpeculative}"
-                                                      Content="N-gram speculative decoding (experimental)"
+                                        </StackPanel>
+
+                                        <!-- r27 03-drafting-and-proof.md 3.1: one composable
+                                             speculative-decoding section. The spec-type flag
+                                             takes a comma-separated list, and drafting and
+                                             n-gram speculation are not mutually exclusive, so
+                                             this replaced the single bool that owned it. -->
+                                        <StackPanel Spacing="6" Margin="0,10,0,0">
+                                            <TextBlock Text="Speculative decoding"
+                                                       FontSize="12"
+                                                       FontWeight="SemiBold" />
+                                            <TextBlock Text="A small model proposes the next few tokens and the large one verifies them in a single pass. The text produced is the text the large model would have produced alone. How much faster it is depends on the model pair and the content, so run the Speed Check to find out."
+                                                       TextWrapping="Wrap"
+                                                       FontSize="11"
+                                                       Opacity="0.55" />
+                                            <CheckBox IsChecked="{Binding UseNgramDecoding}"
+                                                      Content="N-gram drafting (no extra VRAM)"
                                                       FontSize="12"
                                                       IsEnabled="{Binding CanEdit}"
-                                                      ToolTip.Tip="--spec-type ngram-mod. Zero additional VRAM; drafts from the prompt/history itself." />
+                                                      ToolTip.Tip="Adds ngram-mod to --spec-type. Drafts from the prompt and history itself, so it costs no additional VRAM." />
+                                            <CheckBox IsChecked="{Binding UseDraftModelDecoding}"
+                                                      Content="Draft model (MTP head)"
+                                                      FontSize="12"
+                                                      IsEnabled="{Binding CanEdit}"
+                                                      ToolTip.Tip="Adds draft-mtp to --spec-type and launches the draft model below. Costs a second, small VRAM allocation." />
+                                            <ComboBox ItemsSource="{Binding DetectedDraftModelPaths}"
+                                                      SelectedItem="{Binding DraftModelPath}"
+                                                      PlaceholderText="No draft model"
+                                                      HorizontalAlignment="Stretch"
+                                                      FontSize="12" CornerRadius="6"
+                                                      IsEnabled="{Binding CanEdit}"
+                                                      ToolTip.Tip="mtp-*.gguf draft head, found beside the selected model or in its MTP folder. An MTP head is trained as part of its base model and shares that model's vocabulary by construction." />
+                                            <TextBlock Text="{Binding DraftModelHint}"
+                                                       IsVisible="{Binding !HasDetectedDraftModel}"
+                                                       TextWrapping="Wrap"
+                                                       FontSize="11"
+                                                       Opacity="0.55" />
+                                            <Grid ColumnDefinitions="*,*,*,*" ColumnSpacing="6">
+                                                <TextBox Grid.Column="0"
+                                                         Text="{Binding SpeculativeNMaxText}"
+                                                         Watermark="n-max"
+                                                         FontSize="12"
+                                                         IsEnabled="{Binding CanEdit}"
+                                                         ToolTip.Tip="--spec-draft-n-max: tokens to draft per step. Blank uses the server default of 3." />
+                                                <TextBox Grid.Column="1"
+                                                         Text="{Binding SpeculativeNMinText}"
+                                                         Watermark="n-min"
+                                                         FontSize="12"
+                                                         IsEnabled="{Binding CanEdit}"
+                                                         ToolTip.Tip="--spec-draft-n-min: minimum drafted tokens. Blank uses the server default of 0." />
+                                                <TextBox Grid.Column="2"
+                                                         Text="{Binding SpeculativePMinText}"
+                                                         Watermark="p-min"
+                                                         FontSize="12"
+                                                         IsEnabled="{Binding CanEdit}"
+                                                         ToolTip.Tip="--spec-draft-p-min: minimum draft probability. Blank uses the server default of 0.00." />
+                                                <TextBox Grid.Column="3"
+                                                         Text="{Binding DraftGpuLayersText}"
+                                                         Watermark="draft ngl"
+                                                         FontSize="12"
+                                                         IsEnabled="{Binding CanEdit}"
+                                                         ToolTip.Tip="-ngld: draft-model layers to keep in VRAM. Blank leaves the server's own default alone." />
+                                            </Grid>
+                                            <TextBlock Text="{Binding DraftFitNote}"
+                                                       IsVisible="{Binding HasDraftFitNote}"
+                                                       TextWrapping="Wrap"
+                                                       FontSize="11"
+                                                       Opacity="0.7" />
                                         </StackPanel>
                                         <Button Command="{Binding SuggestEngineSettingsCommand}"
                                                 IsEnabled="{Binding CanEdit}"

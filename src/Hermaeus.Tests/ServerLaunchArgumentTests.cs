@@ -93,10 +93,17 @@ public sealed class ServerLaunchArgumentTests
     }
 
     [Fact]
-    public void NgramSpeculative_emits_spec_type_ngram_mod_only_when_enabled()
+    public void Speculative_types_emit_spec_type_only_when_configured()
     {
-        Assert.DoesNotContain("--spec-type", Args(new ServerConfig { NgramSpeculative = false }));
-        Assert.Equal("ngram-mod", ArgValue(Args(new ServerConfig { NgramSpeculative = true }), "--spec-type"));
+        // r27 03 3.1 replaced r18 4.4's NgramSpeculative bool with a composable
+        // section, because --spec-type is a list flag. The legacy bool no longer
+        // reaches the launch path at all: SettingsService.NormalizeManagedServers
+        // upgrades it into Types before a server is ever started.
+        Assert.DoesNotContain("--spec-type", Args(new ServerConfig()));
+        Assert.DoesNotContain("--spec-type", Args(new ServerConfig { NgramSpeculative = true }));
+        Assert.Equal("ngram-mod", ArgValue(
+            Args(new ServerConfig { Speculative = new SpeculativeDecodingConfig { Types = ["ngram-mod"] } }),
+            "--spec-type"));
     }
 
     [Fact]

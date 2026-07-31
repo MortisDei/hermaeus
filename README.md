@@ -77,6 +77,11 @@ organisation, and explicit control over what is kept and what is forgotten.
 - GPU auto-tuning
 - Runtime diagnostics
 - Local AI setup wizard
+- Speculative decoding, composable: n-gram drafting and draft-model drafting
+  (including MTP heads) can be combined, and an incompatible draft model is
+  refused before the server starts rather than after
+- Complete model downloads: shards, vision projectors and MTP draft heads
+  arrive together, each model in its own folder
 
 ### Local RAG
 
@@ -88,6 +93,8 @@ organisation, and explicit control over what is kept and what is forgotten.
 - Budget-aware context packing
 - Watched sources: datasets notice when their source files change instead of
   rotting silently
+- Index size shown against the in-memory budget, so a corpus outgrowing it is
+  visible while it grows rather than discovered later as a slow query
 - Source citations
 - Retrieval traces
 - Native evaluation harness
@@ -147,6 +154,10 @@ Includes:
 - Best across every suite, by mean per-suite standing, so a large suite cannot
   outvote a small one and there is no winner when there cannot honestly be one
 - Historical comparisons
+- Speed Check: a fixed suite for measuring tokens per second, and a comparison
+  between two runs of it with the configuration difference that separates them.
+  How much speculative decoding helps depends on the model pair and the content,
+  so this measures it rather than assuming it
 - CSV / JSON / Markdown export
 - Managed model switching
 - System overview
@@ -325,7 +336,7 @@ For commercial licensing requests, see the Contact section of COMMERCIAL.md.
 
 Current version:
 
-**0.24.0-alpha**
+**0.34.0-alpha**
 
 Major systems currently implemented include:
 

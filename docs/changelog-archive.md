@@ -2,6 +2,42 @@
 
 The CHANGELOG.md in root only contains the current 10 versions of changelogs. The rest are archived here in line with the 10 version limit in the main changelog.
 
+## [0.26.1-alpha] - 2026-07-23
+
+### Fixed
+
+- **Repointing `DataManagement.DataRootDirectory` at a folder that already
+  held a full, real copy of the data threw "already exists" and left the
+  setting permanently stuck reverted to blank.** `SettingsService.MigrateDataRoot`
+  treated any existing file at the destination as a blocking conflict, with
+  no way to just repoint without a move - so once the data root setting was
+  blanked by any means (this shipped alongside a real field incident: the
+  app fell back to the default root, created fresh stray database files
+  there, and every subsequent attempt to point back at the real root failed
+  the same way, silently re-saving blank each retry). A conflict on *every*
+  migratable file now means "the target already has its own copy" and is
+  treated as a plain repoint (nothing moved, nothing deleted on either
+  side); a conflict on *some but not all* files stays genuinely ambiguous
+  and still refuses, matching the original safety intent. Both
+  `SettingsViewModel.SaveAsync` (Settings page) and
+  `SetupWizardViewModel.ApplyDataRootStepAsync` (wizard) share this fix
+  through `PreviewDataRootMigration`/`MigrateDataRoot`. Two new regression
+  tests cover the repoint case at both layers; one existing test per layer
+  was updated to a genuine partial-conflict scenario since a single-file
+  full conflict is no longer a refusal case.
+
+### Changed
+
+- **App icon switched from Tree Ring to the "Archivist's Seal" mark**
+  (Option 1 of 4 on `docs/hermaeus-icons.png`: a gold "H" monogram grown
+  through with a tree and open book, in a circular medallion) - Tree Ring
+  (shipped in 0.26.0-alpha) read worse at tray/taskbar size. `hermaeus.ico`,
+  `hermaeus-app.png`, `hermaeus-tray.png`, and the tray-dark/light fallbacks
+  were regenerated from the new artwork with the same contrast-boosted
+  small-size treatment. Neither option is fully clean at 16x16 - fine
+  medallion detail is tight at that size regardless of which mark is used;
+  32px and up read clearly.
+
 ## [0.26.0-alpha] - 2026-07-23
 
 ### Changed

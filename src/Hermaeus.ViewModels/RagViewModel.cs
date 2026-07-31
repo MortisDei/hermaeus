@@ -121,6 +121,40 @@ public sealed class RagDatasetManagerItemViewModel
             ? $"{DriftPlan.ChangedFiles.Count} changed, {DriftPlan.NewFiles.Count} new, {DriftPlan.MissingFiles.Count} missing"
             : "up to date";
     public string DimensionsLabel => EmbeddingDimensions <= 0 ? "unknown dimensions" : $"{EmbeddingDimensions:N0} dimensions";
+
+    // ── r27 02-retrieval-that-scales.md 2.7: the ceiling, before you hit it ──
+
+    /// <summary>Bytes this dataset's semantic scan index occupies in memory, exact arithmetic over chunk count and dimension.</summary>
+    public long ScanIndexBytes { get; set; }
+
+    /// <summary>The in-memory budget every dataset's scan index shares.</summary>
+    public long ScanIndexBudgetBytes { get; set; }
+
+    /// <summary>True when this dataset's index currently fits, and is therefore scanned from memory rather than from storage.</summary>
+    public bool ScanIndexCached => ScanIndexBudgetBytes > 0 && ScanIndexBytes > 0 && ScanIndexBytes <= ScanIndexBudgetBytes;
+
+    /// <summary>
+    /// The same factual register as the rest of the dataset health line: a size
+    /// against a budget, and what happens above it. Not a warning and not a
+    /// recommendation.
+    /// </summary>
+    public string ScanIndexLabel
+    {
+        get
+        {
+            if (ScanIndexBudgetBytes <= 0 || EmbeddingDimensions <= 0)
+                return "Search index: size unknown until this dataset is indexed";
+
+            var used = FormatMib(ScanIndexBytes);
+            var budget = FormatMib(ScanIndexBudgetBytes);
+            return ScanIndexCached
+                ? $"Search index: {used} of {budget} in memory"
+                : $"Search index: {used}, over the {budget} memory budget; queries read from storage and are slower";
+        }
+    }
+
+    private static string FormatMib(long bytes) =>
+        bytes >= 1024L * 1024L ? $"{bytes / 1024d / 1024d:0.#} MiB" : $"{Math.Max(bytes / 1024d, 0):0.#} KiB";
     public bool ReindexRequired => !string.IsNullOrWhiteSpace(CurrentEmbeddingModel)
         && !string.Equals(EmbeddingModel, "unknown", StringComparison.OrdinalIgnoreCase)
         && !string.Equals(EmbeddingModel, CurrentEmbeddingModel, StringComparison.OrdinalIgnoreCase);
@@ -978,7 +1012,14 @@ public partial class RagViewModel : ObservableObject
         var datasets = await _query.GetDatasetsAsync();
         foreach (var dataset in datasets)
         {
-            var item = new RagDatasetManagerItemViewModel(dataset, _settings.Settings.Rag.EmbeddingModel);
+            var item = new RagDatasetManagerItemViewModel(dataset, _settings.Settings.Rag.EmbeddingModel)
+            {
+                // r27 2.7: arithmetic over the chunk count and the embedding
+                // dimension, so the number is available without loading
+                // anything and moves while a corpus is being ingested.
+                ScanIndexBytes = RagScanIndex.ByteSizeFor(dataset.ChunkCount, dataset.Config.EmbeddingDimensions),
+                ScanIndexBudgetBytes = _query.ScanIndexBudgetBytes
+            };
             try
             {
                 // r10 02-rag-quality.md 2.5: this runs after every ingest,

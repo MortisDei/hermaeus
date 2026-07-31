@@ -144,13 +144,27 @@ public sealed class RecallIndexingServiceTests
             .Select(i => new RecallTaskInput($"t{i}", null, $"Goal {i}", $"Body {i}", "", DateTime.UtcNow))
             .ToList();
 
-        await indexing.RunStartupBackfillAsync(conversations, tasks);
+        // r27 05 5.1: the backfill takes the lightweight projection and loads a
+        // full conversation only for the ids it is actually going to index.
+        var byId = conversations.ToDictionary(c => c.Id, StringComparer.Ordinal);
+        var summaries = conversations.Select(ConversationSummary.From).ToList();
+        var loads = 0;
+        Task<Conversation?> Load(string id, CancellationToken ct)
+        {
+            loads++;
+            return Task.FromResult(byId.GetValueOrDefault(id));
+        }
+
+        await indexing.RunStartupBackfillAsync(summaries, tasks, Load);
 
         var (count, _) = await store.GetSizeAsync();
         Assert.Equal(5, count);
+        Assert.Equal(3, loads);
 
-        // A second run must not duplicate anything already indexed.
-        await indexing.RunStartupBackfillAsync(conversations, tasks);
+        // A second run must not duplicate anything already indexed, and must
+        // not re-read a single conversation to find that out.
+        await indexing.RunStartupBackfillAsync(summaries, tasks, Load);
+        Assert.Equal(3, loads);
         var (countAfter, _) = await store.GetSizeAsync();
         Assert.Equal(5, countAfter);
     }

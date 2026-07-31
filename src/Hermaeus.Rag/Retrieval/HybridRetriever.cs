@@ -41,6 +41,100 @@ public sealed class HybridRetriever
     }
 
     /// <summary>
+    /// r27 02-retrieval-that-scales.md 2.4: the same scan over a contiguous
+    /// embedding block. The chunk-list version above allocates one ScoredChunk
+    /// per chunk and sorts the whole corpus (n log n) to select topK of them.
+    /// This is one pass with a bounded min-heap of size topK: one
+    /// <see cref="TensorPrimitives.CosineSimilarity"/> call per chunk against a
+    /// slice of the block, no per-chunk allocation, and no full sort.
+    /// Returns ids and scores; content is loaded for the survivors only (2.5).
+    /// </summary>
+    public static List<ScoredChunkId> CosineScan(float[] query, RagScanIndex index, int topK)
+    {
+        // The dimension-mismatch guard moves from the chunk to the block,
+        // because a contiguous block has exactly one dimension. A query whose
+        // dimension differs returns no semantic results, exactly as before.
+        if (topK <= 0 || index.Count == 0 || index.Dimension == 0 || query.Length != index.Dimension)
+            return [];
+
+        var heap = new BoundedTopK(Math.Min(topK, index.Count));
+        for (var i = 0; i < index.Count; i++)
+            heap.Offer(i, TensorPrimitives.CosineSimilarity(query.AsSpan(), index.RowAt(i)));
+
+        // A heap and a sort disagree about equal scores, so ties break on scan
+        // position: deterministic across runs, which keeps the eval harness from
+        // becoming noisy for reasons unrelated to retrieval quality.
+        return heap.Drain()
+            .OrderByDescending(e => e.Score)
+            .ThenBy(e => e.Index)
+            .Select(e => new ScoredChunkId(index.ChunkIds[e.Index], e.Score))
+            .ToList();
+    }
+
+    /// <summary>
+    /// A fixed-capacity min-heap over (score, scan index). The root is the worst
+    /// entry currently held, so an incoming score only has to beat one
+    /// comparison to be considered. Ties prefer the lower scan index, so the
+    /// entry evicted first is always the later one.
+    /// </summary>
+    private sealed class BoundedTopK(int capacity)
+    {
+        private readonly (int Index, float Score)[] _items = new (int, float)[Math.Max(capacity, 1)];
+        private readonly int _capacity = Math.Max(capacity, 1);
+        private int _count;
+
+        public void Offer(int index, float score)
+        {
+            if (_count < _capacity)
+            {
+                _items[_count] = (index, score);
+                SiftUp(_count++);
+                return;
+            }
+
+            if (!IsWorseThan(_items[0], (index, score)))
+                return;
+
+            _items[0] = (index, score);
+            SiftDown(0);
+        }
+
+        public IEnumerable<(int Index, float Score)> Drain() => _items.Take(_count);
+
+        /// <summary>True when <paramref name="a"/> ranks below <paramref name="b"/> and should be evicted for it.</summary>
+        private static bool IsWorseThan((int Index, float Score) a, (int Index, float Score) b) =>
+            a.Score < b.Score || (a.Score == b.Score && a.Index > b.Index);
+
+        private void SiftUp(int i)
+        {
+            while (i > 0)
+            {
+                var parent = (i - 1) / 2;
+                if (!IsWorseThan(_items[i], _items[parent]))
+                    break;
+                (_items[i], _items[parent]) = (_items[parent], _items[i]);
+                i = parent;
+            }
+        }
+
+        private void SiftDown(int i)
+        {
+            while (true)
+            {
+                var smallest = i;
+                var left = (2 * i) + 1;
+                var right = left + 1;
+                if (left < _count && IsWorseThan(_items[left], _items[smallest])) smallest = left;
+                if (right < _count && IsWorseThan(_items[right], _items[smallest])) smallest = right;
+                if (smallest == i)
+                    return;
+                (_items[i], _items[smallest]) = (_items[smallest], _items[i]);
+                i = smallest;
+            }
+        }
+    }
+
+    /// <summary>
     /// Fuse semantic and BM25 ranked lists into a single hybrid ranking.
     /// </summary>
     public static List<ScoredChunk> Fuse(

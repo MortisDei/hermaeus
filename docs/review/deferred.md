@@ -17,7 +17,6 @@ updates the status column.
 
 | Item | Deferred by | Why it is still open |
 | --- | --- | --- |
-| Draft-model speculative decoding | r18 4.4 | Real speedup, but it needs a second model file, a second VRAM budget, and a draft-model picker whose wrong answer silently costs performance instead of failing visibly. That is a doc of its own. Passed over in r26 because that round's weight went to the Agent workbench, not because the case against it changed. **Leading candidate for r27.** |
 | Agent run/step endpoints on the local API | r1, restated r2 | Not an effort problem: there is no design for how a non-interactive caller satisfies the agent's approval gate. The gate is the product, so an endpoint that bypasses it is not a smaller version of the feature. Needs its own design pass. |
 | Workflow composition and task orchestration | r1 Opportunities #9 | The stated condition for revisiting was observed sequencing pain from real `run_command` use. That evidence still does not exist. r1's own words stand: "Building an orchestrator before the primitives are proven is how projects acquire their worst code." |
 | MCP HTTP and SSE transport | r2 Phase 3 | `McpClient` is stdio only. No demand observed; local servers are the use case. |
@@ -30,6 +29,7 @@ updates the status column.
 
 | Item | Deferred by | Closed by | Evidence |
 | --- | --- | --- | --- |
+| Draft-model speculative decoding | r18 4.4 | r27 doc 03 | `SpeculativeDecodingConfig` (composable `Types` list, replacing the `NgramSpeculative` bool), the verified `--spec-type` / `--spec-draft-model` / `--spec-draft-n-max` / `--spec-draft-n-min` / `--spec-draft-p-min` / `-ngld` argument builder with a test asserting no removed flag name is ever emitted, `SpeculativeDecodingValidator` (path, symlink and GGUF vocabulary-size checks), `SpeedCheck.Suite()` and `SpeedCheckComparer`. Closed via MTP heads rather than a general-purpose draft-model picker: an MTP head shares its base model's vocabulary by construction, which is what dissolved r18's compatibility objection. The general case, an arbitrary small model drafting for an arbitrary large one, is only partly addressed by 3.3's validation, which refuses on a vocabulary mismatch and warns on an oversized draft but cannot prove two unrelated models will draft well together. A future round wanting the general picker starts there. |
 | Settings and capabilities probe endpoint on the local API | r1 | r26 doc 05 5.1 | `GET /v1/capabilities`, `CapabilitiesResponse`; reports settings and counts, never probes |
 | Benchmarks "Best Overall" column, ranked across all suites | r25 follow-up (owner request) | r26 doc 04 | `SuiteLeaderboard`, `CrossSuiteRanking`, "Best across every suite" card; ranked by mean per-suite standing, not pooled cases |
 | Conversation branching and message-edit forks | r24 | r25 doc 01 | `Message.ParentId`, `ConversationTree`, non-destructive regenerate |

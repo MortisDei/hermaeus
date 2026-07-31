@@ -19,7 +19,6 @@ public partial class ConversationItemViewModel : ObservableObject
 
     public required string Id  { get; init; }
     public string ModelId      { get; set; } = string.Empty;
-    public string SystemPrompt { get; set; } = string.Empty;
     public string FolderDisplay => string.IsNullOrWhiteSpace(Folder) ? "Unfiled" : Folder.Trim();
     public string TagsDisplay => string.Join("  ", Tags);
     public string ArchiveActionLabel => IsArchived ? "Unarchive" : "Archive";

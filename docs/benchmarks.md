@@ -306,6 +306,78 @@ provider.
   of a separate panel. Tab content is width-capped and centered rather than
   stretching edge-to-edge on a maximized window.
 
+## Speed Check
+
+A built-in suite, alongside the starter suites, for answering one question:
+did a runtime setting change make generation faster on this machine?
+
+It exists because of speculative decoding. Enabling a knob you cannot measure
+produces a setting that is believed rather than known, on hardware where the
+answer genuinely varies.
+
+**What it measures.** Tokens per second, prompt tokens per second, and time to
+first token, taken from llama-server's own `timings` rather than estimated. Four
+fixed prompts, chosen because drafting behaves differently across them:
+structured output and repetitive output, where a draft's proposals are accepted
+often, and code and free prose, where they are accepted less often.
+
+**What it does not measure.** Quality. No case carries an expected keyword, an
+expected pattern, or a refusal expectation, because a throughput number should
+not quietly become a pass or a fail.
+
+**Comparing two runs.** Two Speed Check runs of the same suite against the same
+model can be shown side by side, with the difference in tokens per second,
+prompt tokens per second and time to first token, and the configuration
+difference that separates them. A run records the speculative settings that
+produced it, which is what the comparison keys on. Runs of different models or
+different suites are refused rather than compared.
+
+There is deliberately no verdict, grade, score, recommendation or confidence
+interval. The app reports what happened; it does not rate itself, and a handful
+of runs on a desktop under unknown load does not support a significance claim.
+
+**The honest caveat about drafting.** Speculative decoding produces exactly the
+text the large model would have produced alone, so there is no quality tradeoff.
+How much faster it is depends entirely on how often the draft guesses right,
+which depends on the model pair and on the content being generated. It can be a
+large speedup, a small one, or slower than not using it. That is why the Speed
+Check exists: the feature is worth having because the answer can now be
+measured, not because the measurement is guaranteed to be favourable.
+
+### First recorded result (r27, 0.34.0-alpha)
+
+`gemma-4-E4B-it-qat-UD-Q4_K_XL` at 64512 context, 999 GPU layers, q8_0 KV
+cache, one cold iteration per case, on the maintainer's desktop under ordinary
+load. Draft model: `mtp-gemma-4-E4B-it-BF16.gguf`.
+
+| | `ngram-mod` | `draft-mtp` | Delta |
+| --- | --- | --- | --- |
+| Median tok/s | 69.7 | 70.2 | +0.5 |
+| Mean tok/s across the four cases | 69.2 | 70.3 | +1.1 |
+| Median time to first token | 4427 ms | 4602 ms | +175 ms |
+| Structured output | 69.7 tok/s | 70.2 tok/s | +0.5 |
+| Repetitive output | 67.0 tok/s | 70.6 tok/s | +3.6 |
+| Code | 70.3 tok/s | 70.2 tok/s | -0.1 |
+| Free prose | 69.7 tok/s | 70.2 tok/s | +0.5 |
+
+**Read this as a null result, not a win.** A 1.6% mean difference from one
+iteration per case, on a desktop under unknown load, is not distinguishable
+from noise, and this document does not claim otherwise. Time to first token got
+measurably worse, which is what a second model loading and running ahead of the
+first token should do.
+
+The one detail worth keeping: repetitive output, the shape where draft
+acceptance should be highest, gained the most and was the only case below
+70 tok/s without drafting. That is the direction the theory predicts. It is
+also a single sample, and a single sample pointing the right way is a reason to
+measure again with more iterations, not a reason to believe it.
+
+If you are reproducing this, confirm in the Services log that the draft model
+actually loaded when the server started. Uniform tok/s across content shapes as
+different as these is consistent with decode being memory-bandwidth-bound, and
+equally consistent with drafting never having engaged at all, in which case
+both columns measured the same configuration.
+
 ## System Overview
 
 The **System Overview** page shows the local machine and app environment:

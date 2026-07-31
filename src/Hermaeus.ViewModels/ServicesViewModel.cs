@@ -46,7 +46,67 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private bool         _contextShift;
     [ObservableProperty] private bool         _memoryLock;
     [ObservableProperty] private bool         _noMemoryMap;
-    [ObservableProperty] private bool         _ngramSpeculative;
+    // ── r27 03-drafting-and-proof.md 3.1: speculative decoding, as one section ──
+    // The r18 4.4 bool owned a flag that is a list. A second bool beside it
+    // would have given two knobs that both own --spec-type and can contradict
+    // each other, which is how this area acquires a bug that only shows up in
+    // one configuration.
+
+    /// <summary>
+    /// The underlying comma-separated `--spec-type` list. Still the stored
+    /// shape, because the flag genuinely is a list and the two techniques
+    /// compose; the checkboxes below are a view onto it, and each one only ever
+    /// adds or removes its own token, so an exotic list set by hand in
+    /// settings.json survives being toggled.
+    /// </summary>
+    [ObservableProperty] private string       _speculativeTypes = string.Empty;
+
+    /// <summary>r27 follow-up: zero extra VRAM, drafts from the prompt and history itself (`ngram-mod`).</summary>
+    public bool UseNgramDecoding
+    {
+        get => HasType(NgramType);
+        set => SetType(NgramType, value);
+    }
+
+    /// <summary>r27 follow-up: drafts from the MTP head beside the model (`draft-mtp`).</summary>
+    public bool UseDraftModelDecoding
+    {
+        get => HasType(DraftType);
+        set => SetType(DraftType, value);
+    }
+
+    private const string NgramType = "ngram-mod";
+    private const string DraftType = "draft-mtp";
+
+    private bool HasType(string type) =>
+        ParseTypes(SpeculativeTypes).Any(t => string.Equals(t, type, StringComparison.OrdinalIgnoreCase));
+
+    private void SetType(string type, bool enabled)
+    {
+        var types = ParseTypes(SpeculativeTypes);
+        var present = types.Any(t => string.Equals(t, type, StringComparison.OrdinalIgnoreCase));
+        if (present == enabled)
+            return;
+
+        if (enabled)
+            types.Add(type);
+        else
+            types.RemoveAll(t => string.Equals(t, type, StringComparison.OrdinalIgnoreCase));
+
+        SpeculativeTypes = string.Join(",", types);
+        OnPropertyChanged(nameof(UseNgramDecoding));
+        OnPropertyChanged(nameof(UseDraftModelDecoding));
+    }
+    [ObservableProperty] private string       _draftModelPath = string.Empty;
+    [ObservableProperty] private string       _draftGpuLayersText = string.Empty;
+    [ObservableProperty] private string       _speculativeNMaxText = string.Empty;
+    [ObservableProperty] private string       _speculativeNMinText = string.Empty;
+    [ObservableProperty] private string       _speculativePMinText = string.Empty;
+
+    /// <summary>r27 3.4: the combined target-plus-draft VRAM estimate, information rather than a block.</summary>
+    [ObservableProperty] private string       _draftFitNote = string.Empty;
+    public bool HasDraftFitNote => !string.IsNullOrEmpty(DraftFitNote);
+    partial void OnDraftFitNoteChanged(string value) => OnPropertyChanged(nameof(HasDraftFitNote));
     [ObservableProperty] private string       _suggestEngineSettingsPreview = string.Empty;
 
     /// <summary>Verified accepted value set minus f32 (r18 04-llama-server-engine-options.md
@@ -79,6 +139,13 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     public bool IsStopped  => Status is ServerStatus.Stopped or ServerStatus.Error;
     public bool IsStarting => Status == ServerStatus.Starting;
     public bool IsError    => Status == ServerStatus.Error;
+
+    /// <summary>
+    /// r27 01 1.3: when this server entered <see cref="ServerStatus.Starting"/>,
+    /// so Chat can say how long it has been waiting. Null whenever the server is
+    /// not starting. Settable so tests can drive an elapsed time without a clock.
+    /// </summary>
+    public DateTime? StartingSinceUtc { get; set; }
     public bool CanEdit => IsStopped && !IsAutoTuning;
     public bool HasUnsavedChanges =>
         _config.Name != Name ||
@@ -99,7 +166,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _config.ContextShift != ContextShift ||
         _config.MemoryLock != MemoryLock ||
         _config.NoMemoryMap != NoMemoryMap ||
-        _config.NgramSpeculative != NgramSpeculative;
+        !SpeculativeMatchesConfig();
 
     /// <summary>
     /// Human-readable effective GPU offload for the Services card (r14 1.3):
@@ -157,6 +224,15 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
 
     public UiBoundCollection<string> DetectedModelPaths { get; } = [];
     public UiBoundCollection<string> DetectedMmprojPaths { get; } = [];
+
+    /// <summary>
+    /// r27 follow-up: `mtp-*.gguf` draft heads found beside the selected model,
+    /// exactly as <see cref="DetectedMmprojPaths"/> finds projectors. An MTP
+    /// head ships inside its base model's repository, so if you have one, it is
+    /// already next to the model you just picked and you should not have to
+    /// type its path.
+    /// </summary>
+    public UiBoundCollection<string> DetectedDraftModelPaths { get; } = [];
 
     /// <summary>Folder a model-path file picker should open in: the embeddings subfolder for the embeddings server, otherwise the models folder.</summary>
     public string SuggestedModelBrowseDirectory
@@ -242,6 +318,76 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
             MmprojPath = current;
     }
 
+    /// <summary>
+    /// r27 follow-up: rescans for `mtp-*.gguf` draft heads whenever the model
+    /// changes, mirroring <see cref="RefreshDetectedMmprojPaths"/>, including
+    /// its rule of auto-filling the sole candidate only when the field is still
+    /// empty and never overwriting an explicit choice.
+    /// unsloth ships the head in an `MTP/` subdirectory beside the model, so
+    /// both that and the model's own directory are scanned.
+    /// Populating this path does NOT enable speculative decoding. No flag is
+    /// emitted until <see cref="UseDraftModelDecoding"/> is ticked, which is
+    /// what keeps this discovery rather than the auto-selection r27 doc 03
+    /// declined: nothing about the runtime configuration changes on its own.
+    /// </summary>
+    private void RefreshDetectedDraftModelPaths(string modelPath)
+    {
+        var current = DraftModelPath;
+        DetectedDraftModelPaths.Clear();
+
+        if (!string.IsNullOrWhiteSpace(modelPath))
+        {
+            var dir = Path.GetDirectoryName(modelPath);
+            if (!string.IsNullOrWhiteSpace(dir) && Directory.Exists(dir))
+            {
+                foreach (var file in EnumerateDraftHeads(dir))
+                    DetectedDraftModelPaths.Add(file);
+
+                var mtpDir = Path.Combine(dir, "MTP");
+                if (Directory.Exists(mtpDir))
+                {
+                    foreach (var file in EnumerateDraftHeads(mtpDir))
+                        DetectedDraftModelPaths.Add(file);
+                }
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(current) && !DetectedDraftModelPaths.Contains(current, StringComparer.OrdinalIgnoreCase))
+            DetectedDraftModelPaths.Insert(0, current);
+
+        if (string.IsNullOrWhiteSpace(current) && DetectedDraftModelPaths.Count == 1)
+            DraftModelPath = DetectedDraftModelPaths[0];
+        else if (!string.IsNullOrWhiteSpace(current) && DraftModelPath != current)
+            DraftModelPath = current;
+
+        OnPropertyChanged(nameof(HasDetectedDraftModel));
+        OnPropertyChanged(nameof(DraftModelHint));
+    }
+
+    private static IEnumerable<string> EnumerateDraftHeads(string directory)
+    {
+        IEnumerable<string> files;
+        try
+        {
+            files = Directory.EnumerateFiles(directory, "mtp-*.gguf").OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList();
+        }
+        catch
+        {
+            yield break;
+        }
+
+        foreach (var file in files)
+            yield return file;
+    }
+
+    /// <summary>True when a draft head was found beside the model, so the draft checkbox is worth offering.</summary>
+    public bool HasDetectedDraftModel => DetectedDraftModelPaths.Count > 0 || !string.IsNullOrWhiteSpace(DraftModelPath);
+
+    /// <summary>Says why the draft checkbox is unavailable, rather than leaving it inert and unexplained.</summary>
+    public string DraftModelHint => HasDetectedDraftModel
+        ? string.Empty
+        : "No mtp-*.gguf draft head was found beside this model. Download one from the model's repository, or pick a file.";
+
     public ServerProcessViewModel(
         ServerConfig config,
         ISettingsService settings,
@@ -284,7 +430,13 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _contextShift   = config.ContextShift;
         _memoryLock     = config.MemoryLock;
         _noMemoryMap    = config.NoMemoryMap;
-        _ngramSpeculative = config.NgramSpeculative;
+        var speculative = config.Speculative ?? new SpeculativeDecodingConfig();
+        _speculativeTypes     = string.Join(",", speculative.Types);
+        _draftModelPath       = speculative.DraftModelPath;
+        _draftGpuLayersText   = speculative.DraftGpuLayers?.ToString() ?? string.Empty;
+        _speculativeNMaxText  = speculative.NMax?.ToString() ?? string.Empty;
+        _speculativeNMinText  = speculative.NMin?.ToString() ?? string.Empty;
+        _speculativePMinText  = speculative.PMin?.ToString("0.###") ?? string.Empty;
 
         _mgr.StatusChanged += s => RunOnUi(() =>
         {
@@ -310,6 +462,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
 
         RefreshDetectedModels();
         RefreshDetectedMmprojPaths(ModelPath);
+        RefreshDetectedDraftModelPaths(ModelPath);
         ScheduleContextFitRefresh();
     }
 
@@ -729,9 +882,16 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     [RelayCommand]
     private void ToggleLog() => LogExpanded = !LogExpanded;
 
+    /// <summary>
+    /// r27 01 1.2: the auto-start predicate, exposed so
+    /// <see cref="ServicesViewModel.SelectAutoStartTargets"/> can group by port
+    /// without restating the condition in a second place.
+    /// </summary>
+    public bool WillAutoStart => AutoStart && !string.IsNullOrWhiteSpace(ModelPath);
+
     public async Task AutoStartIfConfiguredAsync()
     {
-        if (AutoStart && !string.IsNullOrWhiteSpace(ModelPath))
+        if (WillAutoStart)
             await StartCoreAsync(CancellationToken.None);
     }
 
@@ -852,7 +1012,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _config.ContextShift   = ContextShift;
         _config.MemoryLock     = MemoryLock;
         _config.NoMemoryMap    = NoMemoryMap;
-        _config.NgramSpeculative = NgramSpeculative;
+        _config.Speculative    = BuildSpeculative();
         OnPropertyChanged(nameof(HasUnsavedChanges));
         OnPropertyChanged(nameof(EffectiveOffloadLabel));
         OnPropertyChanged(nameof(ExtraArgsTrustWarning));
@@ -889,7 +1049,12 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
             linked.BaseUrl = url;
     }
 
-    private ServerConfig BuildConfig() => new()
+    /// <summary>
+    /// The editor's current state as a <see cref="ServerConfig"/>, without
+    /// touching the saved one. Public because it is the honest way to ask
+    /// "what would this server launch with right now".
+    /// </summary>
+    public ServerConfig BuildConfig() => new()
     {
         Name           = Name,
         ExecutablePath = ExecutablePath,
@@ -909,8 +1074,48 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         ContextShift   = ContextShift,
         MemoryLock     = MemoryLock,
         NoMemoryMap    = NoMemoryMap,
-        NgramSpeculative = NgramSpeculative
+        Speculative    = BuildSpeculative()
     };
+
+    /// <summary>
+    /// r27 3.1: the edited section, parsed back into config shape. Text boxes
+    /// rather than numeric spinners because every one of these is optional:
+    /// blank means "leave the server's own default alone" and emits no flag.
+    /// </summary>
+    private SpeculativeDecodingConfig BuildSpeculative() => new()
+    {
+        Types = ParseTypes(SpeculativeTypes),
+        DraftModelPath = DraftModelPath?.Trim() ?? string.Empty,
+        DraftGpuLayers = ParseOptionalInt(DraftGpuLayersText),
+        NMax = ParseOptionalInt(SpeculativeNMaxText),
+        NMin = ParseOptionalInt(SpeculativeNMinText),
+        PMin = ParseOptionalDouble(SpeculativePMinText)
+    };
+
+    public static List<string> ParseTypes(string? text) =>
+        (text ?? string.Empty)
+            .Split([',', ' ', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    private static int? ParseOptionalInt(string? text) =>
+        int.TryParse((text ?? string.Empty).Trim(), out var value) ? value : null;
+
+    private static double? ParseOptionalDouble(string? text) =>
+        double.TryParse((text ?? string.Empty).Trim(), System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var value) ? value : null;
+
+    private bool SpeculativeMatchesConfig()
+    {
+        var saved = _config.Speculative ?? new SpeculativeDecodingConfig();
+        var edited = BuildSpeculative();
+        return saved.Types.SequenceEqual(edited.Types, StringComparer.OrdinalIgnoreCase)
+            && string.Equals(saved.DraftModelPath, edited.DraftModelPath, StringComparison.Ordinal)
+            && saved.DraftGpuLayers == edited.DraftGpuLayers
+            && saved.NMax == edited.NMax
+            && saved.NMin == edited.NMin
+            && saved.PMin == edited.PMin;
+    }
 
     private void NotifyStatusProps()
     {
@@ -922,7 +1127,13 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(StatusLabel));
     }
 
-    partial void OnStatusChanged(ServerStatus value) => NotifyStatusProps();
+    partial void OnStatusChanged(ServerStatus value)
+    {
+        // r27 01 1.3: stamped on the transition into Starting and cleared on the
+        // way out, so a server that has been starting for two minutes can say so.
+        StartingSinceUtc = value == ServerStatus.Starting ? DateTime.UtcNow : null;
+        NotifyStatusProps();
+    }
     partial void OnIsAutoTuningChanged(bool value)
     {
         OnPropertyChanged(nameof(CanEdit));
@@ -937,6 +1148,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         RepairDetectedModelPathsIfBrowsedOutsideRoot(value);
         ApplyModelDefaultsIfPathActuallyChanged(value);
         RefreshDetectedMmprojPaths(value);
+        RefreshDetectedDraftModelPaths(value);
     }
     partial void OnMmprojPathChanged(string value) => OnPropertyChanged(nameof(HasUnsavedChanges));
 
@@ -1039,7 +1251,65 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     partial void OnContextShiftChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
     partial void OnMemoryLockChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
     partial void OnNoMemoryMapChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
-    partial void OnNgramSpeculativeChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnSpeculativeTypesChanged(string value)
+    {
+        OnPropertyChanged(nameof(HasUnsavedChanges));
+        OnPropertyChanged(nameof(UseNgramDecoding));
+        OnPropertyChanged(nameof(UseDraftModelDecoding));
+        ApplyDraftFitNote();
+    }
+    partial void OnDraftModelPathChanged(string value)
+    {
+        OnPropertyChanged(nameof(HasUnsavedChanges));
+        OnPropertyChanged(nameof(HasDetectedDraftModel));
+        OnPropertyChanged(nameof(DraftModelHint));
+        ApplyDraftFitNote();
+    }
+    partial void OnDraftGpuLayersTextChanged(string value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnSpeculativeNMaxTextChanged(string value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnSpeculativeNMinTextChanged(string value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnSpeculativePMinTextChanged(string value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+
+    /// <summary>
+    /// r27 03-drafting-and-proof.md 3.4: a draft model is a second allocation.
+    /// The combined estimate is shown before the server starts, as information
+    /// and never a block: the user may have reasons, and llama.cpp spills to
+    /// system memory rather than failing.
+    /// Also carries 3.3's refusal and warning, so an incompatible pair is named
+    /// here rather than discovered by pressing Start.
+    /// </summary>
+    private void ApplyDraftFitNote()
+    {
+        var config = BuildConfig();
+        if (config.Speculative is not { RequiresDraftModel: true })
+        {
+            DraftFitNote = string.Empty;
+            return;
+        }
+
+        var validation = SpeculativeDecodingValidator.Validate(config);
+        if (validation.HasMessage)
+        {
+            DraftFitNote = validation.Message;
+            return;
+        }
+
+        var draftPath = config.Speculative.DraftModelPath;
+        if (draftPath.Length == 0 || !File.Exists(draftPath))
+        {
+            DraftFitNote = string.Empty;
+            return;
+        }
+
+        var draftBytes = new FileInfo(draftPath).Length;
+        var targetBytes = TryGetModelFileSizeBytes() ?? 0;
+        var vram = _hardwareProfile?.MaxGpuVramBytes ?? 0;
+        var combined = targetBytes + draftBytes;
+
+        DraftFitNote = vram > 0
+            ? $"Target plus draft is roughly {FormatGb(combined)} of weights against {FormatGb(vram)} of VRAM."
+            : $"Target plus draft is roughly {FormatGb(combined)} of weights.";
+    }
 
     /// <summary>
     /// r18 04-llama-server-engine-options.md 4.0: llama.cpp historically requires flash
@@ -1096,6 +1366,8 @@ public partial class ServicesViewModel : ViewModelBase
     private readonly RuntimeProfileService _runtimeProfiles;
     private readonly IToastService _toasts;
     private readonly RedactionService _redactor;
+    /// <summary>r27 01 1.5: records elapsed-to-healthy per server, since auto-start is no longer inside the startup total.</summary>
+    private readonly IStartupTimingService? _startupTiming;
     private readonly TrustService _trust;
     private readonly IRuntimeLogService _runtimeLogs;
     private readonly OrphanServerDetector _orphanDetector;
@@ -1148,8 +1420,10 @@ public partial class ServicesViewModel : ViewModelBase
         ISystemInfoService? systemInfo = null,
         ModelProfileService? modelProfiles = null,
         IActivityRecorder? activity = null,
-        SttSettingsViewModel? stt = null)
+        SttSettingsViewModel? stt = null,
+        IStartupTimingService? startupTiming = null)
     {
+        _startupTiming = startupTiming;
         _settings = settings;
         _runtimeProfiles = runtimeProfiles;
         _toasts = toasts;
@@ -1391,11 +1665,52 @@ public partial class ServicesViewModel : ViewModelBase
         }
     }
 
-    public async Task AutoStartAllAsync()
+    /// <summary>
+    /// r27 01-startup-that-never-waits.md 1.2: every configured server starts at
+    /// once. Sequentially, each one awaited a full model load behind
+    /// WaitForHealthAsync's five-minute deadline before the next was even
+    /// launched, and two servers on separate ports and separate processes have
+    /// no reason to wait for each other.
+    /// </summary>
+    public Task AutoStartAllAsync() =>
+        Task.WhenAll(SelectAutoStartTargets(Servers).Select(TimedAutoStartAsync));
+
+    private async Task TimedAutoStartAsync(ServerProcessViewModel server)
     {
-        foreach (var srv in Servers)
-            await srv.AutoStartIfConfiguredAsync();
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        await server.AutoStartIfConfiguredAsync();
+        _startupTiming?.RecordServerStart(new StartupServerStart(server.Name, sw.ElapsedMilliseconds, server.IsRunning));
     }
+
+    /// <summary>
+    /// The servers <see cref="AutoStartAllAsync"/> actually launches: at most one
+    /// per port. StartAsync's port preflight and StopSamePortPeersBeforeStartAsync
+    /// both assume they are looking at settled state, so two concurrent starts on
+    /// one port could both pass the preflight. The rest keep today's behaviour of
+    /// being stopped or refused. Pure and static so this is testable without a
+    /// process.
+    /// </summary>
+    /// <summary>
+    /// r27 01 1.3: the managed non-embedding server Chat is currently waiting on,
+    /// or null. Embedding servers are excluded because listing chat models never
+    /// depended on one.
+    /// </summary>
+    public ChatWarmingServer? GetWarmingChatServer()
+    {
+        var starting = Servers.FirstOrDefault(s => !s.EmbeddingsMode && s.IsStarting);
+        if (starting is null)
+            return null;
+
+        var since = starting.StartingSinceUtc ?? DateTime.UtcNow;
+        return new ChatWarmingServer(starting.Name, DateTime.UtcNow - since);
+    }
+
+    public static IReadOnlyList<ServerProcessViewModel> SelectAutoStartTargets(IEnumerable<ServerProcessViewModel> servers) =>
+        servers
+            .Where(s => s.WillAutoStart)
+            .GroupBy(s => s.Port)
+            .Select(g => g.First())
+            .ToList();
 
     public async Task<IReadOnlyList<string>> StopRunningNonEmbeddingServersAsync()
     {

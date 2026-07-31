@@ -2,6 +2,25 @@
 
 ## Chat
 
+- **The model dropdown does not wait for a model to load** (r27). Startup used
+  to auto-start every managed server one at a time, each behind a five-minute
+  health deadline, before listing chat models, even though a server reaching
+  Running already re-lists them by itself. Servers now start alongside the app
+  rather than ahead of it, and the panel you opened the app to use is usable
+  first.
+- **While a chat server is still loading its model**, one line above the
+  composer names the server and how long it has been starting. Past 90 seconds
+  it adds that this is longer than usual and offers to open the Services log.
+  There is no progress bar: llama-server reports nothing at all between launch
+  and healthy, so a bar would imply knowledge the app does not have.
+- **A message sent during that wait is held, not swallowed.** It appears in the
+  conversation marked as waiting, the composer clears so you can carry on
+  thinking, and it sends once, through the ordinary send path, the moment a
+  model lists. One message at a time: a second send while one is held is
+  refused. Cancelling gives the text back to the composer, and so does a
+  timeout or the server failing to start. Nothing is ever sent that you did not
+  submit, and a hold never survives a restart.
+
 - **Conversation branching.** A conversation is a tree, not a line. Regenerating
   an answer adds a new version alongside the old one instead of replacing it, and
   editing one of your own messages sends the edit as a new version while leaving
@@ -567,9 +586,8 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
   options next to Context Size/GPU Layers/Threads/Slots: KV cache type (K and
   V independently, f16/bf16/q8_0/q5_1/q5_0/q4_1/q4_0/iq4_nl), Flash Attention
   (auto/on/off), and Context Shift (rolling context for long agent loops), plus
-  an "Advanced engine options" section for `--mlock`, `--no-mmap`, and an
-  experimental N-gram speculative decoding checkbox (zero additional VRAM,
-  drafts from the prompt/history itself). Every default matches the prior
+  an "Advanced engine options" section for `--mlock`, `--no-mmap`, and a
+  speculative-decoding section (see below). Every default matches the prior
   hand-typed command line exactly (f16 KV cache, auto flash attention, everything else
   off) - nothing is ever forced, and a value typed into Extra args always wins
   over the equivalent first-class control. A quantized V cache combined with
@@ -591,6 +609,96 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
   server. A model path browsed or previously saved from outside the scanned
   assets root, and the models folder's own casing (`llm` vs `LLM`), are both
   detected against what actually exists on disk rather than assumed.
+
+### Speculative decoding (r27)
+
+A small cheap model proposes the next few tokens and the large model verifies
+all of them in one forward pass instead of one pass per token. Where the
+proposal was right, those tokens are kept for roughly the cost of a single
+decode step; where it diverges, the tail is discarded. **The text produced is
+the text the large model would have produced alone**, so this is a speed
+optimisation with no quality tradeoff. How much speed depends entirely on how
+often the draft guesses right, which depends on the model pair and the content
+being generated: it can be a large win, a small one, or slower than not using
+it. Run the **Speed Check** (`docs/benchmarks.md`) to find out for your pair.
+
+The Services card's server editor carries one composable section rather than a
+checkbox per technique, because llama-server's `--spec-type` takes a
+comma-separated list and n-gram speculation and draft-model drafting are not
+mutually exclusive:
+
+- **N-gram drafting** (`ngram-mod`): costs no additional VRAM, because it
+  drafts from the prompt and history themselves rather than from a second
+  model.
+- **Draft model** (`draft-mtp`): drafts from an MTP (Multi-Token Prediction)
+  head. An MTP head is trained as part of its base model and ships inside that
+  model's own repository, so it shares the model's vocabulary by construction,
+  and at tens of megabytes against a multi-gigabyte target it is the size ratio
+  speculative decoding actually wants.
+- **The draft model itself** is found the same way the vision projector above
+  it is found, and has been since r19: a scan for `mtp-*.gguf` beside the
+  selected model and in its `MTP/` subfolder, with the sole candidate filled in
+  and anything you chose explicitly left alone. Finding the file does not turn
+  drafting on. Nothing reaches the launch command until you tick the box, so
+  discovery never silently changes how a server runs.
+
+Both boxes write into one underlying `--spec-type` list, because the flag
+genuinely is a list and the two techniques compose. Each box only ever adds or
+removes its own entry, so a more exotic list set by hand in `settings.json`
+(`ngram-simple`, `ngram-map-k`, `ngram-map-k4v`, `ngram-cache`,
+`draft-simple`) survives being toggled.
+- **n-max / n-min / p-min / draft ngl**: optional. Blank leaves llama-server's
+  own defaults alone.
+
+A server configured with a `draft-*` type is checked before it launches. The
+draft path goes through the same traversal and symlink rejection every other
+user-supplied path gets; a draft model whose GGUF vocabulary size differs from
+the target's **refuses the start**, naming both models and both sizes, because
+it cannot verify the target's tokens. A draft larger than half its target
+**warns and starts**: that is a bad idea rather than a broken one, and the
+Speed Check will show it. Hermaeus Doctor flags a `draft-*` type with a missing
+or empty draft path, so a configuration that will fail at start is reported
+before you find out by starting.
+
+The combined target-plus-draft weight estimate is shown against available VRAM
+before the server starts. This is information, not a block: you may have
+reasons, and llama.cpp spills to system memory rather than failing.
+
+Existing configurations upgrade automatically. The old N-gram checkbox becomes
+`Types = ["ngram-mod"]` exactly once, which is byte-identical to the flags that
+checkbox used to emit.
+
+### Complete downloads and per-model folders (r27)
+
+Selecting a GGUF in the Hugging Face browser resolves the model's whole **file
+set** from the repository tree that was already fetched:
+
+- **Shard siblings** are required. A partial shard set is a model that does not
+  load, so shards are part of the download or the download is refused. A sharded
+  model is listed once, as its first shard, rather than hidden.
+- **A vision projector** (`mmproj-*.gguf`) beside the model, offered and on by
+  default. Without it a multimodal model loads and quietly cannot see.
+- **An MTP draft head** (`mtp-*.gguf`) beside the model or in an `MTP/`
+  subdirectory, offered and on by default. This is the file speculative
+  decoding drafts from.
+
+Each file keeps its own SHA256 verification, with deletion on mismatch, and its
+own manifest entry. Progress is reported across the set, so a three-shard
+download does not appear to finish three times. A partial failure leaves what
+succeeded on disk and names what is missing: a 4 GB shard that downloaded
+correctly is not deleted because a 60 MB companion failed.
+
+Downloads land in `<models>/llm/<repo folder>/<filename>` rather than one flat
+folder. This is not tidiness. Projector discovery is a sibling-directory scan,
+so in a flat folder every model was offered every other model's projector, and
+companion filenames collide outright: a flat folder can hold exactly one file
+named `mmproj-F16.gguf`. Repository subdirectories are flattened into the model
+folder, so an `MTP/` head lands where that sibling scan already looks.
+**Organize folder** produces the same layout, moving companions with their
+model as one group. Files whose repository is known from the manifest go to
+that repository's folder; the rest go to a folder named from their own base
+name. A file that cannot be attributed is listed as skipped rather than moved
+somewhere wrong, and filenames are never changed.
 
 ## RAG
 
@@ -653,6 +761,27 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
   with that dataset pre-attached (same "new conversation" path as Ctrl+N, so
   an unsent draft in the current chat is handled exactly as that path
   already handles it).
+- **A dataset larger than the in-memory budget is still queried** (r27). It
+  used to be dropped by the cache without being cached, after which every
+  query read an empty cache entry back, scored nothing, and returned no
+  results and no error while re-reading the whole dataset out of SQLite. An
+  over-budget dataset is now scanned from storage, and the retrieval result's
+  planner notes say so and say it will be slower.
+- **Keyword candidates come from a search index**, not from tokenising the
+  whole corpus once per query variant. FTS5 generates the candidates and
+  `Bm25Scorer` still scores them, so ranking among the chunks that matter does
+  not move; the only chunks that stop being scored are ones sharing no query
+  term. The index is backfilled lazily on first search of a dataset, so an
+  install that never opens the RAG panel never pays for it at startup.
+- **The in-memory cache holds embeddings, not documents.** It keeps chunk ids
+  and one contiguous embedding block; content, paths and titles stay in SQLite
+  and are read for the handful of chunks that survive ranking. The footprint
+  per chunk stops varying with document size, so the budget is exact
+  arithmetic rather than an estimate over strings.
+- **Each dataset's search-index size is shown against that budget** on its
+  Dataset Manager card, in the same factual register as the rest of the
+  dataset health line, so a corpus outgrowing memory is visible while it
+  grows rather than discovered afterwards as a slow query.
 
 ## Speech input
 

@@ -47,10 +47,21 @@ public class ServerConfig
     public bool   NoMemoryMap    { get; set; } = false;
 
     /// <summary>
-    /// N-gram speculative decoding (r18 04-llama-server-engine-options.md 4.4): zero additional
-    /// VRAM, drafts from the prompt/history itself. Emits <c>--spec-type ngram-mod</c> only.
+    /// Legacy n-gram speculative decoding flag (r18 04-llama-server-engine-options.md 4.4).
+    /// Superseded by <see cref="Speculative"/> in r27 03-drafting-and-proof.md 3.1:
+    /// <c>--spec-type</c> accepts a comma-separated list, and one bool owning a
+    /// list flag cannot express drafting and n-gram speculation together.
+    /// Read once by <c>SettingsService.NormalizeManagedServers</c>, upgraded to
+    /// <c>Types = ["ngram-mod"]</c>, and never written again.
     /// </summary>
     public bool   NgramSpeculative { get; set; } = false;
+
+    /// <summary>
+    /// r27 03-drafting-and-proof.md 3.1: one composable speculative-decoding
+    /// section rather than a bool per technique. Defaults are empty, so a config
+    /// that never touches this produces a byte-identical launch command.
+    /// </summary>
+    public SpeculativeDecodingConfig Speculative { get; set; } = new();
 
     /// <summary>
     /// r19 5.3: path to a vision projector (mmproj-*.gguf) companion file,

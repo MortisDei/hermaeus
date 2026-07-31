@@ -11,6 +11,7 @@ public partial class SystemOverviewViewModel : ObservableObject
     private readonly ISystemInfoService _system;
     private readonly IToastService _toasts;
     private readonly PrivacyAuditService _privacyAudit;
+    private readonly IStartupTimingService? _startupTiming;
 
     public UiBoundCollection<SystemMetricViewModel> Metrics { get; } = [];
     public UiBoundCollection<GpuInfoViewModel> Gpus { get; } = [];
@@ -22,11 +23,71 @@ public partial class SystemOverviewViewModel : ObservableObject
     [ObservableProperty] private bool _isRefreshing;
     [ObservableProperty] private SystemSnapshot? _snapshot;
 
-    public SystemOverviewViewModel(ISystemInfoService system, IToastService toasts, PrivacyAuditService privacyAudit)
+    public SystemOverviewViewModel(
+        ISystemInfoService system,
+        IToastService toasts,
+        PrivacyAuditService privacyAudit,
+        IStartupTimingService? startupTiming = null)
     {
         _system = system;
         _toasts = toasts;
         _privacyAudit = privacyAudit;
+        _startupTiming = startupTiming;
+        if (_startupTiming is not null)
+            _startupTiming.Changed += RefreshStartupBreakdown;
+        RefreshStartupBreakdown();
+    }
+
+    /// <summary>
+    /// r27 01-startup-that-never-waits.md 1.5: the last startup's phases, in
+    /// order, with their milliseconds. No target, no rating, no judgement about
+    /// whether the number is good; it is the number.
+    /// </summary>
+    public UiBoundCollection<SystemMetricViewModel> StartupPhases { get; } = [];
+
+    /// <summary>Elapsed-to-healthy per auto-started server, which is no longer part of the startup total.</summary>
+    public UiBoundCollection<SystemMetricViewModel> StartupServerStarts { get; } = [];
+
+    [ObservableProperty] private string _startupTotal = string.Empty;
+    [ObservableProperty] private bool _hasStartupBreakdown;
+    [ObservableProperty] private bool _hasStartupServerStarts;
+
+    public void RefreshStartupBreakdown()
+    {
+        var last = _startupTiming?.Last;
+        StartupPhases.Clear();
+        StartupServerStarts.Clear();
+
+        if (last is null)
+        {
+            StartupTotal = string.Empty;
+            HasStartupBreakdown = false;
+            HasStartupServerStarts = false;
+            return;
+        }
+
+        foreach (var phase in last.Phases.Where(p => p.Name != "total"))
+            AddPhase(phase, depth: 0);
+
+        foreach (var start in last.ServerStarts)
+            StartupServerStarts.Add(new SystemMetricViewModel(
+                start.ServerName,
+                start.ReachedHealthy ? $"{start.ElapsedMs} ms to healthy" : $"{start.ElapsedMs} ms, did not reach healthy"));
+
+        StartupTotal = $"{last.TotalMs} ms total";
+        HasStartupBreakdown = StartupPhases.Count > 0;
+        HasStartupServerStarts = StartupServerStarts.Count > 0;
+    }
+
+    private void AddPhase(StartupPhase phase, int depth)
+    {
+        var indent = new string(' ', depth * 4);
+        // 5.3: concurrent parts overlap and do not sum to their parent, so the
+        // label says so rather than leaving a reader to add them up.
+        var suffix = phase.HasChildren && phase.ChildrenRanConcurrently ? " (concurrent)" : string.Empty;
+        StartupPhases.Add(new SystemMetricViewModel($"{indent}{phase.Name}{suffix}", $"{phase.Ms} ms"));
+        foreach (var child in phase.Children)
+            AddPhase(child, depth + 1);
     }
 
     /// <summary>doc 04 4.1: registered next to the ViewModel that owns the action.</summary>

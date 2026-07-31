@@ -10,6 +10,42 @@ statement of a *current* control, that control has been copied into
 See `docs/security-review.md` for current controls and the threat model,
 and `docs/security-roadmap.md` for open hardening work.
 
+## r27: Fast, And Honest About It (Startup, Retrieval, Drafting, Model Downloads)
+
+Three security-relevant changes, all of them new user-controlled input
+reaching a path or a process.
+
+- **A second model file now reaches llama-server.** Speculative decoding with
+  a `draft-*` type passes a user-chosen `.gguf` path to the managed process.
+  It goes through the same validation the app applies to every other
+  user-supplied path before the process is launched: no `..` segments, must
+  resolve, must exist, never a symbolic link or junction. The refusal happens
+  in `StartAsync` before `BuildProcess`, in the same shape as the r9
+  port-conflict refusal, so a doomed or unsafe configuration fails with the
+  cause named rather than launching. Every generated flag reaches the process
+  through `ArgumentList`; none of the new options is shell-interpolated.
+
+- **A compatibility check that is also a safety check.** A draft model whose
+  GGUF vocabulary size differs from the target's cannot verify the target's
+  tokens. `GgufMetadataReader` gained the vocabulary size, read either from
+  the architecture's `.vocab_size` key or from the declared length of the
+  tokenizer token array, skipping the tokens themselves rather than
+  materialising them. The parser's existing untrusted-input posture is
+  unchanged: hard caps on string length, array count and nesting depth, no
+  tensor data read, and null rather than an exception on anything malformed.
+
+- **A remote-influenced string now names a directory.** Download destinations
+  are per-model folders derived from a Hugging Face repository id. That id is
+  typed by the user and comes from a remote service, so `ModelRepoFolder`
+  treats it as hostile input: it is reduced to a single sanitised segment and
+  the resulting path is proven to stay under the destination root after
+  `Path.GetFullPath` rather than trusted to. Two ids that sanitise to the same
+  readable name get distinct folders via a hash of the original, because
+  silently merging two repositories' files into one directory is the failure
+  this change exists to prevent, and doing it by accident would be worse than
+  the flat folder it replaces. Per-file SHA256 verification is unchanged, and
+  a failed hash deletes only the file that failed.
+
 ## r25: Change Your Mind, And Trust What It Tells You (Branching, Context Receipt, Whisper, Benchmark Honesty)
 
 Four security-relevant changes, one of which closes a real availability bug.

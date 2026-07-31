@@ -156,6 +156,89 @@ public sealed class ConversationStore : IConversationStore
         return r;
     }
 
+    /// <summary>
+    /// r27 05-small-open-items.md 5.1: the sidebar's columns only. No
+    /// messages_json, so no per-conversation message deserialisation and no
+    /// ConversationTree.BackfillLinearChain pass over messages nothing is going
+    /// to render.
+    /// </summary>
+    public async Task<List<ConversationSummary>> GetSummariesAsync(bool includeArchived = true, CancellationToken ct = default)
+    {
+        await EnsureInitializedAsync(ct);
+        await using var c = new SqliteConnection(Cs); await c.OpenAsync(ct);
+        var cmd = c.CreateCommand();
+        cmd.CommandText = includeArchived
+            ? $"SELECT {SummaryColumns} FROM conversations ORDER BY is_archived ASC, is_pinned DESC, updated_at DESC"
+            : $"SELECT {SummaryColumns} FROM conversations WHERE is_archived = 0 ORDER BY is_archived ASC, is_pinned DESC, updated_at DESC";
+
+        var r = new List<ConversationSummary>();
+        await using var rd = await cmd.ExecuteReaderAsync(ct);
+        while (await rd.ReadAsync(ct)) r.Add(MapSummary(rd));
+        return r;
+    }
+
+    /// <summary>
+    /// FTS keeps matching message text; this changes what is returned, not what
+    /// is searched. Falls back to LIKE for malformed MATCH input exactly as
+    /// <see cref="SearchAsync"/> does.
+    /// </summary>
+    public async Task<List<ConversationSummary>> SearchSummariesAsync(string query, CancellationToken ct = default)
+    {
+        var trimmed = (query ?? string.Empty).Trim();
+        if (trimmed.Length == 0)
+            return await GetSummariesAsync(includeArchived: true, ct);
+
+        await EnsureInitializedAsync(ct);
+        await using var c = new SqliteConnection(Cs); await c.OpenAsync(ct);
+
+        var ftsQuery = BuildFtsQuery(trimmed);
+        if (ftsQuery.Length == 0)
+            return [.. (await SearchAsync(trimmed, ct)).Select(ConversationSummary.From)];
+
+        var cmd = c.CreateCommand();
+        cmd.CommandText = $@"
+            SELECT {QualifiedSummaryColumns}
+            FROM conversations c
+            JOIN conversations_fts f ON f.id = c.id
+            WHERE conversations_fts MATCH $q
+            ORDER BY c.is_archived ASC, c.is_pinned DESC, c.updated_at DESC
+            LIMIT 50";
+        cmd.Parameters.AddWithValue("$q", ftsQuery);
+
+        try
+        {
+            var r = new List<ConversationSummary>();
+            await using var rd = await cmd.ExecuteReaderAsync(ct);
+            while (await rd.ReadAsync(ct)) r.Add(MapSummary(rd));
+            return r;
+        }
+        catch (SqliteException)
+        {
+            return [.. (await SearchAsync(trimmed, ct)).Select(ConversationSummary.From)];
+        }
+    }
+
+    private const string SummaryColumns =
+        "id, title, model_id, created_at, updated_at, folder, tags_json, is_pinned, is_archived, project_id, rag_dataset_id, recall_excluded";
+
+    /// <summary>The same columns for the FTS join, where "conversations" is aliased to c.</summary>
+    private const string QualifiedSummaryColumns =
+        "c.id, c.title, c.model_id, c.created_at, c.updated_at, c.folder, c.tags_json, c.is_pinned, c.is_archived, c.project_id, c.rag_dataset_id, c.recall_excluded";
+
+    private static ConversationSummary MapSummary(SqliteDataReader r) => new(
+        GetString(r, "id"),
+        GetString(r, "title"),
+        GetString(r, "model_id"),
+        SqliteDateTime.Parse(GetString(r, "created_at")),
+        SqliteDateTime.Parse(GetString(r, "updated_at")),
+        GetString(r, "folder"),
+        JsonSerializer.Deserialize<List<string>>(GetString(r, "tags_json", "[]")) ?? [],
+        GetInt(r, "is_pinned") != 0,
+        GetInt(r, "is_archived") != 0,
+        GetString(r, "project_id"),
+        GetString(r, "rag_dataset_id"),
+        GetInt(r, "recall_excluded") != 0);
+
     public async Task<Conversation?> GetByIdAsync(string id, CancellationToken ct = default)
     {
         await EnsureInitializedAsync(ct);
