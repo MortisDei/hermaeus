@@ -443,7 +443,7 @@
             <ScrollViewer x:Name="MessagesScroll"
                           VerticalScrollBarVisibility="Auto"
                           HorizontalScrollBarVisibility="Disabled"
-                          Padding="16,8,16,28">
+                          Padding="16,8,16,8">
                 <StackPanel>
                     <Button Content="Show earlier messages"
                             Command="{Binding ShowEarlierMessagesCommand}"
@@ -464,6 +464,15 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
+                    <!-- r29 doc 01 1.3: keep this. The last assistant message's
+                         copy/read-aloud row sits outside its message border and
+                         used to end up flush against the input bar, where it
+                         could not reliably be clicked. ScrollViewer.Padding did
+                         not produce usable space (whether it contributes to the
+                         scrollable extent is a ScrollContentPresenter detail);
+                         a spacer inside the scrolled content unambiguously
+                         does. Do not tidy it away. -->
+                    <Border x:Name="TranscriptTrailingSpacer" Height="36" Opacity="0" IsHitTestVisible="False" />
                 </StackPanel>
             </ScrollViewer>
 
@@ -664,8 +673,7 @@
                              x:Name="InputBox"
                              Classes="chat-input"
                              Text="{Binding InputText}"
-                             Watermark="Message or drop text/code files here..."
-                             KeyDown="OnInputKeyDown" />
+                             Watermark="Message or drop text/code files here..." />
 
                     <controls:MicButton Grid.Column="2" x:Name="ChatMicButton" VerticalAlignment="Center" />
 

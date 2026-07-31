@@ -239,7 +239,22 @@ namespace Hermaeus.Tests
                     TryDelete(path);
             };
 
-        private readonly string _root = Path.Combine(Path.GetTempPath(), $"hermaeus-tests-{Guid.NewGuid():N}");
+        /// <summary>
+        /// RUNNER_TEMP when a GitHub Actions runner set it, Path.GetTempPath()
+        /// otherwise. The runner's own temp directory is the path CI excludes
+        /// from Defender (r29 doc 04 4.2) and the path the runner cleans between
+        /// jobs; Path.GetTempPath() is not necessarily either of those. A
+        /// developer machine has no RUNNER_TEMP and is unaffected.
+        /// </summary>
+        private static string TempRoot()
+        {
+            var runnerTemp = Environment.GetEnvironmentVariable("RUNNER_TEMP");
+            return !string.IsNullOrWhiteSpace(runnerTemp) && Directory.Exists(runnerTemp)
+                ? runnerTemp
+                : Path.GetTempPath();
+        }
+
+        private readonly string _root = Path.Combine(TempRoot(), $"hermaeus-tests-{Guid.NewGuid():N}");
 
         public TempDir() => Directory.CreateDirectory(_root);
 

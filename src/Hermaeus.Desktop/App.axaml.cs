@@ -223,7 +223,7 @@ public partial class App : Application
         s.AddSingleton<ChatViewModel>();
         s.AddSingleton<AgentScenarioSuiteViewModel>();
         s.AddSingleton<AgentViewModel>();
-        // Shared between SettingsViewModel (Voice orchestration/channels/profiles) and
+        // Shared between SettingsViewModel (Voice orchestration/channels) and
         // ServicesViewModel (Voice providers card) so both pages see the same live state.
         s.AddSingleton<TtsSettingsViewModel>();
         s.AddSingleton<SttSettingsViewModel>();

@@ -1384,6 +1384,33 @@ public partial class ServicesViewModel : ViewModelBase
     /// <summary>r24 doc 05 5.7: speech recognition process/model/device config.</summary>
     public SttSettingsViewModel? Stt { get; }
 
+    /// <summary>
+    /// r29 doc 01 1.1: set by the DI root to the single settings save flow
+    /// (<see cref="SettingsViewModel.SaveAsync"/>). The Voice and STT cards on
+    /// this page mutate DI singletons shared with Settings, and only that flow
+    /// persists them. Null in tests that do not exercise saving.
+    /// </summary>
+    public Func<Task>? SaveAllSettings { get; set; }
+
+    /// <summary>Transient "Saved" confirmation, mirroring the Settings page.</summary>
+    [ObservableProperty] private bool _isSaved;
+
+    [RelayCommand]
+    private async Task SaveSettingsAsync()
+    {
+        if (SaveAllSettings is null)
+            return;
+        await SaveAllSettings();
+        IsSaved = true;
+        _ = ResetIsSavedAfterDelayAsync();
+    }
+
+    private async Task ResetIsSavedAfterDelayAsync()
+    {
+        await Task.Delay(2000);
+        IsSaved = false;
+    }
+
     public UiBoundCollection<ServerProcessViewModel> Servers { get; } = [];
     public UiBoundCollection<RuntimeProfileViewModel> RuntimeProfiles { get; } = [];
     public event EventHandler? ServerAvailabilityChanged;

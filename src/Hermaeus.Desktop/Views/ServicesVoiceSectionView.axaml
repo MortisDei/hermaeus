@@ -16,7 +16,9 @@
                               Width="15" Height="15" />
                 </Button>
             </Grid>
-            <TextBlock Text="Local/remote text-to-speech backends for chat replies, agent narration, and system notifications. Per-channel routing and named voice profiles are in Settings > Voice."
+            <!-- r29 doc 05 5.1: this used to promise "named voice profiles", which
+                 no UI has ever created or edited. Per-channel routing is real. -->
+            <TextBlock Text="Local/remote text-to-speech backends for chat replies, agent narration, and system notifications. Per-channel routing is in Settings > Voice."
                        FontSize="12" Opacity="0.5" TextWrapping="Wrap" />
             <Grid ColumnDefinitions="110,*" ColumnSpacing="12">
                 <TextBlock Grid.Column="0" Text="Provider" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />

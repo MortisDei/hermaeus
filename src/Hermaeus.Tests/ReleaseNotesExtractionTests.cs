@@ -38,14 +38,30 @@ internal static class ReleaseNotesExtractionTests
         Oldest section body.
         """;
 
+    /// <summary>
+    /// A bash that can actually run this repository's scripts.
+    ///
+    /// r29: probing `bash --version` alone is not enough on Windows. A machine
+    /// with WSL enabled has %LOCALAPPDATA%\Microsoft\WindowsApps\bash.exe ahead
+    /// of Git-for-Windows on PATH; it answers --version with exit 0 and then
+    /// cannot see a Windows-path script at all, so every run of the script
+    /// exited 127. The two cases that assert exit 0 failed, and the three that
+    /// assert a NON-zero exit passed for entirely the wrong reason. So the
+    /// candidate is now probed against the real script path, and the explicit
+    /// Git-for-Windows locations are tried before the bare name.
+    /// </summary>
     private static string? FindBash()
     {
-        var candidates = new[]
-        {
-            "bash",
-            @"C:\Program Files\Git\bin\bash.exe",
-            @"C:\Program Files (x86)\Git\bin\bash.exe"
-        };
+        string[] candidates = OperatingSystem.IsWindows()
+            ?
+            [
+                @"C:\Program Files\Git\bin\bash.exe",
+                @"C:\Program Files (x86)\Git\bin\bash.exe",
+                "bash"
+            ]
+            : ["bash"];
+
+        var script = ScriptPath();
 
         foreach (var candidate in candidates)
         {
@@ -57,7 +73,10 @@ internal static class ReleaseNotesExtractionTests
                     RedirectStandardError = true,
                     UseShellExecute = false
                 };
-                psi.ArgumentList.Add("--version");
+                psi.ArgumentList.Add("-c");
+                // Both halves matter: a shell that cannot see the script, and a
+                // shell with no awk, would each leave the script exiting 127.
+                psi.ArgumentList.Add($"test -f '{script}' && command -v awk >/dev/null");
                 using var probe = Process.Start(psi);
                 if (probe is null)
                     continue;
@@ -67,7 +86,7 @@ internal static class ReleaseNotesExtractionTests
             }
             catch
             {
-                // Not found at this candidate; try the next one.
+                // Not usable at this candidate; try the next one.
             }
         }
 

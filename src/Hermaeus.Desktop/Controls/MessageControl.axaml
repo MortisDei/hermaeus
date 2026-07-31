@@ -252,7 +252,17 @@
                 </StackPanel>
             </Border>
 
+            <!-- r29 doc 01 1.3: 6px padding around a 12-13px icon gives roughly a
+                 24px square, which is a small target for the most-used controls
+                 in the app. Scoped to this row rather than to .icon-btn globally,
+                 which would resize every icon button in every panel. -->
             <Grid Margin="0,4,0,0" ColumnDefinitions="Auto,*">
+                <Grid.Styles>
+                    <Style Selector="Button.icon-btn">
+                        <Setter Property="MinWidth" Value="28" />
+                        <Setter Property="MinHeight" Value="28" />
+                    </Style>
+                </Grid.Styles>
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="2">
                     <ContentControl Content="{Binding}"
                                     ContentTemplate="{StaticResource BranchSwitcherTemplate}" />

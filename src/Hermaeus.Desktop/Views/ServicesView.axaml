@@ -13,9 +13,22 @@
                   HorizontalScrollBarVisibility="Disabled">
         <StackPanel MaxWidth="760" Spacing="16">
 
-            <TextBlock Text="Services" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,4" />
-            <TextBlock FontSize="13" Opacity="0.45" TextWrapping="Wrap"
-                       Text="Manage llama-server processes. Paths and config are saved per server. Auto-start launches on Hermaeus startup if model path is set." />
+            <!-- r29 doc 01 1.1: the Voice and STT cards at the bottom of this page
+                 edit shared settings that only a save writes to disk. Save here
+                 runs the same flow as the Settings page's Save button. -->
+            <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
+                <StackPanel Grid.Column="0" Spacing="4">
+                    <TextBlock Text="Services" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,4" />
+                    <TextBlock FontSize="13" Opacity="0.45" TextWrapping="Wrap"
+                               Text="Manage llama-server processes. Paths and config are saved per server. Voice and speech settings below are saved with the Save button. Auto-start launches on Hermaeus startup if model path is set." />
+                </StackPanel>
+                <TextBlock Grid.Column="1" Text="Saved" IsVisible="{Binding IsSaved}"
+                           VerticalAlignment="Center" FontSize="13"
+                           Foreground="{DynamicResource AccentFillColorDefaultBrush}" />
+                <Button Grid.Column="2" Command="{Binding SaveSettingsCommand}" Content="Save"
+                        VerticalAlignment="Top"
+                        FontSize="13" Padding="16,8" CornerRadius="8" />
+            </Grid>
 
             <Border Classes="settings-card" Padding="16">
                 <StackPanel Spacing="12">

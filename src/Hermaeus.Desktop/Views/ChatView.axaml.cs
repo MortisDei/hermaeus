@@ -14,7 +14,6 @@ public partial class ChatView : UserControl
 {
     private ChatViewModel? _vm;
     private EventHandler? _scrollHandler;
-    private EventHandler? _settingsChangedHandler;
     private EventHandler<ScrollChangedEventArgs>? _scrollChangedHandler;
     private Action<string>? _micTranscriptHandler;
     // r19 6.3: content (action row, sources, memory pills, the incremental
@@ -36,14 +35,17 @@ public partial class ChatView : UserControl
         // silently went nowhere. Attached once here since InputBox itself never
         // changes, only its DataContext.
         if (this.FindControl<TextBox>("InputBox") is { } inputBox)
+        {
             inputBox.AddHandler(TextBox.PastingFromClipboardEvent, OnInputPastingFromClipboard);
+            // r29 doc 01 1.4: tunnelling, so Enter reaches OnInputKeyDown before
+            // TextBox's own class handler inserts a newline and marks it handled.
+            inputBox.AddHandler(InputElement.KeyDownEvent, OnInputKeyDown, RoutingStrategies.Tunnel);
+        }
 
         DataContextChanged += (_, _) =>
         {
             if (_vm is not null && _scrollHandler is not null)
                 _vm.ScrollToBottom -= _scrollHandler;
-            if (_vm is not null && _settingsChangedHandler is not null)
-                _vm.Settings.SettingsChanged -= _settingsChangedHandler;
             if (_scrollChangedHandler is not null && this.FindControl<ScrollViewer>("MessagesScroll") is { } previousScroll)
                 previousScroll.ScrollChanged -= _scrollChangedHandler;
             if (_vm is not null)
@@ -59,7 +61,6 @@ public partial class ChatView : UserControl
             {
                 _vm = null;
                 _scrollHandler = null;
-                _settingsChangedHandler = null;
                 _scrollChangedHandler = null;
                 _micTranscriptHandler = null;
                 return;
@@ -71,10 +72,6 @@ public partial class ChatView : UserControl
                 micButton.ViewModel = vm.ChatMic;
             _micTranscriptHandler = InsertDictatedTextAtCursor;
             vm.ChatMic.TranscriptReady += _micTranscriptHandler;
-
-            _settingsChangedHandler = (_, _) => ApplyAcceptsReturn();
-            vm.Settings.SettingsChanged += _settingsChangedHandler;
-            ApplyAcceptsReturn();
 
             _pinnedToBottom = true;
             _scrollHandler = (_, _) =>
@@ -260,31 +257,55 @@ public partial class ChatView : UserControl
         Math.Max(0, scroll.Extent.Height - scroll.Viewport.Height - scroll.Offset.Y);
 
     /// <summary>
-    /// AcceptsReturn must reflect Ui.CtrlEnterToSend: when it's true (plain
-    /// Enter inserts a newline, Ctrl+Enter sends), the TextBox needs to own
-    /// Enter for its normal newline insertion. When it's false, AcceptsReturn
-    /// must be false too, otherwise Avalonia's own Enter handling inserts a
-    /// newline and marks the key handled before <see cref="OnInputKeyDown"/>
-    /// ever gets to send on plain Enter.
+    /// r29 doc 01 1.4: AcceptsReturn is true always and this handler owns both
+    /// Enter combinations, send and newline. It used to own only send and leave
+    /// newline to AcceptsReturn, which meant that with Ui.CtrlEnterToSend false
+    /// (the default) AcceptsReturn was false and nothing produced a newline at
+    /// all. Registered with RoutingStrategies.Tunnel so the app sees Enter
+    /// before TextBox's own class handler consumes it - the mechanism the
+    /// original 0.24.x fix worked around rather than used.
     /// </summary>
-    private void ApplyAcceptsReturn()
-    {
-        if (_vm is null) return;
-        if (this.FindControl<TextBox>("InputBox") is { } input)
-            input.AcceptsReturn = _vm.Settings.Settings.Ui.CtrlEnterToSend;
-    }
-
     private void OnInputKeyDown(object? sender, KeyEventArgs e)
     {
         if (_vm is null || _vm.IsGenerating) return;
-        var ctrlEnter = _vm.Settings.Settings.Ui.CtrlEnterToSend;
-        var sendModifier = ctrlEnter ? KeyModifiers.Control : KeyModifiers.None;
-        if (e.Key == Key.Return && e.KeyModifiers == sendModifier)
+
+        var modifiers = ChatInputModifiers.None;
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Control)) modifiers |= ChatInputModifiers.Control;
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Shift)) modifiers |= ChatInputModifiers.Shift;
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Alt)) modifiers |= ChatInputModifiers.Alt;
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Meta)) modifiers |= ChatInputModifiers.Meta;
+
+        var action = ChatInputKeys.Resolve(
+            e.Key is Key.Return or Key.Enter,
+            modifiers,
+            _vm.Settings.Settings.Ui.CtrlEnterToSend);
+
+        switch (action)
         {
-            e.Handled = true;
-            if (_vm.SendCommand.CanExecute(null))
-                _vm.SendCommand.Execute(null);
+            case ChatInputKeyAction.Send:
+                e.Handled = true;
+                if (_vm.SendCommand.CanExecute(null))
+                    _vm.SendCommand.Execute(null);
+                break;
+            case ChatInputKeyAction.Newline:
+                e.Handled = true;
+                InsertAtCursor(Environment.NewLine);
+                break;
         }
+    }
+
+    /// <summary>
+    /// Inserts literal text at the caret and leaves the caret after it. Shares
+    /// the caret arithmetic with <see cref="InsertDictatedTextAtCursor"/>, which
+    /// adds its own leading-space rule on top.
+    /// </summary>
+    private void InsertAtCursor(string text)
+    {
+        if (_vm is null || this.FindControl<TextBox>("InputBox") is not { } inputBox) return;
+        var current = _vm.InputText;
+        var caret = Math.Clamp(inputBox.CaretIndex, 0, current.Length);
+        _vm.InputText = current.Insert(caret, text);
+        inputBox.CaretIndex = caret + text.Length;
     }
 
     /// <summary>r24 doc 05 5.4: dictation inserts at the cursor for editing - it never

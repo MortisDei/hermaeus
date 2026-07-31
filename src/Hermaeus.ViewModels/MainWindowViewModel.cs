@@ -186,6 +186,11 @@ public partial class MainWindowViewModel : ViewModelBase
         };
         // allow settings view to request re-running the setup wizard
         Settings.RequestShowSetupWizard = () => ActivePanel = "wizard";
+        // r29 doc 01 1.1: the Services page hosts the Voice and STT cards, which
+        // are the same DI singletons Settings edits. Nothing on Services wrote
+        // them to disk, so every edit made there was lost on restart. Route its
+        // Save through the one existing save flow rather than adding a second.
+        Services.SaveAllSettings = Settings.SaveAsync;
         Chat.PropertyChanged += (s, e) => { if (e.PropertyName == "ConversationTitle") OnPropertyChanged(nameof(WindowTitle)); };
         Chat.ConversationSaved += OnConversationSaved;
         // r27 01 1.3: Chat asks Services what it is waiting on, through a
@@ -739,7 +744,12 @@ public partial class MainWindowViewModel : ViewModelBase
     }
     [RelayCommand] private void ShowRagPanel()         => ActivePanel = "rag";
     [RelayCommand] private void ShowModelsPanel()      { ActivePanel = "models"; RunBackgroundTaskAsync("refresh models panel", () => Models.RefreshCommand.ExecuteAsync(null)); }
-    [RelayCommand] private void ShowServicesPanel()    => ActivePanel = "services";
+    // r29 doc 01 1.1: Services can now persist the whole settings object, so it
+    // needs the same guarantee the Settings page has - every section view model
+    // holds current state when Save is pressed. Without this, a section left
+    // stale by another panel's direct save (model profiles, projects, the setup
+    // wizard) would be written back over the real value.
+    [RelayCommand] private void ShowServicesPanel()    { ActivePanel = "services"; Settings.Reload(); }
     [RelayCommand] private void ShowBenchmarksPanel()  { ActivePanel = "benchmarks"; RunBackgroundTaskAsync("load benchmarks panel", () => Benchmarks.LoadCommand.ExecuteAsync(null)); }
     [RelayCommand] private void ShowSystemPanel()      { ActivePanel = "system"; RunBackgroundTaskAsync("refresh system panel", () => SystemOverview.RefreshCommand.ExecuteAsync(null)); }
     [RelayCommand] private void ShowDoctorPanel()

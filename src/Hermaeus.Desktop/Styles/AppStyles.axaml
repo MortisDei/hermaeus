@@ -105,10 +105,13 @@
         <Setter Property="MinHeight" Value="48" />
         <Setter Property="MaxHeight" Value="200" />
         <Setter Property="TextWrapping" Value="Wrap" />
-        <!-- AcceptsReturn is set dynamically in ChatView.axaml.cs based on
-             Ui.CtrlEnterToSend: hardcoding it true here would make Avalonia's
-             own newline-insertion swallow a plain Enter before the app's send
-             handler ever sees it, regardless of the setting. -->
+        <!-- r29 doc 01 1.4: AcceptsReturn is true always. It used to be set
+             dynamically from Ui.CtrlEnterToSend, which left the default
+             configuration (setting false) with AcceptsReturn false and no key
+             combination that could insert a newline at all. ChatView's
+             tunnelling KeyDown handler now decides send vs newline for both
+             settings before TextBox's class handler sees the key. -->
+        <Setter Property="AcceptsReturn" Value="True" />
         <Setter Property="VerticalContentAlignment" Value="Center" />
     </Style>
 

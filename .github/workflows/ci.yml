@@ -41,6 +41,20 @@ jobs:
       - name: Build (zero warnings enforced)
         run: dotnet build Hermaeus.sln --no-restore -c Release
 
+      # r29 doc 04 4.1: an experiment, not a settled optimisation. The
+      # measurement in that doc showed the Windows leg's cost is hosted-runner
+      # filesystem I/O rather than test code (the same test that takes 164ms on
+      # a dev machine takes 4,409ms here). Real-time scanning of every file the
+      # suite creates is the one cheap, reversible lever. Success condition:
+      # the Windows summed test duration in the TRX artifact falls materially
+      # below 501.4s. If it does not, delete this step.
+      - name: Exclude test working set from Defender (windows only)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Add-MpPreference -ExclusionPath $env:RUNNER_TEMP
+          Add-MpPreference -ExclusionPath $env:GITHUB_WORKSPACE
+
       # The TRX logger is VSTest's own, so this adds no package. It exists
       # because the Windows leg spends about seven times as long inside this
       # step as the Linux leg does, and nobody knew which tests owned the
