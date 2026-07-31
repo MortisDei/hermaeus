@@ -60,7 +60,12 @@ downloaded model arrives complete.
   vocabulary sizes; a draft larger than half its target warns instead,
   because that is a bad idea rather than a broken one.
 
-- **A Speed Check suite, and a comparison between two of its runs.**
+- **A Speed Check suite, and a comparison between two of its runs.** The first
+  recorded result is in `docs/benchmarks.md` and is a null result: on
+  gemma-4-E4B-it-qat-UD-Q4_K_XL, `draft-mtp` measured 70.2 median tok/s against
+  `ngram-mod`'s 69.7, with time to first token 175 ms worse, which one
+  iteration per case cannot distinguish from noise. That is what the check is
+  for.
   Structured, repetitive, code and free-prose prompts, chosen because
   drafting behaves differently across those shapes. It measures speed, so no
   case asserts anything about quality. A run records the speculative settings
