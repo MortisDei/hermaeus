@@ -115,7 +115,16 @@ was changed about it.
   Tests stay serial by default. The measurement and what was done about it are
   recorded in `docs/pull-requests.md`.
 
+- **The nav rail shows which panel you are on.** The active button's icon
+  carries the brand accent and scales up slightly, through a render transform
+  rather than a size change so navigating never reflows the row.
+
 ### Fixed
+
+- **`ShowActivity` never raised `PropertyChanged`.** It was left out of
+  `OnActivePanelChanged`'s notification list when the property was added, so
+  anything bound to it stayed stale. A guard test now fails if a per-panel bool
+  is added without being notified.
 
 - **A `Process` object that was constructed but never started made `Stop()`
   throw.** `Process.HasExited` raises for a process with no OS process behind

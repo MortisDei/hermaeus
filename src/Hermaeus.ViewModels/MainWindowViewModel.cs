@@ -817,6 +817,9 @@ public partial class MainWindowViewModel : ViewModelBase
         OnPropertyChanged(nameof(ShowDoctor));
         OnPropertyChanged(nameof(ShowMemories));
         OnPropertyChanged(nameof(ShowLogs));
+        // ShowActivity was missing from this list since the property was added,
+        // so anything binding to it never refreshed on navigation.
+        OnPropertyChanged(nameof(ShowActivity));
         OnPropertyChanged(nameof(ShowWizard));
         OnPropertyChanged(nameof(ActiveViewModel));
         OnPropertyChanged(nameof(WindowTitle));

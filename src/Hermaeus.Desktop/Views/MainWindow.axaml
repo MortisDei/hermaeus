@@ -56,9 +56,30 @@
                             <Style Selector="Button.icon-btn">
                                 <Setter Property="Padding" Value="8,6" />
                             </Style>
+
+                            <!-- Which panel you are on, readable at a glance. The
+                                 icon scales through a RenderTransform rather than a
+                                 Width/Height change so the row never reflows as you
+                                 navigate: a layout-affecting size change would shift
+                                 every button beside it and reintroduce the cursor
+                                 boundary the Spacing="0" above exists to remove. -->
+                            <Style Selector="Button.icon-btn.nav-active /template/ ContentPresenter">
+                                <Setter Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+                            </Style>
+                            <Style Selector="Button.icon-btn.nav-active PathIcon">
+                                <Setter Property="Foreground" Value="{DynamicResource BrandForestBrush}" />
+                                <Setter Property="RenderTransformOrigin" Value="50%,50%" />
+                                <Setter Property="RenderTransform">
+                                    <ScaleTransform ScaleX="1.2" ScaleY="1.2" />
+                                </Setter>
+                            </Style>
+                            <Style Selector="Button.icon-btn.nav-active TextBlock">
+                                <Setter Property="Foreground" Value="{DynamicResource BrandForestBrush}" />
+                                <Setter Property="FontWeight" Value="SemiBold" />
+                            </Style>
                         </StackPanel.Styles>
 
-                        <Button Classes="icon-btn" Command="{Binding ShowChatPanelCommand}"
+                        <Button Classes="icon-btn" Command="{Binding ShowChatPanelCommand}" Classes.nav-active="{Binding ShowChat}"
                                 ToolTip.Tip="Chat">
                             <StackPanel Orientation="Horizontal" Spacing="4">
                                 <PathIcon Data="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"
@@ -67,7 +88,7 @@
                             </StackPanel>
                         </Button>
 
-                        <Button Classes="icon-btn" Command="{Binding ShowAgentPanelCommand}"
+                        <Button Classes="icon-btn" Command="{Binding ShowAgentPanelCommand}" Classes.nav-active="{Binding ShowAgent}"
                                 ToolTip.Tip="Agent - local task workbench">
                             <StackPanel Orientation="Horizontal" Spacing="4">
                                 <PathIcon Data="M12 2 4 5v6c0 5.55 3.84 9.74 8 11 4.16-1.26 8-5.45 8-11V5l-8-3zm0 2.18L18 6.43V11c0 4.24-2.55 7.51-6 8.82C8.55 18.51 6 15.24 6 11V6.43l6-2.25zM11 7h2v5h-2V7zm0 7h2v2h-2v-2z"
@@ -76,7 +97,7 @@
                             </StackPanel>
                         </Button>
 
-                        <Button Classes="icon-btn" Command="{Binding ShowRagPanelCommand}"
+                        <Button Classes="icon-btn" Command="{Binding ShowRagPanelCommand}" Classes.nav-active="{Binding ShowRag}"
                                 ToolTip.Tip="RAG - ask your documents">
                             <StackPanel Orientation="Horizontal" Spacing="4">
                                 <PathIcon Data="M12 3L1 9l11 6 9-4.91V17h2V9L12 3zM5 13.18v4L12 21l7-3.82v-4L12 17l-7-3.82z"
@@ -85,7 +106,7 @@
                             </StackPanel>
                         </Button>
 
-                        <Button Classes="icon-btn" Command="{Binding ShowModelsPanelCommand}"
+                        <Button Classes="icon-btn" Command="{Binding ShowModelsPanelCommand}" Classes.nav-active="{Binding ShowModels}"
                                 ToolTip.Tip="Model management">
                             <StackPanel Orientation="Horizontal" Spacing="4">
                                 <PathIcon Data="M4 8h4V4H4v4zm6 12h4v-4h-4v4zm-6 0h4v-4H4v4zm0-6h4v-4H4v4zm6 0h4v-4h-4v4zm6-10v4h4V4h-4zm-6 4h4V4h-4v4zm6 6h4v-4h-4v4zm0 6h4v-4h-4v4z"
@@ -95,7 +116,7 @@
                         </Button>
 
                         <!-- Services / process manager -->
-                        <Button Classes="icon-btn" Command="{Binding ShowServicesPanelCommand}"
+                        <Button Classes="icon-btn" Command="{Binding ShowServicesPanelCommand}" Classes.nav-active="{Binding ShowServices}"
                                 ToolTip.Tip="Services - manage llama-server processes">
                             <StackPanel Orientation="Horizontal" Spacing="4">
                                 <Grid>
@@ -113,7 +134,7 @@
                             </StackPanel>
                         </Button>
 
-                        <Button Classes="icon-btn" Command="{Binding ShowBenchmarksPanelCommand}"
+                        <Button Classes="icon-btn" Command="{Binding ShowBenchmarksPanelCommand}" Classes.nav-active="{Binding ShowBenchmarks}"
                                 ToolTip.Tip="Benchmarks">
                             <StackPanel Orientation="Horizontal" Spacing="4">
                                 <PathIcon Data="M3 17h2v-7H3v7zm4 0h2V7H7v10zm4 0h2v-4h-2v4zm4 0h2V4h-2v13zm4 0h2v-9h-2v9z"
@@ -122,7 +143,7 @@
                             </StackPanel>
                         </Button>
 
-                        <Button Classes="icon-btn" Command="{Binding ShowSystemPanelCommand}"
+                        <Button Classes="icon-btn" Command="{Binding ShowSystemPanelCommand}" Classes.nav-active="{Binding ShowSystem}"
                                 ToolTip.Tip="System overview">
                             <StackPanel Orientation="Horizontal" Spacing="4">
                                 <PathIcon Data="M4 5h16v10H4V5zm0-2c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h6v2H7v2h10v-2h-3v-2h6c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2H4z"
@@ -131,7 +152,7 @@
                             </StackPanel>
                         </Button>
 
-                        <Button Classes="icon-btn" Command="{Binding ShowDoctorPanelCommand}"
+                        <Button Classes="icon-btn" Command="{Binding ShowDoctorPanelCommand}" Classes.nav-active="{Binding ShowDoctor}"
                                 ToolTip.Tip="Hermaeus Doctor">
                             <StackPanel Orientation="Horizontal" Spacing="4">
                                 <Grid>
@@ -151,7 +172,7 @@
                             </StackPanel>
                         </Button>
 
-                        <Button Classes="icon-btn" Command="{Binding ShowMemoriesPanelCommand}"
+                        <Button Classes="icon-btn" Command="{Binding ShowMemoriesPanelCommand}" Classes.nav-active="{Binding ShowMemories}"
                                 ToolTip.Tip="Memories - review, manage, and triage chat memories by conversation">
                             <StackPanel Orientation="Horizontal" Spacing="4">
                                 <PathIcon Data="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.5 6.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z"
@@ -160,7 +181,7 @@
                             </StackPanel>
                         </Button>
 
-                        <Button Classes="icon-btn" Command="{Binding ShowLogsPanelCommand}"
+                        <Button Classes="icon-btn" Command="{Binding ShowLogsPanelCommand}" Classes.nav-active="{Binding ShowLogs}"
                             ToolTip.Tip="Runtime logs">
                             <StackPanel Orientation="Horizontal" Spacing="4">
                                 <PathIcon Data="M4 6h16v2H4V6zm0 4h16v2H4v-2zm0 4h10v2H4v-2z"
@@ -169,7 +190,7 @@
                             </StackPanel>
                         </Button>
 
-                        <Button Classes="icon-btn" Command="{Binding ShowActivityPanelCommand}"
+                        <Button Classes="icon-btn" Command="{Binding ShowActivityPanelCommand}" Classes.nav-active="{Binding ShowActivity}"
                             ToolTip.Tip="Activity - what the app has been doing">
                             <StackPanel Orientation="Horizontal" Spacing="4">
                                 <PathIcon Data="M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6a7 7 0 1 1 2.05 4.95l-1.42 1.42A9 9 0 1 0 13 3zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"
@@ -196,7 +217,7 @@
                             </StackPanel>
                         </Button>
 
-                        <Button Classes="icon-btn" Command="{Binding ShowSettingsPanelCommand}"
+                        <Button Classes="icon-btn" Command="{Binding ShowSettingsPanelCommand}" Classes.nav-active="{Binding ShowSettings}"
                             ToolTip.Tip="Settings">
                             <StackPanel Orientation="Horizontal" Spacing="4">
                                 <PathIcon Data="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"
