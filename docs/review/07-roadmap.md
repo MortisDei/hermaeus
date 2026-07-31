@@ -36,10 +36,10 @@ plus `git log --oneline main..HEAD` and know exactly where to resume.
 | 17 | 2.3 Observed spread reported | yes |
 | 18 | 2.4 Acceptance shown beside speed | yes |
 | 19 | 2.5 Doctor check for drafting that never engages | yes |
-| 20 | 3.1 Activity target resolver | no |
-| 21 | 3.2 Activity view navigates | no |
-| 22 | 3.3 Four missing event sources | no |
-| 23 | 3.4 Adjacent rows grouped | no |
+| 20 | 3.1 Activity target resolver | yes |
+| 21 | 3.2 Activity view navigates | yes |
+| 22 | 3.3 Four missing event sources | yes |
+| 23 | 3.4 Adjacent rows grouped | yes |
 | 24 | 4.2 Fix what 4.1 named | yes |
 | 25 | 4.3 Parallel collection (only if justified) | descoped by 4.1 |
 | 26 | 4.4 CI note recorded | yes |

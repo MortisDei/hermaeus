@@ -10,14 +10,25 @@ public sealed class XttsProcessManager : IDisposable
     private CancellationTokenSource? _healthCts;
     private readonly IProcessJobObject _jobObject;
     private readonly IRuntimeLogService? _runtimeLogs;
+    /// <summary>r28 doc 03 3.3. Fire-and-forget; a recorder failure never fails a voice start.</summary>
+    private readonly IActivityRecorder? _activity;
 
-    public XttsProcessManager(IProcessJobObject? jobObject = null, IRuntimeLogService? runtimeLogs = null)
+    public XttsProcessManager(IProcessJobObject? jobObject = null, IRuntimeLogService? runtimeLogs = null, IActivityRecorder? activity = null)
     {
         _jobObject = jobObject ?? ProcessJobObject.Default;
         _runtimeLogs = runtimeLogs;
+        _activity = activity;
     }
 
     public bool IsRunning => _process is { HasExited: false };
+
+    /// <summary>Whether a live OS process is attached, without throwing for one that never started.</summary>
+    private bool WasStarted()
+    {
+        try { return IsRunning; }
+        catch (InvalidOperationException) { return false; }
+    }
+
     public string StatusLabel { get; private set; } = "Stopped";
     public event Action? StatusChanged;
 
@@ -82,9 +93,11 @@ public sealed class XttsProcessManager : IDisposable
             await WaitForHealthAsync(settings.Tts.ServiceUrl, _healthCts.Token);
             StatusLabel = "Running";
             StatusChanged?.Invoke();
+            _activity.RecordSafe("voice.backend-start", "xtts", ActivityOutcome.Succeeded, "XTTS v2 voice service started");
         }
-        catch
+        catch (Exception ex)
         {
+            _activity.RecordSafe("voice.backend-start", "xtts", ActivityOutcome.Failed, "XTTS v2 voice service failed to start", ex.Message);
             Stop();
             throw;
         }
@@ -92,6 +105,12 @@ public sealed class XttsProcessManager : IDisposable
 
     public void Stop()
     {
+        // Not IsRunning: Process.HasExited throws when a Process object was
+        // constructed but never successfully started, which is exactly the
+        // state Stop() is in when it runs from StartAsync's catch.
+        if (WasStarted())
+            _activity.RecordSafe("voice.backend-stop", "xtts", ActivityOutcome.Succeeded, "XTTS v2 voice service stopped");
+
         _healthCts?.Cancel();
         try
         {

@@ -15,6 +15,7 @@ public partial class DataManagementSettingsViewModel : ObservableObject
     private readonly BackupService _backups;
     private readonly IToastService _toasts;
     private readonly Func<string> _resolveDataRoot;
+    private readonly IActivityRecorder? _activity;
 
     [ObservableProperty] private string _dataRootDirectory = string.Empty;
     [ObservableProperty] private string _dataMigrationPreview = string.Empty;
@@ -40,12 +41,14 @@ public partial class DataManagementSettingsViewModel : ObservableObject
         ISettingsService settings,
         BackupService backups,
         IToastService toasts,
-        Func<string> resolveDataRoot)
+        Func<string> resolveDataRoot,
+        IActivityRecorder? activity = null)
     {
         _settings = settings;
         _backups = backups;
         _toasts = toasts;
         _resolveDataRoot = resolveDataRoot;
+        _activity = activity;
     }
 
     public void ReloadFrom(AppSettings settings)
@@ -106,11 +109,16 @@ public partial class DataManagementSettingsViewModel : ObservableObject
         {
             var target = string.IsNullOrWhiteSpace(BackupDirectory) ? _resolveDataRoot() : BackupDirectory.Trim();
             var result = await _backups.BackupAsync(target);
+            // r28 doc 03 3.3. Both directions record, because "did the backup
+            // actually run" is precisely the question this panel exists for.
+            _activity.RecordSafe("backup.write", result.Path, ActivityOutcome.Succeeded,
+                "Backup written", $"{result.FilesIncluded} file(s) to {result.Path}");
             _toasts.Show("Backup complete", $"{result.FilesIncluded} file(s) written to {result.Path}", ToastKind.Success, 7000);
         }
         catch (Exception ex)
         {
             SettingsError = ex.Message;
+            _activity.RecordSafe("backup.write", string.Empty, ActivityOutcome.Failed, "Backup failed", ex.Message);
             _toasts.Show("Backup failed", ex.Message, ToastKind.Error, 7000);
         }
     }
@@ -125,11 +133,16 @@ public partial class DataManagementSettingsViewModel : ObservableObject
                 && !await RequestRestoreBackupConfirmation())
                 return;
             await _backups.RestoreAsync(RestoreBackupPath.Trim());
+            _activity.RecordSafe("backup.restore", RestoreBackupPath.Trim(), ActivityOutcome.Succeeded,
+                "Backup restored", RestoreBackupPath.Trim());
             _toasts.Show("Restore complete", "Restart Hermaeus to load restored data.", ToastKind.Success, 7000);
         }
         catch (Exception ex)
         {
             SettingsError = ex.Message;
+            // BackupService's own refusal reason, not a rewritten one.
+            _activity.RecordSafe("backup.restore", RestoreBackupPath.Trim(), ActivityOutcome.Failed,
+                "Restore refused", ex.Message);
             _toasts.Show("Restore refused", ex.Message, ToastKind.Error, 7000);
         }
     }

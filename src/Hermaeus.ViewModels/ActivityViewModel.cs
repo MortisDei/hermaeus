@@ -18,6 +18,23 @@ public sealed class ActivityRowViewModel
     public bool HasReason => !string.IsNullOrWhiteSpace(Reason);
     public string RelativeTime => FormatRelative(Timestamp);
 
+    /// <summary>
+    /// Where this row points, or null when it points nowhere (r28 doc 03
+    /// 3.1). Resolved at display time from the identifier the row already
+    /// carries, so historical rows link too and nothing is backfilled.
+    /// </summary>
+    public RecallTarget? Target => ActivityTargetResolver.Resolve(Operation, SourceId);
+    public bool HasTarget => Target is not null;
+
+    /// <summary>
+    /// True when this row starts a new time group (r28 doc 03 3.4). Set by
+    /// <see cref="ActivityViewModel.RefreshAsync"/> after the rows are
+    /// ordered, because it is a property of the row's neighbours rather than
+    /// of the row.
+    /// </summary>
+    public bool StartsGroup { get; set; }
+    public string GroupHeading => RelativeTime;
+
     private static string FormatRelative(DateTime utc)
     {
         var span = DateTime.UtcNow - utc;
@@ -53,6 +70,22 @@ public partial class ActivityViewModel : ViewModelBase
 
     public Func<Task<bool>>? RequestConfirmClear { get; set; }
 
+    /// <summary>
+    /// r28 doc 03 3.2: activating a row routes through the app's existing
+    /// recall navigator rather than a second implementation. Two navigation
+    /// paths that can disagree about where a task lives is exactly the
+    /// failure this reuse avoids.
+    /// </summary>
+    public Func<RecallHit, Task>? RequestNavigate { get; set; }
+
+    /// <summary>
+    /// How close two rows must be to fall under one heading (r28 doc 03 3.4).
+    /// Arithmetic on timestamps: it says these things happened together,
+    /// which is a fact about the clock. It does not say they are related and
+    /// it does not order them causally.
+    /// </summary>
+    public static readonly TimeSpan GroupWindow = TimeSpan.FromSeconds(60);
+
     public bool HasEvents => Events.Count > 0;
 
     public ActivityViewModel(IToastService toasts, ITraceStore? traceStore = null)
@@ -74,6 +107,7 @@ public partial class ActivityViewModel : ViewModelBase
                 .Where(r => string.IsNullOrEmpty(ProjectFilter) || r.ProjectId == ProjectFilter)
                 .Where(r => string.IsNullOrEmpty(KindFilter) || r.Operation.StartsWith(KindFilter, StringComparison.OrdinalIgnoreCase))
                 .ToList();
+            MarkTimeGroups(rows);
             RunOnUi(() =>
             {
                 Events.Clear();
@@ -117,6 +151,40 @@ public partial class ActivityViewModel : ViewModelBase
             CanExecute: () => Events.Count > 0,
             DisabledReason: () => "No activity to clear.",
             Execute: () => ClearCommand.ExecuteAsync(null)));
+    }
+
+    /// <summary>
+    /// Marks the first row of each run of rows that fall within
+    /// <see cref="GroupWindow"/> of the one before it. Rows arrive newest
+    /// first, so the comparison is against the previous row's timestamp.
+    /// Public because it is arithmetic and deserves to be checked as
+    /// arithmetic, without a live trace store.
+    /// </summary>
+    public static void MarkTimeGroups(IReadOnlyList<ActivityRowViewModel> rows)
+    {
+        for (var i = 0; i < rows.Count; i++)
+            rows[i].StartsGroup = i == 0 || rows[i - 1].Timestamp - rows[i].Timestamp > GroupWindow;
+    }
+
+    /// <summary>
+    /// Opens what a row describes. A row that resolves to nothing does
+    /// nothing, which is why the affordance is hidden on those rows rather
+    /// than shown and then refused.
+    /// </summary>
+    [RelayCommand]
+    public async Task OpenAsync(ActivityRowViewModel? row)
+    {
+        if (row?.Target is not { } target || RequestNavigate is null)
+            return;
+
+        await RequestNavigate(new RecallHit(
+            ActivityTargetResolver.KindFor(target),
+            row.Title,
+            row.Reason,
+            row.Timestamp,
+            row.ProjectId,
+            Score: 0,
+            target));
     }
 
     private static ActivityRowViewModel Map(TraceRecord record)

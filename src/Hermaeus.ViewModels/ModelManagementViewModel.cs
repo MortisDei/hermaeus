@@ -21,6 +21,7 @@ public partial class ModelManagementViewModel : ObservableObject
     private readonly ModelManifestStore _manifest;
     private readonly HuggingFaceClient _hf;
     private readonly ModelDownloadService _downloader;
+    private readonly IActivityRecorder? _activity;
     private long _lastRefreshUtcTicks = DateTime.MinValue.Ticks;
     private readonly List<LlmModel> _modelCache = [];
     private readonly object _modelCacheLock = new();
@@ -71,8 +72,9 @@ public partial class ModelManagementViewModel : ObservableObject
     public Func<int, Task<bool>>? RequestEmptyDirectoryCleanupConfirmation { get; set; }
 
     public ModelManagementViewModel(ILlmService llm, ModelProfileService profiles, IToastService toasts, ISettingsService settings, ISystemInfoService system, ServicesViewModel services,
-        ModelManifestStore manifest, HuggingFaceClient hf, ModelDownloadService downloader)
+        ModelManifestStore manifest, HuggingFaceClient hf, ModelDownloadService downloader, IActivityRecorder? activity = null)
     {
+        _activity = activity;
         _llm = llm;
         _profiles = profiles;
         _toasts = toasts;
@@ -849,6 +851,11 @@ public partial class ModelManagementViewModel : ObservableObject
             return;
 
         file.IsDownloading = true;
+        // r28 doc 03 3.3: a download is one of the four sources r24 named and
+        // never wired. r27 made it a file set, so a partial set is Partial and
+        // the reason names what is missing.
+        _activity.RecordSafe("models.download", file.RepoId, ActivityOutcome.Running,
+            $"Downloading {file.FileName}", planned.Count == 1 ? string.Empty : $"{planned.Count} files");
         try
         {
             // Progress is reported across the set, so a three-shard download
@@ -912,10 +919,17 @@ public partial class ModelManagementViewModel : ObservableObject
                 _toasts.Show(savedCount > 0 ? "Download incomplete" : "Download failed",
                     $"{savedCount} of {planned.Count} file(s) saved. Missing: {string.Join("; ", missing)}",
                     ToastKind.Warning, 9000);
+                _activity.RecordSafe("models.download", file.RepoId,
+                    savedCount > 0 ? ActivityOutcome.Partial : ActivityOutcome.Failed,
+                    $"{file.FileName} download {(savedCount > 0 ? "incomplete" : "failed")}",
+                    $"{savedCount} of {planned.Count} file(s) saved. Missing: {string.Join("; ", missing)}");
             }
             else
             {
                 var folder = Path.GetDirectoryName(planned[0].Destination);
+                _activity.RecordSafe("models.download", file.RepoId, ActivityOutcome.Succeeded,
+                    $"Downloaded {file.FileName}",
+                    planned.Count == 1 ? string.Empty : $"{planned.Count} files");
                 _toasts.Show("Download complete",
                     planned.Count == 1
                         ? $"{file.FileName} saved to {planned[0].Destination}."
@@ -928,6 +942,8 @@ public partial class ModelManagementViewModel : ObservableObject
         }
         catch (Exception ex)
         {
+            _activity.RecordSafe("models.download", file.RepoId, ActivityOutcome.Failed,
+                $"{file.FileName} download failed", ex.Message);
             _toasts.Show("Download failed", ex.Message, ToastKind.Warning, 7000);
         }
         finally
