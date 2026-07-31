@@ -47,6 +47,31 @@ public sealed class DocsCoverageGuardTests
         return panels;
     }
 
+    /// <summary>
+    /// r27 05-small-open-items.md 5.2: the README's version sat at 0.24.0-alpha
+    /// while Directory.Build.props said 0.33.0. The gap opened at r24 and no
+    /// close-out since closed it, on the front page of a repository being
+    /// prepared to go public.
+    /// This class existed the whole time and passed the whole time, because it
+    /// asserted that navigation panel NAMES appear in the README and never
+    /// looked at the version. The lesson is the general one: a guard covers what
+    /// it asserts and nothing else.
+    /// </summary>
+    [Fact]
+    public void The_readme_states_the_version_this_build_ships()
+    {
+        var props = File.ReadAllText(Path.Combine(RepoRoot, "Directory.Build.props"));
+        var match = System.Text.RegularExpressions.Regex.Match(props, @"<VersionPrefix>\s*([^<\s]+)\s*</VersionPrefix>");
+        Assert.True(match.Success, "Directory.Build.props should declare a <VersionPrefix>.");
+
+        var version = match.Groups[1].Value;
+        var readme = File.ReadAllText(Path.Combine(RepoRoot, "README.md"));
+
+        Assert.True(readme.Contains(version, StringComparison.Ordinal),
+            $"README.md does not mention version {version}. Directory.Build.props says <VersionPrefix>{version}</VersionPrefix>; " +
+            $"update the version line under \"Current Status\" in README.md to **{version}-alpha** as part of this version bump.");
+    }
+
     [Fact]
     public void Every_navigation_panel_is_named_in_the_readme()
     {

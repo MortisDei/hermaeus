@@ -41,10 +41,10 @@ with no memory of any conversation should be able to read this table plus
 | 22 | 4.2 Per-model destination folders | yes |
 | 23 | 4.3 Organize stops flattening | yes |
 | 24 | 4.4 Flat-folder migration | yes |
-| 25 | 5.1 Conversation summary projection | no |
-| 26 | 5.2 README version and guard | no |
-| 27 | 5.4 Docs, changelog, deferred ledger | no |
-| 28 | Close-out: archive pack, PR | no |
+| 25 | 5.1 Conversation summary projection | yes |
+| 26 | 5.2 README version and guard | yes |
+| 27 | 5.4 Docs, changelog, deferred ledger | yes |
+| 28 | Close-out: archive pack, PR | yes |
 
 ## Sequencing (strict)
 

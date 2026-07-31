@@ -1,10 +1,10 @@
 <Project>
   <PropertyGroup>
-    <VersionPrefix>0.33.0</VersionPrefix>
+    <VersionPrefix>0.34.0</VersionPrefix>
     <VersionSuffix>alpha</VersionSuffix>
     <Version>$(VersionPrefix)-$(VersionSuffix)</Version>
-    <AssemblyVersion>0.33.0.0</AssemblyVersion>
-    <FileVersion>0.33.0.0</FileVersion>
+    <AssemblyVersion>0.34.0.0</AssemblyVersion>
+    <FileVersion>0.34.0.0</FileVersion>
     <InformationalVersion>$(Version)</InformationalVersion>
     <Product>Hermaeus</Product>
     <Authors>MortisDei</Authors>

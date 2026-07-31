@@ -101,17 +101,28 @@ public sealed class RecallIndexingService
     /// <summary>Catches up conversations and tasks that existed before Recall shipped or
     /// before indexing was turned on. Bounded batch, modeled on MemoryStore's embedding
     /// backfill shape; call shortly after startup, never on the send path.</summary>
+    /// <summary>
+    /// r27 05-small-open-items.md 5.1: takes the lightweight projection and
+    /// calls <paramref name="loadConversation"/> only for the ids it is actually
+    /// going to index. It used to deserialise every message of every
+    /// conversation at startup in order to discover that most were already
+    /// indexed and needed nothing.
+    /// </summary>
     public async Task RunStartupBackfillAsync(
-        IReadOnlyList<Conversation> conversations,
+        IReadOnlyList<ConversationSummary> conversations,
         IReadOnlyList<RecallTaskInput> tasks,
+        Func<string, CancellationToken, Task<Conversation?>> loadConversation,
         CancellationToken ct = default)
     {
         if (!Enabled) return;
 
         var indexedConvIds = await _index.GetIndexedSourceIdsAsync("message", ct);
-        foreach (var conv in conversations.Where(c => !c.RecallExcluded && !indexedConvIds.Contains(c.Id)).Take(50))
+        foreach (var summary in conversations.Where(c => !c.RecallExcluded && !indexedConvIds.Contains(c.Id)).Take(50))
         {
             ct.ThrowIfCancellationRequested();
+            var conv = await loadConversation(summary.Id, ct);
+            if (conv is null)
+                continue;
             await IndexConversationAsync(conv, ct);
         }
 

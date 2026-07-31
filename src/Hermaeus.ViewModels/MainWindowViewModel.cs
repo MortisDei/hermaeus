@@ -383,9 +383,13 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private async Task RunRecallStartupBackfillAsync()
     {
-        var conversations = await _store.GetAllAsync(includeArchived: true);
+        // r27 05 5.1: the backfill takes the projection and reads full
+        // conversations only for the ids it is actually going to index, rather
+        // than deserialising every message of every conversation to discover
+        // that most of them are already indexed.
+        var summaries = await _store.GetSummariesAsync(includeArchived: true);
         var tasks = await Agent.BuildRecallTaskInputsAsync();
-        await _recallIndexing!.RunStartupBackfillAsync(conversations, tasks);
+        await _recallIndexing!.RunStartupBackfillAsync(summaries, tasks, _store.GetByIdAsync);
     }
 
     /// <summary>doc 03 3.4: optional, off by default. Runs one on-start pass after a
@@ -428,9 +432,12 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private async Task LoadConversationsAsync()
     {
+        // r27 05 5.1: the sidebar shows titles, folders, tags and flags. It has
+        // no business deserialising every message of every conversation, nor
+        // walking them again to backfill parent links, to draw that.
         var convs = string.IsNullOrWhiteSpace(SearchQuery)
-            ? await _store.GetAllAsync(ShowArchivedConversations)
-            : await _store.SearchAsync(SearchQuery);
+            ? await _store.GetSummariesAsync(ShowArchivedConversations)
+            : await _store.SearchSummariesAsync(SearchQuery);
 
         RefreshFolderFilters(convs);
         if (SelectedFolderFilter != "All")
@@ -484,7 +491,7 @@ public partial class MainWindowViewModel : ViewModelBase
         await SaveConversationMetadataAsync(item, showToast: false);
     }
 
-    private void RefreshFolderFilters(IEnumerable<Hermaeus.Core.Models.Conversation> convs)
+    private void RefreshFolderFilters(IEnumerable<Hermaeus.Core.Models.ConversationSummary> convs)
     {
         var selected = SelectedFolderFilter;
         _refreshingFolderFilters = true;
@@ -508,13 +515,12 @@ public partial class MainWindowViewModel : ViewModelBase
         }
     }
 
-    private static ConversationItemViewModel ToItem(Hermaeus.Core.Models.Conversation c) => new()
+    private static ConversationItemViewModel ToItem(Hermaeus.Core.Models.ConversationSummary c) => new()
     {
         Id = c.Id,
         Title = c.Title,
         ModelId = c.ModelId,
         UpdatedAt = c.UpdatedAt,
-        SystemPrompt = c.SystemPrompt,
         Folder = c.Folder,
         TagsText = string.Join(", ", c.Tags),
         IsPinned = c.IsPinned,

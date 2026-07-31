@@ -306,6 +306,44 @@ provider.
   of a separate panel. Tab content is width-capped and centered rather than
   stretching edge-to-edge on a maximized window.
 
+## Speed Check
+
+A built-in suite, alongside the starter suites, for answering one question:
+did a runtime setting change make generation faster on this machine?
+
+It exists because of speculative decoding. Enabling a knob you cannot measure
+produces a setting that is believed rather than known, on hardware where the
+answer genuinely varies.
+
+**What it measures.** Tokens per second, prompt tokens per second, and time to
+first token, taken from llama-server's own `timings` rather than estimated. Four
+fixed prompts, chosen because drafting behaves differently across them:
+structured output and repetitive output, where a draft's proposals are accepted
+often, and code and free prose, where they are accepted less often.
+
+**What it does not measure.** Quality. No case carries an expected keyword, an
+expected pattern, or a refusal expectation, because a throughput number should
+not quietly become a pass or a fail.
+
+**Comparing two runs.** Two Speed Check runs of the same suite against the same
+model can be shown side by side, with the difference in tokens per second,
+prompt tokens per second and time to first token, and the configuration
+difference that separates them. A run records the speculative settings that
+produced it, which is what the comparison keys on. Runs of different models or
+different suites are refused rather than compared.
+
+There is deliberately no verdict, grade, score, recommendation or confidence
+interval. The app reports what happened; it does not rate itself, and a handful
+of runs on a desktop under unknown load does not support a significance claim.
+
+**The honest caveat about drafting.** Speculative decoding produces exactly the
+text the large model would have produced alone, so there is no quality tradeoff.
+How much faster it is depends entirely on how often the draft guesses right,
+which depends on the model pair and on the content being generated. It can be a
+large speedup, a small one, or slower than not using it. That is why the Speed
+Check exists: the feature is worth having because the answer can now be
+measured, not because the measurement is guaranteed to be favourable.
+
 ## System Overview
 
 The **System Overview** page shows the local machine and app environment:

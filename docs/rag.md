@@ -240,6 +240,44 @@ outcome without holding anything open for the life of the process.
   not retained in cache, so very large embedding sets cannot grow memory use
   without limit.
 
+## Scale and the memory budget
+
+Retrieval keeps a per-dataset **scan index** in memory: the chunk ids and one
+contiguous block of embeddings. Content, paths, titles and heading paths stay in
+SQLite and are read only for the handful of chunks that survive ranking.
+
+That index has a budget of 128 MiB across all cached datasets, with an
+eight-dataset LRU. Because the index holds embeddings rather than documents, its
+size is exact arithmetic over chunk count and embedding dimension rather than a
+sum over strings, so it no longer varies with how long your documents happen to
+be. Each dataset's index size is shown against the budget on its Dataset Manager
+card.
+
+**Above the budget, a dataset is still queried.** It is scanned from storage
+instead of from memory, which is slower, and the retrieval result's planner
+notes say so. Before r27 an over-budget dataset was dropped by the cache without
+being cached, and every subsequent query read that empty entry back, scored
+nothing, and returned no results and no error while re-reading every chunk and
+every embedding out of SQLite. Raising the budget was rejected as the fix: a
+bigger number moves the cliff rather than removing it.
+
+## Keyword candidates
+
+BM25 scoring is unchanged, including its stats and its tuning. What changed in
+r27 is where its candidates come from: an FTS5 index over chunk content, rather
+than tokenising every chunk in the dataset once per query variant. FTS5 finds a
+few hundred candidates and `Bm25Scorer` ranks them exactly as it always has. The
+only chunks that stop being scored are ones that share no query term at all and
+therefore scored essentially zero; a regression test asserts that scoring the
+candidate set produces the same ranked ids, in the same order, as scoring the
+whole corpus.
+
+The index is maintained inside the same transaction as the chunk rows it
+mirrors, and is backfilled once, lazily, on the first search of an existing
+dataset. An install that never opens the RAG panel never pays for the backfill.
+Malformed search syntax falls back to a LIKE scan rather than surfacing as an
+error.
+
 ## Eval Harness
 
 Eval files can be either an array of cases or an object with `cases` /
