@@ -326,6 +326,10 @@ public sealed class AgentService : IAgentService
         // before) and removes a whole class of stall where it can.
         var plannerConstraint = await ResolvePlannerConstraintAsync(modelId, ct);
         state.PlannerConstrained = plannerConstraint is not null;
+        // Only for the parse-failure message: an OpenAI-compatible endpoint
+        // that has not declared it enforces response_format is the one case
+        // where the fix is a setting rather than a different model.
+        var constraintIsOneCheckboxAway = plannerConstraint is null && await IsUndeclaredOpenAiEndpointAsync(modelId, ct);
         var raw = new StringBuilder();
         IReadOnlyList<LlmToolCallRequest>? nativeToolCalls = null;
         try
@@ -374,7 +378,7 @@ public sealed class AgentService : IAgentService
             state.TotalStepErrors++;
             response = new AgentPlannerResponse
             {
-                ThoughtSummary = DescribeParseFailure(raw.ToString(), state.PlannerConstrained),
+                ThoughtSummary = DescribeParseFailure(raw.ToString(), state.PlannerConstrained, constraintIsOneCheckboxAway),
                 CurrentStep = state.ActiveStep,
                 NextAction = new AgentNextAction
                 {
@@ -1601,6 +1605,32 @@ public sealed class AgentService : IAgentService
         }
     }
 
+    /// <summary>
+    /// Whether this model comes from the OpenAI-compatible provider and that
+    /// endpoint has not been declared as enforcing <c>response_format</c>
+    /// (r28 doc 05 5.4). Read off the provider tag rather than by asking the
+    /// provider anything: the Agent project knows nothing about OpenAI, and
+    /// this is only ever used to pick which sentence to show a user.
+    /// </summary>
+    private async Task<bool> IsUndeclaredOpenAiEndpointAsync(string modelId, CancellationToken ct)
+    {
+        if (_settings is null || _settings.Settings.Llm.OpenAiSupportsStructuredOutputs)
+            return false;
+
+        try
+        {
+            var models = await _llm.GetModelsAsync(ct);
+            var selected = models.FirstOrDefault(m => string.Equals(m.Id, modelId, StringComparison.OrdinalIgnoreCase));
+            return selected is not null
+                && selected.ProviderTag.Equals("openai", StringComparison.OrdinalIgnoreCase)
+                && !selected.SupportsOutputConstraints;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return false;
+        }
+    }
+
     private static string BuildPrompt(AgentContextPack context)
     {
         var json = JsonSerializer.Serialize(context, AgentJson.Options);
@@ -1784,12 +1814,14 @@ public sealed class AgentService : IAgentService
     /// request the model declined; constrained, the request was not a request
     /// and the model still missed, which is a different problem with a
     /// different answer.
-    ///
-    /// There is no third "available but switched off" branch because there is
-    /// no switch: the app constrains whenever the selected model's provider
-    /// reports it can.
     /// </param>
-    internal static string DescribeParseFailure(string raw, bool constraintApplied = false)
+    /// <param name="constraintAvailableButUndeclared">
+    /// True when the model is served by an OpenAI-compatible endpoint that has
+    /// not been declared as enforcing <c>response_format</c>. That is the one
+    /// case where the fix is a checkbox rather than a different model, so the
+    /// message names it.
+    /// </param>
+    internal static string DescribeParseFailure(string raw, bool constraintApplied = false, bool constraintAvailableButUndeclared = false)
     {
         var trimmed = (raw ?? string.Empty).Trim();
 
@@ -1798,15 +1830,24 @@ public sealed class AgentService : IAgentService
                 + "stopped mid-generation; check the Services log for the model server.";
 
         if (!trimmed.Contains('{'))
-            return constraintApplied
-                ? "The model replied in prose even though the response shape was constrained to the "
+        {
+            if (constraintApplied)
+                return "The model replied in prose even though the response shape was constrained to the "
                     + "action format. The shape was enforced, so this is the model rather than the "
                     + "request: a model with stronger instruction following, or one that supports "
-                    + "native tool calling, handles this better."
-                : "The model replied in prose instead of the JSON action format it was asked for. "
-                    + "This provider cannot enforce a response shape, so the format is a request the "
-                    + "model can decline. A local llama.cpp or Ollama model has the shape enforced "
-                    + "for it and does not hit this.";
+                    + "native tool calling, handles this better.";
+
+            if (constraintAvailableButUndeclared)
+                return "The model replied in prose instead of the JSON action format it was asked for. "
+                    + "Hermaeus can require that shape instead of asking for it, but it does not assume "
+                    + "an OpenAI-compatible endpoint supports it. If yours does, tick \"This endpoint "
+                    + "enforces response_format\" in Settings, under LLM.";
+
+            return "The model replied in prose instead of the JSON action format it was asked for. "
+                + "This provider cannot enforce a response shape, so the format is a request the "
+                + "model can decline. A local llama.cpp or Ollama model has the shape enforced "
+                + "for it and does not hit this.";
+        }
 
         var opens = trimmed.Count(c => c == '{');
         var closes = trimmed.Count(c => c == '}');

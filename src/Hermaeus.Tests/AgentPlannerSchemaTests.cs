@@ -130,6 +130,31 @@ public sealed class AgentPlannerSchemaTests
         Assert.Contains("cannot enforce", message, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// The one case where the fix is a checkbox rather than a bigger model:
+    /// an OpenAI-compatible endpoint that supports response_format and has not
+    /// been declared as supporting it.
+    /// </summary>
+    [Fact]
+    public void An_undeclared_compatible_endpoint_is_told_about_the_setting()
+    {
+        var message = AgentService.DescribeParseFailure(
+            "Sure! Here is what I would do next.", constraintApplied: false, constraintAvailableButUndeclared: true);
+
+        Assert.Contains("response_format", message, StringComparison.Ordinal);
+        Assert.Contains("Settings", message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_constrained_reply_is_never_told_about_the_setting()
+    {
+        // Applied wins: the shape was enforced, so a checkbox is not the answer.
+        var message = AgentService.DescribeParseFailure(
+            "Sure! Here is what I would do next.", constraintApplied: true, constraintAvailableButUndeclared: true);
+
+        Assert.DoesNotContain("response_format", message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void A_constrained_prose_reply_stops_blaming_the_format_request()
     {

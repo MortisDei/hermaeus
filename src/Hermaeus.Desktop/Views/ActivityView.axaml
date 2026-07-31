@@ -43,7 +43,7 @@
                             <Button Classes="activity-row" Padding="0" HorizontalAlignment="Stretch"
                                     HorizontalContentAlignment="Stretch"
                                     IsHitTestVisible="{Binding HasTarget}"
-                                    Command="{Binding $parent[ItemsControl].((vm:ActivityViewModel)DataContext).OpenCommand}"
+                                    Command="{Binding $parent[ItemsControl].DataContext.OpenCommand}"
                                     CommandParameter="{Binding}">
                                 <Border CornerRadius="8" BorderThickness="1" Padding="12" Margin="0,0,0,8"
                                         BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">

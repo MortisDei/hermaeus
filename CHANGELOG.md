@@ -58,8 +58,10 @@ was changed about it.
   the speed. `0 drafted` means drafting never engaged and a comparison was run
   between two identical configurations. A provider that reports no counters
   shows nothing rather than a zero. Hermaeus Doctor reports the same fact
-  without needing a benchmark run, and reports "never measured" as its own
-  separate state.
+  without needing a benchmark run, across three separate answers: drafted
+  nothing, reported nothing (the server was started without `--spec-type`,
+  because changing the setting does not restart a running server), and never
+  measured.
 
 - **The Speed Check runs five iterations per case** instead of one, and a
   comparison reports the median with the range observed, written as
@@ -122,6 +124,15 @@ was changed about it.
 - **`SqliteEvalStore` committed a saved run and its retention prune
   separately.** Two durable commits per save, and a crash between them left
   the table over its cap. One transaction now, matching the trace store.
+
+- **The Benchmarks panel silently reset five suite fields on every run.** The
+  clone it takes before running dropped `IterationsPerCase`, `SuiteVersion`,
+  `ScoringProfile` and both baseline fields, plus `CaseVersion` and
+  `ExpectedBehaviourVersion` per case. Every run recorded a default scoring
+  profile and version, and any suite asking for repeated iterations ran
+  exactly one per case and recorded itself as "Cold". It went unnoticed
+  because every shipped suite wanted one iteration until the Speed Check asked
+  for five.
 
 ## [0.34.0-alpha] - 2026-07-31
 

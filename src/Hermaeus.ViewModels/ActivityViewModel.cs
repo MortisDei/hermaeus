@@ -26,6 +26,7 @@ public sealed class ActivityRowViewModel
     public RecallTarget? Target => ActivityTargetResolver.Resolve(Operation, SourceId);
     public bool HasTarget => Target is not null;
 
+
     /// <summary>
     /// True when this row starts a new time group (r28 doc 03 3.4). Set by
     /// <see cref="ActivityViewModel.RefreshAsync"/> after the rows are

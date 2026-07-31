@@ -46,6 +46,29 @@ public sealed class DraftAcceptanceReportingTests
         Assert.Equal(286, timings.PredictedTokens);
     }
 
+    /// <summary>
+    /// The benchmark path streams, and the earlier verification of these field
+    /// names was done against a non-streaming request. This is a real final
+    /// SSE chunk captured from b10195 with `--spec-type ngram-mod`: an empty
+    /// choices array, usage, and timings all on one chunk. It is here because
+    /// "the field exists on the non-streaming response" would not have proved
+    /// the streaming path works, and the streaming path is the one that runs.
+    /// </summary>
+    [Fact]
+    public void The_real_streaming_final_chunk_yields_draft_counters()
+    {
+        const string realChunk = """
+            {"choices":[],"usage":{"completion_tokens":300,"prompt_tokens":140,"total_tokens":440},"timings":{"cache_n":139,"prompt_n":1,"prompt_ms":246.21,"predicted_n":300,"predicted_ms":1047.107,"draft_n":267,"draft_n_accepted":220}}
+            """;
+
+        var evt = LlamaCppService.ParseStreamEvent(realChunk);
+
+        Assert.NotNull(evt);
+        Assert.True(evt!.IsFinal);
+        Assert.Equal(267, evt.ServerTimings!.DraftTokens);
+        Assert.Equal(220, evt.ServerTimings.DraftTokensAccepted);
+    }
+
     [Fact]
     public void A_measured_zero_is_not_a_missing_measurement()
     {
@@ -186,9 +209,27 @@ public sealed class DraftAcceptanceReportingTests
     public void Never_measured_is_its_own_answer()
     {
         Assert.Equal(DraftEngagementState.NeverMeasured, DraftEngagementAdvisory.Evaluate(Drafting(), null).State);
-        // A run that reported no counters is also "nobody counted", not "counted zero".
-        Assert.Equal(DraftEngagementState.NeverMeasured,
-            DraftEngagementAdvisory.Evaluate(Drafting(), Run("a", "m", [(70.0, null, null)])).State);
+    }
+
+    /// <summary>
+    /// The state that sent the owner looking for a number that was never
+    /// there: the setting says drafting is on, a run exists, and the server it
+    /// talked to reported no draft counters at all. llama-server emits them
+    /// whenever speculative decoding is active (confirmed on b10195 and
+    /// b10199, streaming and not), so this points at the server having been
+    /// started before the setting changed. Changing the setting does not
+    /// restart a running server.
+    /// </summary>
+    [Fact]
+    public void A_run_whose_server_never_mentioned_drafting_is_its_own_answer()
+    {
+        var finding = DraftEngagementAdvisory.Evaluate(Drafting(), Run("a", "m", [(70.0, null, null)]));
+
+        Assert.Equal(DraftEngagementState.ConfiguredButNotReported, finding.State);
+        Assert.Null(finding.DraftTokens);
+        // Not the same as a measured zero, and not the same as never measured.
+        Assert.NotEqual(DraftEngagementState.ConfiguredButNeverEngaged, finding.State);
+        Assert.NotEqual(DraftEngagementState.NeverMeasured, finding.State);
     }
 
     [Fact]

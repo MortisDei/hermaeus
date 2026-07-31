@@ -457,6 +457,19 @@ public sealed partial class DoctorService
                 $"Speculative types: {types}; last Speed Check drafted tokens: 0",
                 "Runtime"),
 
+            DraftEngagementState.ConfiguredButNotReported => BuildCheck(
+                $"draft-engagement-{server.Id}",
+                $"{server.Name} drafting engagement",
+                DoctorCheckStatus.Warning,
+                "The last Speed Check ran against a server that was not drafting",
+                $"{server.Name} is set to {types}, and the most recent Speed Check for {modelId} came back with no draft counters at all. "
+                    + "llama-server reports them whenever speculative decoding is active, so the server that answered was started without it. "
+                    + "Changing this setting does not restart a running server; restart it from Services and run the check again.",
+                "Open Services",
+                true,
+                $"Speculative types: {types}; last Speed Check draft counters: (none reported)",
+                "Runtime"),
+
             DraftEngagementState.NeverMeasured => BuildCheck(
                 $"draft-engagement-{server.Id}",
                 $"{server.Name} drafting engagement",

@@ -654,20 +654,40 @@ public partial class BenchmarkViewModel : ObservableObject
     private static string GetRankingGroupKey(BenchmarkRun run) =>
         string.IsNullOrWhiteSpace(run.ModelId) ? run.ModelName : run.ModelId;
 
+    /// <summary>
+    /// Every field the runner reads, not a subset. This dropped
+    /// <see cref="BenchmarkSuite.IterationsPerCase"/>,
+    /// <see cref="BenchmarkSuite.SuiteVersion"/>,
+    /// <see cref="BenchmarkSuite.ScoringProfile"/> and the two baseline
+    /// fields, so a suite that asked for repeated iterations ran exactly one
+    /// per case and recorded its run as "Cold" with a default scoring profile
+    /// and version. Every run launched from this panel since the clone was
+    /// written had those fields silently reset to their defaults; it went
+    /// unnoticed because the shipped suites all wanted 1 iteration anyway
+    /// until r28 doc 02 2.2 asked the Speed Check for 5. Per-case fields have
+    /// the same shape of bug and are copied whole here too.
+    /// </summary>
     private static BenchmarkSuite CloneSuite(BenchmarkSuite suite) => new()
     {
         Id = suite.Id,
         Name = suite.Name,
         Description = suite.Description,
+        SuiteVersion = suite.SuiteVersion,
+        ScoringProfile = suite.ScoringProfile,
+        BaselineModelId = suite.BaselineModelId,
+        BaselineModelName = suite.BaselineModelName,
         Temperature = suite.Temperature,
         TimeoutSeconds = suite.TimeoutSeconds,
         MaxCases = suite.MaxCases,
+        IterationsPerCase = suite.IterationsPerCase,
         UseJudge = suite.UseJudge,
         JudgeModelId = suite.JudgeModelId,
         Cases = suite.Cases.Select(c => new BenchmarkCase
         {
             Id = c.Id,
             Name = c.Name,
+            CaseVersion = c.CaseVersion,
+            ExpectedBehaviourVersion = c.ExpectedBehaviourVersion,
             Prompt = c.Prompt,
             SystemPrompt = c.SystemPrompt,
             ExpectedKeywords = c.ExpectedKeywords.ToList(),

@@ -346,11 +346,20 @@ measurement and a measured zero are different facts. No recommendation is
 attached to an acceptance rate; `12%` is a fact, "12%, consider disabling
 drafting" is not the app's call.
 
-Hermaeus Doctor reports the same thing without needing a benchmark run: if
-speculative decoding is configured and the most recent Speed Check for the
-model recorded zero drafted tokens, it says so. If the model has never been
-through a Speed Check, it says that instead, because "never measured" and
-"measured and found dead" are different answers.
+Hermaeus Doctor reports the same thing without needing a benchmark run, across
+three separate answers, because they are three separate facts:
+
+- **`0 drafted`**: drafting was configured, the server reported counters, and
+  it drafted nothing.
+- **No counters at all in a run that did happen**: the server that answered
+  was not started with `--spec-type`. llama-server reports draft counters
+  whenever speculative decoding is active, so their complete absence points at
+  the process rather than at drafting. **Changing the speculative setting does
+  not restart a running server**, and the Speed Check benchmarks whatever is
+  already listening, so this is the state to expect after toggling the setting
+  without restarting from Services.
+- **No Speed Check for this model at all**: never measured, which is not the
+  same as measured and found dead.
 
 **What it does not measure.** Quality. No case carries an expected keyword, an
 expected pattern, or a refusal expectation, because a throughput number should
