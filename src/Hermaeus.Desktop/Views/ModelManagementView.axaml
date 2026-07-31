@@ -111,7 +111,8 @@
                         <ItemsControl ItemsSource="{Binding HfFiles}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate DataType="vm:HfFileResultViewModel">
-                                    <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="10" Margin="0,4">
+                                  <StackPanel Spacing="2" Margin="0,4">
+                                    <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="10">
                                         <TextBlock Grid.Column="0" Text="{Binding FileName}" VerticalAlignment="Center" TextWrapping="Wrap" />
                                         <TextBlock Grid.Column="1" Text="{Binding SizeDisplay}" FontSize="11" Opacity="0.5" VerticalAlignment="Center" />
                                         <Border Grid.Column="2" CornerRadius="4" Padding="6,1"
@@ -127,8 +128,31 @@
                                                 CommandParameter="{Binding}"
                                                 IsEnabled="{Binding !IsDownloading}"
                                                 FontSize="12" Padding="10,4" CornerRadius="6"
-                                                ToolTip.Tip="Downloads to Models\LLM\, SHA256-verified against the repo before use." />
+                                                ToolTip.Tip="Downloads the whole file set into its own folder under Models\LLM\, each file SHA256-verified against the repo before use." />
                                     </Grid>
+
+                                    <!-- r27 04-models-arrive-complete.md 4.1: a GGUF model is
+                                         frequently not one file. Shards are part of the download
+                                         or the download is refused; a projector and an MTP draft
+                                         head are offered, on by default. -->
+                                    <TextBlock Text="{Binding SetSummary}"
+                                               IsVisible="{Binding HasCompanions}"
+                                               FontSize="11"
+                                               Opacity="0.55"
+                                               TextWrapping="Wrap" />
+                                    <StackPanel Orientation="Horizontal" Spacing="12" IsVisible="{Binding HasCompanions}">
+                                        <CheckBox IsChecked="{Binding IncludeProjector}"
+                                                  IsVisible="{Binding HasProjector}"
+                                                  Content="Vision projector"
+                                                  FontSize="11"
+                                                  ToolTip.Tip="mmproj-*.gguf. Without it, a multimodal model loads but cannot see." />
+                                        <CheckBox IsChecked="{Binding IncludeDraftHead}"
+                                                  IsVisible="{Binding HasDraftHead}"
+                                                  Content="MTP draft head"
+                                                  FontSize="11"
+                                                  ToolTip.Tip="mtp-*.gguf. The draft model speculative decoding uses; it shares this model's vocabulary by construction." />
+                                    </StackPanel>
+                                  </StackPanel>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>

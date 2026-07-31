@@ -341,7 +341,7 @@ public sealed class ModelManagementViewModelTests
     }
 
     [Fact]
-    public async Task SelectHfRepo_hides_multipart_files_and_shows_single_file_ggufs()
+    public async Task SelectHfRepo_lists_a_sharded_model_once_as_a_downloadable_set()
     {
         using var temp = new TempDir();
         var settings = NewSettings(temp);
@@ -357,8 +357,18 @@ public sealed class ModelManagementViewModelTests
 
         await vm.SelectHfRepoCommand.ExecuteAsync(new HfRepoResultViewModel("org/repo", 100));
 
-        var file = Assert.Single(vm.HfFiles);
-        Assert.Equal("model-Q4.gguf", file.FileName);
+        // r27 04 4.1: a sharded model used to be hidden outright, because a
+        // single shard is a model that will not load. It is now listed once, as
+        // its first shard, and downloads as a complete set.
+        Assert.Equal(2, vm.HfFiles.Count);
+        Assert.Equal("model-Q4.gguf", vm.HfFiles[0].FileName);
+        Assert.False(vm.HfFiles[0].IsSharded);
+
+        var sharded = vm.HfFiles[1];
+        Assert.Equal("big-00001-of-00002.gguf", sharded.FileName);
+        Assert.True(sharded.IsSharded);
+        Assert.Equal(2, sharded.SelectedEntries().Count);
+        Assert.All(sharded.FileSet.Entries, e => Assert.True(e.Required));
         Assert.Equal("mit", vm.SelectedHfRepo!.License);
     }
 
@@ -380,7 +390,9 @@ public sealed class ModelManagementViewModelTests
 
         await vm.DownloadHfFileCommand.ExecuteAsync(file);
 
-        var destination = Path.Combine(modelsRoot, "Models", "llm", "tiny.gguf");
+        // r27 04 4.2: the destination carries the repository, so companion
+        // filenames from different repositories can coexist.
+        var destination = Path.Combine(modelsRoot, "Models", "llm", "org__repo", "tiny.gguf");
         Assert.True(File.Exists(destination));
         var entry = await manifest.FindAsync(destination);
         Assert.NotNull(entry);
@@ -397,7 +409,7 @@ public sealed class ModelManagementViewModelTests
         using var temp = new TempDir();
         var settings = NewSettings(temp);
         var modelsRoot = temp.PathFor("assets");
-        var llmDir = Path.Combine(modelsRoot, "Models", "LLM");
+        var llmDir = Path.Combine(modelsRoot, "Models", "LLM", "org__repo");
         Directory.CreateDirectory(llmDir);
         File.WriteAllText(Path.Combine(llmDir, "tiny.gguf"), "already here");
         settings.Settings.DataManagement.LocalAiAssetsRoot = modelsRoot;

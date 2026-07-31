@@ -451,10 +451,17 @@ public partial class ModelManagementViewModel : ObservableObject
         }
 
         var ggufPaths = LocalAiAssetLocator.FindGgufModels(assetsRoot);
-        var plan = ModelFolderOrganizer.Plan(layout.ModelsDirectory, ggufPaths);
+        // r27 04-models-arrive-complete.md 4.4: files whose repository is known
+        // from the manifest move into that repository's folder; the rest fall
+        // back to their own base name, which is at least stable.
+        var provenance = (await _manifest.LoadAsync())
+            .Where(e => !string.IsNullOrWhiteSpace(e.FilePath) && !string.IsNullOrWhiteSpace(e.RepoId))
+            .GroupBy(e => Path.GetFullPath(e.FilePath), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First().RepoId, StringComparer.OrdinalIgnoreCase);
+        var plan = ModelFolderOrganizer.Plan(layout.ModelsDirectory, ggufPaths, repoIdsByPath: provenance);
         if (plan.Moves.Count == 0)
         {
-            _toasts.Show("Organize folder", "Every model is already directly under the LLM folder.", ToastKind.Info);
+            _toasts.Show("Organize folder", "Every model is already in its own folder under the LLM folder.", ToastKind.Info);
             return;
         }
 
@@ -771,21 +778,36 @@ public partial class ModelManagementViewModel : ObservableObject
 
             var hardware = await _system.GetHardwareProfileAsync();
             var ggufEntries = tree.Where(e => e.Path.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase)).ToList();
-            var multiPartHidden = 0;
+
+            // r27 04 4.1: a sharded model is listed once, as its first shard,
+            // and downloads as a set. It used to be hidden outright, because a
+            // single shard is a model that will not load.
+            var listed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var shardedSets = 0;
             foreach (var entry in ggufEntries)
             {
-                if (HuggingFaceBrowserSupport.IsMultiPartGguf(entry.Path))
-                {
-                    multiPartHidden++;
+                // Companions belong to their model's set, not to a row of their own.
+                var name = System.IO.Path.GetFileName(entry.Path);
+                if (name.StartsWith("mmproj-", StringComparison.OrdinalIgnoreCase) || name.StartsWith("mtp-", StringComparison.OrdinalIgnoreCase))
                     continue;
-                }
 
-                var fit = ModelFitEstimator.Estimate(entry.SizeBytes ?? 0, hardware);
-                HfFiles.Add(new HfFileResultViewModel(repo.RepoId, entry.Path, entry.SizeBytes, entry.LfsSha256, fit.Tier, fit.Reason));
+                if (listed.Contains(entry.Path))
+                    continue;
+
+                var fileSet = ModelFileSetResolver.Resolve(repo.RepoId, tree, entry.Path);
+                foreach (var member in fileSet.Entries.Where(e => e.Role is ModelFileRole.Model or ModelFileRole.Shard))
+                    listed.Add(member.RepoPath);
+
+                if (fileSet.IsSharded)
+                    shardedSets++;
+
+                var setBytes = fileSet.Entries.Where(e => e.Role is ModelFileRole.Model or ModelFileRole.Shard).Sum(e => e.SizeBytes ?? 0);
+                var fit = ModelFitEstimator.Estimate(setBytes, hardware);
+                HfFiles.Add(new HfFileResultViewModel(repo.RepoId, entry.Path, entry.SizeBytes, entry.LfsSha256, fit.Tier, fit.Reason, fileSet));
             }
 
-            HfBrowserStatus = multiPartHidden > 0
-                ? $"{HfFiles.Count} single-file GGUF(s); {multiPartHidden} multi-part file(s) are not yet supported and are hidden."
+            HfBrowserStatus = shardedSets > 0
+                ? $"{HfFiles.Count} GGUF model(s) found, {shardedSets} of them sharded; each downloads as a complete set."
                 : $"{HfFiles.Count} GGUF file(s) found.";
         }
         finally
@@ -805,47 +827,102 @@ public partial class ModelManagementViewModel : ObservableObject
             ? Path.Combine(_settings.Settings.DataManagement.LocalAiAssetsRoot, "Models")
             : layout.ModelsDirectory;
 
-        var (destination, collides) = HuggingFaceBrowserSupport.PlanDestination(modelsDir, file.Path);
-        if (collides)
+        // r27 04-models-arrive-complete.md 4.1: the whole file set, not the one
+        // file that was clicked. A shard set is all-or-nothing; a projector and
+        // an MTP head are offered and on by default.
+        var entries = file.SelectedEntries();
+        var planned = new List<(ModelFileSetEntry Entry, string Destination)>();
+        foreach (var entry in entries)
         {
-            _toasts.Show("Cannot download", $"{file.FileName} already exists at the destination. Nothing was overwritten.", ToastKind.Warning, 7000);
-            return;
+            var (destination, collides) = HuggingFaceBrowserSupport.PlanDestination(modelsDir, entry.RepoPath, file.RepoId);
+            if (collides)
+            {
+                _toasts.Show("Cannot download",
+                    $"{entry.FileName} already exists at the destination. Nothing was overwritten.", ToastKind.Warning, 7000);
+                return;
+            }
+
+            planned.Add((entry, destination));
         }
+
+        if (planned.Count == 0)
+            return;
 
         file.IsDownloading = true;
         try
         {
-            var url = HuggingFaceClient.ResolveDownloadUrl(file.RepoId, file.Path);
-            var progress = new Progress<DownloadProgress>(p => file.DownloadPercent = p.PercentComplete);
-            var download = await _downloader.DownloadAsync(url, destination, progress);
-            if (!download.Success)
-            {
-                _toasts.Show("Download failed", download.Message, ToastKind.Warning, 7000);
-                return;
-            }
+            // Progress is reported across the set, so a three-shard download
+            // does not appear to finish three times.
+            var totalBytes = planned.Sum(p => p.Entry.SizeBytes ?? 0);
+            long completedBytes = 0;
+            var missing = new List<string>();
+            var savedCount = 0;
 
-            if (!string.IsNullOrWhiteSpace(file.LfsSha256))
+            foreach (var (entry, destination) in planned)
             {
-                var verified = await _downloader.VerifyHashAsync(destination, file.LfsSha256);
-                if (!verified)
+                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                var entryBytes = entry.SizeBytes ?? 0;
+                var carried = completedBytes;
+                var url = HuggingFaceClient.ResolveDownloadUrl(file.RepoId, entry.RepoPath);
+                var progress = new Progress<DownloadProgress>(p =>
+                    file.DownloadPercent = totalBytes > 0
+                        ? Math.Clamp((carried + (entryBytes * p.PercentComplete / 100d)) / totalBytes * 100d, 0, 100)
+                        : p.PercentComplete);
+
+                var download = await _downloader.DownloadAsync(url, destination, progress);
+                if (!download.Success)
                 {
-                    try { File.Delete(destination); } catch { }
-                    _toasts.Show("Download failed", "Hash verification failed against the repo's recorded hash; the file was removed.", ToastKind.Warning, 7000);
-                    return;
+                    // A partial failure leaves what succeeded on disk: a 4 GB
+                    // shard that downloaded correctly should not be deleted
+                    // because a 60 MB companion failed.
+                    missing.Add($"{entry.FileName} ({download.Message})");
+                    completedBytes += entryBytes;
+                    continue;
                 }
+
+                if (!string.IsNullOrWhiteSpace(entry.LfsSha256))
+                {
+                    var verified = await _downloader.VerifyHashAsync(destination, entry.LfsSha256);
+                    if (!verified)
+                    {
+                        // Deletes only the file that failed, never the set.
+                        try { File.Delete(destination); } catch { }
+                        missing.Add($"{entry.FileName} (hash verification failed; the file was removed)");
+                        completedBytes += entryBytes;
+                        continue;
+                    }
+                }
+
+                await _manifest.UpsertAsync(new ModelManifestEntry
+                {
+                    FilePath = destination,
+                    RepoId = file.RepoId,
+                    RepoFile = entry.RepoPath,
+                    Sha256 = entry.LfsSha256 ?? string.Empty,
+                    SizeBytes = new FileInfo(destination).Length,
+                    Source = "hf-browser"
+                });
+
+                savedCount++;
+                completedBytes += entryBytes;
             }
 
-            await _manifest.UpsertAsync(new ModelManifestEntry
+            if (missing.Count > 0)
             {
-                FilePath = destination,
-                RepoId = file.RepoId,
-                RepoFile = file.Path,
-                Sha256 = file.LfsSha256 ?? string.Empty,
-                SizeBytes = new FileInfo(destination).Length,
-                Source = "hf-browser"
-            });
+                _toasts.Show(savedCount > 0 ? "Download incomplete" : "Download failed",
+                    $"{savedCount} of {planned.Count} file(s) saved. Missing: {string.Join("; ", missing)}",
+                    ToastKind.Warning, 9000);
+            }
+            else
+            {
+                var folder = Path.GetDirectoryName(planned[0].Destination);
+                _toasts.Show("Download complete",
+                    planned.Count == 1
+                        ? $"{file.FileName} saved to {planned[0].Destination}."
+                        : $"{planned.Count} files saved to {folder}.",
+                    ToastKind.Success);
+            }
 
-            _toasts.Show("Download complete", $"{file.FileName} saved to {destination}.", ToastKind.Success);
             ForceRefresh = true;
             await RefreshAsync();
         }
@@ -888,7 +965,54 @@ public sealed partial class HfFileResultViewModel : ObservableObject
     [ObservableProperty] private bool _isDownloading;
     [ObservableProperty] private double _downloadPercent;
 
-    public HfFileResultViewModel(string repoId, string path, long? sizeBytes, string? lfsSha256, ModelFitTier fitTier, string fitReason)
+    // ── r27 04-models-arrive-complete.md 4.1: a model is a file set ─────────
+
+    /// <summary>Every file this download will fetch, resolved from the repository tree.</summary>
+    public ModelFileSet FileSet { get; }
+
+    /// <summary>Shards are not a checkbox: a partial shard set is a model that does not load.</summary>
+    public bool IsSharded => FileSet.IsSharded;
+
+    public bool HasProjector => FileSet.Entries.Any(e => e.Role == ModelFileRole.Projector);
+    public bool HasDraftHead => FileSet.Entries.Any(e => e.Role == ModelFileRole.DraftHead);
+    public bool HasCompanions => HasProjector || HasDraftHead;
+
+    /// <summary>Offered, on by default. A multimodal model without its projector quietly cannot see.</summary>
+    [ObservableProperty] private bool _includeProjector = true;
+
+    /// <summary>Offered, on by default. This is the file doc 03's speculative decoding needs.</summary>
+    [ObservableProperty] private bool _includeDraftHead = true;
+
+    public string SetSummary
+    {
+        get
+        {
+            var parts = new List<string>();
+            var modelFiles = FileSet.Entries.Count(e => e.Role is ModelFileRole.Model or ModelFileRole.Shard);
+            if (modelFiles > 1)
+                parts.Add($"{modelFiles} shards");
+            if (HasProjector)
+                parts.Add("projector");
+            if (HasDraftHead)
+                parts.Add("MTP draft head");
+            return parts.Count == 0 ? string.Empty : $"Set: {string.Join(", ", parts)}, {SystemInfoService.FormatBytes(SelectedBytes)} total";
+        }
+    }
+
+    /// <summary>Total size of what is currently ticked, so the number on screen is the number that downloads.</summary>
+    public long SelectedBytes => SelectedEntries().Sum(e => e.SizeBytes ?? 0);
+
+    public IReadOnlyList<ModelFileSetEntry> SelectedEntries() =>
+    [
+        .. FileSet.Entries.Where(e => e.Required
+            || (e.Role == ModelFileRole.Projector && IncludeProjector)
+            || (e.Role == ModelFileRole.DraftHead && IncludeDraftHead))
+    ];
+
+    partial void OnIncludeProjectorChanged(bool value) => OnPropertyChanged(nameof(SetSummary));
+    partial void OnIncludeDraftHeadChanged(bool value) => OnPropertyChanged(nameof(SetSummary));
+
+    public HfFileResultViewModel(string repoId, string path, long? sizeBytes, string? lfsSha256, ModelFitTier fitTier, string fitReason, ModelFileSet? fileSet = null)
     {
         RepoId = repoId;
         Path = path;
@@ -896,6 +1020,7 @@ public sealed partial class HfFileResultViewModel : ObservableObject
         LfsSha256 = lfsSha256;
         FitTier = fitTier;
         FitReason = fitReason;
+        FileSet = fileSet ?? new ModelFileSet(repoId, [new ModelFileSetEntry(path, sizeBytes, lfsSha256, ModelFileRole.Model, true, true)]);
     }
 }
 

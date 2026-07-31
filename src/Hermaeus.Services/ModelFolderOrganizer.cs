@@ -44,42 +44,139 @@ public static class ModelFolderOrganizer
     /// <see cref="LocalAiAssetLocator.FindGgufModels"/>, which already excludes the
     /// embed/embedding/embeddings/rerank/reranker special directories - the organizer never
     /// needs to re-check that exclusion because those files are never in its input.</summary>
-    public static ModelOrganizePlan Plan(string modelsDirectory, IReadOnlyList<string> ggufPaths, bool moveRootLevelFiles = true)
+    public static ModelOrganizePlan Plan(
+        string modelsDirectory,
+        IReadOnlyList<string> ggufPaths,
+        bool moveRootLevelFiles = true,
+        IReadOnlyDictionary<string, string>? repoIdsByPath = null)
     {
         var destination = Path.Combine(modelsDirectory, LlmFolderName.Resolve(modelsDirectory));
         var moves = new List<ModelMoveItem>();
         var skips = new List<ModelMoveSkip>();
         var usedDestinations = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var existingDestinationFiles = Directory.Exists(destination)
-            ? new HashSet<string>(Directory.EnumerateFiles(destination), StringComparer.OrdinalIgnoreCase)
-            : [];
+        var claimedSources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var group in GroupMultiPartSets(ggufPaths))
         {
-            if (group.All(p => IsDirectlyUnder(p, destination)))
-                continue; // already flat: nothing to do
-
             if (!moveRootLevelFiles && group.All(p => IsDirectlyUnder(p, modelsDirectory)))
                 continue; // root-level files opted out of the move
 
-            var destPaths = group.Select(p => Path.Combine(destination, Path.GetFileName(p))).ToList();
-            var collides = destPaths.Any(d => usedDestinations.Contains(d) || existingDestinationFiles.Contains(d));
+            // r27 04-models-arrive-complete.md 4.3: companions move with their
+            // model, into the same folder, as one group. This is the item that
+            // fixes the seven-way mmproj-F16.gguf collision: in per-model
+            // folders they no longer compete for one name.
+            var members = group.Concat(FindCompanions(group, claimedSources)).ToList();
+
+            var folderName = ResolveFolderName(group, repoIdsByPath);
+            if (folderName.Length == 0)
+            {
+                // Leaving a file alone is always allowed. Moving it to the wrong
+                // place is not.
+                foreach (var p in members)
+                    skips.Add(new ModelMoveSkip(p, "Could not attribute this file to a model or repository, so it was left where it is."));
+                continue;
+            }
+
+            var modelFolder = Path.Combine(destination, folderName);
+            if (members.All(p => IsDirectlyUnder(p, modelFolder)))
+                continue; // already in its own per-model folder: nothing to do
+
+            var destPaths = members.Select(p => Path.Combine(modelFolder, Path.GetFileName(p))).ToList();
+            var collides = false;
+            for (var i = 0; i < destPaths.Count && !collides; i++)
+            {
+                // A file already sitting at its own destination is not a
+                // collision with itself; anything else at that name is.
+                collides = usedDestinations.Contains(destPaths[i])
+                    || (File.Exists(destPaths[i]) && !IsSameFile(destPaths[i], members[i]));
+            }
+
             if (collides)
             {
-                foreach (var p in group)
+                foreach (var p in members)
                     skips.Add(new ModelMoveSkip(p, $"A file named {Path.GetFileName(p)} already exists at the destination."));
                 continue;
             }
 
             foreach (var d in destPaths)
                 usedDestinations.Add(d);
+            foreach (var p in members)
+                claimedSources.Add(NormalizeKey(p));
 
             var (org, repo) = TryExtractHubRepo(group[0]);
-            moves.Add(new ModelMoveItem(group, destPaths, org, repo));
+            moves.Add(new ModelMoveItem(members, destPaths, org, repo));
         }
 
         return new ModelOrganizePlan(moves, skips, destination);
     }
+
+    /// <summary>
+    /// r27 4.2/4.3: the per-model folder segment, in the order the doc gives.
+    /// Repository provenance where the manifest has it, the hub-cache path where
+    /// the source encodes one, and the file's own base name where neither does,
+    /// which is the best available answer and is at least stable.
+    /// </summary>
+    private static string ResolveFolderName(IReadOnlyList<string> group, IReadOnlyDictionary<string, string>? repoIdsByPath)
+    {
+        if (repoIdsByPath is not null)
+        {
+            foreach (var path in group)
+            {
+                if (repoIdsByPath.TryGetValue(NormalizeKey(path), out var repoId) && !string.IsNullOrWhiteSpace(repoId))
+                    return ModelRepoFolder.Resolve(repoId);
+            }
+        }
+
+        var (org, repo) = TryExtractHubRepo(group[0]);
+        if (org is not null && repo is not null)
+            return ModelRepoFolder.Resolve($"{org}/{repo}");
+
+        var baseName = Path.GetFileNameWithoutExtension(group[0]);
+        var shard = MultiPartRegex.Match(baseName);
+        if (shard.Success)
+            baseName = shard.Groups["base"].Value;
+
+        return string.IsNullOrWhiteSpace(baseName) ? string.Empty : ModelRepoFolder.Resolve(baseName);
+    }
+
+    /// <summary>
+    /// The <c>mmproj-*</c> and <c>mtp-*</c> files sitting beside a model.
+    /// LocalAiAssetLocator.FindGgufModels excludes them from the organizer's
+    /// input on purpose (they are not models), so they are picked up here from
+    /// the model's own directory rather than being left behind by the move.
+    /// A companion is claimed by exactly one model, so two models in one
+    /// directory cannot both try to take the same file.
+    /// </summary>
+    private static IReadOnlyList<string> FindCompanions(IReadOnlyList<string> group, HashSet<string> claimed)
+    {
+        var directory = Path.GetDirectoryName(group[0]);
+        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+            return [];
+
+        try
+        {
+            return Directory.EnumerateFiles(directory, "*.gguf")
+                .Where(IsCompanion)
+                .Where(p => !claimed.Contains(NormalizeKey(p)))
+                .Order(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private static bool IsCompanion(string path)
+    {
+        var name = Path.GetFileNameWithoutExtension(path);
+        return name.StartsWith("mmproj", StringComparison.OrdinalIgnoreCase)
+            || name.StartsWith("mtp-", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>A file already sitting at its own destination is not a collision with itself.</summary>
+    private static bool IsSameFile(string a, string b) =>
+        string.Equals(NormalizeKey(a), NormalizeKey(b), StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Executes a previously-confirmed plan: moves files (same-volume rename, or
     /// copy+verify-length+delete across volumes), rewrites every stored settings reference to
@@ -102,7 +199,12 @@ public static class ModelFolderOrganizer
             try
             {
                 for (var i = 0; i < move.SourcePaths.Count; i++)
+                {
+                    // r27 4.2: destinations are per-model folders now, so the
+                    // directory a file lands in may not exist yet.
+                    Directory.CreateDirectory(Path.GetDirectoryName(move.DestinationPaths[i])!);
                     MoveFile(move.SourcePaths[i], move.DestinationPaths[i]);
+                }
 
                 for (var i = 0; i < move.SourcePaths.Count; i++)
                     pathRewrites[NormalizeKey(move.SourcePaths[i])] = move.DestinationPaths[i];

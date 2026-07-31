@@ -4,8 +4,11 @@ using Xunit;
 
 namespace Hermaeus.Tests;
 
-// r13 02-model-library.md 2.6: flat-folder organizer. Plan is pure; execution touches disk
-// and settings only after a preview+confirm gate the tests below don't exercise directly.
+// r13 02-model-library.md 2.6: the model folder organizer. Plan is pure; execution touches
+// disk and settings only after a preview+confirm gate the tests below do not exercise directly.
+// r27 04-models-arrive-complete.md 4.3/4.4: the destination is now a per-model folder rather
+// than one flat directory, because the projector sibling scan is load-bearing and a flat
+// folder can hold exactly one file named mmproj-F16.gguf.
 public sealed class ModelFolderOrganizerTests
 {
     [Fact]
@@ -22,14 +25,35 @@ public sealed class ModelFolderOrganizerTests
 
         var move = Assert.Single(plan.Moves);
         Assert.Equal(file, Assert.Single(move.SourcePaths));
-        Assert.Equal(Path.Combine(modelsDir, "llm", "gemma-3-12b-it-Q4_K_M.gguf"), Assert.Single(move.DestinationPaths));
+        Assert.Equal(Path.Combine(modelsDir, "llm", "unsloth__gemma-3-12b-it-GGUF", "gemma-3-12b-it-Q4_K_M.gguf"), Assert.Single(move.DestinationPaths));
         Assert.Equal("unsloth", move.HubRepoOrg);
         Assert.Equal("gemma-3-12b-it-GGUF", move.HubRepoName);
         Assert.Equal(1, plan.ProvenanceCount);
     }
 
     [Fact]
-    public void Plan_leaves_a_file_already_directly_under_LLM_alone()
+    public void Plan_leaves_a_model_already_in_its_own_folder_alone()
+    {
+        using var temp = new TempDir();
+        var modelsDir = temp.PathFor("Models");
+        var modelDir = Path.Combine(modelsDir, "LLM", "already-organized");
+        Directory.CreateDirectory(modelDir);
+        var file = Path.Combine(modelDir, "already-organized.gguf");
+        File.WriteAllText(file, "fake");
+
+        var plan = ModelFolderOrganizer.Plan(modelsDir, [file]);
+
+        Assert.Empty(plan.Moves);
+        Assert.Empty(plan.Skips);
+    }
+
+    /// <summary>
+    /// r27 04 4.4: an install that has already run Organize has a flat LLM folder
+    /// where filenames are the only identity. Re-running must improve that
+    /// without guessing wrong.
+    /// </summary>
+    [Fact]
+    public void Plan_migrates_a_flat_file_into_a_folder_named_from_its_own_base_name()
     {
         using var temp = new TempDir();
         var modelsDir = temp.PathFor("Models");
@@ -40,8 +64,77 @@ public sealed class ModelFolderOrganizerTests
 
         var plan = ModelFolderOrganizer.Plan(modelsDir, [file]);
 
-        Assert.Empty(plan.Moves);
-        Assert.Empty(plan.Skips);
+        var move = Assert.Single(plan.Moves);
+        Assert.Equal(Path.Combine(llmDir, "already-flat", "already-flat.gguf"), Assert.Single(move.DestinationPaths));
+    }
+
+    [Fact]
+    public void Plan_migrates_a_flat_file_with_manifest_provenance_into_its_repository_folder()
+    {
+        using var temp = new TempDir();
+        var modelsDir = temp.PathFor("Models");
+        var llmDir = Path.Combine(modelsDir, "LLM");
+        Directory.CreateDirectory(llmDir);
+        var file = Path.Combine(llmDir, "gemma-Q4.gguf");
+        File.WriteAllText(file, "fake");
+
+        var plan = ModelFolderOrganizer.Plan(modelsDir, [file], repoIdsByPath: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            [Path.GetFullPath(file)] = "unsloth/gemma-4-E4B-it-qat-GGUF"
+        });
+
+        var move = Assert.Single(plan.Moves);
+        Assert.Equal(Path.Combine(llmDir, "unsloth__gemma-4-E4B-it-qat-GGUF", "gemma-Q4.gguf"), Assert.Single(move.DestinationPaths));
+    }
+
+    /// <summary>
+    /// r27 04 4.3: this is the item that fixes the owner's seven-way
+    /// mmproj-F16.gguf collision. In per-model folders they stop competing for
+    /// one name, and each moves with the model it belongs to.
+    /// </summary>
+    [Fact]
+    public void Plan_moves_a_companion_with_its_model_into_the_same_folder()
+    {
+        using var temp = new TempDir();
+        var modelsDir = temp.PathFor("Models");
+        var nested = Path.Combine(modelsDir, "hub", "models--unsloth--gemma-4-E4B-it-qat-GGUF", "snapshots", "abc");
+        Directory.CreateDirectory(nested);
+        var model = Path.Combine(nested, "gemma-Q4.gguf");
+        var projector = Path.Combine(nested, "mmproj-F16.gguf");
+        var draftHead = Path.Combine(nested, "mtp-gemma-4-E4B-it.gguf");
+        File.WriteAllText(model, "model");
+        File.WriteAllText(projector, "projector");
+        File.WriteAllText(draftHead, "draft");
+
+        // FindGgufModels deliberately excludes companions from the input; the
+        // plan picks them up from the model's own directory.
+        var plan = ModelFolderOrganizer.Plan(modelsDir, [model]);
+
+        var move = Assert.Single(plan.Moves);
+        Assert.Equal(3, move.SourcePaths.Count);
+        Assert.Contains(projector, move.SourcePaths);
+        Assert.Contains(draftHead, move.SourcePaths);
+        var folder = Path.Combine(modelsDir, "llm", "unsloth__gemma-4-E4B-it-qat-GGUF");
+        Assert.All(move.DestinationPaths, d => Assert.Equal(folder, Path.GetDirectoryName(d)));
+    }
+
+    [Fact]
+    public void Plan_is_unchanged_by_being_called_twice()
+    {
+        using var temp = new TempDir();
+        var modelsDir = temp.PathFor("Models");
+        var nested = Path.Combine(modelsDir, "hub", "models--org--repo", "snapshots", "abc");
+        Directory.CreateDirectory(nested);
+        var file = Path.Combine(nested, "model.gguf");
+        File.WriteAllText(file, "fake");
+
+        var first = ModelFolderOrganizer.Plan(modelsDir, [file]);
+        var second = ModelFolderOrganizer.Plan(modelsDir, [file]);
+
+        Assert.Equal(
+            string.Join("|", first.Moves.SelectMany(m => m.DestinationPaths)),
+            string.Join("|", second.Moves.SelectMany(m => m.DestinationPaths)));
+        Assert.Equal(first.Skips.Count, second.Skips.Count);
     }
 
     [Fact]
@@ -53,6 +146,10 @@ public sealed class ModelFolderOrganizerTests
         Directory.CreateDirectory(llmDir);
         var existing = Path.Combine(llmDir, "model.gguf");
         File.WriteAllText(existing, "already here");
+
+        // The collision has to be inside the model's own folder to be one now.
+        Directory.CreateDirectory(Path.Combine(llmDir, "model"));
+        File.WriteAllText(Path.Combine(llmDir, "model", "model.gguf"), "already here");
 
         var nested = Path.Combine(modelsDir, "hub", "nested");
         Directory.CreateDirectory(nested);
@@ -93,7 +190,8 @@ public sealed class ModelFolderOrganizerTests
         var modelsDir = temp.PathFor("Models");
         var llmDir = Path.Combine(modelsDir, "LLM");
         Directory.CreateDirectory(llmDir);
-        File.WriteAllText(Path.Combine(llmDir, "big-model-00001-of-00002.gguf"), "existing");
+        Directory.CreateDirectory(Path.Combine(llmDir, "big-model"));
+        File.WriteAllText(Path.Combine(llmDir, "big-model", "big-model-00001-of-00002.gguf"), "existing");
 
         var nested = Path.Combine(modelsDir, "hub", "big-model");
         Directory.CreateDirectory(nested);
@@ -120,7 +218,7 @@ public sealed class ModelFolderOrganizerTests
         var plan = ModelFolderOrganizer.Plan(modelsDir, [file]);
 
         var move = Assert.Single(plan.Moves);
-        Assert.Equal(Path.Combine(modelsDir, "llm", "root-level.gguf"), Assert.Single(move.DestinationPaths));
+        Assert.Equal(Path.Combine(modelsDir, "llm", "root-level", "root-level.gguf"), Assert.Single(move.DestinationPaths));
     }
 
     [Fact]
@@ -187,7 +285,7 @@ public sealed class ModelFolderOrganizerTests
         Assert.Single(result.Moved);
         Assert.Empty(result.Failed);
         Assert.False(File.Exists(source));
-        Assert.True(File.Exists(Path.Combine(modelsDir, "llm", "model.gguf")));
+        Assert.True(File.Exists(Path.Combine(modelsDir, "llm", "model", "model.gguf")));
     }
 
     [Fact]
@@ -206,7 +304,7 @@ public sealed class ModelFolderOrganizerTests
         var manifestStore = new ModelManifestStore(settings);
         await ModelFolderOrganizer.ExecuteAsync(plan, settings, manifestStore);
 
-        var destination = Path.Combine(modelsDir, "llm", "gemma.gguf");
+        var destination = Path.Combine(modelsDir, "llm", "unsloth__gemma-3-12b-it-GGUF", "gemma.gguf");
         var entry = await manifestStore.FindAsync(destination);
         Assert.NotNull(entry);
         Assert.Equal("unsloth/gemma-3-12b-it-GGUF", entry!.RepoId);

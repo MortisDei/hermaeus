@@ -37,10 +37,10 @@ with no memory of any conversation should be able to read this table plus
 | 18 | 3.5 Speed check | yes |
 | 19 | 3.6 Comparison | yes |
 | 20 | 3.7 Doctor check | yes |
-| 21 | 4.1 A model is a file set | no |
-| 22 | 4.2 Per-model destination folders | no |
-| 23 | 4.3 Organize stops flattening | no |
-| 24 | 4.4 Flat-folder migration | no |
+| 21 | 4.1 A model is a file set | yes |
+| 22 | 4.2 Per-model destination folders | yes |
+| 23 | 4.3 Organize stops flattening | yes |
+| 24 | 4.4 Flat-folder migration | yes |
 | 25 | 5.1 Conversation summary projection | no |
 | 26 | 5.2 README version and guard | no |
 | 27 | 5.4 Docs, changelog, deferred ledger | no |
