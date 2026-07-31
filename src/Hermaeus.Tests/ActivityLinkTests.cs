@@ -87,6 +87,7 @@ public sealed class ActivityLinkTests
     [InlineData("services.server-stop")]
     [InlineData("services.server-crash")]
     [InlineData("models.download")]
+    [InlineData("models.update")]
     [InlineData("backup.write")]
     [InlineData("backup.restore")]
     [InlineData("memory.auto-archive")]

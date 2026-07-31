@@ -76,7 +76,8 @@ was changed about it.
   related.
 
 - **The four Activity sources r24 named and never wired.** Model downloads (a
-  partial file set records as Partial with the reason naming what is missing),
+  partial file set records as Partial with the reason naming what is missing)
+  and model updates, which download and then replace a file on disk,
   backup and restore in both directions, memory auto-archive sweeps including
   the ones that archive nothing, and the managed voice backend's start, stop
   and failure.

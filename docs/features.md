@@ -959,7 +959,8 @@ existing mechanisms; entries are redacted before being persisted.
 
 Coverage is now the full set the recorder was written for: managed servers,
 model downloads (a partially downloaded file set records as Partial, with the
-reason naming what is missing), RAG ingest and watched-source refresh, Doctor
+reason naming what is missing), model updates including a refused hash or a
+failed swap, RAG ingest and watched-source refresh, Doctor
 scans, backup and restore in both directions, memory auto-archive sweeps
 including the ones that archive nothing, and the managed voice backend's
 start, stop and failure. A recorder failure never fails the operation it is

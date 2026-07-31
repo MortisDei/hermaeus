@@ -673,6 +673,10 @@ public partial class ModelManagementViewModel : ObservableObject
             var download = await _downloader.DownloadAsync(url, tmpPath, progress);
             if (!download.Success)
             {
+                // r28 doc 03 3.3: an update is a download that also replaces a
+                // file on disk, so "did that actually work" applies twice over.
+                _activity.RecordSafe("models.update", entry.RepoId, ActivityOutcome.Failed,
+                    $"{item.EffectiveName} update failed", download.Message);
                 _toasts.Show("Update failed", download.Message, ToastKind.Warning, 7000);
                 return;
             }
@@ -680,13 +684,18 @@ public partial class ModelManagementViewModel : ObservableObject
             var verified = await _downloader.VerifyHashAsync(tmpPath, entry.PendingSha256);
             if (!verified)
             {
-                _toasts.Show("Update failed", "Downloaded file hash did not match the repo's recorded hash; nothing was changed.", ToastKind.Warning, 7000);
+                const string mismatch = "Downloaded file hash did not match the repo's recorded hash; nothing was changed.";
+                _activity.RecordSafe("models.update", entry.RepoId, ActivityOutcome.Failed,
+                    $"{item.EffectiveName} update failed", mismatch);
+                _toasts.Show("Update failed", mismatch, ToastKind.Warning, 7000);
                 return;
             }
 
             var swap = ModelUpdateApplier.Swap(item.ModelId, tmpPath);
             if (!swap.Success)
             {
+                _activity.RecordSafe("models.update", entry.RepoId, ActivityOutcome.Failed,
+                    $"{item.EffectiveName} update failed", swap.Error ?? "Unknown error during swap.");
                 _toasts.Show("Update failed", swap.Error ?? "Unknown error during swap.", ToastKind.Warning, 7000);
                 return;
             }
@@ -701,10 +710,14 @@ public partial class ModelManagementViewModel : ObservableObject
 
             item.UpdateStatus = ModelUpdateStatus.UpToDate;
             item.RetuneRecommended = true;
+            _activity.RecordSafe("models.update", entry.RepoId, ActivityOutcome.Succeeded,
+                $"Updated {item.EffectiveName}", "Re-tune recommended; the file changed size and mtime.");
             _toasts.Show("Model updated", $"{item.EffectiveName} was updated. Re-tune recommended (the file changed size/mtime).", ToastKind.Success, 7000);
         }
         catch (Exception ex)
         {
+            _activity.RecordSafe("models.update", entry.RepoId, ActivityOutcome.Failed,
+                $"{item.EffectiveName} update failed", ex.Message);
             _toasts.Show("Update failed", ex.Message, ToastKind.Warning, 7000);
         }
         finally
