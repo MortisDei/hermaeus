@@ -16,6 +16,13 @@ public sealed class AgentSafetyGate : IAgentSafetyGate
         "set_plan"
     };
 
+    // "run_command" is here as defence in depth, not as its real
+    // classification. The dispatch path routes run_command to
+    // EvaluateCommand below, which resolves the command family, blocks
+    // anything the workspace has not declared and returns RequiresApproval
+    // for a declared one. That is the Review level documented in
+    // docs/agent.md. This entry only catches a future caller that reaches
+    // the generic Evaluate path instead.
     private static readonly HashSet<string> HighRiskTools = new(StringComparer.OrdinalIgnoreCase)
     {
         "delete_file",

@@ -17,8 +17,8 @@ plus `git log --oneline main..HEAD` and know exactly where to resume.
 
 | # | Item | Landed |
 | --- | --- | --- |
-| 1 | 6.1 `run_command` classification pinned | no |
-| 2 | 4.1 Per-test timing in CI, both legs | no |
+| 1 | 6.1 `run_command` classification pinned | yes |
+| 2 | 4.1 Per-test timing in CI, both legs | yes |
 | 3 | 1.1 `LlmOutputConstraint` on `LlmChatOptions` | no |
 | 4 | 1.2 llama.cpp sends the constraint | no |
 | 5 | 1.3 OpenAI and Ollama, with honest refusal | no |
@@ -44,7 +44,7 @@ plus `git log --oneline main..HEAD` and know exactly where to resume.
 | 25 | 4.3 Parallel collection (only if justified) | no |
 | 26 | 4.4 CI note recorded | no |
 | 27 | 6.2 Docs guard over enumerable facts | no |
-| 28 | 6.3 NuGet caching | no |
+| 28 | 6.3 NuGet caching | yes |
 | 29 | 6.4 Speed Check forward pointer | no |
 | 30 | 6.5 Docs, changelog, deferred ledger | no |
 | 31 | Close-out: archive pack, PR | no |

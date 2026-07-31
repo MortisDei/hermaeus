@@ -530,13 +530,31 @@ even when it is running several steps unattended.
 
 | Level | Meaning | Examples | Behaviour |
 |---|---|---|---|
-| Safe | Read-only local inspection, or task-state-only | list files, search, glob, read, `set_plan` | execute directly |
-| Review | Local write, command, or MCP call proposed by the agent | edit_file, create_file, apply_draft_patch, run_command, mcp: calls | queue for approval |
-| Blocked | Out of scope | shell, network, install, commit, push | do not execute |
+| Safe | Read-only local inspection, or task-state-only | `list_files`, `search_files`, `glob_files`, `read_file`, `summarize_file`, `draft_patch`, `inspect_git_diff`, `set_plan` | execute directly |
+| Review | Local write, command, sub-task delegation, or MCP call proposed by the agent | edit_file, create_file, apply_draft_patch, `run_command`, `plan_subtasks`, mcp: calls | queue for approval |
+| Blocked | Out of scope | `delete_file`, `install_package`, `network_access`, `upload`, `download`, `modify_system_config`, `commit`, `push`, `change_git_history` | do not execute |
 | Dangerous | Destructive or broad operation | delete tree, overwrite many files | block by default |
 
 Risk classification is deterministic and recorded in traces so users can review
 why an action was allowed, queued, or blocked.
+
+`run_command` is Review, not Blocked, and the route matters: the dispatch path
+sends it to `AgentSafetyGate.EvaluateCommand`, which resolves the command family
+and blocks anything the workspace has not declared as a command recipe. A
+declared family returns "requires approval". The `run_command` entry in the
+gate's high-risk set is defence in depth for any future caller that reaches the
+generic `Evaluate` path instead.
+
+One nuance: within a single task, a `run_command` whose command string is
+character-for-character identical to one the user already approved executes
+without asking again. That memory is per task and per exact string; it never
+widens to the command family, so approving `dotnet test` once does not approve
+`dotnet test --filter Something` later.
+
+A constrained planner response (see "Constrained planner protocol" below) is
+classified identically to an unconstrained one. Constraining the shape of the
+model's reply makes it parseable, not trusted: `requires_approval` and
+`risk_level` remain fields the model fills in and the code overrides.
 
 ## Patch Queue Semantics
 
