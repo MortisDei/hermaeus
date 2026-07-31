@@ -17,9 +17,30 @@ public static class WorkspaceCommandRecipes
 {
     public sealed record MatchResult(string FileName, IReadOnlyList<string> Args);
 
+    // The verbs a developer runs to check their own work: build it, test it,
+    // inspect it. Everything here is bounded to the workspace and produces a
+    // result rather than a change.
+    //
+    // Deliberately absent, each for a reason rather than an oversight:
+    //   - installers (npm install, dotnet restore, pip install): they reach the
+    //     network and pull in third-party code, which is out of scope entirely.
+    //   - formatters and fixers (cargo fmt, dotnet format): they rewrite source
+    //     files, which has to go through the patch queue where the user can see
+    //     the diff, not through a command that edits the tree invisibly.
+    //   - long-running processes (dotnet run, npm start): not a verification
+    //     step, and nothing here supervises a server.
+    //   - make, mvn, gradle: a target can be arbitrary shell and there is no
+    //     cheap declared-target check equivalent to package.json's scripts.
+    //     Worth revisiting with real validation rather than waving through.
     private static readonly string[] Families =
     [
-        "dotnet build", "dotnet test", "npm test", "npm run", "cargo build", "cargo test", "pytest"
+        "dotnet build", "dotnet test",
+        "npm test", "npm run",
+        "pnpm test", "pnpm run",
+        "yarn test", "yarn run",
+        "cargo build", "cargo test", "cargo check", "cargo clippy",
+        "go build", "go test", "go vet",
+        "pytest", "python -m pytest"
     ];
 
     /// <summary>
@@ -38,9 +59,19 @@ public static class WorkspaceCommandRecipes
         "dotnet test" => "Run a .NET test project.",
         "npm test" => "Run the package's test script.",
         "npm run" => "Run a script declared in package.json.",
+        "pnpm test" => "Run the package's test script with pnpm.",
+        "pnpm run" => "Run a package.json script with pnpm.",
+        "yarn test" => "Run the package's test script with yarn.",
+        "yarn run" => "Run a package.json script with yarn.",
         "cargo build" => "Compile a Rust crate.",
         "cargo test" => "Run a Rust crate's tests.",
+        "cargo check" => "Type-check a Rust crate without building it.",
+        "cargo clippy" => "Lint a Rust crate.",
+        "go build" => "Compile Go packages.",
+        "go test" => "Run Go tests.",
+        "go vet" => "Report suspicious constructs in Go code.",
         "pytest" => "Run a Python test suite.",
+        "python -m pytest" => "Run a Python test suite through the interpreter.",
         _ => string.Empty
     };
 
@@ -52,10 +83,22 @@ public static class WorkspaceCommandRecipes
     /// actually run it) key off, so they cannot disagree about what counts
     /// as a recognized command.
     /// </summary>
+    /// <summary>
+    /// Characters that only ever mean chaining, redirection or substitution.
+    /// Nothing runs through a shell here (every command is launched with an
+    /// explicit ArgumentList), so these could not have been interpreted, but a
+    /// string like "dotnet test &amp;&amp; rm -rf /" still matched the family prefix
+    /// and was therefore offered to the user as an approvable action. It would
+    /// have been refused at execution time; it should never reach an approval
+    /// prompt looking legitimate.
+    /// </summary>
+    private static readonly char[] ShellMetaCharacters = ['&', '|', ';', '`', '$', '>', '<', '\n', '\r'];
+
     public static string? ExtractFamily(string command)
     {
         var trimmed = (command ?? string.Empty).Trim();
         if (trimmed.Length == 0) return null;
+        if (trimmed.IndexOfAny(ShellMetaCharacters) >= 0) return null;
 
         foreach (var family in Families)
         {
@@ -89,13 +132,33 @@ public static class WorkspaceCommandRecipes
             "dotnet build" => WithOptionalPath("dotnet", ["build"], remainder, workspaceRoot),
             "dotnet test" => WithOptionalPath("dotnet", ["test"], remainder, workspaceRoot),
             "npm test" => remainder is null ? new MatchResult("npm", ["test"]) : null,
-            "npm run" => remainder is null ? null : MatchNpmRunScript(remainder, workspaceRoot),
+            "npm run" => remainder is null ? null : MatchPackageScript("npm", remainder, workspaceRoot),
+            "pnpm test" => remainder is null ? new MatchResult("pnpm", ["test"]) : null,
+            "pnpm run" => remainder is null ? null : MatchPackageScript("pnpm", remainder, workspaceRoot),
+            "yarn test" => remainder is null ? new MatchResult("yarn", ["test"]) : null,
+            "yarn run" => remainder is null ? null : MatchPackageScript("yarn", remainder, workspaceRoot),
             "cargo build" => remainder is null ? new MatchResult("cargo", ["build"]) : null,
             "cargo test" => remainder is null ? new MatchResult("cargo", ["test"]) : null,
+            "cargo check" => remainder is null ? new MatchResult("cargo", ["check"]) : null,
+            "cargo clippy" => remainder is null ? new MatchResult("cargo", ["clippy"]) : null,
+            "go build" => WithGoTarget("build", remainder, workspaceRoot),
+            "go test" => WithGoTarget("test", remainder, workspaceRoot),
+            "go vet" => WithGoTarget("vet", remainder, workspaceRoot),
             "pytest" => WithOptionalPath("pytest", [], remainder, workspaceRoot),
+            "python -m pytest" => WithOptionalPath("python", ["-m", "pytest"], remainder, workspaceRoot),
             _ => null
         };
     }
+
+    /// <summary>
+    /// Go's package pattern "./..." is how every real Go command is written and
+    /// is not a filesystem path, so it is allowed literally; anything else has
+    /// to be a contained workspace path like every other family's argument.
+    /// </summary>
+    private static MatchResult? WithGoTarget(string verb, string? remainder, string workspaceRoot) =>
+        remainder is "./..."
+            ? new MatchResult("go", [verb, "./..."])
+            : WithOptionalPath("go", [verb], remainder, workspaceRoot);
 
     private static MatchResult? WithOptionalPath(string fileName, string[] baseArgs, string? pathArg, string workspaceRoot)
     {
@@ -114,7 +177,12 @@ public static class WorkspaceCommandRecipes
         return new MatchResult(fileName, [.. baseArgs, pathArg.Replace('\\', '/')]);
     }
 
-    private static MatchResult? MatchNpmRunScript(string scriptName, string workspaceRoot)
+    /// <summary>
+    /// A package-manager script must already be declared in the workspace's own
+    /// package.json. The script body is arbitrary, so what keeps this bounded is
+    /// that the workspace author wrote it, not the model.
+    /// </summary>
+    private static MatchResult? MatchPackageScript(string fileName, string scriptName, string workspaceRoot)
     {
         if (scriptName.Any(c => c is '/' or '\\' or ' ') || scriptName.Contains(".."))
             return null;
@@ -136,6 +204,6 @@ public static class WorkspaceCommandRecipes
             return null;
         }
 
-        return new MatchResult("npm", ["run", scriptName]);
+        return new MatchResult(fileName, ["run", scriptName]);
     }
 }

@@ -41,6 +41,11 @@ benchmarks answer "best across every suite".
   only to the log and the transcript, so a task paused on a question rendered
   a reply box with no question next to it. It is persisted on the task now and
   shown above the reply box.
+- **A command containing shell metacharacters could reach an approval prompt.**
+  `dotnet test && rm -rf /` matched the family prefix, so the gate offered it
+  as approvable; execution would have refused it (nothing is launched through a
+  shell, and the argument fails path validation), but it should never have
+  looked legitimate. Such a string now matches no family at all.
 - **`list_files` hid whole folders.** It shared the *search* result cap of 20,
   and the workspace walk is a LIFO stack, so a listing of a real workspace
   returned 20 entries from whichever subtree was popped first and said nothing
@@ -161,6 +166,18 @@ benchmarks answer "best across every suite".
   refused on a running task or a sub-task child. `AgentTaskStatus.Cancelled`
   is new and terminal; `docs/agent.md` already documented `cancelled` as a
   task state, so this closes that drift too.
+- **Ten more command families**, so an ordinary dev workflow is covered rather
+  than only .NET, npm, cargo and pytest: `pnpm`/`yarn` test and run,
+  `cargo check`, `cargo clippy`, `go build`, `go test`, `go vet` (including
+  Go's `./...` pattern) and `python -m pytest`. Installers, formatters,
+  long-running processes and `make`/`mvn`/`gradle` stay out, each for a stated
+  reason rather than by omission; see `docs/agent.md`.
+- **A blocked command says what can be done about it.** If the agent asks for a
+  family this workspace has not declared, the row names it and offers to
+  declare it in one click, after which the action still needs its own approval.
+  If it asks for something outside the families entirely, the refusal says so
+  and offers nothing, because nothing the user could allow would make it
+  runnable. No new execution power either way.
 - **A command recipe editor** on the Workspace tab. A workspace that declares
   no recipes can run nothing, and declaring one meant hand-editing
   `.hermaeus/workspace.json`, which assumed the user knew both that the file

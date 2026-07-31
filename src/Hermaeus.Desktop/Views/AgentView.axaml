@@ -150,6 +150,18 @@
                                         <!-- A row without a pending action has no decision to offer, so it
                                              says what it needs instead of rendering an Approve button that
                                              would apply to nothing. -->
+                                        <!-- The agent asked for a command family this workspace
+                                             has not declared. Declaring it grants nothing the
+                                             Command Recipes editor does not already grant, and
+                                             the action still needs its own approval after. -->
+                                        <Button Content="{Binding DeclareCommandFamilyLabel}"
+                                                IsVisible="{Binding CanDeclareCommandFamily}"
+                                                HorizontalAlignment="Left"
+                                                FontSize="11" Padding="8,3"
+                                                x:CompileBindings="False"
+                                                Command="{Binding DataContext.DeclareCommandFamilyCommand, ElementName=Root}"
+                                                CommandParameter="{Binding}"
+                                                ToolTip.Tip="Adds this command family to .hermaeus/workspace.json so the agent may request it here. It still needs your approval every time it runs." />
                                         <TextBlock Text="{Binding NoDecisionLabel}"
                                                    FontSize="11"
                                                    Opacity="0.7"

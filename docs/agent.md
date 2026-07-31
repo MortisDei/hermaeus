@@ -343,16 +343,36 @@ the model sees next step that only the first one ran.
   - `apply_draft_patch` - whole-file rewrite, for the cases `edit_file` isn't
     a fit.
 - Approval-gated command execution (`run_command`): a fixed set of template
-  families (`dotnet build`/`dotnet test` with an optional project path,
-  `npm test`, `npm run <script>` where the script must already exist in the
-  workspace's own `package.json`, `cargo build`, `cargo test`, `pytest` with
-  an optional path), and only when the workspace itself declared that family
-  safe in `.hermaeus/workspace.json`. Those declarations are editable from the
+  families, and only when the workspace itself declared that family safe in
+  `.hermaeus/workspace.json`. The families are the verbs a developer runs to
+  check their own work: `dotnet build`/`dotnet test` with an optional project
+  path; `npm`/`pnpm`/`yarn` `test` and `run <script>`, where the script must
+  already exist in the workspace's own `package.json`; `cargo build`,
+  `cargo test`, `cargo check`, `cargo clippy`; `go build`, `go test`, `go vet`,
+  which also accept Go's `./...` package pattern; and `pytest` /
+  `python -m pytest` with an optional path. A command containing shell
+  metacharacters (`&`, `|`, `;`, backtick, `$`, `<`, `>`, a newline) matches no
+  family at all: nothing is ever launched through a shell, so they could not
+  have been interpreted, but such a string must not reach an approval prompt
+  looking legitimate either.
+
+  Absent by decision, not oversight: installers (`npm install`,
+  `dotnet restore`, `pip install`) reach the network and pull in third-party
+  code; formatters (`cargo fmt`, `dotnet format`) rewrite source outside the
+  patch queue where the user would see the diff; long-running processes
+  (`dotnet run`, `npm start`) are not a verification step; and `make`, `mvn`
+  and `gradle` can run arbitrary targets with no cheap declared-target check
+  equivalent to `package.json`'s scripts. Those declarations are editable from the
   Workspace tab's Command Recipes panel: pick a family from the fixed list,
   optionally narrow it with an argument, and it is written to the manifest
   straight away; Remove takes it back off. The picker offers only families the
   safety gate can accept, so a recipe cannot be declared that would be refused
-  at run time, and nothing about the editor widens what the gate allows.
+  at run time, and nothing about the editor widens what the gate allows. When
+  the agent asks for a family the workspace has not declared, the blocked row
+  names that family and offers to declare it in one click; the action still
+  needs its own approval afterwards. When it asks for something outside the
+  families entirely, the refusal says so and offers nothing, because there is
+  nothing the user could allow that would make it runnable.
   Optional path arguments go through the
   same containment checks as every other workspace file path. Always requires
   approval, even for a declared-safe family. After the user approves a given

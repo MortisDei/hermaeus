@@ -127,6 +127,17 @@ public sealed class AgentReviewQueueItemViewModel
     /// <summary>What a pending run_command approval will actually execute (r6 3.2); empty for non-command tools.</summary>
     public string RecipePreview { get; }
     public bool HasRecipePreview => !string.IsNullOrWhiteSpace(RecipePreview);
+
+    /// <summary>
+    /// The command family this row is blocked on, when the agent asked for a
+    /// real family this workspace simply has not declared. Empty when the
+    /// request was not a command at all, or was not a family the agent can
+    /// ever run: there is nothing to offer in that case, and offering
+    /// something would imply an approval that will never exist.
+    /// </summary>
+    public string UndeclaredCommandFamily { get; init; } = string.Empty;
+    public bool CanDeclareCommandFamily => UndeclaredCommandFamily.Length > 0;
+    public string DeclareCommandFamilyLabel => $"Allow '{UndeclaredCommandFamily}' in this workspace";
 }
 
 /// <summary>
@@ -1118,8 +1129,52 @@ public partial class AgentViewModel : ViewModelBase
             // workbench's active one (r16 01-orchestration-hardening.md 1.4).
             var previewOptions = item.WorkspaceRoot is { Length: > 0 } root ? options with { WorkspaceRoot = root } : options;
             var preview = item.PendingToolAction is null ? string.Empty : AgentApprovalPreview.Describe(item.PendingToolAction, previewOptions);
-            ReviewQueue.Add(new AgentReviewQueueItemViewModel(item, preview, WorkspaceRoot));
+            ReviewQueue.Add(new AgentReviewQueueItemViewModel(item, preview, WorkspaceRoot)
+            {
+                UndeclaredCommandFamily = ResolveUndeclaredFamily(item)
+            });
         }
+    }
+
+    /// <summary>
+    /// A blocked run_command whose family the agent CAN run but this workspace
+    /// has not declared. Anything else returns empty: a command outside the
+    /// fixed families has nothing the user could usefully allow, and pretending
+    /// otherwise would offer a button that cannot help.
+    /// </summary>
+    private string ResolveUndeclaredFamily(AgentReviewQueueItem item)
+    {
+        if (item.PendingToolAction is not { } pending
+            || !string.Equals(pending.ToolName, "run_command", StringComparison.OrdinalIgnoreCase))
+            return string.Empty;
+
+        var requested = pending.Arguments.TryGetValue("command", out var value) ? value?.ToString() ?? string.Empty : string.Empty;
+        var family = WorkspaceCommandRecipes.ExtractFamily(requested);
+        if (family is null)
+            return string.Empty;
+
+        var declared = CommandRecipes.Any(r =>
+            string.Equals(WorkspaceCommandRecipes.ExtractFamily(r.Command) ?? r.Command.Trim(), family, StringComparison.OrdinalIgnoreCase));
+        return declared ? string.Empty : family;
+    }
+
+    /// <summary>
+    /// Declares the family the blocked row named, from the row itself. This
+    /// grants nothing beyond what the Command Recipes editor already grants:
+    /// the family was always one the gate accepts, the workspace just had not
+    /// said yes to it, and the action still needs its own approval afterwards.
+    /// </summary>
+    [RelayCommand]
+    private async Task DeclareCommandFamilyAsync(AgentReviewQueueItemViewModel? item)
+    {
+        if (item is null || !item.CanDeclareCommandFamily) return;
+
+        var family = item.UndeclaredCommandFamily;
+        CommandRecipes.Add(new WorkspaceCommandRecipeViewModel(
+            new WorkspaceCommandRecipe(family, WorkspaceCommandRecipes.DescribeFamily(family), AgentRiskLevel.Medium)));
+        await SaveWorkspaceManifestAsync();
+        await RefreshReviewQueueAsync();
+        StatusMessage = $"'{family}' is now allowed in this workspace. The agent still needs your approval to run it.";
     }
 
     [RelayCommand]

@@ -76,7 +76,10 @@ public sealed class AgentSafetyGate : IAgentSafetyGate
 
         var family = WorkspaceCommandRecipes.ExtractFamily(command);
         if (family is null)
-            return new AgentToolPolicyDecision(AgentToolDisposition.Blocked, AgentRiskLevel.High, "Command is not one of the fixed, safe executable template families.");
+            return new AgentToolPolicyDecision(AgentToolDisposition.Blocked, AgentRiskLevel.High,
+                "This is not one of the command families the agent can run. Allowed families: "
+                + string.Join(", ", WorkspaceCommandRecipes.KnownFamilies)
+                + ". There is nothing to allow here; run it yourself if it needs running.");
 
         // A declared recipe may itself carry an example argument (or none);
         // what has to match is the family, not the exact string, so a
@@ -86,7 +89,15 @@ public sealed class AgentSafetyGate : IAgentSafetyGate
         var declared = allowedCommands.Any(recipe =>
             string.Equals(WorkspaceCommandRecipes.ExtractFamily(recipe.Command) ?? recipe.Command.Trim(), family, StringComparison.OrdinalIgnoreCase));
         if (!declared)
-            return new AgentToolPolicyDecision(AgentToolDisposition.Blocked, AgentRiskLevel.High, "Command family was not declared as a safe recipe for this workspace.");
+        {
+            // Names the family, because that is the thing the user can act on:
+            // the workbench turns this into a one-click "declare it here". A
+            // bare "was not declared" left them to work out which of the
+            // families it meant and where declarations live.
+            return new AgentToolPolicyDecision(AgentToolDisposition.Blocked, AgentRiskLevel.High,
+                $"This workspace has not declared '{family}' as an allowed command. "
+                + "Add it in the Workspace tab's Command Recipes panel to allow it here.");
+        }
 
         return new AgentToolPolicyDecision(AgentToolDisposition.RequiresApproval, AgentRiskLevel.Medium, "Template-family command execution always requires approval.");
     }
