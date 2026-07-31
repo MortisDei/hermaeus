@@ -51,6 +51,17 @@ public sealed class OpenAiService : IDisposable
     private bool IsRealOpenAiEndpoint =>
         Uri.TryCreate(Base, UriKind.Absolute, out var uri) && uri.Host.Equals("api.openai.com", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Structured outputs are documented for api.openai.com and vary by server
+    /// and by model everywhere else this base URL can point (LM Studio, vLLM,
+    /// Groq, OpenRouter). Nothing is probed, and nothing is assumed of an
+    /// endpoint that has not declared itself: a constraint aimed at an
+    /// arbitrary compatible server is refused in words rather than sent as a
+    /// field that server may silently drop (r28 doc 01 1.3/1.4).
+    /// </summary>
+    public LlmConstraintSupport ConstraintSupport =>
+        IsRealOpenAiEndpoint ? LlmConstraintSupport.JsonSchema : LlmConstraintSupport.None;
+
     private async Task<AuthenticationHeaderValue> BuildAuthHeaderAsync(CancellationToken ct) =>
         new("Bearer", await _secrets.ResolveAsync(_settings.Settings.Llm.OpenAiApiKey, ct));
 
@@ -69,7 +80,7 @@ public sealed class OpenAiService : IDisposable
                 ? models.Where(m => !NonChatModelIdMarkers.Any(marker => m.Id.Contains(marker, StringComparison.OrdinalIgnoreCase)))
                 : models;
             return chatUsable
-                .Select(m => new LlmModel { Id = m.Id, Name = m.Id, Provider = "OpenAI", ProviderTag = ProviderTagValue })
+                .Select(m => new LlmModel { Id = m.Id, Name = m.Id, Provider = "OpenAI", ProviderTag = ProviderTagValue, SupportsOutputConstraints = ConstraintSupport != LlmConstraintSupport.None })
                 .ToList();
         }
         catch { return []; }
@@ -82,7 +93,10 @@ public sealed class OpenAiService : IDisposable
         CancellationToken ct = default)
     {
         if (!IsConfigured) return YieldEventError("*OpenAI API key not configured.*");
-        return StreamEventsInternal(modelId, messages, options ?? LlmChatOptions.Default, ct);
+        options ??= LlmChatOptions.Default;
+        if (LlmOutputConstraintWire.DescribeRefusal(options.OutputConstraint, ConstraintSupport, ProviderName) is { } refusal)
+            return YieldEventError(refusal);
+        return StreamEventsInternal(modelId, messages, options, ct);
     }
 
     private async IAsyncEnumerable<LlmStreamEvent> StreamEventsInternal(
@@ -169,6 +183,10 @@ public sealed class OpenAiService : IDisposable
             temperature = options.Temperature,
             max_tokens = maxTokens,
             top_p = options.TopP,
+            // Only reached once ConstraintSupport has allowed it; a server that
+            // rejects the field returns an error, which GetStreamResponseAsync
+            // surfaces rather than retrying unconstrained (r28 doc 01 1.3).
+            response_format = LlmOutputConstraintWire.ResponseFormat(options.OutputConstraint),
             frequency_penalty = options.FrequencyPenalty,
             presence_penalty = options.PresencePenalty,
             tools,

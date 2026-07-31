@@ -22,6 +22,14 @@ public class LlmModel
     public double? DefaultPresencePenalty { get; set; }
     /// <summary>Context length read live from the provider (llama.cpp /props, Ollama /api/show), if available.</summary>
     public int? ProbedContextLength { get; set; }
+    /// <summary>
+    /// Whether the provider behind this model can enforce
+    /// <see cref="LlmChatOptions.OutputConstraint"/> (r28 doc 01 1.4). Set
+    /// from what the provider knows about itself, never probed: a capability
+    /// check that loads a model to find out whether a model loads is a
+    /// denial-of-service handle wearing a health check's name.
+    /// </summary>
+    public bool SupportsOutputConstraints { get; set; }
     public bool IsVisible { get; set; } = true;
     public string Avatar { get; set; } = string.Empty;
 

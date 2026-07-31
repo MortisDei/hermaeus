@@ -65,6 +65,17 @@ public sealed class ChatTraceViewModel
     public long TotalLatencyMs { get; init; }
     public string ErrorDetails { get; init; } = string.Empty;
 
+    /// <summary>
+    /// The <see cref="LlmOutputConstraint.Description"/> the send enforced, or
+    /// empty when the send was unconstrained (r28 doc 01 1.6). The chat path
+    /// does not constrain its own sends, so this reads "unconstrained" for an
+    /// ordinary turn; it is the receipt that says so rather than leaving the
+    /// question open.
+    /// </summary>
+    public string OutputConstraint { get; init; } = string.Empty;
+    public string OutputConstraintLabel =>
+        string.IsNullOrWhiteSpace(OutputConstraint) ? "unconstrained" : OutputConstraint;
+
     /// <summary>Pre-stream stage timing (r9 01-send-path-latency.md 1.1), e.g. "recall 240 ms, select 3 ms, ...".</summary>
     public string PreStreamBreakdown { get; init; } = string.Empty;
     public string Summary => $"{Timestamp:HH:mm:ss} {ModelId} · {TotalLatencyMs} ms · {EstimatedTokens:N0} est tokens";
@@ -1243,9 +1254,10 @@ public partial class ChatViewModel : ViewModelBase
                 () => Volatile.Read(ref sawContent) == 1,
                 phaseCts.Token);
 
+            var sendOptions = BuildChatOptions(memoryContext, ragAndRecallContext);
             var result = await ChatSendOrchestrator.StreamAsync(
                 _llm, selectedModelId, history,
-                BuildChatOptions(memoryContext, ragAndRecallContext),
+                sendOptions,
                 onToken: token =>
                 {
                     if (Interlocked.Exchange(ref sawContent, 1) == 0)
@@ -1348,7 +1360,7 @@ public partial class ChatViewModel : ViewModelBase
                     SpeakStreamingChunk(asst.Content);
             }
 
-            AddChatTrace(snapshot, selectedModelId, result.Usage, result.FirstTokenMs, result.TotalLatencyMs, traceError, timing.Format(), ragContextItems, ragMs, ragNote, recallItems, recallInjectionMs, recallNote);
+            AddChatTrace(snapshot, selectedModelId, result.Usage, result.FirstTokenMs, result.TotalLatencyMs, traceError, timing.Format(), ragContextItems, ragMs, ragNote, recallItems, recallInjectionMs, recallNote, sendOptions.OutputConstraint);
         }
         catch (Exception ex)
         {
@@ -2246,11 +2258,12 @@ public partial class ChatViewModel : ViewModelBase
         ContextPreviewRaw += $"\n\n---\n\n[{part.Kind}] {part.Title}\n{part.Content}";
     }
 
-    private void AddChatTrace(ChatContextSnapshot snapshot, string modelId, ChatTokenUsage? usage, long firstTokenMs, long totalMs, string error, string preStreamBreakdown, int ragContextItems = 0, long ragMs = 0, string ragNote = "", int recallContextItems = 0, long recallInjectionMs = 0, string recallNote = "")
+    private void AddChatTrace(ChatContextSnapshot snapshot, string modelId, ChatTokenUsage? usage, long firstTokenMs, long totalMs, string error, string preStreamBreakdown, int ragContextItems = 0, long ragMs = 0, string ragNote = "", int recallContextItems = 0, long recallInjectionMs = 0, string recallNote = "", LlmOutputConstraint? outputConstraint = null)
     {
         var model = AvailableModels.FirstOrDefault(m => m.Id == modelId);
         var trace = new ChatTraceViewModel
         {
+            OutputConstraint = outputConstraint?.Description ?? string.Empty,
             ModelId = modelId,
             Provider = model?.Provider ?? _llm.ProviderName,
             Runtime = model?.ProviderTag ?? _llm.ProviderName,
@@ -2279,7 +2292,7 @@ public partial class ChatViewModel : ViewModelBase
             trace.AttachmentCount, trace.EstimatedTokens, trace.ProviderUsage, trace.FirstTokenMs,
             trace.TotalLatencyMs, trace.ErrorDetails, trace.PreStreamBreakdown,
             trace.RagContextItems, trace.RagMs, trace.RagNote,
-            trace.RecallContextItems, trace.RecallInjectionMs, trace.RecallNote);
+            trace.RecallContextItems, trace.RecallInjectionMs, trace.RecallNote, trace.OutputConstraint);
         _ = Task.Run(() => _chatTraces?.PersistAsync(entry, CurrentConversationId) ?? Task.CompletedTask);
     }
 
@@ -2309,7 +2322,8 @@ public partial class ChatViewModel : ViewModelBase
             FirstTokenMs = entry.FirstTokenMs,
             TotalLatencyMs = entry.TotalLatencyMs,
             ErrorDetails = entry.ErrorDetails,
-            PreStreamBreakdown = entry.PreStreamBreakdown
+            PreStreamBreakdown = entry.PreStreamBreakdown,
+            OutputConstraint = entry.OutputConstraint
         }).ToList();
 
         RunOnUi(() =>

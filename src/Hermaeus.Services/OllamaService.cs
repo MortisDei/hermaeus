@@ -24,6 +24,12 @@ public sealed class OllamaService : IDisposable
         ProviderCapabilities.Streaming | ProviderCapabilities.UsageReporting
         | ProviderCapabilities.ModelPull | ProviderCapabilities.ModelDelete);
 
+    /// <summary>
+    /// Ollama's <c>format</c> field takes a JSON schema. It has no grammar
+    /// surface, so a grammar constraint is refused rather than dropped.
+    /// </summary>
+    public const LlmConstraintSupport ConstraintSupport = LlmConstraintSupport.JsonSchema;
+
     public OllamaService(RuntimeProfileService profiles, HttpClient? http = null)
     {
         _profiles = profiles;
@@ -48,6 +54,7 @@ public sealed class OllamaService : IDisposable
                         ProviderTag = ProviderTagValue,
                         SizeBytes = model.Size,
                         ModifiedAt = model.ModifiedAt,
+                        SupportsOutputConstraints = true,
                         ProbedContextLength = await ProbeContextLengthAsync(profile.BaseUrl, model.Name, ct)
                     });
                 }
@@ -112,6 +119,12 @@ public sealed class OllamaService : IDisposable
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         options ??= LlmChatOptions.Default;
+        if (LlmOutputConstraintWire.DescribeRefusal(options.OutputConstraint, ConstraintSupport, "Ollama") is { } refusal)
+        {
+            yield return LlmStreamEvent.Error(refusal);
+            yield break;
+        }
+
         var systemPrompt = options.SystemPrompt;
         var (profileId, modelName) = ParseId(modelId);
         var profile = _profiles.Profiles.FirstOrDefault(p => p.Id == profileId);
@@ -132,6 +145,8 @@ public sealed class OllamaService : IDisposable
             messages = msgs,
             stream = true,
             tools,
+            // Ollama takes the schema document itself, unwrapped (r28 doc 01 1.3).
+            format = LlmOutputConstraintWire.OllamaFormat(options.OutputConstraint),
             options = new
             {
                 temperature = options.Temperature,

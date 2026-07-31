@@ -182,18 +182,60 @@ public sealed class MemoryExtractionService
         return null;
     }
 
-    private sealed class StructuredExtractionResult
+    internal sealed class StructuredExtractionResult
     {
         public List<StructuredMemoryItem>? Memories { get; set; }
     }
 
-    private sealed class StructuredMemoryItem
+    internal sealed class StructuredMemoryItem
     {
         public string? Content { get; set; }
         public string? Category { get; set; }
         public double? Importance { get; set; }
         public List<string>? Tags { get; set; }
     }
+
+    /// <summary>
+    /// The shape <see cref="ExtractStructuredMemoriesAsync"/> parses, written
+    /// out so a provider's sampler can enforce it instead of the prompt asking
+    /// for it (r28 doc 01 1.5).
+    /// </summary>
+    /// <remarks>
+    /// Hand-written beside the type it describes rather than generated or
+    /// reflected: it is four properties, it changes when the record changes,
+    /// and <c>MemorySchemaMatchesTheRecordTests</c> fails if the two drift.
+    /// </remarks>
+    public const string StructuredExtractionSchema = """
+        {
+          "type": "object",
+          "properties": {
+            "memories": {
+              "type": "array",
+              "maxItems": 5,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "content": { "type": "string" },
+                  "category": { "type": "string", "enum": ["facts", "preferences", "learned_behaviors", "interests"] },
+                  "importance": { "type": "number", "minimum": 0, "maximum": 1 },
+                  "tags": { "type": "array", "items": { "type": "string" } }
+                },
+                "required": ["content", "category", "importance", "tags"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["memories"],
+          "additionalProperties": false
+        }
+        """;
+
+    /// <summary>Short label for traces, so a receipt can name what was enforced without printing a schema.</summary>
+    public const string StructuredExtractionConstraintDescription = "memory extraction v1";
+
+    /// <summary>The constraint the auto-summary call sends when the selected model can enforce one.</summary>
+    public static LlmOutputConstraint StructuredExtractionConstraint { get; } =
+        LlmOutputConstraint.FromJsonSchema(StructuredExtractionSchema, StructuredExtractionConstraintDescription);
 
     public string CleanMemoryMarkers(string modelOutput)
     {

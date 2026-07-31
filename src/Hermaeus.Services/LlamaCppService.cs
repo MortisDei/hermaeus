@@ -41,6 +41,13 @@ public sealed class LlamaCppService : IDisposable
     public string ProviderName => "llama.cpp";
     public bool   IsConfigured => true;
 
+    /// <summary>
+    /// llama-server enforces both shapes: a JSON schema through
+    /// <c>response_format</c> and a GBNF grammar through a top-level
+    /// <c>grammar</c> field (r28 doc 01 1.2).
+    /// </summary>
+    public const LlmConstraintSupport ConstraintSupport = LlmConstraintSupport.JsonSchema | LlmConstraintSupport.Grammar;
+
     public LlamaCppService(ISettingsService settings, IRuntimeLogService logs, HttpClient? http = null)
     {
         _settings = settings;
@@ -72,7 +79,7 @@ public sealed class LlamaCppService : IDisposable
             resp.EnsureSuccessStatusCode();
             var data = await resp.Content.ReadFromJsonAsync<ModelsResponse>(JsonOpts, ct);
             var models = data?.Data?
-                .Select(m => new LlmModel { Id = m.Id, Name = Path.GetFileNameWithoutExtension(m.Id), Provider = "llama.cpp", ProviderTag = ProviderTagValue })
+                .Select(m => new LlmModel { Id = m.Id, Name = Path.GetFileNameWithoutExtension(m.Id), Provider = "llama.cpp", ProviderTag = ProviderTagValue, SupportsOutputConstraints = true })
                 .ToList() ?? [];
 
             // llama-server hosts exactly one model at a time, so the probed context
@@ -196,6 +203,12 @@ public sealed class LlamaCppService : IDisposable
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         options ??= LlmChatOptions.Default;
+        if (LlmOutputConstraintWire.DescribeRefusal(options.OutputConstraint, ConstraintSupport, ProviderName) is { } refusal)
+        {
+            yield return LlmStreamEvent.Error(refusal);
+            yield break;
+        }
+
         var (success, resp, error) = await GetStreamResponseAsync(modelId, messages, options, ct);
 
         if (!success)
@@ -295,6 +308,11 @@ public sealed class LlamaCppService : IDisposable
             messages = msgs,
             stream = true,
             stream_options = new { include_usage = true },
+            // r28 doc 01 1.2. Both forms were confirmed to reach the sampler
+            // on the installed b10195 build before this was written; see
+            // LlmOutputConstraintWire's remarks for the exact check.
+            response_format = LlmOutputConstraintWire.ResponseFormat(options.OutputConstraint),
+            grammar = LlmOutputConstraintWire.Grammar(options.OutputConstraint),
             // r14 2.2: pin the prompt-cache on explicitly rather than relying on
             // llama-server's current default, so a follow-up send reprocesses
             // only the changed suffix instead of the whole prompt. r17 2.6:

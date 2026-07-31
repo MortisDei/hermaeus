@@ -19,12 +19,12 @@ plus `git log --oneline main..HEAD` and know exactly where to resume.
 | --- | --- | --- |
 | 1 | 6.1 `run_command` classification pinned | yes |
 | 2 | 4.1 Per-test timing in CI, both legs | yes |
-| 3 | 1.1 `LlmOutputConstraint` on `LlmChatOptions` | no |
-| 4 | 1.2 llama.cpp sends the constraint | no |
-| 5 | 1.3 OpenAI and Ollama, with honest refusal | no |
-| 6 | 1.4 `SupportsOutputConstraints` capability flag | no |
-| 7 | 1.5 Memory auto-summary asks for a schema | no |
-| 8 | 1.6 Trace records whether shape was enforced | no |
+| 3 | 1.1 `LlmOutputConstraint` on `LlmChatOptions` | yes |
+| 4 | 1.2 llama.cpp sends the constraint | yes |
+| 5 | 1.3 OpenAI and Ollama, with honest refusal | yes |
+| 6 | 1.4 `SupportsOutputConstraints` capability flag | yes |
+| 7 | 1.5 Memory auto-summary asks for a schema | yes |
+| 8 | 1.6 Trace records whether shape was enforced | yes |
 | 9 | 5.1 Planner protocol schema | no |
 | 10 | 5.2 Planner call sends the constraint | no |
 | 11 | 5.5 Gate provably unchanged | no |

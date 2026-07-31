@@ -101,6 +101,16 @@ public sealed record LlmChatOptions
     /// </summary>
     public bool DisablePromptCache { get; init; }
 
+    /// <summary>
+    /// Constrains generation to a shape. Null means unconstrained, which is
+    /// the behaviour every caller had before r28. Providers that cannot
+    /// enforce a constraint report that through
+    /// <see cref="LlmStreamEvent"/> rather than ignoring it, because a caller
+    /// that sets one intends to parse the result without defending against
+    /// prose.
+    /// </summary>
+    public LlmOutputConstraint? OutputConstraint { get; init; }
+
     public static readonly LlmChatOptions Default = new();
 }
 

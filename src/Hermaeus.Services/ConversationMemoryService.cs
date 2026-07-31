@@ -287,7 +287,8 @@ public sealed class ConversationMemoryService : IConversationMemoryService
                            new LlmChatOptions
                            {
                                SystemPrompt = "You are a memory extraction assistant. Follow the output format exactly.",
-                               Temperature = 0.2
+                               Temperature = 0.2,
+                               OutputConstraint = await ResolveConstraintAsync(modelId, ct)
                            },
                            ct))
         {
@@ -295,6 +296,34 @@ public sealed class ConversationMemoryService : IConversationMemoryService
         }
 
         return buffer.ToString();
+    }
+
+    /// <summary>
+    /// The extraction schema when the selected model's provider can enforce
+    /// one, null otherwise (r28 doc 01 1.5). Asked before sending rather than
+    /// discovered mid-parse, because an unconstrained provider must still get
+    /// an unconstrained request: all three of the extractor's fallbacks stay,
+    /// and they are what runs there.
+    /// </summary>
+    private async Task<LlmOutputConstraint?> ResolveConstraintAsync(string modelId, CancellationToken ct)
+    {
+        try
+        {
+            var models = await _llm.GetModelsAsync(ct);
+            var selected = models.FirstOrDefault(m => string.Equals(m.Id, modelId, StringComparison.OrdinalIgnoreCase));
+            return selected?.SupportsOutputConstraints == true
+                ? MemoryExtractionService.StructuredExtractionConstraint
+                : null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // A provider that cannot be listed right now is not a reason to
+            // fail an auto-summary: send it unconstrained, exactly as before
+            // r28, and let the fallbacks do their job.
+            _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Service,
+                $"Could not check output-constraint support for '{modelId}': {ex.Message}. Auto-summary sent unconstrained."));
+            return null;
+        }
     }
 
     private static string BuildTranscript(List<Message> messages, int maxMessages, int maxCharsPerMessage)
