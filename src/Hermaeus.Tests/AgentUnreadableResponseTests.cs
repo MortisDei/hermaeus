@@ -12,11 +12,15 @@ using static Hermaeus.Tests.Helpers;
 namespace Hermaeus.Tests;
 
 /// <summary>
+/// What the workbench tells the user when a step goes wrong, and what it
+/// asks them.
+///
 /// An unreadable model response is the model's problem, not the user's. It
 /// used to synthesize an ask_user, which set the task WaitingForUser and
 /// stopped the autonomous loop: the user was shown "the agent is waiting for
 /// your reply" with no question to answer, and the three-strike budget was
-/// unreachable because reaching it took three manual Run Step clicks.
+/// unreachable because reaching it took three manual Run Step clicks. A real
+/// question, meanwhile, has to survive long enough to be read and no longer.
 /// </summary>
 public sealed class AgentUnreadableResponseTests
 {
@@ -172,5 +176,92 @@ public sealed class AgentUnreadableResponseTests
         // And it survives a reload, since this is what the reply box renders.
         var reloaded = await store.LoadAsync(created.TaskId);
         Assert.Equal("Should I target the Stone Age epoch first?", reloaded!.LastUserMessage);
+    }
+
+    [Fact]
+    public async Task Answering_a_question_clears_it()
+    {
+        using var temp = new TempDir();
+        var (agent, store, options) = await BuildAsync(temp, new FakeSequencedAgentLlm([AskUserResponse]));
+
+        var created = await agent.CreateTaskAsync("Do the thing", options);
+        await agent.RunAsync(created.TaskId, options);
+
+        await agent.AppendUserReplyAsync(created.TaskId, "Yes, start with the Stone Age.");
+
+        var reloaded = await store.LoadAsync(created.TaskId);
+        Assert.Equal(AgentTaskStatus.Running, reloaded!.Status);
+        Assert.Equal(string.Empty, reloaded.LastUserMessage);
+    }
+
+    [Fact]
+    public async Task Continuing_a_task_clears_whatever_it_was_asking()
+    {
+        using var temp = new TempDir();
+        var (agent, store, options) = await BuildAsync(temp, new FakeSequencedAgentLlm([AskUserResponse]));
+
+        var created = await agent.CreateTaskAsync("Do the thing", options);
+        await agent.RunAsync(created.TaskId, options);
+
+        await agent.ContinueTaskAsync(created.TaskId, "keep going", options);
+
+        var reloaded = await store.LoadAsync(created.TaskId);
+        Assert.Equal(string.Empty, reloaded!.LastUserMessage);
+    }
+
+    [Fact]
+    public async Task A_pause_for_the_step_budget_states_its_own_reason_rather_than_an_old_question()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        settings.Settings.Agent.MaxAutoSteps = 2;
+
+        var store = new FileAgentTaskStateStore(settings);
+        await store.InitializeAsync();
+        var workspace = temp.PathFor("workspace");
+        Directory.CreateDirectory(workspace);
+
+        var ragStore = new SqliteRagStore(settings);
+        await ragStore.InitializeAsync();
+        var rag = new RagQueryService(ragStore, new FakeEmbeddingService(), new FakeLlm(), settings, new NoOpReranker());
+        var tools = new AgentWorkspaceTools();
+        var contextBuilder = new AgentContextBuilder(
+            tools,
+            new AgentRetrievalService(rag, ragStore),
+            await BuildMemoryStoreAsync(settings),
+            new WorkspaceActivationService(new WorkspaceManifestService(), new FileWorkspaceProfileStore(settings)),
+            store,
+            settings);
+
+        // A tool step keeps the task Running, so the loop runs until the
+        // budget stops it rather than reaching a final answer.
+        const string keepGoing = """
+            {
+              "thought_summary": "Still looking.",
+              "current_step": "Listing files",
+              "next_action": { "type": "tool", "tool_name": "list_files", "arguments": {}, "requires_approval": false, "risk_level": "low" },
+              "state_update": { "completed": [], "pending": [], "new_facts": [], "blockers": [] },
+              "user_message": "Have a look at this earlier question."
+            }
+            """;
+
+        var agent = new AgentService(store, contextBuilder, new AgentSafetyGate(), new AgentToolExecutor(tools),
+            new FakeSequencedAgentLlm([keepGoing, keepGoing]), settings: settings, workspaceTools: tools);
+        var options = new AgentWorkspaceOptions(workspace, null, "fake-sequenced-agent");
+
+        var created = await agent.CreateTaskAsync("Do the thing", options);
+        var result = await agent.RunAsync(created.TaskId, options);
+
+        Assert.Equal(AgentTaskStatus.WaitingForUser, result.State.Status);
+        Assert.Contains("step budget", result.State.LastUserMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("earlier question", result.State.LastUserMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static async Task<WorkspaceMemoryStore> BuildMemoryStoreAsync(ISettingsService settings)
+    {
+        var memoryStore = new WorkspaceMemoryStore(new MemoryStore(settings), settings);
+        await memoryStore.InitializeAsync();
+        return memoryStore;
     }
 }

@@ -13,7 +13,7 @@ namespace Hermaeus.Agent.Services;
 /// containment rules as every other agent file path, or a script name that
 /// must already exist in the workspace's own package.json).
 /// </summary>
-internal static class WorkspaceCommandRecipes
+public static class WorkspaceCommandRecipes
 {
     public sealed record MatchResult(string FileName, IReadOnlyList<string> Args);
 
@@ -21,6 +21,28 @@ internal static class WorkspaceCommandRecipes
     [
         "dotnet build", "dotnet test", "npm test", "npm run", "cargo build", "cargo test", "pytest"
     ];
+
+    /// <summary>
+    /// Every command family the agent can ever run, which is the complete set
+    /// a workspace may declare. Public so the workbench can offer them as a
+    /// pick list instead of expecting the user to know them: a recipe typed
+    /// from memory that is not one of these is refused by the safety gate at
+    /// run time, which is a bad moment to find out.
+    /// </summary>
+    public static IReadOnlyList<string> KnownFamilies => Families;
+
+    /// <summary>One line on what a family is for, for the workbench's recipe picker.</summary>
+    public static string DescribeFamily(string family) => family switch
+    {
+        "dotnet build" => "Compile a .NET solution or project.",
+        "dotnet test" => "Run a .NET test project.",
+        "npm test" => "Run the package's test script.",
+        "npm run" => "Run a script declared in package.json.",
+        "cargo build" => "Compile a Rust crate.",
+        "cargo test" => "Run a Rust crate's tests.",
+        "pytest" => "Run a Python test suite.",
+        _ => string.Empty
+    };
 
     /// <summary>
     /// The fixed family prefix a command belongs to (e.g. "dotnet test" for

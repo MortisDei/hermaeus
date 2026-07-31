@@ -323,6 +323,13 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
 - While a run is in flight the status line shows a progress bar and a rotating
   activity line naming the current step and how long it has been going, so a
   long model call no longer looks like a hung app.
+- Command recipes are editable from the Workspace tab: pick one of the fixed
+  command families the safety gate accepts, optionally narrow it with an
+  argument, and it is saved to `.hermaeus/workspace.json` immediately; Remove
+  takes it away again. A workspace that declares none can run nothing, and
+  declaring one previously meant hand-editing a file the user had no reason to
+  know about. The picker cannot express a command the gate would refuse, and
+  every run still asks for approval.
 - When the agent asks a question, the question itself is shown above the reply
   box. It previously reached only the log and the transcript, so the workbench
   asked for an answer without saying what had been asked.

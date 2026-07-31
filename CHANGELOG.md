@@ -41,6 +41,20 @@ benchmarks answer "best across every suite".
   only to the log and the transcript, so a task paused on a question rendered
   a reply box with no question next to it. It is persisted on the task now and
   shown above the reply box.
+- **A truncated file read read as a dead end.** The result said only
+  `"truncated": true`, and a real run concluded the tool "cannot return the
+  entire file content in one go" and abandoned the file. Results now carry the
+  line range they cover and name the exact `line_offset` to ask for next, the
+  oversized-result notice says the same, and the system prompt states it.
+- **A file over the whole-file byte cap could not be read at all**, in slices
+  or otherwise: the size gate ran before the line-ranged path, so `line_offset`
+  could not rescue it. A bounded line range now has its own, much larger
+  ceiling, which is what ranged reading is for. Every other check (ignored
+  directory, symlink, text extension, read policy) is unchanged.
+- **The plan panel stopped updating.** Same cause as the parse failure above:
+  the model updates it with `set_plan`, and every one of those calls was being
+  thrown away. The owner's task showed a plan last revised at step 36 while the
+  run was on step 82, with exactly four discarded responses.
 - **A conversation title overran the timestamp and the details button** in the
   sidebar. The title sat in a horizontal `StackPanel`, which measures children
   with infinite width, so `TextTrimming` never fired. It now wraps to at most
@@ -125,6 +139,15 @@ benchmarks answer "best across every suite".
   refused on a running task or a sub-task child. `AgentTaskStatus.Cancelled`
   is new and terminal; `docs/agent.md` already documented `cancelled` as a
   task state, so this closes that drift too.
+- **A command recipe editor** on the Workspace tab. A workspace that declares
+  no recipes can run nothing, and declaring one meant hand-editing
+  `.hermaeus/workspace.json`, which assumed the user knew both that the file
+  existed and which command families the safety gate accepts. Pick a family
+  from the fixed list, optionally narrow it with an argument, and it is saved
+  immediately; Remove takes it back off. The picker can only express families
+  the gate already accepts, so a recipe cannot be declared that would be
+  refused at run time, and every run still requires approval. Command Recipes
+  and Project Instructions both gained explanatory text and tooltips.
 - **`GET /v1/capabilities`** on the local API, deferred since r1. Reports the
   routes it exposes, the app version, and per feature (chat, RAG, memory,
   embeddings) whether it is usable right now with a reason when it is not. It

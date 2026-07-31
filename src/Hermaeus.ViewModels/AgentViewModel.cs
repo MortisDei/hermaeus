@@ -300,6 +300,24 @@ public sealed class WorkspaceCommandRecipeViewModel
     public bool IsElevatedRisk => RiskLevel is AgentRiskLevel.Medium or AgentRiskLevel.High;
 }
 
+/// <summary>
+/// One pickable command family in the workbench's recipe editor. The list is
+/// fixed by the safety gate, so this is a chooser, never a free-text field:
+/// anything outside these families is refused at run time regardless.
+/// </summary>
+public sealed class CommandFamilyOptionViewModel
+{
+    public CommandFamilyOptionViewModel(string family)
+    {
+        Family = family;
+        Description = WorkspaceCommandRecipes.DescribeFamily(family);
+    }
+
+    public string Family { get; }
+    public string Description { get; }
+    public string Display => Description.Length == 0 ? Family : $"{Family} - {Description}";
+}
+
 public sealed class AgentDraftPatchViewModel
 {
     public AgentDraftPatchViewModel(AgentDraftPatch patch)
@@ -1133,6 +1151,11 @@ public partial class AgentViewModel : ViewModelBase
             await _agent.AppendUserReplyAsync(taskId, ReplyText);
             ReplyText = string.Empty;
             await LoadTaskIfOpenAsync(taskId);
+            // The task has left the queue as of this moment, so the strip has
+            // to say so now. Refreshing only after the resumed run finished
+            // left "1 waiting on you" on screen, with the answered question
+            // still under it, for the whole length of the run.
+            await RefreshReviewQueueAsync();
             // Same approve-and-continue shape as ApproveReviewAsync: a
             // reply that unblocked the task should resume the loop instead
             // of requiring a separate manual step.
@@ -1161,6 +1184,7 @@ public partial class AgentViewModel : ViewModelBase
             await _agent.ContinueTaskAsync(taskId, ContinueInstructionText, options);
             ContinueInstructionText = string.Empty;
             await LoadTaskIfOpenAsync(taskId);
+            await RefreshReviewQueueAsync();
             // Same approve-and-continue shape as ApproveReviewAsync/SendReplyAsync:
             // a reopened task that AgentService just returned to Running should
             // resume the loop instead of requiring a separate manual step.
@@ -1844,6 +1868,72 @@ public partial class AgentViewModel : ViewModelBase
 
     private static string DescribePolicyAllowCount(int count) =>
         count == 0 ? "unrestricted" : $"limited to {count} rule{(count == 1 ? string.Empty : "s")}";
+
+    // ── Command recipes the user can actually manage ──
+    //
+    // A workspace with no declared recipes cannot run anything, and until now
+    // the only way to declare one was to hand-edit .hermaeus/workspace.json,
+    // which assumes the user knows both that the file exists and which command
+    // families the safety gate will accept. Both are now on screen: pick a
+    // family, optionally narrow it with an argument, add it. Nothing here
+    // widens what the gate allows; it only lets the user say which of the
+    // fixed, already-safe families this workspace is permitted to use.
+
+    /// <summary>The complete set of families the gate can ever allow, as pickable rows.</summary>
+    public IReadOnlyList<CommandFamilyOptionViewModel> AvailableCommandFamilies { get; } =
+        [.. WorkspaceCommandRecipes.KnownFamilies.Select(f => new CommandFamilyOptionViewModel(f))];
+
+    [ObservableProperty] private CommandFamilyOptionViewModel? _selectedCommandFamily;
+    /// <summary>Optional argument narrowing the recipe, e.g. the project path on "dotnet test".</summary>
+    [ObservableProperty] private string _newRecipeArgument = string.Empty;
+
+    public bool CanAddCommandRecipe => SelectedCommandFamily is not null && HasWorkspace;
+    partial void OnSelectedCommandFamilyChanged(CommandFamilyOptionViewModel? value)
+    {
+        OnPropertyChanged(nameof(CanAddCommandRecipe));
+        AddCommandRecipeCommand.NotifyCanExecuteChanged();
+    }
+
+    [RelayCommand(CanExecute = nameof(CanAddCommandRecipe))]
+    private async Task AddCommandRecipeAsync()
+    {
+        if (SelectedCommandFamily is null) return;
+
+        var argument = NewRecipeArgument.Trim();
+        var command = argument.Length == 0
+            ? SelectedCommandFamily.Family
+            : $"{SelectedCommandFamily.Family} {argument}";
+
+        // The gate is the authority on what counts as a recipe, so ask it
+        // rather than trusting the composed string.
+        if (WorkspaceCommandRecipes.ExtractFamily(command) is null)
+        {
+            SetError($"'{command}' is not one of the command families the agent can run.");
+            return;
+        }
+
+        if (CommandRecipes.Any(r => string.Equals(r.Command, command, StringComparison.OrdinalIgnoreCase)))
+        {
+            StatusMessage = "That recipe is already declared for this workspace.";
+            return;
+        }
+
+        CommandRecipes.Add(new WorkspaceCommandRecipeViewModel(
+            new WorkspaceCommandRecipe(command, SelectedCommandFamily.Description, AgentRiskLevel.Medium)));
+        NewRecipeArgument = string.Empty;
+
+        await SaveWorkspaceManifestAsync();
+        StatusMessage = $"Added '{command}'. The agent can now request it, and it still needs your approval each time.";
+    }
+
+    [RelayCommand]
+    private async Task RemoveCommandRecipeAsync(WorkspaceCommandRecipeViewModel? recipe)
+    {
+        if (recipe is null) return;
+        CommandRecipes.Remove(recipe);
+        await SaveWorkspaceManifestAsync();
+        StatusMessage = $"Removed '{recipe.Command}'. The agent can no longer run it here.";
+    }
 
     [RelayCommand]
     private async Task SaveWorkspaceManifestAsync()

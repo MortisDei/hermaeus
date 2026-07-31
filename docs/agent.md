@@ -173,6 +173,14 @@ the task in `waiting_for_review` and showed the user a reply box for a question
 the agent had never asked, while the three-strike budget was unreachable
 because reaching it took three manual Run Step clicks.
 
+A truncated read is never a dead end. `read_file` results carry the line range
+they cover and a continuation hint naming the exact `line_offset` to ask for
+next, and a file over the whole-file byte cap can still be read in slices (the
+size ceiling applies to reading a file whole, not to a bounded line range). The
+system prompt says so too. Before this, a result said only `"truncated": true`
+and a real run concluded the tool "cannot return the entire file content in one
+go" and abandoned the file.
+
 A response that names a tool in `next_action.type` (for example
 `"type": "set_plan"` with a null `tool_name`) is repaired into the protocol's
 own shape and executed, rather than being rejected as unparseable. This is a
@@ -328,7 +336,13 @@ the model sees next step that only the first one ran.
   `npm test`, `npm run <script>` where the script must already exist in the
   workspace's own `package.json`, `cargo build`, `cargo test`, `pytest` with
   an optional path), and only when the workspace itself declared that family
-  safe in `.hermaeus/workspace.json`. Optional path arguments go through the
+  safe in `.hermaeus/workspace.json`. Those declarations are editable from the
+  Workspace tab's Command Recipes panel: pick a family from the fixed list,
+  optionally narrow it with an argument, and it is written to the manifest
+  straight away; Remove takes it back off. The picker offers only families the
+  safety gate can accept, so a recipe cannot be declared that would be refused
+  at run time, and nothing about the editor widens what the gate allows.
+  Optional path arguments go through the
   same containment checks as every other workspace file path. Always requires
   approval, even for a declared-safe family. After the user approves a given
   command string once in a task, an identical repeat of that exact string may
@@ -656,8 +670,10 @@ and the ledger still shows it.
 The Workspace tab's capability list shows one line when a policy is
 active (for example "Workspace policy: reads limited to 2 rules, writes to
 2, 3 paths off limits."); expanding it lists the raw globs, read-only. There
-is no policy editor; the manifest is hand-edited, like `AllowedCommands`
-already is.
+is no policy editor; the policy block of the manifest is hand-edited.
+`AllowedCommands` is the exception: it has an editor on the Workspace tab,
+because a workspace that declares no recipes can run nothing and the user had
+no way to discover either the file or the families it accepts.
 
 ## Context Packs
 

@@ -827,8 +827,12 @@
                                     <TextBlock Text="{Binding WorkspaceRagIngestPlan}" FontSize="12" Opacity="0.75" TextWrapping="Wrap" />
 
                                     <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
-                                        <Expander Grid.Column="0" Header="Project Instructions" IsExpanded="True">
+                                        <Expander Grid.Column="0" Header="Project Instructions" IsExpanded="True"
+                                                  ToolTip.Tip="Instruction files found in this workspace (AGENTS.md, CLAUDE.md and similar). The agent reads them into every task's context, so a project can state its own rules once instead of you repeating them in each goal.">
                                             <StackPanel Spacing="8" Margin="0,8,0,0">
+                                                <TextBlock TextWrapping="Wrap" FontSize="11" Opacity="0.7"
+                                                           Text="Found automatically. Add an AGENTS.md to this workspace and the agent will follow it in every task here."
+                                                           IsVisible="{Binding !ProjectInstructionCount}" />
                                                 <ItemsControl ItemsSource="{Binding InstructionWarnings}">
                                                     <ItemsControl.ItemTemplate>
                                                         <DataTemplate>
@@ -858,32 +862,82 @@
                                             </StackPanel>
                                         </Expander>
 
-                                        <Expander Grid.Column="1" Header="Command Recipes" IsExpanded="True">
-                                            <ItemsControl ItemsSource="{Binding CommandRecipes}" Margin="0,8,0,0">
-                                                <ItemsControl.ItemTemplate>
-                                                    <DataTemplate DataType="vm:WorkspaceCommandRecipeViewModel">
-                                                        <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
-                                                                BorderThickness="1"
-                                                                CornerRadius="6"
-                                                                Padding="10"
-                                                                Margin="0,0,0,6">
-                                                            <StackPanel Spacing="3">
-                                                                <Grid ColumnDefinitions="*,Auto">
-                                                                    <SelectableTextBlock Grid.Column="0" Text="{Binding Command}" FontFamily="{DynamicResource AppMonoFont}" FontWeight="SemiBold" />
-                                                                    <Border Grid.Column="1" CornerRadius="4" Padding="6,2"
-                                                                            IsVisible="{Binding IsElevatedRisk}"
-                                                                            Background="#FF9800">
-                                                                        <TextBlock Text="{Binding RiskLabel}" FontSize="10" FontWeight="SemiBold" Foreground="White" />
-                                                                    </Border>
-                                                                    <TextBlock Grid.Column="1" Text="{Binding RiskLabel}" FontSize="11" Opacity="0.55"
-                                                                               IsVisible="{Binding !IsElevatedRisk}" />
-                                                                </Grid>
-                                                                <TextBlock Text="{Binding Why}" FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
-                                                            </StackPanel>
-                                                        </Border>
-                                                    </DataTemplate>
-                                                </ItemsControl.ItemTemplate>
-                                            </ItemsControl>
+                                        <Expander Grid.Column="1" IsExpanded="True"
+                                                  ToolTip.Tip="Commands this workspace allows the agent to request, such as its build or test command. The agent cannot run anything that is not listed here, and every run still asks for your approval. Reading, searching and editing files need no recipe.">
+                                            <Expander.Header>
+                                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                                    <TextBlock Text="Command Recipes" />
+                                                    <TextBlock Text="{Binding CommandRecipeCount, StringFormat=({0})}" Opacity="0.5" />
+                                                </StackPanel>
+                                            </Expander.Header>
+                                            <StackPanel Margin="0,8,0,0" Spacing="8">
+                                                <TextBlock TextWrapping="Wrap" FontSize="11" Opacity="0.7"
+                                                           Text="Pick a command this workspace should be allowed to run. The list is fixed: these are the only families the agent can ever execute, and each run still needs your approval. Reading and editing files never needs a recipe." />
+
+                                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8" RowDefinitions="Auto,Auto" RowSpacing="6">
+                                                    <ComboBox Grid.Row="0" Grid.Column="0"
+                                                              ItemsSource="{Binding AvailableCommandFamilies}"
+                                                              SelectedItem="{Binding SelectedCommandFamily}"
+                                                              PlaceholderText="Choose a command family"
+                                                              HorizontalAlignment="Stretch"
+                                                              ToolTip.Tip="The fixed set of command families the safety gate accepts. Anything outside this list is refused when the agent asks for it.">
+                                                        <ComboBox.ItemTemplate>
+                                                            <DataTemplate DataType="vm:CommandFamilyOptionViewModel">
+                                                                <TextBlock Text="{Binding Display}" />
+                                                            </DataTemplate>
+                                                        </ComboBox.ItemTemplate>
+                                                    </ComboBox>
+                                                    <Button Grid.Row="0" Grid.Column="1"
+                                                            Content="Add"
+                                                            Command="{Binding AddCommandRecipeCommand}"
+                                                            Padding="12,6" CornerRadius="6"
+                                                            ToolTip.Tip="Adds this recipe and saves it to .hermaeus/workspace.json straight away." />
+                                                    <TextBox Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
+                                                             Text="{Binding NewRecipeArgument}"
+                                                             Watermark="Optional argument, e.g. src/Hermaeus.Tests/Hermaeus.Tests.csproj"
+                                                             FontFamily="{DynamicResource AppMonoFont}"
+                                                             FontSize="11"
+                                                             ToolTip.Tip="Optional. Narrows the recipe to one project or script. Leave empty to allow the bare command." />
+                                                </Grid>
+
+                                                <ItemsControl ItemsSource="{Binding CommandRecipes}">
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate DataType="vm:WorkspaceCommandRecipeViewModel">
+                                                            <Border BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                                                    BorderThickness="1"
+                                                                    CornerRadius="6"
+                                                                    Padding="10"
+                                                                    Margin="0,0,0,6">
+                                                                <StackPanel Spacing="3">
+                                                                    <Grid ColumnDefinitions="*,Auto">
+                                                                        <SelectableTextBlock Grid.Column="0" Text="{Binding Command}" FontFamily="{DynamicResource AppMonoFont}" FontWeight="SemiBold" />
+                                                                        <Border Grid.Column="1" CornerRadius="4" Padding="6,2"
+                                                                                IsVisible="{Binding IsElevatedRisk}"
+                                                                                Background="#FF9800">
+                                                                            <TextBlock Text="{Binding RiskLabel}" FontSize="10" FontWeight="SemiBold" Foreground="White" />
+                                                                        </Border>
+                                                                        <TextBlock Grid.Column="1" Text="{Binding RiskLabel}" FontSize="11" Opacity="0.55"
+                                                                                   IsVisible="{Binding !IsElevatedRisk}" />
+                                                                    </Grid>
+                                                                    <TextBlock Text="{Binding Why}" FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
+                                                                    <Button Content="Remove"
+                                                                            HorizontalAlignment="Left"
+                                                                            FontSize="11" Padding="8,3"
+                                                                            x:CompileBindings="False"
+                                                                            Command="{Binding DataContext.RemoveCommandRecipeCommand, ElementName=Root}"
+                                                                            CommandParameter="{Binding}"
+                                                                            ToolTip.Tip="Stops the agent being able to run this command in this workspace. Saved immediately." />
+                                                                </StackPanel>
+                                                            </Border>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+
+                                                <controls:MossEmptyState Title="No commands allowed yet"
+                                                                         Hint="Nothing can be built or tested here until you add one. Moss suggests starting with this project's test command."
+                                                                         IconSize="24"
+                                                                         IsVisible="{Binding !CommandRecipeCount}" />
+                                            </StackPanel>
                                         </Expander>
                                     </Grid>
 

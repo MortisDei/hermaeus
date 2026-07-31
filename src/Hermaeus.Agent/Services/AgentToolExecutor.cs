@@ -336,7 +336,18 @@ public sealed class AgentToolExecutor : IAgentToolExecutor
         if (json.Length <= cap)
             return json;
 
-        return json[..cap] + $"\n[truncated: {json.Length - cap} of {json.Length} chars omitted]";
+        // Says what to do about it, not just that it happened. A real run read
+        // this as "the tool cannot return the entire file content in one go"
+        // and abandoned the file, when reading it in slices was available all
+        // along.
+        var advice = normalizedTool switch
+        {
+            "read_file" => " Read it in slices: call read_file again with line_offset and line_limit"
+                + " (for example line_offset=0, line_limit=400, then line_offset=400).",
+            "search_files" => " Narrow the query, or use glob_files to find candidate files first.",
+            _ => string.Empty
+        };
+        return json[..cap] + $"\n[truncated: {json.Length - cap} of {json.Length} chars omitted.{advice}]";
     }
 
     private static string Normalize(string toolName) => toolName.Trim().Replace('-', '_').ToLowerInvariant();

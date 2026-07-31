@@ -684,7 +684,33 @@ public sealed record AgentFileSearchResult(
 public sealed record AgentFileReadResult(
     string RelativePath,
     string Content,
-    bool Truncated);
+    bool Truncated,
+    /// <summary>Total lines in the file, when known (a line-ranged read always knows).</summary>
+    int? TotalLines = null,
+    /// <summary>First line index this result covers, 0-based.</summary>
+    int? LineOffset = null,
+    /// <summary>
+    /// Lines returned in this result. With <see cref="LineOffset"/> this is
+    /// exactly what the model needs to ask for the next slice.
+    /// </summary>
+    int? LineCount = null)
+{
+    /// <summary>
+    /// What to do about a truncated read, in the result itself. A bare
+    /// "truncated": true told the model only that content was missing, and a
+    /// real run concluded "the tool cannot return the entire file content in
+    /// one go" and gave up on the file entirely. It can: this says how.
+    /// </summary>
+    public string ContinuationHint => !Truncated
+        ? string.Empty
+        : LineOffset is { } offset && LineCount is { } count
+            ? $"Truncated. This is lines {offset + 1} to {offset + count}"
+                + (TotalLines is { } total ? $" of {total}" : string.Empty)
+                + $". Call read_file again with line_offset={offset + count} to continue from where this stopped."
+            : "Truncated: the file was too large to return whole. Call read_file again with line_offset and "
+                + "line_limit (for example line_offset=0, line_limit=400, then line_offset=400) to read it in "
+                + "slices, or use search_files to find a symbol without reading the whole file.";
+}
 
 public sealed record AgentFileSummaryResult(
     string RelativePath,

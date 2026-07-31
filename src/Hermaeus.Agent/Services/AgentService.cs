@@ -21,7 +21,12 @@ public sealed class AgentService : IAgentService
         edit_file, create_file, set_plan, plan_subtasks, and run_command.
         Read-only tools
         (list_files, search_files, glob_files, read_file, summarize_file,
-        inspect_git_diff, set_plan) execute immediately. Prefer edit_file
+        inspect_git_diff, set_plan) execute immediately. A read_file result
+        marked truncated is not the whole file and is not a dead end: call
+        read_file again with line_offset set past what you already have (and a
+        line_limit of a few hundred lines) until you have read what you need.
+        Never conclude a file cannot be read because one read came back
+        truncated. Prefer edit_file
         (relative_path, old_string, new_string) for changing part of an
         existing file over draft_patch/apply_draft_patch, which rewrite the
         whole file; old_string must match the file's current content exactly
@@ -97,7 +102,7 @@ public sealed class AgentService : IAgentService
                 Schema("""{"type":"object","properties":{"query":{"type":"string"},"regex":{"type":"boolean"},"context_lines":{"type":"integer"}},"required":["query"]}""")),
             new("glob_files", "Match workspace files against a glob pattern (supports * and **).",
                 Schema("""{"type":"object","properties":{"pattern":{"type":"string"}},"required":["pattern"]}""")),
-            new("read_file", "Read a workspace file, optionally a bounded line range via line_offset/line_limit.",
+            new("read_file", "Read a workspace file, optionally a bounded line range via line_offset/line_limit. If the result is marked truncated, call again with line_offset past what you already read to get the rest.",
                 Schema("""{"type":"object","properties":{"relative_path":{"type":"string"},"line_offset":{"type":"integer"},"line_limit":{"type":"integer"}},"required":["relative_path"]}""")),
             new("summarize_file", "Summarize a workspace file's readable content.",
                 Schema("""{"type":"object","properties":{"relative_path":{"type":"string"}},"required":["relative_path"]}""")),
@@ -728,6 +733,10 @@ public sealed class AgentService : IAgentService
             // explicitly instead of leaving it silently stalled.
             var note = $"step budget exhausted after {steps} step(s)";
             result.State.Status = AgentTaskStatus.WaitingForUser;
+            // This pause has its own reason, and it is not whatever the model
+            // last asked. Saying so here stops a stale question standing in for
+            // it in the workbench.
+            result.State.LastUserMessage = note;
             await _store.AppendLogAsync(taskId, note, ct);
             await _store.AppendTranscriptEntryAsync(taskId, new AgentTranscriptEntry(
                 result.State.StepCount, "assistant", null, note, DateTime.UtcNow), ct);
@@ -1156,6 +1165,11 @@ public sealed class AgentService : IAgentService
         await _store.AppendTranscriptEntryAsync(taskId, new AgentTranscriptEntry(
             state.StepCount, "user", null, trimmed, DateTime.UtcNow), ct);
         state.Status = AgentTaskStatus.Running;
+        // The question has been answered, so it stops being the task's open
+        // question. Leaving it set meant a later pause that sets no message of
+        // its own (the step budget running out, for one) re-displayed a
+        // question the user had already dealt with.
+        state.LastUserMessage = string.Empty;
         await _store.SaveAsync(state, ct);
         await _store.AppendLogAsync(taskId, "user reply recorded", ct);
     }
@@ -1192,6 +1206,9 @@ public sealed class AgentService : IAgentService
         state.Status = AgentTaskStatus.Running;
         state.ConsecutiveStepErrors = 0;
         state.PlanApprovalPending = false;
+        // Reopening the task settles whatever it was last asking; the
+        // instruction just given is the answer.
+        state.LastUserMessage = string.Empty;
         await _store.SaveAsync(state, ct);
         await _store.AppendLogAsync(taskId, $"continued: {trimmedInstruction}", ct);
         return state;
