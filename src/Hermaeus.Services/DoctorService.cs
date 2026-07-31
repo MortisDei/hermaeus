@@ -146,6 +146,8 @@ public sealed partial class DoctorService : IDoctorService
             checks.Add(embeddingFallbackAdvisory);
 
         checks.AddRange(CheckOversizedContextAdvisories());
+        // r27 03 3.7: only appears when a draft-* type is configured with a missing or empty draft path.
+        checks.AddRange(CheckDraftModelAdvisories());
 
         var gpuInferenceAdvisory = await CheckGpuInferenceAdvisoryAsync(ct);
         if (gpuInferenceAdvisory is not null)

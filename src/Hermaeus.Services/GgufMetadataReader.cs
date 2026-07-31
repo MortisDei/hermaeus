@@ -20,7 +20,14 @@ public sealed record GgufModelInfo(
     int? KeyLength,
     int? ValueLength,
     int? SlidingWindow = null,
-    IReadOnlyList<bool>? SlidingWindowPattern = null);
+    IReadOnlyList<bool>? SlidingWindowPattern = null,
+    /// <summary>
+    /// r27 03-drafting-and-proof.md 3.3: the token count a draft model must
+    /// share with its target, read either from the architecture's
+    /// <c>.vocab_size</c> key or from the length of the tokenizer token array.
+    /// Null when the file declares neither.
+    /// </summary>
+    int? VocabularySize = null);
 
 /// <summary>
 /// Reads only the metadata key/value section of a GGUF file header; tensor data is never
@@ -107,6 +114,7 @@ public static class GgufMetadataReader
             long? keyLength = null;
             long? valueLength = null;
             long? slidingWindow = null;
+            long? vocabularySize = null;
             IReadOnlyList<bool>? slidingWindowPattern = null;
 
             for (ulong i = 0; i < kvCount; i++)
@@ -140,6 +148,12 @@ public static class GgufMetadataReader
                     slidingWindow = ToScalarLong(ReadValue(reader, valueType, 0));
                 else if (key.EndsWith(".attention.sliding_window_pattern", StringComparison.Ordinal))
                     slidingWindowPattern = ToBoolList(ReadValue(reader, valueType, 0));
+                else if (key.EndsWith(".vocab_size", StringComparison.Ordinal))
+                    vocabularySize = ToScalarLong(ReadValue(reader, valueType, 0));
+                else if (key == "tokenizer.ggml.tokens" && valueType == 9)
+                    // The token array itself is never materialised: only its
+                    // declared length is read, then the elements are skipped.
+                    vocabularySize ??= SkipArrayAndCount(reader);
                 else
                     SkipValue(reader, valueType, 0);
             }
@@ -161,7 +175,8 @@ public static class GgufMetadataReader
                 KeyLength: ToInt(keyLength),
                 ValueLength: ToInt(valueLength),
                 SlidingWindow: ToInt(slidingWindow),
-                SlidingWindowPattern: slidingWindowPattern);
+                SlidingWindowPattern: slidingWindowPattern,
+                VocabularySize: ToInt(vocabularySize));
         }
         catch (EndOfStreamException) { return null; }
         catch (IOException) { return null; }
@@ -270,6 +285,22 @@ public static class GgufMetadataReader
             case 10: case 11: case 12: r.ReadUInt64(); break;
             default: throw new InvalidDataException($"Unknown GGUF value type {type}.");
         }
+    }
+
+    /// <summary>
+    /// Reads an array value's declared element count, skips its elements, and
+    /// returns the count. Used for tokenizer.ggml.tokens, where the length is
+    /// the vocabulary size and the tokens themselves are never needed.
+    /// </summary>
+    private static long? SkipArrayAndCount(BinaryReader r)
+    {
+        var elemType = r.ReadUInt32();
+        var count = r.ReadUInt64();
+        if (count > MaxArrayCount)
+            throw new InvalidDataException("GGUF array count exceeds the safety cap.");
+        for (ulong i = 0; i < count; i++)
+            SkipValue(r, elemType, 1);
+        return (long)count;
     }
 
     private static string ReadGgufString(BinaryReader r)

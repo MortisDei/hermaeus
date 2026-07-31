@@ -617,6 +617,10 @@ public sealed class BenchmarkService
 
     public static IReadOnlyList<BenchmarkSuite> StarterSuites() =>
     [
+        // r27 03-drafting-and-proof.md 3.5: the speed check, alongside the
+        // starter suites so it is seeded, stored and run through the machinery
+        // that already exists. Its cases assert nothing about quality.
+        SpeedCheck.Suite(),
         new()
         {
             Id = "speed-smoke",
@@ -921,7 +925,18 @@ public sealed class BenchmarkService
             GpuLayers = managedServer?.GpuLayers,
             ModelPath = managedServer?.ModelPath ?? string.Empty,
             ModelHash = string.Empty,
-            Quantization = ggufInfo?.Quantization ?? string.Empty
+            Quantization = ggufInfo?.Quantization ?? string.Empty,
+
+            // r27 03 3.5: a run records the speculative configuration that
+            // produced it. Without this, 3.6's comparison has nothing to key on.
+            SpeculativeTypes = string.Join(",", managedServer?.Speculative?.Types ?? []),
+            SpeculativeDraftModel = string.IsNullOrWhiteSpace(managedServer?.Speculative?.DraftModelPath)
+                ? string.Empty
+                : Path.GetFileName(managedServer!.Speculative.DraftModelPath),
+            SpeculativeNMax = managedServer?.Speculative?.NMax,
+            SpeculativeNMin = managedServer?.Speculative?.NMin,
+            SpeculativePMin = managedServer?.Speculative?.PMin,
+            SpeculativeDraftGpuLayers = managedServer?.Speculative?.DraftGpuLayers
         };
     }
 

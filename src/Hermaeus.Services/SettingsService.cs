@@ -53,6 +53,8 @@ public sealed class SettingsService : ISettingsService
             if (string.IsNullOrWhiteSpace(server.Id))
                 server.Id = Guid.NewGuid().ToString();
 
+            UpgradeSpeculativeDecoding(server);
+
             if (!seenIds.Add(server.Id))
             {
                 servers.RemoveAt(i);
@@ -71,6 +73,28 @@ public sealed class SettingsService : ISettingsService
             servers.Insert(0, CreateDefaultServer(false));
         if (!servers.Any(server => server.EmbeddingsMode))
             servers.Add(CreateDefaultServer(true));
+    }
+
+    /// <summary>
+    /// r27 03-drafting-and-proof.md 3.1: a legacy <c>NgramSpeculative: true</c>
+    /// becomes <c>Speculative.Types = ["ngram-mod"]</c>, which is exactly the
+    /// flag pair the bool used to emit, so a settings file written by 0.33.0
+    /// produces byte-identical launch arguments after the upgrade.
+    /// Runs exactly once: the bool is cleared as it is read, and a config that
+    /// already has types is left alone so the upgrade cannot duplicate or
+    /// resurrect a type the user has since removed.
+    /// </summary>
+    public static void UpgradeSpeculativeDecoding(ServerConfig server)
+    {
+        server.Speculative ??= new SpeculativeDecodingConfig();
+        if (!server.NgramSpeculative)
+            return;
+
+        server.NgramSpeculative = false;
+        if (server.Speculative.Types.Count > 0)
+            return;
+
+        server.Speculative.Types.Add("ngram-mod");
     }
 
     public async Task LoadAsync()

@@ -39,4 +39,31 @@ public sealed class BenchmarkRunMetadata
     public string CPU { get; set; } = string.Empty;
     public string RAM { get; set; } = string.Empty;
     public string GPU { get; set; } = string.Empty;
+
+    // ── r27 03-drafting-and-proof.md 3.5: what produced the number ──────────
+    // Without these, 3.6's comparison has nothing to key on: two runs of the
+    // same suite against the same model would be indistinguishable even though
+    // the whole point is that their speculative settings differed.
+
+    /// <summary>The <c>--spec-type</c> list in effect, comma-separated. Empty when speculative decoding was off.</summary>
+    public string SpeculativeTypes { get; set; } = string.Empty;
+
+    /// <summary>File name of the draft model, when a <c>draft-*</c> type was in use.</summary>
+    public string SpeculativeDraftModel { get; set; } = string.Empty;
+
+    public int? SpeculativeNMax { get; set; }
+    public int? SpeculativeNMin { get; set; }
+    public double? SpeculativePMin { get; set; }
+    public int? SpeculativeDraftGpuLayers { get; set; }
+
+    /// <summary>
+    /// The one-line description of this run's speculative configuration, used
+    /// as the difference a comparison reports between two runs.
+    /// </summary>
+    public string SpeculativeSummary =>
+        string.IsNullOrWhiteSpace(SpeculativeTypes)
+            ? "speculative decoding off"
+            : string.IsNullOrWhiteSpace(SpeculativeDraftModel)
+                ? SpeculativeTypes
+                : $"{SpeculativeTypes} with {SpeculativeDraftModel}";
 }

@@ -30,13 +30,13 @@ with no memory of any conversation should be able to read this table plus
 | 11 | 2.5 Content loaded for candidates only | yes |
 | 12 | 2.6 Concurrent send-path injections | yes |
 | 13 | 2.7 Index size visible in the RAG panel | yes |
-| 14 | 3.1 Composable speculative-decoding section | no |
-| 15 | 3.2 Verified launch flags | no |
-| 16 | 3.3 Draft model validated before launch | no |
-| 17 | 3.4 Combined VRAM estimate | no |
-| 18 | 3.5 Speed check | no |
-| 19 | 3.6 Comparison | no |
-| 20 | 3.7 Doctor check | no |
+| 14 | 3.1 Composable speculative-decoding section | yes |
+| 15 | 3.2 Verified launch flags | yes |
+| 16 | 3.3 Draft model validated before launch | yes |
+| 17 | 3.4 Combined VRAM estimate | yes |
+| 18 | 3.5 Speed check | yes |
+| 19 | 3.6 Comparison | yes |
+| 20 | 3.7 Doctor check | yes |
 | 21 | 4.1 A model is a file set | no |
 | 22 | 4.2 Per-model destination folders | no |
 | 23 | 4.3 Organize stops flattening | no |

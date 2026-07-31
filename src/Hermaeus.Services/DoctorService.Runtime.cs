@@ -357,6 +357,58 @@ public sealed partial class DoctorService
             .ToList();
     }
 
+    /// <summary>
+    /// r27 03-drafting-and-proof.md 3.7: a server configured with a
+    /// <c>draft-*</c> speculative type but no draft model path, or a draft path
+    /// that no longer exists on disk. Both are configurations that will fail at
+    /// start, and Doctor's job is to say so before the user finds out by
+    /// starting. Only appears when there is something to report.
+    /// </summary>
+    private List<DoctorCheck> CheckDraftModelAdvisories()
+    {
+        var checks = new List<DoctorCheck>();
+        foreach (var server in _settings.Settings.ManagedServers)
+        {
+            var speculative = server.Speculative;
+            if (speculative is not { RequiresDraftModel: true })
+                continue;
+
+            var path = speculative.DraftModelPath?.Trim() ?? string.Empty;
+            var types = string.Join(", ", speculative.Types);
+
+            if (path.Length == 0)
+            {
+                checks.Add(BuildCheck(
+                    $"draft-model-{server.Id}",
+                    $"{server.Name} draft model",
+                    DoctorCheckStatus.Warning,
+                    "Speculative decoding needs a draft model",
+                    $"{server.Name} is set to {types}, which drafts from a second model file, but no draft model is selected. The server will refuse to start.",
+                    "Open Services",
+                    true,
+                    $"Speculative types: {types}; draft model path: (empty)",
+                    "Runtime"));
+                continue;
+            }
+
+            if (!File.Exists(path))
+            {
+                checks.Add(BuildCheck(
+                    $"draft-model-{server.Id}",
+                    $"{server.Name} draft model",
+                    DoctorCheckStatus.Warning,
+                    "Draft model file is missing",
+                    $"{server.Name} is set to {types} with a draft model at '{path}', which is not on disk. The server will refuse to start.",
+                    "Open Services",
+                    true,
+                    $"Speculative types: {types}; draft model path: {path}",
+                    "Runtime"));
+            }
+        }
+
+        return checks;
+    }
+
     private async Task<DoctorCheck> CheckOllamaAsync(CancellationToken ct)
     {
         var profiles = _runtimes.Profiles.Where(p => p.Enabled && p.Kind == RuntimeKind.Ollama).ToList();

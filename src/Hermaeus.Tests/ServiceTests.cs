@@ -56,7 +56,7 @@ namespace Hermaeus.Tests
             suite.MaxCases = 1;
 
             var suites = await service.GetSuitesAsync();
-            Equal(12, suites.Count, "fresh benchmark db should seed all starter suites");
+            Equal(13, suites.Count, "fresh benchmark db should seed all starter suites");
             True(suites.Any(s => s.Id == suite.Id), "starter suite should be listed");
 
             var run = await service.RunAsync(suite, new LlmModel { Id = "fake-agent", Name = "Fake Agent", Provider = "Test" });
@@ -81,10 +81,10 @@ namespace Hermaeus.Tests
                 service.GetSuitesAsync());
 
             foreach (var suites in results)
-                Equal(12, suites.Count, "every concurrent first call should observe exactly one set of seeded starter suites");
+                Equal(13, suites.Count, "every concurrent first call should observe exactly one set of seeded starter suites");
 
             var finalSuites = await service.GetSuitesAsync();
-            Equal(12, finalSuites.Count, "starter suites should not be double-seeded by a concurrent first call race");
+            Equal(13, finalSuites.Count, "starter suites should not be double-seeded by a concurrent first call race");
         }
 
         public static Task BenchmarkStarterSuitesIncludeExpandedDeterministicSet()
@@ -92,7 +92,7 @@ namespace Hermaeus.Tests
             var suites = BenchmarkService.StarterSuites();
             var ids = suites.Select(s => s.Id).ToHashSet(StringComparer.Ordinal);
 
-            Equal(12, suites.Count, "starter suite count should include the original seven plus five expanded suites");
+            Equal(13, suites.Count, "starter suite count should include the original seven, five expanded suites, and r27's speed check");
             True(ids.IsSupersetOf([
                 "speed-smoke",
                 "instruction-following",

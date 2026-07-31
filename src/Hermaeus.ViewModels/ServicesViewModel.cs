@@ -46,7 +46,24 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private bool         _contextShift;
     [ObservableProperty] private bool         _memoryLock;
     [ObservableProperty] private bool         _noMemoryMap;
-    [ObservableProperty] private bool         _ngramSpeculative;
+    // ── r27 03-drafting-and-proof.md 3.1: speculative decoding, as one section ──
+    // The r18 4.4 bool owned a flag that is a list. A second bool beside it
+    // would have given two knobs that both own --spec-type and can contradict
+    // each other, which is how this area acquires a bug that only shows up in
+    // one configuration.
+
+    /// <summary>Comma-separated --spec-type list, e.g. "ngram-mod" or "draft-mtp".</summary>
+    [ObservableProperty] private string       _speculativeTypes = string.Empty;
+    [ObservableProperty] private string       _draftModelPath = string.Empty;
+    [ObservableProperty] private string       _draftGpuLayersText = string.Empty;
+    [ObservableProperty] private string       _speculativeNMaxText = string.Empty;
+    [ObservableProperty] private string       _speculativeNMinText = string.Empty;
+    [ObservableProperty] private string       _speculativePMinText = string.Empty;
+
+    /// <summary>r27 3.4: the combined target-plus-draft VRAM estimate, information rather than a block.</summary>
+    [ObservableProperty] private string       _draftFitNote = string.Empty;
+    public bool HasDraftFitNote => !string.IsNullOrEmpty(DraftFitNote);
+    partial void OnDraftFitNoteChanged(string value) => OnPropertyChanged(nameof(HasDraftFitNote));
     [ObservableProperty] private string       _suggestEngineSettingsPreview = string.Empty;
 
     /// <summary>Verified accepted value set minus f32 (r18 04-llama-server-engine-options.md
@@ -106,7 +123,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _config.ContextShift != ContextShift ||
         _config.MemoryLock != MemoryLock ||
         _config.NoMemoryMap != NoMemoryMap ||
-        _config.NgramSpeculative != NgramSpeculative;
+        !SpeculativeMatchesConfig();
 
     /// <summary>
     /// Human-readable effective GPU offload for the Services card (r14 1.3):
@@ -291,7 +308,13 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _contextShift   = config.ContextShift;
         _memoryLock     = config.MemoryLock;
         _noMemoryMap    = config.NoMemoryMap;
-        _ngramSpeculative = config.NgramSpeculative;
+        var speculative = config.Speculative ?? new SpeculativeDecodingConfig();
+        _speculativeTypes     = string.Join(",", speculative.Types);
+        _draftModelPath       = speculative.DraftModelPath;
+        _draftGpuLayersText   = speculative.DraftGpuLayers?.ToString() ?? string.Empty;
+        _speculativeNMaxText  = speculative.NMax?.ToString() ?? string.Empty;
+        _speculativeNMinText  = speculative.NMin?.ToString() ?? string.Empty;
+        _speculativePMinText  = speculative.PMin?.ToString("0.###") ?? string.Empty;
 
         _mgr.StatusChanged += s => RunOnUi(() =>
         {
@@ -866,7 +889,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _config.ContextShift   = ContextShift;
         _config.MemoryLock     = MemoryLock;
         _config.NoMemoryMap    = NoMemoryMap;
-        _config.NgramSpeculative = NgramSpeculative;
+        _config.Speculative    = BuildSpeculative();
         OnPropertyChanged(nameof(HasUnsavedChanges));
         OnPropertyChanged(nameof(EffectiveOffloadLabel));
         OnPropertyChanged(nameof(ExtraArgsTrustWarning));
@@ -923,8 +946,48 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         ContextShift   = ContextShift,
         MemoryLock     = MemoryLock,
         NoMemoryMap    = NoMemoryMap,
-        NgramSpeculative = NgramSpeculative
+        Speculative    = BuildSpeculative()
     };
+
+    /// <summary>
+    /// r27 3.1: the edited section, parsed back into config shape. Text boxes
+    /// rather than numeric spinners because every one of these is optional:
+    /// blank means "leave the server's own default alone" and emits no flag.
+    /// </summary>
+    private SpeculativeDecodingConfig BuildSpeculative() => new()
+    {
+        Types = ParseTypes(SpeculativeTypes),
+        DraftModelPath = DraftModelPath?.Trim() ?? string.Empty,
+        DraftGpuLayers = ParseOptionalInt(DraftGpuLayersText),
+        NMax = ParseOptionalInt(SpeculativeNMaxText),
+        NMin = ParseOptionalInt(SpeculativeNMinText),
+        PMin = ParseOptionalDouble(SpeculativePMinText)
+    };
+
+    public static List<string> ParseTypes(string? text) =>
+        (text ?? string.Empty)
+            .Split([',', ' ', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    private static int? ParseOptionalInt(string? text) =>
+        int.TryParse((text ?? string.Empty).Trim(), out var value) ? value : null;
+
+    private static double? ParseOptionalDouble(string? text) =>
+        double.TryParse((text ?? string.Empty).Trim(), System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var value) ? value : null;
+
+    private bool SpeculativeMatchesConfig()
+    {
+        var saved = _config.Speculative ?? new SpeculativeDecodingConfig();
+        var edited = BuildSpeculative();
+        return saved.Types.SequenceEqual(edited.Types, StringComparer.OrdinalIgnoreCase)
+            && string.Equals(saved.DraftModelPath, edited.DraftModelPath, StringComparison.Ordinal)
+            && saved.DraftGpuLayers == edited.DraftGpuLayers
+            && saved.NMax == edited.NMax
+            && saved.NMin == edited.NMin
+            && saved.PMin == edited.PMin;
+    }
 
     private void NotifyStatusProps()
     {
@@ -1059,7 +1122,61 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     partial void OnContextShiftChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
     partial void OnMemoryLockChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
     partial void OnNoMemoryMapChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
-    partial void OnNgramSpeculativeChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnSpeculativeTypesChanged(string value)
+    {
+        OnPropertyChanged(nameof(HasUnsavedChanges));
+        ApplyDraftFitNote();
+    }
+    partial void OnDraftModelPathChanged(string value)
+    {
+        OnPropertyChanged(nameof(HasUnsavedChanges));
+        ApplyDraftFitNote();
+    }
+    partial void OnDraftGpuLayersTextChanged(string value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnSpeculativeNMaxTextChanged(string value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnSpeculativeNMinTextChanged(string value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnSpeculativePMinTextChanged(string value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+
+    /// <summary>
+    /// r27 03-drafting-and-proof.md 3.4: a draft model is a second allocation.
+    /// The combined estimate is shown before the server starts, as information
+    /// and never a block: the user may have reasons, and llama.cpp spills to
+    /// system memory rather than failing.
+    /// Also carries 3.3's refusal and warning, so an incompatible pair is named
+    /// here rather than discovered by pressing Start.
+    /// </summary>
+    private void ApplyDraftFitNote()
+    {
+        var config = BuildConfig();
+        if (config.Speculative is not { RequiresDraftModel: true })
+        {
+            DraftFitNote = string.Empty;
+            return;
+        }
+
+        var validation = SpeculativeDecodingValidator.Validate(config);
+        if (validation.HasMessage)
+        {
+            DraftFitNote = validation.Message;
+            return;
+        }
+
+        var draftPath = config.Speculative.DraftModelPath;
+        if (draftPath.Length == 0 || !File.Exists(draftPath))
+        {
+            DraftFitNote = string.Empty;
+            return;
+        }
+
+        var draftBytes = new FileInfo(draftPath).Length;
+        var targetBytes = TryGetModelFileSizeBytes() ?? 0;
+        var vram = _hardwareProfile?.MaxGpuVramBytes ?? 0;
+        var combined = targetBytes + draftBytes;
+
+        DraftFitNote = vram > 0
+            ? $"Target plus draft is roughly {FormatGb(combined)} of weights against {FormatGb(vram)} of VRAM."
+            : $"Target plus draft is roughly {FormatGb(combined)} of weights.";
+    }
 
     /// <summary>
     /// r18 04-llama-server-engine-options.md 4.0: llama.cpp historically requires flash
