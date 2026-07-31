@@ -136,6 +136,9 @@ public partial class MainWindowViewModel : ViewModelBase
             Palette.SetActiveProject(project?.Id ?? string.Empty, project?.Name ?? string.Empty);
         };
         Palette.RequestNavigate = NavigateToRecallHitAsync;
+        // r28 doc 03 3.2: Activity rows reuse the same navigator the palette
+        // uses, so there is one answer to "where does a task live".
+        Activity.RequestNavigate = NavigateToRecallHitAsync;
         Doctor.RequestNavigate = panel => ActivePanel = panel;
         Doctor.RequestOpenUrl = url =>
         {
@@ -814,6 +817,9 @@ public partial class MainWindowViewModel : ViewModelBase
         OnPropertyChanged(nameof(ShowDoctor));
         OnPropertyChanged(nameof(ShowMemories));
         OnPropertyChanged(nameof(ShowLogs));
+        // ShowActivity was missing from this list since the property was added,
+        // so anything binding to it never refreshed on navigation.
+        OnPropertyChanged(nameof(ShowActivity));
         OnPropertyChanged(nameof(ShowWizard));
         OnPropertyChanged(nameof(ActiveViewModel));
         OnPropertyChanged(nameof(WindowTitle));

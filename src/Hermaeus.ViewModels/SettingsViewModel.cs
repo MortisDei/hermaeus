@@ -130,7 +130,8 @@ public partial class SettingsViewModel : ViewModelBase
         LocalApiProcessManager localApiProcess,
         LocalAiSetupService localAiSetup,
         TrustService trust,
-        Hermaeus.Services.Recall.RecallIndexingService? recallIndexing = null)
+        Hermaeus.Services.Recall.RecallIndexingService? recallIndexing = null,
+        IActivityRecorder? activity = null)
     {
         _svc = svc;
         _toasts = toasts;
@@ -140,7 +141,7 @@ public partial class SettingsViewModel : ViewModelBase
 
         Llm = new LlmDefaultsSettingsViewModel(secrets);
         Rag = new RagSettingsViewModel(ResolveDataRoot);
-        Data = new DataManagementSettingsViewModel(_svc, backups, _toasts, ResolveDataRoot);
+        Data = new DataManagementSettingsViewModel(_svc, backups, _toasts, ResolveDataRoot, activity);
         Ui = new UiSettingsViewModel();
         Memory = new MemorySettingsViewModel(recallIndexing, _toasts);
         Mcp = new McpSettingsViewModel();

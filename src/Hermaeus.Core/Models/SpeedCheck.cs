@@ -20,12 +20,22 @@ public static class SpeedCheck
     /// It is a speed measurement, so no case asserts anything about quality:
     /// no expected keywords, no expected regexes, no refusal expectation.
     /// </summary>
+    /// <summary>
+    /// Iterations per case (r28 doc 02 2.2). r27's first recorded result was
+    /// one cold iteration per case, and a 1.6% difference from a single sample
+    /// says nothing. Five is enough for a spread to be visible and keeps four
+    /// cases at roughly 20 generations a side, which is a few minutes on the
+    /// hardware this runs on rather than an afternoon.
+    /// </summary>
+    public const int IterationsPerCase = 5;
+
     public static BenchmarkSuite Suite() => new()
     {
         Id = SuiteId,
         Name = SuiteName,
         Description = "Fixed prompts for measuring tokens per second. Reports speed only; it does not judge the answers.",
         ScoringProfile = "fast-chat-v1",
+        IterationsPerCase = IterationsPerCase,
         Cases =
         [
             new BenchmarkCase
@@ -60,13 +70,65 @@ public static class SpeedCheck
 /// One side of a speed-check comparison: the measured numbers and the
 /// configuration that produced them.
 /// </summary>
+/// <param name="TokensPerSecond">Median across the run's iterations, not the mean, so one slow cold pass does not move it.</param>
+/// <param name="TokensPerSecondMin">Slowest iteration observed.</param>
+/// <param name="TokensPerSecondMax">Fastest iteration observed.</param>
+/// <param name="IterationCount">How many measured generations the numbers above came from.</param>
+/// <param name="DraftTokens">
+/// Tokens the server drafted across the run, or null when it reported no
+/// draft counters at all (r28 doc 02 2.4). Zero and null are different facts:
+/// zero means drafting was configured and never engaged, so the comparison
+/// was between two identical configurations.
+/// </param>
+/// <param name="DraftTokensAccepted">Drafted tokens the target model accepted.</param>
 public sealed record SpeedCheckSide(
     string RunId,
     DateTime StartedAt,
     string ConfigurationSummary,
     double TokensPerSecond,
     double PromptTokensPerSecond,
-    double FirstTokenMs);
+    double FirstTokenMs,
+    double TokensPerSecondMin = 0,
+    double TokensPerSecondMax = 0,
+    int IterationCount = 1,
+    int? DraftTokens = null,
+    int? DraftTokensAccepted = null)
+{
+    /// <summary>
+    /// What was seen, phrased as what was seen: "70.2 tok/s (66.8 to 71.9
+    /// over 5 runs)". Not a confidence interval and not a significance claim.
+    /// If the two sides overlap, the reader can see that for themselves,
+    /// which is where the app's job ends.
+    /// </summary>
+    public string SpreadLabel => IterationCount <= 1
+        ? $"{TokensPerSecond:F1} tok/s (1 run)"
+        : $"{TokensPerSecond:F1} tok/s ({TokensPerSecondMin:F1} to {TokensPerSecondMax:F1} over {IterationCount} runs)";
+
+    /// <summary>
+    /// Whether the server reported draft counters at all. False means nobody
+    /// counted, which is never displayed as a zero.
+    /// </summary>
+    public bool HasDraftCounters => DraftTokens.HasValue;
+
+    /// <summary>
+    /// Drafted, accepted and the ratio between them, or empty when the server
+    /// reported nothing. No recommendation is attached: "12%" is a fact,
+    /// "12%, consider disabling drafting" is a recommendation.
+    /// </summary>
+    public string AcceptanceLabel
+    {
+        get
+        {
+            if (DraftTokens is not { } drafted)
+                return string.Empty;
+            if (drafted == 0)
+                return "0 drafted (drafting did not engage)";
+
+            var accepted = DraftTokensAccepted ?? 0;
+            return $"{drafted:N0} drafted, {accepted:N0} accepted ({(double)accepted / drafted:P0})";
+        }
+    }
+}
 
 /// <summary>
 /// Two speed-check runs of the same suite against the same model, with the

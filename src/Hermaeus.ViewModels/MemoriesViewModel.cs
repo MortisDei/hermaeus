@@ -14,6 +14,7 @@ public partial class MemoriesViewModel : ViewModelBase
     private readonly IConversationStore _conversations;
     private readonly ISettingsService _settings;
     private readonly IToastService _toasts;
+    private readonly IActivityRecorder? _activity;
     private CancellationTokenSource? _searchTextCts;
 
     public UiBoundCollection<MemoryItemViewModel> Memories { get; } = [];
@@ -32,8 +33,10 @@ public partial class MemoriesViewModel : ViewModelBase
 
     public List<string> AvailableCategories { get; } = ["All", "facts", "preferences", "learned_behaviors", "interests"];
 
-    public MemoriesViewModel(IMemoryStore store, IConversationStore conversations, ISettingsService settings, IToastService toasts)
+    public MemoriesViewModel(IMemoryStore store, IConversationStore conversations, ISettingsService settings, IToastService toasts,
+        IActivityRecorder? activity = null)
     {
+        _activity = activity;
         _store = store;
         _conversations = conversations;
         _settings = settings;
@@ -51,8 +54,20 @@ public partial class MemoriesViewModel : ViewModelBase
         // gone unrecalled long enough into the archive before loading the
         // list, so the panel reflects lifecycle state without needing a
         // separate background job.
-        try { await _store.ArchiveStaleMemoriesAsync(); }
-        catch { }
+        // r28 doc 03 3.3: a sweep that archives nothing still records, because
+        // "it ran and found nothing" and "it never ran" are the two states
+        // this panel exists to separate.
+        try
+        {
+            var archived = await _store.ArchiveStaleMemoriesAsync();
+            _activity.RecordSafe("memory.auto-archive", string.Empty, ActivityOutcome.Succeeded,
+                archived == 1 ? "Archived 1 stale memory" : $"Archived {archived} stale memories");
+        }
+        catch (Exception ex)
+        {
+            _activity.RecordSafe("memory.auto-archive", string.Empty, ActivityOutcome.Failed,
+                "Memory archive sweep failed", ex.Message);
+        }
 
         await LoadMemoriesAsync();
         await RefreshConversationFiltersAsync();

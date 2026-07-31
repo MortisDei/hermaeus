@@ -20,3 +20,34 @@ public interface IActivityRecorder
         string projectId = "",
         CancellationToken ct = default);
 }
+
+public static class ActivityRecorderExtensions
+{
+    /// <summary>
+    /// Records without ever throwing at the call site (r28 doc 03 3.3). The
+    /// production recorder already swallows its own failures, but a call site
+    /// that writes <c>_ = recorder.RecordAsync(...)</c> still propagates
+    /// anything thrown before the first await, and a recorder must never fail
+    /// the operation it is describing. Every observing call site uses this.
+    /// </summary>
+    public static void RecordSafe(
+        this IActivityRecorder? recorder,
+        string operation,
+        string sourceId,
+        ActivityOutcome outcome,
+        string title,
+        string reason = "",
+        string projectId = "")
+    {
+        if (recorder is null) return;
+
+        try
+        {
+            _ = recorder.RecordAsync(operation, sourceId, outcome, title, reason, projectId)
+                .ContinueWith(static t => { _ = t.Exception; }, TaskContinuationOptions.OnlyOnFaulted);
+        }
+        catch
+        {
+        }
+    }
+}

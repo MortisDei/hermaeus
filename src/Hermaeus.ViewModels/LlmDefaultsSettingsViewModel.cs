@@ -18,6 +18,7 @@ public partial class LlmDefaultsSettingsViewModel : ObservableObject
     [ObservableProperty] private string _openAiBaseUrl = "https://api.openai.com";
     [ObservableProperty] private string _openAiApiKey = string.Empty;
     [ObservableProperty] private bool _openAiEnabled;
+    [ObservableProperty] private bool _openAiSupportsStructuredOutputs;
     [ObservableProperty] private string _defaultSystemPrompt = string.Empty;
     [ObservableProperty] private double _temperature = 0.7;
     [ObservableProperty] private int _maxTokens = 4096;
@@ -37,6 +38,7 @@ public partial class LlmDefaultsSettingsViewModel : ObservableObject
         OpenAiBaseUrl = settings.Llm.OpenAiBaseUrl;
         OpenAiApiKey = _secrets.IsReference(settings.Llm.OpenAiApiKey) ? string.Empty : settings.Llm.OpenAiApiKey;
         OpenAiEnabled = settings.Llm.OpenAiEnabled;
+        OpenAiSupportsStructuredOutputs = settings.Llm.OpenAiSupportsStructuredOutputs;
         DefaultSystemPrompt = settings.Llm.DefaultSystemPrompt;
         Temperature = settings.Llm.Temperature;
         MaxTokens = settings.Llm.MaxTokens;
@@ -56,6 +58,7 @@ public partial class LlmDefaultsSettingsViewModel : ObservableObject
         if (!string.IsNullOrWhiteSpace(OpenAiApiKey))
             settings.Llm.OpenAiApiKey = await _secrets.StoreAsync("openai-api-key", OpenAiApiKey.Trim());
         settings.Llm.OpenAiEnabled = OpenAiEnabled;
+        settings.Llm.OpenAiSupportsStructuredOutputs = OpenAiSupportsStructuredOutputs;
         settings.Llm.DefaultSystemPrompt = DefaultSystemPrompt;
         settings.Llm.Temperature = Temperature;
         settings.Llm.MaxTokens = MaxTokens;

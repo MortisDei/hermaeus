@@ -24,11 +24,34 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      # The repository has no lock files, so the cache key is the hash of
+      # every project file: a package reference only changes when one of
+      # those changes (r28 doc 06 6.3). Worth 20 to 30 seconds a run. It is
+      # not, and must not be mistaken for, a fix for the Windows test gap.
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', 'Directory.Build.props') }}
+          restore-keys: ${{ runner.os }}-nuget-
+
       - name: Restore
         run: dotnet restore Hermaeus.sln
 
       - name: Build (zero warnings enforced)
         run: dotnet build Hermaeus.sln --no-restore -c Release
 
+      # The TRX logger is VSTest's own, so this adds no package. It exists
+      # because the Windows leg spends about seven times as long inside this
+      # step as the Linux leg does, and nobody knew which tests owned the
+      # difference (r28 doc 04 4.1). See docs/pull-requests.md, "CI timing".
       - name: Test
-        run: dotnet test src/Hermaeus.Tests/Hermaeus.Tests.csproj --no-restore -c Release -v normal --nologo
+        run: dotnet test src/Hermaeus.Tests/Hermaeus.Tests.csproj --no-restore -c Release -v normal --nologo --logger "trx;LogFileName=test-results.trx"
+
+      - name: Upload test timings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.os }}
+          path: '**/test-results.trx'
+          if-no-files-found: warn

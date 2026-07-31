@@ -146,6 +146,16 @@ public sealed class BenchmarkResult
     /// provider's own timings, "chars-approx" when it is the chars/4 estimate. Empty for runs
     /// recorded before this field existed, which keeps old stored JSON loading cleanly.</summary>
     public string MeasurementSource { get; set; } = string.Empty;
+    /// <summary>
+    /// Tokens the speculative decoder drafted, and how many the target model
+    /// accepted, straight from llama-server's timings (r28 doc 02 2.1/2.4).
+    /// Null when the provider reported no draft counters at all, which is a
+    /// different fact from a measured zero and is displayed differently:
+    /// <c>0 drafted</c> means drafting never engaged and a comparison was run
+    /// between two identical configurations.
+    /// </summary>
+    public int? DraftTokens { get; set; }
+    public int? DraftTokensAccepted { get; set; }
     public bool KeywordHit { get; set; }
     public bool RegexHit { get; set; }
     public bool RefusalCorrect { get; set; }

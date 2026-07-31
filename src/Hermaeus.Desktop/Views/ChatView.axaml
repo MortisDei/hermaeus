@@ -373,6 +373,7 @@
                             <TextBlock Text="{Binding SelectedChatTrace.TotalLatencyMs, StringFormat='Total latency: {0} ms', FallbackValue='Total latency: N/A'}" FontSize="11" Opacity="0.65" />
                             <TextBlock Text="{Binding SelectedChatTrace.AttachmentCount, StringFormat='Attachments: {0}', FallbackValue='Attachments: N/A'}" FontSize="11" Opacity="0.65" />
                             <TextBlock Text="{Binding SelectedChatTrace.EstimatedTokens, StringFormat='Estimated tokens: {0}', FallbackValue='Estimated tokens: N/A'}" FontSize="11" Opacity="0.65" />
+                            <TextBlock Text="{Binding SelectedChatTrace.OutputConstraintLabel, StringFormat='Output shape: {0}', FallbackValue='Output shape: N/A'}" FontSize="11" Opacity="0.65" />
                             <TextBlock Text="{Binding SelectedChatTrace.RagContextItems, StringFormat='Knowledge chunks injected: {0}'}" FontSize="11" Opacity="0.65"
                                        IsVisible="{Binding SelectedChatTrace.HasRagContext}" />
                             <TextBlock Text="{Binding SelectedChatTrace.RagMs, StringFormat='Knowledge retrieval: {0} ms'}" FontSize="11" Opacity="0.65"

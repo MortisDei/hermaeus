@@ -41,6 +41,13 @@ public sealed class LlamaCppService : IDisposable
     public string ProviderName => "llama.cpp";
     public bool   IsConfigured => true;
 
+    /// <summary>
+    /// llama-server enforces both shapes: a JSON schema through
+    /// <c>response_format</c> and a GBNF grammar through a top-level
+    /// <c>grammar</c> field (r28 doc 01 1.2).
+    /// </summary>
+    public const LlmConstraintSupport ConstraintSupport = LlmConstraintSupport.JsonSchema | LlmConstraintSupport.Grammar;
+
     public LlamaCppService(ISettingsService settings, IRuntimeLogService logs, HttpClient? http = null)
     {
         _settings = settings;
@@ -72,7 +79,7 @@ public sealed class LlamaCppService : IDisposable
             resp.EnsureSuccessStatusCode();
             var data = await resp.Content.ReadFromJsonAsync<ModelsResponse>(JsonOpts, ct);
             var models = data?.Data?
-                .Select(m => new LlmModel { Id = m.Id, Name = Path.GetFileNameWithoutExtension(m.Id), Provider = "llama.cpp", ProviderTag = ProviderTagValue })
+                .Select(m => new LlmModel { Id = m.Id, Name = Path.GetFileNameWithoutExtension(m.Id), Provider = "llama.cpp", ProviderTag = ProviderTagValue, SupportsOutputConstraints = true })
                 .ToList() ?? [];
 
             // llama-server hosts exactly one model at a time, so the probed context
@@ -196,6 +203,12 @@ public sealed class LlamaCppService : IDisposable
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         options ??= LlmChatOptions.Default;
+        if (LlmOutputConstraintWire.DescribeRefusal(options.OutputConstraint, ConstraintSupport, ProviderName) is { } refusal)
+        {
+            yield return LlmStreamEvent.Error(refusal);
+            yield break;
+        }
+
         var (success, resp, error) = await GetStreamResponseAsync(modelId, messages, options, ct);
 
         if (!success)
@@ -295,6 +308,11 @@ public sealed class LlamaCppService : IDisposable
             messages = msgs,
             stream = true,
             stream_options = new { include_usage = true },
+            // r28 doc 01 1.2. Both forms were confirmed to reach the sampler
+            // on the installed b10195 build before this was written; see
+            // LlmOutputConstraintWire's remarks for the exact check.
+            response_format = LlmOutputConstraintWire.ResponseFormat(options.OutputConstraint),
+            grammar = LlmOutputConstraintWire.Grammar(options.OutputConstraint),
             // r14 2.2: pin the prompt-cache on explicitly rather than relying on
             // llama-server's current default, so a follow-up send reprocesses
             // only the changed suffix instead of the whole prompt. r17 2.6:
@@ -333,7 +351,8 @@ public sealed class LlamaCppService : IDisposable
             : new ChatTokenUsage(chunk.Usage.PromptTokens, chunk.Usage.CompletionTokens, chunk.Usage.TotalTokens);
         var serverTimings = chunk?.Timings is null
             ? null
-            : new ChatServerTimings(chunk.Timings.PromptN, chunk.Timings.PromptMs, chunk.Timings.PredictedN, chunk.Timings.PredictedMs);
+            : new ChatServerTimings(chunk.Timings.PromptN, chunk.Timings.PromptMs, chunk.Timings.PredictedN, chunk.Timings.PredictedMs,
+                chunk.Timings.DraftN, chunk.Timings.DraftNAccepted);
         var finishReason = chunk?.Choices?.FirstOrDefault()?.FinishReason;
         var isFinal = usage is not null || finishReason is not null;
         if (string.IsNullOrEmpty(c) && usage is null && serverTimings is null && !isFinal)
@@ -360,10 +379,25 @@ public sealed class LlamaCppService : IDisposable
         [property: JsonPropertyName("prompt_tokens")] int PromptTokens,
         [property: JsonPropertyName("completion_tokens")] int CompletionTokens,
         [property: JsonPropertyName("total_tokens")] int TotalTokens);
-    /// <summary>llama-server's own prompt/generation timing, present on the final streamed chunk.</summary>
+    /// <summary>
+    /// llama-server's own prompt/generation timing, present on the final
+    /// streamed chunk. <c>draft_n</c> and <c>draft_n_accepted</c> appear only
+    /// when speculative decoding is active, and are absent (null) otherwise,
+    /// which is how the app tells "drafting produced nothing" apart from
+    /// "nothing was drafting".
+    /// </summary>
+    /// <remarks>
+    /// The two draft field names were read off the installed b10195 build
+    /// before this was written (r28 doc 02 2.1): a server started with
+    /// <c>--spec-type ngram-mod</c> returned
+    /// <c>"draft_n": 64, "draft_n_accepted": 31</c> beside the four fields
+    /// that were already parsed here.
+    /// </remarks>
     private record TimingsData(
         [property: JsonPropertyName("prompt_n")] int? PromptN,
         [property: JsonPropertyName("prompt_ms")] double? PromptMs,
         [property: JsonPropertyName("predicted_n")] int? PredictedN,
-        [property: JsonPropertyName("predicted_ms")] double? PredictedMs);
+        [property: JsonPropertyName("predicted_ms")] double? PredictedMs,
+        [property: JsonPropertyName("draft_n")] int? DraftN = null,
+        [property: JsonPropertyName("draft_n_accepted")] int? DraftNAccepted = null);
 }

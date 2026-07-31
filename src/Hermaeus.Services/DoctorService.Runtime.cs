@@ -409,6 +409,83 @@ public sealed partial class DoctorService
         return checks;
     }
 
+    /// <summary>
+    /// r28 doc 02 2.5: speculative decoding is on and the most recent Speed
+    /// Check for the default model recorded zero drafted tokens, which means
+    /// the last comparison was between two identical configurations.
+    ///
+    /// Deterministic: it compares a setting against a recorded number. It runs
+    /// nothing, does not diagnose why, and proposes no fix. "Never measured"
+    /// is reported as its own state and never as "measured and found dead".
+    /// </summary>
+    private async Task<DoctorCheck?> CheckDraftEngagementAdvisoryAsync(CancellationToken ct)
+    {
+        if (_benchmarkInsights is null)
+            return null;
+
+        var modelId = _settings.Settings.Llm.DefaultModel;
+        var server = _settings.Settings.ManagedServers.FirstOrDefault(s => !s.EmbeddingsMode && s.Speculative is { Types.Count: > 0 });
+        if (server is null || string.IsNullOrWhiteSpace(modelId))
+            return null;
+
+        BenchmarkRun? latest;
+        try
+        {
+            latest = await _benchmarkInsights.GetLatestSpeedCheckRunAsync(modelId, ct);
+        }
+        catch
+        {
+            // Benchmark storage being unreadable is not this check's business
+            // to report; the storage checks already cover that.
+            return null;
+        }
+
+        var finding = DraftEngagementAdvisory.Evaluate(server.Speculative, latest);
+        var types = string.Join(", ", server.Speculative!.Types);
+
+        return finding.State switch
+        {
+            DraftEngagementState.ConfiguredButNeverEngaged => BuildCheck(
+                $"draft-engagement-{server.Id}",
+                $"{server.Name} drafting engagement",
+                DoctorCheckStatus.Warning,
+                "Drafting is configured but did not engage on the last measured run",
+                $"{server.Name} is set to {types}, and the most recent Speed Check for {modelId} recorded 0 drafted tokens. "
+                    + "That run compared the setting against itself.",
+                "Open Services",
+                true,
+                $"Speculative types: {types}; last Speed Check drafted tokens: 0",
+                "Runtime"),
+
+            DraftEngagementState.ConfiguredButNotReported => BuildCheck(
+                $"draft-engagement-{server.Id}",
+                $"{server.Name} drafting engagement",
+                DoctorCheckStatus.Warning,
+                "The last Speed Check ran against a server that was not drafting",
+                $"{server.Name} is set to {types}, and the most recent Speed Check for {modelId} came back with no draft counters at all. "
+                    + "llama-server reports them whenever speculative decoding is active, so the server that answered was started without it. "
+                    + "Changing this setting does not restart a running server; restart it from Services and run the check again.",
+                "Open Services",
+                true,
+                $"Speculative types: {types}; last Speed Check draft counters: (none reported)",
+                "Runtime"),
+
+            DraftEngagementState.NeverMeasured => BuildCheck(
+                $"draft-engagement-{server.Id}",
+                $"{server.Name} drafting engagement",
+                DoctorCheckStatus.Info,
+                "Drafting has not been measured on this model",
+                $"{server.Name} is set to {types}, and {modelId} has no Speed Check run that reported draft counters. "
+                    + "Whether drafting engages here is unmeasured rather than known.",
+                "Open Benchmarks",
+                false,
+                $"Speculative types: {types}; last Speed Check drafted tokens: (none recorded)",
+                "Runtime"),
+
+            _ => null
+        };
+    }
+
     private async Task<DoctorCheck> CheckOllamaAsync(CancellationToken ct)
     {
         var profiles = _runtimes.Profiles.Where(p => p.Enabled && p.Kind == RuntimeKind.Ollama).ToList();

@@ -148,6 +148,11 @@ public sealed partial class DoctorService : IDoctorService
         checks.AddRange(CheckOversizedContextAdvisories());
         // r27 03 3.7: only appears when a draft-* type is configured with a missing or empty draft path.
         checks.AddRange(CheckDraftModelAdvisories());
+        // r28 doc 02 2.5: only appears when drafting is configured and the
+        // last Speed Check for the model recorded that it never engaged.
+        var draftEngagement = await CheckDraftEngagementAdvisoryAsync(ct);
+        if (draftEngagement is not null)
+            checks.Add(draftEngagement);
 
         var gpuInferenceAdvisory = await CheckGpuInferenceAdvisoryAsync(ct);
         if (gpuInferenceAdvisory is not null)

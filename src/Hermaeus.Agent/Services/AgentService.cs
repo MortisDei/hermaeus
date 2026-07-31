@@ -82,6 +82,61 @@ public sealed class AgentService : IAgentService
         """;
 
     /// <summary>
+    /// The planner protocol as a schema a sampler can enforce, rather than a
+    /// template the prompt asks for politely (r28 doc 05 5.1). It describes
+    /// the shape above; it does not change it.
+    /// </summary>
+    /// <remarks>
+    /// Hand-written, following <see cref="BuildFixedToolDefinitions"/> in this
+    /// same file: no schema-generation package and no runtime reflection.
+    /// <c>AgentPlannerSchemaTests</c> fails if this and
+    /// <see cref="AgentPlannerResponse"/> ever disagree, including on the two
+    /// enums.
+    ///
+    /// Constraining the shape does not make the answer trusted.
+    /// <c>requires_approval</c> and <c>risk_level</c> are still fields the
+    /// model fills in and the dispatch path overrides in code.
+    /// </remarks>
+    internal const string PlannerResponseSchema = """
+        {
+          "type": "object",
+          "properties": {
+            "thought_summary": { "type": "string" },
+            "current_step": { "type": "string" },
+            "next_action": {
+              "type": "object",
+              "properties": {
+                "type": { "type": "string", "enum": ["none", "tool", "ask_user", "final"] },
+                "tool_name": { "type": ["string", "null"] },
+                "arguments": { "type": "object" },
+                "requires_approval": { "type": "boolean" },
+                "risk_level": { "type": "string", "enum": ["none", "low", "medium", "high"] }
+              },
+              "required": ["type", "tool_name", "arguments", "requires_approval", "risk_level"]
+            },
+            "state_update": {
+              "type": "object",
+              "properties": {
+                "completed": { "type": "array", "items": { "type": "string" } },
+                "pending": { "type": "array", "items": { "type": "string" } },
+                "new_facts": { "type": "array", "items": { "type": "string" } },
+                "blockers": { "type": "array", "items": { "type": "string" } }
+              },
+              "required": ["completed", "pending", "new_facts", "blockers"]
+            },
+            "user_message": { "type": "string" },
+            "reservations": { "type": "array", "items": { "type": "string" } }
+          },
+          "required": ["thought_summary", "current_step", "next_action", "state_update", "user_message"]
+        }
+        """;
+
+    internal const string PlannerConstraintDescription = "agent planner protocol v1";
+
+    private static readonly LlmOutputConstraint PlannerConstraint =
+        LlmOutputConstraint.FromJsonSchema(PlannerResponseSchema, PlannerConstraintDescription);
+
+    /// <summary>
     /// Native tool declarations for the fixed workspace tool set, offered on
     /// every step via <see cref="LlmChatOptions.Tools"/>. MCP-bridged
     /// (<c>mcp:</c>) tools are not declared natively; a model reaches those
@@ -264,6 +319,17 @@ public sealed class AgentService : IAgentService
         }
         var prompt = BuildPrompt(context);
         var modelId = options.ModelId;
+        // r28 doc 05 5.2: the text protocol is what runs when the provider
+        // returns no native tool calls, and it is the only path to an MCP tool
+        // for any provider. Constraining it costs nothing where the provider
+        // cannot enforce it (null, so the request is exactly what it was
+        // before) and removes a whole class of stall where it can.
+        var plannerConstraint = await ResolvePlannerConstraintAsync(modelId, ct);
+        state.PlannerConstrained = plannerConstraint is not null;
+        // Only for the parse-failure message: an OpenAI-compatible endpoint
+        // that has not declared it enforces response_format is the one case
+        // where the fix is a setting rather than a different model.
+        var constraintIsOneCheckboxAway = plannerConstraint is null && await IsUndeclaredOpenAiEndpointAsync(modelId, ct);
         var raw = new StringBuilder();
         IReadOnlyList<LlmToolCallRequest>? nativeToolCalls = null;
         try
@@ -271,7 +337,7 @@ public sealed class AgentService : IAgentService
             await foreach (var evt in _llm.StreamChatAsync(
                 modelId,
                 [new ChatMessage("user", prompt)],
-                new LlmChatOptions { SystemPrompt = AgentSystemPrompt, Temperature = 0.2, Tools = FixedToolDefinitions },
+                new LlmChatOptions { SystemPrompt = AgentSystemPrompt, Temperature = 0.2, Tools = FixedToolDefinitions, OutputConstraint = plannerConstraint },
                 ct))
             {
                 if (!string.IsNullOrEmpty(evt.ContentDelta))
@@ -312,7 +378,7 @@ public sealed class AgentService : IAgentService
             state.TotalStepErrors++;
             response = new AgentPlannerResponse
             {
-                ThoughtSummary = DescribeParseFailure(raw.ToString()),
+                ThoughtSummary = DescribeParseFailure(raw.ToString(), state.PlannerConstrained, constraintIsOneCheckboxAway),
                 CurrentStep = state.ActiveStep,
                 NextAction = new AgentNextAction
                 {
@@ -336,6 +402,7 @@ public sealed class AgentService : IAgentService
                 step = state.StepCount,
                 @event = "parse_failed",
                 diagnosis = response.ThoughtSummary,
+                planner_constrained = state.PlannerConstrained,
                 raw_length = rawText.Length,
                 raw_head = Excerpt(rawText, fromStart: true),
                 raw_tail = Excerpt(rawText, fromStart: false),
@@ -631,6 +698,9 @@ public sealed class AgentService : IAgentService
                 state.Status,
                 context,
                 response,
+                // r28 doc 05 5.6: one boolean per run, so "did constraining
+                // help" can be answered from real runs rather than claimed.
+                planner_constrained = state.PlannerConstrained,
                 logged_at = DateTime.UtcNow
             }, ct);
         }
@@ -1512,13 +1582,62 @@ public sealed class AgentService : IAgentService
             state.RememberedCommandApprovals.Add(command);
     }
 
+    /// <summary>
+    /// The planner schema when the selected model's provider can enforce one,
+    /// null otherwise (r28 doc 05 5.2). A provider that cannot be listed right
+    /// now is treated as one that cannot constrain: the step runs exactly as
+    /// it did before r28, through the fallbacks that 5.3 keeps.
+    /// </summary>
+    private async Task<LlmOutputConstraint?> ResolvePlannerConstraintAsync(string modelId, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(modelId))
+            return null;
+
+        try
+        {
+            var models = await _llm.GetModelsAsync(ct);
+            var selected = models.FirstOrDefault(m => string.Equals(m.Id, modelId, StringComparison.OrdinalIgnoreCase));
+            return selected?.SupportsOutputConstraints == true ? PlannerConstraint : null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Whether this model comes from the OpenAI-compatible provider and that
+    /// endpoint has not been declared as enforcing <c>response_format</c>
+    /// (r28 doc 05 5.4). Read off the provider tag rather than by asking the
+    /// provider anything: the Agent project knows nothing about OpenAI, and
+    /// this is only ever used to pick which sentence to show a user.
+    /// </summary>
+    private async Task<bool> IsUndeclaredOpenAiEndpointAsync(string modelId, CancellationToken ct)
+    {
+        if (_settings is null || _settings.Settings.Llm.OpenAiSupportsStructuredOutputs)
+            return false;
+
+        try
+        {
+            var models = await _llm.GetModelsAsync(ct);
+            var selected = models.FirstOrDefault(m => string.Equals(m.Id, modelId, StringComparison.OrdinalIgnoreCase));
+            return selected is not null
+                && selected.ProviderTag.Equals("openai", StringComparison.OrdinalIgnoreCase)
+                && !selected.SupportsOutputConstraints;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return false;
+        }
+    }
+
     private static string BuildPrompt(AgentContextPack context)
     {
         var json = JsonSerializer.Serialize(context, AgentJson.Options);
         return $"Use this compact context pack for the next decision.\n\n{json}";
     }
 
-    private static AgentPlannerResponse ParseResponse(string raw)
+    internal static AgentPlannerResponse ParseResponse(string raw)
     {
         var json = ExtractJson(raw);
         AgentPlannerResponse? response;
@@ -1688,7 +1807,21 @@ public sealed class AgentService : IAgentService
             : trimmed[^ParseFailureExcerptChars..];
     }
 
-    internal static string DescribeParseFailure(string raw)
+    /// <param name="constraintApplied">
+    /// Whether this step's planner call was sent with the protocol schema
+    /// enforced by the provider's sampler (r28 doc 05 5.4). It changes what
+    /// the prose branch can honestly say: unconstrained, the format was a
+    /// request the model declined; constrained, the request was not a request
+    /// and the model still missed, which is a different problem with a
+    /// different answer.
+    /// </param>
+    /// <param name="constraintAvailableButUndeclared">
+    /// True when the model is served by an OpenAI-compatible endpoint that has
+    /// not been declared as enforcing <c>response_format</c>. That is the one
+    /// case where the fix is a checkbox rather than a different model, so the
+    /// message names it.
+    /// </param>
+    internal static string DescribeParseFailure(string raw, bool constraintApplied = false, bool constraintAvailableButUndeclared = false)
     {
         var trimmed = (raw ?? string.Empty).Trim();
 
@@ -1697,9 +1830,24 @@ public sealed class AgentService : IAgentService
                 + "stopped mid-generation; check the Services log for the model server.";
 
         if (!trimmed.Contains('{'))
+        {
+            if (constraintApplied)
+                return "The model replied in prose even though the response shape was constrained to the "
+                    + "action format. The shape was enforced, so this is the model rather than the "
+                    + "request: a model with stronger instruction following, or one that supports "
+                    + "native tool calling, handles this better.";
+
+            if (constraintAvailableButUndeclared)
+                return "The model replied in prose instead of the JSON action format it was asked for. "
+                    + "Hermaeus can require that shape instead of asking for it, but it does not assume "
+                    + "an OpenAI-compatible endpoint supports it. If yours does, tick \"This endpoint "
+                    + "enforces response_format\" in Settings, under LLM.";
+
             return "The model replied in prose instead of the JSON action format it was asked for. "
-                + "Smaller local models do this; a model with stronger instruction following, or one "
-                + "that supports native tool calling, avoids it.";
+                + "This provider cannot enforce a response shape, so the format is a request the "
+                + "model can decline. A local llama.cpp or Ollama model has the shape enforced "
+                + "for it and does not hit this.";
+        }
 
         var opens = trimmed.Count(c => c == '{');
         var closes = trimmed.Count(c => c == '}');

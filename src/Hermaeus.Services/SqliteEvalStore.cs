@@ -82,8 +82,17 @@ public sealed class SqliteEvalStore : IEvalStore
         await EnsureInitializedAsync(ct);
         await using var c = new SqliteConnection(Cs);
         await c.OpenAsync(ct);
+        // One transaction for the insert and its prune, matching
+        // SqliteTraceStore.AppendAsync. Two implicit transactions meant two
+        // durable commits per saved run, and a crash between them left the
+        // table over its cap. r28 doc 04 4.1's per-test timings named the
+        // retention test as one of the two slowest on the Windows leg, where a
+        // commit is far more expensive than on Linux, which is what made this
+        // visible.
+        await using var tx = await c.BeginTransactionAsync(ct);
 
         var cmd = c.CreateCommand();
+        cmd.Transaction = (SqliteTransaction)tx;
         cmd.CommandText = @"
             INSERT INTO eval_runs (id,mode,model_id,dataset_id,suite_id,started_at,finished_at,run_json)
             VALUES ($id,$mode,$model,$dataset,$suite,$started,$finished,$json)
@@ -99,11 +108,14 @@ public sealed class SqliteEvalStore : IEvalStore
         await cmd.ExecuteNonQueryAsync(ct);
 
         var prune = c.CreateCommand();
+        prune.Transaction = (SqliteTransaction)tx;
         prune.CommandText = @"
             DELETE FROM eval_runs WHERE id NOT IN (
                 SELECT id FROM eval_runs ORDER BY started_at DESC LIMIT $keep)";
         prune.Parameters.AddWithValue("$keep", MaxSavedRuns);
         await prune.ExecuteNonQueryAsync(ct);
+
+        await tx.CommitAsync(ct);
     }
 
     public async Task<IReadOnlyList<EvalRun>> GetRunsAsync(EvalMode? mode = null, CancellationToken ct = default)

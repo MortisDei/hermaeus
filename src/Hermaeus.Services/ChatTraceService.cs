@@ -27,7 +27,9 @@ public sealed record ChatTraceEntry(
     string RagNote = "",
     int RecallContextItems = 0,
     long RecallInjectionMs = 0,
-    string RecallNote = "");
+    string RecallNote = "",
+    /// <summary>Label of the output constraint the send enforced; empty means unconstrained (r28 doc 01 1.6).</summary>
+    string OutputConstraint = "");
 
 /// <summary>
 /// Persists and reloads chat traces through the shared <see cref="ITraceStore"/>.
@@ -51,7 +53,8 @@ public sealed class ChatTraceService
         string RagNote = "",
         int RecallContextItems = 0,
         long RecallInjectionMs = 0,
-        string RecallNote = "");
+        string RecallNote = "",
+        string OutputConstraint = "");
 
     private readonly ITraceStore? _traceStore;
     private readonly IRuntimeLogService _runtimeLogs;
@@ -86,7 +89,8 @@ public sealed class ChatTraceService
                 DetailJson = JsonSerializer.Serialize(new ChatTraceDetail(
                     trace.Provider, trace.Runtime, trace.SystemPrompt, trace.AttachmentCount, trace.EstimatedTokens, trace.PreStreamBreakdown,
                     trace.RagContextItems, trace.RagMs, trace.RagNote,
-                    trace.RecallContextItems, trace.RecallInjectionMs, trace.RecallNote))
+                    trace.RecallContextItems, trace.RecallInjectionMs, trace.RecallNote,
+                    trace.OutputConstraint))
             }, ct);
         }
         catch (Exception ex)
@@ -140,7 +144,8 @@ public sealed class ChatTraceService
             detail?.RagNote ?? string.Empty,
             detail?.RecallContextItems ?? 0,
             detail?.RecallInjectionMs ?? 0,
-            detail?.RecallNote ?? string.Empty);
+            detail?.RecallNote ?? string.Empty,
+            detail?.OutputConstraint ?? string.Empty);
     }
 
     private static ChatTraceDetail? TryParseDetail(string json)
