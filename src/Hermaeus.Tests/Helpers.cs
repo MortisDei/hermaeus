@@ -173,23 +173,53 @@ namespace Hermaeus.Tests
     /// </summary>
     sealed class QueueingSynchronizationContext : SynchronizationContext
     {
+        // A real SynchronizationContext is posted to from arbitrary threads, and
+        // this one is too: a view model that finishes background work (a GGUF
+        // header read on the thread pool, a process status callback) marshals
+        // back through Post while the test thread is inside DrainAll. An
+        // unsynchronized Queue<T> mutated concurrently corrupts its internal
+        // array and surfaces as a NullReferenceException out of Dequeue, which
+        // is an intermittent failure with no connection to the test that
+        // observes it. Every access is under one lock, and callbacks run outside
+        // it so a callback that posts again cannot deadlock.
+        private readonly Lock _sync = new();
         private readonly Queue<(SendOrPostCallback Callback, object? State)> _queue = new();
-        public int PostCount { get; private set; }
+        private int _postCount;
+
+        public int PostCount
+        {
+            get { lock (_sync) return _postCount; }
+        }
 
         public override void Post(SendOrPostCallback d, object? state)
         {
-            PostCount++;
-            _queue.Enqueue((d, state));
+            lock (_sync)
+            {
+                _postCount++;
+                _queue.Enqueue((d, state));
+            }
         }
 
         public override void Send(SendOrPostCallback d, object? state) => d(state);
 
+        /// <summary>
+        /// Runs queued callbacks until the queue is empty, including anything a
+        /// callback posts while draining, which is the behaviour the coalescing
+        /// tests rely on (r12 02-async-and-threading.md 2.4).
+        /// </summary>
         public void DrainAll()
         {
-            while (_queue.Count > 0)
+            while (true)
             {
-                var (callback, state) = _queue.Dequeue();
-                callback(state);
+                (SendOrPostCallback Callback, object? State) next;
+                lock (_sync)
+                {
+                    if (_queue.Count == 0)
+                        return;
+                    next = _queue.Dequeue();
+                }
+
+                next.Callback(next.State);
             }
         }
     }

@@ -627,14 +627,26 @@ checkbox per technique, because llama-server's `--spec-type` takes a
 comma-separated list and n-gram speculation and draft-model drafting are not
 mutually exclusive:
 
-- **Types**: any of `ngram-mod`, `ngram-simple`, `ngram-map-k`,
-  `ngram-map-k4v`, `ngram-cache`, `draft-mtp`, `draft-simple`. Empty means off,
-  and an empty section emits no flags at all.
-- **Draft model**: a `.gguf` path, needed only by the `draft-*` types. An MTP
-  (Multi-Token Prediction) head shipped beside its base model is the easy case:
-  it is trained as part of that model and shares its vocabulary by
-  construction, and at tens of megabytes against a multi-gigabyte target it is
-  the size ratio speculative decoding actually wants.
+- **N-gram drafting** (`ngram-mod`): costs no additional VRAM, because it
+  drafts from the prompt and history themselves rather than from a second
+  model.
+- **Draft model** (`draft-mtp`): drafts from an MTP (Multi-Token Prediction)
+  head. An MTP head is trained as part of its base model and ships inside that
+  model's own repository, so it shares the model's vocabulary by construction,
+  and at tens of megabytes against a multi-gigabyte target it is the size ratio
+  speculative decoding actually wants.
+- **The draft model itself** is found the same way the vision projector above
+  it is found, and has been since r19: a scan for `mtp-*.gguf` beside the
+  selected model and in its `MTP/` subfolder, with the sole candidate filled in
+  and anything you chose explicitly left alone. Finding the file does not turn
+  drafting on. Nothing reaches the launch command until you tick the box, so
+  discovery never silently changes how a server runs.
+
+Both boxes write into one underlying `--spec-type` list, because the flag
+genuinely is a list and the two techniques compose. Each box only ever adds or
+removes its own entry, so a more exotic list set by hand in `settings.json`
+(`ngram-simple`, `ngram-map-k`, `ngram-map-k4v`, `ngram-cache`,
+`draft-simple`) survives being toggled.
 - **n-max / n-min / p-min / draft ngl**: optional. Blank leaves llama-server's
   own defaults alone.
 

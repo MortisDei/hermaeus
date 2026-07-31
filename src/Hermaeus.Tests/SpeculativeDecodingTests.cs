@@ -434,6 +434,142 @@ public sealed class SpeculativeDecodingTests
         Assert.Empty(ServerProcessViewModel.ParseTypes(null));
     }
 
+    // ── Draft-model discovery and the checkbox surface (r27 follow-up) ──────
+
+    private static ServerProcessViewModel NewServerVm(TempDir temp, string modelPath)
+    {
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        var config = new ServerConfig { Name = "Chat", ModelPath = modelPath };
+        return new ServerProcessViewModel(config, settings, new RedactionService(),
+            new TrustService(), new FakeToasts(), new RuntimeLogService(settings));
+    }
+
+    /// <summary>
+    /// The app knows which model is selected, and an MTP head ships inside that
+    /// model's own repository, so it is already sitting next to it. Typing the
+    /// path by hand was busywork, exactly as it would be for the vision
+    /// projector one field above, which has scanned for its companion since r19.
+    /// </summary>
+    [Fact]
+    public void A_draft_head_beside_the_model_is_discovered_and_prefilled()
+    {
+        using var temp = new TempDir();
+        var dir = temp.PathFor("snapshot");
+        Directory.CreateDirectory(dir);
+        var model = Path.Combine(dir, "gemma-4-E4B-it-Q4_K_M.gguf");
+        var draft = Path.Combine(dir, "mtp-gemma-4-E4B-it.gguf");
+        File.WriteAllText(model, "model");
+        File.WriteAllText(draft, "draft");
+
+        var vm = NewServerVm(temp, model);
+
+        Assert.Contains(draft, vm.DetectedDraftModelPaths);
+        Assert.Equal(draft, vm.DraftModelPath);
+        Assert.True(vm.HasDetectedDraftModel);
+    }
+
+    [Fact]
+    public void A_draft_head_in_an_mtp_subdirectory_is_discovered_too()
+    {
+        using var temp = new TempDir();
+        var dir = temp.PathFor("snapshot-nested");
+        var mtpDir = Path.Combine(dir, "MTP");
+        Directory.CreateDirectory(mtpDir);
+        var model = Path.Combine(dir, "gemma-4-E4B-it-Q4_K_M.gguf");
+        var draft = Path.Combine(mtpDir, "mtp-gemma-4-E4B-it-BF16.gguf");
+        File.WriteAllText(model, "model");
+        File.WriteAllText(draft, "draft");
+
+        var vm = NewServerVm(temp, model);
+
+        // unsloth ships the head in an MTP/ folder beside the model.
+        Assert.Contains(draft, vm.DetectedDraftModelPaths);
+        Assert.Equal(draft, vm.DraftModelPath);
+    }
+
+    /// <summary>
+    /// This is what keeps discovery from becoming the auto-selection r27 doc 03
+    /// declined. Finding the file changes nothing about how the server launches;
+    /// only ticking the box does.
+    /// </summary>
+    [Fact]
+    public void Discovering_a_draft_head_does_not_enable_speculative_decoding()
+    {
+        using var temp = new TempDir();
+        var dir = temp.PathFor("snapshot-off");
+        Directory.CreateDirectory(dir);
+        var model = Path.Combine(dir, "model.gguf");
+        File.WriteAllText(model, "model");
+        File.WriteAllText(Path.Combine(dir, "mtp-model.gguf"), "draft");
+
+        var vm = NewServerVm(temp, model);
+
+        Assert.False(vm.UseDraftModelDecoding);
+        Assert.False(vm.UseNgramDecoding);
+        Assert.DoesNotContain("--spec-type", Args(vm.BuildConfig()));
+    }
+
+    [Fact]
+    public void The_two_checkboxes_compose_onto_one_spec_type_list()
+    {
+        using var temp = new TempDir();
+        var dir = temp.PathFor("snapshot-compose");
+        Directory.CreateDirectory(dir);
+        var model = Path.Combine(dir, "model.gguf");
+        File.WriteAllText(model, "model");
+        File.WriteAllText(Path.Combine(dir, "mtp-model.gguf"), "draft");
+        var vm = NewServerVm(temp, model);
+
+        vm.UseNgramDecoding = true;
+        Assert.Equal("ngram-mod", ArgValue(Args(vm.BuildConfig()), "--spec-type"));
+
+        vm.UseDraftModelDecoding = true;
+        Assert.Equal("ngram-mod,draft-mtp", ArgValue(Args(vm.BuildConfig()), "--spec-type"));
+
+        vm.UseNgramDecoding = false;
+        Assert.Equal("draft-mtp", ArgValue(Args(vm.BuildConfig()), "--spec-type"));
+
+        vm.UseDraftModelDecoding = false;
+        Assert.DoesNotContain("--spec-type", Args(vm.BuildConfig()));
+    }
+
+    [Fact]
+    public void A_hand_written_exotic_type_survives_toggling_a_checkbox()
+    {
+        using var temp = new TempDir();
+        var dir = temp.PathFor("snapshot-exotic");
+        Directory.CreateDirectory(dir);
+        var model = Path.Combine(dir, "model.gguf");
+        File.WriteAllText(model, "model");
+        var vm = NewServerVm(temp, model);
+
+        // Set by hand in settings.json; a checkbox only ever adds or removes
+        // its own token, so it must not eat this.
+        vm.SpeculativeTypes = "ngram-cache";
+        vm.UseNgramDecoding = true;
+        Assert.Equal("ngram-cache,ngram-mod", vm.SpeculativeTypes);
+
+        vm.UseNgramDecoding = false;
+        Assert.Equal("ngram-cache", vm.SpeculativeTypes);
+    }
+
+    [Fact]
+    public void With_no_draft_head_beside_the_model_the_hint_says_so()
+    {
+        using var temp = new TempDir();
+        var dir = temp.PathFor("snapshot-bare");
+        Directory.CreateDirectory(dir);
+        var model = Path.Combine(dir, "model.gguf");
+        File.WriteAllText(model, "model");
+
+        var vm = NewServerVm(temp, model);
+
+        Assert.Empty(vm.DetectedDraftModelPaths);
+        Assert.False(vm.HasDetectedDraftModel);
+        Assert.Contains("mtp-", vm.DraftModelHint);
+    }
+
     // ── Fixtures ────────────────────────────────────────────────────────────
 
     /// <summary>

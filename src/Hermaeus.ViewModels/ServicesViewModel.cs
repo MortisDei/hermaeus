@@ -52,8 +52,51 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     // each other, which is how this area acquires a bug that only shows up in
     // one configuration.
 
-    /// <summary>Comma-separated --spec-type list, e.g. "ngram-mod" or "draft-mtp".</summary>
+    /// <summary>
+    /// The underlying comma-separated `--spec-type` list. Still the stored
+    /// shape, because the flag genuinely is a list and the two techniques
+    /// compose; the checkboxes below are a view onto it, and each one only ever
+    /// adds or removes its own token, so an exotic list set by hand in
+    /// settings.json survives being toggled.
+    /// </summary>
     [ObservableProperty] private string       _speculativeTypes = string.Empty;
+
+    /// <summary>r27 follow-up: zero extra VRAM, drafts from the prompt and history itself (`ngram-mod`).</summary>
+    public bool UseNgramDecoding
+    {
+        get => HasType(NgramType);
+        set => SetType(NgramType, value);
+    }
+
+    /// <summary>r27 follow-up: drafts from the MTP head beside the model (`draft-mtp`).</summary>
+    public bool UseDraftModelDecoding
+    {
+        get => HasType(DraftType);
+        set => SetType(DraftType, value);
+    }
+
+    private const string NgramType = "ngram-mod";
+    private const string DraftType = "draft-mtp";
+
+    private bool HasType(string type) =>
+        ParseTypes(SpeculativeTypes).Any(t => string.Equals(t, type, StringComparison.OrdinalIgnoreCase));
+
+    private void SetType(string type, bool enabled)
+    {
+        var types = ParseTypes(SpeculativeTypes);
+        var present = types.Any(t => string.Equals(t, type, StringComparison.OrdinalIgnoreCase));
+        if (present == enabled)
+            return;
+
+        if (enabled)
+            types.Add(type);
+        else
+            types.RemoveAll(t => string.Equals(t, type, StringComparison.OrdinalIgnoreCase));
+
+        SpeculativeTypes = string.Join(",", types);
+        OnPropertyChanged(nameof(UseNgramDecoding));
+        OnPropertyChanged(nameof(UseDraftModelDecoding));
+    }
     [ObservableProperty] private string       _draftModelPath = string.Empty;
     [ObservableProperty] private string       _draftGpuLayersText = string.Empty;
     [ObservableProperty] private string       _speculativeNMaxText = string.Empty;
@@ -182,6 +225,15 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     public UiBoundCollection<string> DetectedModelPaths { get; } = [];
     public UiBoundCollection<string> DetectedMmprojPaths { get; } = [];
 
+    /// <summary>
+    /// r27 follow-up: `mtp-*.gguf` draft heads found beside the selected model,
+    /// exactly as <see cref="DetectedMmprojPaths"/> finds projectors. An MTP
+    /// head ships inside its base model's repository, so if you have one, it is
+    /// already next to the model you just picked and you should not have to
+    /// type its path.
+    /// </summary>
+    public UiBoundCollection<string> DetectedDraftModelPaths { get; } = [];
+
     /// <summary>Folder a model-path file picker should open in: the embeddings subfolder for the embeddings server, otherwise the models folder.</summary>
     public string SuggestedModelBrowseDirectory
     {
@@ -266,6 +318,76 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
             MmprojPath = current;
     }
 
+    /// <summary>
+    /// r27 follow-up: rescans for `mtp-*.gguf` draft heads whenever the model
+    /// changes, mirroring <see cref="RefreshDetectedMmprojPaths"/>, including
+    /// its rule of auto-filling the sole candidate only when the field is still
+    /// empty and never overwriting an explicit choice.
+    /// unsloth ships the head in an `MTP/` subdirectory beside the model, so
+    /// both that and the model's own directory are scanned.
+    /// Populating this path does NOT enable speculative decoding. No flag is
+    /// emitted until <see cref="UseDraftModelDecoding"/> is ticked, which is
+    /// what keeps this discovery rather than the auto-selection r27 doc 03
+    /// declined: nothing about the runtime configuration changes on its own.
+    /// </summary>
+    private void RefreshDetectedDraftModelPaths(string modelPath)
+    {
+        var current = DraftModelPath;
+        DetectedDraftModelPaths.Clear();
+
+        if (!string.IsNullOrWhiteSpace(modelPath))
+        {
+            var dir = Path.GetDirectoryName(modelPath);
+            if (!string.IsNullOrWhiteSpace(dir) && Directory.Exists(dir))
+            {
+                foreach (var file in EnumerateDraftHeads(dir))
+                    DetectedDraftModelPaths.Add(file);
+
+                var mtpDir = Path.Combine(dir, "MTP");
+                if (Directory.Exists(mtpDir))
+                {
+                    foreach (var file in EnumerateDraftHeads(mtpDir))
+                        DetectedDraftModelPaths.Add(file);
+                }
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(current) && !DetectedDraftModelPaths.Contains(current, StringComparer.OrdinalIgnoreCase))
+            DetectedDraftModelPaths.Insert(0, current);
+
+        if (string.IsNullOrWhiteSpace(current) && DetectedDraftModelPaths.Count == 1)
+            DraftModelPath = DetectedDraftModelPaths[0];
+        else if (!string.IsNullOrWhiteSpace(current) && DraftModelPath != current)
+            DraftModelPath = current;
+
+        OnPropertyChanged(nameof(HasDetectedDraftModel));
+        OnPropertyChanged(nameof(DraftModelHint));
+    }
+
+    private static IEnumerable<string> EnumerateDraftHeads(string directory)
+    {
+        IEnumerable<string> files;
+        try
+        {
+            files = Directory.EnumerateFiles(directory, "mtp-*.gguf").OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList();
+        }
+        catch
+        {
+            yield break;
+        }
+
+        foreach (var file in files)
+            yield return file;
+    }
+
+    /// <summary>True when a draft head was found beside the model, so the draft checkbox is worth offering.</summary>
+    public bool HasDetectedDraftModel => DetectedDraftModelPaths.Count > 0 || !string.IsNullOrWhiteSpace(DraftModelPath);
+
+    /// <summary>Says why the draft checkbox is unavailable, rather than leaving it inert and unexplained.</summary>
+    public string DraftModelHint => HasDetectedDraftModel
+        ? string.Empty
+        : "No mtp-*.gguf draft head was found beside this model. Download one from the model's repository, or pick a file.";
+
     public ServerProcessViewModel(
         ServerConfig config,
         ISettingsService settings,
@@ -340,6 +462,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
 
         RefreshDetectedModels();
         RefreshDetectedMmprojPaths(ModelPath);
+        RefreshDetectedDraftModelPaths(ModelPath);
         ScheduleContextFitRefresh();
     }
 
@@ -926,7 +1049,12 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
             linked.BaseUrl = url;
     }
 
-    private ServerConfig BuildConfig() => new()
+    /// <summary>
+    /// The editor's current state as a <see cref="ServerConfig"/>, without
+    /// touching the saved one. Public because it is the honest way to ask
+    /// "what would this server launch with right now".
+    /// </summary>
+    public ServerConfig BuildConfig() => new()
     {
         Name           = Name,
         ExecutablePath = ExecutablePath,
@@ -1020,6 +1148,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         RepairDetectedModelPathsIfBrowsedOutsideRoot(value);
         ApplyModelDefaultsIfPathActuallyChanged(value);
         RefreshDetectedMmprojPaths(value);
+        RefreshDetectedDraftModelPaths(value);
     }
     partial void OnMmprojPathChanged(string value) => OnPropertyChanged(nameof(HasUnsavedChanges));
 
@@ -1125,11 +1254,15 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     partial void OnSpeculativeTypesChanged(string value)
     {
         OnPropertyChanged(nameof(HasUnsavedChanges));
+        OnPropertyChanged(nameof(UseNgramDecoding));
+        OnPropertyChanged(nameof(UseDraftModelDecoding));
         ApplyDraftFitNote();
     }
     partial void OnDraftModelPathChanged(string value)
     {
         OnPropertyChanged(nameof(HasUnsavedChanges));
+        OnPropertyChanged(nameof(HasDetectedDraftModel));
+        OnPropertyChanged(nameof(DraftModelHint));
         ApplyDraftFitNote();
     }
     partial void OnDraftGpuLayersTextChanged(string value) => OnPropertyChanged(nameof(HasUnsavedChanges));
