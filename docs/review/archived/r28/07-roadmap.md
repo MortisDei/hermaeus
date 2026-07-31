@@ -47,7 +47,7 @@ plus `git log --oneline main..HEAD` and know exactly where to resume.
 | 28 | 6.3 NuGet caching | yes |
 | 29 | 6.4 Speed Check forward pointer | yes |
 | 30 | 6.5 Docs, changelog, deferred ledger | yes |
-| 31 | Close-out: archive pack, PR | no |
+| 31 | Close-out: archive pack, PR | yes |
 
 ## Sequencing (strict)
 
