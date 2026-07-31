@@ -93,6 +93,22 @@
                 </Grid>
             </Border>
 
+            <!-- r27 01 1.4: submitted while the chat server was still loading a
+                 model. Nothing has been sent; cancelling gives the text back. -->
+            <StackPanel IsVisible="{Binding IsHeld}"
+                        Orientation="Horizontal"
+                        Spacing="6"
+                        HorizontalAlignment="Right"
+                        Margin="0,2,0,0">
+                <TextBlock Text="{Binding HeldReason}"
+                           FontSize="11" Opacity="0.55" VerticalAlignment="Center" />
+                <Button Content="Cancel"
+                        FontSize="11"
+                        Padding="8,2"
+                        ToolTip.Tip="Discard this held message and put its text back in the box"
+                        Command="{Binding $parent[ItemsControl].DataContext.CancelHeldMessageCommand}" />
+            </StackPanel>
+
             <StackPanel Orientation="Horizontal"
                         Spacing="2"
                         HorizontalAlignment="Right"

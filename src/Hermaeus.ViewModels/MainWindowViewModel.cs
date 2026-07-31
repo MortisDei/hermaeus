@@ -46,7 +46,6 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty] private bool   _isSidebarOpen = true;
     [ObservableProperty] private string _searchQuery   = string.Empty;
     [ObservableProperty] private string _activePanel   = "chat";
-    [ObservableProperty] private bool   _isLoading;
     [ObservableProperty] private string _selectedFolderFilter = "All";
     [ObservableProperty] private bool   _showArchivedConversations;
     [ObservableProperty] private bool   _showQuickChat;
@@ -186,7 +185,14 @@ public partial class MainWindowViewModel : ViewModelBase
         Settings.RequestShowSetupWizard = () => ActivePanel = "wizard";
         Chat.PropertyChanged += (s, e) => { if (e.PropertyName == "ConversationTitle") OnPropertyChanged(nameof(WindowTitle)); };
         Chat.ConversationSaved += OnConversationSaved;
-        Services.ServerAvailabilityChanged += (_, _) => RunBackgroundTaskAsync("refresh models after server availability change", RefreshModelsAfterServerChangeAsync);
+        // r27 01 1.3: Chat asks Services what it is waiting on, through a
+        // delegate, so the chat view model keeps knowing nothing about Services.
+        Chat.WarmingServerProvider = Services.GetWarmingChatServer;
+        Services.ServerAvailabilityChanged += (_, _) =>
+        {
+            RunOnUi(Chat.RefreshWarmingState);
+            RunBackgroundTaskAsync("refresh models after server availability change", RefreshModelsAfterServerChangeAsync);
+        };
         _toasts.ToastRaised += OnToastRaised;
 
         Commands = commands;
@@ -284,27 +290,36 @@ public partial class MainWindowViewModel : ViewModelBase
         DoctorIsOk = errs == 0 && warns == 0 && Doctor.Checks.Count > 0;
     }
 
+    /// <summary>
+    /// r27 01 1.5: the phase breakdown of this view model's own startup work,
+    /// so "viewmodels" stops being one opaque number that used to absorb a
+    /// five-minute-capable server wait. Empty until <see cref="InitializeAsync"/>
+    /// has run.
+    /// </summary>
+    public IReadOnlyList<StartupPhase> StartupPhases => _startupPhases;
+    private readonly List<StartupPhase> _startupPhases = [];
+
     public async Task InitializeAsync()
     {
-        IsLoading = true;
-        try
-        {
-            await LoadConversationsAsync();
-            Settings.Reload();
-            ShowQuickChat = Settings.ShowQuickChat;
-            await LoadToastHistoryAsync();
-            await Projects.EnsureLoadedAsync();
-            Agent.ActiveProjectId = Projects.ActiveProject?.Id ?? string.Empty;
-            Palette.SetActiveProject(Projects.ActiveProject?.Id ?? string.Empty, Projects.ActiveProject?.Name ?? string.Empty);
-            if (!_settingsService.Settings.SetupWizardCompleted)
-            {
-                ActivePanel = "wizard";
-                return;
-            }
+        _startupPhases.Clear();
+        var phase = Stopwatch.StartNew();
 
-            await CompletePostSetupInitializationAsync();
+        await LoadConversationsAsync();
+        Settings.Reload();
+        ShowQuickChat = Settings.ShowQuickChat;
+        await LoadToastHistoryAsync();
+        await Projects.EnsureLoadedAsync();
+        Agent.ActiveProjectId = Projects.ActiveProject?.Id ?? string.Empty;
+        Palette.SetActiveProject(Projects.ActiveProject?.Id ?? string.Empty, Projects.ActiveProject?.Name ?? string.Empty);
+        _startupPhases.Add(new StartupPhase("conversations and projects", phase.ElapsedMilliseconds));
+
+        if (!_settingsService.Settings.SetupWizardCompleted)
+        {
+            ActivePanel = "wizard";
+            return;
         }
-        finally { IsLoading = false; }
+
+        await CompletePostSetupInitializationAsync();
     }
 
     /// <summary>
@@ -316,20 +331,47 @@ public partial class MainWindowViewModel : ViewModelBase
     /// keeps a startup race between the two from double-running it.
     /// Each step is isolated (r12 3.2) so one failing store (a locked or
     /// corrupt RAG/benchmark database) cannot silently skip every later
-    /// step - hard-ordering is kept only where a step truly depends on the
-    /// previous one (auto-starting managed servers before listing models).
+    /// step.
+    /// r27 01-startup-that-never-waits.md 1.1: the three store loads are
+    /// independent and run concurrently, and auto-starting managed servers
+    /// has left the awaited chain entirely. Listing models never depended on
+    /// auto-start finishing: a server reaching Running raises
+    /// <see cref="ServicesViewModel.ServerAvailabilityChanged"/>, which
+    /// re-lists with force: true. The one direct call below covers a server
+    /// that is ALREADY running (started externally, or while the app was
+    /// closed) and will therefore never raise a status transition.
     /// </summary>
     private async Task CompletePostSetupInitializationAsync()
     {
         if (_postSetupInitialized) return;
         _postSetupInitialized = true;
 
-        await RunBackgroundTaskCoreAsync("load RAG datasets", () => Rag.LoadDatasetsAsync());
-        await RunBackgroundTaskCoreAsync("load agent", () => Agent.LoadAsync());
-        await RunBackgroundTaskCoreAsync("load benchmarks", () => Benchmarks.LoadAsync());
-        await RunBackgroundTaskCoreAsync("auto-start managed servers", () => Services.AutoStartAllAsync());
+        // Each concurrent step keeps its own RunBackgroundTaskCoreAsync wrapper
+        // so every failure still names its own operation in the log, instead of
+        // three steps collapsing into one WhenAll exception (r12 3.2).
+        // r27 05 5.3: the block is timed as one wall-clock number with its parts
+        // underneath, because three overlapping durations printed as a sequence
+        // would not add up to anything.
+        var block = Stopwatch.StartNew();
+        var children = new List<StartupPhase>();
+        await Task.WhenAll(
+            TimedStepAsync(children, "RAG datasets", () => Rag.LoadDatasetsAsync()),
+            TimedStepAsync(children, "agent", () => Agent.LoadAsync()),
+            TimedStepAsync(children, "benchmarks", () => Benchmarks.LoadAsync()));
+        _startupPhases.Add(new StartupPhase("stores", block.ElapsedMilliseconds,
+            children.OrderBy(c => c.Name, StringComparer.Ordinal).ToList(), ChildrenRanConcurrently: true));
+
+        var step = Stopwatch.StartNew();
         await RunBackgroundTaskCoreAsync("ensure Local API running state", () => Settings.EnsureLocalApiRunningStateAsync());
+        _startupPhases.Add(new StartupPhase("local API state", step.ElapsedMilliseconds));
+
+        step.Restart();
         await RunBackgroundTaskCoreAsync("load chat models", () => Chat.LoadModelsAsync());
+        _startupPhases.Add(new StartupPhase("chat models", step.ElapsedMilliseconds));
+        // Fire and forget: the same isolation and the same log line, without the
+        // await. A model load behind a five-minute health deadline is no longer
+        // between the user and the model dropdown.
+        RunBackgroundTaskAsync("auto-start managed servers", () => Services.AutoStartAllAsync());
         RunBackgroundTaskAsync("run startup doctor scan", () => Doctor.RunStartupScanAsync());
         // r24 doc 02 2.1: shortly after startup, bounded, never on the send path.
         if (_recallIndexing is not null)
@@ -968,6 +1010,19 @@ public partial class MainWindowViewModel : ViewModelBase
                 $"Model refresh failed: {ex.Message}"));
             _toasts.Show("Model refresh failed", ex.Message, ToastKind.Warning, 7000);
         }
+    }
+
+    /// <summary>
+    /// One concurrent startup step: same isolation and same log line as every
+    /// other step (r12 3.2), with its own wall-clock duration recorded for 1.5.
+    /// </summary>
+    private async Task TimedStepAsync(List<StartupPhase> into, string name, Func<Task> action)
+    {
+        var sw = Stopwatch.StartNew();
+        await RunBackgroundTaskCoreAsync($"load {name}", action);
+        var elapsed = sw.ElapsedMilliseconds;
+        lock (into)
+            into.Add(new StartupPhase(name, elapsed));
     }
 
     private void RunBackgroundTaskAsync(string operation, Func<Task> action)

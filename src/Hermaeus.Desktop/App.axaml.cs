@@ -95,7 +95,7 @@ public partial class App : Application
     private static async Task InitializeAppAsync(ServiceProvider sp, MainWindowViewModel vm)
     {
         var totalTimer = Stopwatch.StartNew();
-        var phases = new List<(string Phase, long Ms)>();
+        var phases = new List<StartupPhase>();
         IRuntimeLogService? logs = null;
         try
         {
@@ -111,7 +111,7 @@ public partial class App : Application
             // Constructed purely for its side effect: subscribes to toasts and
             // forwards Warning/Error ones onto the Notification voice channel.
             sp.GetRequiredService<VoiceNotificationBridge>();
-            phases.Add(("settings", phaseTimer.ElapsedMilliseconds));
+            phases.Add(new StartupPhase("settings", phaseTimer.ElapsedMilliseconds));
 
             phaseTimer.Restart();
             await Task.WhenAll(
@@ -121,7 +121,7 @@ public partial class App : Application
                 sp.GetRequiredService<IAgentTaskStateStore>().InitializeAsync(),
                 sp.GetRequiredService<BenchmarkService>().InitializeAsync(),
                 sp.GetRequiredService<IEvalStore>().InitializeAsync());
-            phases.Add(("stores", phaseTimer.ElapsedMilliseconds));
+            phases.Add(new StartupPhase("stores", phaseTimer.ElapsedMilliseconds));
 
             // Probe active voice provider health at startup to detect externally-running services
             phaseTimer.Restart();
@@ -137,18 +137,24 @@ public partial class App : Application
                     RuntimeLogCategory.Service,
                     $"Voice provider startup probe failed: {ex.Message}"));
             }
-            phases.Add(("voice probe", phaseTimer.ElapsedMilliseconds));
+            phases.Add(new StartupPhase("voice probe", phaseTimer.ElapsedMilliseconds));
 
             phaseTimer.Restart();
             await vm.InitializeAsync();
-            phases.Add(("viewmodels", phaseTimer.ElapsedMilliseconds));
+            // r27 01 1.5: "viewmodels" used to absorb the whole post-setup chain
+            // including a five-minute-capable server wait. It now carries its own
+            // breakdown, and auto-start is no longer inside it at all.
+            phases.Add(new StartupPhase("viewmodels", phaseTimer.ElapsedMilliseconds, vm.StartupPhases));
 
-            phases.Add(("total", totalTimer.ElapsedMilliseconds));
+            var totalMs = totalTimer.ElapsedMilliseconds;
+            phases.Add(new StartupPhase("total", totalMs));
             logs.Add(new RuntimeLogEntry(
                 DateTime.UtcNow,
                 RuntimeLogLevel.Info,
                 RuntimeLogCategory.Startup,
                 StartupTimingFormatter.Format(phases)));
+            sp.GetRequiredService<IStartupTimingService>()
+                .Record(new StartupBreakdown(DateTime.UtcNow, phases, totalMs, []));
 
             // r19 1.5: brackets the risky startup window tightly so a crash
             // hours later blames "running" (no specific operation in

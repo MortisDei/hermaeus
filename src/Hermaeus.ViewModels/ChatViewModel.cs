@@ -361,6 +361,191 @@ public partial class ChatViewModel : ViewModelBase
     /// Wired by MainWindowViewModel; never queried on an existing conversation.</summary>
     public Func<Project?>? ActiveProjectProvider { get; set; }
 
+    // ── r27 01-startup-that-never-waits.md 1.3 / 1.4: warming, and the held message ──
+
+    /// <summary>
+    /// Supplies the managed non-embedding server Chat is waiting on, or null.
+    /// Wired by MainWindowViewModel to <see cref="ServicesViewModel.GetWarmingChatServer"/>;
+    /// a delegate rather than a reference so this view model keeps knowing
+    /// nothing about Services.
+    /// </summary>
+    public Func<ChatWarmingServer?>? WarmingServerProvider { get; set; }
+
+    /// <summary>True only while a non-embedding server is Starting and no models are listed.</summary>
+    [ObservableProperty] private bool _isServerWarming;
+
+    /// <summary>The one line shown above the composer while warming. See <see cref="ChatWarmingState"/>.</summary>
+    [ObservableProperty] private string _warmingText = string.Empty;
+
+    /// <summary>Past 90 seconds, the line says so and points at the Services log.</summary>
+    [ObservableProperty] private bool _warmingIsSlow;
+
+    /// <summary>The message the user submitted while warming, waiting for a model to list.</summary>
+    [ObservableProperty] private bool _hasHeldMessage;
+
+    /// <summary>How long a hold waits before giving the text back and sending nothing.</summary>
+    public static readonly TimeSpan HeldMessageTimeout = TimeSpan.FromMinutes(5);
+
+    private MessageViewModel? _heldMessage;
+    private CancellationTokenSource? _heldMessageCts;
+    private CancellationTokenSource? _warmingTickerCts;
+
+    /// <summary>
+    /// A send while warming holds the message instead of returning silently.
+    /// Depth one: a second send while one is held is refused, because a queue of
+    /// depth N is a scheduler with ordering, persistence and failure semantics
+    /// this does not have.
+    /// </summary>
+    public bool CanHoldMessage => IsServerWarming && !HasHeldMessage;
+
+    /// <summary>
+    /// Recomputes the warming state. Called on every server availability change
+    /// and whenever the model list changes; also ticked once a second while
+    /// warming so the elapsed time on screen is the real one.
+    /// </summary>
+    public void RefreshWarmingState()
+    {
+        var warming = AvailableModels.Count == 0 ? WarmingServerProvider?.Invoke() : null;
+
+        IsServerWarming = warming is not null;
+        WarmingIsSlow = warming is not null && ChatWarmingState.IsSlow(warming.Elapsed);
+        WarmingText = warming is null ? string.Empty : ChatWarmingState.Describe(warming.Name, warming.Elapsed);
+
+        if (HasHeldMessage && AvailableModels.Count > 0 && SelectedModel is not null)
+            _ = ReleaseHeldMessageAsync();
+        else if (HasHeldMessage && warming is null)
+            FailHeldMessage("the server stopped starting before a model was listed");
+    }
+
+    private bool TryHoldMessage(string text)
+    {
+        if (!IsServerWarming || string.IsNullOrEmpty(text))
+            return false;
+
+        if (HasHeldMessage)
+        {
+            _toasts.Show("Already waiting to send",
+                "One message is already held until the server is ready. Cancel it first if you want to send something else.",
+                ToastKind.Info, 6000);
+            return true;
+        }
+
+        _heldMessage = new MessageViewModel
+        {
+            Role = "user",
+            Content = text,
+            OriginalContent = text,
+            ParentId = _pendingParentIdOverride ?? CurrentLeafId(),
+            IsHeld = true,
+            HeldReason = "Waiting for the chat server"
+        };
+        Messages.Add(_heldMessage);
+        HasHeldMessage = true;
+        InputText = string.Empty;
+
+        _heldMessageCts = new CancellationTokenSource();
+        var token = _heldMessageCts.Token;
+        _ = Task.Run(async () =>
+        {
+            try { await Task.Delay(HeldMessageTimeout, token); }
+            catch (OperationCanceledException) { return; }
+            RunOnUi(() => FailHeldMessage($"no model listed within {(int)HeldMessageTimeout.TotalMinutes} minutes"));
+        }, CancellationToken.None);
+
+        return true;
+    }
+
+    /// <summary>
+    /// Takes the hold down and gives the text back to the composer. Shared by
+    /// cancel, timeout and failure: in every one of those cases nothing was sent
+    /// and the user's words are still theirs.
+    /// </summary>
+    private string? TakeHeldMessage()
+    {
+        _heldMessageCts?.Cancel();
+        _heldMessageCts?.Dispose();
+        _heldMessageCts = null;
+
+        if (_heldMessage is null)
+            return null;
+
+        var text = _heldMessage.OriginalContent;
+        Messages.Remove(_heldMessage);
+        _heldMessage = null;
+        HasHeldMessage = false;
+        return text;
+    }
+
+    [RelayCommand]
+    private void CancelHeldMessage()
+    {
+        var text = TakeHeldMessage();
+        if (text is not null)
+            InputText = text;
+    }
+
+    private void FailHeldMessage(string reason)
+    {
+        var text = TakeHeldMessage();
+        if (text is null)
+            return;
+
+        InputText = text;
+        _toasts.Show("Message not sent", $"Nothing was sent: {reason}. Your text is back in the box.", ToastKind.Warning, 8000);
+    }
+
+    /// <summary>
+    /// Releases the hold through the ordinary <see cref="SendAsync"/> path, once.
+    /// The placeholder is removed first so the send builds the real message,
+    /// its attachments and its parent link exactly as an ordinary send does.
+    /// </summary>
+    private async Task ReleaseHeldMessageAsync()
+    {
+        var text = TakeHeldMessage();
+        if (string.IsNullOrEmpty(text))
+            return;
+
+        InputText = text;
+        await SendAsync();
+    }
+
+    /// <summary>
+    /// One second while warming, nothing otherwise. Elapsed time on screen has to
+    /// move or it is not elapsed time.
+    /// </summary>
+    partial void OnIsServerWarmingChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanHoldMessage));
+        SendCommand.NotifyCanExecuteChanged();
+
+        _warmingTickerCts?.Cancel();
+        _warmingTickerCts?.Dispose();
+        _warmingTickerCts = null;
+        if (!value)
+            return;
+
+        _warmingTickerCts = new CancellationTokenSource();
+        var token = _warmingTickerCts.Token;
+        _ = Task.Run(async () =>
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+            try
+            {
+                while (await timer.WaitForNextTickAsync(token))
+                    RunOnUi(RefreshWarmingState);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        }, CancellationToken.None);
+    }
+
+    partial void OnHasHeldMessageChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanHoldMessage));
+        SendCommand.NotifyCanExecuteChanged();
+    }
+
     // ── r19 5.4: chat artifacts (saving a code block to a real file) ────────
 
     /// <summary>Bound to MarkdownViewer.RequestSaveCodeBlock; a plain delegate (not a
@@ -628,6 +813,9 @@ public partial class ChatViewModel : ViewModelBase
             SelectedModel = null;
         }
         _modelsLoadedAtUtc = DateTime.UtcNow;
+        // r27 01 1.3/1.4: the warming line clears the moment a model lists, and
+        // that is also what releases a held message.
+        RefreshWarmingState();
     }
 
     [RelayCommand]
@@ -916,7 +1104,19 @@ public partial class ChatViewModel : ViewModelBase
     {
         var text = InputText.Trim();
         var attachments = ContextAttachments.ToList();
-        if ((string.IsNullOrEmpty(text) && !attachments.Any(a => a.IsReady)) || SelectedModel is null) return;
+        if (string.IsNullOrEmpty(text) && !attachments.Any(a => a.IsReady)) return;
+
+        // r27 01 1.4: SelectedModel is null at launch because a server is still
+        // loading a model. This used to return silently, so a question the user
+        // typed and pressed send on simply vanished. Hold it, show it as held,
+        // and release it when a model lists. Every other reason for a null model
+        // (nothing configured, no server, a broken runtime) still returns: those
+        // are not warming and holding against them would wait forever.
+        if (SelectedModel is null)
+        {
+            TryHoldMessage(text);
+            return;
+        }
 
         var snapshot = BuildContextSnapshot(text, attachments);
         var promptText = snapshot.PromptText;
@@ -1676,7 +1876,9 @@ public partial class ChatViewModel : ViewModelBase
 
     private bool CanSend() =>
         !IsGenerating
-        && SelectedModel is not null
+        // r27 01 1.4: sending while a server is warming is allowed, because the
+        // send holds the message rather than dropping it.
+        && (SelectedModel is not null || CanHoldMessage)
         && (!string.IsNullOrWhiteSpace(InputText) || ContextAttachments.Any(a => a.IsReady));
 
     private LlmChatOptions BuildChatOptions(string memoryContext = "", string ragContext = "") => new()

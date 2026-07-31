@@ -19,6 +19,18 @@ public partial class MessageViewModel : ObservableObject, IConversationNode
     [ObservableProperty] private string _streamingStatus = string.Empty;
     public bool HasStreamingStatus => !string.IsNullOrEmpty(StreamingStatus);
     partial void OnStreamingStatusChanged(string value) => OnPropertyChanged(nameof(HasStreamingStatus));
+    /// <summary>
+    /// r27 01 1.4: the user pressed send while a server was still loading a
+    /// model. The message is shown, with its reason, and sends once a model
+    /// lists. Never persisted: a hold that has not been released at shutdown is
+    /// discarded, because a message the app sends because you launched it three
+    /// days ago is a message you did not send.
+    /// </summary>
+    [ObservableProperty] private bool _isHeld;
+
+    /// <summary>Why a held message is waiting, shown on the message itself.</summary>
+    [ObservableProperty] private string _heldReason = string.Empty;
+
     [ObservableProperty] private string _modelId = string.Empty;
     [ObservableProperty] private long   _durationMs;
     [ObservableProperty] private bool   _hasSources;

@@ -79,6 +79,13 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     public bool IsStopped  => Status is ServerStatus.Stopped or ServerStatus.Error;
     public bool IsStarting => Status == ServerStatus.Starting;
     public bool IsError    => Status == ServerStatus.Error;
+
+    /// <summary>
+    /// r27 01 1.3: when this server entered <see cref="ServerStatus.Starting"/>,
+    /// so Chat can say how long it has been waiting. Null whenever the server is
+    /// not starting. Settable so tests can drive an elapsed time without a clock.
+    /// </summary>
+    public DateTime? StartingSinceUtc { get; set; }
     public bool CanEdit => IsStopped && !IsAutoTuning;
     public bool HasUnsavedChanges =>
         _config.Name != Name ||
@@ -729,9 +736,16 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     [RelayCommand]
     private void ToggleLog() => LogExpanded = !LogExpanded;
 
+    /// <summary>
+    /// r27 01 1.2: the auto-start predicate, exposed so
+    /// <see cref="ServicesViewModel.SelectAutoStartTargets"/> can group by port
+    /// without restating the condition in a second place.
+    /// </summary>
+    public bool WillAutoStart => AutoStart && !string.IsNullOrWhiteSpace(ModelPath);
+
     public async Task AutoStartIfConfiguredAsync()
     {
-        if (AutoStart && !string.IsNullOrWhiteSpace(ModelPath))
+        if (WillAutoStart)
             await StartCoreAsync(CancellationToken.None);
     }
 
@@ -922,7 +936,13 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(StatusLabel));
     }
 
-    partial void OnStatusChanged(ServerStatus value) => NotifyStatusProps();
+    partial void OnStatusChanged(ServerStatus value)
+    {
+        // r27 01 1.3: stamped on the transition into Starting and cleared on the
+        // way out, so a server that has been starting for two minutes can say so.
+        StartingSinceUtc = value == ServerStatus.Starting ? DateTime.UtcNow : null;
+        NotifyStatusProps();
+    }
     partial void OnIsAutoTuningChanged(bool value)
     {
         OnPropertyChanged(nameof(CanEdit));
@@ -1096,6 +1116,8 @@ public partial class ServicesViewModel : ViewModelBase
     private readonly RuntimeProfileService _runtimeProfiles;
     private readonly IToastService _toasts;
     private readonly RedactionService _redactor;
+    /// <summary>r27 01 1.5: records elapsed-to-healthy per server, since auto-start is no longer inside the startup total.</summary>
+    private readonly IStartupTimingService? _startupTiming;
     private readonly TrustService _trust;
     private readonly IRuntimeLogService _runtimeLogs;
     private readonly OrphanServerDetector _orphanDetector;
@@ -1148,8 +1170,10 @@ public partial class ServicesViewModel : ViewModelBase
         ISystemInfoService? systemInfo = null,
         ModelProfileService? modelProfiles = null,
         IActivityRecorder? activity = null,
-        SttSettingsViewModel? stt = null)
+        SttSettingsViewModel? stt = null,
+        IStartupTimingService? startupTiming = null)
     {
+        _startupTiming = startupTiming;
         _settings = settings;
         _runtimeProfiles = runtimeProfiles;
         _toasts = toasts;
@@ -1391,11 +1415,52 @@ public partial class ServicesViewModel : ViewModelBase
         }
     }
 
-    public async Task AutoStartAllAsync()
+    /// <summary>
+    /// r27 01-startup-that-never-waits.md 1.2: every configured server starts at
+    /// once. Sequentially, each one awaited a full model load behind
+    /// WaitForHealthAsync's five-minute deadline before the next was even
+    /// launched, and two servers on separate ports and separate processes have
+    /// no reason to wait for each other.
+    /// </summary>
+    public Task AutoStartAllAsync() =>
+        Task.WhenAll(SelectAutoStartTargets(Servers).Select(TimedAutoStartAsync));
+
+    private async Task TimedAutoStartAsync(ServerProcessViewModel server)
     {
-        foreach (var srv in Servers)
-            await srv.AutoStartIfConfiguredAsync();
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        await server.AutoStartIfConfiguredAsync();
+        _startupTiming?.RecordServerStart(new StartupServerStart(server.Name, sw.ElapsedMilliseconds, server.IsRunning));
     }
+
+    /// <summary>
+    /// The servers <see cref="AutoStartAllAsync"/> actually launches: at most one
+    /// per port. StartAsync's port preflight and StopSamePortPeersBeforeStartAsync
+    /// both assume they are looking at settled state, so two concurrent starts on
+    /// one port could both pass the preflight. The rest keep today's behaviour of
+    /// being stopped or refused. Pure and static so this is testable without a
+    /// process.
+    /// </summary>
+    /// <summary>
+    /// r27 01 1.3: the managed non-embedding server Chat is currently waiting on,
+    /// or null. Embedding servers are excluded because listing chat models never
+    /// depended on one.
+    /// </summary>
+    public ChatWarmingServer? GetWarmingChatServer()
+    {
+        var starting = Servers.FirstOrDefault(s => !s.EmbeddingsMode && s.IsStarting);
+        if (starting is null)
+            return null;
+
+        var since = starting.StartingSinceUtc ?? DateTime.UtcNow;
+        return new ChatWarmingServer(starting.Name, DateTime.UtcNow - since);
+    }
+
+    public static IReadOnlyList<ServerProcessViewModel> SelectAutoStartTargets(IEnumerable<ServerProcessViewModel> servers) =>
+        servers
+            .Where(s => s.WillAutoStart)
+            .GroupBy(s => s.Port)
+            .Select(g => g.First())
+            .ToList();
 
     public async Task<IReadOnlyList<string>> StopRunningNonEmbeddingServersAsync()
     {

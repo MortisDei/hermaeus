@@ -18,12 +18,12 @@ with no memory of any conversation should be able to read this table plus
 | # | Item | Landed |
 | --- | --- | --- |
 | 1 | 2.1 Oversized dataset returns results | yes |
-| 2 | 1.1 Post-setup chain stops serialising | no |
-| 3 | 1.2 Servers auto-start concurrently | no |
-| 4 | 1.6 Delete dead `IsLoading` | no |
-| 5 | 1.3 Chat warming state | no |
-| 6 | 1.4 Held message | no |
-| 7 | 1.5 Startup breakdown visible (with 5.3) | no |
+| 2 | 1.1 Post-setup chain stops serialising | yes |
+| 3 | 1.2 Servers auto-start concurrently | yes |
+| 4 | 1.6 Delete dead `IsLoading` | yes |
+| 5 | 1.3 Chat warming state | yes |
+| 6 | 1.4 Held message | yes |
+| 7 | 1.5 Startup breakdown visible (with 5.3) | yes |
 | 8 | 2.2 FTS5 candidate generation | no |
 | 9 | 2.3 Cache holds embeddings only | no |
 | 10 | 2.4 Bounded top-K scan | no |

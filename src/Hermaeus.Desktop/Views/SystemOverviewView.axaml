@@ -109,6 +109,46 @@
                 </Border>
             </Grid>
 
+            <!-- r27 01 1.5: the startup breakdown was already measured and already
+                 formatted into one Info line in the runtime log, which nobody
+                 reads. It is the only evidence a round changed startup at all. -->
+            <Expander Header="Last startup" IsExpanded="False" IsVisible="{Binding HasStartupBreakdown}">
+                <StackPanel Spacing="10">
+                    <TextBlock Text="{Binding StartupTotal}" FontWeight="SemiBold" />
+                    <ItemsControl ItemsSource="{Binding StartupPhases}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:SystemMetricViewModel">
+                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12" Margin="0,3">
+                                    <TextBlock Grid.Column="0" Text="{Binding Name}" FontSize="12" Opacity="0.75" />
+                                    <TextBlock Grid.Column="1" Text="{Binding Value}" FontSize="12" FontWeight="SemiBold" />
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <TextBlock Text="Server auto-start"
+                               FontSize="13"
+                               FontWeight="SemiBold"
+                               Margin="0,6,0,0"
+                               IsVisible="{Binding HasStartupServerStarts}" />
+                    <TextBlock Text="Managed servers start alongside the app rather than ahead of it, so these times are not part of the total above."
+                               TextWrapping="Wrap"
+                               FontSize="11"
+                               Opacity="0.5"
+                               IsVisible="{Binding HasStartupServerStarts}" />
+                    <ItemsControl ItemsSource="{Binding StartupServerStarts}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:SystemMetricViewModel">
+                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12" Margin="0,3">
+                                    <TextBlock Grid.Column="0" Text="{Binding Name}" FontSize="12" Opacity="0.75" />
+                                    <TextBlock Grid.Column="1" Text="{Binding Value}" FontSize="12" FontWeight="SemiBold" />
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Expander>
+
             <Expander Header="Privacy audit - what can leave this machine" IsExpanded="True">
                 <StackPanel Spacing="10">
                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
