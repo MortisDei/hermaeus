@@ -59,7 +59,16 @@ public partial class ModelManagementViewModel : ObservableObject
         Models.Clear();
         foreach (var m in matches)
             Models.Add(m);
+        OnPropertyChanged(nameof(HasNoModels));
     }
+
+    /// <summary>
+    /// r29 doc 02 2.2: drives the shared MossEmptyState. True both when nothing
+    /// was detected and when the filter matched nothing; the empty state's own
+    /// copy covers the first case and the filter box is visible above it for
+    /// the second.
+    /// </summary>
+    public bool HasNoModels => Models.Count == 0;
 
     /// <summary>Emitted before moving any file so the view can show a "from -> to" preview and
     /// require an explicit confirmation; returning false cancels the whole operation without
@@ -1102,6 +1111,21 @@ public partial class ModelProfileItemViewModel : ObservableObject
     /// layers, 8 threads"; empty when never tuned (r13 02-model-library.md 2.3).</summary>
     [ObservableProperty] private string _tuneSummary = string.Empty;
 
+    /// <summary>
+    /// r29 doc 02 2.2: the tile has no room for <see cref="TuneSummary"/> without
+    /// crowding it, so it is appended to the Auto tune button's tooltip. No
+    /// information is lost in the move to cards.
+    /// </summary>
+    public string AutoTuneTooltip => string.IsNullOrWhiteSpace(TuneSummary)
+        ? AutoTuneExplanation
+        : $"{AutoTuneExplanation}\n\nCurrent tune: {TuneSummary}";
+
+    private const string AutoTuneExplanation =
+        "Probes GPU layer counts against the first configured managed llama-server executable "
+        + "and saves the result to the shared tune-profile store.";
+
+    partial void OnTuneSummaryChanged(string value) => OnPropertyChanged(nameof(AutoTuneTooltip));
+
     [ObservableProperty] private bool _isTuning;
 
     /// <summary>Only rows discovered from disk (not reported live by a running provider) can
@@ -1119,6 +1143,57 @@ public partial class ModelProfileItemViewModel : ObservableObject
 
     // ── r13 03-hugging-face.md: provenance/update state ───────────────────────────────────
     [ObservableProperty] private string _repoId = string.Empty;
+
+    /// <summary>
+    /// r29 doc 02 2.1: where this model came from, derived rather than bound
+    /// straight to <see cref="RepoId"/>, so a second download provider is a new
+    /// enum value instead of a new binding in the tile template.
+    /// </summary>
+    public ModelSourceKind SourceKind =>
+        !string.IsNullOrWhiteSpace(RepoId) ? ModelSourceKind.HuggingFace
+        : IsLocalGguf ? ModelSourceKind.LocalFile
+        : ModelSourceKind.Unknown;
+
+    /// <summary>Stable display text for the source badge. Never model-written.</summary>
+    public string SourceLabel => SourceKind switch
+    {
+        ModelSourceKind.HuggingFace => "Hugging Face",
+        ModelSourceKind.LocalFile => "Local file",
+        _ => string.Empty
+    };
+
+    /// <summary>Short badge text; the tile has no room for the full label.</summary>
+    public string SourceBadgeText => SourceKind switch
+    {
+        ModelSourceKind.HuggingFace => "HF",
+        ModelSourceKind.LocalFile => "Local",
+        _ => string.Empty
+    };
+
+    /// <summary>
+    /// For Hugging Face the repo id itself is more useful than the words
+    /// "Hugging Face", which the badge already carries.
+    /// </summary>
+    public string SourceTooltip =>
+        SourceKind == ModelSourceKind.HuggingFace && !string.IsNullOrWhiteSpace(RepoId)
+            ? $"Downloaded from Hugging Face: {RepoId}"
+            : SourceLabel;
+
+    public bool HasKnownSource => SourceKind != ModelSourceKind.Unknown;
+
+    /// <summary>
+    /// RepoId is populated by an async manifest refresh after the row already
+    /// exists, and again after a repo link, so the badge has to be told.
+    /// </summary>
+    partial void OnRepoIdChanged(string value)
+    {
+        OnPropertyChanged(nameof(HasRepoLink));
+        OnPropertyChanged(nameof(SourceKind));
+        OnPropertyChanged(nameof(SourceLabel));
+        OnPropertyChanged(nameof(SourceBadgeText));
+        OnPropertyChanged(nameof(SourceTooltip));
+        OnPropertyChanged(nameof(HasKnownSource));
+    }
     [ObservableProperty] private ModelUpdateStatus _updateStatus = ModelUpdateStatus.NotLinked;
     [ObservableProperty] private bool _isCheckingUpdate;
     [ObservableProperty] private bool _isUpdating;
@@ -1138,7 +1213,6 @@ public partial class ModelProfileItemViewModel : ObservableObject
     };
 
     partial void OnUpdateStatusChanged(ModelUpdateStatus value) => OnPropertyChanged(nameof(UpdateLabel));
-    partial void OnRepoIdChanged(string value) => OnPropertyChanged(nameof(HasRepoLink));
 
     public ModelProfileItemViewModel(LlmModel model, ModelProfile profile, bool isRunning = false)
     {
