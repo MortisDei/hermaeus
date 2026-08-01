@@ -48,6 +48,105 @@ public sealed class DocsCoverageGuardTests
     }
 
     /// <summary>
+    /// The gaps between icon buttons hit-test to nothing, so without a container
+    /// background the pointer falls through to the window root and the cursor
+    /// flickers hand/arrow/hand along the row. IconBarCursor fills those gaps for
+    /// every all-button container in the app; dropping the call silently brings
+    /// the flicker back everywhere except the two containers that set it in xaml.
+    /// </summary>
+    [Fact]
+    public void The_icon_bar_cursor_fix_stays_installed()
+    {
+        var app = File.ReadAllText(
+            Path.Combine(RepoRoot, "src", "Hermaeus.Desktop", "App.axaml.cs"));
+
+        Assert.True(
+            app.Contains("IconBarCursor.Install()", StringComparison.Ordinal),
+            "App.OnFrameworkInitializationCompleted must call IconBarCursor.Install(). Without it the " +
+            "cursor flickers between the hand and the arrow when crossing a row of icon buttons. See " +
+            "Controls/IconBarCursor.cs.");
+    }
+
+    /// <summary>
+    /// A ":pointerover /template/ ContentPresenter" style that introduces a
+    /// background, rather than replacing one the base state already set, makes
+    /// the presenter stop being a hit-test result when the hover setter
+    /// deactivates. The pointer falls through to the window root, :pointerover
+    /// drops, the button comes back, and the pair oscillates at about 80Hz,
+    /// which reads to the user as the mouse cursor flickering between the hand
+    /// and the arrow. It plagued the app for several rounds and five fixes
+    /// aimed at tooltips, cursors and popups missed it.
+    ///
+    /// The rule is mechanical, so it is worth a mechanical guard: every hover
+    /// setter on a templated ContentPresenter needs an unconditional base-state
+    /// setter on the same selector.
+    /// </summary>
+    [Fact]
+    public void Every_hover_content_presenter_style_has_a_base_state_pair()
+    {
+        var path = Path.Combine(RepoRoot, "src", "Hermaeus.Desktop", "Styles", "AppStyles.axaml");
+        var styles = File.ReadAllText(path);
+
+        var hovered = Regex.Matches(
+                styles, @"Selector=""Button\.([\w-]+):pointerover /template/ ContentPresenter""")
+            .Select(m => m.Groups[1].Value)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.True(hovered.Count > 0, "expected hover styles on templated ContentPresenters in AppStyles.axaml");
+
+        // The base state may exclude :pressed and :disabled so FluentTheme keeps
+        // providing those, but it must not be conditioned on :pointerover, which
+        // would leave the resting state unset again.
+        var missing = hovered
+            .Where(c => !Regex.IsMatch(
+                styles,
+                $@"Selector=""Button\.{Regex.Escape(c)}(:not\([^)]*\))* /template/ ContentPresenter"""))
+            .ToList();
+
+        Assert.True(missing.Count == 0,
+            $"these button classes set a ContentPresenter background on :pointerover with no unconditional " +
+            $"base-state setter: {string.Join(", ", missing)}. Add a " +
+            @"'Selector=""Button.<class> /template/ ContentPresenter"" ' style pinning the resting background, " +
+            "or hovering them will flicker the mouse cursor. See the icon-btn comment in AppStyles.axaml.");
+    }
+
+    /// <summary>
+    /// Tooltips are drawn by Controls/OverlayToolTip.cs because Avalonia's own
+    /// ToolTipService flickers the mouse cursor: the popup's outer edge counts as
+    /// being over the popup but yields no hit-test result, so the service closes
+    /// and instantly reopens the tooltip, and every iteration rewrites
+    /// PointerOverElement, which makes TopLevel call SetCursor. Upstream
+    /// AvaloniaUI/Avalonia#19218, open against 12.0.3.
+    ///
+    /// Four XAML workarounds were tried and reverted before the overlay layer, so
+    /// the failure mode this guards against is real: someone re-enables the
+    /// built-in service, or drops the Install call, and the flicker returns with
+    /// nothing to catch it. A tooltip that regressed this way still looks correct
+    /// in a screenshot.
+    /// </summary>
+    [Fact]
+    public void Avalonias_built_in_tooltip_service_stays_disabled()
+    {
+        var styles = File.ReadAllText(
+            Path.Combine(RepoRoot, "src", "Hermaeus.Desktop", "Styles", "AppStyles.axaml"));
+
+        Assert.True(
+            Regex.IsMatch(styles, @"ToolTip\.ServiceEnabled""\s+Value=""False"""),
+            "AppStyles.axaml must set ToolTip.ServiceEnabled to False for :is(Control). Without it " +
+            "Avalonia's ToolTipService renders a second tooltip in a popup and the cursor flicker of " +
+            "AvaloniaUI/Avalonia#19218 comes back. See Controls/OverlayToolTip.cs.");
+
+        var app = File.ReadAllText(
+            Path.Combine(RepoRoot, "src", "Hermaeus.Desktop", "App.axaml.cs"));
+
+        Assert.True(
+            app.Contains("OverlayToolTip.Install()", StringComparison.Ordinal),
+            "App.OnFrameworkInitializationCompleted must call OverlayToolTip.Install(). With the " +
+            "built-in service disabled and no replacement installed, the app has no tooltips at all.");
+    }
+
+    /// <summary>
     /// r27 05-small-open-items.md 5.2: the README's version sat at 0.24.0-alpha
     /// while Directory.Build.props said 0.33.0. The gap opened at r24 and no
     /// close-out since closed it, on the front page of a repository being

@@ -185,6 +185,14 @@
 
                 <!-- Answer area -->
                 <StackPanel IsVisible="{Binding HasAnswer}" Spacing="4">
+                    <!-- The question box empties on send, so the question is
+                         echoed here. Without it an answer would sit on the page
+                         with nothing on screen saying what was asked. -->
+                    <TextBlock Text="{Binding AskedQuestion}"
+                               IsVisible="{Binding HasAskedQuestion}"
+                               FontSize="13" FontWeight="Medium" TextWrapping="Wrap"
+                               Margin="0,0,0,6" />
+
                     <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,0,4">
                         <PathIcon Data="M12 3L1 9l11 6 9-4.91V17h2V9L12 3z"
                                   Width="13" Height="13" Opacity="0.4" />
@@ -699,6 +707,14 @@
                         </StackPanel>
                     </Border>
                 </Expander>
+
+                <!-- r29 doc 01 1.3, same defect as the chat transcript: the
+                     last card ended up flush against the question bar and could
+                     not be reached. ScrollViewer.Padding does not reliably
+                     contribute to the scrollable extent, so the gap lives
+                     inside the scrolled content where it unambiguously does.
+                     Do not tidy it away. -->
+                <Border x:Name="RagTrailingSpacer" Height="36" Opacity="0" IsHitTestVisible="False" />
 
             </StackPanel>
         </ScrollViewer>

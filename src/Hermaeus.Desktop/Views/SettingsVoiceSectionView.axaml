@@ -31,12 +31,29 @@
                                      editable-with-suggestions control, so typed text that matches
                                      nothing still works for providers that cannot enumerate
                                      voices (TtsVoices then holds just "default"). -->
-                                <AutoCompleteBox Grid.Column="2"
-                                                 ItemsSource="{Binding $parent[ItemsControl].DataContext.ChannelVoiceOptions}"
-                                                 Text="{Binding VoiceDisplay, Mode=TwoWay}"
-                                                 FilterMode="Contains"
-                                                 FontSize="12"
-                                                 HorizontalAlignment="Stretch" />
+                                <!-- r29 doc 01 1.2: MinimumPrefixLength 0 plus the chevron.
+                                     Without them this renders as a bare TextBox that shows
+                                     nothing until the user guesses a first character, so a
+                                     control whose whole job is "choose one of the provider's
+                                     voices" was reported twice as a missing dropdown. -->
+                                <Grid Grid.Column="2" ColumnDefinitions="*,Auto">
+                                    <AutoCompleteBox Grid.Column="0"
+                                                     x:Name="ChannelVoiceBox"
+                                                     ItemsSource="{Binding $parent[ItemsControl].DataContext.ChannelVoiceOptions}"
+                                                     Text="{Binding VoiceDisplay, Mode=TwoWay}"
+                                                     FilterMode="Contains"
+                                                     MinimumPrefixLength="0"
+                                                     FontSize="12"
+                                                     HorizontalAlignment="Stretch" />
+                                    <Button Grid.Column="1"
+                                            Classes="icon-btn"
+                                            Margin="2,0,0,0"
+                                            VerticalAlignment="Center"
+                                            ToolTip.Tip="Show the available voices"
+                                            Click="OnShowChannelVoiceList">
+                                        <PathIcon Data="M7 10l5 5 5-5z" Width="12" Height="12" />
+                                    </Button>
+                                </Grid>
                             </Grid>
                             <TextBlock Text="Spoken text is sent to the remote voice provider."
                                        FontSize="11" Opacity="0.55" Foreground="Orange" Margin="152,2,0,0"
@@ -45,6 +62,12 @@
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
+            <!-- r29 doc 01 1.2: factual state, not personality (docs/mascot.md).
+                 The picker's usual content is the sentinel plus the placeholder
+                 "default", which looks like a populated list and is not. -->
+            <TextBlock Text="The voice service has not listed its voices, so these pickers only offer the default. Use Refresh on Services &gt; Voice to list them, or type a voice id the provider knows."
+                       FontSize="11" Opacity="0.55" TextWrapping="Wrap"
+                       IsVisible="{Binding !ChannelVoiceOptionsAreProviderSupplied}" />
         </StackPanel>
     </Border>
 </UserControl>

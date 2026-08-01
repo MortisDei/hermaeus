@@ -201,8 +201,11 @@
                 <!-- r24: the reply box is the immediate next action after reading the
                      agent's response, so it stays with the decision rather than
                      behind a tab. -->
-                <StackPanel Spacing="8" IsVisible="{Binding IsWaitingForReply}">
-                    <TextBlock Text="The agent is waiting for your reply"
+                <!-- r29 doc 03 3.5: the same row also steers a run in flight. Its
+                     caption, watermark and button label change with state, so the
+                     user always knows which of the two they are doing. -->
+                <StackPanel Spacing="8" IsVisible="{Binding ShowReplyBox}">
+                    <TextBlock Text="{Binding ReplyBoxTitle}"
                                FontWeight="SemiBold"
                                FontSize="12" />
                     <!-- The question itself. It used to reach only the log and the
@@ -217,13 +220,13 @@
                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
                         <TextBox Grid.Column="0"
                                  Text="{Binding ReplyText}"
-                                 Watermark="Answer the agent's question..."
+                                 Watermark="{Binding ReplyWatermark}"
                                  AcceptsReturn="True"
                                  MinHeight="56"
                                  TextWrapping="Wrap" />
                         <Button Grid.Column="1"
                                 Command="{Binding SendReplyCommand}"
-                                Content="Send"
+                                Content="{Binding ReplyButtonLabel}"
                                 VerticalAlignment="Bottom"
                                 Padding="14,8"
                                 CornerRadius="6" />

@@ -457,13 +457,36 @@ public sealed class RagQueryService
 
         // ── 9. Stream LLM answer ─────────────────────────────────────────
         var answer = new StringBuilder();
-        await foreach (var token in _llm.StreamChatTextAsync(
-            modelId,
-            [new ChatMessage("user", prompt)],
-            ct: ct))
+        if (string.IsNullOrWhiteSpace(modelId))
         {
-            answer.Append(token);
-            yield return RagStreamEvent.ForToken(token);
+            // An empty model id used to be handed to the composite LLM service
+            // anyway. It cannot resolve a provider for "", so the user got
+            // "Could not determine which provider serves model ''. Refresh the
+            // model list and try again." - which names the wrong problem and
+            // gives advice that cannot fix it, because refreshing does not set
+            // a default model. Reported against a fresh dataset on an install
+            // where Llm.DefaultModel had never been set.
+            //
+            // Deliberately placed here rather than earlier: retrieval really
+            // did run, the sources above are real, and the trace below is still
+            // worth recording. Only the answer is missing.
+            const string noModel =
+                "No chat model is selected, so there is nothing to write the answer with. "
+                + "The sources above are real, and the retrieval ran normally. Pick a model in Chat, "
+                + "or set a default under Settings > LLM, then ask again.";
+            answer.Append(noModel);
+            yield return RagStreamEvent.ForToken(noModel);
+        }
+        else
+        {
+            await foreach (var token in _llm.StreamChatTextAsync(
+                modelId,
+                [new ChatMessage("user", prompt)],
+                ct: ct))
+            {
+                answer.Append(token);
+                yield return RagStreamEvent.ForToken(token);
+            }
         }
 
         totalSw.Stop();

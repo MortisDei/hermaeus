@@ -210,7 +210,21 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
         ChannelVoiceOptions.Add(VoiceChannelSettingViewModel.DefaultVoiceLabel);
         foreach (var voice in TtsVoices)
             ChannelVoiceOptions.Add(voice);
+        OnPropertyChanged(nameof(ChannelVoiceOptionsAreProviderSupplied));
     }
+
+    /// <summary>
+    /// r29 doc 01 1.2: false while the picker holds nothing but the sentinel and
+    /// the placeholder "default" <see cref="TtsVoices"/> starts with, which is
+    /// the common state because <see cref="RefreshTtsVoicesAsync"/> is fired and
+    /// forgotten at construction and leaves the initial list in place when the
+    /// voice service is not running. The picker looks populated and is not; the
+    /// view uses this to say so and name the fix.
+    /// </summary>
+    public bool ChannelVoiceOptionsAreProviderSupplied =>
+        ChannelVoiceOptions.Any(o =>
+            o != VoiceChannelSettingViewModel.DefaultVoiceLabel &&
+            !string.Equals(o, "default", StringComparison.OrdinalIgnoreCase));
 
     private static readonly VoiceChannel[] AllChannels =
     [

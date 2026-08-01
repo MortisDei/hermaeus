@@ -112,6 +112,14 @@ public sealed class AgentTaskState
     public List<AgentDecision> Decisions { get; set; } = [];
     public List<AgentToolResult> ToolResults { get; set; } = [];
     public List<AgentApprovalRecord> ApprovalHistory { get; set; } = [];
+
+    /// <summary>
+    /// Instructions the user sent while the task was running, not yet folded
+    /// into the planner context. Drained at the next step boundary, in order.
+    /// User text: carries no approval and no risk decision (r29 doc 03).
+    /// Empty for pre-existing task files (JSON-additive).
+    /// </summary>
+    public List<AgentSteeringNote> PendingInstructions { get; set; } = [];
     public List<AgentDraftPatch> DraftPatches { get; set; } = [];
     public AgentPendingToolAction? PendingToolAction { get; set; }
     public string Summary { get; set; } = string.Empty;
@@ -377,6 +385,31 @@ public sealed record AgentDecision(
     string Reason,
     DateTime Timestamp);
 
+/// <summary>
+/// r29 doc 03: an instruction the user sent while the task was running, waiting
+/// to be folded into the planner context at the next step boundary.
+///
+/// This is USER TEXT and nothing else, exactly as untrusted as the goal the
+/// task was created with. It carries no approval, sets no risk classification,
+/// and never marks a tool pre-approved.
+/// </summary>
+/// <param name="Text">What the user typed.</param>
+/// <param name="ReceivedAt">When it was accepted, UTC.</param>
+/// <param name="StepCount">The task's step count when it arrived.</param>
+public sealed record AgentSteeringNote(
+    string Text,
+    DateTime ReceivedAt,
+    int StepCount);
+
+/// <summary>Outcome of <c>AgentService.SteerTaskAsync</c>.</summary>
+/// <param name="Accepted">False when the instruction was refused.</param>
+/// <param name="Message">The reason, when refused; empty when accepted.</param>
+public sealed record AgentSteeringResult(bool Accepted, string Message)
+{
+    public static AgentSteeringResult Ok() => new(true, string.Empty);
+    public static AgentSteeringResult Refused(string message) => new(false, message);
+}
+
 public sealed record AgentApprovalRecord(
     string Action,
     bool Approved,
@@ -529,6 +562,13 @@ public sealed class AgentContextPack
     /// Empty, and omitted from the context receipt, for every other task.
     /// </summary>
     public List<AgentRetrievedItem> SubTaskReports { get; set; } = [];
+    /// <summary>
+    /// r29 doc 03 3.3: instructions the user sent mid-run, delivered to the
+    /// model as the user's own words arriving late. Deliberately not in the
+    /// system prompt: these are as untrusted as the goal, they carry no
+    /// authority, and nothing here can approve a tool or change a risk level.
+    /// </summary>
+    public List<string> SteeringInstructions { get; set; } = [];
     public List<string> KnownRisks { get; set; } = [];
     public string RequiredOutputFormat { get; set; } =
         "Return JSON with thought_summary, current_step, next_action, state_update, and user_message.";

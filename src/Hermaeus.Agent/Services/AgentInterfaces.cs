@@ -143,6 +143,17 @@ public interface IAgentService
     /// the task is a sub-task child (continue the parent instead).
     /// </summary>
     Task<AgentTaskState> ContinueTaskAsync(string taskId, string instruction, AgentWorkspaceOptions options, CancellationToken ct = default);
+
+    /// <summary>
+    /// r29 doc 03: delivers an instruction into a task that is already running.
+    /// Queued on the task state, drained at the next step boundary, and it
+    /// interrupts the planner inference in progress so the model sees it on the
+    /// very next call. It never interrupts a tool that has started executing.
+    ///
+    /// The instruction is USER TEXT: it carries no approval, sets no risk
+    /// classification, and cannot pre-approve a tool.
+    /// </summary>
+    Task<AgentSteeringResult> SteerTaskAsync(string taskId, string instruction, CancellationToken ct = default);
 }
 
 public interface IWorkspaceProfileStore

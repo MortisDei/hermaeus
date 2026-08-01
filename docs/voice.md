@@ -279,6 +279,23 @@ process. `TtsSettingsViewModel` is a single DI-shared
 instance (`ServicesViewModel.Tts` and `SettingsViewModel.Tts` are the same
 object), so both pages always reflect the same live state.
 
+**Services -> Voice saves.** Until 0.36.0-alpha it did not: the Voice and
+speech-recognition cards edited that shared instance and nothing on the page
+wrote it to disk, so a base URL, voice, device or speed set there was silently
+discarded on restart. The Services page now has a Save button in its header
+that runs the same single save flow as the Settings page's.
+
+**The per-channel voice picker.** Each channel's picker lists the active
+provider's own voices, with a chevron that opens the list and a
+"(Default voice)" sentinel meaning "use the global voice". It also accepts
+free text, for a provider that cannot enumerate its voices.
+
+Providers only list their voices when the voice service is running and
+`Refresh` has been pressed on **Services -> Voice**. Until then the picker
+holds nothing but the sentinel and a placeholder, which looks like a populated
+list and is not, so the section says so in plain text and names the fix. Typing
+a voice id the provider knows works either way.
+
 Speech recognition follows the identical split: provider/device/model/install
 on **Services -> Voice** (`SttSettingsViewModel`, its own DI-shared
 instance); push-to-talk key, insert-at-cursor behavior, hands-free enable,

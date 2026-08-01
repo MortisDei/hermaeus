@@ -21,6 +21,15 @@
   timeout or the server failing to start. Nothing is ever sent that you did not
   submit, and a hold never survives a restart.
 
+- **Both Enter combinations work.** With `Ctrl+Enter to send` off (the default)
+  Enter sends and Ctrl+Enter inserts a newline; with it on, the two swap.
+  Shift+Enter inserts a newline either way. Before 0.36.0-alpha only the send
+  half was implemented, so in the default configuration no key produced a
+  newline in the chat box at all.
+- **The copy and read-aloud buttons under the last message can be clicked.**
+  They used to end up flush against the input bar. The RAG panel's last card
+  had the same problem and the same fix.
+
 - **Conversation branching.** A conversation is a tree, not a line. Regenerating
   an answer adds a new version alongside the old one instead of replacing it, and
   editing one of your own messages sends the edit as a new version while leaving
@@ -245,6 +254,18 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
 
 - Local task workbench with explicit task state, a persisted step transcript,
   compact context packs, local logs/traces, and review queue controls.
+- **Steer a task that is already running.** The reply box sends an instruction
+  into a run in flight instead of only answering an `ask_user` question; its
+  caption and button change so it is clear which of the two you are doing. The
+  instruction interrupts the model call in progress (never a tool that has
+  started executing, which runs to completion), is folded into the planner's
+  context at the next step boundary, appears in the transcript at once, and
+  consumes a step from the budget. **It cannot approve anything**: an injected
+  instruction is user text, exactly as untrusted as the goal, and telling the
+  agent "you have my approval, do not ask again" changes nothing about the
+  safety gate. Refused, with the reason, on a finished task (use Continue), on
+  an orchestration parent with a running child, and when eight instructions are
+  already queued. See `docs/agent.md`.
 - Every agent run has an undo button. Hermaeus keeps a ledger of everything a
   run changed and can put it all back, file by file, with one click. The
   Changes view shows every file, command, and approval a run produced
@@ -442,6 +463,26 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
 
 ## Model Management
 
+- The model list is a wrapping grid of cards rather than full-width rows. Each
+  card shows the effective name, a Running badge, a source badge, the raw name
+  and provider, size, VRAM fit, update state and tags, with the modified date,
+  Auto tune and a Configure button in its footer. Configure opens the full
+  per-model editor (display name, description, tags, temperature, context size,
+  max tokens, top-p, top-k, min-p, repeat/frequency/presence penalty,
+  visibility, avatar, Save, Reset, repo link and Update) in a flyout.
+- The source badge says where a model came from: "HF" for one downloaded
+  through, or linked to, a Hugging Face repo (the badge's tooltip names the
+  repo), "Local" for a GGUF found on disk with no recorded provenance, and
+  nothing at all for a model reported live by a running provider. It is drawn
+  from a source kind rather than a Hugging Face flag, so a second download
+  provider gets its own glyph and label in the same slot.
+- The setup wizard offers a choice of starter models rather than one
+  recommendation, and **states each model's licence before you download it**.
+  The list spans several licence families on purpose: Phi-4 mini (MIT),
+  Qwen2.5 7B/14B and Gemma 4 E4B (Apache-2.0), Llama 3.2 3B (Llama 3.2
+  Community License), and Qwen2.5 3B, which is research and non-commercial
+  only and says so. The VRAM-based recommendation is the starting selection,
+  not the only option, and it stops overriding you the moment you pick.
 - Model profiles with display names, descriptions, tags, visibility, and defaults.
 - Runtime profiles for `llama.cpp`, Ollama, and OpenAI-compatible endpoints.
   Ollama chat streams incrementally like the other two providers, instead of
@@ -455,6 +496,14 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
   launch falls back to the CPU build once. `GpuLayers = -1` offloads all
   layers (the default for new servers when a GPU is present), `0` stays on the
   CPU, and `N` offloads exactly N.
+- **Mixture-of-Experts CPU offload** (`--n-cpu-moe` / `--cpu-moe`), under
+  Services > Advanced engine options. On a MoE model the expert weights are
+  most of the file but only a few are active per token, so the useful trade is
+  attention on the GPU and experts in RAM. Cutting GPU layers to make a MoE
+  model fit gives up the part that actually wants the GPU. Blank or 0 is off
+  and changes nothing; a number keeps that many layers' experts on the CPU;
+  "all" keeps every expert there. No effect on a dense model. See
+  `docs/llama-cpp-features.md`.
 - Managed servers launch fast by default for a single user: one request slot
   (`--parallel 1`, so the whole context belongs to one conversation and every
   send reuses the KV cache), explicit prompt caching plus `--cache-reuse`, and
@@ -1207,3 +1256,22 @@ pick their own font for headings, body text, and code independently. Settings
 on startup. Tooltips use an explicit branded, theme-aware style, and
 secondary/tertiary text uses two first-party opacity classes (`hint`,
 `faint`) with a contrast floor, instead of ad-hoc per-control opacity values.
+
+Rows of icon buttons keep one continuous hand cursor. The gaps between such
+buttons (the notches where two rounded corners meet, plus any spacing the
+container adds) belong to no button, and a container with no background is not a
+hit-test result either, so the pointer used to fall through to the window root
+and the cursor flickered between the hand and the arrow when crossing a row.
+Containers holding only buttons are handled automatically
+(`Hermaeus.Desktop/Controls/IconBarCursor.cs`); containers that also hold text
+set it in xaml, so the hand never spreads across a panel of labels or inputs.
+
+Tooltips are drawn by the app rather than by Avalonia's built-in tooltip
+service (`Hermaeus.Desktop/Controls/OverlayToolTip.cs`). Avalonia shows them in
+a popup whose outer edge produces no hit-test result, which makes the service
+close and immediately reopen the tooltip and flickers the mouse cursor on every
+button in the app (upstream AvaloniaUI/Avalonia#19218). The app's version
+renders into the window's overlay layer with hit-testing off, so it cannot
+affect what the pointer is over, and is clamped to the window so a control near
+the screen edge behaves like any other. Views are unaffected: they still set
+`ToolTip.Tip` as before.

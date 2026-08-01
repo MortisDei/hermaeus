@@ -18,6 +18,7 @@ public partial class UiSettingsViewModel : ObservableObject
     [ObservableProperty] private bool _showQuickChat;
     [ObservableProperty] private bool _enableTrayIcon = true;
     [ObservableProperty] private bool _minimizeToTray = true;
+    [ObservableProperty] private bool _closeToTray = true;
     [ObservableProperty] private bool _enableLocalHotkeys = true;
     [ObservableProperty] private bool _enableGlobalHotkeys;
     [ObservableProperty] private string _globalHotkeyStatus = "System-wide hotkeys are off.";
@@ -37,6 +38,7 @@ public partial class UiSettingsViewModel : ObservableObject
         ShowQuickChat = settings.Ui.ShowQuickChat;
         EnableTrayIcon = settings.Ui.EnableTrayIcon;
         MinimizeToTray = settings.Ui.MinimizeToTray;
+        CloseToTray = settings.Ui.CloseToTray;
         EnableLocalHotkeys = settings.Ui.EnableLocalHotkeys;
         EnableGlobalHotkeys = settings.Ui.EnableGlobalHotkeys;
         ShowNavLabels = settings.Ui.ShowNavLabels;
@@ -54,6 +56,7 @@ public partial class UiSettingsViewModel : ObservableObject
         settings.Ui.ShowQuickChat = ShowQuickChat;
         settings.Ui.EnableTrayIcon = EnableTrayIcon;
         settings.Ui.MinimizeToTray = MinimizeToTray;
+        settings.Ui.CloseToTray = CloseToTray;
         settings.Ui.EnableLocalHotkeys = EnableLocalHotkeys;
         settings.Ui.EnableGlobalHotkeys = EnableGlobalHotkeys;
         settings.Ui.ShowNavLabels = ShowNavLabels;

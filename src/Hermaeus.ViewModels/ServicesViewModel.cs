@@ -1,3 +1,4 @@
+using System.Globalization;
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
 using Hermaeus.Services;
@@ -46,6 +47,14 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private bool         _contextShift;
     [ObservableProperty] private bool         _memoryLock;
     [ObservableProperty] private bool         _noMemoryMap;
+
+    /// <summary>
+    /// Mixture-of-Experts CPU offload, as text so the box can be left empty for
+    /// "off". Empty or 0 means off; a positive N is --n-cpu-moe N; "all" is
+    /// --cpu-moe. See ServerConfig.CpuMoeLayers for why this is not the same
+    /// knob as GPU layers.
+    /// </summary>
+    [ObservableProperty] private string       _cpuMoeLayersText = string.Empty;
     // ── r27 03-drafting-and-proof.md 3.1: speculative decoding, as one section ──
     // The r18 4.4 bool owned a flag that is a list. A second bool beside it
     // would have given two knobs that both own --spec-type and can contradict
@@ -166,6 +175,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _config.ContextShift != ContextShift ||
         _config.MemoryLock != MemoryLock ||
         _config.NoMemoryMap != NoMemoryMap ||
+        _config.CpuMoeLayers != ParseCpuMoeLayers(CpuMoeLayersText) ||
         !SpeculativeMatchesConfig();
 
     /// <summary>
@@ -430,6 +440,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _contextShift   = config.ContextShift;
         _memoryLock     = config.MemoryLock;
         _noMemoryMap    = config.NoMemoryMap;
+        _cpuMoeLayersText = FormatCpuMoeLayers(config.CpuMoeLayers);
         var speculative = config.Speculative ?? new SpeculativeDecodingConfig();
         _speculativeTypes     = string.Join(",", speculative.Types);
         _draftModelPath       = speculative.DraftModelPath;
@@ -1012,6 +1023,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _config.ContextShift   = ContextShift;
         _config.MemoryLock     = MemoryLock;
         _config.NoMemoryMap    = NoMemoryMap;
+        _config.CpuMoeLayers   = ParseCpuMoeLayers(CpuMoeLayersText);
         _config.Speculative    = BuildSpeculative();
         OnPropertyChanged(nameof(HasUnsavedChanges));
         OnPropertyChanged(nameof(EffectiveOffloadLabel));
@@ -1074,6 +1086,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         ContextShift   = ContextShift,
         MemoryLock     = MemoryLock,
         NoMemoryMap    = NoMemoryMap,
+        CpuMoeLayers   = ParseCpuMoeLayers(CpuMoeLayersText),
         Speculative    = BuildSpeculative()
     };
 
@@ -1251,6 +1264,31 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     partial void OnContextShiftChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
     partial void OnMemoryLockChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
     partial void OnNoMemoryMapChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnCpuMoeLayersTextChanged(string value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+
+    /// <summary>
+    /// Empty/0 off, "all" (or any negative) all layers, otherwise N. Public
+    /// rather than internal only because Hermaeus.ViewModels does not grant
+    /// InternalsVisibleTo and these are pure functions worth testing directly.
+    /// </summary>
+    public static int ParseCpuMoeLayers(string? text)
+    {
+        var trimmed = text?.Trim() ?? string.Empty;
+        if (trimmed.Length == 0)
+            return 0;
+        if (string.Equals(trimmed, "all", StringComparison.OrdinalIgnoreCase))
+            return -1;
+        if (!int.TryParse(trimmed, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+            return 0;
+        return parsed < 0 ? -1 : parsed;
+    }
+
+    public static string FormatCpuMoeLayers(int layers) => layers switch
+    {
+        0 => string.Empty,
+        < 0 => "all",
+        _ => layers.ToString(CultureInfo.InvariantCulture)
+    };
     partial void OnSpeculativeTypesChanged(string value)
     {
         OnPropertyChanged(nameof(HasUnsavedChanges));
@@ -1383,6 +1421,33 @@ public partial class ServicesViewModel : ViewModelBase
 
     /// <summary>r24 doc 05 5.7: speech recognition process/model/device config.</summary>
     public SttSettingsViewModel? Stt { get; }
+
+    /// <summary>
+    /// r29 doc 01 1.1: set by the DI root to the single settings save flow
+    /// (<see cref="SettingsViewModel.SaveAsync"/>). The Voice and STT cards on
+    /// this page mutate DI singletons shared with Settings, and only that flow
+    /// persists them. Null in tests that do not exercise saving.
+    /// </summary>
+    public Func<Task>? SaveAllSettings { get; set; }
+
+    /// <summary>Transient "Saved" confirmation, mirroring the Settings page.</summary>
+    [ObservableProperty] private bool _isSaved;
+
+    [RelayCommand]
+    private async Task SaveSettingsAsync()
+    {
+        if (SaveAllSettings is null)
+            return;
+        await SaveAllSettings();
+        IsSaved = true;
+        _ = ResetIsSavedAfterDelayAsync();
+    }
+
+    private async Task ResetIsSavedAfterDelayAsync()
+    {
+        await Task.Delay(2000);
+        IsSaved = false;
+    }
 
     public UiBoundCollection<ServerProcessViewModel> Servers { get; } = [];
     public UiBoundCollection<RuntimeProfileViewModel> RuntimeProfiles { get; } = [];

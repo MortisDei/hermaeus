@@ -191,6 +191,29 @@ public sealed class AgentService : IAgentService
     private readonly ILessonStore? _lessons;
     private readonly IAgentWorkspaceTools? _workspaceTools;
 
+    /// <summary>
+    /// r29 doc 03 3.4: one interrupt source per running task, held for the
+    /// duration of the run. Cancelling it aborts the planner inference only;
+    /// everything after the model call, tool execution included, keeps using
+    /// the caller's own token. A half-applied patch or a half-run command
+    /// leaves the workspace in a state task_state.json does not describe.
+    /// </summary>
+    private readonly Dictionary<string, CancellationTokenSource> _steerInterrupts = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The same queue as <see cref="AgentTaskState.PendingInstructions"/>, held
+    /// in memory as well.
+    ///
+    /// The file copy is what survives a crash between acceptance and
+    /// consumption. It is NOT sufficient on its own: a step already in flight
+    /// is holding a state object loaded before the steer arrived, and any save
+    /// it performs would write that stale object back and silently drop the
+    /// instruction. An instruction that vanishes is the one outcome this
+    /// feature must not have, so both copies are kept and the drain unions them.
+    /// </summary>
+    private readonly Dictionary<string, List<AgentSteeringNote>> _pendingSteers = new(StringComparer.Ordinal);
+    private readonly object _steerLock = new();
+
     public AgentService(
         IAgentTaskStateStore store,
         IAgentContextBuilder contextBuilder,
@@ -308,6 +331,11 @@ public sealed class AgentService : IAgentService
         state.Status = AgentTaskStatus.Running;
         await _store.SaveAsync(state, ct);
 
+        // r29 doc 03 3.3: fold anything the user said mid-run into the task's
+        // own record before building context, so the model sees it on this
+        // call. Consumed exactly once, even if this step then fails.
+        await DrainPendingInstructionsAsync(state, ct);
+
         var context = await _contextBuilder.BuildAsync(state, options, ct);
         // Tracked across the whole task so a successful completion can
         // confirm (bump evidence on) every lesson that actually informed
@@ -332,19 +360,33 @@ public sealed class AgentService : IAgentService
         var constraintIsOneCheckboxAway = plannerConstraint is null && await IsUndeclaredOpenAiEndpointAsync(modelId, ct);
         var raw = new StringBuilder();
         IReadOnlyList<LlmToolCallRequest>? nativeToolCalls = null;
+        // r29 doc 03 3.4: only the planner inference is cancellable by a steer.
+        // Everything below this block, tool execution included, keeps using ct.
+        using var plannerCts = CreateSteerInterrupt(taskId, ct);
         try
         {
             await foreach (var evt in _llm.StreamChatAsync(
                 modelId,
                 [new ChatMessage("user", prompt)],
                 new LlmChatOptions { SystemPrompt = AgentSystemPrompt, Temperature = 0.2, Tools = FixedToolDefinitions, OutputConstraint = plannerConstraint },
-                ct))
+                plannerCts.Token))
             {
                 if (!string.IsNullOrEmpty(evt.ContentDelta))
                     raw.Append(evt.ContentDelta);
                 if (evt.ToolCalls is { Count: > 0 })
                     nativeToolCalls = evt.ToolCalls;
             }
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            // A steer fired, not the caller. Absorb it: discard the partial
+            // response, note the interruption, and hand back a result that lets
+            // RunAsync's loop continue. The next iteration drains the
+            // instruction and the model sees it on the very next call.
+            //
+            // The caller's own cancellation (Stop) is NOT this case; it still
+            // propagates, unchanged, through the filter above.
+            return await BuildSteerInterruptedStepAsync(state, context, options, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -354,6 +396,10 @@ public sealed class AgentService : IAgentService
             state.Status = AgentTaskStatus.WaitingForUser;
             await _store.SaveAsync(state, ct);
             throw;
+        }
+        finally
+        {
+            ReleaseSteerInterrupt(taskId);
         }
 
         // A model/provider that supports native tool calling ends the
@@ -1242,6 +1288,193 @@ public sealed class AgentService : IAgentService
         state.LastUserMessage = string.Empty;
         await _store.SaveAsync(state, ct);
         await _store.AppendLogAsync(taskId, "user reply recorded", ct);
+    }
+
+    /// <summary>
+    /// r29 doc 03 3.2: accepts an instruction for a task that is already
+    /// running (or paused mid-run), queues it on the task state so it survives
+    /// a crash between acceptance and consumption, and signals the planner
+    /// interrupt so the current model call is abandoned rather than waited out.
+    ///
+    /// The instruction is user text. It is not an approval, it does not touch
+    /// <see cref="AgentTaskState.PendingToolAction"/>, and it reaches the model
+    /// through the context pack exactly as the goal and constraints do.
+    /// </summary>
+    public async Task<AgentSteeringResult> SteerTaskAsync(string taskId, string instruction, CancellationToken ct = default)
+    {
+        var trimmed = instruction?.Trim() ?? string.Empty;
+        if (trimmed.Length == 0)
+            return AgentSteeringResult.Refused("An instruction cannot be empty.");
+
+        var state = await _store.LoadAsync(taskId, ct)
+            ?? throw new InvalidOperationException("Agent task was not found.");
+
+        if (state.Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed or AgentTaskStatus.Cancelled)
+            return AgentSteeringResult.Refused("This task has finished. Use Continue to reopen it with a new instruction.");
+
+        // An orchestration parent delegates each child to its own RunAsync
+        // loop. Steering the parent while a child runs would either be
+        // silently dropped or silently retarget the child, and neither is
+        // something a user can reason about. Refuse and name the child.
+        var runningChild = state.SubTaskPlan.FirstOrDefault(s => s.Status == AgentSubTaskStatus.Running);
+        if (runningChild is not null)
+            return AgentSteeringResult.Refused(
+                $"This task is orchestrating sub-tasks. Steer the running sub-task instead: \"{runningChild.Goal}\".");
+
+        var note = new AgentSteeringNote(trimmed, DateTime.UtcNow, state.StepCount);
+        lock (_steerLock)
+        {
+            if (!_pendingSteers.TryGetValue(taskId, out var queue))
+                _pendingSteers[taskId] = queue = [];
+
+            // Whichever copy is fuller decides; the file's is authoritative
+            // after a restart, the in-memory one during a run.
+            if (Math.Max(queue.Count, state.PendingInstructions.Count) >= AgentSteering.MaxPending)
+                return AgentSteeringResult.Refused(
+                    $"There are already {AgentSteering.MaxPending} instructions waiting. Let the task work through them first.");
+
+            queue.Add(note);
+        }
+
+        state.PendingInstructions.Add(note);
+        await _store.SaveAsync(state, ct);
+        await _store.AppendTranscriptEntryAsync(taskId, new AgentTranscriptEntry(
+            state.StepCount, "user", null, $"steer: {trimmed}", DateTime.UtcNow), ct);
+        await _store.AppendLogAsync(taskId, $"steered: {trimmed}", ct);
+
+        SignalSteerInterrupt(taskId);
+        return AgentSteeringResult.Ok();
+    }
+
+    /// <summary>
+    /// Registers the interrupt source for this step's planner call and returns
+    /// it linked to the caller's token, so either can end the inference.
+    /// </summary>
+    private CancellationTokenSource CreateSteerInterrupt(string taskId, CancellationToken ct)
+    {
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        lock (_steerLock)
+        {
+            // A previous step's source is replaced rather than reused; the
+            // step boundary is exactly where a steer stops being pending.
+            if (_steerInterrupts.TryGetValue(taskId, out var previous))
+                previous.Dispose();
+            _steerInterrupts[taskId] = cts;
+        }
+        return cts;
+    }
+
+    private void ReleaseSteerInterrupt(string taskId)
+    {
+        lock (_steerLock)
+            _steerInterrupts.Remove(taskId);
+    }
+
+    /// <summary>
+    /// The result of a step whose planner call a steer interrupted. The task
+    /// stays Running so RunAsync's loop continues into the next step, which
+    /// drains the instruction. The step still counts against maxSteps: a user
+    /// who steers repeatedly consumes their step budget, which is the correct
+    /// incentive and keeps the run bounded.
+    /// </summary>
+    private async Task<AgentStepResult> BuildSteerInterruptedStepAsync(
+        AgentTaskState state,
+        AgentContextPack context,
+        AgentWorkspaceOptions options,
+        CancellationToken ct)
+    {
+        const string note = "Step interrupted by a user instruction; the partial response was discarded.";
+
+        // This state object was loaded before the steer arrived, so its
+        // PendingInstructions are stale. Take the store's copy before saving,
+        // or this save would drop the very instruction that caused the
+        // interrupt from the file. (The in-memory queue would still carry it,
+        // but only until the process ends.)
+        if (await _store.LoadAsync(state.TaskId, ct) is { } current)
+            state.PendingInstructions = current.PendingInstructions;
+
+        state.Status = AgentTaskStatus.Running;
+        state.StepCount++;
+        state.Decisions.Add(new AgentDecision("Step interrupted", note, DateTime.UtcNow));
+        await _store.SaveAsync(state, ct);
+        await _store.AppendLogAsync(state.TaskId, note, ct);
+        await _store.AppendTranscriptEntryAsync(state.TaskId, new AgentTranscriptEntry(
+            state.StepCount, "assistant", null, note, DateTime.UtcNow), ct);
+
+        var response = new AgentPlannerResponse
+        {
+            ThoughtSummary = note,
+            CurrentStep = state.ActiveStep,
+            NextAction = new AgentNextAction
+            {
+                // None, not Tool and not AskUser: the interrupted step proposed
+                // nothing. Anything else would put a tool through the gate on
+                // the strength of a discarded partial response.
+                Type = AgentActionKind.None,
+                RequiresApproval = false,
+                RiskLevel = AgentRiskLevel.None
+            },
+            UserMessage = string.Empty
+        };
+
+        return new AgentStepResult(state, context, response, note);
+    }
+
+    /// <summary>
+    /// Cancels the planner inference for a run in flight, if there is one. A
+    /// task that is not currently running has nothing to interrupt; its
+    /// instruction is simply waiting on the state for the next step.
+    /// </summary>
+    private void SignalSteerInterrupt(string taskId)
+    {
+        CancellationTokenSource? cts;
+        lock (_steerLock)
+            _steerInterrupts.TryGetValue(taskId, out cts);
+
+        try
+        {
+            cts?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // The run finished between the lookup and the cancel; nothing to do.
+        }
+    }
+
+    /// <summary>
+    /// Drains queued instructions into the task's own record before a step
+    /// runs, and saves before running, so an instruction is consumed exactly
+    /// once even if the step then fails. Lives in RunStepAsync so a single-step
+    /// run honours a pending instruction and RunAsync inherits it.
+    /// </summary>
+    private async Task DrainPendingInstructionsAsync(AgentTaskState state, CancellationToken ct)
+    {
+        List<AgentSteeringNote> inMemory;
+        lock (_steerLock)
+        {
+            _pendingSteers.TryGetValue(state.TaskId, out var queue);
+            inMemory = queue is null ? [] : [.. queue];
+            _pendingSteers.Remove(state.TaskId);
+        }
+
+        // Union of both copies, in arrival order, de-duplicated: a steer
+        // accepted just before this step started is in the file, one accepted
+        // while the previous step was mid-flight may only be in memory, and one
+        // accepted between the two is in both.
+        var notes = state.PendingInstructions
+            .Concat(inMemory)
+            .DistinctBy(n => (n.Text, n.ReceivedAt))
+            .OrderBy(n => n.ReceivedAt)
+            .ToList();
+
+        if (notes.Count == 0)
+            return;
+
+        foreach (var note in notes)
+            state.Decisions.Add(new AgentDecision(AgentSteering.DecisionKey, note.Text, DateTime.UtcNow));
+
+        state.PendingInstructions.Clear();
+        await _store.SaveAsync(state, ct);
     }
 
     private const string DefaultContinueInstruction = "Continue with the remaining pending steps.";

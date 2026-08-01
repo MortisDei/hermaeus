@@ -47,6 +47,23 @@ public class ServerConfig
     public bool   NoMemoryMap    { get; set; } = false;
 
     /// <summary>
+    /// Mixture-of-Experts CPU offload, verified against llama-server b10215's
+    /// own <c>--help</c>: <c>-cmoe, --cpu-moe</c> and <c>-ncmoe, --n-cpu-moe N</c>.
+    ///
+    /// <para>Why this exists as its own option rather than as GPU layers: on a
+    /// MoE model the expert weights are most of the file but only a fraction
+    /// are active per token, so the useful trade is "attention on the GPU,
+    /// experts in RAM", not "the first N layers on the GPU". Turning
+    /// <see cref="GpuLayers"/> down to fit a MoE model in VRAM gives up
+    /// attention offload, which is the part that actually wants the GPU.</para>
+    ///
+    /// <para>0 emits nothing and is the previous behaviour. A positive N emits
+    /// <c>--n-cpu-moe N</c>, keeping the MoE weights of the first N layers on
+    /// the CPU. -1 emits <c>--cpu-moe</c>, keeping all of them there.</para>
+    /// </summary>
+    public int    CpuMoeLayers   { get; set; } = 0;
+
+    /// <summary>
     /// Legacy n-gram speculative decoding flag (r18 04-llama-server-engine-options.md 4.4).
     /// Superseded by <see cref="Speculative"/> in r27 03-drafting-and-proof.md 3.1:
     /// <c>--spec-type</c> accepts a comma-separated list, and one bool owning a

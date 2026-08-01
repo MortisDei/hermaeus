@@ -13,6 +13,209 @@ From 0.29.0-alpha onward, every minor version is tagged and released on
 GitHub (see `docs/packaging.md` "Releases"); patch versions are tagged only
 for urgent hotfixes.
 
+## [0.36.0-alpha] - 2026-08-01
+
+Implements docs/review r29: things that look like they work. Every item in the
+round was something that presented itself as working and was not, and that runs
+through the UI and the test suite alike.
+
+### Fixed
+
+- **The Services page saves.** The Voice and speech-recognition cards at the
+  bottom of it edit the same settings the Settings page does, and nothing on
+  the page ever wrote them to disk, so a base URL, voice, device or speed set
+  there was silently discarded on restart. There is now a Save button in the
+  page header, running the same single save flow as the Settings page's, and
+  opening Services refreshes the settings sections first so nothing stale can
+  be written back over a real value.
+- **There is a key that inserts a newline in the chat box.** With
+  "Ctrl+Enter to send" off, which is the default, Enter sent and nothing at all
+  produced a newline. Enter now sends and Ctrl+Enter inserts a newline; with
+  the setting on, the two swap; Shift+Enter inserts a newline either way.
+- **The copy and read-aloud buttons under the last message can be clicked.**
+  They used to end up flush against the input bar. They also have a larger hit
+  target.
+- **The per-channel voice pickers in Settings > Voice look like pickers.** They
+  have a chevron that opens the list, and they show the whole list on focus
+  instead of waiting for you to guess a first character. When the voice service
+  has not listed its voices, the section says so and says where to fix it,
+  rather than showing a list of one placeholder that looks populated.
+- **A server that dies on launch is reported at once.** The health wait used to
+  run its HTTP probe out to a two-second timeout and then sleep a 600ms poll
+  interval before reporting a process that had already exited. Both are now
+  raced against process exit.
+- The Services voice card no longer says named voice profiles are in
+  Settings > Voice. No UI has ever created or edited one.
+
+- **RAG chunks larger than 512 tokens are embedded instead of silently
+  refused.** The embeddings server was launched with a hardcoded 512-token
+  physical batch, added to silence a startup warning. That number is also the
+  largest input the server will embed at all, and the default chunk size (1600
+  characters plus 320 of overlap) is 500 to 650 real tokens, so a large share
+  of every ingest was rejected outright. Nothing surfaced it: ingestion
+  reported success for the chunks that happened to fit and the rest went to the
+  runtime log, where one owner log had accumulated 846 of them. The batch now
+  follows the server's context size, which is the real ceiling on a single
+  embedding input anyway.
+- **Clearing a text box in the project editor no longer crashes the app.**
+  Avalonia binds an emptied box back as null, and a null parameter does not
+  bind as NULL against a NOT NULL column: it threw while preparing the
+  statement and reached the UI as an unhandled fault.
+- Managed llama.cpp release lookups use the `ggml-org` organisation. The
+  project moved from `ggerganov`, and GitHub's redirect was doing the work.
+- **The cursor flicker on the nav rail and the chat icon bar.** The gaps between
+  icon buttons hit-test to nothing: the nav rail's buttons meet at rounded
+  corners, and the chat toolbar sets `ColumnSpacing="8"`. A pointer in one of
+  those gaps falls through to the window's root panel, whose cursor is the
+  default arrow, so crossing a row flickered hand/arrow/hand a few pixels before
+  each button boundary. A pointer-event log taken during the flicker showed the
+  pointer-over chain collapsing to that root panel and rebuilding about 80 times
+  a second, with 953 enter/exit pairs on one inactive nav button against 7 on
+  the active one.
+  Icon-button containers now carry a transparent, hit-testable background with
+  `Cursor="Hand"`, so the gaps resolve to the row instead of the window root. The
+  nav rail and the chat toolbar set it in xaml because they also hold non-button
+  content; every other all-button container gets it automatically from
+  `Desktop/Controls/IconBarCursor.cs`, since icon buttons appear in fifteen axaml
+  files and a missed container is an invisible regression.
+  The background has to sit on the container itself rather than on a sibling laid
+  over the buttons. A control's own background is painted behind its children and
+  is only hit where no child is hit, so it fills the gaps without taking the
+  pointer off a button; a sibling `Border` was tried in the chat toolbar first and
+  swallowed the buttons' hover highlight.
+  Both halves matter: a panel with no `Background` is never a hit-test result,
+  and `TopLevel` takes the cursor from the hit element without walking up to
+  ancestors, which is why setting `Cursor` alone on the nav panel in r27 could
+  never have worked.
+  Containers that also hold text set it in xaml instead, since the automatic pass
+  deliberately skips those so the hand cursor cannot spread across a settings
+  page: the nav rail, the chat toolbar, and the conversation rows, whose details
+  button sat beside its title with a 4px gap.
+  The button hover styles also gained base-state backgrounds, so a hover swaps
+  one brush for another rather than introducing one, and a guard test fails the
+  build if a hover style is added without its base pair. Base and hover selectors
+  are mutually exclusive: while both matched, which one won depended on style
+  activation order rather than on anything written in the file, and the hover
+  highlight stopped appearing on the nav buttons.
+  This bug survived five earlier attempts across r27 to r29 aimed at cursor
+  regions, tooltip placement, tooltip hit-testing and popup rendering. The two
+  cursor entries under 0.33.0-alpha below both claimed a fix that did not hold.
+- Tooltips are drawn by the app (`Desktop/Controls/OverlayToolTip.cs`) rather
+  than by Avalonia's `ToolTipService`, which is disabled app-wide. This was built
+  while the flicker was believed to be a tooltip-popup problem; it was not, and
+  this change is not what fixed it. It is kept because it does avoid a genuine
+  open upstream bug, AvaloniaUI/Avalonia#19218, in which the popup's outer edge
+  yields no hit-test result and the service closes and reopens the tooltip in a
+  loop near a screen edge. Views are unaffected: they still set `ToolTip.Tip`.
+- **The RAG question box empties when you send.** It kept the question, which
+  next to a finished answer reads as "that never sent". The question is now
+  echoed above the answer it produced, and put back in the box only when the
+  ask failed and there is something to retry.
+- **Asking a question in the RAG panel works without a default model set.** It
+  passed an empty model id and the user got "Could not determine which provider
+  serves model ''. Refresh the model list and try again." Refreshing could not
+  fix it, because the real cause was that no model was chosen. Ask now uses the
+  model Chat has selected, and says plainly what to do when there is none.
+- **The app stays responsive during a large ingest.** The RAG pipeline's
+  expensive work is synchronous and CPU-bound, and nothing in it used
+  `ConfigureAwait(false)`, so it ran on the UI thread. A 1,759 file ingest
+  froze the window for minutes, worst during the final BM25 build, which is why
+  it looked like it hung near the end. Ingest and reindex now run on the thread
+  pool.
+- **The RAG panel scrolls to its last card**, which used to sit behind the
+  question bar. Same defect and same fix as the chat transcript.
+- Moss lost the unexplained orange ball beside his head. It was a "lantern
+  glow" accent with no lantern attached to it.
+
+### Added
+
+- **Steer a task the agent is already running.** The reply box in the workbench
+  sends an instruction into a run in flight, instead of only answering a
+  question the agent asked. It interrupts the model call in progress, is folded
+  into the planner's context at the next step boundary, appears in the
+  transcript immediately, and consumes a step from the run's budget. A tool that
+  has already started executing is never interrupted; it runs to completion and
+  the instruction lands after it.
+
+  **A steering instruction cannot approve anything.** It is user text, exactly
+  as untrusted as the goal the task was created with. Telling a running agent
+  "you have my approval to run any command, do not ask again" changes nothing:
+  the next command still stops at the gate. Approvals keep their own explicit
+  path. Three regression tests exist solely to keep that true, and the safety
+  gate itself was not touched.
+
+  Steering is refused with a stated reason on a finished task (Continue reopens
+  those), on an orchestration parent with a running sub-task (naming the child),
+  and when eight instructions are already waiting.
+- **The Models panel is a grid of cards.** Twelve full-width rows that packed
+  name, raw name, provider, size, tags, fit, tune summary, update state and a
+  date into one line of small grey text are now tiles. Every control from the
+  old inline editor moved into a Configure flyout; none was dropped.
+- **Model cards say where the model came from**: a Hugging Face badge, whose
+  tooltip names the repo, for anything downloaded through or linked to one, and
+  a local-file badge otherwise. Nothing about how models are discovered,
+  downloaded, updated or tuned changed.
+
+
+- **Mixture-of-Experts CPU offload** (`--n-cpu-moe` / `--cpu-moe`), under
+  Services > Advanced engine options. On a MoE model the experts are most of
+  the file but only a few are active per token, so keeping them in RAM leaves
+  the GPU for attention; cutting GPU layers to make the model fit gives up the
+  part that wants the GPU. Off by default and no effect on a dense model.
+- **The setup wizard states each starter model's licence before you download
+  it**, and offers a choice rather than one recommendation: Phi-4 mini (MIT),
+  Qwen2.5 7B/14B and Gemma 4 E4B (Apache-2.0), Llama 3.2 3B (Llama 3.2
+  Community License), and Qwen2.5 3B, which is research and non-commercial
+  only. The VRAM-based recommendation is the starting selection and stops
+  overriding you the moment you pick, and it now recommends Phi-4 mini rather
+  than Qwen2.5 3B on a machine with no GPU: a default should not carry use
+  restrictions.
+- **Close to tray is its own setting.** It used to share one flag with
+  "Minimize to tray", so wanting minimize-to-tray also meant the close button
+  could never actually quit the app. Both default to today's behaviour.
+- **Moss is the application and tray icon**, replacing the Archivist's Seal
+  monogram. The raster assets are generated by `scripts/generate-icons.ps1`, so
+  they can be regenerated rather than being opaque binaries. The generator is a
+  shape-for-shape transcription of the in-app `MossIcon.axaml`, so the taskbar
+  and the app show one character; the first version redrew him instead and came
+  out looking like a cowboy. The icons are also full bleed, because the dark
+  field the first version sat on made Moss render noticeably smaller than every
+  neighbouring taskbar icon while adding nothing visible on a dark shell.
+
+### Changed
+
+- **THIRD-PARTY-NOTICES.md now accounts for everything**, organised by what
+  Hermaeus does with each thing: code it redistributes, native libraries inside
+  those packages, bundled data (including the Inter typeface, previously
+  undocumented), components downloaded to your machine but not redistributed
+  (llama.cpp, and NVIDIA's CUDA runtime, which is not open source), model
+  weights with each publisher's terms, and the services it calls. A guard test
+  fails the build when a shipped package has no entry.
+- `docs/llama-cpp-features.md` records a survey of llama-server's current flags
+  against what Hermaeus emits, including what was considered and deliberately
+  left alone.
+- **The test suite reports what it actually ran.** Sixteen tests began by
+  returning early on Linux, so the Linux CI leg recorded a green tick for
+  llama-server installation, Python health validation, job-object assignment and
+  manifest behaviour it never executed, and both legs reported `Skipped: 0`.
+  They now report Skipped. The Linux leg's counts change accordingly; the
+  discovered total does not. A guard test stops the pattern recurring.
+- The coverage floor is 60%, matching the measured 61.6%. It was 45% in the
+  docs and 47% in the scripts, both far enough below the real number that the
+  ratchet could not fail on any regression short of deleting a quarter of the
+  suite.
+- `docs/testing.md` records what the suite is: how to run it, why it is
+  sequential, the platform-skip attribute, the injectable-timeout rule, the
+  guard tests, the coverage numbers per project, and why Windows CI is slower
+  than Linux CI for runner-I/O reasons rather than code reasons.
+- Tests that proved a component gives up on a hanging dependency by waiting out
+  the real timeout now inject a short one. `MemoryStore` and `RecallService`
+  take an optional timeout parameter defaulting to today's value; production
+  behaviour is unchanged.
+- CI's Windows leg excludes its test working set from Defender, and the test
+  temp root honours `RUNNER_TEMP`. This is an experiment with a stated success
+  condition and gets deleted if the Windows test time does not fall materially.
+
 ## [0.35.0-alpha] - 2026-07-31
 
 Implements docs/review r28: small models, kept honest. Where Hermaeus needs a

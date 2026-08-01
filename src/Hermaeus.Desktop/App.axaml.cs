@@ -4,6 +4,7 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Hermaeus.Agent.Services;
 using Hermaeus.Composition;
+using Hermaeus.Desktop.Controls;
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
 using Hermaeus.Rag.Embeddings;
@@ -34,6 +35,12 @@ public partial class App : Application
     public override void OnFrameworkInitializationCompleted()
     {
         UiThreadGuard.Arm();
+        // Replaces Avalonia's ToolTipService for every window in the process;
+        // see Controls/OverlayToolTip.cs for why.
+        OverlayToolTip.Install();
+        // Keeps the cursor a hand across the gaps in a row of icon buttons;
+        // see Controls/IconBarCursor.cs for why those gaps flicker.
+        IconBarCursor.Install();
         var services = new ServiceCollection();
         ConfigureServices(services);
         var sp = services.BuildServiceProvider();
@@ -223,7 +230,7 @@ public partial class App : Application
         s.AddSingleton<ChatViewModel>();
         s.AddSingleton<AgentScenarioSuiteViewModel>();
         s.AddSingleton<AgentViewModel>();
-        // Shared between SettingsViewModel (Voice orchestration/channels/profiles) and
+        // Shared between SettingsViewModel (Voice orchestration/channels) and
         // ServicesViewModel (Voice providers card) so both pages see the same live state.
         s.AddSingleton<TtsSettingsViewModel>();
         s.AddSingleton<SttSettingsViewModel>();

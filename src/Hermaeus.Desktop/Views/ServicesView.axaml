@@ -13,9 +13,14 @@
                   HorizontalScrollBarVisibility="Disabled">
         <StackPanel MaxWidth="760" Spacing="16">
 
-            <TextBlock Text="Services" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,4" />
-            <TextBlock FontSize="13" Opacity="0.45" TextWrapping="Wrap"
-                       Text="Manage llama-server processes. Paths and config are saved per server. Auto-start launches on Hermaeus startup if model path is set." />
+            <!-- r29 doc 01 1.1: the Voice and STT cards at the bottom of this page
+                 edit shared settings that only a save writes to disk. Save here
+                 runs the same flow as the Settings page's Save button. -->
+            <StackPanel Spacing="4">
+                <TextBlock Text="Services" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,4" />
+                <TextBlock FontSize="13" Opacity="0.45" TextWrapping="Wrap"
+                           Text="Manage llama-server processes. Paths and config are saved per card with Save Config. Auto-start launches on Hermaeus startup if model path is set." />
+            </StackPanel>
 
             <Border Classes="settings-card" Padding="16">
                 <StackPanel Spacing="12">
@@ -446,6 +451,27 @@
                                                       IsEnabled="{Binding CanEdit}" />
                                         </StackPanel>
 
+                                        <!-- Mixture-of-Experts CPU offload. A different knob
+                                             from GPU layers, and the right one for a MoE model:
+                                             the experts are most of the file but only a few are
+                                             active per token, so keeping them in RAM leaves the
+                                             GPU free for attention. Turning GPU layers down
+                                             instead gives up the part that wants the GPU. -->
+                                        <Grid ColumnDefinitions="200,120,*" ColumnSpacing="8">
+                                            <TextBlock Grid.Column="0" Text="MoE experts on CPU"
+                                                       VerticalAlignment="Center" FontSize="12" Opacity="0.75" />
+                                            <TextBox Grid.Column="1"
+                                                     Text="{Binding CpuMoeLayersText}"
+                                                     Watermark="off"
+                                                     FontSize="12"
+                                                     CornerRadius="6"
+                                                     IsEnabled="{Binding CanEdit}"
+                                                     ToolTip.Tip="Blank or 0 is off. A number N keeps the MoE weights of the first N layers on the CPU (--n-cpu-moe N). &quot;all&quot; keeps every expert on the CPU (--cpu-moe). Only affects Mixture-of-Experts models; ignored by dense ones." />
+                                            <TextBlock Grid.Column="2"
+                                                       Text="Only affects MoE models. Lets a large MoE run with attention on the GPU and the experts in RAM, instead of cutting GPU layers to make it fit."
+                                                       VerticalAlignment="Center" FontSize="11" Opacity="0.55" TextWrapping="Wrap" />
+                                        </Grid>
+
                                         <!-- r27 03-drafting-and-proof.md 3.1: one composable
                                              speculative-decoding section. The spec-type flag
                                              takes a comma-separated list, and drafting and
@@ -595,8 +621,34 @@
                 </ListBox.ItemTemplate>
             </ListBox>
 
+            <!-- r29 doc 01 1.1, revised: these cards edit settings that only a
+                 save writes to disk, and the owner asked for the button to sit
+                 with the settings it saves and to be named like the server
+                 cards' own. It is still the single existing save flow; there is
+                 no second serializer. Both cards save together because they
+                 share it, which is why each says so. -->
             <views:ServicesVoiceSectionView DataContext="{Binding Tts}" />
+            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,-8,0,0">
+                <Button Command="{Binding SaveSettingsCommand}"
+                        Content="Save Config"
+                        Padding="12,5" CornerRadius="6" FontSize="12"
+                        ToolTip.Tip="Saves the voice and speech settings on this page." />
+                <TextBlock Text="Saved" IsVisible="{Binding IsSaved}"
+                           VerticalAlignment="Center" FontSize="12"
+                           Foreground="{DynamicResource AccentFillColorDefaultBrush}" />
+            </StackPanel>
+
             <views:ServicesSttSectionView DataContext="{Binding Stt}" IsVisible="{Binding Stt, Converter={x:Static conv:ObjectConverters.IsNotNull}}" />
+            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,-8,0,0"
+                        IsVisible="{Binding Stt, Converter={x:Static conv:ObjectConverters.IsNotNull}}">
+                <Button Command="{Binding SaveSettingsCommand}"
+                        Content="Save Config"
+                        Padding="12,5" CornerRadius="6" FontSize="12"
+                        ToolTip.Tip="Saves the voice and speech settings on this page." />
+                <TextBlock Text="Saved" IsVisible="{Binding IsSaved}"
+                           VerticalAlignment="Center" FontSize="12"
+                           Foreground="{DynamicResource AccentFillColorDefaultBrush}" />
+            </StackPanel>
 
         </StackPanel>
     </ScrollViewer>

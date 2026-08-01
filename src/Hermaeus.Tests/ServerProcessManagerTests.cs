@@ -49,11 +49,9 @@ public sealed class ServerProcessManagerTests
         ContextSize = 4096
     };
 
-    [Fact]
+    [WindowsOnlyFact]
     public async Task StartAsync_reports_error_without_launching_when_the_port_is_already_in_use()
     {
-        if (!OperatingSystem.IsWindows()) return;
-
         using var temp = new TempDir();
         var modelPath = temp.PathFor("model.gguf");
         File.WriteAllText(modelPath, "fake");
@@ -72,11 +70,9 @@ public sealed class ServerProcessManagerTests
         Assert.DoesNotContain("Launched PID", mgr.GetLog());
     }
 
-    [Fact]
+    [WindowsOnlyFact]
     public async Task StartAsync_does_not_block_launch_when_job_object_assignment_fails()
     {
-        if (!OperatingSystem.IsWindows()) return;
-
         using var temp = new TempDir();
         var modelPath = temp.PathFor("model.gguf");
         File.WriteAllText(modelPath, "fake");
@@ -95,11 +91,9 @@ public sealed class ServerProcessManagerTests
         Assert.Contains("could not attach process to the app's job object", mgr.GetLog());
     }
 
-    [Fact]
+    [WindowsOnlyFact]
     public async Task StartAsync_reports_error_with_exit_code_and_log_tail_when_the_process_exits_immediately()
     {
-        if (!OperatingSystem.IsWindows()) return;
-
         using var temp = new TempDir();
         var modelPath = temp.PathFor("model.gguf");
         File.WriteAllText(modelPath, "fake");
@@ -114,11 +108,43 @@ public sealed class ServerProcessManagerTests
         Assert.Contains("Recent log:", mgr.ErrorMessage);
     }
 
-    [Fact]
+    /// <summary>
+    /// r29 doc 04 4.4: the health wait races its probe and its poll interval
+    /// against process exit. Before that it ran the in-flight HTTP probe out to
+    /// the HttpClient's own 2 s timeout and then slept the 600 ms poll interval
+    /// on top, so a server that died on launch took seconds to be reported when
+    /// the app had the answer immediately. These four StartAsync tests were the
+    /// only ones in the suite whose CI and local timings agreed, which is what
+    /// identified this as our cost rather than the runner's.
+    ///
+    /// The margin is deliberately loose. It is not measuring how fast the code
+    /// is, it is asserting that the exit is not being waited out: the old path
+    /// could not finish inside the HttpClient timeout, and the new one does not
+    /// touch it at all.
+    /// </summary>
+    [WindowsOnlyFact]
+    public async Task StartAsync_reports_an_immediate_exit_without_waiting_out_the_health_probe()
+    {
+        using var temp = new TempDir();
+        var modelPath = temp.PathFor("model.gguf");
+        File.WriteAllText(modelPath, "fake");
+
+        var mgr = new ServerProcessManager();
+        var config = NewConfig(ImmediateExitExecutable, modelPath, GetFreePort());
+
+        var started = System.Diagnostics.Stopwatch.StartNew();
+        await mgr.StartAsync(config);
+        started.Stop();
+
+        Assert.Equal(ServerStatus.Error, mgr.Status);
+        Assert.True(started.ElapsedMilliseconds < 1500,
+            $"the health wait should observe the process exit rather than wait out the 2 s HTTP probe timeout, "
+            + $"but StartAsync took {started.ElapsedMilliseconds}ms");
+    }
+
+    [WindowsOnlyFact]
     public async Task StartAsync_reports_a_cancelled_log_line_when_cancelled_during_the_health_wait()
     {
-        if (!OperatingSystem.IsWindows()) return;
-
         using var temp = new TempDir();
         var modelPath = temp.PathFor("model.gguf");
         File.WriteAllText(modelPath, "fake");
@@ -138,11 +164,9 @@ public sealed class ServerProcessManagerTests
     }
 
     /// <summary>r11 4.4: StartAsync replaced _monitorCts on restart without disposing the previous instance.</summary>
-    [Fact]
+    [WindowsOnlyFact]
     public async Task StartAsync_disposes_the_previous_monitor_cts_on_restart()
     {
-        if (!OperatingSystem.IsWindows()) return;
-
         using var temp = new TempDir();
         var modelPath = temp.PathFor("model.gguf");
         File.WriteAllText(modelPath, "fake");
@@ -164,11 +188,9 @@ public sealed class ServerProcessManagerTests
     }
 
     /// <summary>r11 4.5: NormalizeConfig used to write the resolved executable/model paths back onto the caller's ServerConfig - typically the settings object itself - silently rewriting a directory/bare-name configuration in memory, later persisted by an unrelated SaveAsync.</summary>
-    [Fact]
+    [WindowsOnlyFact]
     public async Task StartAsync_does_not_mutate_the_callers_ServerConfig()
     {
-        if (!OperatingSystem.IsWindows()) return;
-
         using var temp = new TempDir();
         var modelDir = temp.PathFor("models");
         Directory.CreateDirectory(modelDir);
@@ -190,11 +212,9 @@ public sealed class ServerProcessManagerTests
     }
 
     /// <summary>r11 1.5: auto-tune probes started processes and waited for /health on a port it never checked for prior occupancy; if anything was already listening there, every candidate "reached /health" instantly against the wrong process.</summary>
-    [Fact]
+    [WindowsOnlyFact]
     public async Task AutoTuneAsync_fails_fast_with_the_named_port_owner_when_the_port_is_occupied()
     {
-        if (!OperatingSystem.IsWindows()) return;
-
         using var temp = new TempDir();
         var modelPath = temp.PathFor("model.gguf");
         File.WriteAllText(modelPath, "fake");

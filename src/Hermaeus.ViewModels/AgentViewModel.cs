@@ -489,6 +489,9 @@ public partial class AgentViewModel : ViewModelBase
     private readonly ISettingsService? _settings;
     private readonly ILessonStore? _lessons;
     private readonly IVoiceOrchestrator? _voice;
+    /// <summary>r29 doc 03 3.5: steering refusals need a reason the user sees.
+    /// Optional so the existing test constructions are unaffected.</summary>
+    private readonly IToastService? _toasts;
     private CancellationTokenSource? _cts;
     /// <summary>
     /// The task id the user actually opened (Start or LoadTask), independent
@@ -801,8 +804,10 @@ public partial class AgentViewModel : ViewModelBase
         ILessonStore? lessons = null,
         IVoiceOrchestrator? voice = null,
         AgentScenarioSuiteViewModel? scenarioSuite = null,
-        Hermaeus.Services.Recall.RecallIndexingService? recallIndexing = null)
+        Hermaeus.Services.Recall.RecallIndexingService? recallIndexing = null,
+        IToastService? toasts = null)
     {
+        _toasts = toasts;
         _agent = agent;
         _store = store;
         _recallIndexing = recallIndexing;
@@ -1210,11 +1215,42 @@ public partial class AgentViewModel : ViewModelBase
         await ResumeAgentLoopIfRunnableAsync(item.ParentTaskId ?? item.TaskId);
     }
 
+    /// <summary>
+    /// r29 doc 03 3.5: the same box does two things and says which. While the
+    /// task is running it steers the run; while the task is paused on a
+    /// question it answers that question. Presenting one control that silently
+    /// meant two things would be worse than either.
+    /// </summary>
+    public bool IsSteering => IsRunning && CurrentTask is not null;
+
+    public string ReplyBoxTitle => IsSteering
+        ? "Send an instruction to the running task"
+        : "The agent is waiting for your reply";
+
+    public string ReplyWatermark => IsSteering
+        ? "Tell the agent what to do differently..."
+        : "Answer the agent's question...";
+
+    public string ReplyButtonLabel => IsSteering ? "Steer" : "Send";
+
+    /// <summary>The reply row is visible while a question is open OR while a run
+    /// is in flight, which is the whole point of steering.</summary>
+    public bool ShowReplyBox => IsWaitingForReply || IsSteering;
+
     [RelayCommand(CanExecute = nameof(CanSendReply))]
     private async Task SendReplyAsync()
     {
         if (CurrentTask is null || string.IsNullOrWhiteSpace(ReplyText)) return;
         var taskId = CurrentTask.TaskId;
+
+        // Routing, not a second control: a running task gets a steering
+        // instruction, a paused one gets an answer to its question.
+        if (IsSteering)
+        {
+            await SteerRunningTaskAsync(taskId);
+            return;
+        }
+
         try
         {
             await _agent.AppendUserReplyAsync(taskId, ReplyText);
@@ -1236,7 +1272,40 @@ public partial class AgentViewModel : ViewModelBase
         }
     }
 
-    private bool CanSendReply() => !IsRunning && IsWaitingForReply && !string.IsNullOrWhiteSpace(ReplyText);
+    /// <summary>
+    /// r29 doc 03 3.5: an accepted instruction has to appear in the transcript
+    /// immediately, before the model has responded to it. A steer that produces
+    /// no visible acknowledgement gets sent twice.
+    /// </summary>
+    private async Task SteerRunningTaskAsync(string taskId)
+    {
+        var instruction = ReplyText;
+        try
+        {
+            var result = await _agent.SteerTaskAsync(taskId, instruction);
+            if (!result.Accepted)
+            {
+                _toasts?.Show("Instruction not sent", result.Message, ToastKind.Warning, 6000);
+                SetError(result.Message);
+                return;
+            }
+
+            ReplyText = string.Empty;
+            _toasts?.Show("Instruction sent", "The agent will pick it up at its next step.", ToastKind.Success);
+            // Reload so the transcript shows the instruction now, before the
+            // model has responded to it.
+            await LoadTaskIfOpenAsync(taskId);
+        }
+        catch (Exception ex)
+        {
+            SetError(ex.Message);
+        }
+    }
+
+    // r29 doc 03 3.5: !IsRunning became a ROUTING condition in SendReplyAsync
+    // rather than a block. The box is enabled while the task runs (to steer)
+    // and while it waits on a question (to answer), and nothing else.
+    private bool CanSendReply() => (IsSteering || IsWaitingForReply) && !string.IsNullOrWhiteSpace(ReplyText);
 
     /// <summary>Bound to the "Continue task" instruction box (r19 3.1); placeholder text
     /// covers the empty-input default, so this stays literally empty until the user types.</summary>
@@ -2353,6 +2422,11 @@ public partial class AgentViewModel : ViewModelBase
         NewTaskCommand.NotifyCanExecuteChanged();
         ContinueTaskCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(IsWaitingForReply));
+        OnPropertyChanged(nameof(IsSteering));
+        OnPropertyChanged(nameof(ReplyBoxTitle));
+        OnPropertyChanged(nameof(ReplyWatermark));
+        OnPropertyChanged(nameof(ReplyButtonLabel));
+        OnPropertyChanged(nameof(ShowReplyBox));
         OnPropertyChanged(nameof(CurrentQuestion));
         OnPropertyChanged(nameof(HasCurrentQuestion));
         OnPropertyChanged(nameof(CanShowNewTaskButton));
@@ -2421,7 +2495,16 @@ public partial class AgentViewModel : ViewModelBase
     {
         NewTaskCommand.NotifyCanExecuteChanged();
         ContinueTaskCommand.NotifyCanExecuteChanged();
+        SendReplyCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(CanShowNewTaskButton));
+        // r29 doc 03 3.5: the reply row's caption, watermark, button label and
+        // visibility all turn on whether a run is in flight.
+        OnPropertyChanged(nameof(IsSteering));
+        OnPropertyChanged(nameof(ReplyBoxTitle));
+        OnPropertyChanged(nameof(ReplyWatermark));
+        OnPropertyChanged(nameof(ReplyButtonLabel));
+        OnPropertyChanged(nameof(ShowReplyBox));
+        OnPropertyChanged(nameof(HasDecisionWaiting));
 
         OnPropertyChanged(nameof(CurrentStepCountLabel));
 

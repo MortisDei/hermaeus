@@ -548,18 +548,35 @@ public sealed class ServerProcessManager : IDisposable
                 parts.Add("mean");
             }
 
-            // r14 2.4: llama-server clamps n_batch down to n_ubatch (512) for
-            // embeddings and logs a warning pair every start; set a coherent
-            // pair up front so the start is clean.
+            // r14 2.4 set this pair to a hardcoded 512 so llama-server would
+            // stop logging a clamp warning at every start. That silenced the
+            // warning and introduced a much worse defect, found in a real
+            // runtime log: the physical batch is the largest input the server
+            // will embed AT ALL, and anything bigger is refused outright with
+            //   "input (N tokens) is too large to process.
+            //    increase the physical batch size (current batch size: 512)"
+            //
+            // RAG chunks default to 1600 characters plus 320 of overlap, which
+            // is 500 to 650 real tokens for prose and denser again for code, so
+            // a large share of every ingest was being rejected. One owner log
+            // carried 846 of those errors. Nothing surfaced it: ingestion
+            // reported success for the chunks that fit and the rest went to the
+            // runtime log, so the feature looked like it worked.
+            //
+            // The batch now follows the context size, which is the real ceiling
+            // on a single embedding input anyway: if it fits the context, the
+            // server can embed it. The pair stays equal so the clamp warning
+            // r14 was chasing still never appears.
+            var embeddingBatch = Math.Max(512, cfg.ContextSize).ToString(CultureInfo.InvariantCulture);
             if (!HasArg("-b") && !HasArg("--batch-size"))
             {
                 parts.Add("-b");
-                parts.Add("512");
+                parts.Add(embeddingBatch);
             }
             if (!HasArg("-ub") && !HasArg("--ubatch-size"))
             {
                 parts.Add("-ub");
-                parts.Add("512");
+                parts.Add(embeddingBatch);
             }
         }
 
@@ -594,6 +611,27 @@ public sealed class ServerProcessManager : IDisposable
 
         if (cfg.NoMemoryMap && !HasArg("--no-mmap") && !HasArg("--mmap"))
             parts.Add("--no-mmap");
+
+        // Mixture-of-Experts CPU offload. Flag names read from llama-server
+        // b10215's own --help, per the r27 rule that only flags the installed
+        // binary actually lists appear here:
+        //   -cmoe,  --cpu-moe       keep all MoE weights in the CPU
+        //   -ncmoe, --n-cpu-moe N   keep the MoE weights of the first N layers in the CPU
+        // 0 emits nothing, which is the pre-0.36 command line exactly.
+        if (cfg.CpuMoeLayers != 0
+            && !HasArg("--cpu-moe") && !HasArg("-cmoe")
+            && !HasArg("--n-cpu-moe") && !HasArg("-ncmoe"))
+        {
+            if (cfg.CpuMoeLayers < 0)
+            {
+                parts.Add("--cpu-moe");
+            }
+            else
+            {
+                parts.Add("--n-cpu-moe");
+                parts.Add(cfg.CpuMoeLayers.ToString(CultureInfo.InvariantCulture));
+            }
+        }
 
         // r27 03-drafting-and-proof.md 3.2: speculative decoding, with the flag
         // names the installed binary (b10195) actually lists. --draft-max,
@@ -767,20 +805,55 @@ public sealed class ServerProcessManager : IDisposable
             if (process is { HasExited: true })
                 throw new InvalidOperationException($"llama-server exited before it became ready. Exit code: {process.ExitCode}.");
 
+            // r29 doc 04 4.4: both the probe and the poll interval are raced
+            // against process exit. Before this, a server that died on launch
+            // was still diagnosed only after the in-flight probe ran out the
+            // HttpClient's 2 s timeout (which is what happens when something
+            // else holds the port open but never answers) and then the 600 ms
+            // interval elapsed on top. The app already had the answer and sat
+            // on it, and the user waited seconds to be told the launch failed.
+            using var iterationCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             try
             {
-                var r = await http.GetAsync(url, ct);
-                if (r.IsSuccessStatusCode) return;
-            }
-            // The HttpClient's own 2 s timeout throws OperationCanceledException too, indistinguishable
-            // from a real cancellation by type alone; only a genuinely cancelled ct should escape this
-            // retry loop (r9 02-server-lifecycle.md 2.4: an HTTP timeout must not masquerade as a
-            // user-initiated cancel and overwrite an already-diagnosed Error state with a silent Stopped).
-            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested) { }
+                var exited  = WhenProcessExitsAsync(process, iterationCts.Token);
+                var request = http.GetAsync(url, iterationCts.Token);
 
-            await Task.Delay(600, ct);
+                if (await Task.WhenAny(request, exited) != request)
+                    continue;   // the process is gone; the top of the loop reports it
+
+                try
+                {
+                    var r = await request;
+                    if (r.IsSuccessStatusCode) return;
+                }
+                // The HttpClient's own 2 s timeout throws OperationCanceledException too, indistinguishable
+                // from a real cancellation by type alone; only a genuinely cancelled ct should escape this
+                // retry loop (r9 02-server-lifecycle.md 2.4: an HTTP timeout must not masquerade as a
+                // user-initiated cancel and overwrite an already-diagnosed Error state with a silent Stopped).
+                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested) { }
+
+                await Task.WhenAny(Task.Delay(600, iterationCts.Token), exited);
+            }
+            finally
+            {
+                // Abandons whichever of the probe, the exit watch and the poll
+                // delay is still outstanding, so nothing survives the iteration.
+                iterationCts.Cancel();
+            }
         }
         throw new TimeoutException($"llama-server on port {port} did not respond within 5 minutes");
+    }
+
+    /// <summary>Completes when the process exits, or never for a null process.</summary>
+    private static Task WhenProcessExitsAsync(Process? process, CancellationToken ct)
+    {
+        var task = process is null
+            ? Task.Delay(Timeout.Infinite, ct)
+            : process.WaitForExitAsync(ct);
+        // Abandoned at the end of every poll iteration; observe the resulting
+        // cancellation so it is not an unobserved task exception.
+        _ = task.ContinueWith(static t => _ = t.Exception, TaskScheduler.Default);
+        return task;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

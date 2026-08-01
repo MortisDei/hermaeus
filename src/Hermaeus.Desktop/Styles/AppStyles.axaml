@@ -23,28 +23,39 @@
         </ResourceDictionary>
     </Styles.Resources>
 
-    <!-- Avalonia places a tooltip at the pointer by default, so the popup
-         opens directly under the cursor. The pointer is then over the popup,
-         not the control: the cursor reverts to an arrow, the control counts as
-         exited, the tooltip closes, the cursor returns to a hand, and the
-         tooltip opens again. That loop is the cursor flicker on the nav icons,
-         and it is worst near an edge where the popup lands right under the
-         pointer. Placing tooltips below the control they describe takes the
-         popup out from under the cursor entirely. -->
+    <!-- Tooltips are drawn by Controls/OverlayToolTip.cs, not by Avalonia's
+         ToolTipService. Avalonia shows them in a Popup whose outermost edge
+         counts as being over the popup but returns no hit-test result, so the
+         service concludes nothing is under the pointer, closes the tooltip, and
+         reopens it because the pointer never left the control. That loop
+         rewrites TopLevel.PointerOverElement, TopLevel calls SetCursor on every
+         change, and the cursor flickers between the control's hand and the
+         default arrow - usually without the tooltip ever painting. It is
+         upstream AvaloniaUI/Avalonia#19218, still open against 12.0.3 on
+         Windows, macOS and Wayland.
+
+         ServiceEnabled false stops that service. ToolTip.Tip is still the
+         source of the text and is still what the icon-only-control guard test
+         scans for; OverlayToolTip reads the same attached values and renders
+         them in the window's OverlayLayer with hit-testing off, so the tooltip
+         cannot influence what the pointer is over and the loop has nothing to
+         feed on. Four XAML placement and hit-test workarounds were tried before
+         this and none held, because none of them removed the popup. -->
     <Style Selector=":is(Control)">
-        <Setter Property="ToolTip.Placement" Value="Bottom" />
-        <Setter Property="ToolTip.VerticalOffset" Value="6" />
+        <Setter Property="ToolTip.ServiceEnabled" Value="False" />
     </Style>
 
-    <Style Selector="ToolTip">
+    <Style Selector="Border.app-tooltip">
         <Setter Property="Background" Value="{DynamicResource AppToolTipBackgroundBrush}" />
-        <Setter Property="Foreground" Value="{DynamicResource AppToolTipForegroundBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AppToolTipBorderBrush}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="8" />
         <Setter Property="Padding" Value="10,8" />
-        <Setter Property="MaxWidth" Value="360" />
-        <Setter Property="TextBlock.TextWrapping" Value="Wrap" />
+        <Setter Property="BoxShadow" Value="0 2 8 0 #40000000" />
+    </Style>
+    <Style Selector="Border.app-tooltip TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource AppToolTipForegroundBrush}" />
+        <Setter Property="TextWrapping" Value="Wrap" />
     </Style>
 
     <!-- r22 2.2: first-party text-dim classes with a contrast floor. Ad-hoc
@@ -105,10 +116,13 @@
         <Setter Property="MinHeight" Value="48" />
         <Setter Property="MaxHeight" Value="200" />
         <Setter Property="TextWrapping" Value="Wrap" />
-        <!-- AcceptsReturn is set dynamically in ChatView.axaml.cs based on
-             Ui.CtrlEnterToSend: hardcoding it true here would make Avalonia's
-             own newline-insertion swallow a plain Enter before the app's send
-             handler ever sees it, regardless of the setting. -->
+        <!-- r29 doc 01 1.4: AcceptsReturn is true always. It used to be set
+             dynamically from Ui.CtrlEnterToSend, which left the default
+             configuration (setting false) with AcceptsReturn false and no key
+             combination that could insert a newline at all. ChatView's
+             tunnelling KeyDown handler now decides send vs newline for both
+             settings before TextBox's class handler sees the key. -->
+        <Setter Property="AcceptsReturn" Value="True" />
         <Setter Property="VerticalContentAlignment" Value="Center" />
     </Style>
 
@@ -119,6 +133,37 @@
         <Setter Property="Padding" Value="6" />
         <Setter Property="CornerRadius" Value="6" />
         <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <!-- The base-state Background setters below are what stop the cursor
+         flicker, and every ":pointerover /template/ ContentPresenter" style in
+         this file needs its matching pair.
+
+         Measured cause: with only a hover setter, the presenter's background
+         between hovers came from the template binding, and when the hover
+         setter deactivated the presenter stopped being a hit-test result. The
+         pointer then fell through to the window's root Panel, which dropped
+         :pointerover, which restored the button, which re-hovered it - a two
+         state oscillator running at about 80Hz. Every rebuild rewrites
+         TopLevel.PointerOverElement and TopLevel calls SetCursor on every such
+         change, so the cursor alternated between the button's hand and the
+         default arrow. A pointer-event log showed 953 enter/exit pairs on one
+         inactive button against 7 on the active one.
+
+         The active nav button never flickered because nav-active sets this
+         same presenter background explicitly and unconditionally, so hovering
+         it changes nothing. Pinning the base state here gives every button that
+         same property: hover swaps one brush for another instead of
+         introducing one, and hit-testing never changes.
+
+         The base selector excludes :pointerover, :pressed and :disabled so it
+         is mutually exclusive with the hover setter below and with FluentTheme's
+         pressed and disabled setters. An earlier version excluded only the last
+         two, which left base and hover both matching while hovering; which one
+         won then depended on style activation order rather than on anything
+         written here, and the hover highlight stopped appearing. Exactly one of
+         these selectors matches in any state. -->
+    <Style Selector="Button.icon-btn:not(:pointerover):not(:pressed):not(:disabled) /template/ ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
     </Style>
     <Style Selector="Button.icon-btn:pointerover /template/ ContentPresenter">
         <Setter Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
@@ -134,6 +179,9 @@
         <Setter Property="CornerRadius" Value="8" />
         <Setter Property="Cursor" Value="Hand" />
     </Style>
+    <Style Selector="Button.activity-row:not(:pointerover):not(:pressed):not(:disabled) /template/ ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
     <Style Selector="Button.activity-row:pointerover /template/ ContentPresenter">
         <Setter Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
     </Style>
@@ -148,6 +196,9 @@
         <Setter Property="MinWidth" Value="70" />
         <Setter Property="Background" Value="{DynamicResource BrandForestBrush}" />
         <Setter Property="Foreground" Value="{DynamicResource BrandParchmentBrush}" />
+    </Style>
+    <Style Selector="Button.send-btn:not(:pointerover):not(:pressed):not(:disabled) /template/ ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource BrandForestBrush}" />
     </Style>
     <Style Selector="Button.send-btn:pointerover /template/ ContentPresenter">
         <Setter Property="Background" Value="{DynamicResource BrandDeepMossBrush}" />
@@ -166,6 +217,9 @@
         <Setter Property="BorderBrush" Value="{DynamicResource BrandForestBrush}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="Foreground" Value="{DynamicResource BrandForestBrush}" />
+    </Style>
+    <Style Selector="Button.sidebar-new:not(:pointerover):not(:pressed):not(:disabled) /template/ ContentPresenter">
+        <Setter Property="Background" Value="Transparent" />
     </Style>
     <Style Selector="Button.sidebar-new:pointerover /template/ ContentPresenter">
         <Setter Property="Background" Value="{DynamicResource BrandForestBrush}" />

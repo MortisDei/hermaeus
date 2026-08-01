@@ -76,7 +76,15 @@
 
                 <ListBox.ItemTemplate>
                     <DataTemplate DataType="vm:ConversationItemViewModel">
-                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="4">
+                        <!-- ColumnSpacing and the details button's rounded corners
+                             leave gaps that hit-test to nothing, so the pointer
+                             fell through to the window root and the cursor
+                             flickered hand/arrow beside the button. IconBarCursor
+                             skips this container because it also holds text, so
+                             it is set here. The hand is already right for the
+                             whole row: conv-item sets it too. -->
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="4"
+                              Background="Transparent" Cursor="Hand">
                             <StackPanel Grid.Column="0" Spacing="4">
                                 <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
                                     <!-- A horizontal StackPanel measures its children with

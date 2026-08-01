@@ -54,7 +54,10 @@ public sealed class DesktopIntegrationService : IDisposable
         if (_isQuitting)
             return false;
 
-        return _vm.Settings.EnableTrayIcon && _vm.Settings.MinimizeToTray;
+        // Closing and minimizing are separate choices now. Sharing one flag
+        // meant wanting minimize-to-tray also meant the app could never be
+        // closed from its own window button.
+        return _vm.Settings.EnableTrayIcon && _vm.Settings.CloseToTray;
     }
 
     public void Dispose()

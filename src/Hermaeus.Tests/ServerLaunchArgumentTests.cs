@@ -39,12 +39,19 @@ public sealed class ServerLaunchArgumentTests
         Assert.Equal("32", ArgValue(args, "--cache-reuse"));
     }
 
+    /// <summary>
+    /// The pair stays coherent (equal), which is what stops llama-server
+    /// logging its clamp warning, but it is no longer the hardcoded 512 this
+    /// test used to assert. 512 is also the largest input the server will embed
+    /// at all, and RAG chunks routinely exceed it, so that value was silently
+    /// refusing a large share of every ingest. See EmbeddingBatchSizeTests.
+    /// </summary>
     [Fact]
-    public void Embeddings_pin_a_coherent_batch_pair()
+    public void Embeddings_pin_a_coherent_batch_pair_sized_to_the_context()
     {
-        var args = Args(new ServerConfig { EmbeddingsMode = true });
-        Assert.Equal("512", ArgValue(args, "-b"));
-        Assert.Equal("512", ArgValue(args, "-ub"));
+        var args = Args(new ServerConfig { EmbeddingsMode = true, ContextSize = 4096 });
+        Assert.Equal("4096", ArgValue(args, "-b"));
+        Assert.Equal("4096", ArgValue(args, "-ub"));
     }
 
     // r18 04-llama-server-engine-options.md 4.1: first-class engine options, defaults

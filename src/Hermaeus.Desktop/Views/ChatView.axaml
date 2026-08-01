@@ -49,7 +49,18 @@
                 Padding="12,6"
                 BorderThickness="0,0,0,1"
                 BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
-            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
+            <!-- ColumnSpacing leaves an 8px dead strip between each icon button.
+                 A gap that hit-tests to nothing sends the pointer through to the
+                 window root, whose cursor is the default arrow, so crossing the
+                 row flickered hand/arrow/hand.
+                 Background and Cursor go on the Grid itself, not on a sibling
+                 Border spanning the buttons: a control's own background is
+                 painted behind its children and is only hit where no child is
+                 hit, so it fills the gaps without ever taking the pointer off a
+                 button. A sibling Border was tried first and swallowed the
+                 buttons' hover highlight. -->
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8"
+                  Background="Transparent" Cursor="Hand">
 
                 <TextBlock Grid.Column="0" Text="Model"
                            VerticalAlignment="Center" Opacity="0.5" FontSize="12" />
@@ -443,7 +454,7 @@
             <ScrollViewer x:Name="MessagesScroll"
                           VerticalScrollBarVisibility="Auto"
                           HorizontalScrollBarVisibility="Disabled"
-                          Padding="16,8,16,28">
+                          Padding="16,8,16,8">
                 <StackPanel>
                     <Button Content="Show earlier messages"
                             Command="{Binding ShowEarlierMessagesCommand}"
@@ -464,6 +475,15 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
+                    <!-- r29 doc 01 1.3: keep this. The last assistant message's
+                         copy/read-aloud row sits outside its message border and
+                         used to end up flush against the input bar, where it
+                         could not reliably be clicked. ScrollViewer.Padding did
+                         not produce usable space (whether it contributes to the
+                         scrollable extent is a ScrollContentPresenter detail);
+                         a spacer inside the scrolled content unambiguously
+                         does. Do not tidy it away. -->
+                    <Border x:Name="TranscriptTrailingSpacer" Height="36" Opacity="0" IsHitTestVisible="False" />
                 </StackPanel>
             </ScrollViewer>
 
@@ -664,8 +684,7 @@
                              x:Name="InputBox"
                              Classes="chat-input"
                              Text="{Binding InputText}"
-                             Watermark="Message or drop text/code files here..."
-                             KeyDown="OnInputKeyDown" />
+                             Watermark="Message or drop text/code files here..." />
 
                     <controls:MicButton Grid.Column="2" x:Name="ChatMicButton" VerticalAlignment="Center" />
 

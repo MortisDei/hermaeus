@@ -6,8 +6,10 @@
   <!--
     Icon-scale rendering of the "Moss" mascot per docs/mascot.md's
     woodland-goblin spec: a weathered hood (not a round cute face), pointed
-    ears, a small brass spectacles band, and a warm lantern-glow accent in
-    place of the retired cute-era mushroom tuft. Plain vector shapes only
+    ears and a small brass spectacles band. The amber "lantern glow" dot that
+    used to sit off Moss's right temple is gone: with no lantern drawn to
+    attach it to, it read as an unexplained orange ball floating beside his
+    head, which is what the owner saw. Plain vector shapes only
     (no image/SVG dependency) so it scales cleanly at any size this control
     is placed at.
   -->
@@ -23,7 +25,6 @@
       <Ellipse Canvas.Left="8.9" Canvas.Top="13" Width="0.9" Height="0.9" Fill="#E8DFC6" />
       <Ellipse Canvas.Left="13.3" Canvas.Top="13" Width="0.9" Height="0.9" Fill="#E8DFC6" />
       <Rectangle Canvas.Left="7.8" Canvas.Top="13.6" Width="8.4" Height="1" RadiusX="0.5" RadiusY="0.5" Fill="#B87333" />
-      <Ellipse Canvas.Left="18" Canvas.Top="15" Width="2.4" Height="2.4" Fill="#D19A42" />
     </Canvas>
   </Viewbox>
 </UserControl>

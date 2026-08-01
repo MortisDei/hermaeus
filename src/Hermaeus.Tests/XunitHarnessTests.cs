@@ -451,6 +451,8 @@ public static class HarnessCases
         [new HarnessCase("recommend returns medium tier for mid vram", SetupWizardOnboardingTests.RecommendReturnsMediumTierForMidVram)],
         [new HarnessCase("recommend returns large tier for high vram", SetupWizardOnboardingTests.RecommendReturnsLargeTierForHighVram)],
         [new HarnessCase("catalog entries declare https urls and sha256 hashes", SetupWizardOnboardingTests.CatalogEntriesDeclareHttpsUrlsAndSha256Hashes)],
+        [new HarnessCase("catalog offers models under more than one licence", SetupWizardOnboardingTests.CatalogOffersModelsUnderMoreThanOneLicence)],
+        [new HarnessCase("wizard starter model selection follows the recommendation until the user chooses", SetupWizardOnboardingTests.WizardStarterModelSelectionFollowsTheRecommendationUntilTheUserChooses)],
         [new HarnessCase("wizard downloads starter model verifies hash and sets model path", SetupWizardOnboardingTests.WizardDownloadsStarterModelVerifiesHashAndSetsModelPath)],
         [new HarnessCase("wizard starter model download deletes file and reports error on hash mismatch", SetupWizardOnboardingTests.WizardStarterModelDownloadDeletesFileAndReportsErrorOnHashMismatch)],
         [new HarnessCase("only kokoro native can install from wizard", SetupWizardOnboardingTests.OnlyKokoroNativeCanInstallFromWizard)],

@@ -31,9 +31,58 @@ public partial class SetupWizardViewModel : ObservableObject
 
     // ── Guided starter model download (docs/review 02-onboarding-and-usability.md 2.1) ──
     [ObservableProperty] private bool _useStarterModelDownload;
+    /// <summary>The VRAM-based default. Kept so the wizard can say which entry it suggested.</summary>
     [ObservableProperty] private StarterModelEntry? _recommendedStarterModel;
+    /// <summary>
+    /// What will actually be downloaded. Starts at <see cref="RecommendedStarterModel"/>
+    /// and the user can pick any entry in <see cref="StarterModels"/>: the sizes
+    /// are close enough that VRAM is not the only thing worth choosing on, and
+    /// the licences differ (one entry is research and non-commercial only).
+    /// </summary>
+    [ObservableProperty] private StarterModelEntry? _selectedStarterModel;
     [ObservableProperty] private string _recommendedStarterModelFitLabel = string.Empty;
     [ObservableProperty] private string _recommendedStarterModelFitReason = string.Empty;
+
+    /// <summary>Every starter model on offer, for the wizard's picker.</summary>
+    public IReadOnlyList<StarterModelEntry> StarterModels { get; } = StarterModelCatalog.All;
+
+    /// <summary>True when the chosen entry is the one recommended for this machine.</summary>
+    public bool SelectedStarterModelIsRecommended =>
+        SelectedStarterModel is not null && SelectedStarterModel.Id == RecommendedStarterModel?.Id;
+
+    /// <summary>
+    /// The recommendation the selection is currently tracking. Used to tell
+    /// "the user has not chosen anything yet" from "the user chose this".
+    /// </summary>
+    private string _followedRecommendationId = string.Empty;
+
+    /// <summary>
+    /// The hardware probe finishes after the wizard is constructed, so the
+    /// recommendation can arrive (or change) with a selection already in place.
+    /// Follow it while the selection is still whatever was last recommended;
+    /// leave it alone the moment the user has picked something else.
+    /// </summary>
+    partial void OnRecommendedStarterModelChanged(StarterModelEntry? value)
+    {
+        if (value is null)
+            return;
+
+        if (SelectedStarterModel is null || SelectedStarterModel.Id == _followedRecommendationId)
+        {
+            _followedRecommendationId = value.Id;
+            SelectedStarterModel = value;
+        }
+
+        OnPropertyChanged(nameof(SelectedStarterModelIsRecommended));
+    }
+
+    partial void OnSelectedStarterModelChanged(StarterModelEntry? value)
+    {
+        OnPropertyChanged(nameof(SelectedStarterModelIsRecommended));
+        // The fit badge describes the model that will be downloaded, so it has
+        // to follow the selection rather than stay on the recommendation.
+        _ = RefreshStarterModelFitAsync();
+    }
     [ObservableProperty] private bool _isDownloadingStarterModel;
     [ObservableProperty] private double _starterModelDownloadPercent;
     [ObservableProperty] private string _starterModelDownloadStatus = string.Empty;
@@ -150,10 +199,21 @@ public partial class SetupWizardViewModel : ObservableObject
             RecommendedStarterModel = StarterModelCatalog.Small;
         }
 
+        // OnRecommendedStarterModelChanged has already moved the selection if
+        // the user has not chosen for themselves.
+        await RefreshStarterModelFitAsync();
+    }
+
+    private async Task RefreshStarterModelFitAsync()
+    {
+        var entry = SelectedStarterModel ?? RecommendedStarterModel;
+        if (entry is null)
+            return;
+
         try
         {
             var hardware = await _systemInfo.GetHardwareProfileAsync();
-            var fit = ModelFitEstimator.Estimate(RecommendedStarterModel.SizeBytes, hardware);
+            var fit = ModelFitEstimator.Estimate(entry.SizeBytes, hardware);
             RecommendedStarterModelFitLabel = ModelFitEstimator.Label(fit.Tier);
             RecommendedStarterModelFitReason = fit.Reason;
         }
@@ -231,7 +291,7 @@ public partial class SetupWizardViewModel : ObservableObject
     private async Task DownloadStarterModelAsync()
     {
         if (IsDownloadingStarterModel) return;
-        var entry = RecommendedStarterModel ?? StarterModelCatalog.Small;
+        var entry = SelectedStarterModel ?? RecommendedStarterModel ?? StarterModelCatalog.Small;
 
         IsDownloadingStarterModel = true;
         StarterModelDownloadCompleted = false;
