@@ -44,7 +44,10 @@ public sealed class LlamaServerSetupService
     /// </summary>
     public const string PinnedTag = "b10034";
 
-    private const string ReleaseRepo = "ggerganov/llama.cpp";
+    // The project moved from ggerganov/ to the ggml-org/ organisation. GitHub
+    // still redirects the old slug, so this kept working, but a redirect is not
+    // a guarantee and the API path is the one that matters for release lookups.
+    private const string ReleaseRepo = "ggml-org/llama.cpp";
     private const string ReleaseBaseUrl = $"https://github.com/{ReleaseRepo}/releases/download";
     private const string ReleaseApiBaseUrl = $"https://api.github.com/repos/{ReleaseRepo}/releases";
 

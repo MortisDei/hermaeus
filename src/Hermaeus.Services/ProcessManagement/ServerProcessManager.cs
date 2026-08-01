@@ -595,6 +595,27 @@ public sealed class ServerProcessManager : IDisposable
         if (cfg.NoMemoryMap && !HasArg("--no-mmap") && !HasArg("--mmap"))
             parts.Add("--no-mmap");
 
+        // Mixture-of-Experts CPU offload. Flag names read from llama-server
+        // b10215's own --help, per the r27 rule that only flags the installed
+        // binary actually lists appear here:
+        //   -cmoe,  --cpu-moe       keep all MoE weights in the CPU
+        //   -ncmoe, --n-cpu-moe N   keep the MoE weights of the first N layers in the CPU
+        // 0 emits nothing, which is the pre-0.36 command line exactly.
+        if (cfg.CpuMoeLayers != 0
+            && !HasArg("--cpu-moe") && !HasArg("-cmoe")
+            && !HasArg("--n-cpu-moe") && !HasArg("-ncmoe"))
+        {
+            if (cfg.CpuMoeLayers < 0)
+            {
+                parts.Add("--cpu-moe");
+            }
+            else
+            {
+                parts.Add("--n-cpu-moe");
+                parts.Add(cfg.CpuMoeLayers.ToString(CultureInfo.InvariantCulture));
+            }
+        }
+
         // r27 03-drafting-and-proof.md 3.2: speculative decoding, with the flag
         // names the installed binary (b10195) actually lists. --draft-max,
         // --draft-min, --draft-n, --spec-ngram-size-n and friends have been

@@ -459,6 +459,27 @@
                                                       IsEnabled="{Binding CanEdit}" />
                                         </StackPanel>
 
+                                        <!-- Mixture-of-Experts CPU offload. A different knob
+                                             from GPU layers, and the right one for a MoE model:
+                                             the experts are most of the file but only a few are
+                                             active per token, so keeping them in RAM leaves the
+                                             GPU free for attention. Turning GPU layers down
+                                             instead gives up the part that wants the GPU. -->
+                                        <Grid ColumnDefinitions="200,120,*" ColumnSpacing="8">
+                                            <TextBlock Grid.Column="0" Text="MoE experts on CPU"
+                                                       VerticalAlignment="Center" FontSize="12" Opacity="0.75" />
+                                            <TextBox Grid.Column="1"
+                                                     Text="{Binding CpuMoeLayersText}"
+                                                     Watermark="off"
+                                                     FontSize="12"
+                                                     CornerRadius="6"
+                                                     IsEnabled="{Binding CanEdit}"
+                                                     ToolTip.Tip="Blank or 0 is off. A number N keeps the MoE weights of the first N layers on the CPU (--n-cpu-moe N). &quot;all&quot; keeps every expert on the CPU (--cpu-moe). Only affects Mixture-of-Experts models; ignored by dense ones." />
+                                            <TextBlock Grid.Column="2"
+                                                       Text="Only affects MoE models. Lets a large MoE run with attention on the GPU and the experts in RAM, instead of cutting GPU layers to make it fit."
+                                                       VerticalAlignment="Center" FontSize="11" Opacity="0.55" TextWrapping="Wrap" />
+                                        </Grid>
+
                                         <!-- r27 03-drafting-and-proof.md 3.1: one composable
                                              speculative-decoding section. The spec-type flag
                                              takes a comma-separated list, and drafting and

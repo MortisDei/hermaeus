@@ -495,6 +495,14 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
   launch falls back to the CPU build once. `GpuLayers = -1` offloads all
   layers (the default for new servers when a GPU is present), `0` stays on the
   CPU, and `N` offloads exactly N.
+- **Mixture-of-Experts CPU offload** (`--n-cpu-moe` / `--cpu-moe`), under
+  Services > Advanced engine options. On a MoE model the expert weights are
+  most of the file but only a few are active per token, so the useful trade is
+  attention on the GPU and experts in RAM. Cutting GPU layers to make a MoE
+  model fit gives up the part that actually wants the GPU. Blank or 0 is off
+  and changes nothing; a number keeps that many layers' experts on the CPU;
+  "all" keeps every expert there. No effect on a dense model. See
+  `docs/llama-cpp-features.md`.
 - Managed servers launch fast by default for a single user: one request slot
   (`--parallel 1`, so the whole context belongs to one conversation and every
   send reuses the KV cache), explicit prompt caching plus `--cache-reuse`, and

@@ -718,7 +718,7 @@ public sealed partial class DoctorService
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(4) };
             http.DefaultRequestHeaders.UserAgent.ParseAdd("Hermaeus-Doctor/1.0");
             var release = await http.GetFromJsonAsync<GitHubRelease>(
-                "https://api.github.com/repos/ggerganov/llama.cpp/releases/latest",
+                "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest",
                 timeout.Token);
             if (string.IsNullOrWhiteSpace(release?.TagName))
                 return null;
