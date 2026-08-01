@@ -3,6 +3,7 @@
              xmlns:vm="using:Hermaeus.ViewModels"
              xmlns:views="using:Hermaeus.Desktop.Views"
              xmlns:controls="using:Hermaeus.Desktop.Controls"
+             xmlns:services="using:Hermaeus.Services"
              x:Class="Hermaeus.Desktop.Views.SetupWizardView"
              x:DataType="vm:SetupWizardViewModel">
 
@@ -68,8 +69,26 @@
                         </Grid>
 
                         <StackPanel IsVisible="{Binding UseStarterModelDownload}" Spacing="8">
+                            <!-- The wizard suggests a size from the machine's VRAM, but the
+                                 choice is the user's: these models differ in licence as well
+                                 as size, and one of them is research/non-commercial only. -->
+                            <ComboBox ItemsSource="{Binding StarterModels}"
+                                      SelectedItem="{Binding SelectedStarterModel}"
+                                      HorizontalAlignment="Stretch"
+                                      FontSize="13"
+                                      ToolTip.Tip="Every option downloads once from Hugging Face and then runs fully offline.">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate DataType="services:StarterModelEntry">
+                                        <StackPanel Spacing="1" Margin="0,2">
+                                            <TextBlock Text="{Binding DisplayName}" FontSize="13" />
+                                            <TextBlock Text="{Binding LicenseDisplay}"
+                                                       IsVisible="{Binding HasLicense}"
+                                                       FontSize="11" Opacity="0.6" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
                             <StackPanel Orientation="Horizontal" Spacing="8">
-                                <TextBlock Text="{Binding RecommendedStarterModel.DisplayName}" FontSize="13" FontWeight="SemiBold" />
                                 <Border CornerRadius="4" Padding="6,1"
                                         VerticalAlignment="Center"
                                         IsVisible="{Binding RecommendedStarterModelFitLabel, Converter={x:Static views:NotEmptyConverter.Instance}}"
@@ -77,8 +96,14 @@
                                         ToolTip.Tip="{Binding RecommendedStarterModelFitReason}">
                                     <TextBlock Text="{Binding RecommendedStarterModelFitLabel}" FontSize="10" FontWeight="SemiBold" />
                                 </Border>
+                                <TextBlock Text="Recommended for your GPU"
+                                           IsVisible="{Binding SelectedStarterModelIsRecommended}"
+                                           FontSize="11" Opacity="0.6" VerticalAlignment="Center" />
                             </StackPanel>
-                            <TextBlock Text="Recommended for your GPU's available VRAM; downloads once, then runs fully offline."
+                            <TextBlock Text="{Binding SelectedStarterModel.LicenseDisplay}"
+                                       IsVisible="{Binding SelectedStarterModel.HasLicense}"
+                                       FontSize="11" Opacity="0.6" TextWrapping="Wrap" />
+                            <TextBlock Text="Downloads once, then runs fully offline. The model's licence is the publisher's, not Hermaeus's; read it before you rely on the model for anything."
                                        FontSize="11" Opacity="0.6" TextWrapping="Wrap" />
                             <Button Content="Download starter model"
                                     Command="{Binding DownloadStarterModelCommand}"

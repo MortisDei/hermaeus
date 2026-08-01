@@ -475,6 +475,13 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
   nothing at all for a model reported live by a running provider. It is drawn
   from a source kind rather than a Hugging Face flag, so a second download
   provider gets its own glyph and label in the same slot.
+- The setup wizard offers a choice of starter models rather than one
+  recommendation, and **states each model's licence before you download it**.
+  The list spans several licence families on purpose: Phi-4 mini (MIT),
+  Qwen2.5 7B/14B and Gemma 4 E4B (Apache-2.0), Llama 3.2 3B (Llama 3.2
+  Community License), and Qwen2.5 3B, which is research and non-commercial
+  only and says so. The VRAM-based recommendation is the starting selection,
+  not the only option, and it stops overriding you the moment you pick.
 - Model profiles with display names, descriptions, tags, visibility, and defaults.
 - Runtime profiles for `llama.cpp`, Ollama, and OpenAI-compatible endpoints.
   Ollama chat streams incrementally like the other two providers, instead of
