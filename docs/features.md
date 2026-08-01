@@ -1256,3 +1256,13 @@ pick their own font for headings, body text, and code independently. Settings
 on startup. Tooltips use an explicit branded, theme-aware style, and
 secondary/tertiary text uses two first-party opacity classes (`hint`,
 `faint`) with a contrast floor, instead of ad-hoc per-control opacity values.
+
+Tooltips are drawn by the app rather than by Avalonia's built-in tooltip
+service (`Hermaeus.Desktop/Controls/OverlayToolTip.cs`). Avalonia shows them in
+a popup whose outer edge produces no hit-test result, which makes the service
+close and immediately reopen the tooltip and flickers the mouse cursor on every
+button in the app (upstream AvaloniaUI/Avalonia#19218). The app's version
+renders into the window's overlay layer with hit-testing off, so it cannot
+affect what the pointer is over, and is clamped to the window so a control near
+the screen edge behaves like any other. Views are unaffected: they still set
+`ToolTip.Tip` as before.

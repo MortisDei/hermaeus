@@ -51,6 +51,17 @@
                 BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
             <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
 
+                <!-- ColumnSpacing leaves an 8px dead strip between each icon
+                     button. A gap that hit-tests to nothing sends the pointer
+                     through to the window root, whose cursor is the default
+                     arrow, so crossing the row flickered hand/arrow/hand. This
+                     strip sits behind the icon buttons only (not the model
+                     selector, which keeps the normal cursor) and makes those
+                     gaps resolve to a hand. First child, so it renders beneath
+                     the buttons and never intercepts a click. -->
+                <Border Grid.Column="3" Grid.ColumnSpan="9"
+                        Background="Transparent" Cursor="Hand" />
+
                 <TextBlock Grid.Column="0" Text="Model"
                            VerticalAlignment="Center" Opacity="0.5" FontSize="12" />
 

@@ -4,6 +4,7 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Hermaeus.Agent.Services;
 using Hermaeus.Composition;
+using Hermaeus.Desktop.Controls;
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
 using Hermaeus.Rag.Embeddings;
@@ -34,6 +35,9 @@ public partial class App : Application
     public override void OnFrameworkInitializationCompleted()
     {
         UiThreadGuard.Arm();
+        // Replaces Avalonia's ToolTipService for every window in the process;
+        // see Controls/OverlayToolTip.cs for why.
+        OverlayToolTip.Install();
         var services = new ServiceCollection();
         ConfigureServices(services);
         var sp = services.BuildServiceProvider();

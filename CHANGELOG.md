@@ -63,16 +63,34 @@ through the UI and the test suite alike.
   statement and reached the UI as an unhandled fault.
 - Managed llama.cpp release lookups use the `ggml-org` organisation. The
   project moved from `ggerganov`, and GitHub's redirect was doing the work.
-- **The nav and toolbar cursor flicker.** Confirmed rather than theorised:
-  removing a tooltip from one button stopped that button flickering, so the
-  popup is the mechanism, and the two earlier attempts fixed the cursor region,
-  which never was. The fix is placement - tooltips open below the control they
-  describe rather than under the pointer.
-  The attempt in between made tooltips non-hit-testable, and that was wrong:
-  Avalonia's `ToolTipService` keeps a tooltip open by walking up from the
-  pointer's hit-test result and recognising the tooltip it reaches, so a tooltip
-  that cannot be hit-tested reads as "the pointer left everything" and gets
-  closed and immediately reopened. That setter is gone.
+- **The cursor flicker on the nav rail and the chat icon bar.** The gaps between
+  icon buttons hit-test to nothing: the nav rail's buttons meet at rounded
+  corners, and the chat toolbar sets `ColumnSpacing="8"`. A pointer in one of
+  those gaps falls through to the window's root panel, whose cursor is the
+  default arrow, so crossing a row flickered hand/arrow/hand a few pixels before
+  each button boundary. A pointer-event log taken during the flicker showed the
+  pointer-over chain collapsing to that root panel and rebuilding about 80 times
+  a second, with 953 enter/exit pairs on one inactive nav button against 7 on
+  the active one.
+  Both rows now carry a transparent, hit-testable background with `Cursor="Hand"`
+  behind the buttons, so the gaps resolve to the row instead of the window root.
+  Both halves matter: a panel with no `Background` is never a hit-test result,
+  and `TopLevel` takes the cursor from the hit element without walking up to
+  ancestors, which is why setting `Cursor` alone on the nav panel in r27 could
+  never have worked.
+  The button hover styles also gained unconditional base-state backgrounds, so a
+  hover swaps one brush for another rather than introducing one, and a guard test
+  fails the build if a hover style is added without its base pair.
+  This bug survived five earlier attempts across r27 to r29 aimed at cursor
+  regions, tooltip placement, tooltip hit-testing and popup rendering. The two
+  cursor entries under 0.33.0-alpha below both claimed a fix that did not hold.
+- Tooltips are drawn by the app (`Desktop/Controls/OverlayToolTip.cs`) rather
+  than by Avalonia's `ToolTipService`, which is disabled app-wide. This was built
+  while the flicker was believed to be a tooltip-popup problem; it was not, and
+  this change is not what fixed it. It is kept because it does avoid a genuine
+  open upstream bug, AvaloniaUI/Avalonia#19218, in which the popup's outer edge
+  yields no hit-test result and the service closes and reopens the tooltip in a
+  loop near a screen edge. Views are unaffected: they still set `ToolTip.Tip`.
 - **The RAG question box empties when you send.** It kept the question, which
   next to a finished answer reads as "that never sent". The question is now
   echoed above the answer it produced, and put back in the box only when the
