@@ -87,9 +87,16 @@ through the UI and the test suite alike.
   and `TopLevel` takes the cursor from the hit element without walking up to
   ancestors, which is why setting `Cursor` alone on the nav panel in r27 could
   never have worked.
-  The button hover styles also gained unconditional base-state backgrounds, so a
-  hover swaps one brush for another rather than introducing one, and a guard test
-  fails the build if a hover style is added without its base pair.
+  Containers that also hold text set it in xaml instead, since the automatic pass
+  deliberately skips those so the hand cursor cannot spread across a settings
+  page: the nav rail, the chat toolbar, and the conversation rows, whose details
+  button sat beside its title with a 4px gap.
+  The button hover styles also gained base-state backgrounds, so a hover swaps
+  one brush for another rather than introducing one, and a guard test fails the
+  build if a hover style is added without its base pair. Base and hover selectors
+  are mutually exclusive: while both matched, which one won depended on style
+  activation order rather than on anything written in the file, and the hover
+  highlight stopped appearing on the nav buttons.
   This bug survived five earlier attempts across r27 to r29 aimed at cursor
   regions, tooltip placement, tooltip hit-testing and popup rendering. The two
   cursor entries under 0.33.0-alpha below both claimed a fix that did not hold.

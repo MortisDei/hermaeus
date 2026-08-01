@@ -1257,6 +1257,15 @@ on startup. Tooltips use an explicit branded, theme-aware style, and
 secondary/tertiary text uses two first-party opacity classes (`hint`,
 `faint`) with a contrast floor, instead of ad-hoc per-control opacity values.
 
+Rows of icon buttons keep one continuous hand cursor. The gaps between such
+buttons (the notches where two rounded corners meet, plus any spacing the
+container adds) belong to no button, and a container with no background is not a
+hit-test result either, so the pointer used to fall through to the window root
+and the cursor flickered between the hand and the arrow when crossing a row.
+Containers holding only buttons are handled automatically
+(`Hermaeus.Desktop/Controls/IconBarCursor.cs`); containers that also hold text
+set it in xaml, so the hand never spreads across a panel of labels or inputs.
+
 Tooltips are drawn by the app rather than by Avalonia's built-in tooltip
 service (`Hermaeus.Desktop/Controls/OverlayToolTip.cs`). Avalonia shows them in
 a popup whose outer edge produces no hit-test result, which makes the service
