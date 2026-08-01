@@ -26,7 +26,7 @@ a reason that survives the same test.
 | 11 | Doc 03 Agent steering | Largest and riskiest. Last of the feature work so an interrupted round loses this rather than a bug fix. Its 3.6 tests land in the same commit as the feature, not after. | Yes, including all of 3.6 |
 | 12 | 4.6 + 4.7 Coverage floor and the test-suite doc | Reads the state of the suite after this round's tests exist, not before. | Yes (floor 60, docs/testing.md) |
 | 13 | Doc 05 small items, docs, CHANGELOG, version bump | Close-out. | Yes |
-| 14 | Read 4.1's result and decide | The last thing before the PR merges: compare the Windows TRX against 501.4s. Keep the step or revert it, and record which in `deferred.md`. | Owner action after the first CI run on this branch |
+| 14 | Read 4.1's result and decide | The last thing before the PR merges: compare the Windows TRX against 501.4s. Keep the step or revert it, and record which in `deferred.md`. | Yes. Run 30681255153: Windows summed test duration **72.3s** against the 501.4s baseline. Condition met by a wide margin; the step is KEPT and the result is recorded in `deferred.md`. |
 
 Commit after each row. An interrupted session should cost at most one row.
 

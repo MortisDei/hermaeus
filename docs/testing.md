@@ -131,9 +131,15 @@ developer machine. A full local run in Debug with coverage instrumentation
 attached beat CI Windows in Release with none.
 
 So: do not rewrite tests to make that number smaller. It would trade real
-coverage for a faster clock. r29 added a Defender exclusion to the Windows leg
-as a cheap, reversible experiment with a stated success condition; if it does
-not move the number materially it gets deleted.
+coverage for a faster clock.
+
+**r29 acted on that and it worked.** Excluding the test working set from
+Defender on the Windows leg, and pointing the test temp root at `RUNNER_TEMP`
+so the exclusion actually covers it, took the Windows summed test duration from
+**501.4s to 72.3s** (run 30681255153), and job wall time from 13m06s to 4m33s.
+About 23s of that is r29's own test and product fixes; the rest, roughly 400
+seconds, is the scanner. The runner's filesystem cost was the dominant term and
+it was not a floor.
 
 ## Guard tests
 
