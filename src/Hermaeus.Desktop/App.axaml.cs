@@ -38,6 +38,9 @@ public partial class App : Application
         // Replaces Avalonia's ToolTipService for every window in the process;
         // see Controls/OverlayToolTip.cs for why.
         OverlayToolTip.Install();
+        // Keeps the cursor a hand across the gaps in a row of icon buttons;
+        // see Controls/IconBarCursor.cs for why those gaps flicker.
+        IconBarCursor.Install();
         var services = new ServiceCollection();
         ConfigureServices(services);
         var sp = services.BuildServiceProvider();

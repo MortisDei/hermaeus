@@ -72,8 +72,17 @@ through the UI and the test suite alike.
   pointer-over chain collapsing to that root panel and rebuilding about 80 times
   a second, with 953 enter/exit pairs on one inactive nav button against 7 on
   the active one.
-  Both rows now carry a transparent, hit-testable background with `Cursor="Hand"`
-  behind the buttons, so the gaps resolve to the row instead of the window root.
+  Icon-button containers now carry a transparent, hit-testable background with
+  `Cursor="Hand"`, so the gaps resolve to the row instead of the window root. The
+  nav rail and the chat toolbar set it in xaml because they also hold non-button
+  content; every other all-button container gets it automatically from
+  `Desktop/Controls/IconBarCursor.cs`, since icon buttons appear in fifteen axaml
+  files and a missed container is an invisible regression.
+  The background has to sit on the container itself rather than on a sibling laid
+  over the buttons. A control's own background is painted behind its children and
+  is only hit where no child is hit, so it fills the gaps without taking the
+  pointer off a button; a sibling `Border` was tried in the chat toolbar first and
+  swallowed the buttons' hover highlight.
   Both halves matter: a panel with no `Background` is never a hit-test result,
   and `TopLevel` takes the cursor from the hit element without walking up to
   ancestors, which is why setting `Cursor` alone on the nav panel in r27 could

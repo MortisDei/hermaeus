@@ -48,6 +48,26 @@ public sealed class DocsCoverageGuardTests
     }
 
     /// <summary>
+    /// The gaps between icon buttons hit-test to nothing, so without a container
+    /// background the pointer falls through to the window root and the cursor
+    /// flickers hand/arrow/hand along the row. IconBarCursor fills those gaps for
+    /// every all-button container in the app; dropping the call silently brings
+    /// the flicker back everywhere except the two containers that set it in xaml.
+    /// </summary>
+    [Fact]
+    public void The_icon_bar_cursor_fix_stays_installed()
+    {
+        var app = File.ReadAllText(
+            Path.Combine(RepoRoot, "src", "Hermaeus.Desktop", "App.axaml.cs"));
+
+        Assert.True(
+            app.Contains("IconBarCursor.Install()", StringComparison.Ordinal),
+            "App.OnFrameworkInitializationCompleted must call IconBarCursor.Install(). Without it the " +
+            "cursor flickers between the hand and the arrow when crossing a row of icon buttons. See " +
+            "Controls/IconBarCursor.cs.");
+    }
+
+    /// <summary>
     /// A ":pointerover /template/ ContentPresenter" style that introduces a
     /// background, rather than replacing one the base state already set, makes
     /// the presenter stop being a hit-test result when the hover setter
