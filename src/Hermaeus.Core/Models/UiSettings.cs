@@ -37,9 +37,20 @@ public class UiSettings
     public bool EnableTrayIcon { get; set; } = true;
 
     /// <summary>
-    /// Minimize to tray instead of taskbar.
+    /// Minimizing the window hides it to the tray instead of the taskbar.
     /// </summary>
     public bool MinimizeToTray { get; set; } = true;
+
+    /// <summary>
+    /// Closing the window hides it to the tray instead of exiting.
+    ///
+    /// This used to be the same setting as <see cref="MinimizeToTray"/>, so
+    /// anyone who wanted minimize-to-tray also had no way to actually close the
+    /// app, and the checkbox labelled "Minimize to tray" carried a tooltip
+    /// describing what closing did. Defaults to true, which is exactly the
+    /// previous behaviour for an existing install.
+    /// </summary>
+    public bool CloseToTray { get; set; } = true;
 
     /// <summary>
     /// Enable local system hotkeys (e.g., Quick Chat toggle).

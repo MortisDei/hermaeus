@@ -27,7 +27,8 @@
   half was implemented, so in the default configuration no key produced a
   newline in the chat box at all.
 - **The copy and read-aloud buttons under the last message can be clicked.**
-  They used to end up flush against the input bar.
+  They used to end up flush against the input bar. The RAG panel's last card
+  had the same problem and the same fix.
 
 - **Conversation branching.** A conversation is a tree, not a line. Regenerating
   an answer adds a new version alongside the old one instead of replacing it, and

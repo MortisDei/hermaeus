@@ -17,12 +17,17 @@ public sealed class ChatTranscriptLayoutGuardTests
     private static string RepoRoot =>
         Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../"));
 
-    [Fact]
-    public void The_chat_transcript_keeps_a_trailing_spacer_below_the_last_message()
+    [Theory]
+    // Every scrolling panel with a docked input bar underneath it has the same
+    // defect and needs the same spacer. The owner found the RAG panel after the
+    // chat one was fixed.
+    [InlineData("ChatView.axaml", "TranscriptTrailingSpacer")]
+    [InlineData("RagView.axaml", "RagTrailingSpacer")]
+    public void A_panel_with_a_docked_input_bar_keeps_a_trailing_spacer(string view, string spacerName)
     {
-        var path = Path.Combine(RepoRoot, "src", "Hermaeus.Desktop", "Views", "ChatView.axaml");
+        var path = Path.Combine(RepoRoot, "src", "Hermaeus.Desktop", "Views", view);
         var xaml = File.ReadAllText(path);
 
-        Assert.Contains("TranscriptTrailingSpacer", xaml);
+        Assert.Contains(spacerName, xaml);
     }
 }

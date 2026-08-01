@@ -22,7 +22,10 @@ internal static class SetupWizardOnboardingTests
     public static Task RecommendReturnsSmallTierWhenNoGpuIsPresent()
     {
         var snapshot = new SystemSnapshot { Gpus = [] };
-        Equal(StarterModelCatalog.Small.Id, StarterModelCatalog.Recommend(snapshot).Id, "No GPU must recommend the smallest tier.");
+        // The low tier is Phi-4 mini (MIT), not Qwen2.5 3B, which is research
+        // and non-commercial only. A machine with no GPU is the least likely
+        // place to want a restricted default.
+        Equal(StarterModelCatalog.Phi4Mini.Id, StarterModelCatalog.Recommend(snapshot).Id, "No GPU must recommend the permissively licensed low tier.");
         return Task.CompletedTask;
     }
 
@@ -32,14 +35,14 @@ internal static class SetupWizardOnboardingTests
         {
             Gpus = [new GpuInfo { Name = "GPU probe unavailable", Provider = "best-effort", Status = "unavailable", MemoryTotalBytes = null }]
         };
-        Equal(StarterModelCatalog.Small.Id, StarterModelCatalog.Recommend(snapshot).Id, "An 'unavailable' GPU probe row must fall back to the smallest tier.");
+        Equal(StarterModelCatalog.Phi4Mini.Id, StarterModelCatalog.Recommend(snapshot).Id, "An 'unavailable' GPU probe row must fall back to the low tier.");
         return Task.CompletedTask;
     }
 
     public static Task RecommendReturnsSmallTierForLowVram()
     {
         var snapshot = new SystemSnapshot { Gpus = [new GpuInfo { Name = "Test GPU", Status = "ok", MemoryTotalBytes = 4L * 1024 * 1024 * 1024 }] };
-        Equal(StarterModelCatalog.Small.Id, StarterModelCatalog.Recommend(snapshot).Id, "Under 6 GB VRAM must recommend the smallest tier.");
+        Equal(StarterModelCatalog.Phi4Mini.Id, StarterModelCatalog.Recommend(snapshot).Id, "Under 6 GB VRAM must recommend the low tier.");
         return Task.CompletedTask;
     }
 

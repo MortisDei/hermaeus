@@ -86,6 +86,17 @@ public partial class SettingsViewModel : ViewModelBase
         }
     }
 
+    public bool CloseToTray
+    {
+        get => Ui.CloseToTray;
+        set
+        {
+            if (Ui.CloseToTray == value) return;
+            Ui.CloseToTray = value;
+            OnPropertyChanged();
+        }
+    }
+
     public bool EnableTrayIcon
     {
         get => Ui.EnableTrayIcon;

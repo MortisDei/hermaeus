@@ -31,12 +31,29 @@
          and it is worst near an edge where the popup lands right under the
          pointer. Placing tooltips below the control they describe takes the
          popup out from under the cursor entirely. -->
+    <!-- r29 1.5, CONFIRMED. The owner ran the one-button experiment the round
+         asked for: with ToolTip.Tip removed from a nav button, that button
+         stopped flickering. So the tooltip popup WAS the mechanism, which is
+         why two cursor-region fixes never touched it - the cursor region was
+         never the problem, the popup stealing pointer-over was.
+
+         The fix keeps every tooltip. IsHitTestVisible="False" makes the popup
+         unable to take pointer-over at all, so the pointer passes through to
+         whatever is underneath, the control never counts as exited, and the
+         loop cannot form regardless of geometry. Nothing in this app has a
+         clickable tooltip, so nothing is lost. The offset goes to 10 as well so
+         the popup is not visually touching the control it describes.
+
+         This is global, on the ToolTip style itself, because the owner found
+         the flicker on more than the nav rail. -->
     <Style Selector=":is(Control)">
         <Setter Property="ToolTip.Placement" Value="Bottom" />
-        <Setter Property="ToolTip.VerticalOffset" Value="6" />
+        <Setter Property="ToolTip.VerticalOffset" Value="10" />
     </Style>
 
     <Style Selector="ToolTip">
+        <!-- See the comment above: this one setter is the actual fix. -->
+        <Setter Property="IsHitTestVisible" Value="False" />
         <Setter Property="Background" Value="{DynamicResource AppToolTipBackgroundBrush}" />
         <Setter Property="Foreground" Value="{DynamicResource AppToolTipForegroundBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AppToolTipBorderBrush}" />

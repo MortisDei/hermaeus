@@ -262,6 +262,13 @@ public partial class RagViewModel : ObservableObject
     public Action<RagDataset>? RequestOpenInChat { get; set; }
     public bool IsLocalIngest => !EnableWebLoader;
 
+    /// <summary>
+    /// Set by the DI root to the model Chat currently has selected. The RAG
+    /// panel has no model picker of its own, and the settings default is often
+    /// unset, so without this Ask had no model to write an answer with.
+    /// </summary>
+    public Func<string>? ChatModelProvider { get; set; }
+
     public RagViewModel(RagQueryService query, RagPipeline pipeline, RagEvalService eval, IToastService toasts, IRuntimeLogService logs, ISettingsService settings, ServicesViewModel? services = null, XttsProcessManager? xtts = null, KokoroProcessManager? kokoro = null, IActivityRecorder? activity = null, WatchedSourceService? watchedSources = null)
     {
         _query    = query;
@@ -309,10 +316,17 @@ public partial class RagViewModel : ObservableObject
         {
             _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Rag,
                 $"RAG query started for dataset {SelectedDataset.Name}"));
+            // Ask used to pass an empty model id unconditionally and let the
+            // query service fall back to Llm.DefaultModel. That setting is
+            // empty on any install where the user only ever picked a model from
+            // the Chat dropdown, so Ask failed with a routing error naming an
+            // empty model. Use whatever Chat is actually using; the query
+            // service still falls back to the configured default, and now says
+            // so plainly when there is no model at all.
             var opts = new RagQueryOptions(
                 TopK: 5,
                 UseParentChild: UseParentChild,
-                ModelId: string.Empty);
+                ModelId: ChatModelProvider?.Invoke() ?? string.Empty);
 
             var answerBuilder = new StringBuilder();
 
@@ -411,15 +425,22 @@ public partial class RagViewModel : ObservableObject
                 StatusMessage = p.Detail;
             });
 
-            IngestReport report;
-            if (EnableWebLoader)
-            {
-                report = await _pipeline.IngestWebAsync(ds, progress, _ingestCts.Token, new IngestOptions { DryRun = IngestDryRun, DuplicatePolicy = IngestPolicy });
-            }
-            else
-            {
-                report = await _pipeline.IngestDirectoryAsync(ds, IngestPath, progress, _ingestCts.Token, new IngestOptions { DryRun = IngestDryRun, DuplicatePolicy = IngestPolicy });
-            }
+            // Ingest runs on the thread pool, not the UI thread. The pipeline is
+            // async but its expensive parts are synchronous and CPU-bound
+            // (ParagraphChunker's regex work per file, and Bm25Scorer.BuildStats
+            // tokenising every stored chunk at the end), and nothing in
+            // Hermaeus.Rag uses ConfigureAwait(false), so every continuation
+            // resumed on the UI thread and ran that work there. A 1,759 file
+            // ingest producing 12,794 chunks froze the window for minutes,
+            // worst around the final "Building BM25 stats" phase, which is why
+            // it looked like it hung near the end rather than throughout.
+            //
+            // Progress<T> was constructed on the UI thread above, so its
+            // callbacks still marshal back correctly on their own.
+            var ingestOptions = new IngestOptions { DryRun = IngestDryRun, DuplicatePolicy = IngestPolicy };
+            var report = EnableWebLoader
+                ? await Task.Run(() => _pipeline.IngestWebAsync(ds, progress, _ingestCts.Token, ingestOptions), _ingestCts.Token)
+                : await Task.Run(() => _pipeline.IngestDirectoryAsync(ds, IngestPath, progress, _ingestCts.Token, ingestOptions), _ingestCts.Token);
 
             // r10 01-rag-correctness.md 1.3: re-ingest into an already-queried
             // dataset must not keep serving the pre-ingest in-memory chunk
@@ -835,7 +856,9 @@ public partial class RagViewModel : ObservableObject
                 StatusMessage = p.Detail;
             });
 
-            var count = await _pipeline.ReindexDatasetAsync(workingDataset, progress, _ingestCts.Token);
+            // Same reason as the ingest path above: re-embedding and the BM25
+            // rebuild are CPU-bound and would otherwise run on the UI thread.
+            var count = await Task.Run(() => _pipeline.ReindexDatasetAsync(workingDataset, progress, _ingestCts.Token), _ingestCts.Token);
             _query.ClearCache(workingDataset.Id);
 
             StatusMessage = $"Reindex complete: {count} chunk(s) re-embedded with {newModel}.";

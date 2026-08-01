@@ -196,6 +196,9 @@ public partial class MainWindowViewModel : ViewModelBase
         // r27 01 1.3: Chat asks Services what it is waiting on, through a
         // delegate, so the chat view model keeps knowing nothing about Services.
         Chat.WarmingServerProvider = Services.GetWarmingChatServer;
+        // The RAG panel's Ask has no model picker of its own; it uses whatever
+        // Chat has selected rather than an often-unset settings default.
+        Rag.ChatModelProvider = () => Chat.SelectedModel?.Id ?? string.Empty;
         Services.ServerAvailabilityChanged += (_, _) =>
         {
             RunOnUi(Chat.RefreshWarmingState);

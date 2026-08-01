@@ -132,11 +132,11 @@ public static class StarterModelCatalog
     /// that came back "unavailable") is treated as the smallest tier so the
     /// recommendation is always safe on CPU-only machines.
     ///
-    /// The smallest tier is Qwen2.5 3B, whose licence is research and
-    /// non-commercial only. That is a default, not a decision: the wizard
-    /// lists every entry with its licence and the user chooses, and
-    /// <see cref="Llama32_3B"/> and <see cref="Phi4Mini"/> are comparable
-    /// sizes under other terms.
+    /// The low tier is <see cref="Phi4Mini"/> (MIT) rather than Qwen2.5 3B,
+    /// which is research and non-commercial only. Recommending a restricted
+    /// model by default to exactly the users least likely to read a licence
+    /// was the wrong default; Qwen2.5 3B is still offered, with its terms
+    /// stated, for anyone who wants it.
     /// </summary>
     public static StarterModelEntry Recommend(SystemSnapshot snapshot)
     {
@@ -153,7 +153,7 @@ public static class StarterModelCatalog
         {
             >= twelveGb => Large,
             >= sixGb => Medium,
-            _ => Small
+            _ => Phi4Mini
         };
     }
 }
