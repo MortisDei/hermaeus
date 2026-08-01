@@ -32,12 +32,15 @@ dotnet build Hermaeus.sln                                  # zero warnings enfor
 dotnet test src/Hermaeus.Tests/Hermaeus.Tests.csproj         # standard xunit; all tests must pass
 dotnet run --project src/Hermaeus.Desktop                  # launch the app; see warning below
 ./build.sh --skip-restore    # or: pwsh ./build.ps1 -SkipRestore   # packaging
-./scripts/coverage.sh        # or: pwsh ./scripts/coverage.ps1     # line-coverage ratchet (floor: 45%)
+./scripts/coverage.sh        # or: pwsh ./scripts/coverage.ps1     # line-coverage ratchet (floor: 60%)
 ```
 
 Any compiler warning fails the build. Fix the warning; do not suppress it without a comment explaining the constraint.
 
+- `docs/testing.md` is the reference for the suite: what it is, the platform-skip attribute, the injectable-timeout rule, the coverage floor, the guard tests, and why Windows CI is slower than Linux CI. Read it before adding or changing tests.
 - New harness-style test methods must be registered in `XunitHarnessTests.HarnessCases`; a reflection guard (`HarnessRegistrationGuardTests`) fails the suite otherwise.
+- Platform-specific tests use `[WindowsOnlyFact]` so they report Skipped, never an early `return` that reports Passed; a guard test enforces this.
+- Never let test output land in the working tree: pass `--results-directory` outside the repo, and never `git add -A`.
 - `dotnet run` on the Desktop project reads and writes the SAME `%LOCALAPPDATA%\Hermaeus\settings.json` (Linux: `~/.local/share/Hermaeus`) as the owner's installed app. Look, do not resave settings casually, and never force-kill the process (`taskkill /F`); close it cleanly.
 - Releases are tag-driven (`.github/workflows/release.yml`, see `docs/packaging.md`). Never push a version tag; that is an owner action.
 

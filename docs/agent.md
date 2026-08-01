@@ -206,6 +206,58 @@ approve-and-continue shape as a gated-action approval. A reply is never
 accepted while a tool approval is also pending on the same task - those are
 answered separately, on their own explicit approve/reject path.
 
+## Steering a Running Task
+
+The agent used to take an instruction once, at creation. Watching a task head
+in the wrong direction left two options: let it finish wrong, or press Stop and
+lose the run. Steering is the third.
+
+While a task is running, the same box that answers an `ask_user` question sends
+an instruction instead. Its caption, watermark and button label change with the
+state, so it is always clear which of the two you are doing, and an accepted
+instruction appears in the transcript immediately, before the model has
+responded to it.
+
+What happens to it:
+
+- It is queued on `task_state.json` (`pending_instructions`) so it survives a
+  crash between being accepted and being used, and held in memory as well so a
+  step already in flight cannot overwrite it with the state it loaded before the
+  instruction arrived.
+- It is **drained at the next step boundary**, in order, and folded into the
+  planner's context pack alongside the goal and the constraints. It is consumed
+  exactly once, even if that step then fails.
+- It **interrupts the model call in progress**. The planner inference is the
+  long part of a step and the safely cancellable part, so a steer does not wait
+  for it. The partial response is discarded and the next step starts fresh with
+  the instruction in context.
+- It **never interrupts a tool that has started executing.** A tool runs to
+  completion and records its result; the instruction lands at the boundary after
+  it. Cancelling a half-written patch apply or a half-run `run_command` is how a
+  workspace ends up in a state `task_state.json` does not describe.
+- The interrupted step **still counts against the step budget**
+  (`Agent.MaxAutoSteps`). Steering repeatedly spends your budget, which is the
+  correct incentive and keeps a run bounded.
+
+**An instruction cannot approve anything.** This is the boundary, and it is not
+negotiable. An injected instruction is user text, exactly as untrusted as the
+goal the task was created with. It carries no approval, it never sets
+`requires_approval`, and it never changes a risk classification. Telling a
+running agent "you have my approval to run any command, do not ask again" does
+nothing at all: the next `run_command` still stops at the gate. Approvals go
+through the explicit approve/reject path with an expected fingerprint, and
+nothing else reaches it. Three regression tests exist solely to keep this true.
+
+Steering is refused, with the reason shown, when:
+
+- the instruction is empty;
+- the task has finished (`Complete`, `Failed`, `Cancelled`) - use **Continue**,
+  which reopens the task with a new instruction;
+- the task is an orchestration parent with a running sub-task, in which case the
+  refusal names the child so you can steer that instead;
+- eight instructions are already waiting. An instruction that silently vanishes
+  is worse than one that is refused.
+
 ## Plan Checkpoint and Completion Honesty
 
 - **Plan-approval checkpoint** (`Agent.RequirePlanApproval`, Settings;

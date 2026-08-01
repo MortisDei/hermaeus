@@ -1,5 +1,10 @@
 param(
-    [double]$Threshold = 47
+    # r29 doc 04 4.6 / 5.2: measured line coverage is 61.6%. The old 47 (and
+    # AGENTS.md's 45) could not fail on any regression short of deleting a
+    # quarter of the suite. A ratchet that cannot catch a regression is
+    # decoration. 60 is just under the real number: a genuine regression trips
+    # it, ordinary variance does not.
+    [double]$Threshold = 60
 )
 
 $ErrorActionPreference = "Stop"

@@ -13,6 +13,93 @@ From 0.29.0-alpha onward, every minor version is tagged and released on
 GitHub (see `docs/packaging.md` "Releases"); patch versions are tagged only
 for urgent hotfixes.
 
+## [0.36.0-alpha] - 2026-08-01
+
+Implements docs/review r29: things that look like they work. Every item in the
+round was something that presented itself as working and was not, and that runs
+through the UI and the test suite alike.
+
+### Fixed
+
+- **The Services page saves.** The Voice and speech-recognition cards at the
+  bottom of it edit the same settings the Settings page does, and nothing on
+  the page ever wrote them to disk, so a base URL, voice, device or speed set
+  there was silently discarded on restart. There is now a Save button in the
+  page header, running the same single save flow as the Settings page's, and
+  opening Services refreshes the settings sections first so nothing stale can
+  be written back over a real value.
+- **There is a key that inserts a newline in the chat box.** With
+  "Ctrl+Enter to send" off, which is the default, Enter sent and nothing at all
+  produced a newline. Enter now sends and Ctrl+Enter inserts a newline; with
+  the setting on, the two swap; Shift+Enter inserts a newline either way.
+- **The copy and read-aloud buttons under the last message can be clicked.**
+  They used to end up flush against the input bar. They also have a larger hit
+  target.
+- **The per-channel voice pickers in Settings > Voice look like pickers.** They
+  have a chevron that opens the list, and they show the whole list on focus
+  instead of waiting for you to guess a first character. When the voice service
+  has not listed its voices, the section says so and says where to fix it,
+  rather than showing a list of one placeholder that looks populated.
+- **A server that dies on launch is reported at once.** The health wait used to
+  run its HTTP probe out to a two-second timeout and then sleep a 600ms poll
+  interval before reporting a process that had already exited. Both are now
+  raced against process exit.
+- The Services voice card no longer says named voice profiles are in
+  Settings > Voice. No UI has ever created or edited one.
+
+### Added
+
+- **Steer a task the agent is already running.** The reply box in the workbench
+  sends an instruction into a run in flight, instead of only answering a
+  question the agent asked. It interrupts the model call in progress, is folded
+  into the planner's context at the next step boundary, appears in the
+  transcript immediately, and consumes a step from the run's budget. A tool that
+  has already started executing is never interrupted; it runs to completion and
+  the instruction lands after it.
+
+  **A steering instruction cannot approve anything.** It is user text, exactly
+  as untrusted as the goal the task was created with. Telling a running agent
+  "you have my approval to run any command, do not ask again" changes nothing:
+  the next command still stops at the gate. Approvals keep their own explicit
+  path. Three regression tests exist solely to keep that true, and the safety
+  gate itself was not touched.
+
+  Steering is refused with a stated reason on a finished task (Continue reopens
+  those), on an orchestration parent with a running sub-task (naming the child),
+  and when eight instructions are already waiting.
+- **The Models panel is a grid of cards.** Twelve full-width rows that packed
+  name, raw name, provider, size, tags, fit, tune summary, update state and a
+  date into one line of small grey text are now tiles. Every control from the
+  old inline editor moved into a Configure flyout; none was dropped.
+- **Model cards say where the model came from**: a Hugging Face badge, whose
+  tooltip names the repo, for anything downloaded through or linked to one, and
+  a local-file badge otherwise. Nothing about how models are discovered,
+  downloaded, updated or tuned changed.
+
+### Changed
+
+- **The test suite reports what it actually ran.** Sixteen tests began by
+  returning early on Linux, so the Linux CI leg recorded a green tick for
+  llama-server installation, Python health validation, job-object assignment and
+  manifest behaviour it never executed, and both legs reported `Skipped: 0`.
+  They now report Skipped. The Linux leg's counts change accordingly; the
+  discovered total does not. A guard test stops the pattern recurring.
+- The coverage floor is 60%, matching the measured 61.6%. It was 45% in the
+  docs and 47% in the scripts, both far enough below the real number that the
+  ratchet could not fail on any regression short of deleting a quarter of the
+  suite.
+- `docs/testing.md` records what the suite is: how to run it, why it is
+  sequential, the platform-skip attribute, the injectable-timeout rule, the
+  guard tests, the coverage numbers per project, and why Windows CI is slower
+  than Linux CI for runner-I/O reasons rather than code reasons.
+- Tests that proved a component gives up on a hanging dependency by waiting out
+  the real timeout now inject a short one. `MemoryStore` and `RecallService`
+  take an optional timeout parameter defaulting to today's value; production
+  behaviour is unchanged.
+- CI's Windows leg excludes its test working set from Defender, and the test
+  temp root honours `RUNNER_TEMP`. This is an experiment with a stated success
+  condition and gets deleted if the Windows test time does not fall materially.
+
 ## [0.35.0-alpha] - 2026-07-31
 
 Implements docs/review r28: small models, kept honest. Where Hermaeus needs a

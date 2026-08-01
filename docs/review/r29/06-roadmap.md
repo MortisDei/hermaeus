@@ -13,20 +13,20 @@ a reason that survives the same test.
 
 | # | Item | Why here | Landed |
 | --- | --- | --- | --- |
-| 1 | 4.1 + 4.2 Defender exclusion and `RUNNER_TEMP` | The experiment needs CI runs to observe. Landing it first gives it the whole round to report. Must land together or the measurement is meaningless. | |
-| 2 | 1.1 Save on Services | The most costly defect in daily use: settings the owner sets are being silently discarded. | |
-| 3 | 1.4 Ctrl+Enter both ways | Second most costly: no newline in the chat box in the default configuration. | |
-| 4 | 1.3 Chat action row reachable | Small, self-contained, visual verification needed. | |
-| 5 | 1.2 Voice channel picker | Depends on nothing; grouped after the two keyboard/mouse fixes because it is the largest of the five. | |
-| 6 | 1.5 Cursor flicker: observe, then maybe fix | Deliberately after the other four. Its first deliverable is an observation, not a change. | |
-| 7 | 4.3 Platform skips report Skipped | Independent of everything. Changes CI's reported numbers, so land it before doc 03 adds tests and the numbers get harder to read. | |
-| 8 | 4.4 The four slow `ServerProcessManagerTests` | May turn into a product fix in the health wait; wants its own commit and its own scrutiny. | |
-| 9 | 4.5 Injectable timeouts | Closes a deferred row. | |
-| 10 | Doc 02 Models as cards | Largest pure-UI change. After the bug fixes because it is the least urgent and the most reviewable. | |
-| 11 | Doc 03 Agent steering | Largest and riskiest. Last of the feature work so an interrupted round loses this rather than a bug fix. Its 3.6 tests land in the same commit as the feature, not after. | |
-| 12 | 4.6 + 4.7 Coverage floor and the test-suite doc | Reads the state of the suite after this round's tests exist, not before. | |
-| 13 | Doc 05 small items, docs, CHANGELOG, version bump | Close-out. | |
-| 14 | Read 4.1's result and decide | The last thing before the PR merges: compare the Windows TRX against 501.4s. Keep the step or revert it, and record which in `deferred.md`. | |
+| 1 | 4.1 + 4.2 Defender exclusion and `RUNNER_TEMP` | The experiment needs CI runs to observe. Landing it first gives it the whole round to report. Must land together or the measurement is meaningless. | Yes |
+| 2 | 1.1 Save on Services | The most costly defect in daily use: settings the owner sets are being silently discarded. | Yes |
+| 3 | 1.4 Ctrl+Enter both ways | Second most costly: no newline in the chat box in the default configuration. | Yes |
+| 4 | 1.3 Chat action row reachable | Small, self-contained, visual verification needed. | Yes (structural fix; pixel result still wants a human eye) |
+| 5 | 1.2 Voice channel picker | Depends on nothing; grouped after the two keyboard/mouse fixes because it is the largest of the five. | Yes |
+| 6 | 1.5 Cursor flicker: observe, then maybe fix | Deliberately after the other four. Its first deliverable is an observation, not a change. | No, by the doc's own rule: the observation needs a human at the pointer and no third unverified fix shipped. Finding recorded in deferred.md |
+| 7 | 4.3 Platform skips report Skipped | Independent of everything. Changes CI's reported numbers, so land it before doc 03 adds tests and the numbers get harder to read. | Yes |
+| 8 | 4.4 The four slow `ServerProcessManagerTests` | May turn into a product fix in the health wait; wants its own commit and its own scrutiny. | Yes, as a product fix in the health wait (5.3s/2.6s/2.6s/2.6s to 63ms/29ms/22ms/117ms) |
+| 9 | 4.5 Injectable timeouts | Closes a deferred row. | Partly: the three component timeouts done, VoiceOrchestratorTests left per descope order 1 |
+| 10 | Doc 02 Models as cards | Largest pure-UI change. After the bug fixes because it is the least urgent and the most reviewable. | Yes |
+| 11 | Doc 03 Agent steering | Largest and riskiest. Last of the feature work so an interrupted round loses this rather than a bug fix. Its 3.6 tests land in the same commit as the feature, not after. | Yes, including all of 3.6 |
+| 12 | 4.6 + 4.7 Coverage floor and the test-suite doc | Reads the state of the suite after this round's tests exist, not before. | Yes (floor 60, docs/testing.md) |
+| 13 | Doc 05 small items, docs, CHANGELOG, version bump | Close-out. | Yes |
+| 14 | Read 4.1's result and decide | The last thing before the PR merges: compare the Windows TRX against 501.4s. Keep the step or revert it, and record which in `deferred.md`. | Owner action after the first CI run on this branch |
 
 Commit after each row. An interrupted session should cost at most one row.
 

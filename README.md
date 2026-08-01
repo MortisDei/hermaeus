@@ -347,7 +347,7 @@ For commercial licensing requests, see the Contact section of COMMERCIAL.md.
 
 Current version:
 
-**0.35.0-alpha**
+**0.36.0-alpha**
 
 Major systems currently implemented include:
 
