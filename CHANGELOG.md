@@ -47,6 +47,23 @@ through the UI and the test suite alike.
 - The Services voice card no longer says named voice profiles are in
   Settings > Voice. No UI has ever created or edited one.
 
+- **RAG chunks larger than 512 tokens are embedded instead of silently
+  refused.** The embeddings server was launched with a hardcoded 512-token
+  physical batch, added to silence a startup warning. That number is also the
+  largest input the server will embed at all, and the default chunk size (1600
+  characters plus 320 of overlap) is 500 to 650 real tokens, so a large share
+  of every ingest was rejected outright. Nothing surfaced it: ingestion
+  reported success for the chunks that happened to fit and the rest went to the
+  runtime log, where one owner log had accumulated 846 of them. The batch now
+  follows the server's context size, which is the real ceiling on a single
+  embedding input anyway.
+- **Clearing a text box in the project editor no longer crashes the app.**
+  Avalonia binds an emptied box back as null, and a null parameter does not
+  bind as NULL against a NOT NULL column: it threw while preparing the
+  statement and reached the UI as an unhandled fault.
+- Managed llama.cpp release lookups use the `ggml-org` organisation. The
+  project moved from `ggerganov`, and GitHub's redirect was doing the work.
+
 ### Added
 
 - **Steer a task the agent is already running.** The reply box in the workbench
@@ -76,24 +93,6 @@ through the UI and the test suite alike.
   a local-file badge otherwise. Nothing about how models are discovered,
   downloaded, updated or tuned changed.
 
-- **RAG chunks larger than 512 tokens are embedded instead of silently
-  refused.** The embeddings server was launched with a hardcoded 512-token
-  physical batch, added to silence a startup warning. That number is also the
-  largest input the server will embed at all, and the default chunk size (1600
-  characters plus 320 of overlap) is 500 to 650 real tokens, so a large share
-  of every ingest was rejected outright. Nothing surfaced it: ingestion
-  reported success for the chunks that happened to fit and the rest went to the
-  runtime log, where one owner log had accumulated 846 of them. The batch now
-  follows the server's context size, which is the real ceiling on a single
-  embedding input anyway.
-- **Clearing a text box in the project editor no longer crashes the app.**
-  Avalonia binds an emptied box back as null, and a null parameter does not
-  bind as NULL against a NOT NULL column: it threw while preparing the
-  statement and reached the UI as an unhandled fault.
-- Managed llama.cpp release lookups use the `ggml-org` organisation. The
-  project moved from `ggerganov`, and GitHub's redirect was doing the work.
-
-### Added
 
 - **Mixture-of-Experts CPU offload** (`--n-cpu-moe` / `--cpu-moe`), under
   Services > Advanced engine options. On a MoE model the experts are most of
