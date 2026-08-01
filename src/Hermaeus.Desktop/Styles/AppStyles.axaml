@@ -23,37 +23,42 @@
         </ResourceDictionary>
     </Styles.Resources>
 
-    <!-- Avalonia places a tooltip at the pointer by default, so the popup
-         opens directly under the cursor. The pointer is then over the popup,
-         not the control: the cursor reverts to an arrow, the control counts as
-         exited, the tooltip closes, the cursor returns to a hand, and the
-         tooltip opens again. That loop is the cursor flicker on the nav icons,
-         and it is worst near an edge where the popup lands right under the
-         pointer. Placing tooltips below the control they describe takes the
-         popup out from under the cursor entirely. -->
-    <!-- r29 1.5, CONFIRMED. The owner ran the one-button experiment the round
-         asked for: with ToolTip.Tip removed from a nav button, that button
-         stopped flickering. So the tooltip popup WAS the mechanism, which is
-         why two cursor-region fixes never touched it - the cursor region was
-         never the problem, the popup stealing pointer-over was.
+    <!-- Avalonia's default ToolTip.Placement is Pointer, so the popup opens
+         directly under the cursor. The popup is a separate OS window with its
+         own cursor, so the pointer sitting on it shows an arrow while the
+         control underneath asks for a hand: the cursor flickers between the two
+         as the popup opens, moves and closes. Placing the tooltip away from the
+         pointer removes the overlap and with it the flicker. -->
+    <!-- r29 1.5, CONFIRMED by the owner's one-button experiment: with
+         ToolTip.Tip removed from a nav button, that button stopped flickering.
+         The popup is the mechanism, which is why two cursor-region fixes never
+         touched it.
 
-         The fix keeps every tooltip. IsHitTestVisible="False" makes the popup
-         unable to take pointer-over at all, so the pointer passes through to
-         whatever is underneath, the control never counts as exited, and the
-         loop cannot form regardless of geometry. Nothing in this app has a
-         clickable tooltip, so nothing is lost. The offset goes to 10 as well so
-         the popup is not visually touching the control it describes.
+         The first attempt at the fix set IsHitTestVisible="False" on the
+         ToolTip, and it made things worse. Avalonia's ToolTipService.Update
+         walks up from the pointer's hit-test result and returns early when it
+         reaches the open tooltip ("if (candidateToolTipHost == currentToolTip)
+         return;") - that early return IS the "do not close while the pointer is
+         over the tooltip" guard. A hit-test-invisible tooltip yields a null hit
+         result, the walk ends immediately, and the service closes the tooltip
+         as though the pointer had left everything. It then reopens, because the
+         pointer is still on the control. So the setter created an open/close
+         loop on top of the cursor flicker instead of removing it.
 
-         This is global, on the ToolTip style itself, because the owner found
-         the flicker on more than the nav rail. -->
+         What is left is geometry, and geometry is the whole fix: keep the popup
+         out from under the pointer.
+
+         Bottom placement suits a control the pointer rests on, and the 10px
+         offset keeps the popup off the control's edge. It is wrong for a
+         vertical stack, where "below this button" is "on top of the next
+         button" and every tooltip lands in the path the cursor takes down the
+         rail; MainWindow's nav rail overrides to Right for that reason. -->
     <Style Selector=":is(Control)">
         <Setter Property="ToolTip.Placement" Value="Bottom" />
         <Setter Property="ToolTip.VerticalOffset" Value="10" />
     </Style>
 
     <Style Selector="ToolTip">
-        <!-- See the comment above: this one setter is the actual fix. -->
-        <Setter Property="IsHitTestVisible" Value="False" />
         <Setter Property="Background" Value="{DynamicResource AppToolTipBackgroundBrush}" />
         <Setter Property="Foreground" Value="{DynamicResource AppToolTipForegroundBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource AppToolTipBorderBrush}" />

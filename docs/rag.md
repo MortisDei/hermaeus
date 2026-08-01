@@ -13,7 +13,10 @@ traces, versioned SQLite schema migrations, and native eval support.
 3. Use **Dry run** to preview the ingest report before writing to SQLite, or
    choose a duplicate policy to skip unchanged sources, replace them, or just
    report what would happen. Use **Stop** during ingest to cancel long runs.
-4. Ask questions against the dataset.
+4. Ask questions against the dataset. The box empties on send and the question
+   is shown above the answer it produced; a question that failed goes back in
+   the box so it can be edited and retried. Answers are written by the model
+   Chat has selected, falling back to Settings > LLM's default.
 5. Inspect citations, source text, grounding score, query traces, planner
   variants, context packing summaries, and the last ingest report.
 6. Run eval sets from the Eval Harness panel.

@@ -55,6 +55,16 @@
                         <StackPanel.Styles>
                             <Style Selector="Button.icon-btn">
                                 <Setter Property="Padding" Value="8,6" />
+                                <!-- The same placement AppStyles.axaml sets for
+                                     every control, repeated here so the rail the
+                                     flicker was reported on does not depend on a
+                                     :is(Control) selector matching. Bottom is
+                                     right for this row: it is horizontal, so the
+                                     popup lands on the panel below and never on a
+                                     neighbouring button, and it is never under a
+                                     pointer that is resting on the button. -->
+                                <Setter Property="ToolTip.Placement" Value="Bottom" />
+                                <Setter Property="ToolTip.VerticalOffset" Value="10" />
                             </Style>
 
                             <!-- Which panel you are on, readable at a glance. The

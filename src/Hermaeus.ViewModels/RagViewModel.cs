@@ -204,6 +204,17 @@ public partial class RagViewModel : ObservableObject
             SelectedDataset = match;
     }
     [ObservableProperty] private string      _answerText      = string.Empty;
+
+    /// <summary>
+    /// The question this answer was given to. The box clears on send, so
+    /// without this the panel would show an answer with nothing saying what was
+    /// asked.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasAskedQuestion))]
+    private string _askedQuestion = string.Empty;
+
+    public bool HasAskedQuestion => !string.IsNullOrWhiteSpace(AskedQuestion);
     [ObservableProperty] private bool        _isQuerying;
     [ObservableProperty] private bool        _isIngesting;
     [ObservableProperty] private string      _ingestPath      = string.Empty;
@@ -304,6 +315,14 @@ public partial class RagViewModel : ObservableObject
     {
         if (SelectedDataset is null || string.IsNullOrWhiteSpace(QuestionText)) return;
 
+        // The box empties on send, the way the chat composer does, so a sent
+        // question never looks like an unsent one. The text is not lost: it is
+        // shown above the answer it produced, and put back in the box if the
+        // query failed, because then there is something to edit and retry.
+        var question = QuestionText.Trim();
+        QuestionText = string.Empty;
+        AskedQuestion = question;
+
         _cts = new CancellationTokenSource();
         IsQuerying = true;
         AnswerText = string.Empty;
@@ -331,7 +350,7 @@ public partial class RagViewModel : ObservableObject
             var answerBuilder = new StringBuilder();
 
             await foreach (var evt in _query.StreamQueryAsync(
-                SelectedDataset.Id, QuestionText, opts, _cts.Token))
+                SelectedDataset.Id, question, opts, _cts.Token))
             {
                 switch (evt.Kind)
                 {
@@ -356,9 +375,24 @@ public partial class RagViewModel : ObservableObject
             _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Info, RuntimeLogCategory.Rag,
                 $"RAG query completed for dataset {SelectedDataset.Name}"));
         }
-        catch (OperationCanceledException) { }
-        catch (Exception ex) { SetError(ex.Message); }
+        catch (OperationCanceledException) { RestoreQuestion(question); }
+        catch (Exception ex) { SetError(ex.Message); RestoreQuestion(question); }
         finally { IsQuerying = false; _cts?.Dispose(); _cts = null; }
+    }
+
+    /// <summary>
+    /// Puts a question back in the box after a failed or cancelled query, so the
+    /// user can edit and retry instead of retyping. Never overwrites something
+    /// they have started typing in the meantime.
+    /// </summary>
+    private void RestoreQuestion(string question)
+    {
+        if (string.IsNullOrWhiteSpace(QuestionText))
+        {
+            QuestionText = question;
+        }
+
+        AskedQuestion = string.Empty;
     }
 
     [RelayCommand]

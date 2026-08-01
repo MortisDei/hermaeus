@@ -1,140 +1,152 @@
 # Renders the Moss mascot to the app/tray raster assets.
 #
-# Palette is docs/mascot.md's: Deep Moss #2E3D2B, Forest #436B3F, Sage #7A8F6A,
-# Parchment #E8DFC6, Ink #1A1D18, Copper #B87333.
+# This is a direct raster of the SAME geometry as the in-app control,
+# src/Hermaeus.Desktop/Controls/MossIcon.axaml, shape for shape on its 24x24
+# canvas. The taskbar icon and the icon inside the app are one character, and
+# the only way to keep them one character across future edits is for this file
+# to be a transcription of that one rather than a second drawing of it.
 #
-# Composition is deliberately NOT a scaled-up copy of MossIcon.axaml. That
-# control was drawn for a 16px inline glyph; enlarged, its ears read as horns
-# and its spectacle band reads as a blindfold. This draws the same character at
-# icon scale: centred, hooded, calm, with real round spectacles.
+# The first version of this script was a redraw "at icon scale" instead, with a
+# wide brimmed hood and round spectacles. It read as a cowboy and looked
+# nothing like Moss, which is exactly the failure mode a transcription avoids.
+#
+# It is also full bleed. The dark rounded field the redraw sat on cost about a
+# fifth of the icon's width on every edge, so Moss rendered visibly smaller
+# than every neighbouring taskbar icon, and the field itself was invisible
+# anyway: Ink on a near-black taskbar is not a background, it is padding.
 #
 # No new dependencies: System.Drawing ships with Windows.
+#
+# Run: pwsh ./scripts/generate-icons.ps1
 Add-Type -AssemblyName System.Drawing
 
 $Repo = Split-Path -Parent $PSScriptRoot
 $Assets = Join-Path $Repo "src\Hermaeus.Desktop\Assets"
 
+# docs/mascot.md's palette.
 $DeepMoss  = [System.Drawing.Color]::FromArgb(255, 0x2E, 0x3D, 0x2B)
 $Forest    = [System.Drawing.Color]::FromArgb(255, 0x43, 0x6B, 0x3F)
-$Sage      = [System.Drawing.Color]::FromArgb(255, 0x7A, 0x8F, 0x6A)
 $Parchment = [System.Drawing.Color]::FromArgb(255, 0xE8, 0xDF, 0xC6)
 $Ink       = [System.Drawing.Color]::FromArgb(255, 0x1A, 0x1D, 0x18)
 $Copper    = [System.Drawing.Color]::FromArgb(255, 0xB8, 0x73, 0x33)
 
-function New-RoundedPath {
-    param([single]$X, [single]$Y, [single]$W, [single]$H, [single]$R)
-    $p = New-Object System.Drawing.Drawing2D.GraphicsPath
-    $d = $R * 2
-    $p.AddArc($X, $Y, $d, $d, 180, 90)
-    $p.AddArc($X + $W - $d, $Y, $d, $d, 270, 90)
-    $p.AddArc($X + $W - $d, $Y + $H - $d, $d, $d, 0, 90)
-    $p.AddArc($X, $Y + $H - $d, $d, $d, 90, 90)
-    $p.CloseFigure()
-    return $p
-}
+# MossIcon.axaml draws inside x 4..20, y 1..19 of its 24x24 canvas. Rastering
+# the whole canvas would reintroduce the padding problem, so the render maps
+# that content box to the output square, less a small margin so antialiasing
+# has somewhere to go.
+$ContentX = 4.0
+$ContentY = 1.0
+$ContentW = 16.0
+$ContentH = 18.0
+$Margin   = 0.04
 
 function New-MossBitmap {
-    param([int]$Size, [bool]$WithField)
+    param([int]$Size)
 
     $bmp = New-Object System.Drawing.Bitmap($Size, $Size, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
     $g = [System.Drawing.Graphics]::FromImage($bmp)
     $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+    $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
     $g.Clear([System.Drawing.Color]::Transparent)
 
-    # 100x100 design space.
-    $u = $Size / 100.0
-    function U([double]$v) { return [single]($v * $u) }
+    # Uniform fit of the content box, centred.
+    $inner = $Size * (1.0 - 2.0 * $Margin)
+    $scale = [Math]::Min($inner / $ContentW, $inner / $ContentH)
+    $offX = ($Size - $ContentW * $scale) / 2.0 - $ContentX * $scale
+    $offY = ($Size - $ContentH * $scale) / 2.0 - $ContentY * $scale
 
-    if ($WithField) {
-        # Dark rounded field, matching the outgoing app icon's silhouette so
-        # the taskbar/dock shape does not change.
-        $field = New-RoundedPath (U 2) (U 2) (U 96) (U 96) (U 21)
-        $b = New-Object System.Drawing.SolidBrush($Ink)
-        $g.FillPath($b, $field); $b.Dispose()
-        $pen = New-Object System.Drawing.Pen($DeepMoss, (U 2.5))
-        $g.DrawPath($pen, $field); $pen.Dispose()
-        $field.Dispose()
+    function X([double]$v) { return [single]($v * $scale + $offX) }
+    function Y([double]$v) { return [single]($v * $scale + $offY) }
+    function S([double]$v) { return [single]($v * $scale) }
+    function P([double]$px, [double]$py) {
+        return New-Object System.Drawing.PointF((X $px), (Y $py))
     }
 
     $bForest = New-Object System.Drawing.SolidBrush($Forest)
     $bDeep   = New-Object System.Drawing.SolidBrush($DeepMoss)
-    $bSage   = New-Object System.Drawing.SolidBrush($Sage)
     $bFace   = New-Object System.Drawing.SolidBrush($Parchment)
     $bInk    = New-Object System.Drawing.SolidBrush($Ink)
+    $bCopper = New-Object System.Drawing.SolidBrush($Copper)
 
-    # ── Ears: low and swept back, behind the hood, so they read as ears ──────
-    foreach ($side in @(-1, 1)) {
-        [System.Drawing.PointF[]]$pts = @(
-            (New-Object System.Drawing.PointF((U (50 + $side * 27)), (U 50))),
-            (New-Object System.Drawing.PointF((U (50 + $side * 40)), (U 40))),
-            (New-Object System.Drawing.PointF((U (50 + $side * 30)), (U 60))))
-        $g.FillPolygon($bSage, $pts)
-    }
+    # Ears: Polygon 4,8 8,3 8,9 and its mirror.
+    [System.Drawing.PointF[]]$earL = @((P 4 8), (P 8 3), (P 8 9))
+    [System.Drawing.PointF[]]$earR = @((P 20 8), (P 16 3), (P 16 9))
+    $g.FillPolygon($bForest, $earL)
+    $g.FillPolygon($bForest, $earR)
 
-    # ── Hood: one shape, peak included, so nothing floats ────────────────────
-    $hood = New-Object System.Drawing.Drawing2D.GraphicsPath
-    [System.Drawing.PointF[]]$hoodPts = @(
-        (New-Object System.Drawing.PointF((U 22), (U 52))),
-        (New-Object System.Drawing.PointF((U 50), (U 12))),
-        (New-Object System.Drawing.PointF((U 78), (U 52))),
-        (New-Object System.Drawing.PointF((U 78), (U 62))),
-        (New-Object System.Drawing.PointF((U 22), (U 62))))
-    $hood.AddPolygon($hoodPts)
-    $g.FillPath($bForest, $hood)
-    $hood.Dispose()
-    # Hood body below the cowl
-    $g.FillEllipse($bForest, (U 20), (U 40), (U 60), (U 50))
-    # Inner shadow under the cowl edge
-    $g.FillEllipse($bDeep, (U 24), (U 44), (U 52), (U 16))
+    # Hood: Ellipse 4,5 16x14.
+    $g.FillEllipse($bForest, (X 4), (Y 5), (S 16), (S 14))
 
-    # ── Face ─────────────────────────────────────────────────────────────────
-    $g.FillEllipse($bFace, (U 27), (U 50), (U 46), (U 38))
+    # Hood peak: Polygon 8,5 12,1 16,5.
+    [System.Drawing.PointF[]]$peak = @((P 8 5), (P 12 1), (P 16 5))
+    $g.FillPolygon($bDeep, $peak)
 
-    # ── Spectacles: two brass rings and a bridge, sitting ON the eyes ────────
-    $eyeY = 62.0
-    $ringR = 10.0
-    $pen = New-Object System.Drawing.Pen($Copper, (U 3.2))
-    foreach ($cx in @(39.5, 60.5)) {
-        # Eye inside the ring
-        $g.FillEllipse($bInk, (U ($cx - 5.5)), (U ($eyeY - 5.5)), (U 11), (U 11))
-        $g.DrawEllipse($pen, (U ($cx - $ringR)), (U ($eyeY - $ringR)), (U ($ringR * 2)), (U ($ringR * 2)))
-    }
-    # Bridge
-    $g.DrawLine($pen, (U 49.5), (U $eyeY), (U 50.5), (U $eyeY))
-    $pen.Dispose()
+    # Face: Ellipse 7,10 10x8.
+    $g.FillEllipse($bFace, (X 7), (Y 10), (S 10), (S 8))
 
-    # Catchlights: the "calm, curious, knowing" part. Skipped below 32px, where
-    # they turn into stray light pixels rather than a highlight.
+    # Eyes: Ellipse 8.3,12.5 and 12.7,12.5, each 3x3.6.
+    $g.FillEllipse($bInk, (X 8.3), (Y 12.5), (S 3), (S 3.6))
+    $g.FillEllipse($bInk, (X 12.7), (Y 12.5), (S 3), (S 3.6))
+
+    # Catchlights: Ellipse 8.9,13 and 13.3,13, each 0.9x0.9. Under 32px they
+    # land on less than a pixel and read as noise in the eye rather than a
+    # highlight, so they are dropped there.
     if ($Size -ge 32) {
-        foreach ($cx in @(37.5, 58.5)) {
-            $g.FillEllipse($bFace, (U $cx), (U ($eyeY - 3.4)), (U 3), (U 3))
-        }
+        $g.FillEllipse($bFace, (X 8.9), (Y 13), (S 0.9), (S 0.9))
+        $g.FillEllipse($bFace, (X 13.3), (Y 13), (S 0.9), (S 0.9))
     }
+
+    # Brass spectacles band: Rectangle 7.8,13.6 8.4x1, corner radius 0.5.
+    $band = New-Object System.Drawing.Drawing2D.GraphicsPath
+    $d = (S 1)
+    $band.AddArc((X 7.8), (Y 13.6), $d, $d, 90, 180)
+    $band.AddArc((X (16.2 - 1)), (Y 13.6), $d, $d, 270, 180)
+    $band.CloseFigure()
+    $g.FillPath($bCopper, $band)
+    $band.Dispose()
 
     $g.Dispose()
-    foreach ($b in @($bForest, $bDeep, $bSage, $bFace, $bInk)) { $b.Dispose() }
+    foreach ($b in @($bForest, $bDeep, $bFace, $bInk, $bCopper)) { $b.Dispose() }
     return $bmp
 }
 
-# ── PNGs ─────────────────────────────────────────────────────────────────────
-# App icon carries the dark field; tray icons are transparent so they sit on
-# whatever the shell's tray background is.
-foreach ($spec in @(
-    @{n='hermaeus-app.png';        s=512; field=$true},
-    @{n='hermaeus-tray.png';       s=256; field=$false},
-    @{n='hermaeus-tray-dark.png';  s=256; field=$false},
-    @{n='hermaeus-tray-light.png'; s=256; field=$false})) {
-    $bmp = New-MossBitmap -Size $spec.s -WithField $spec.field
-    $bmp.Save((Join-Path $Assets $spec.n), [System.Drawing.Imaging.ImageFormat]::Png)
-    $bmp.Dispose()
-    "wrote $($spec.n) ($($spec.s)px, field=$($spec.field))"
+# Small sizes are rendered large and downsampled. Drawing a 0.9-unit catchlight
+# straight into a 16px bitmap gives a smear; supersampling gives a pixel.
+function New-MossBitmapScaled {
+    param([int]$Size)
+
+    if ($Size -ge 128) { return New-MossBitmap -Size $Size }
+
+    $big = New-MossBitmap -Size ($Size * 8)
+    $bmp = New-Object System.Drawing.Bitmap($Size, $Size, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+    $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+    $g.Clear([System.Drawing.Color]::Transparent)
+    $g.DrawImage($big, (New-Object System.Drawing.Rectangle(0, 0, $Size, $Size)))
+    $g.Dispose(); $big.Dispose()
+    return $bmp
 }
 
-# ── Multi-size ICO (System.Drawing cannot emit one, so write it by hand) ─────
+# PNGs. All transparent: the tray and the taskbar both composite onto whatever
+# the shell's background is, and a baked-in field only makes Moss smaller.
+foreach ($spec in @(
+    @{n='hermaeus-app.png';        s=512},
+    @{n='hermaeus-tray.png';       s=256},
+    @{n='hermaeus-tray-dark.png';  s=256},
+    @{n='hermaeus-tray-light.png'; s=256})) {
+    $bmp = New-MossBitmapScaled -Size $spec.s
+    $bmp.Save((Join-Path $Assets $spec.n), [System.Drawing.Imaging.ImageFormat]::Png)
+    $bmp.Dispose()
+    "wrote $($spec.n) ($($spec.s)px)"
+}
+
+# Multi-size ICO. System.Drawing cannot emit one, so write the directory by hand
+# over PNG-compressed frames (supported since Vista).
 $sizes = @(16, 24, 32, 48, 64, 128, 256)
 $pngs = @()
 foreach ($sz in $sizes) {
-    $bmp = New-MossBitmap -Size $sz -WithField $true
+    $bmp = New-MossBitmapScaled -Size $sz
     $ms = New-Object System.IO.MemoryStream
     $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
     $pngs += ,@($sz, $ms.ToArray())
