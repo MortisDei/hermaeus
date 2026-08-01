@@ -36,6 +36,9 @@ public sealed class AgentPatchReviewServiceTests
 
         public Task<AgentTaskState> ContinueTaskAsync(string taskId, string instruction, AgentWorkspaceOptions options, CancellationToken ct = default) =>
             throw new NotSupportedException();
+
+        public Task<AgentSteeringResult> SteerTaskAsync(string taskId, string instruction, CancellationToken ct = default) =>
+            throw new NotSupportedException();
     }
 
     private static (AgentPatchReviewService Service, RecordingAgentService Agent, FileAgentTaskStateStore Store, string Workspace) Build(TempDir temp)

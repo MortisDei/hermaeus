@@ -53,6 +53,15 @@ public sealed class AgentContextBuilder : IAgentContextBuilder
             Constraints = state.Constraints.Take(8).ToList(),
             TaskStateSummary = state.Summary,
             ToolResults = state.ToolResults.TakeLast(5).ToList(),
+            // r29 doc 03 3.3: the user's words, arriving after the task
+            // started. Labelled so the model cannot mistake them for system
+            // authority; they sit alongside the goal and constraints, never in
+            // the system prompt.
+            SteeringInstructions = state.Decisions
+                .Where(d => d.Decision == AgentSteering.DecisionKey)
+                .TakeLast(AgentSteering.MaxPending)
+                .Select(d => d.Reason)
+                .ToList(),
             KnownRisks =
             [
                 "Read-only tools may inspect local files under the selected workspace root.",
