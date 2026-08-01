@@ -76,8 +76,49 @@ through the UI and the test suite alike.
   a local-file badge otherwise. Nothing about how models are discovered,
   downloaded, updated or tuned changed.
 
+- **RAG chunks larger than 512 tokens are embedded instead of silently
+  refused.** The embeddings server was launched with a hardcoded 512-token
+  physical batch, added to silence a startup warning. That number is also the
+  largest input the server will embed at all, and the default chunk size (1600
+  characters plus 320 of overlap) is 500 to 650 real tokens, so a large share
+  of every ingest was rejected outright. Nothing surfaced it: ingestion
+  reported success for the chunks that happened to fit and the rest went to the
+  runtime log, where one owner log had accumulated 846 of them. The batch now
+  follows the server's context size, which is the real ceiling on a single
+  embedding input anyway.
+- **Clearing a text box in the project editor no longer crashes the app.**
+  Avalonia binds an emptied box back as null, and a null parameter does not
+  bind as NULL against a NOT NULL column: it threw while preparing the
+  statement and reached the UI as an unhandled fault.
+- Managed llama.cpp release lookups use the `ggml-org` organisation. The
+  project moved from `ggerganov`, and GitHub's redirect was doing the work.
+
+### Added
+
+- **Mixture-of-Experts CPU offload** (`--n-cpu-moe` / `--cpu-moe`), under
+  Services > Advanced engine options. On a MoE model the experts are most of
+  the file but only a few are active per token, so keeping them in RAM leaves
+  the GPU for attention; cutting GPU layers to make the model fit gives up the
+  part that wants the GPU. Off by default and no effect on a dense model.
+- **The setup wizard states each starter model's licence before you download
+  it**, and offers a choice rather than one recommendation: Phi-4 mini (MIT),
+  Qwen2.5 7B/14B and Gemma 4 E4B (Apache-2.0), Llama 3.2 3B (Llama 3.2
+  Community License), and Qwen2.5 3B, which is research and non-commercial
+  only. The VRAM-based recommendation is the starting selection and stops
+  overriding you the moment you pick.
+
 ### Changed
 
+- **THIRD-PARTY-NOTICES.md now accounts for everything**, organised by what
+  Hermaeus does with each thing: code it redistributes, native libraries inside
+  those packages, bundled data (including the Inter typeface, previously
+  undocumented), components downloaded to your machine but not redistributed
+  (llama.cpp, and NVIDIA's CUDA runtime, which is not open source), model
+  weights with each publisher's terms, and the services it calls. A guard test
+  fails the build when a shipped package has no entry.
+- `docs/llama-cpp-features.md` records a survey of llama-server's current flags
+  against what Hermaeus emits, including what was considered and deliberately
+  left alone.
 - **The test suite reports what it actually ran.** Sixteen tests began by
   returning early on Linux, so the Linux CI leg recorded a green tick for
   llama-server installation, Python health validation, job-object assignment and

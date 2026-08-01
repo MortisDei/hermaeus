@@ -20,6 +20,43 @@ public sealed class ProjectStoreTests
         return new ProjectStore(s);
     }
 
+    /// <summary>
+    /// Found in an owner's crash log. Every text column here is NOT NULL, and a
+    /// null parameter does not bind as NULL: Microsoft.Data.Sqlite throws
+    /// "Value must be set." while preparing the statement, which reached the
+    /// UI as an unhandled AsyncRelayCommand fault and took the app down.
+    ///
+    /// It is reachable from the UI because Avalonia binds a cleared TextBox
+    /// back as null regardless of the property's nullable annotation, so
+    /// emptying a box in the project editor and pressing Save was enough.
+    /// </summary>
+    [Fact]
+    public async Task SaveAsync_survives_null_text_fields_from_a_cleared_editor_box()
+    {
+        using var temp = new TempDir();
+        var store = NewStore(temp);
+        await store.InitializeAsync();
+
+        var project = new Project { Id = "p-null", Name = "Has nulls" };
+        // What Avalonia actually hands back for an emptied TextBox.
+        project.Description = null!;
+        project.FolderRoot = null!;
+        project.DatasetId = null!;
+        project.DefaultModelId = null!;
+        project.DefaultSystemPrompt = null!;
+        project.Color = null!;
+
+        await store.SaveAsync(project);
+
+        var loaded = await store.GetByIdAsync("p-null");
+        Assert.NotNull(loaded);
+        Assert.Equal("Has nulls", loaded!.Name);
+        Assert.Equal(string.Empty, loaded.Description);
+        Assert.Equal(string.Empty, loaded.FolderRoot);
+        // An invalid (here null) colour falls back to the default, as it always did.
+        Assert.Equal(ProjectColors.Default, loaded.Color);
+    }
+
     [Fact]
     public async Task SaveAsync_and_GetByIdAsync_round_trip()
     {

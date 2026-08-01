@@ -548,18 +548,35 @@ public sealed class ServerProcessManager : IDisposable
                 parts.Add("mean");
             }
 
-            // r14 2.4: llama-server clamps n_batch down to n_ubatch (512) for
-            // embeddings and logs a warning pair every start; set a coherent
-            // pair up front so the start is clean.
+            // r14 2.4 set this pair to a hardcoded 512 so llama-server would
+            // stop logging a clamp warning at every start. That silenced the
+            // warning and introduced a much worse defect, found in a real
+            // runtime log: the physical batch is the largest input the server
+            // will embed AT ALL, and anything bigger is refused outright with
+            //   "input (N tokens) is too large to process.
+            //    increase the physical batch size (current batch size: 512)"
+            //
+            // RAG chunks default to 1600 characters plus 320 of overlap, which
+            // is 500 to 650 real tokens for prose and denser again for code, so
+            // a large share of every ingest was being rejected. One owner log
+            // carried 846 of those errors. Nothing surfaced it: ingestion
+            // reported success for the chunks that fit and the rest went to the
+            // runtime log, so the feature looked like it worked.
+            //
+            // The batch now follows the context size, which is the real ceiling
+            // on a single embedding input anyway: if it fits the context, the
+            // server can embed it. The pair stays equal so the clamp warning
+            // r14 was chasing still never appears.
+            var embeddingBatch = Math.Max(512, cfg.ContextSize).ToString(CultureInfo.InvariantCulture);
             if (!HasArg("-b") && !HasArg("--batch-size"))
             {
                 parts.Add("-b");
-                parts.Add("512");
+                parts.Add(embeddingBatch);
             }
             if (!HasArg("-ub") && !HasArg("--ubatch-size"))
             {
                 parts.Add("-ub");
-                parts.Add("512");
+                parts.Add(embeddingBatch);
             }
         }
 

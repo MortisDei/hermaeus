@@ -137,20 +137,34 @@ public sealed class ProjectStore : IProjectStore
                 default_model_id=excluded.default_model_id, default_system_prompt=excluded.default_system_prompt,
                 color=excluded.color, updated_at=excluded.updated_at,
                 last_opened_at=excluded.last_opened_at, is_archived=excluded.is_archived";
-        cmd.Parameters.AddWithValue("$id", project.Id);
-        cmd.Parameters.AddWithValue("$name", project.Name.Trim());
-        cmd.Parameters.AddWithValue("$desc", project.Description);
-        cmd.Parameters.AddWithValue("$folder", project.FolderRoot);
-        cmd.Parameters.AddWithValue("$dataset", project.DatasetId);
-        cmd.Parameters.AddWithValue("$model", project.DefaultModelId);
-        cmd.Parameters.AddWithValue("$prompt", project.DefaultSystemPrompt);
-        cmd.Parameters.AddWithValue("$color", ProjectColors.IsValid(project.Color) ? project.Color : ProjectColors.Default);
+        // Every text column here is NOT NULL, and a null parameter does not bind
+        // as NULL: Microsoft.Data.Sqlite throws "Value must be set." while
+        // preparing the statement. That is not hypothetical. Avalonia binds a
+        // cleared TextBox back as null regardless of the property's nullable
+        // annotation, so emptying Description (or any other box) in the project
+        // editor and pressing Save took the whole app down with an unhandled
+        // exception. Normalise here, at the boundary that actually knows the
+        // columns are NOT NULL, rather than trusting every caller.
+        cmd.Parameters.AddWithValue("$id", Text(project.Id));
+        cmd.Parameters.AddWithValue("$name", Text(project.Name).Trim());
+        cmd.Parameters.AddWithValue("$desc", Text(project.Description));
+        cmd.Parameters.AddWithValue("$folder", Text(project.FolderRoot));
+        cmd.Parameters.AddWithValue("$dataset", Text(project.DatasetId));
+        cmd.Parameters.AddWithValue("$model", Text(project.DefaultModelId));
+        cmd.Parameters.AddWithValue("$prompt", Text(project.DefaultSystemPrompt));
+        cmd.Parameters.AddWithValue("$color", ProjectColors.IsValid(Text(project.Color)) ? project.Color : ProjectColors.Default);
         cmd.Parameters.AddWithValue("$ca", project.CreatedAt.ToString("O"));
         cmd.Parameters.AddWithValue("$ua", project.UpdatedAt.ToString("O"));
         cmd.Parameters.AddWithValue("$loa", project.LastOpenedAt.ToString("O"));
         cmd.Parameters.AddWithValue("$archived", project.IsArchived ? 1 : 0);
         await cmd.ExecuteNonQueryAsync(ct);
     }
+
+    /// <summary>
+    /// A value safe to bind to a NOT NULL text column. See SaveAsync for why
+    /// this exists rather than relying on the model's non-nullable strings.
+    /// </summary>
+    private static string Text(string? value) => value ?? string.Empty;
 
     public async Task DeleteAsync(string id, CancellationToken ct = default)
     {
