@@ -153,6 +153,7 @@ public static class HarnessCases
         [new HarnessCase("memory expiration date archives and is excluded from search even before the sweep", ServiceTests.MemoryExpirationDateArchivesAndIsExcludedFromSearchEvenBeforeTheSweep)],
         [new HarnessCase("conversation memory saves a new memory marker even with zero injected memories", ServiceTests.ConversationMemorySavesANewMemoryMarkerEvenWithZeroInjectedMemories)],
         [new HarnessCase("conversation memory dedupes the same marker across turns into one row with bumped frequency", ServiceTests.ConversationMemoryDedupesTheSameMarkerAcrossTurnsIntoOneRowWithBumpedFrequency)],
+        [new HarnessCase("conversation memory dedupes near equivalent markers across turns", ServiceTests.ConversationMemoryDedupesNearEquivalentMarkersAcrossTurns)],
         [new HarnessCase("conversation memory always strips markers regardless of injection or extraction", ServiceTests.ConversationMemoryAlwaysStripsMarkersRegardlessOfInjectionOrExtraction)],
         [new HarnessCase("XTTS API template delegates to generator", ServiceTests.XttsApiTemplateDelegatesToGenerator)],
         [new HarnessCase("extra args parser handles escaped quotes", ServiceTests.ExtraArgsParserHandlesEscapedQuotes)],

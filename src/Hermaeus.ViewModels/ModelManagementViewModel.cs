@@ -618,6 +618,10 @@ public partial class ModelManagementViewModel : ObservableObject
                     {
                         UpdateCheckStatus = $"Hashing {item.EffectiveName} (first check after linking)...";
                         entry.Sha256 = await ComputeSha256Async(item.ModelId);
+                        // Hashing a multi-GB model is expensive. Persist it before the
+                        // network call so a timeout, cancellation, or failed repo lookup
+                        // cannot make the next check hash the exact same bytes again.
+                        await _manifest.UpsertAsync(entry);
                     }
                 }
 

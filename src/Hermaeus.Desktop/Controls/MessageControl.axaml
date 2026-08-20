@@ -172,16 +172,24 @@
                             <TextBlock Text="{Binding IsReasoningStreaming, Converter={x:Static conv:BoolToTextConverter.Instance}, ConverterParameter='Thinking|Reasoning'}"
                                        FontSize="11" />
                         </ToggleButton>
-                        <StackPanel IsVisible="{Binding IsReasoningExpanded}" Spacing="4">
-                            <controls:MarkdownViewer Markdown="{Binding ReasoningContent}"
-                                                      FontSize="{DynamicResource AppChatFontSize}" />
-                            <Button Content="Copy reasoning"
-                                    HorizontalAlignment="Left"
-                                    Padding="8,3"
-                                    ToolTip.Tip="Copy reasoning without copying the answer"
-                                    Command="{Binding $parent[ItemsControl].DataContext.CopyReasoningCommand}"
-                                    CommandParameter="{Binding}" />
-                        </StackPanel>
+                        <Border IsVisible="{Binding IsReasoningExpanded}"
+                                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                BorderThickness="1"
+                                CornerRadius="8"
+                                Background="{DynamicResource SubtleFillColorSecondaryBrush}"
+                                Padding="10,8">
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="Reasoning" FontSize="10" Opacity="0.55" FontWeight="SemiBold" />
+                                <controls:MarkdownViewer Markdown="{Binding ReasoningContent}"
+                                                          FontSize="{DynamicResource AppChatFontSize}" />
+                                <Button Content="Copy reasoning"
+                                        HorizontalAlignment="Left"
+                                        Padding="8,3"
+                                        ToolTip.Tip="Copy reasoning without copying the answer"
+                                        Command="{Binding $parent[ItemsControl].DataContext.CopyReasoningCommand}"
+                                        CommandParameter="{Binding}" />
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
 
                     <TextBlock Text="{Binding NoFinalAnswerNotice}"

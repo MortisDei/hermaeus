@@ -13,6 +13,15 @@ limit.
 
 ### Fixed
 
+- Model update checks persist a first calculated model hash before the remote
+  lookup, so an interrupted lookup does not hash the same model again. Doctor
+  now accepts current llama-server `build 10509` version output.
+- Changing models now replaces auto-selected vision projectors and MTP draft
+  heads with the sole companion belonging to the newly selected model, while
+  preserving explicit companion choices. Near-equivalent extracted memories
+  reinforce one row instead of accumulating paraphrases.
+- Expanded reasoning is visually boxed and labelled, separating it from the
+  final answer.
 - Starter model downloads now adopt matching files on retry, verify hashes before
   completion, write provenance, and refresh Services immediately after setup.
 - Models and Services share one context default and one KV-cache precision. Model

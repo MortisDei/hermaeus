@@ -222,7 +222,7 @@
   sweep runs. Pinned memories never decay and never expire.
 - The model can save a new memory anywhere in its response with
   `[MEMORY: <content>]` (up to 3 per turn, deduplicated against existing
-  memories so a repeated fact reinforces one row instead of piling up), and
+  memories so a repeated or near-equivalent fact reinforces one row instead of piling up), and
   correct or retire a memory it was shown this turn with
   `[MEMORY_UPDATE: <id> | <content>]` / `[MEMORY_FORGET: <id>]`; only ids
   actually injected into that turn are honored for update/forget, everything
@@ -676,7 +676,8 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
   an "Advanced engine options" section for `--mlock`, `--no-mmap`, and a
   speculative-decoding section (see below). Every default matches the prior
   hand-typed command line exactly (f16 KV cache, auto flash attention, everything else
-  off) - nothing is ever forced, and a value typed into Extra args always wins
+  off). Auto emits no `--flash-attn` override, leaving llama-server to select
+  its supported default; on and off are explicit overrides. Nothing is ever forced, and a value typed into Extra args always wins
   over the equivalent first-class control. A quantized V cache combined with
   flash attention off shows an inline warning (llama.cpp needs flash attention
   for a quantized V cache) but still launches with exactly what was chosen. A
@@ -690,8 +691,9 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
   same VRAM.
 - The Services card's server editor also exposes an optional "Vision
   projector" picker beside the model row: a `mmproj-*.gguf` file that sits
-  alone next to the selected model auto-fills, otherwise it lists every
-  `mmproj-*.gguf` found there for manual choice. Setting one launches the
+  alone next to the selected model auto-fills and follows a later model
+  switch, otherwise it lists every `mmproj-*.gguf` found there for manual
+  choice. Setting one launches the
   server with `--mmproj <path>`, enabling image attachments in chat for that
   server. A model path browsed or previously saved from outside the scanned
   assets root, and the models folder's own casing (`llm` vs `LLM`), are both
@@ -766,9 +768,9 @@ mutually exclusive:
   and at tens of megabytes against a multi-gigabyte target it is the size ratio
   speculative decoding actually wants.
 - **The draft model itself** is found the same way the vision projector above
-  it is found, and has been since r19: a scan for `mtp-*.gguf` beside the
-  selected model and in its `MTP/` subfolder, with the sole candidate filled in
-  and anything you chose explicitly left alone. Finding the file does not turn
+  it is found: a scan for `mtp-*.gguf` beside the selected model and in its
+  `MTP/` subfolder. A sole candidate is filled in and follows a later model
+  switch; anything you chose explicitly is left alone. Finding the file does not turn
   drafting on. Nothing reaches the launch command until you tick the box, so
   discovery never silently changes how a server runs.
 

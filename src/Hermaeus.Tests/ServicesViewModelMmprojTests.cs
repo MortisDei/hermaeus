@@ -70,4 +70,23 @@ public sealed class ServicesViewModelMmprojTests
 
         Assert.Equal(manualChoice, server.MmprojPath);
     }
+
+    [Fact]
+    public void Switching_models_replaces_an_auto_selected_projector_with_the_new_models_projector()
+    {
+        using var temp = new TempDir();
+        var (_, server, firstModel, dir) = Build(temp);
+        var secondModel = Path.Combine(dir, "model-b.gguf");
+        var firstProjector = Path.Combine(dir, "mmproj-model-a.gguf");
+        var secondProjector = Path.Combine(dir, "mmproj-model-b.gguf");
+        File.WriteAllText(firstProjector, "fake");
+        server.ModelPath = firstModel;
+        File.Delete(firstProjector);
+        File.WriteAllText(secondModel, "fake");
+        File.WriteAllText(secondProjector, "fake");
+
+        server.ModelPath = secondModel;
+
+        Assert.Equal(secondProjector, server.MmprojPath);
+    }
 }

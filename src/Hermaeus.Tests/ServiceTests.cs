@@ -2240,6 +2240,7 @@ namespace Hermaeus.Tests
             Equal(0, args[^1], "CPU fallback should be the final auto-tune candidate");
             Equal(12, ServerProcessManager.ParseGpuLayerLog("llm_load_tensors: offloaded 12/33 layers to GPU").Used, "offloaded layer logs should parse");
             Equal(4341, DoctorService.TryParseLlamaBuild("llama.cpp b4341"), "llama.cpp build tags should parse");
+            Equal(10509, DoctorService.TryParseLlamaBuild("version: 0.1.2-dev (build 10509, commit fe8156f78)"), "current llama-server parenthesized build output should parse");
             return Task.CompletedTask;
         }
 
@@ -2696,6 +2697,26 @@ namespace Hermaeus.Tests
             var matches = all.Where(m => m.Content == "User wants todos auto-continued without prompting.").ToList();
             Equal(1, matches.Count, "the same marker text saved twice across turns should dedupe into a single row, not pile up duplicates");
             Equal(2, matches[0].FrequencyCount, "the dedupe path should bump FrequencyCount on the second save");
+        }
+
+        public static async Task ConversationMemoryDedupesNearEquivalentMarkersAcrossTurns()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var store = new MemoryStore(settings);
+            await store.InitializeAsync();
+            var conversations = new ConversationStore(settings);
+            await conversations.InitializeAsync();
+            var service = new ConversationMemoryService(settings, conversations, store,
+                new MemoryExtractionService(), new FakeLlm(), new RuntimeLogService(settings));
+
+            await service.ApplyMemoryMarkersAsync("[MEMORY: User prefers Australian English spelling in all replies.]", [], "conv-near-dedupe");
+            await service.ApplyMemoryMarkersAsync("[MEMORY: User prefers Australian English spelling for every reply.]", [], "conv-near-dedupe");
+
+            var memories = await store.GetAllAsync();
+            Equal(1, memories.Count, "near-equivalent durable memories should reinforce one row rather than accumulating paraphrases");
+            Equal(2, memories[0].FrequencyCount, "merging a near-equivalent memory should retain the reinforcement count");
         }
 
         public static async Task ConversationMemoryAlwaysStripsMarkersRegardlessOfInjectionOrExtraction()

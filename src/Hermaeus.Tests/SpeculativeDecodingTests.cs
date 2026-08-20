@@ -488,6 +488,29 @@ public sealed class SpeculativeDecodingTests
         Assert.Equal(draft, vm.DraftModelPath);
     }
 
+    [Fact]
+    public void Switching_models_replaces_an_auto_selected_draft_head_with_the_new_models_head()
+    {
+        using var temp = new TempDir();
+        var firstDir = temp.PathFor("first-snapshot");
+        var secondDir = temp.PathFor("second-snapshot");
+        Directory.CreateDirectory(firstDir);
+        Directory.CreateDirectory(secondDir);
+        var firstModel = Path.Combine(firstDir, "qwen.gguf");
+        var firstDraft = Path.Combine(firstDir, "mtp-qwen.gguf");
+        var secondModel = Path.Combine(secondDir, "gemma.gguf");
+        var secondDraft = Path.Combine(secondDir, "mtp-gemma-4-E4B-it-BF16.gguf");
+        File.WriteAllText(firstModel, "model");
+        File.WriteAllText(firstDraft, "draft");
+        File.WriteAllText(secondModel, "model");
+        File.WriteAllText(secondDraft, "draft");
+        var vm = NewServerVm(temp, firstModel);
+
+        vm.ModelPath = secondModel;
+
+        Assert.Equal(secondDraft, vm.DraftModelPath);
+    }
+
     /// <summary>
     /// This is what keeps discovery from becoming the auto-selection r27 doc 03
     /// declined. Finding the file changes nothing about how the server launches;

@@ -250,6 +250,10 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     private HardwareProfile? _hardwareProfile;
     private GgufModelInfo? _ggufInfo;
     private int _contextFitGeneration;
+    private string? _autoSelectedMmprojPath;
+    private string? _autoSelectedDraftModelPath;
+    private bool _settingAutoMmproj;
+    private bool _settingAutoDraftModel;
 
     public UiBoundCollection<string> DetectedModelPaths { get; } = [];
     public UiBoundCollection<string> DetectedMmprojPaths { get; } = [];
@@ -326,6 +330,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     private void RefreshDetectedMmprojPaths(string modelPath)
     {
         var current = MmprojPath;
+        var wasAutoSelected = string.Equals(current, _autoSelectedMmprojPath, StringComparison.OrdinalIgnoreCase);
         DetectedMmprojPaths.Clear();
 
         if (!string.IsNullOrWhiteSpace(modelPath))
@@ -338,13 +343,17 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
             }
         }
 
-        if (!string.IsNullOrWhiteSpace(current) && !DetectedMmprojPaths.Contains(current, StringComparer.OrdinalIgnoreCase))
+        var hasCurrentCandidate = !string.IsNullOrWhiteSpace(current)
+            && DetectedMmprojPaths.Contains(current, StringComparer.OrdinalIgnoreCase);
+        var soleCandidate = DetectedMmprojPaths.Count == 1 ? DetectedMmprojPaths[0] : string.Empty;
+        if (!string.IsNullOrWhiteSpace(current) && !hasCurrentCandidate)
             DetectedMmprojPaths.Insert(0, current);
 
-        if (string.IsNullOrWhiteSpace(current) && DetectedMmprojPaths.Count == 1)
-            MmprojPath = DetectedMmprojPaths[0];
-        else if (!string.IsNullOrWhiteSpace(current) && MmprojPath != current)
-            MmprojPath = current;
+        var replacement = (string.IsNullOrWhiteSpace(current) || wasAutoSelected || !File.Exists(current))
+            && !string.IsNullOrWhiteSpace(soleCandidate)
+            ? soleCandidate
+            : current;
+        SetAutoMmprojPath(replacement, soleCandidate);
     }
 
     /// <summary>
@@ -362,6 +371,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     private void RefreshDetectedDraftModelPaths(string modelPath)
     {
         var current = DraftModelPath;
+        var wasAutoSelected = string.Equals(current, _autoSelectedDraftModelPath, StringComparison.OrdinalIgnoreCase);
         DetectedDraftModelPaths.Clear();
 
         if (!string.IsNullOrWhiteSpace(modelPath))
@@ -381,16 +391,44 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
             }
         }
 
-        if (!string.IsNullOrWhiteSpace(current) && !DetectedDraftModelPaths.Contains(current, StringComparer.OrdinalIgnoreCase))
+        var hasCurrentCandidate = !string.IsNullOrWhiteSpace(current)
+            && DetectedDraftModelPaths.Contains(current, StringComparer.OrdinalIgnoreCase);
+        var soleCandidate = DetectedDraftModelPaths.Count == 1 ? DetectedDraftModelPaths[0] : string.Empty;
+        if (!string.IsNullOrWhiteSpace(current) && !hasCurrentCandidate)
             DetectedDraftModelPaths.Insert(0, current);
 
-        if (string.IsNullOrWhiteSpace(current) && DetectedDraftModelPaths.Count == 1)
-            DraftModelPath = DetectedDraftModelPaths[0];
-        else if (!string.IsNullOrWhiteSpace(current) && DraftModelPath != current)
-            DraftModelPath = current;
+        var replacement = (string.IsNullOrWhiteSpace(current) || wasAutoSelected || !File.Exists(current))
+            && !string.IsNullOrWhiteSpace(soleCandidate)
+            ? soleCandidate
+            : current;
+        SetAutoDraftModelPath(replacement, soleCandidate);
 
         OnPropertyChanged(nameof(HasDetectedDraftModel));
         OnPropertyChanged(nameof(DraftModelHint));
+    }
+
+    private void SetAutoMmprojPath(string path, string soleCandidate)
+    {
+        _settingAutoMmproj = true;
+        try
+        {
+            if (!string.Equals(MmprojPath, path, StringComparison.OrdinalIgnoreCase))
+                MmprojPath = path;
+            _autoSelectedMmprojPath = string.Equals(path, soleCandidate, StringComparison.OrdinalIgnoreCase) ? path : null;
+        }
+        finally { _settingAutoMmproj = false; }
+    }
+
+    private void SetAutoDraftModelPath(string path, string soleCandidate)
+    {
+        _settingAutoDraftModel = true;
+        try
+        {
+            if (!string.Equals(DraftModelPath, path, StringComparison.OrdinalIgnoreCase))
+                DraftModelPath = path;
+            _autoSelectedDraftModelPath = string.Equals(path, soleCandidate, StringComparison.OrdinalIgnoreCase) ? path : null;
+        }
+        finally { _settingAutoDraftModel = false; }
     }
 
     private static IEnumerable<string> EnumerateDraftHeads(string directory)
@@ -1191,7 +1229,12 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         RefreshDetectedMmprojPaths(value);
         RefreshDetectedDraftModelPaths(value);
     }
-    partial void OnMmprojPathChanged(string value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnMmprojPathChanged(string value)
+    {
+        if (!_settingAutoMmproj)
+            _autoSelectedMmprojPath = null;
+        OnPropertyChanged(nameof(HasUnsavedChanges));
+    }
     partial void OnPreserveReasoningChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
 
     /// <summary>
@@ -1328,6 +1371,8 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     }
     partial void OnDraftModelPathChanged(string value)
     {
+        if (!_settingAutoDraftModel)
+            _autoSelectedDraftModelPath = null;
         OnPropertyChanged(nameof(HasUnsavedChanges));
         OnPropertyChanged(nameof(HasDetectedDraftModel));
         OnPropertyChanged(nameof(DraftModelHint));

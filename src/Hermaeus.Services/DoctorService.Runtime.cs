@@ -744,9 +744,9 @@ public sealed partial class DoctorService
         if (match.Success && int.TryParse(match.Groups["build"].Value, out var build))
             return build;
 
-        // Current llama-server --version output dropped the "b" prefix, e.g.
-        // "version: 5750 (abcdef1)" or "build: 5750 (abcdef1)".
-        match = Regex.Match(value, @"(?:version|build)\s*[:=]\s*(?<build>\d{3,6})", RegexOptions.IgnoreCase);
+        // Current llama-server output uses both "build: 5750" and
+        // "(build 10509, commit ...)" forms. The latter is what b10509 emits.
+        match = Regex.Match(value, @"(?:version|build)\s*[:=]?\s*(?<build>\d{3,6})", RegexOptions.IgnoreCase);
         return match.Success && int.TryParse(match.Groups["build"].Value, out build) ? build : null;
     }
 
