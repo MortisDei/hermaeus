@@ -7,7 +7,7 @@ namespace Hermaeus.Services;
 
 public sealed class ConversationStore : IConversationStore
 {
-    private const int SchemaVersion = 5;
+    private const int SchemaVersion = 6;
     private readonly ISettingsService _settings;
     private string _initializedPath = string.Empty;
     private readonly SemaphoreSlim _initGate = new(1, 1);
@@ -83,7 +83,11 @@ public sealed class ConversationStore : IConversationStore
                 // The tree itself needs no migration - Message.ParentId is additive JSON
                 // inside the existing messages_json blob.
                 new SqliteMigration(5, async (db, token) =>
-                    await EnsureColumnAsync(db, "active_leaf_id", "TEXT NOT NULL DEFAULT ''", token))
+                    await EnsureColumnAsync(db, "active_leaf_id", "TEXT NOT NULL DEFAULT ''", token)),
+                // r30: rebuild the FTS projection from answer content only. The
+                // table shape is unchanged, but old rows may contain reasoning
+                // text in the previous JSON projection.
+                new SqliteMigration(6, (_, _) => Task.FromResult(true))
             ], ct);
             if (!ftsExisted || schemaChanged)
                 await RebuildFtsAsync(c, ct);
@@ -111,11 +115,26 @@ public sealed class ConversationStore : IConversationStore
         await clear.ExecuteNonQueryAsync(ct);
 
         await using var fill = c.CreateCommand();
-        fill.CommandText = @"
-            INSERT INTO conversations_fts (id, title, messages, folder, tags)
-            SELECT id, title, messages_json, folder, tags_json
-            FROM conversations";
-        await fill.ExecuteNonQueryAsync(ct);
+        fill.CommandText = "SELECT id, title, messages_json, folder, tags_json FROM conversations";
+        await using var reader = await fill.ExecuteReaderAsync(ct);
+        var rows = new List<(string Id, string Title, string Messages, string Folder, string Tags)>();
+        while (await reader.ReadAsync(ct))
+        {
+            var messages = JsonSerializer.Deserialize<List<Message>>(reader.GetString(2)) ?? [];
+            rows.Add((reader.GetString(0), reader.GetString(1), SearchMessageText(messages), reader.GetString(3), reader.GetString(4)));
+        }
+        await reader.DisposeAsync();
+        foreach (var row in rows)
+        {
+            await using var insert = c.CreateCommand();
+            insert.CommandText = "INSERT INTO conversations_fts (id, title, messages, folder, tags) VALUES ($id, $title, $messages, $folder, $tags)";
+            insert.Parameters.AddWithValue("$id", row.Id);
+            insert.Parameters.AddWithValue("$title", row.Title);
+            insert.Parameters.AddWithValue("$messages", row.Messages);
+            insert.Parameters.AddWithValue("$folder", row.Folder);
+            insert.Parameters.AddWithValue("$tags", row.Tags);
+            await insert.ExecuteNonQueryAsync(ct);
+        }
     }
 
     private static async Task<bool> EnsureColumnAsync(SqliteConnection c, string column, string definition, CancellationToken ct)
@@ -289,7 +308,7 @@ public sealed class ConversationStore : IConversationStore
         cmd.Parameters.AddWithValue("$activeLeafId", conv.ActiveLeafId.Trim());
         await cmd.ExecuteNonQueryAsync(ct);
 
-        await UpsertFtsAsync(c, conv, json, tagsJson, ct);
+        await UpsertFtsAsync(c, conv, tagsJson, ct);
     }
 
     public async Task DeleteAsync(string id, CancellationToken ct = default)
@@ -343,7 +362,6 @@ public sealed class ConversationStore : IConversationStore
     private static async Task UpsertFtsAsync(
         SqliteConnection c,
         Conversation conv,
-        string messagesJson,
         string tagsJson,
         CancellationToken ct)
     {
@@ -358,7 +376,7 @@ public sealed class ConversationStore : IConversationStore
             VALUES ($id, $title, $messages, $folder, $tags)";
         insert.Parameters.AddWithValue("$id", conv.Id);
         insert.Parameters.AddWithValue("$title", conv.Title);
-        insert.Parameters.AddWithValue("$messages", messagesJson);
+        insert.Parameters.AddWithValue("$messages", SearchMessageText(conv.Messages));
         insert.Parameters.AddWithValue("$folder", conv.Folder.Trim());
         insert.Parameters.AddWithValue("$tags", tagsJson);
         await insert.ExecuteNonQueryAsync(ct);
@@ -367,12 +385,30 @@ public sealed class ConversationStore : IConversationStore
     private static async Task<List<Conversation>> SearchLikeAsync(SqliteConnection c, string q, CancellationToken ct)
     {
         var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT * FROM conversations WHERE title LIKE $q OR messages_json LIKE $q OR folder LIKE $q OR tags_json LIKE $q ORDER BY is_archived ASC, is_pinned DESC, updated_at DESC LIMIT 50";
+        cmd.CommandText = "SELECT * FROM conversations ORDER BY is_archived ASC, is_pinned DESC, updated_at DESC LIMIT 200";
         cmd.Parameters.AddWithValue("$q", $"%{q}%");
         var r = new List<Conversation>();
         await using var rd = await cmd.ExecuteReaderAsync(ct);
-        while (await rd.ReadAsync(ct)) r.Add(Map(rd));
+        while (await rd.ReadAsync(ct))
+        {
+            var conversation = Map(rd);
+            if (SearchMatches(conversation, q))
+                r.Add(conversation);
+            if (r.Count >= 50) break;
+        }
         return r;
+    }
+
+    private static string SearchMessageText(IEnumerable<Message> messages) =>
+        string.Join("\n", messages.Select(m => $"{m.Role} {m.Content}"));
+
+    private static bool SearchMatches(Conversation conversation, string query)
+    {
+        var needle = query.Trim();
+        if (needle.Length == 0) return true;
+        var fields = new[] { conversation.Title, conversation.Folder, string.Join(" ", conversation.Tags) }
+            .Concat(conversation.Messages.SelectMany(m => new[] { m.Role, m.Content }));
+        return fields.Any(field => field.Contains(needle, StringComparison.OrdinalIgnoreCase));
     }
 
     private static string BuildFtsQuery(string query)

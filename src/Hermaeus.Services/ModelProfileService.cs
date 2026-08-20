@@ -45,6 +45,8 @@ public sealed class ModelProfileService
                 model.Tags = NormalizeTags(profile.Tags);
                 model.DefaultTemperature = profile.DefaultTemperature;
                 model.DefaultContextSize = profile.DefaultContextSize;
+                model.DefaultKvCacheType = profile.DefaultKvCacheType;
+                model.DefaultPreserveReasoning = profile.DefaultPreserveReasoning;
                 model.DefaultMaxTokens = profile.DefaultMaxTokens;
                 model.DefaultTopP = profile.DefaultTopP;
                 model.DefaultTopK = profile.DefaultTopK;
@@ -77,6 +79,8 @@ public sealed class ModelProfileService
             existing.Tags = normalized.Tags;
             existing.DefaultTemperature = normalized.DefaultTemperature;
             existing.DefaultContextSize = normalized.DefaultContextSize;
+            existing.DefaultKvCacheType = normalized.DefaultKvCacheType;
+            existing.DefaultPreserveReasoning = normalized.DefaultPreserveReasoning;
             existing.DefaultMaxTokens = normalized.DefaultMaxTokens;
             existing.DefaultTopP = normalized.DefaultTopP;
             existing.DefaultTopK = normalized.DefaultTopK;
@@ -107,6 +111,8 @@ public sealed class ModelProfileService
         Tags = NormalizeTags(profile.Tags),
         DefaultTemperature = profile.DefaultTemperature,
         DefaultContextSize = profile.DefaultContextSize,
+        DefaultKvCacheType = profile.DefaultKvCacheType,
+        DefaultPreserveReasoning = profile.DefaultPreserveReasoning,
         DefaultMaxTokens = profile.DefaultMaxTokens,
         DefaultTopP = profile.DefaultTopP,
         DefaultTopK = profile.DefaultTopK,

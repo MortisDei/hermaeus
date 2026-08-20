@@ -15,6 +15,7 @@ public partial class SetupWizardViewModel : ObservableObject
     private readonly IToastService _toasts;
     private readonly ISystemInfoService _systemInfo;
     private readonly ModelDownloadService _modelDownloads;
+    private readonly ModelManifestStore _manifest;
 
     [ObservableProperty] private int _stepIndex;
     [ObservableProperty] private string _dataRootDirectory = string.Empty;
@@ -78,6 +79,14 @@ public partial class SetupWizardViewModel : ObservableObject
 
     partial void OnSelectedStarterModelChanged(StarterModelEntry? value)
     {
+        if (!IsDownloadingStarterModel && !string.IsNullOrEmpty(_starterModelDownloadId)
+            && !string.Equals(_starterModelDownloadId, value?.Id, StringComparison.Ordinal))
+        {
+            StarterModelDownloadCompleted = false;
+            StarterModelDownloadPercent = 0;
+            StarterModelDownloadStatus = string.Empty;
+            StarterModelDownloadError = string.Empty;
+        }
         OnPropertyChanged(nameof(SelectedStarterModelIsRecommended));
         // The fit badge describes the model that will be downloaded, so it has
         // to follow the selection rather than stay on the recommendation.
@@ -88,6 +97,7 @@ public partial class SetupWizardViewModel : ObservableObject
     [ObservableProperty] private string _starterModelDownloadStatus = string.Empty;
     [ObservableProperty] private string _starterModelDownloadError = string.Empty;
     [ObservableProperty] private bool _starterModelDownloadCompleted;
+    private string _starterModelDownloadId = string.Empty;
 
     // ── Voice install from the wizard (docs/review 02-onboarding-and-usability.md 2.2) ──
     [ObservableProperty] private bool _isInstallingVoice;
@@ -149,7 +159,8 @@ public partial class SetupWizardViewModel : ObservableObject
         IDoctorService doctor,
         IToastService toasts,
         ISystemInfoService systemInfo,
-        ModelDownloadService? modelDownloads = null)
+        ModelDownloadService? modelDownloads = null,
+        ModelManifestStore? manifest = null)
     {
         _settings = settings;
         _runtimeProfiles = runtimeProfiles;
@@ -158,6 +169,7 @@ public partial class SetupWizardViewModel : ObservableObject
         _toasts = toasts;
         _systemInfo = systemInfo;
         _modelDownloads = modelDownloads ?? new ModelDownloadService();
+        _manifest = manifest ?? new ModelManifestStore(settings);
         LoadFromSettings();
     }
 
@@ -299,9 +311,32 @@ public partial class SetupWizardViewModel : ObservableObject
         StarterModelDownloadPercent = 0;
         try
         {
-            var folder = ResolveStarterModelFolder();
+            var root = ResolveStarterModelRoot();
+            if (!ModelPathSafety.TryResolveFileUnderRoot(root, Path.Combine(root, "Models", "chat", entry.FileName), out var destination, out var pathError))
+            {
+                StarterModelDownloadError = pathError;
+                StarterModelDownloadStatus = "Choose a different AI root.";
+                return;
+            }
+
+            var folder = Path.GetDirectoryName(destination)!;
             Directory.CreateDirectory(folder);
-            var destination = Path.Combine(folder, entry.FileName);
+
+            if (File.Exists(destination))
+            {
+                StarterModelDownloadStatus = "Checking the existing file...";
+                if (!await _modelDownloads.VerifyHashAsync(destination, entry.Sha256))
+                {
+                    StarterModelDownloadError = $"A different file already exists at {destination}. It was not changed.";
+                    StarterModelDownloadStatus = "Existing file conflicts with the selected starter model.";
+                    return;
+                }
+
+                await AdoptStarterModelAsync(entry, destination);
+                StarterModelDownloadPercent = 100;
+                StarterModelDownloadStatus = $"{entry.DisplayName} was already downloaded and is ready.";
+                return;
+            }
 
             StarterModelDownloadStatus = $"Downloading {entry.DisplayName}...";
             var progress = new Progress<DownloadProgress>(p => StarterModelDownloadPercent = p.PercentComplete);
@@ -317,16 +352,19 @@ public partial class SetupWizardViewModel : ObservableObject
             {
                 try { File.Delete(destination); } catch { }
                 StarterModelDownloadError = "The downloaded file failed hash verification and was removed. Please try again.";
+                StarterModelDownloadStatus = "Hash verification failed.";
                 return;
             }
 
-            ModelFolder = destination;
+            await AdoptStarterModelAsync(entry, destination);
+            StarterModelDownloadPercent = 100;
             StarterModelDownloadCompleted = true;
             StarterModelDownloadStatus = $"{entry.DisplayName} is ready.";
         }
         catch (Exception ex)
         {
             StarterModelDownloadError = ex.Message;
+            StarterModelDownloadStatus = "Starter model adoption failed.";
         }
         finally
         {
@@ -334,13 +372,43 @@ public partial class SetupWizardViewModel : ObservableObject
         }
     }
 
-    private string ResolveStarterModelFolder()
+    private async Task AdoptStarterModelAsync(StarterModelEntry entry, string destination)
+    {
+        var info = new FileInfo(destination);
+        if (!info.Exists)
+            throw new InvalidOperationException($"The downloaded model is missing at {destination}.");
+
+        await _manifest.UpsertAsync(new ModelManifestEntry
+        {
+            FilePath = Path.GetFullPath(destination),
+            RepoId = GetRepoId(entry.DownloadUrl),
+            RepoFile = entry.FileName,
+            Sha256 = entry.Sha256,
+            SizeBytes = info.Length,
+            Source = "starter"
+        });
+
+        ModelFolder = Path.GetFullPath(destination);
+        _starterModelDownloadId = entry.Id;
+        StarterModelDownloadCompleted = true;
+        StarterModelDownloadError = string.Empty;
+    }
+
+    private string ResolveStarterModelRoot()
     {
         var configured = _settings.Settings.DataManagement.LocalAiAssetsRoot?.Trim();
         var root = string.IsNullOrWhiteSpace(configured)
             ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Hermaeus")
             : Path.GetFullPath(configured);
-        return Path.Combine(root, "Models", "chat");
+        return root;
+    }
+
+    private static string GetRepoId(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+            return string.Empty;
+        var segments = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        return segments.Length >= 2 ? $"{segments[0]}/{segments[1]}" : string.Empty;
     }
 
     [RelayCommand]
@@ -469,6 +537,12 @@ public partial class SetupWizardViewModel : ObservableObject
                     await _runtimeProfiles.SaveAsync(profile.ToProfile());
                 return true;
             case 2:
+                if (UseStarterModelDownload && (!StarterModelDownloadCompleted || string.IsNullOrWhiteSpace(ModelFolder) || !File.Exists(ModelFolder)))
+                {
+                    StarterModelDownloadError = $"Download a starter model before continuing. Expected file: {ModelFolder}";
+                    _toasts.Show("Model is not ready", StarterModelDownloadError, ToastKind.Error, 7000);
+                    return false;
+                }
                 var server = _settings.Settings.ManagedServers.FirstOrDefault();
                 if (server is null)
                 {
@@ -476,6 +550,11 @@ public partial class SetupWizardViewModel : ObservableObject
                     return true;
                 }
                 server.ModelPath = ModelFolder.Trim();
+                if (!File.Exists(server.ModelPath))
+                {
+                    StarterModelDownloadError = $"The selected model is missing at {server.ModelPath}. Retry the download or choose another model.";
+                    return false;
+                }
                 await _settings.SaveAsync();
                 return true;
             case 3:

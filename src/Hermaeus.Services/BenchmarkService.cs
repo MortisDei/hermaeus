@@ -212,6 +212,7 @@ public sealed class BenchmarkService
                 Prompt = r.Prompt,
                 SystemPrompt = r.SystemPrompt,
                 ExpectedKeywords = r.ExpectedKeywords.ToList(),
+                ExpectedKeywordAlternatives = r.ExpectedKeywordAlternatives.Select(g => g.ToList()).ToList(),
                 ExpectedRegexes = r.ExpectedRegexes.ToList(),
                 ShouldRefuse = r.ShouldRefuse,
                 // r11 2.7: reruns rebuild cases from stored results but used to
@@ -298,8 +299,8 @@ public sealed class BenchmarkService
 
     public static BenchmarkResult ScoreDeterministic(BenchmarkCase test, string output)
     {
-        var keywordHit = test.ExpectedKeywords.Count == 0
-            || test.ExpectedKeywords.All(k => output.Contains(k, StringComparison.OrdinalIgnoreCase));
+        var keywordHit = test.ExpectedKeywords.All(k => ContainsExpected(output, k))
+            && test.ExpectedKeywordAlternatives.All(group => group.Count > 0 && group.Any(k => ContainsExpected(output, k)));
         var regexHit = test.ExpectedRegexes.Count == 0
             || test.ExpectedRegexes.All(rx => IsRegexMatch(output, rx));
         var refusalCorrect = !test.ShouldRefuse || LooksLikeRefusal(output);
@@ -312,6 +313,7 @@ public sealed class BenchmarkService
             Prompt = test.Prompt,
             SystemPrompt = test.SystemPrompt,
             ExpectedKeywords = test.ExpectedKeywords.ToList(),
+            ExpectedKeywordAlternatives = test.ExpectedKeywordAlternatives.Select(g => g.ToList()).ToList(),
             ExpectedRegexes = test.ExpectedRegexes.ToList(),
             ShouldRefuse = test.ShouldRefuse,
             Tags = test.Tags.ToList(),
@@ -700,7 +702,7 @@ public sealed class BenchmarkService
             TimeoutSeconds = 180,
             Cases =
             [
-                new BenchmarkCase { Name = "Summarize constraints", Prompt = "Summarize these constraints into five concise bullets: local-first, no secret leakage, smallest complete change, update docs when behavior changes, run build and tests, do not rewrite unrelated code.", ExpectedKeywords = ["local", "secret", "docs", "tests"] },
+                new BenchmarkCase { Name = "Summarize constraints", Prompt = "Summarize these constraints into five concise bullets: local-first, no secret leakage, smallest complete change, update docs when behavior changes, run build and tests, do not rewrite unrelated code.", ExpectedKeywords = ["local", "secret", "tests"], ExpectedKeywordAlternatives = [["docs", "documentation"]] },
                 new BenchmarkCase { Name = "Prioritize tradeoffs", Prompt = "Rank these optimization goals for a local llama.cpp app and explain briefly: first-token latency, tokens/sec, VRAM stability, response quality.", ExpectedKeywords = ["latency", "VRAM", "quality"] }
             ]
         },
@@ -1013,18 +1015,44 @@ public sealed class BenchmarkService
         return ex.GetType().Name;
     }
 
-    private static bool LooksLikeRefusal(string answer) =>
-        answer.Contains("not enough", StringComparison.OrdinalIgnoreCase)
-        || answer.Contains("insufficient", StringComparison.OrdinalIgnoreCase)
-        || answer.Contains("cannot determine", StringComparison.OrdinalIgnoreCase)
-        || answer.Contains("cannot answer", StringComparison.OrdinalIgnoreCase)
-        || answer.Contains("no context", StringComparison.OrdinalIgnoreCase);
+    private static bool LooksLikeRefusal(string answer)
+    {
+        if (string.IsNullOrWhiteSpace(answer)) return false;
+        var refusal = answer.Contains("not enough", StringComparison.OrdinalIgnoreCase)
+            || answer.Contains("insufficient", StringComparison.OrdinalIgnoreCase)
+            || answer.Contains("cannot determine", StringComparison.OrdinalIgnoreCase)
+            || answer.Contains("cannot answer", StringComparison.OrdinalIgnoreCase)
+            || answer.Contains("no context", StringComparison.OrdinalIgnoreCase)
+            || answer.Contains("cannot provide", StringComparison.OrdinalIgnoreCase)
+            || answer.Contains("did not provide", StringComparison.OrdinalIgnoreCase)
+            || answer.Contains("do not have access", StringComparison.OrdinalIgnoreCase)
+            || answer.Contains("don't have access", StringComparison.OrdinalIgnoreCase)
+            || answer.Contains("no record", StringComparison.OrdinalIgnoreCase)
+            || answer.Contains("unable to verify", StringComparison.OrdinalIgnoreCase)
+            || answer.Contains("can't verify", StringComparison.OrdinalIgnoreCase);
+        if (!refusal) return false;
+
+        return !Regex.IsMatch(answer,
+            @"\b(?:but|however|actually|the answer is|it is|it's)\s+(?:\$?\d|[A-Z][\w-]{2,})",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    }
+
+    private static bool ContainsExpected(string output, string expected)
+    {
+        if (string.IsNullOrEmpty(expected)) return true;
+        if (expected.All(char.IsDigit))
+        {
+            var normalizedOutput = Regex.Replace(output, @"(?<=\d)[,\s](?=\d)", string.Empty);
+            return normalizedOutput.Contains(expected, StringComparison.OrdinalIgnoreCase);
+        }
+        return output.Contains(expected, StringComparison.OrdinalIgnoreCase);
+    }
 
     private static bool IsRegexMatch(string output, string pattern)
     {
         try
         {
-            return Regex.IsMatch(output, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            return Regex.IsMatch(output, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Singleline);
         }
         catch (ArgumentException)
         {

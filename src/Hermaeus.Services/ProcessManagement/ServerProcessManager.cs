@@ -474,7 +474,7 @@ public sealed class ServerProcessManager : IDisposable
             WorkingDirectory       = GetWorkingDirectory(cfg.ExecutablePath)
         };
 
-        foreach (var arg in BuildLaunchArguments(cfg))
+        foreach (var arg in BuildLaunchArguments(cfg, cfg.ReasoningPreserveSupported))
             startInfo.ArgumentList.Add(arg);
 
         return new Process
@@ -484,7 +484,7 @@ public sealed class ServerProcessManager : IDisposable
         };
     }
 
-    public static IReadOnlyList<string> BuildLaunchArguments(ServerConfig cfg)
+    public static IReadOnlyList<string> BuildLaunchArguments(ServerConfig cfg, bool reasoningPreserveSupported = false)
     {
         var parts = new List<string>();
 
@@ -584,16 +584,24 @@ public sealed class ServerProcessManager : IDisposable
         // today's exact command line (f16 KV cache, auto flash attention, context shift/mlock/
         // no-mmap all off) so an older saved config launches byte-identically; ExtraArgs always
         // wins over any of these, exactly like --parallel and --cache-reuse above.
-        if (!string.Equals(cfg.KvCacheTypeK, "f16", StringComparison.OrdinalIgnoreCase) && !HasArg("--cache-type-k"))
+        var kvCacheType = EffectiveKvCacheType(cfg);
+        if (!string.Equals(kvCacheType, "f16", StringComparison.OrdinalIgnoreCase) && !HasArg("--cache-type-k"))
         {
             parts.Add("--cache-type-k");
-            parts.Add(cfg.KvCacheTypeK);
+            parts.Add(kvCacheType);
         }
 
-        if (!string.Equals(cfg.KvCacheTypeV, "f16", StringComparison.OrdinalIgnoreCase) && !HasArg("--cache-type-v"))
+        if (!string.Equals(kvCacheType, "f16", StringComparison.OrdinalIgnoreCase) && !HasArg("--cache-type-v"))
         {
             parts.Add("--cache-type-v");
-            parts.Add(cfg.KvCacheTypeV);
+            parts.Add(kvCacheType);
+        }
+
+        if (reasoningPreserveSupported
+            && !HasArg("--reasoning-preserve")
+            && !HasArg("--no-reasoning-preserve"))
+        {
+            parts.Add(cfg.PreserveReasoning ? "--reasoning-preserve" : "--no-reasoning-preserve");
         }
 
         // "auto" is the server's own default and emits nothing.
@@ -701,6 +709,13 @@ public sealed class ServerProcessManager : IDisposable
 
         return parts;
     }
+
+    private static string EffectiveKvCacheType(ServerConfig cfg) =>
+        !string.IsNullOrWhiteSpace(cfg.KvCacheType) && !string.Equals(cfg.KvCacheType, "f16", StringComparison.OrdinalIgnoreCase)
+            ? cfg.KvCacheType
+            : !string.IsNullOrWhiteSpace(cfg.KvCacheTypeK) && !string.Equals(cfg.KvCacheTypeK, "f16", StringComparison.OrdinalIgnoreCase)
+                ? cfg.KvCacheTypeK
+                : "f16";
 
     private static ServerConfig NormalizeConfig(ServerConfig cfg)
     {

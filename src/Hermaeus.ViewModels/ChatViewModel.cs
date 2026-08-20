@@ -966,6 +966,7 @@ public partial class ChatViewModel : ViewModelBase
                 ParentId = msg.ParentId,
                 CreatedAt = msg.CreatedAt,
                 Content = msg.Content,
+                ReasoningContent = msg.ReasoningContent,
                 OriginalContent = msg.OriginalContent,
                 IsError = msg.IsError,
                 ModelId = msg.ModelId,
@@ -1230,7 +1231,8 @@ public partial class ChatViewModel : ViewModelBase
                 ActivePath.Where(m => !m.IsStreaming).ToList(),
                 ResolveContextWindowLimit(),
                 systemPromptTokens,
-                Math.Max(0, snapshot.EstimatedTokens - snapshot.HistoryTokens - systemPromptTokens));
+                Math.Max(0, snapshot.EstimatedTokens - snapshot.HistoryTokens - systemPromptTokens),
+                ShouldReplayReasoning());
             if (history.Count > 0 && history[^1].Role == "user")
             {
                 var images = attachments.Where(a => a.IsReady && a.IsImage)
@@ -1274,7 +1276,13 @@ public partial class ChatViewModel : ViewModelBase
                             SpeakStreamingChunk(chunk);
                 },
                 onUsage: usage => UpdateContextUsage(usage, "Reported by provider"),
-                _cts.Token);
+                _cts.Token,
+                onReasoning: reasoning =>
+                {
+                    asst.ReasoningContent += reasoning;
+                    asst.IsReasoningStreaming = true;
+                    ScrollToBottom?.Invoke(this, EventArgs.Empty);
+                });
 
             phaseCts.Cancel();
             try { await phaseLoop; } catch (OperationCanceledException) { }
@@ -1292,6 +1300,7 @@ public partial class ChatViewModel : ViewModelBase
                 ? $"cancelled after {result.TotalLatencyMs} ms"
                 : $"{timing.Format()} · render batches {accumulator.RenderBatches}";
             asst.IsStreaming = false;
+            asst.IsReasoningStreaming = false;
 
             if (!result.Cancelled && timing.IsSlow)
             {
@@ -1306,7 +1315,7 @@ public partial class ChatViewModel : ViewModelBase
 
             if (result.Cancelled)
             {
-                if (string.IsNullOrWhiteSpace(asst.Content))
+                if (string.IsNullOrWhiteSpace(asst.Content) && string.IsNullOrWhiteSpace(asst.ReasoningContent))
                 {
                     RemoveAndReanchor(asst);
                 }
@@ -1471,6 +1480,7 @@ public partial class ChatViewModel : ViewModelBase
                 ConversationId = CurrentConversationId,
                 Role = m.Role,
                 Content = m.Content,
+                ReasoningContent = m.ReasoningContent,
                 OriginalContent = m.OriginalContent,
                 CreatedAt = m.CreatedAt,
                 IsError = m.IsError,
@@ -1561,6 +1571,13 @@ public partial class ChatViewModel : ViewModelBase
     private void CopyMessage(MessageViewModel? msg)
     {
         if (msg is not null) RequestCopyToClipboard?.Invoke(msg.Content);
+    }
+
+    [RelayCommand]
+    private void CopyReasoning(MessageViewModel? msg)
+    {
+        if (msg is not null && !string.IsNullOrWhiteSpace(msg.ReasoningContent))
+            RequestCopyToClipboard?.Invoke(msg.ReasoningContent);
     }
 
     [RelayCommand]
@@ -1920,7 +1937,9 @@ public partial class ChatViewModel : ViewModelBase
         MinP = MinP,
         RepeatPenalty = RepeatPenalty,
         FrequencyPenalty = FrequencyPenalty,
-        PresencePenalty = PresencePenalty
+        PresencePenalty = PresencePenalty,
+        IncludeReasoningHistory = ShouldReplayReasoning(),
+        UseDeepseekReasoningFormat = string.Equals(SelectedModel?.ProviderTag, "llama.cpp", StringComparison.OrdinalIgnoreCase)
     };
 
     private string? ComposeSystemPrompt(string memoryContext, string ragContext = "")
@@ -2179,7 +2198,8 @@ public partial class ChatViewModel : ViewModelBase
     private ChatContextSnapshot BuildContextSnapshot(string text, IReadOnlyList<ChatContextAttachment> attachments)
     {
         var promptText = ChatContextAttachment.BuildPrompt(text, attachments);
-        var historyTokens = ActivePath.Where(m => !m.IsStreaming).Sum(m => EstimateTokens(m.Content));
+        var historyTokens = ActivePath.Where(m => !m.IsStreaming).Sum(m =>
+            EstimateTokens(m.Content) + (ShouldReplayReasoning() ? EstimateTokens(m.ReasoningContent) : 0));
 
         var contextParts = new List<ContextPart>();
         if (!string.IsNullOrWhiteSpace(SystemPrompt))
@@ -2203,7 +2223,8 @@ public partial class ChatViewModel : ViewModelBase
     private List<ChatMessage> BuildHistory(string promptText)
     {
         var history = ActivePath.Where(m => !m.IsStreaming)
-            .Select(m => new ChatMessage(m.Role, m.Content)).ToList();
+            .Select(m => new ChatMessage(m.Role, m.Content,
+                ReasoningContent: ShouldReplayReasoning() ? m.ReasoningContent : null)).ToList();
         history.Add(new ChatMessage("user", promptText));
         return history;
     }
@@ -2442,12 +2463,25 @@ public partial class ChatViewModel : ViewModelBase
         IReadOnlyList<MessageViewModel> messages,
         int contextWindow,
         int systemTokens = 0,
-        int currentPromptTokens = 0) =>
+        int currentPromptTokens = 0,
+        bool includeReasoning = false) =>
         ChatContextUsageCalculator.TruncateHistoryToContextWindow(
-            messages.Select(m => new ChatMessage(m.Role, m.Content)).ToList(),
+            messages.Select(m => new ChatMessage(m.Role, m.Content,
+                ReasoningContent: includeReasoning ? m.ReasoningContent : null)).ToList(),
             contextWindow,
             systemTokens,
             currentPromptTokens);
+
+    private bool ShouldReplayReasoning()
+    {
+        var server = _settings.Settings.ManagedServers.FirstOrDefault(s => !s.EmbeddingsMode);
+        return ReasoningHistoryPolicy.CanReplay(
+            SelectedModel?.ProviderTag ?? string.Empty,
+            providerAccepts: SelectedModel?.DefaultPreserveReasoning is not null,
+            templatePreserves: SelectedModel?.DefaultPreserveReasoning == true,
+            preserveSetting: server?.PreserveReasoning == true,
+            launchApplied: SelectedModel?.DefaultPreserveReasoning == true);
+    }
 
     /// <summary>
     /// r21 3.3: "Open in chat" from the Dataset Manager attaches a dataset to
@@ -2516,6 +2550,7 @@ public partial class ChatViewModel : ViewModelBase
                 CreatedAt = m.CreatedAt,
                 Role = m.Role,
                 Content = m.Content,
+                ReasoningContent = m.ReasoningContent,
                 OriginalContent = m.OriginalContent,
                 IsError = m.IsError,
                 ModelId = m.ModelId,

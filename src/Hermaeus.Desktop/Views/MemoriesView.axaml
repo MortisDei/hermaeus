@@ -3,6 +3,7 @@
              xmlns:vm="using:Hermaeus.ViewModels"
              xmlns:controls="using:Hermaeus.Desktop.Controls"
              x:Class="Hermaeus.Desktop.Views.MemoriesView"
+             x:Name="Root"
              x:DataType="vm:MemoriesViewModel">
 
     <ScrollViewer Padding="24"
@@ -145,14 +146,14 @@
                                                     VerticalAlignment="Center">
                                             <!-- Pin Button -->
                                             <Button x:Name="PinButton"
-                                                    Command="{Binding #MemoriesView.DataContext.TogglePinCommand}"
+                                                    Command="{Binding #Root.DataContext.TogglePinCommand}"
                                                     CommandParameter="{Binding Id}"
                                                     Content="{Binding PinButtonLabel}"
                                                     FontSize="11" Padding="8,5" CornerRadius="6"
                                                     ToolTip.Tip="Pinned memories are weighted higher and are never auto-archived." />
 
                                             <!-- Delete Button -->
-                                            <Button Command="{Binding #MemoriesView.DataContext.DeleteMemoryCommand}"
+                                            <Button Command="{Binding #Root.DataContext.DeleteMemoryCommand}"
                                                     CommandParameter="{Binding Id}"
                                                     Content="Delete"
                                                     FontSize="11" Padding="8,5" CornerRadius="6"

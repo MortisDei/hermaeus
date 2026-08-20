@@ -5,7 +5,7 @@ public sealed class BenchmarkSuite
     public string Id { get; set; } = Guid.NewGuid().ToString();
     public string Name { get; set; } = "Benchmark";
     public string Description { get; set; } = string.Empty;
-    public string SuiteVersion { get; set; } = "1.0.0";
+    public string SuiteVersion { get; set; } = "1.1.0";
     public string ScoringProfile { get; set; } = "balanced-v1";
     public string BaselineModelId { get; set; } = string.Empty;
     public string BaselineModelName { get; set; } = string.Empty;
@@ -23,10 +23,11 @@ public sealed class BenchmarkCase
     public string Id { get; set; } = Guid.NewGuid().ToString();
     public string Name { get; set; } = "Case";
     public string CaseVersion { get; set; } = "1.0.0";
-    public string ExpectedBehaviourVersion { get; set; } = "1.0.0";
+    public string ExpectedBehaviourVersion { get; set; } = "1.1.0";
     public string Prompt { get; set; } = string.Empty;
     public string SystemPrompt { get; set; } = string.Empty;
     public List<string> ExpectedKeywords { get; set; } = [];
+    public List<List<string>> ExpectedKeywordAlternatives { get; set; } = [];
     public List<string> ExpectedRegexes { get; set; } = [];
     public bool ShouldRefuse { get; set; }
     public List<string> Tags { get; set; } = [];
@@ -123,6 +124,7 @@ public sealed class BenchmarkResult
     public string Prompt { get; set; } = string.Empty;
     public string SystemPrompt { get; set; } = string.Empty;
     public List<string> ExpectedKeywords { get; set; } = [];
+    public List<List<string>> ExpectedKeywordAlternatives { get; set; } = [];
     public List<string> ExpectedRegexes { get; set; } = [];
     public bool ShouldRefuse { get; set; }
     public List<string> Tags { get; set; } = [];

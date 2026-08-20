@@ -75,7 +75,8 @@ public static class ChatContextUsageCalculator
         for (var i = messages.Count - 1; i >= 0; i--)
         {
             var message = messages[i];
-            var tokens = ContextPackBuilder.EstimateTokens(message.Content);
+            var tokens = ContextPackBuilder.EstimateTokens(message.Content)
+                + ContextPackBuilder.EstimateTokens(message.ReasoningContent ?? string.Empty);
             if (selected.Count > 0 && used + tokens > budget)
                 break;
             selected.Push(message);

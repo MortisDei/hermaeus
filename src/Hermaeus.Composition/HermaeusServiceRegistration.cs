@@ -34,6 +34,7 @@ public static class HermaeusServiceRegistration
         s.AddSingleton<PythonHealthValidator>();
         s.AddSingleton<BackupService>();
         s.AddSingleton<LocalAiSetupService>();
+        s.AddSingleton<LocalModelCapabilityService>();
         s.AddSingleton<TrustService>();
         s.AddSingleton<DoctorService>();
         s.AddSingleton<IDoctorService>(sp => sp.GetRequiredService<DoctorService>());

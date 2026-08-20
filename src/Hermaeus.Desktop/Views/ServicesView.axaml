@@ -402,23 +402,16 @@
                                                Text="KV cache / engine" VerticalAlignment="Center"
                                                Opacity="0.6" FontSize="13" />
                                     <StackPanel Grid.Row="6" Grid.Column="1" Spacing="6">
-                                        <Grid ColumnDefinitions="Auto,110,Auto,110,Auto,140" ColumnSpacing="8">
-                                            <TextBlock Text="K:" VerticalAlignment="Center" Opacity="0.6" FontSize="12" />
+                                        <Grid ColumnDefinitions="Auto,110,Auto,140" ColumnSpacing="8">
+                                            <TextBlock Text="KV cache:" VerticalAlignment="Center" Opacity="0.6" FontSize="12" />
                                             <ComboBox Grid.Column="1"
                                                       ItemsSource="{Binding KvCacheTypeOptions}"
-                                                      SelectedItem="{Binding KvCacheTypeK}"
+                                                      SelectedItem="{Binding KvCacheType}"
                                                       IsEnabled="{Binding CanEdit}"
                                                       FontSize="12"
-                                                      ToolTip.Tip="--cache-type-k. f16 is the server default; q8_0/q4_0 shrink KV cache memory at some quality cost." />
-                                            <TextBlock Grid.Column="2" Text="V:" VerticalAlignment="Center" Opacity="0.6" FontSize="12" />
+                                                      ToolTip.Tip="Hermaeus applies this one KV cache choice to both K and V. f16 is the server default; q8_0/q4_0 shrink KV cache memory at some quality cost." />
+                                            <TextBlock Grid.Column="2" Text="Flash attn:" VerticalAlignment="Center" Opacity="0.6" FontSize="12" />
                                             <ComboBox Grid.Column="3"
-                                                      ItemsSource="{Binding KvCacheTypeOptions}"
-                                                      SelectedItem="{Binding KvCacheTypeV}"
-                                                      IsEnabled="{Binding CanEdit}"
-                                                      FontSize="12"
-                                                      ToolTip.Tip="--cache-type-v. Quantizing V below f16/bf16 needs flash attention on or auto (see the warning below if not)." />
-                                            <TextBlock Grid.Column="4" Text="Flash attn:" VerticalAlignment="Center" Opacity="0.6" FontSize="12" />
-                                            <ComboBox Grid.Column="5"
                                                       ItemsSource="{Binding FlashAttentionOptions}"
                                                       SelectedItem="{Binding FlashAttention}"
                                                       IsEnabled="{Binding CanEdit}"
@@ -433,6 +426,14 @@
                                                   Content="Context shift (rolling context for long agent loops)"
                                                   FontSize="12"
                                                   IsEnabled="{Binding CanEdit}" />
+                                        <CheckBox IsChecked="{Binding PreserveReasoning}"
+                                                  Content="Preserve reasoning between turns"
+                                                  IsVisible="{Binding ReasoningPreserveAvailable}"
+                                                  IsEnabled="{Binding CanEdit}"
+                                                  ToolTip.Tip="Replays separate reasoning content only when the selected managed model and template support it." />
+                                        <TextBlock Text="{Binding ReasoningPreserveStatus}"
+                                                   IsVisible="{Binding !ReasoningPreserveAvailable}"
+                                                   FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
                                     </StackPanel>
 
                                 </Grid>

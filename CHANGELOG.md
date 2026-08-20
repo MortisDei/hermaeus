@@ -9,6 +9,23 @@ FIFO for changelog entries, 10 versions in this file max. Remove older entries
 and append them to `docs/changelog-archive.md` to maintain the 10 version
 limit.
 
+## [0.37.0-alpha] - 2026-08-20
+
+### Fixed
+
+- Starter model downloads now adopt matching files on retry, verify hashes before
+  completion, write provenance, and refresh Services immediately after setup.
+- Models and Services share one context default and one KV-cache precision. Model
+  cards show download state and offer confirmation-gated safe deletion.
+- Reasoning deltas are preserved separately from answers through providers,
+  storage, history policy, local API, transcript rendering, and exports. Replay
+  requires proven managed llama.cpp template support and preservation settings.
+- Deterministic benchmark scoring now handles multiline structures, grouped
+  digits, explicit refusal language, and explicit keyword alternatives without
+  rewriting historical runs.
+- Memories deletion is confirmation-gated and its item commands bind through the
+  named view root.
+
 From 0.29.0-alpha onward, every minor version is tagged and released on
 GitHub (see `docs/packaging.md` "Releases"); patch versions are tagged only
 for urgent hotfixes.

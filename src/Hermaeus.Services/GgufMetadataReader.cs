@@ -27,7 +27,9 @@ public sealed record GgufModelInfo(
     /// <c>.vocab_size</c> key or from the length of the tokenizer token array.
     /// Null when the file declares neither.
     /// </summary>
-    int? VocabularySize = null);
+    int? VocabularySize = null,
+    int? NextnPredictLayers = null,
+    bool HasChatTemplate = false);
 
 /// <summary>
 /// Reads only the metadata key/value section of a GGUF file header; tensor data is never
@@ -115,6 +117,8 @@ public static class GgufMetadataReader
             long? valueLength = null;
             long? slidingWindow = null;
             long? vocabularySize = null;
+            long? nextnPredictLayers = null;
+            var hasChatTemplate = false;
             IReadOnlyList<bool>? slidingWindowPattern = null;
 
             for (ulong i = 0; i < kvCount; i++)
@@ -150,6 +154,13 @@ public static class GgufMetadataReader
                     slidingWindowPattern = ToBoolList(ReadValue(reader, valueType, 0));
                 else if (key.EndsWith(".vocab_size", StringComparison.Ordinal))
                     vocabularySize = ToScalarLong(ReadValue(reader, valueType, 0));
+                else if (key.EndsWith(".nextn_predict_layers", StringComparison.Ordinal))
+                    nextnPredictLayers = ToScalarLong(ReadValue(reader, valueType, 0));
+                else if (key == "tokenizer.chat_template")
+                {
+                    _ = ReadValue(reader, valueType, 0);
+                    hasChatTemplate = true;
+                }
                 else if (key == "tokenizer.ggml.tokens" && valueType == 9)
                     // The token array itself is never materialised: only its
                     // declared length is read, then the elements are skipped.
@@ -176,7 +187,9 @@ public static class GgufMetadataReader
                 ValueLength: ToInt(valueLength),
                 SlidingWindow: ToInt(slidingWindow),
                 SlidingWindowPattern: slidingWindowPattern,
-                VocabularySize: ToInt(vocabularySize));
+                VocabularySize: ToInt(vocabularySize),
+                NextnPredictLayers: ToInt(nextnPredictLayers),
+                HasChatTemplate: hasChatTemplate);
         }
         catch (EndOfStreamException) { return null; }
         catch (IOException) { return null; }

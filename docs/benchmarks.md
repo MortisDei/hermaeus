@@ -110,6 +110,13 @@ Hermaeus includes starter suites covering:
 
 ### Suite Versioning
 
+The 0.37.0-alpha deterministic scorer is versioned separately from stored run
+data. It accepts multiline structural regexes, normalizes grouping separators
+only inside digit runs, recognizes explicit inability phrases, and supports
+additive all-required keyword alternative groups. Historical `run_json` rows are
+not rescored. A reasoning-only response still fails cases that score the final
+answer, because an explanation is not an answer.
+
 Suites and cases carry version identifiers so historical runs remain meaningful
 after prompts, scoring profiles, or evaluation rules change.
 

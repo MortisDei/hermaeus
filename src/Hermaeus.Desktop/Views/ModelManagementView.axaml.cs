@@ -53,6 +53,14 @@ public partial class ModelManagementView : UserControl
             dialog.SetModelName(item.EffectiveName);
             return await dialog.ShowDialog<string?>(owner);
         };
+
+        vm.RequestDeleteModelConfirmation = async plan =>
+        {
+            if (TopLevel.GetTopLevel(this) is not Window owner)
+                return false;
+            var dialog = new ConfirmActionDialog("Delete model", plan.Description);
+            return await dialog.ShowDialog<bool>(owner);
+        };
     }
 
     /// <summary>
@@ -137,6 +145,15 @@ public class UpdateAvailableConverter : IValueConverter
     public static readonly UpdateAvailableConverter Instance = new();
     public object Convert(object? v, Type t, object? p, CultureInfo c)
         => v is ModelUpdateStatus.UpdateAvailable;
+    public object ConvertBack(object? v, Type t, object? p, CultureInfo c)
+        => AvaloniaProperty.UnsetValue;
+}
+
+public class NotDownloadedConverter : IValueConverter
+{
+    public static readonly NotDownloadedConverter Instance = new();
+    public object Convert(object? v, Type t, object? p, CultureInfo c)
+        => v is HfDownloadState state && state != HfDownloadState.Downloaded && state != HfDownloadState.Downloading;
     public object ConvertBack(object? v, Type t, object? p, CultureInfo c)
         => AvaloniaProperty.UnsetValue;
 }

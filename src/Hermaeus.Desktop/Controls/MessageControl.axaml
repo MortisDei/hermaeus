@@ -110,7 +110,7 @@
             </StackPanel>
 
             <StackPanel Orientation="Horizontal"
-                        Spacing="2"
+                        Spacing="2" Background="Transparent" Cursor="Hand"
                         HorizontalAlignment="Right"
                         IsVisible="{Binding !IsEditing}">
                 <ContentControl Content="{Binding}"
@@ -163,6 +163,30 @@
                                    VerticalAlignment="Center" />
                     </StackPanel>
 
+                    <StackPanel IsVisible="{Binding HasReasoning}" Spacing="4" Margin="0,0,0,8">
+                        <ToggleButton IsChecked="{Binding IsReasoningExpanded, Mode=TwoWay}"
+                                      HorizontalAlignment="Left"
+                                      Padding="8,3"
+                                      CornerRadius="8"
+                                      ToolTip.Tip="Show or hide the separate reasoning content">
+                            <TextBlock Text="{Binding IsReasoningStreaming, Converter={x:Static conv:BoolToTextConverter.Instance}, ConverterParameter='Thinking|Reasoning'}"
+                                       FontSize="11" />
+                        </ToggleButton>
+                        <StackPanel IsVisible="{Binding IsReasoningExpanded}" Spacing="4">
+                            <controls:MarkdownViewer Markdown="{Binding ReasoningContent}"
+                                                      FontSize="{DynamicResource AppChatFontSize}" />
+                            <Button Content="Copy reasoning"
+                                    HorizontalAlignment="Left"
+                                    Padding="8,3"
+                                    ToolTip.Tip="Copy reasoning without copying the answer"
+                                    Command="{Binding $parent[ItemsControl].DataContext.CopyReasoningCommand}"
+                                    CommandParameter="{Binding}" />
+                        </StackPanel>
+                    </StackPanel>
+
+                    <TextBlock Text="{Binding NoFinalAnswerNotice}"
+                               IsVisible="{Binding NoFinalAnswerNotice, Converter={x:Static conv:NotEmptyConverter.Instance}}"
+                               FontSize="12" Opacity="0.7" Margin="0,0,0,6" />
                     <controls:MarkdownViewer Markdown="{Binding Content}"
                                              IsError="{Binding IsError}"
                                              RequestSaveCodeBlock="{Binding $parent[ItemsControl].DataContext.SaveCodeBlockAction}"
@@ -263,7 +287,7 @@
                         <Setter Property="MinHeight" Value="28" />
                     </Style>
                 </Grid.Styles>
-                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="2">
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="2" Background="Transparent" Cursor="Hand">
                     <ContentControl Content="{Binding}"
                                     ContentTemplate="{StaticResource BranchSwitcherTemplate}" />
                     <Button Classes="icon-btn"

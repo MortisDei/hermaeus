@@ -8,9 +8,24 @@ namespace Hermaeus.ViewModels;
 public partial class MessageViewModel : ObservableObject, IConversationNode
 {
     [ObservableProperty] private string _content = string.Empty;
+    [ObservableProperty] private string _reasoningContent = string.Empty;
     [ObservableProperty] private string _originalContent = string.Empty;
     [ObservableProperty] private bool   _isStreaming;
     [ObservableProperty] private bool   _isError;
+    [ObservableProperty] private bool _isReasoningExpanded;
+    [ObservableProperty] private bool _isReasoningStreaming;
+
+    public bool HasReasoning => !string.IsNullOrWhiteSpace(ReasoningContent);
+    public string NoFinalAnswerNotice => IsAssistant && !IsStreaming && HasReasoning && string.IsNullOrWhiteSpace(Content)
+        ? "No final answer was returned."
+        : string.Empty;
+    partial void OnReasoningContentChanged(string value)
+    {
+        OnPropertyChanged(nameof(HasReasoning));
+        OnPropertyChanged(nameof(NoFinalAnswerNotice));
+    }
+    partial void OnContentChanged(string value) => OnPropertyChanged(nameof(NoFinalAnswerNotice));
+    partial void OnIsStreamingChanged(bool value) => OnPropertyChanged(nameof(NoFinalAnswerNotice));
 
     /// <summary>
     /// Live phase placeholder while a send has produced no visible content yet

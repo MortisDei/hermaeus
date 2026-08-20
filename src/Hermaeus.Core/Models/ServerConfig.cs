@@ -37,8 +37,15 @@ public class ServerConfig
     /// defaults and produces a byte-identical launch). Every option is the user's explicit
     /// choice; nothing here is ever forced or auto-changed.
     /// </summary>
+    /// <summary>One user-facing KV precision applied to both llama.cpp caches.</summary>
+    public string KvCacheType    { get; set; } = "f16";
+
+    /// <summary>Legacy compatibility fields read during the r30 migration.</summary>
     public string KvCacheTypeK   { get; set; } = "f16";
     public string KvCacheTypeV   { get; set; } = "f16";
+    public bool PreserveReasoning { get; set; } = true;
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool ReasoningPreserveSupported { get; set; }
 
     /// <summary>Tri-state: "auto" (server default, emits nothing), "on", or "off".</summary>
     public string FlashAttention { get; set; } = "auto";

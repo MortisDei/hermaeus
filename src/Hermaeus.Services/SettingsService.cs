@@ -17,6 +17,7 @@ public sealed class SettingsService : ISettingsService
 
     public AppSettings Settings { get; private set; } = new();
     public event EventHandler? SettingsChanged;
+    public event Action<string>? NormalizationWarning;
 
     public SettingsService()
     {
@@ -36,7 +37,7 @@ public sealed class SettingsService : ISettingsService
         return string.IsNullOrWhiteSpace(configured) ? DefaultDir : Path.GetFullPath(configured);
     }
 
-    public static void NormalizeManagedServers(List<ServerConfig> servers)
+    public static void NormalizeManagedServers(List<ServerConfig> servers, Action<string>? warning = null)
     {
         if (servers.Count == 0)
         {
@@ -54,6 +55,7 @@ public sealed class SettingsService : ISettingsService
                 server.Id = Guid.NewGuid().ToString();
 
             UpgradeSpeculativeDecoding(server);
+            NormalizeKvCache(server, warning);
 
             if (!seenIds.Add(server.Id))
             {
@@ -73,6 +75,24 @@ public sealed class SettingsService : ISettingsService
             servers.Insert(0, CreateDefaultServer(false));
         if (!servers.Any(server => server.EmbeddingsMode))
             servers.Add(CreateDefaultServer(true));
+    }
+
+    private static void NormalizeKvCache(ServerConfig server, Action<string>? warning)
+    {
+        var canonical = string.IsNullOrWhiteSpace(server.KvCacheType) ? "f16" : server.KvCacheType.Trim();
+        var legacyK = string.IsNullOrWhiteSpace(server.KvCacheTypeK) ? "f16" : server.KvCacheTypeK.Trim();
+        var legacyV = string.IsNullOrWhiteSpace(server.KvCacheTypeV) ? "f16" : server.KvCacheTypeV.Trim();
+
+        if (string.Equals(canonical, "f16", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(legacyK, "f16", StringComparison.OrdinalIgnoreCase))
+            canonical = legacyK;
+
+        if (!string.Equals(legacyK, legacyV, StringComparison.OrdinalIgnoreCase))
+            warning?.Invoke($"Managed server '{server.Name}' had divergent legacy K/V cache types; using K value '{legacyK}'.");
+
+        server.KvCacheType = canonical;
+        server.KvCacheTypeK = canonical;
+        server.KvCacheTypeV = canonical;
     }
 
     /// <summary>
@@ -282,9 +302,9 @@ public sealed class SettingsService : ISettingsService
         }
     }
 
-    private static void NormalizeSettings(AppSettings settings)
+    private void NormalizeSettings(AppSettings settings)
     {
-        NormalizeManagedServers(settings.ManagedServers);
+        NormalizeManagedServers(settings.ManagedServers, message => NormalizationWarning?.Invoke(message));
 
         if (settings.Memory.EnabledPerConversation.Count == 0)
             return;

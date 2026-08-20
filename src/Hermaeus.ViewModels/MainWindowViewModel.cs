@@ -177,12 +177,19 @@ public partial class MainWindowViewModel : ViewModelBase
         Wizard.WizardCompleted += () =>
         {
             ActivePanel = "chat";
+            Settings.Reload();
+            Services.RefreshAllDetectedModels();
             // r12 03-runtime-vm-correctness.md 3.1: finishing (or skipping)
             // the wizard on first run used to leave the app on a dead chat
             // panel - InitializeAsync had already returned early to show the
             // wizard, so nothing here ever auto-started servers, listed
             // models, or loaded datasets/agent/benchmarks until a restart.
             RunBackgroundTaskAsync("complete post-setup initialization", CompletePostSetupInitializationAsync);
+            RunBackgroundTaskAsync("refresh models after setup", async () =>
+            {
+                Models.ForceRefresh = true;
+                await RunOnUiAsync(() => Models.RefreshAsync());
+            });
         };
         // allow settings view to request re-running the setup wizard
         Settings.RequestShowSetupWizard = () => ActivePanel = "wizard";

@@ -32,6 +32,7 @@ public partial class MemoriesViewModel : ViewModelBase
     [ObservableProperty] private bool _isReembedding;
 
     public List<string> AvailableCategories { get; } = ["All", "facts", "preferences", "learned_behaviors", "interests"];
+    public Func<MemoryItemViewModel, Task<bool>>? RequestDeleteConfirmation { get; set; }
 
     public MemoriesViewModel(IMemoryStore store, IConversationStore conversations, ISettingsService settings, IToastService toasts,
         IActivityRecorder? activity = null)
@@ -244,10 +245,11 @@ public partial class MemoriesViewModel : ViewModelBase
     {
         try
         {
-            await _store.DeleteAsync(memoryId);
             var item = Memories.FirstOrDefault(m => m.Id == memoryId);
-            if (item is not null)
-                Memories.Remove(item);
+            if (item is null || RequestDeleteConfirmation is null || !await RequestDeleteConfirmation(item))
+                return;
+            await _store.DeleteAsync(memoryId);
+            Memories.Remove(item);
             _toasts.Show("Memory deleted", "The memory has been removed.", ToastKind.Info);
         }
         catch (Exception ex)

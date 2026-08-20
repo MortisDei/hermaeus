@@ -347,7 +347,7 @@ For commercial licensing requests, see the Contact section of COMMERCIAL.md.
 
 Current version:
 
-**0.36.0-alpha**
+**0.37.0-alpha**
 
 Major systems currently implemented include:
 
@@ -360,6 +360,9 @@ Major systems currently implemented include:
 - Benchmark suites
 - Local AI setup
 - Doctor diagnostics
+- Reasoning-aware local chat with capability evidence and preserved reasoning
+- Shared per-model context and KV-cache defaults
+- Safe model adoption, progress, and deletion workflows
 - Security review and threat model
 
 Hermaeus is alpha software. See [Known Issues](#known-issues--alpha-status) below and `CHANGELOG.md` for the current state and improvement cadence. Public release hardening continues in the areas of installer signing, OCR support, additional security tightening, and Linux global hotkeys.

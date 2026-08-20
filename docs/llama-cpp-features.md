@@ -29,7 +29,27 @@ Every flag Hermaeus can emit still exists in b10215:
 `--cache-type-k`, `--cache-type-v`, `--flash-attn`, `--context-shift`,
 `--mlock`, `--no-mmap`, `--mmproj`, `--spec-type`, `--spec-draft-model`,
 `-ngld`, `--spec-draft-n-max`, `--spec-draft-n-min`, `--spec-draft-p-min`,
-`--n-cpu-moe`, `--cpu-moe`.
+`--n-cpu-moe`, `--cpu-moe`, `--reasoning-format`, `--reasoning-preserve`,
+`--no-reasoning-preserve`.
+
+## Adopted in 0.37.0-alpha
+
+### Capability evidence and reasoning transport
+
+Hermaeus reads bounded GGUF metadata, including the architecture-suffixed
+`nextn_predict_layers` scalar and the presence of `tokenizer.chat_template`.
+It combines that evidence with the selected executable's `--help` flags and a
+healthy managed server's `/props` response. Embedded MTP, separate reasoning
+output, template reasoning preservation, and modalities are each reported as
+Available, Unavailable, or Unknown with evidence. Results are cached by model
+and executable path, size, and modification time using an atomic state file.
+
+llama.cpp reasoning uses `--reasoning-format deepseek` when supported. Stream
+events carry `reasoning_content` separately from answer content. The optional
+`--reasoning-preserve` and `--no-reasoning-preserve` flags are emitted only after
+the paired runtime capability is proven. Stored reasoning is replayed only when
+the matching template reports `supports_preserve_reasoning=true` and the saved
+server setting is enabled.
 
 ## Adopted in 0.36.0-alpha
 
@@ -53,7 +73,7 @@ Recorded so the next round starts from a survey rather than repeating it.
 
 | Flag | What it does | Why not now |
 | --- | --- | --- |
-| `--reasoning-format`, `-rea/--reasoning` | Extracts a model's thought tags into a separate `reasoning_content` field instead of leaving them inline in `message.content` | **The most valuable one left.** Hermaeus does not parse thinking output at all, so a reasoning model's `<think>` block currently lands raw in the reply. Doing it properly spans `LlmStreamEvent` (a reasoning delta), `LlamaCppService`'s stream parsing, the message model, persistence, and collapsible rendering in the transcript. That is a round's work, and half of it would be worse than none. Its own item, next round. |
+| `--reasoning-format`, `-rea/--reasoning` | Extracts a model's reasoning into a separate `reasoning_content` field instead of leaving it in `message.content` | Shipped in 0.37.0-alpha through the separate stream, message, persistence, export, and evidence-gated history paths. |
 | `-cram`, `--cache-ram N` | Caps the RAM used to keep KV caches of idle slots warm | Already defaults to 8192 MiB, which is sensible. A knob with no observed problem behind it is a knob nobody sets correctly. |
 | `--swa-full` | Full-size sliding-window-attention cache | Trades memory for a narrow correctness/perf case on SWA models. No observed need. |
 | `-kvu/--kv-unified` | One KV buffer shared across sequences | Hermaeus runs `--parallel 1` by design (r14 2.1), so there is one sequence and nothing to unify. |

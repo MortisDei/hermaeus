@@ -2,6 +2,37 @@
 
 ## Chat
 
+- **Reasoning is a separate transcript channel.** llama.cpp, OpenAI-compatible,
+  and Ollama streams may provide reasoning deltas without leaking them into the
+  final answer. Reasoning is stored, reloads with its assistant message, starts
+  collapsed, and can be copied from its own labelled section. Markdown export
+  labels it separately and JSON remains lossless. Ordinary Copy, speech, memory,
+  Recall, title generation, and transcript search use answer content only.
+- **Preserved reasoning is evidence-gated.** Hermaeus reports Unknown rather than
+  guessing from a model filename. History replay requires a managed llama.cpp
+  route, matching template evidence from `/props`, a compatible runtime launch,
+  and the per-server Preserve reasoning setting.
+
+## Models and setup
+
+- A starter model with a matching pinned hash is adopted on retry without a
+  second download. Conflicting files are never overwritten, and setup does not
+  finish until the selected path is present in the saved managed server and the
+  local model scan.
+- Model cards share context size and one KV-cache precision with Services. The
+  precision applies to both llama.cpp K and V flags. Hugging Face file sets show
+  On disk, Complete set, Downloading, or Download before the first click.
+- Deleting a local GGUF is confirmation-gated and removes only the exact validated
+  file, manifest entry, profile, and stopped server references. Running servers,
+  symlinks, traversal, and outside-root targets are refused.
+
+## Memories
+
+- Pin and delete actions bind through the named Memories view root. Permanent
+  deletion asks for confirmation and leaves the card and database unchanged when
+  cancelled.
+
+
 - **The model dropdown does not wait for a model to load** (r27). Startup used
   to auto-start every managed server one at a time, each behind a five-minute
   health deadline, before listing chat models, even though a server reaching

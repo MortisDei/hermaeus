@@ -37,12 +37,27 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private int          _slots;
     [ObservableProperty] private bool         _embeddingsMode;
     [ObservableProperty] private bool         _autoStart;
+    [ObservableProperty] private bool         _preserveReasoning;
     [ObservableProperty] private string       _extraArgs = string.Empty;
 
     // r18 04-llama-server-engine-options.md 4.1: first-class engine options, editable-form
     // fields on the server editor next to Context Size/GPU Layers/Threads/Slots.
     [ObservableProperty] private string       _kvCacheTypeK = "f16";
     [ObservableProperty] private string       _kvCacheTypeV = "f16";
+    public string KvCacheType
+    {
+        get => KvCacheTypeK;
+        set
+        {
+            var normalized = string.IsNullOrWhiteSpace(value) ? "f16" : value.Trim();
+            KvCacheTypeK = normalized;
+            KvCacheTypeV = normalized;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(NeedsFlashAttentionForQuantizedV));
+            OnPropertyChanged(nameof(HasUnsavedChanges));
+            ApplyContextFitNote();
+        }
+    }
     [ObservableProperty] private string       _flashAttention = "auto";
     [ObservableProperty] private bool         _contextShift;
     [ObservableProperty] private bool         _memoryLock;
@@ -144,6 +159,10 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     partial void OnContextSourceLabelChanged(string value) => OnPropertyChanged(nameof(HasContextSourceLabel));
 
     public string Id => _config.Id;
+    public bool ReasoningPreserveAvailable => _modelProfiles?.Get(ModelPath)?.DefaultPreserveReasoning == true;
+    public string ReasoningPreserveStatus => ReasoningPreserveAvailable
+        ? "Template support is confirmed for this model."
+        : "Waiting for a successful model capability probe.";
     public bool IsRunning  => Status == ServerStatus.Running;
     public bool IsStopped  => Status is ServerStatus.Stopped or ServerStatus.Error;
     public bool IsStarting => Status == ServerStatus.Starting;
@@ -168,9 +187,9 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _config.Slots != Slots ||
         _config.EmbeddingsMode != EmbeddingsMode ||
         _config.AutoStart != AutoStart ||
+        _config.PreserveReasoning != PreserveReasoning ||
         _config.ExtraArgs != ExtraArgs ||
-        _config.KvCacheTypeK != KvCacheTypeK ||
-        _config.KvCacheTypeV != KvCacheTypeV ||
+        EffectiveKvCacheType(_config) != KvCacheType ||
         _config.FlashAttention != FlashAttention ||
         _config.ContextShift != ContextShift ||
         _config.MemoryLock != MemoryLock ||
@@ -433,9 +452,10 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _slots          = config.Slots;
         _embeddingsMode = config.EmbeddingsMode;
         _autoStart      = config.AutoStart;
+        _preserveReasoning = config.PreserveReasoning;
         _extraArgs      = config.ExtraArgs;
-        _kvCacheTypeK   = config.KvCacheTypeK;
-        _kvCacheTypeV   = config.KvCacheTypeV;
+        _kvCacheTypeK   = EffectiveKvCacheType(config);
+        _kvCacheTypeV   = EffectiveKvCacheType(config);
         _flashAttention = config.FlashAttention;
         _contextShift   = config.ContextShift;
         _memoryLock     = config.MemoryLock;
@@ -571,8 +591,8 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
             return flatNote;
 
         var fileSizeBytes = TryGetModelFileSizeBytes();
-        var bpeK = KvCacheMath.ResolveBytesPerElement(KvCacheTypeK, ExtraArgs, isKeyCache: true);
-        var bpeV = KvCacheMath.ResolveBytesPerElement(KvCacheTypeV, ExtraArgs, isKeyCache: false);
+        var bpeK = KvCacheMath.ResolveBytesPerElement(KvCacheType, ExtraArgs, isKeyCache: true);
+        var bpeV = KvCacheMath.ResolveBytesPerElement(KvCacheType, ExtraArgs, isKeyCache: false);
         var swaFull = KvCacheMath.HasSwaFull(ExtraArgs);
         var primary = string.Empty;
 
@@ -1016,9 +1036,12 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _config.Slots          = Slots;
         _config.EmbeddingsMode = EmbeddingsMode;
         _config.AutoStart      = AutoStart;
+        _config.PreserveReasoning = PreserveReasoning;
+        _config.ReasoningPreserveSupported = ReasoningPreserveAvailable;
         _config.ExtraArgs      = ExtraArgs;
-        _config.KvCacheTypeK   = KvCacheTypeK;
-        _config.KvCacheTypeV   = KvCacheTypeV;
+        _config.KvCacheType    = KvCacheType;
+        _config.KvCacheTypeK   = KvCacheType;
+        _config.KvCacheTypeV   = KvCacheType;
         _config.FlashAttention = FlashAttention;
         _config.ContextShift   = ContextShift;
         _config.MemoryLock     = MemoryLock;
@@ -1079,9 +1102,12 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         Slots          = Slots,
         EmbeddingsMode = EmbeddingsMode,
         AutoStart      = AutoStart,
+        PreserveReasoning = PreserveReasoning,
+        ReasoningPreserveSupported = ReasoningPreserveAvailable,
         ExtraArgs      = ExtraArgs,
-        KvCacheTypeK   = KvCacheTypeK,
-        KvCacheTypeV   = KvCacheTypeV,
+        KvCacheType    = KvCacheType,
+        KvCacheTypeK   = KvCacheType,
+        KvCacheTypeV   = KvCacheType,
         FlashAttention = FlashAttention,
         ContextShift   = ContextShift,
         MemoryLock     = MemoryLock,
@@ -1157,6 +1183,8 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     partial void OnModelPathChanged(string value)
     {
         OnPropertyChanged(nameof(HasUnsavedChanges));
+        OnPropertyChanged(nameof(ReasoningPreserveAvailable));
+        OnPropertyChanged(nameof(ReasoningPreserveStatus));
         ScheduleContextFitRefresh();
         RepairDetectedModelPathsIfBrowsedOutsideRoot(value);
         ApplyModelDefaultsIfPathActuallyChanged(value);
@@ -1164,6 +1192,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         RefreshDetectedDraftModelPaths(value);
     }
     partial void OnMmprojPathChanged(string value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnPreserveReasoningChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
 
     /// <summary>
     /// r19 2.5: the ComboBox's SelectedItem binding can only display a value
@@ -1247,6 +1276,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     // the context-fit note must recompute when either dropdown changes, same as ExtraArgs above.
     partial void OnKvCacheTypeKChanged(string value)
     {
+        OnPropertyChanged(nameof(KvCacheType));
         OnPropertyChanged(nameof(HasUnsavedChanges));
         ApplyContextFitNote();
     }
@@ -1355,9 +1385,20 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     /// field; the user can launch with exactly what they chose regardless.
     /// </summary>
     public bool NeedsFlashAttentionForQuantizedV =>
-        !string.Equals(KvCacheTypeV, "f16", StringComparison.OrdinalIgnoreCase)
-        && !string.Equals(KvCacheTypeV, "bf16", StringComparison.OrdinalIgnoreCase)
+        !string.Equals(KvCacheType, "f16", StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(KvCacheType, "bf16", StringComparison.OrdinalIgnoreCase)
         && string.Equals(FlashAttention, "off", StringComparison.OrdinalIgnoreCase);
+
+    private static string EffectiveKvCacheType(ServerConfig config)
+    {
+        if (!string.IsNullOrWhiteSpace(config.KvCacheType)
+            && !string.Equals(config.KvCacheType, "f16", StringComparison.OrdinalIgnoreCase))
+            return config.KvCacheType;
+        if (!string.IsNullOrWhiteSpace(config.KvCacheTypeK)
+            && !string.Equals(config.KvCacheTypeK, "f16", StringComparison.OrdinalIgnoreCase))
+            return config.KvCacheTypeK;
+        return "f16";
+    }
 
     private void WarnForExtraArgs()
     {
@@ -1451,6 +1492,13 @@ public partial class ServicesViewModel : ViewModelBase
 
     public UiBoundCollection<ServerProcessViewModel> Servers { get; } = [];
     public UiBoundCollection<RuntimeProfileViewModel> RuntimeProfiles { get; } = [];
+
+    public void RefreshAllDetectedModels()
+    {
+        foreach (var server in Servers)
+            server.RefreshDetectedModels();
+    }
+
     public event EventHandler? ServerAvailabilityChanged;
     private string? _lastAvailabilityFingerprint;
 
