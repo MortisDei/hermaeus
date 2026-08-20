@@ -22,10 +22,10 @@ namespace Hermaeus.Services;
 public sealed partial class DoctorService : IDoctorService
 {
     private static readonly EmbeddingModelDownloadSpec DefaultEmbeddingDownload = new(
-        "nomic-embed-text-v1.5",
-        "nomic-embed-text-v1.5-Q4_K_M.gguf",
-        "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/f750a25aba2d24830d874eb4e1af468f37248a37/nomic-embed-text-v1.5.Q4_K_M.gguf",
-        "d4e388894e09cf3816e8b0896d81d265b55e7a9fff9ab03fe8bf4ef5e11295ac");
+        "Qwen3-Embedding-0.6B",
+        "Qwen3-Embedding-0.6B-Q8_0.gguf",
+        "https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/370f27d7550e0def9b39c1f16d3fbaa13aa67728/Qwen3-Embedding-0.6B-Q8_0.gguf",
+        "06507c7b42688469c4e7298b0a1e16deff06caf291cf0a5b278c308249c3e439");
 
     private readonly ISettingsService _settings;
     private readonly RuntimeProfileService _runtimes;

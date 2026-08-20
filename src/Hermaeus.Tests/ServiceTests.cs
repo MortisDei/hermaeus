@@ -1423,6 +1423,56 @@ namespace Hermaeus.Tests
             Equal(expectedPath, settings.Settings.ManagedServers.Single(s => s.EmbeddingsMode).ModelPath, "embedding server should point at the migrated model");
         }
 
+        public static async Task DoctorEmbeddingInstallKeepsExistingNomicUntilVerifiedQwenIsReady()
+        {
+            using var temp = new TempDir();
+            var root = temp.PathFor("AI");
+            var embedDir = Path.Combine(root, "Models", "embed");
+            Directory.CreateDirectory(embedDir);
+            var nomicPath = Path.Combine(embedDir, "nomic-embed-text-v1.5-Q4_K_M.gguf");
+            await File.WriteAllTextAsync(nomicPath, "existing nomic model");
+
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.LocalAiAssetsRoot = root;
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            settings.Settings.Rag.EmbeddingModel = "nomic-embed-text-v1.5";
+            settings.Settings.ManagedServers.Clear();
+            settings.Settings.ManagedServers.Add(new ServerConfig
+            {
+                Name = "Embeddings",
+                EmbeddingsMode = true,
+                ModelPath = nomicPath
+            });
+
+            var qwenContent = "verified qwen model";
+            var spec = new EmbeddingModelDownloadSpec(
+                "Qwen3-Embedding-0.6B",
+                "Qwen3-Embedding-0.6B-Q8_0.gguf",
+                "https://example.test/Qwen3-Embedding-0.6B-Q8_0.gguf",
+                ExpectedSha256(qwenContent));
+            var doctor = new DoctorService(
+                settings,
+                new RuntimeProfileService(settings),
+                new FakeVoiceProviderRegistry(settings),
+                new FakeSecretStore(),
+                new SqliteRagStore(settings),
+                new ThrowingEmbeddingService(),
+                new FakeSystemInfo(),
+                new PythonHealthValidator(),
+                new NoOpReranker(),
+                new ModelDownloadService(new HttpClient(new CapturingRangeHttpHandler(qwenContent))),
+                spec);
+
+            var ok = await doctor.InstallEmbeddingModelAsync();
+            var qwenPath = Path.Combine(embedDir, spec.FileName);
+
+            True(ok, "verified Qwen download should succeed");
+            True(File.Exists(nomicPath), "installing Qwen must retain an existing Nomic model");
+            Equal("existing nomic model", await File.ReadAllTextAsync(nomicPath), "installing Qwen must not alter Nomic's file");
+            Equal(spec.ModelName, settings.Settings.Rag.EmbeddingModel, "settings should switch only after the Qwen file verifies");
+            Equal(qwenPath, settings.Settings.ManagedServers.Single(s => s.EmbeddingsMode).ModelPath, "embedding server should switch to verified Qwen");
+        }
+
         public static Task LlamaServerReleaseDataCoversSupportedPlatforms()
         {
             var service = new LlamaServerSetupService();
@@ -2264,6 +2314,21 @@ namespace Hermaeus.Tests
                 True(ex.Message.Contains("--pooling mean", StringComparison.Ordinal), "error should suggest an OAI-compatible pooling mode");
                 True(ex.Message.Contains("embedding model", StringComparison.OrdinalIgnoreCase), "error should suggest using an embedding model");
             }
+        }
+
+        public static Task EmbeddingClientUsesKnownQwenAndLegacyNomicDimensions()
+        {
+            using var temp = new TempDir();
+            var qwenSettings = NewSettings(temp);
+            qwenSettings.Settings.Rag.EmbeddingModel = "Qwen3-Embedding-0.6B";
+            using var qwen = new LlamaCppEmbeddingService(qwenSettings);
+            Equal(1024, qwen.Dimensions, "Qwen3-Embedding-0.6B should report its known 1024 dimensions before the first server response");
+
+            var nomicSettings = NewSettings(temp);
+            nomicSettings.Settings.Rag.EmbeddingModel = "nomic-embed-text-v1.5";
+            using var nomic = new LlamaCppEmbeddingService(nomicSettings);
+            Equal(768, nomic.Dimensions, "existing Nomic configurations should retain their known 768 dimensions");
+            return Task.CompletedTask;
         }
 
         public static async Task ConversationStoreRoundTripsPerMessageModelAttribution()

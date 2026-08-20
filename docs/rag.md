@@ -24,12 +24,16 @@ traces, versioned SQLite schema migrations, and native eval support.
 ### Embedding Model Setup
 
 - Hermaeus requires an embedding model to run the embedding server. If none is found, the
-  **Doctor** panel can automatically download the recommended model (nomic-embed-text-v1.5-Q4_K_M)
+  **Doctor** panel can automatically download the recommended model (Qwen3-Embedding-0.6B-Q8_0)
   from a pinned Hugging Face commit and verify its SHA256 before configuring
   the embedding server.
 - Embedding GGUF files live under the configured local AI assets root in
-  `Models/embed`. Doctor installs the pinned nomic embedding model there and
+  `Models/embed`. Doctor installs the pinned Qwen embedding model there and
   moves a verified root-level copy into that folder when found.
+- Existing Nomic installations are not replaced or deleted. Doctor keeps Nomic
+  selected until the Qwen file has downloaded and verified, then changes the
+  dedicated embedding server to Qwen. Reindex RAG datasets and re-embed any
+  mismatched memories after that switch.
 - The Settings embedding selector lists dedicated embedding models only. Chat
   and code GGUF files in the model root are not shown as embedding choices.
 - Chat or code GGUF files are not treated as embedding models. Doctor will skip
@@ -39,7 +43,9 @@ traces, versioned SQLite schema migrations, and native eval support.
   pauses other LLM servers and TTS services** to reduce memory pressure, starts
   the managed embedding server if needed, then restores suspended services after
   ingestion completes.
-- For 6 GB VRAM systems, nomic-embed-text-v1.5-Q4_K_M (Q4 quantization) is recommended.
+- Qwen3-Embedding-0.6B is a small 0.6B embedding model. The official GGUF
+  release currently provides the verified Q8_0 file (about 640 MB), suitable
+  for the dedicated embedding server alongside a chat model.
 
 ## Features
 

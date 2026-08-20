@@ -12,6 +12,10 @@ public sealed class ConversationMemoryService : IConversationMemoryService
         "prefer", "like", "dislike", "always", "never", "important", "remember", "goal", "workflow",
         "project", "deadline", "bug", "performance", "privacy", "security"
     ];
+    private static readonly HashSet<string> DuplicateQualifierWords = new(StringComparer.Ordinal)
+    {
+        "a", "an", "the", "in", "on", "at", "for", "to", "of", "with", "all", "every", "each"
+    };
 
     private readonly ISettingsService _settings;
     private readonly IConversationStore _conversations;
@@ -403,8 +407,8 @@ public sealed class ConversationMemoryService : IConversationMemoryService
         if (string.Equals(normalizedLeft, normalizedRight, StringComparison.Ordinal))
             return true;
 
-        var leftWords = normalizedLeft.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToHashSet(StringComparer.Ordinal);
-        var rightWords = normalizedRight.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToHashSet(StringComparer.Ordinal);
+        var leftWords = DuplicateTerms(normalizedLeft);
+        var rightWords = DuplicateTerms(normalizedRight);
         if (leftWords.Count < 4 || rightWords.Count < 4)
             return false;
 
@@ -446,4 +450,16 @@ public sealed class ConversationMemoryService : IConversationMemoryService
             .Trim()
             .Split([' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries));
     }
+
+    private static HashSet<string> DuplicateTerms(string content) =>
+        content.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Select(term => term.Trim('.', ',', '!', '?', ':', ';', '\'', '"').ToLowerInvariant())
+            .Where(term => !string.IsNullOrWhiteSpace(term) && !DuplicateQualifierWords.Contains(term))
+            .Select(Singularize)
+            .ToHashSet(StringComparer.Ordinal);
+
+    private static string Singularize(string term) =>
+        term.Length > 4 && term.EndsWith("ies", StringComparison.Ordinal) ? term[..^3] + "y"
+        : term.Length > 3 && term.EndsWith('s') && !term.EndsWith("ss", StringComparison.Ordinal) ? term[..^1]
+        : term;
 }

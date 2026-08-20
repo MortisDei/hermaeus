@@ -597,7 +597,7 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
   board), and names every suite and model it left out. When there is no
   honest answer, it says which case applies instead of naming a winner.
 - Doctor checks for untuned GGUF files, stale `llama.cpp` binaries, and pinned
-  `nomic-embed-text-v1.5` hash drift, with install actions where available.
+  `Qwen3-Embedding-0.6B` hash drift, with install actions where available.
 - Doctor advises when a real GPU is present but inference is still configured
   for the CPU (a CPU-only build is installed, or the chat server offloads zero
   layers), naming the measured consequence and linking the fix in Services.
@@ -996,7 +996,8 @@ attached to a conversation. See [docs/voice.md](voice.md).
   there yet.
 - Doctor embedding model install downloads the default model from a pinned
   Hugging Face commit, verifies SHA256, removes failed downloads, and points the
-  embedding server at the verified file.
+  embedding server at the verified Qwen3-Embedding-0.6B file. Existing Nomic
+  installations remain selected and untouched until that verified install completes.
 - Doctor flags a blank embedding endpoint (RAG's `EmbeddingBaseUrl`) while
   memory or RAG is enabled: embedding requests silently fall back to the chat
   server otherwise, queuing behind chat generation on a single-slot

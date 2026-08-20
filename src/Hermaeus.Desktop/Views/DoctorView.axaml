@@ -131,7 +131,7 @@
         <Border HorizontalAlignment="Center" VerticalAlignment="Center" Background="{DynamicResource BackgroundBrush}" Padding="20" CornerRadius="8">
             <StackPanel Spacing="12" Width="520">
                 <TextBlock Text="Installing Embedding Model" FontSize="16" FontWeight="SemiBold" />
-                <TextBlock Text="This will download the default embedding model (nomic-embed-text-v1.5-Q4_K_M.gguf). You can cancel at any time." Opacity="0.7" TextWrapping="Wrap" />
+                <TextBlock Text="This will download the default embedding model (Qwen3-Embedding-0.6B-Q8_0.gguf). Existing Nomic files are retained. You can cancel at any time." Opacity="0.7" TextWrapping="Wrap" />
                 <ProgressBar IsIndeterminate="{Binding EmbeddingModelProgressIsIndeterminate}" Value="{Binding EmbeddingModelProgressPercent}" Maximum="100" Height="12" />
                 <TextBlock Text="{Binding EmbeddingModelProgress}" Opacity="0.9" TextWrapping="Wrap" />
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">

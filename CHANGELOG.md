@@ -22,6 +22,10 @@ limit.
   reinforce one row instead of accumulating paraphrases.
 - Expanded reasoning is visually boxed and labelled, separating it from the
   final answer.
+- The default dedicated embedding model is now the SHA256-pinned
+  Qwen3-Embedding-0.6B-Q8_0 GGUF. Existing Nomic installations stay selected
+  and on disk until a verified Qwen download completes, then Doctor points the
+  embedding server at Qwen and leaves RAG/memory reindexing user-controlled.
 - Starter model downloads now adopt matching files on retry, verify hashes before
   completion, write provenance, and refresh Services immediately after setup.
 - Models and Services share one context default and one KV-cache precision. Model
