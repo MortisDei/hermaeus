@@ -28,6 +28,26 @@ filesystem and SQLite state that parallelism would corrupt.
 
 Do not re-enable parallelization.
 
+## Run the suite in the real terminal environment
+
+The test harness deliberately uses shared temporary data roots and SQLite
+connection pools, but a restricted command runner can also be unable to reach
+the real Windows application-data root or NuGet's user configuration. Errors
+such as `UnauthorizedAccessException` under `%LOCALAPPDATA%\Hermaeus` or
+`SQLite Error 14: unable to open database file` are therefore not evidence of
+test leakage or a product regression until the documented command has been
+reproduced in a normal VS Code or PowerShell terminal.
+
+Do not change `src/Hermaeus.Tests/Helpers.cs`, production data-root logic, or
+SQLite setup merely to make a restricted runner pass. Run the same command in
+the normal terminal, keep results under `%TEMP%`, and diagnose a genuine
+failure only from that run. The canonical Windows verification is:
+
+```powershell
+dotnet test src/Hermaeus.Tests/Hermaeus.Tests.csproj `
+  --results-directory "$env:TEMP\hermaeus-tests"
+```
+
 ## Never write test output into the working tree
 
 A `.trx` header contains `runUser="MACHINE\user"` and a run name of

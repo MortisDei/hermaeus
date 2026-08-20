@@ -38,6 +38,7 @@ dotnet run --project src/Hermaeus.Desktop                  # launch the app; see
 Any compiler warning fails the build. Fix the warning; do not suppress it without a comment explaining the constraint.
 
 - `docs/testing.md` is the reference for the suite: what it is, the platform-skip attribute, the injectable-timeout rule, the coverage floor, the guard tests, and why Windows CI is slower than Linux CI. Read it before adding or changing tests.
+- Run the documented suite from a normal VS Code or PowerShell terminal before diagnosing failures. Restricted runners may not be able to access the real `%LOCALAPPDATA%\Hermaeus` app-data root or NuGet user configuration, producing misleading temp-root, SQLite, or restore errors. Never modify `src/Hermaeus.Tests/Helpers.cs`, production root selection, or SQLite setup just to compensate for that environment; reproduce the same command with results outside the repo first.
 - New harness-style test methods must be registered in `XunitHarnessTests.HarnessCases`; a reflection guard (`HarnessRegistrationGuardTests`) fails the suite otherwise.
 - Platform-specific tests use `[WindowsOnlyFact]` so they report Skipped, never an early `return` that reports Passed; a guard test enforces this.
 - Never let test output land in the working tree: pass `--results-directory` outside the repo, and never `git add -A`.
