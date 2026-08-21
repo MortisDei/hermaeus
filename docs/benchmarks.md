@@ -27,8 +27,9 @@ Runs record the following metrics and metadata:
 	see Resource Sampling Notes)
 - Pass rate, failure count, and weighted rankings
 - Run metadata including model identity, backend/runtime, context size, GPU
-	layers, thread count, model path, and quantization (all sourced from the
-	managed server actually serving a local GGUF model, not app-process values)
+	layers, thread count, model path, quantization, KV cache K/V types, and Flash
+	Attention (all sourced from the managed server actually serving a local GGUF
+	model, not app-process values)
 - Suite version, case version, scoring profile, and run mode
 - Cold-only single-iteration runs, or cold and warm phase attempts when suites
 	use repeated iterations per case
@@ -46,9 +47,16 @@ without appearing here.
 `RuntimeVersion`, `RuntimeKind`, `ContextSize`, `PromptTemplate`,
 `SamplerSettings`, `Temperature`, `TopP`, `TopK`, `RepeatPenalty`, `Seed`,
 `GpuLayers`, `Threads`, `BatchSize`, `EmbeddingModel`, `RerankerEnabled`,
-`OS`, `CPU`, `RAM`, `GPU`, `SpeculativeTypes`, `SpeculativeDraftModel`,
+`KvCacheTypeK`, `KvCacheTypeV`, `FlashAttention`, `OS`, `CPU`, `RAM`, `GPU`,
+`SpeculativeTypes`, `SpeculativeDraftModel`,
 `SpeculativeNMax`, `SpeculativeNMin`, `SpeculativePMin`,
 `SpeculativeDraftGpuLayers`.
+
+KV cache and Flash Attention are configuration provenance, not a score or a
+recommendation. New local-GGUF runs record the managed server values in their
+saved record, run details, and JSON, Markdown, and CSV exports. Historical
+runs and runs that do not resolve to a managed llama-server show the settings
+as not recorded; Hermaeus does not infer a default after the fact.
 
 The default action is a one-click benchmark pass. With **Run all suites**
 enabled, Hermaeus runs every built-in suite for the selected model. Turning it off

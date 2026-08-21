@@ -412,6 +412,26 @@ public sealed class SpeculativeDecodingTests
     }
 
     [Fact]
+    public void Comparison_includes_recorded_kv_and_flash_attention_configuration()
+    {
+        var baseline = Run("a", "gemma.gguf", SpeedCheck.SuiteId, "", 30, 400);
+        baseline.Metadata.KvCacheTypeK = "f16";
+        baseline.Metadata.KvCacheTypeV = "f16";
+        baseline.Metadata.FlashAttention = "auto";
+        var candidate = Run("b", "gemma.gguf", SpeedCheck.SuiteId, "", 44, 380);
+        candidate.Metadata.KvCacheTypeK = "q8_0";
+        candidate.Metadata.KvCacheTypeV = "q4_0";
+        candidate.Metadata.FlashAttention = "on";
+
+        var result = SpeedCheckComparer.Compare(baseline, candidate);
+
+        Assert.True(result.Compared);
+        Assert.Equal(
+            "KV cache K/V f16/f16; Flash Attention auto; speculative decoding off -> KV cache K/V q8_0/q4_0; Flash Attention on; speculative decoding off",
+            result.Comparison!.ConfigurationDelta);
+    }
+
+    [Fact]
     public void Comparison_reports_no_verdict_grade_or_recommendation()
     {
         // Settled by r23 2.3 and unchanged: the app reports what happened, it

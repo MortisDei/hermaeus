@@ -26,6 +26,18 @@ Singleline, and a refusal detector containing only `not enough`, `insufficient`,
 (`BenchmarkService.cs:299-325,1016-1028`). The stored rows above fail exactly at
 those boundaries.
 
+## r30 add-on: engine-setting provenance
+
+The deterministic scorer repair does not make a benchmark reproducible when
+the inference engine is omitted. KV cache K type, KV cache V type, and Flash
+Attention change memory use, usable context, and potentially performance.
+New runs against a managed local GGUF therefore record those exact managed
+server settings. The metadata is JSON-additive, so historical `run_json` rows
+remain unchanged and exports mark their engine settings as not recorded.
+
+This is provenance only. r30 adds no score, recommendation, automatic tuning,
+or claim that one configuration is universally better.
+
 ## 4.1 Turn the observed rows into fixtures first
 
 Copy only prompt, expectations, and model output from the six rows into named

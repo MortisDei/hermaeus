@@ -46,6 +46,10 @@ The smaller reports are confirmed gaps, not a new architecture:
   therefore require a binding/runtime reproduction, not new commands.
 - benchmark run data under the owner's real data root proves several
   deterministic false fails. Doc 04 names the exact runs and scorer causes.
+- benchmark exports and comparisons must identify the KV cache K/V types and
+  Flash Attention setting that produced a local llama-server result. Those
+  engine choices materially affect memory use and can affect performance, so
+  an omitted value is not reproducibility.
 
 ## Scope
 
@@ -57,6 +61,14 @@ The smaller reports are confirmed gaps, not a new architecture:
 | `04-benchmark-truth.md` | False-fail fixtures from the owner's runs and narrowly corrected deterministic scoring |
 | `05-reasoning-and-capabilities.md` | Automatic GGUF/runtime capability detection and complete reasoning extraction, preservation, persistence, replay, UI, and export |
 | `06-roadmap.md` | 0.37.0-alpha, strict sequence, test budget, descope boundary, deferred work, and explicit rejections |
+
+### r30 add-on: measured engine provenance
+
+The r30 draft PR also records the managed llama-server KV cache K/V types and
+Flash Attention setting on new local-GGUF benchmark runs. The additive fields
+flow through saved `run_json`, details, comparisons, and JSON, Markdown, and
+CSV exports. Historical data stays unchanged and says not recorded rather than
+being backfilled from a presumed default.
 
 ## Deliberately not in r30
 

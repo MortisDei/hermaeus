@@ -33,6 +33,23 @@ public sealed class BenchmarkRunMetadata
     public int? GpuLayers { get; set; }
     public int? Threads { get; set; }
     public int? BatchSize { get; set; }
+
+    /// <summary>
+    /// The managed llama-server <c>--cache-type-k</c> configuration that
+    /// produced this run. Empty means the run did not resolve to a managed
+    /// llama-server, or predates recording this field; it never implies f16.
+    /// </summary>
+    public string KvCacheTypeK { get; set; } = string.Empty;
+
+    /// <summary>See <see cref="KvCacheTypeK"/> for the corresponding V cache.</summary>
+    public string KvCacheTypeV { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The managed llama-server Flash Attention choice (<c>auto</c>,
+    /// <c>on</c>, or <c>off</c>) that produced this run. Empty means it was not
+    /// recorded, not that the runtime chose an automatic setting.
+    /// </summary>
+    public string FlashAttention { get; set; } = string.Empty;
     public string EmbeddingModel { get; set; } = string.Empty;
     public bool? RerankerEnabled { get; set; }
     public string OS { get; set; } = string.Empty;
@@ -66,4 +83,38 @@ public sealed class BenchmarkRunMetadata
             : string.IsNullOrWhiteSpace(SpeculativeDraftModel)
                 ? SpeculativeTypes
                 : $"{SpeculativeTypes} with {SpeculativeDraftModel}";
+
+    /// <summary>
+    /// The inference-engine configuration that can materially affect memory
+    /// use and measured speed. Historical or non-managed runs retain the fact
+    /// that this configuration was not captured.
+    /// </summary>
+    public string InferenceEngineSummary
+    {
+        get
+        {
+            var hasKv = !string.IsNullOrWhiteSpace(KvCacheTypeK)
+                || !string.IsNullOrWhiteSpace(KvCacheTypeV);
+            var hasFlashAttention = !string.IsNullOrWhiteSpace(FlashAttention);
+            if (!hasKv && !hasFlashAttention)
+                return "inference engine settings not recorded";
+
+            var kv = hasKv
+                ? $"KV cache K/V {ValueOrNotRecorded(KvCacheTypeK)}/{ValueOrNotRecorded(KvCacheTypeV)}"
+                : "KV cache K/V not recorded";
+            var flashAttention = hasFlashAttention
+                ? $"Flash Attention {FlashAttention}"
+                : "Flash Attention not recorded";
+            return $"{kv}; {flashAttention}";
+        }
+    }
+
+    /// <summary>The complete recorded engine configuration for run comparison.</summary>
+    public string InferenceConfigurationSummary =>
+        InferenceEngineSummary == "inference engine settings not recorded"
+            ? SpeculativeSummary
+            : $"{InferenceEngineSummary}; {SpeculativeSummary}";
+
+    private static string ValueOrNotRecorded(string value) =>
+        string.IsNullOrWhiteSpace(value) ? "not recorded" : value;
 }

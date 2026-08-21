@@ -338,7 +338,10 @@ namespace Hermaeus.Tests
                 ModelPath = modelPath,
                 ContextSize = 16384,
                 GpuLayers = 24,
-                Threads = 6
+                Threads = 6,
+                KvCacheTypeK = "q8_0",
+                KvCacheTypeV = "q4_0",
+                FlashAttention = "on"
             });
             var service = new BenchmarkService(settings, new FakeLlm(), new FakeSystemInfo(), new FakeEvalStore());
 
@@ -352,6 +355,19 @@ namespace Hermaeus.Tests
             Equal(6, run.Metadata.Threads, "Threads should come from the matching managed ServerConfig, not Environment.ProcessorCount");
             Equal(modelPath, run.Metadata.ModelPath, "ModelPath should come from the matching managed ServerConfig");
             False(string.IsNullOrEmpty(run.Metadata.Quantization), "a local GGUF model should carry a non-empty quantization label");
+            Equal("q8_0", run.Metadata.KvCacheTypeK, "KV cache K type should come from the matching managed ServerConfig");
+            Equal("q4_0", run.Metadata.KvCacheTypeV, "KV cache V type should come from the matching managed ServerConfig");
+            Equal("on", run.Metadata.FlashAttention, "Flash Attention should come from the matching managed ServerConfig");
+
+            var markdownPath = await service.ExportAsync(run.Id, temp.PathFor("exports"));
+            var markdown = await File.ReadAllTextAsync(markdownPath);
+            var json = await File.ReadAllTextAsync(Path.ChangeExtension(markdownPath, ".json"));
+            var csv = await File.ReadAllTextAsync(Path.ChangeExtension(markdownPath, ".csv"));
+            True(markdown.Contains("KV cache K type: `q8_0`", StringComparison.Ordinal), "Markdown export should preserve KV cache K type");
+            True(markdown.Contains("Flash Attention: `on`", StringComparison.Ordinal), "Markdown export should preserve Flash Attention");
+            True(json.Contains("\"KvCacheTypeV\": \"q4_0\"", StringComparison.Ordinal), "JSON export should preserve KV cache V type");
+            True(csv.Contains("kv_cache_type_k", StringComparison.Ordinal), "CSV export should label engine configuration provenance");
+            True(csv.Contains("\"q8_0\",\"q4_0\",\"on\"", StringComparison.Ordinal), "CSV export should preserve engine configuration provenance");
         }
 
         /// <summary>r17 02-benchmark-truth.md 2.5: RerunAsync used to rebuild the model as a bare

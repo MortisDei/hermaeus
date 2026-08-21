@@ -582,9 +582,12 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
 - Model benchmarks with GGUF discovery, one-click full-suite runs, saved run
   history, deterministic quality checks, rankings that group runs by model
   with a rank, a proportional score bar, and a Details button per run, test
-  info modal for case details, reruns, and Markdown/JSON/CSV export. Rerun is
-  disabled while a run is already in progress, so a second click can no
-  longer interrupt and leak the first run's state.
+  info modal for case details, reruns, and Markdown/JSON/CSV export. Run
+  provenance includes the managed server's KV cache K/V types and Flash
+  Attention setting when recorded, so results do not imply those engine
+  choices were held constant. Rerun is disabled while a run is already in
+  progress, so a second click can no longer interrupt and leak the first run's
+  state.
 - Benchmark views expose the test-details modal from both the per-result list
   and the best-run ranking rows, and saved benchmark history can be exported
   in bulk as one timestamped folder.

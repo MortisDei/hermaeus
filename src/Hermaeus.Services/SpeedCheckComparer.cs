@@ -50,7 +50,7 @@ public static class SpeedCheckComparer
         return new SpeedCheckSide(
             run.Id,
             run.StartedAt,
-            run.Metadata.SpeculativeSummary,
+            run.Metadata.InferenceConfigurationSummary,
             Median(perIteration),
             run.Results.Where(r => r.PromptTokensPerSecond.HasValue).Select(r => r.PromptTokensPerSecond!.Value).DefaultIfEmpty(0).Average(),
             run.AverageFirstTokenMs,

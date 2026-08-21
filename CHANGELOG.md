@@ -36,6 +36,10 @@ limit.
 - Deterministic benchmark scoring now handles multiline structures, grouped
   digits, explicit refusal language, and explicit keyword alternatives without
   rewriting historical runs.
+- Benchmark runs now preserve the managed llama-server KV cache K/V types and
+  Flash Attention setting in saved provenance, run details, comparisons, and
+  JSON, Markdown, and CSV exports. Historical runs remain unmodified and show
+  these settings as not recorded.
 - Memories deletion is confirmation-gated and its item commands bind through the
   named view root.
 

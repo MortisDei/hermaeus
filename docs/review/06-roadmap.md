@@ -6,6 +6,11 @@
 GGUF/runtime capability detection, separate reasoning content, and full
 reasoning preservation are mandatory scope, not stretch goals.
 
+**r30 add-on:** benchmark provenance also records managed llama-server KV cache
+K/V types and Flash Attention on new local-GGUF runs, including run details,
+comparisons, and exports. It is additive storage and measured configuration
+truth only, not an optimisation feature.
+
 **Deferred to r31 before implementation starts:** audio feedback and all four
 TLB items. Those remain worthwhile, but none outranks the live broken workflows
 or the owner's explicit reasoning requirement.

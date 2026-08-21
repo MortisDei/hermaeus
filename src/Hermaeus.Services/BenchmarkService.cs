@@ -933,6 +933,9 @@ public sealed class BenchmarkService
             ModelPath = managedServer?.ModelPath ?? string.Empty,
             ModelHash = string.Empty,
             Quantization = ggufInfo?.Quantization ?? string.Empty,
+            KvCacheTypeK = managedServer?.KvCacheTypeK ?? string.Empty,
+            KvCacheTypeV = managedServer?.KvCacheTypeV ?? string.Empty,
+            FlashAttention = managedServer?.FlashAttention ?? string.Empty,
 
             // r27 03 3.5: a run records the speculative configuration that
             // produced it. Without this, 3.6's comparison has nothing to key on.
@@ -1090,6 +1093,9 @@ public sealed class BenchmarkService
         md.AppendLine($"- Runtime kind: `{run.Metadata.RuntimeKind}`");
         md.AppendLine($"- Runtime version: `{run.Metadata.RuntimeVersion}`");
         md.AppendLine($"- Context size: {run.Metadata.ContextSize?.ToString() ?? "n/a"}");
+        md.AppendLine($"- KV cache K type: `{ValueOrNotRecorded(run.Metadata.KvCacheTypeK)}`");
+        md.AppendLine($"- KV cache V type: `{ValueOrNotRecorded(run.Metadata.KvCacheTypeV)}`");
+        md.AppendLine($"- Flash Attention: `{ValueOrNotRecorded(run.Metadata.FlashAttention)}`");
         md.AppendLine($"- Sampler settings: `{run.Metadata.SamplerSettings}`");
         md.AppendLine($"- Temperature: {run.Metadata.Temperature?.ToString("0.###") ?? "n/a"}");
         md.AppendLine($"- OS: {run.Metadata.OS}");
@@ -1120,9 +1126,9 @@ public sealed class BenchmarkService
     private static string ToCsv(BenchmarkRun run)
     {
         var csv = new StringBuilder();
-        csv.AppendLine("case,phase,iteration,passed,first_token_ms,total_ms,approx_tokens_per_second,quality,failure_category,error");
+        csv.AppendLine("case,phase,iteration,passed,first_token_ms,total_ms,approx_tokens_per_second,quality,failure_category,error,kv_cache_type_k,kv_cache_type_v,flash_attention");
         foreach (var result in run.Results)
-            csv.AppendLine($"{Csv(result.CaseName)},{Csv(result.Phase)},{result.IterationIndex + 1},{result.Passed},{result.FirstTokenMs},{result.TotalMs},{result.ApproxTokensPerSecond:F2},{result.QualityScore:F4},{Csv(result.FailureCategory)},{Csv(result.Error)}");
+            csv.AppendLine($"{Csv(result.CaseName)},{Csv(result.Phase)},{result.IterationIndex + 1},{result.Passed},{result.FirstTokenMs},{result.TotalMs},{result.ApproxTokensPerSecond:F2},{result.QualityScore:F4},{Csv(result.FailureCategory)},{Csv(result.Error)},{Csv(run.Metadata.KvCacheTypeK)},{Csv(run.Metadata.KvCacheTypeV)},{Csv(run.Metadata.FlashAttention)}");
         return csv.ToString();
     }
 
@@ -1134,6 +1140,9 @@ public sealed class BenchmarkService
             .Replace('\n', ' ');
         return $"\"{normalized.Replace("\"", "\"\"")}\"";
     }
+
+    private static string ValueOrNotRecorded(string value) =>
+        string.IsNullOrWhiteSpace(value) ? "not recorded" : value;
 
     private static string EscapeMarkdown(string value) => value.Replace("|", "\\|", StringComparison.Ordinal);
 
