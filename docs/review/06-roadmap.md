@@ -11,6 +11,13 @@ K/V types and Flash Attention on new local-GGUF runs, including run details,
 comparisons, and exports. It is additive storage and measured configuration
 truth only, not an optimisation feature.
 
+**r30 Batch #3 add-on:** runtime capability discovery now gates speculative
+launches and separate prompt-processing threads, records meaningful capability
+drift to Activity, and gives Moss one deduped capability heads-up per changed
+snapshot. It does not expose arbitrary draft-model, backend-sampling, cache,
+or performance-debug controls without a stable runtime contract and measured
+single-user benefit.
+
 **Deferred to r31 before implementation starts:** audio feedback, normalized
 model-facing tool outcomes, and the empirical experience store. Those remain
 worthwhile cross-cutting designs. The bounded transcript-compaction and

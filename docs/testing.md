@@ -5,8 +5,10 @@ r29 (v0.36.0-alpha) after the first whole-suite audit this project has had.
 
 ## Shape
 
-Around 1790 tests across ~200 files, all in `src/Hermaeus.Tests`. Standard
-xunit; no separate integration project and no test categories.
+At the r29 measurement, the suite had around 1790 tests across ~200 files, all
+in `src/Hermaeus.Tests`. This is historical sizing information, not a permanent
+test-count contract. Standard xunit; no separate integration project and no
+test categories.
 
 ```bash
 dotnet test src/Hermaeus.Tests/Hermaeus.Tests.csproj
@@ -66,6 +68,12 @@ dotnet test src/Hermaeus.Tests/Hermaeus.Tests.csproj \
 `.gitignore` catches the mistake, but the habit is the real fix. Check
 `git status --untracked-files=all` before every `git add`, and never
 `git add -A` from the repository root.
+
+Some restricted command wrappers report after build output while a VSTest host
+continues to run. Before treating that as a terminated suite, check for the
+test-host process and the requested TRX outside the repository. This is a
+runner-reporting boundary, not a product failure and not a reason to weaken
+tests.
 
 ## Platform-specific tests report Skipped, not Passed
 

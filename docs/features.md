@@ -770,6 +770,13 @@ checkbox per technique, because llama-server's `--spec-type` takes a
 comma-separated list and n-gram speculation and draft-model drafting are not
 mutually exclusive:
 
+The selected executable's own `--help` is the gate. Hermaeus discovers the
+runtime's advertised speculative types and separate prompt-processing threads,
+but enables the n-gram and MTP controls only when that runtime proves them.
+Launch repeats the check, so an executable update cannot turn a saved setting
+into an ignored flag. Other discovered speculative types stay informational
+until Hermaeus has a complete drafter and compatibility workflow for them.
+
 - **N-gram drafting** (`ngram-mod`): costs no additional VRAM, because it
   drafts from the prompt and history themselves rather than from a second
   model.
@@ -787,9 +794,9 @@ mutually exclusive:
 
 Both boxes write into one underlying `--spec-type` list, because the flag
 genuinely is a list and the two techniques compose. Each box only ever adds or
-removes its own entry, so a more exotic list set by hand in `settings.json`
-(`ngram-simple`, `ngram-map-k`, `ngram-map-k4v`, `ngram-cache`,
-`draft-simple`) survives being toggled.
+removes its own entry. A manually saved type is never assumed compatible: it
+must appear in the selected runtime's help or launch is refused with the type
+named.
 - **n-max / n-min / p-min / draft ngl**: optional. Blank leaves llama-server's
   own defaults alone.
 
@@ -810,6 +817,15 @@ reasons, and llama.cpp spills to system memory rather than failing.
 Existing configurations upgrade automatically. The old N-gram checkbox becomes
 `Types = ["ngram-mod"]` exactly once, which is byte-identical to the flags that
 checkbox used to emit.
+
+### Runtime capability changes
+
+When a selected model and managed `llama-server` are probed, Hermaeus compares
+the resulting capability snapshot with the previous executable identity. It
+records only meaningful capability state changes and speculative types appearing
+or disappearing in Activity. Moss gives one short heads-up for that new
+snapshot, escalating a disappeared capability that may affect the configured
+server. It does not show raw help diffs or send a notification for every start.
 
 ### Complete downloads and per-model folders (r27)
 

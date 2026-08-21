@@ -50,6 +50,17 @@ limit.
   instead of fixed sleeps. Voice provider registry behavior is covered for
   stored aliases, fallback logging, persistence, catalog metadata, and service
   mapping.
+- Managed llama-server settings now discover speculative modes and
+  `--threads-batch` from the selected executable, recheck them at launch, and
+  refuse stale unsupported settings instead of silently emitting them. Prompt
+  processing threads are stored separately from generation threads when the
+  runtime supports them.
+- Capability snapshots now record meaningful runtime changes in Activity. Moss
+  reports one deduped heads-up for a changed snapshot, with a warning when a
+  disappeared capability can affect the configured server.
+- The benchmark model-selection regression test now uses ephemeral loopback
+  ports, so an unrelated listener cannot make it misreport that a benchmark
+  restart was skipped.
 
 From 0.29.0-alpha onward, every minor version is tagged and released on
 GitHub (see `docs/packaging.md` "Releases"); patch versions are tagged only

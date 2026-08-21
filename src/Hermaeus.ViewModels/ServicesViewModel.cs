@@ -20,6 +20,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     private readonly OrphanServerDetector  _orphanDetector;
     private readonly ModelProfileService?  _modelProfiles;
     private readonly IActivityRecorder?    _activity;
+    private readonly LocalModelCapabilityService? _capabilityService;
     private ServerStatus _lastRecordedStatus = ServerStatus.Stopped;
     private ServerConfig                   _config;
     private OrphanServerInfo? _orphanInfo;
@@ -34,6 +35,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private int          _contextSize;
     [ObservableProperty] private int          _gpuLayers;
     [ObservableProperty] private int          _threads;
+    [ObservableProperty] private int          _promptThreads;
     [ObservableProperty] private int          _slots;
     [ObservableProperty] private bool         _embeddingsMode;
     [ObservableProperty] private bool         _autoStart;
@@ -101,6 +103,17 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
 
     private const string NgramType = "ngram-mod";
     private const string DraftType = "draft-mtp";
+    private readonly HashSet<string> _runtimeSpeculativeTypes = new(StringComparer.OrdinalIgnoreCase);
+    private int _runtimeCapabilityGeneration;
+    [ObservableProperty] private bool _runtimeCapabilitiesKnown;
+    [ObservableProperty] private string _runtimeCapabilityStatus = "Checking selected llama-server capabilities.";
+
+    public bool SupportsNgramDecoding => _runtimeSpeculativeTypes.Contains(NgramType);
+    public bool SupportsDraftModelDecoding => _runtimeSpeculativeTypes.Contains(DraftType);
+    public bool SupportsPromptThreads { get; private set; }
+    public bool CanEditNgramDecoding => CanEdit && (SupportsNgramDecoding || UseNgramDecoding);
+    public bool CanEditDraftModelDecoding => CanEdit && (SupportsDraftModelDecoding || UseDraftModelDecoding);
+    public bool HasPromptThreadsControl => SupportsPromptThreads || PromptThreads > 0;
 
     private bool HasType(string type) =>
         ParseTypes(SpeculativeTypes).Any(t => string.Equals(t, type, StringComparison.OrdinalIgnoreCase));
@@ -184,6 +197,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _config.ContextSize != ContextSize ||
         _config.GpuLayers != GpuLayers ||
         _config.Threads != Threads ||
+        _config.PromptThreads != PromptThreads ||
         _config.Slots != Slots ||
         _config.EmbeddingsMode != EmbeddingsMode ||
         _config.AutoStart != AutoStart ||
@@ -465,7 +479,8 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         OrphanServerDetector? orphanDetector = null,
         HardwareProfile? hardwareProfile = null,
         ModelProfileService? modelProfiles = null,
-        IActivityRecorder? activity = null)
+        IActivityRecorder? activity = null,
+        LocalModelCapabilityService? capabilityService = null)
     {
         _mgr = new ServerProcessManager(redactor);
         _config   = config;
@@ -477,6 +492,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _hardwareProfile = hardwareProfile;
         _modelProfiles = modelProfiles;
         _activity = activity;
+        _capabilityService = capabilityService;
 
         _name           = config.Name;
         _executablePath = config.ExecutablePath;
@@ -487,6 +503,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _contextSize    = config.ContextSize;
         _gpuLayers      = config.GpuLayers;
         _threads        = config.Threads;
+        _promptThreads  = config.PromptThreads;
         _slots          = config.Slots;
         _embeddingsMode = config.EmbeddingsMode;
         _autoStart      = config.AutoStart;
@@ -533,6 +550,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         RefreshDetectedMmprojPaths(ModelPath);
         RefreshDetectedDraftModelPaths(ModelPath);
         ScheduleContextFitRefresh();
+        _ = RefreshRuntimeCapabilitiesAsync(ExecutablePath);
     }
 
     /// <summary>doc 04 4.2: managed server start, stop, and crash all record through
@@ -1071,6 +1089,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _config.ContextSize    = ContextSize;
         _config.GpuLayers      = GpuLayers;
         _config.Threads        = Threads;
+        _config.PromptThreads  = PromptThreads;
         _config.Slots          = Slots;
         _config.EmbeddingsMode = EmbeddingsMode;
         _config.AutoStart      = AutoStart;
@@ -1137,6 +1156,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         ContextSize    = ContextSize,
         GpuLayers      = GpuLayers,
         Threads        = Threads,
+        PromptThreads  = PromptThreads,
         Slots          = Slots,
         EmbeddingsMode = EmbeddingsMode,
         AutoStart      = AutoStart,
@@ -1201,6 +1221,8 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(IsStarting));
         OnPropertyChanged(nameof(IsError));
         OnPropertyChanged(nameof(CanEdit));
+        OnPropertyChanged(nameof(CanEditNgramDecoding));
+        OnPropertyChanged(nameof(CanEditDraftModelDecoding));
         OnPropertyChanged(nameof(StatusLabel));
     }
 
@@ -1217,7 +1239,11 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         AutoTuneCommand.NotifyCanExecuteChanged();
     }
     partial void OnNameChanged(string value) => OnPropertyChanged(nameof(HasUnsavedChanges));
-    partial void OnExecutablePathChanged(string value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnExecutablePathChanged(string value)
+    {
+        OnPropertyChanged(nameof(HasUnsavedChanges));
+        _ = RefreshRuntimeCapabilitiesAsync(value);
+    }
     partial void OnModelPathChanged(string value)
     {
         OnPropertyChanged(nameof(HasUnsavedChanges));
@@ -1305,6 +1331,11 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         ApplyContextFitNote();
     }
     partial void OnThreadsChanged(int value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnPromptThreadsChanged(int value)
+    {
+        OnPropertyChanged(nameof(HasUnsavedChanges));
+        OnPropertyChanged(nameof(HasPromptThreadsControl));
+    }
     partial void OnSlotsChanged(int value) => OnPropertyChanged(nameof(HasUnsavedChanges));
     partial void OnEmbeddingsModeChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
     partial void OnAutoStartChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
@@ -1382,6 +1413,53 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     partial void OnSpeculativeNMaxTextChanged(string value) => OnPropertyChanged(nameof(HasUnsavedChanges));
     partial void OnSpeculativeNMinTextChanged(string value) => OnPropertyChanged(nameof(HasUnsavedChanges));
     partial void OnSpeculativePMinTextChanged(string value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+
+    private async Task RefreshRuntimeCapabilitiesAsync(string executablePath)
+    {
+        var generation = ++_runtimeCapabilityGeneration;
+        var facts = await LocalModelCapabilityService.ProbeRuntimeAsync(executablePath);
+        IReadOnlyList<CapabilityDrift> drift = [];
+        if (_capabilityService is not null && File.Exists(ModelPath))
+            drift = (await _capabilityService.ProbeWithDriftAsync(ModelPath, executablePath)).Drift;
+        RunOnUi(() =>
+        {
+            if (generation != _runtimeCapabilityGeneration)
+                return;
+
+            _runtimeSpeculativeTypes.Clear();
+            foreach (var type in facts.SpeculativeTypes)
+                _runtimeSpeculativeTypes.Add(type);
+            SupportsPromptThreads = facts.SupportsPromptThreads;
+            RuntimeCapabilitiesKnown = facts.HelpProbeSucceeded;
+            RuntimeCapabilityStatus = facts.HelpProbeSucceeded
+                ? facts.SpeculativeTypes.Count == 0
+                    ? "This llama-server advertises no speculative types."
+                    : $"Runtime speculative types: {string.Join(", ", facts.SpeculativeTypes)}."
+                : "Could not read selected llama-server help. Runtime-only options stay unavailable.";
+            OnPropertyChanged(nameof(SupportsNgramDecoding));
+            OnPropertyChanged(nameof(SupportsDraftModelDecoding));
+            OnPropertyChanged(nameof(SupportsPromptThreads));
+            OnPropertyChanged(nameof(CanEditNgramDecoding));
+            OnPropertyChanged(nameof(CanEditDraftModelDecoding));
+            OnPropertyChanged(nameof(HasPromptThreadsControl));
+            ShowCapabilityDrift(drift);
+        });
+    }
+
+    private void ShowCapabilityDrift(IReadOnlyList<CapabilityDrift> drift)
+    {
+        if (drift.Count == 0)
+            return;
+
+        var affected = drift.Where(change => change.AffectsConfiguredCapability).ToArray();
+        if (affected.Length > 0)
+        {
+            _toasts.Show("Moss: runtime capability changed", string.Join(" ", affected.Select(change => change.Detail)) + " Check Services before starting.", ToastKind.Warning, 8000);
+            return;
+        }
+
+        _toasts.Show("Moss: llama.cpp learned something", string.Join(" ", drift.Select(change => change.Detail)), ToastKind.Info, 7000);
+    }
 
     /// <summary>
     /// r27 03-drafting-and-proof.md 3.4: a draft model is a second allocation.
@@ -1494,6 +1572,7 @@ public partial class ServicesViewModel : ViewModelBase
     private readonly IStartupTimingService? _startupTiming;
     private readonly TrustService _trust;
     private readonly IRuntimeLogService _runtimeLogs;
+    private readonly LocalModelCapabilityService? _capabilityService;
     private readonly OrphanServerDetector _orphanDetector;
     private readonly ISystemInfoService? _systemInfo;
     private readonly IActivityRecorder? _activity;
@@ -1579,7 +1658,8 @@ public partial class ServicesViewModel : ViewModelBase
         ModelProfileService? modelProfiles = null,
         IActivityRecorder? activity = null,
         SttSettingsViewModel? stt = null,
-        IStartupTimingService? startupTiming = null)
+        IStartupTimingService? startupTiming = null,
+        LocalModelCapabilityService? capabilityService = null)
     {
         _startupTiming = startupTiming;
         _settings = settings;
@@ -1593,6 +1673,7 @@ public partial class ServicesViewModel : ViewModelBase
         _orphanDetector = orphanDetector ?? new OrphanServerDetector();
         _systemInfo = systemInfo;
         _activity = activity;
+        _capabilityService = capabilityService;
         _modelProfiles = modelProfiles ?? new ModelProfileService(settings);
         Rebuild();
         _settings.SettingsChanged += (_, _) => RunOnUi(Rebuild);
@@ -1683,7 +1764,7 @@ public partial class ServicesViewModel : ViewModelBase
             }
             else
             {
-                var vm = new ServerProcessViewModel(cfg, _settings, _redactor, _trust, _toasts, _runtimeLogs, _orphanDetector, _hardwareProfile, _modelProfiles, _activity)
+                var vm = new ServerProcessViewModel(cfg, _settings, _redactor, _trust, _toasts, _runtimeLogs, _orphanDetector, _hardwareProfile, _modelProfiles, _activity, _capabilityService)
                 {
                     BeforeStartAsync = StopSamePortPeersBeforeStartAsync
                 };

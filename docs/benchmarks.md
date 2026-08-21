@@ -380,6 +380,13 @@ three separate answers, because they are three separate facts:
 expected pattern, or a refusal expectation, because a throughput number should
 not quietly become a pass or a fail.
 
+**Prompt cache boundaries.** Cold and warm phases report externally observable
+prompt throughput and time to first token. They can show whether the workflow
+changed, but they do not claim how many prompt tokens llama-server reused:
+this runtime integration has no stable reuse-token counter. A timing difference
+is not fabricated into a reuse count. Shared-prefix cache measurement remains a
+future controlled workload, not a normal-chat inference.
+
 **Comparing two runs.** Two Speed Check runs of the same suite against the same
 model can be shown side by side, with the difference in tokens per second,
 prompt tokens per second and time to first token, and the configuration
@@ -402,6 +409,11 @@ which depends on the model pair and on the content being generated. It can be a
 large speedup, a small one, or slower than not using it. That is why the Speed
 Check exists: the feature is worth having because the answer can now be
 measured, not because the measurement is guaranteed to be favourable.
+
+Read throughput, TTFT, drafted tokens, accepted draft tokens, and acceptance
+rate together. A higher tokens-per-second result with no drafted tokens, poor
+acceptance, or worse TTFT is a trade-off to inspect, not a "best" verdict.
+Hermaeus deliberately does not collapse those facts into a magic score.
 
 ### First recorded result (r27, 0.34.0-alpha)
 

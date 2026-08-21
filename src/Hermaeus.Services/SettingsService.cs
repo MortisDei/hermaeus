@@ -56,6 +56,7 @@ public sealed class SettingsService : ISettingsService
 
             UpgradeSpeculativeDecoding(server);
             NormalizeKvCache(server, warning);
+            server.PromptThreads = Math.Max(0, server.PromptThreads);
 
             if (!seenIds.Add(server.Id))
             {

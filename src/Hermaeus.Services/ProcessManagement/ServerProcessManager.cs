@@ -65,6 +65,24 @@ public sealed class ServerProcessManager : IDisposable
             return;
         }
 
+        // Runtime help is the source of truth for speculative decoding and
+        // prompt-processing threads. A saved config may outlive an executable
+        // update, so do not let an old UI assumption silently become an ignored
+        // flag on a new server.
+        var runtime = await LocalModelCapabilityService.ProbeRuntimeAsync(cfg.ExecutablePath, ct);
+        cfg.RuntimeHelpProbed = runtime.HelpProbeSucceeded;
+        cfg.RuntimeSpeculativeTypes = runtime.SpeculativeTypes;
+        cfg.RuntimeSupportsPromptThreads = runtime.SupportsPromptThreads;
+        var runtimeValidation = ValidateRuntimeOptions(cfg);
+        if (runtimeValidation is not null)
+        {
+            ErrorMessage = runtimeValidation;
+            ClearLog();
+            SetStatus(ServerStatus.Error);
+            Emit($"[hermaeus] ERROR: {ErrorMessage}");
+            return;
+        }
+
         // r27 03-drafting-and-proof.md 3.3: a draft model that cannot verify
         // against this target is refused here, with the cause named, rather than
         // launching a doomed process. Same precedent as the port refusal above.
@@ -522,6 +540,12 @@ public sealed class ServerProcessManager : IDisposable
 
         bool HasArg(string flag) => extraArgs.Any(a => string.Equals(a, flag, StringComparison.OrdinalIgnoreCase));
 
+        if (cfg.PromptThreads > 0 && cfg.RuntimeSupportsPromptThreads && !HasArg("--threads-batch"))
+        {
+            parts.Add("--threads-batch");
+            parts.Add(cfg.PromptThreads.ToString(CultureInfo.InvariantCulture));
+        }
+
         // r14 2.1: single slot by default so the whole context belongs to one
         // conversation and every send reuses the same KV cache.
         if (!HasArg("--parallel"))
@@ -738,11 +762,59 @@ public sealed class ServerProcessManager : IDisposable
             ContextSize    = cfg.ContextSize,
             GpuLayers      = cfg.GpuLayers,
             Threads        = cfg.Threads,
+            PromptThreads  = cfg.PromptThreads,
             Slots          = cfg.Slots,
             EmbeddingsMode = cfg.EmbeddingsMode,
             AutoStart      = cfg.AutoStart,
-            ExtraArgs      = cfg.ExtraArgs
+            ExtraArgs      = cfg.ExtraArgs,
+            MmprojPath = cfg.MmprojPath,
+            KvCacheType = cfg.KvCacheType,
+            KvCacheTypeK = cfg.KvCacheTypeK,
+            KvCacheTypeV = cfg.KvCacheTypeV,
+            PreserveReasoning = cfg.PreserveReasoning,
+            ReasoningPreserveSupported = cfg.ReasoningPreserveSupported,
+            FlashAttention = cfg.FlashAttention,
+            ContextShift = cfg.ContextShift,
+            MemoryLock = cfg.MemoryLock,
+            NoMemoryMap = cfg.NoMemoryMap,
+            CpuMoeLayers = cfg.CpuMoeLayers,
+            NgramSpeculative = cfg.NgramSpeculative,
+            Speculative = new SpeculativeDecodingConfig
+            {
+                Types = cfg.Speculative?.Types.ToList() ?? [],
+                DraftModelPath = cfg.Speculative?.DraftModelPath ?? string.Empty,
+                DraftGpuLayers = cfg.Speculative?.DraftGpuLayers,
+                NMax = cfg.Speculative?.NMax,
+                NMin = cfg.Speculative?.NMin,
+                PMin = cfg.Speculative?.PMin
+            },
+            RuntimeHelpProbed = cfg.RuntimeHelpProbed,
+            RuntimeSpeculativeTypes = cfg.RuntimeSpeculativeTypes,
+            RuntimeSupportsPromptThreads = cfg.RuntimeSupportsPromptThreads
         };
+    }
+
+    private static string? ValidateRuntimeOptions(ServerConfig cfg)
+    {
+        if (cfg.PromptThreads > 0 && !cfg.RuntimeSupportsPromptThreads)
+            return "This llama-server does not advertise --threads-batch. Remove Prompt processing threads or select a runtime that supports it.";
+
+        var types = cfg.Speculative?.Types
+            .Where(type => !string.IsNullOrWhiteSpace(type))
+            .Select(type => type.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray() ?? [];
+        if (types.Length == 0)
+            return null;
+
+        if (!cfg.RuntimeHelpProbed)
+            return "Could not read the selected llama-server help, so Hermaeus will not launch speculative decoding without runtime proof.";
+
+        var supported = new HashSet<string>(cfg.RuntimeSpeculativeTypes, StringComparer.OrdinalIgnoreCase);
+        var unsupported = types.Where(type => !supported.Contains(type)).ToArray();
+        return unsupported.Length == 0
+            ? null
+            : $"The selected llama-server does not advertise speculative type(s): {string.Join(", ", unsupported)}. Remove them or select a runtime that supports them.";
     }
 
     private static string ResolveExecutable(string executablePath)

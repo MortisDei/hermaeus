@@ -2,6 +2,8 @@ using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
 using Hermaeus.Services;
 using Hermaeus.ViewModels;
+using System.Net;
+using System.Net.Sockets;
 using Xunit;
 using static Hermaeus.Tests.Helpers;
 
@@ -17,6 +19,13 @@ namespace Hermaeus.Tests;
 /// </summary>
 public sealed class BenchmarkViewModelModelSelectionTests
 {
+    private static int GetFreePort()
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        return ((IPEndPoint)listener.LocalEndpoint).Port;
+    }
+
     [Fact]
     public async Task Selecting_a_model_triggers_no_restart_and_running_triggers_exactly_one()
     {
@@ -26,8 +35,8 @@ public sealed class BenchmarkViewModelModelSelectionTests
         var modelPath = temp.PathFor("model.gguf");
         File.WriteAllText(modelPath, "fake");
         settings.Settings.ManagedServers.Clear();
-        settings.Settings.ManagedServers.Add(new ServerConfig { Name = "Chat", Port = 39555 });
-        settings.Settings.ManagedServers.Add(new ServerConfig { Name = "Embeddings", Port = 39556, EmbeddingsMode = true });
+        settings.Settings.ManagedServers.Add(new ServerConfig { Name = "Chat", Port = GetFreePort() });
+        settings.Settings.ManagedServers.Add(new ServerConfig { Name = "Embeddings", Port = GetFreePort(), EmbeddingsMode = true });
 
         var services = NewServicesViewModel(settings);
         var starts = 0;

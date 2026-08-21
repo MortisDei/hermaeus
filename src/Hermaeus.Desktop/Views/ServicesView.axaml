@@ -489,13 +489,15 @@
                                             <CheckBox IsChecked="{Binding UseNgramDecoding}"
                                                       Content="N-gram drafting (no extra VRAM)"
                                                       FontSize="12"
-                                                      IsEnabled="{Binding CanEdit}"
+                                                      IsEnabled="{Binding CanEditNgramDecoding}"
                                                       ToolTip.Tip="Adds ngram-mod to --spec-type. Drafts from the prompt and history itself, so it costs no additional VRAM." />
                                             <CheckBox IsChecked="{Binding UseDraftModelDecoding}"
                                                       Content="Draft model (MTP head)"
                                                       FontSize="12"
-                                                      IsEnabled="{Binding CanEdit}"
+                                                      IsEnabled="{Binding CanEditDraftModelDecoding}"
                                                       ToolTip.Tip="Adds draft-mtp to --spec-type and launches the draft model below. Costs a second, small VRAM allocation." />
+                                            <TextBlock Text="{Binding RuntimeCapabilityStatus}"
+                                                       FontSize="11" Opacity="0.55" TextWrapping="Wrap" />
                                             <ComboBox ItemsSource="{Binding DetectedDraftModelPaths}"
                                                       SelectedItem="{Binding DraftModelPath}"
                                                       PlaceholderText="No draft model"
@@ -533,6 +535,21 @@
                                                          FontSize="12"
                                                          IsEnabled="{Binding CanEdit}"
                                                          ToolTip.Tip="-ngld: draft-model layers to keep in VRAM. Blank leaves the server's own default alone." />
+                                            </Grid>
+                                            <Grid ColumnDefinitions="200,120,*" ColumnSpacing="8"
+                                                  IsVisible="{Binding HasPromptThreadsControl}">
+                                                <TextBlock Text="Prompt processing threads"
+                                                           VerticalAlignment="Center" FontSize="12" Opacity="0.75" />
+                                                <NumericUpDown Grid.Column="1"
+                                                         Value="{Binding PromptThreads}"
+                                                         Minimum="0" Maximum="128"
+                                                         Increment="1"
+                                                         FontSize="12"
+                                                         IsEnabled="{Binding CanEdit}"
+                                                         ToolTip.Tip="--threads-batch N. Uses a separate CPU count while prompt tokens are processed. Leave 0 for the runtime default; measure it with a repeatable workload before keeping a change." />
+                                                <TextBlock Grid.Column="2"
+                                                           Text="Shown only when the selected runtime proves --threads-batch support. It does not change generation threads."
+                                                           VerticalAlignment="Center" FontSize="11" Opacity="0.55" TextWrapping="Wrap" />
                                             </Grid>
                                             <TextBlock Text="{Binding DraftFitNote}"
                                                        IsVisible="{Binding HasDraftFitNote}"
