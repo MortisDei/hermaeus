@@ -58,7 +58,14 @@ explicit user approval before it executes.
 - Searches and reads bounded text files under a selected workspace root, with
   glob matching, optional regex search, and line-ranged reads for large files.
 - Can include relevant context from an optional RAG dataset.
-- Replays a budgeted tail of the task's own step transcript (see below).
+- Replays a budgeted tail of the task's own step transcript (see below). The
+  persisted `transcript.jsonl` remains complete; model-facing replay compacts
+  only consecutive replay-safe tool outcomes with the same tool,
+  canonical arguments, and result. The first outcome remains with a count and
+  deterministic step/entry range. Failed, timed-out, denied, changed, and old
+  entries without the required provenance stay separate. Three or more
+  unchanged successful calls add an informational context-receipt diagnostic;
+  it never blocks a call or changes task status or loop behavior.
 - Surfaces relevant lessons from the self-learning store (see below).
 - Classifies risky actions before execution.
 

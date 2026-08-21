@@ -285,6 +285,14 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
 
 - Local task workbench with explicit task state, a persisted step transcript,
   compact context packs, local logs/traces, and review queue controls.
+- **Transcript replay keeps repeated evidence legible without rewriting the
+  audit trail.** `transcript.jsonl` remains the complete raw sequence. For the
+  next model decision only, consecutive replay-safe tool outcomes with the same
+  tool, canonical arguments, and result collapse to the first outcome plus a
+  repeat count and deterministic range. Failed, timed-out, denied, changed,
+  and historical entries without matching provenance remain separate. Three or
+  more unchanged calls appear as an informational context-receipt diagnostic;
+  nothing is auto-blocked and the agent's status and loop budget do not change.
 - **Steer a task that is already running.** The reply box sends an instruction
   into a run in flight instead of only answering an `ask_user` question; its
   caption and button change so it is clear which of the two you are doing. The

@@ -171,6 +171,10 @@ public sealed class AgentContextBuilder : IAgentContextBuilder
             var entries = await _taskStateStore.LoadTranscriptAsync(state.TaskId, ct);
             if (entries.Count == 0) return;
 
+            var compacted = AgentTranscriptCompactor.Compact(entries);
+            foreach (var diagnostic in compacted.Diagnostics)
+                pack.TranscriptDiagnostics.Add(diagnostic.Describe());
+
             var budget = Math.Max(_settings.Settings.Agent.TranscriptTokenBudget, 512);
             // Pack from most-recent backward so the budget favors recency, then
             // restore chronological order for the model to read. Two entries
@@ -179,25 +183,28 @@ public sealed class AgentContextBuilder : IAgentContextBuilder
             // entry to break ties deterministically instead of relying on
             // OrderBy(Step) alone, which would only preserve stability within
             // a single pass and not across the earlier Reverse().
-            var candidates = entries
-                .Select((e, index) => new ContextPart(
-                    TranscriptSource(e.Role),
-                    e.Role == "tool" ? $"step {e.Step}: {e.ToolName}" : $"step {e.Step}",
-                    e.Content,
-                    Data: (e, index)))
+            var candidates = compacted.Entries
+                .Select((replay, index) => new ContextPart(
+                    TranscriptSource(replay.Entry.Role),
+                    replay.Entry.Role == "tool" ? $"step {replay.Entry.Step}: {replay.Entry.ToolName}" : $"step {replay.Entry.Step}",
+                    replay.Entry.Content,
+                    Data: (replay, index)))
                 .Reverse()
                 .ToList();
-            var packed = ContextPackBuilder.Pack(candidates, budget, maxParts: entries.Count);
+            var packed = ContextPackBuilder.Pack(candidates, budget, maxParts: compacted.Entries.Count);
             var ordered = packed.Parts
-                .Select(p => (((AgentTranscriptEntry Entry, int Index))p.Data!, p.Content))
+                .Select(p => (((AgentTranscriptReplayEntry Replay, int Index))p.Data!, p.Content))
                 .OrderBy(t => t.Item1.Index)
-                .Select(t => (t.Item1.Entry, t.Content));
+                .Select(t => (t.Item1.Replay, t.Content));
 
-            foreach (var (entry, content) in ordered)
+            foreach (var (replay, content) in ordered)
             {
+                var entry = replay.Entry;
                 pack.TranscriptHistory.Add(new AgentRetrievedItem(
                     TranscriptSource(entry.Role),
-                    entry.ToolName ?? $"step {entry.Step}",
+                    replay.RepeatCount > 1
+                        ? $"{entry.ToolName} (repeated {replay.RepeatCount} times)"
+                        : entry.ToolName ?? $"step {entry.Step}",
                     content,
                     1.0,
                     entry.Timestamp,

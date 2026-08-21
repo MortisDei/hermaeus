@@ -549,6 +549,11 @@ public sealed class AgentContextPack
     /// </summary>
     public List<AgentRetrievedItem> TranscriptHistory { get; set; } = [];
     /// <summary>
+    /// Informational notices produced while compacting transcript replay. They
+    /// never affect tool approval, task status, or loop execution.
+    /// </summary>
+    public List<string> TranscriptDiagnostics { get; set; } = [];
+    /// <summary>
     /// Deterministic, evidence-backed lessons relevant to this task's
     /// workspace (plus any global ones), most confident first. Content
     /// includes the confidence and evidence count so the model can weigh
@@ -600,6 +605,7 @@ public sealed class AgentToolResult
     public int? ExitCode { get; set; }
     /// <summary>True only when run_command hit its 5-minute timeout and was killed; ExitCode is meaningless then.</summary>
     public bool TimedOut { get; set; }
+
 }
 
 public sealed class AgentPendingToolAction
@@ -709,7 +715,9 @@ public sealed record AgentTranscriptEntry(
     string Role, // "assistant" | "tool" | "user"
     string? ToolName,
     string Content,
-    DateTime Timestamp);
+    DateTime Timestamp,
+    string? ArgumentsCanonical = null,
+    bool? ReplaySafe = null);
 
 public sealed record AgentStepResult(
     AgentTaskState State,

@@ -112,6 +112,12 @@ and then slept a 600 ms interval before reporting a process that had already
 exited. Racing both against process exit fixed a real product defect and took
 13.1s off the Windows leg as a side effect.
 
+For asynchronous queue ownership, use explicit test signals instead of sleeps:
+the controlled provider in `VoiceOrchestratorTests` exposes start, completion,
+failure, and cancellation boundaries, so assertions follow the event that
+matters rather than elapsed time. It replaced fifteen `Task.Delay` calls in
+r30; do not reintroduce polling or fixed delays for this behavior.
+
 ## Coverage
 
 ```bash

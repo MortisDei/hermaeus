@@ -11,9 +11,11 @@ K/V types and Flash Attention on new local-GGUF runs, including run details,
 comparisons, and exports. It is additive storage and measured configuration
 truth only, not an optimisation feature.
 
-**Deferred to r31 before implementation starts:** audio feedback and all four
-TLB items. Those remain worthwhile, but none outranks the live broken workflows
-or the owner's explicit reasoning requirement.
+**Deferred to r31 before implementation starts:** audio feedback, normalized
+model-facing tool outcomes, and the empirical experience store. Those remain
+worthwhile cross-cutting designs. The bounded transcript-compaction and
+successful-loop diagnostic work landed as a post-scope r30 add-on and does not
+introduce a normalized outcome vocabulary.
 
 This is the owner sanity-check boundary. Do not replace doc 05 with a launch
 checkbox or treat an Unknown capability as Unavailable to save work.
@@ -166,7 +168,8 @@ Do not descope below this line:
   Fix only the deterministic false-fail boundaries proven in doc 04.
 - **No audio in r30.** A couple of ad hoc beeps without mute, accessibility, and
   event policy would become another inconsistent subsystem.
-- **No TLB feature work in r30.** The memo validates existing design and supplies
-  r31 candidates; it does not outrank live broken workflows.
+- **No additional TLB feature work in r30.** The bounded transcript replay
+  add-on is complete; normalized outcomes and empirical experience remain
+  deferred and do not enter through its replay metadata.
 - **No new NuGet packages.** Every item is buildable from current dependencies.
 - **No version tag or release action.** Owner-only.

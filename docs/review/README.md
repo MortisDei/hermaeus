@@ -70,13 +70,22 @@ flow through saved `run_json`, details, comparisons, and JSON, Markdown, and
 CSV exports. Historical data stays unchanged and says not recorded rather than
 being backfilled from a presumed default.
 
+### r30 add-on: compact agent replay and voice test signals
+
+The add-on also compacts only proven-identical successful tool outcomes in the
+model-facing agent transcript replay, leaving the raw transcript untouched and
+making a three-or-more unchanged sequence visible as a diagnostic without
+blocking it. `VoiceOrchestratorTests` now use provider signals rather than
+fixed sleeps, and `VoiceProviderRegistry` has behavior coverage for settings
+aliases, fallback, persistence, catalog metadata, and service mapping.
+
 ## Deliberately not in r30
 
 - Audio feedback. It is a feature request, not part of repairing a broken
   one-month round.
-- TLB transcript compaction, successful-loop diagnostics, normalized tool
-  outcomes, and an empirical experience store. The first two are useful but
-  lose to live bugs; the latter two are larger cross-cutting designs.
+- Normalized model-facing tool outcomes and an empirical experience store. They
+  remain larger cross-cutting designs; transcript compaction and its diagnostic
+  are the bounded r30 add-on described above.
 
 Every deferred item is recorded in `docs/review/deferred.md`; none is silently
 dropped.

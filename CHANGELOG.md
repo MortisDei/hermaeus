@@ -42,6 +42,14 @@ limit.
   these settings as not recorded.
 - Memories deletion is confirmation-gated and its item commands bind through the
   named view root.
+- Agent transcript replay now compresses only consecutive, proven-identical
+  successful tool outcomes for the next model decision. Raw transcripts remain
+  intact; failed, partial, changed, and older unproven entries remain verbatim.
+  A repeated successful sequence is diagnostic-only and never auto-blocks work.
+- Voice orchestration tests now synchronize on provider start/completion signals
+  instead of fixed sleeps. Voice provider registry behavior is covered for
+  stored aliases, fallback logging, persistence, catalog metadata, and service
+  mapping.
 
 From 0.29.0-alpha onward, every minor version is tagged and released on
 GitHub (see `docs/packaging.md` "Releases"); patch versions are tagged only

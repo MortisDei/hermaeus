@@ -773,12 +773,8 @@ public sealed class AgentService : IAgentService
             DateTime.UtcNow), ct);
         if (executedToolResult is not null)
         {
-            await _store.AppendTranscriptEntryAsync(taskId, new AgentTranscriptEntry(
-                state.StepCount,
-                "tool",
-                executedToolResult.Tool,
-                executedToolResult.ResultSummary,
-                DateTime.UtcNow), ct);
+            await _store.AppendTranscriptEntryAsync(taskId,
+                AgentTranscriptCompactor.FromToolResult(state.StepCount, executedToolResult, DateTime.UtcNow), ct);
         }
 
         await _store.SaveAsync(state, ct);
@@ -1188,8 +1184,8 @@ public sealed class AgentService : IAgentService
             // next (it is why the step paused), so it belongs in the
             // transcript alongside every other executed tool result, not
             // just in ToolResults' last-five window.
-            await _store.AppendTranscriptEntryAsync(taskId, new AgentTranscriptEntry(
-                state.StepCount, "tool", result.Tool, result.ResultSummary, DateTime.UtcNow), ct);
+            await _store.AppendTranscriptEntryAsync(taskId,
+                AgentTranscriptCompactor.FromToolResult(state.StepCount, result, DateTime.UtcNow), ct);
 
             if (mutatesFile && _workspaceTools is not null)
             {
@@ -2339,7 +2335,7 @@ public sealed class AgentService : IAgentService
             Arguments = new Dictionary<string, object?>(arguments, StringComparer.OrdinalIgnoreCase),
             ResultSummary = plan.Count == 0
                 ? "Plan cleared."
-                : string.Join("; ", plan.Select(p => $"[{p.Status}] {p.Description}"))
+                : string.Join("; ", plan.Select(p => $"[{p.Status}] {p.Description}")),
         };
     }
 
