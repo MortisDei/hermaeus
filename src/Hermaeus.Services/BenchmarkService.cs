@@ -153,6 +153,14 @@ public sealed class BenchmarkService
             HardwareSnapshot = await _system.CaptureAsync(ct)
         };
         run.Metadata = CreateMetadata(suite, model, run.HardwareSnapshot);
+        run.Metadata.ProfileFingerprint = EmpiricalProfileFingerprint.From(run.Metadata, model.Id);
+        run.Metadata.ObservationSource = new SourceReference(
+            ProvenanceKind.Benchmark,
+            suite.Name,
+            Locator: run.Id,
+            Snippet: "Local benchmark observation",
+            Timestamp: run.StartedAt,
+            EvidenceOrigin: EvidenceOrigin.DirectObservation);
 
         try
         {
@@ -924,6 +932,7 @@ public sealed class BenchmarkService
             PromptTemplate = string.IsNullOrWhiteSpace(suite.Description) ? suite.Name : suite.Description,
             SamplerSettings = $"temperature={suite.Temperature}",
             Threads = managedServer?.Threads,
+            PromptThreads = managedServer?.PromptThreads,
             BatchSize = null,
             TopP = null,
             TopK = null,
@@ -1093,9 +1102,12 @@ public sealed class BenchmarkService
         md.AppendLine($"- Runtime kind: `{run.Metadata.RuntimeKind}`");
         md.AppendLine($"- Runtime version: `{run.Metadata.RuntimeVersion}`");
         md.AppendLine($"- Context size: {run.Metadata.ContextSize?.ToString() ?? "n/a"}");
+        md.AppendLine($"- Prompt threads: {run.Metadata.PromptThreads?.ToString() ?? "not recorded"}");
         md.AppendLine($"- KV cache K type: `{ValueOrNotRecorded(run.Metadata.KvCacheTypeK)}`");
         md.AppendLine($"- KV cache V type: `{ValueOrNotRecorded(run.Metadata.KvCacheTypeV)}`");
         md.AppendLine($"- Flash Attention: `{ValueOrNotRecorded(run.Metadata.FlashAttention)}`");
+        md.AppendLine($"- Empirical profile fingerprint: `{run.Metadata.ProfileFingerprint?.StableId ?? "not recorded"}`");
+        md.AppendLine($"- Observation provenance: `{run.Metadata.ObservationSource?.EvidenceOrigin.ToString() ?? "not recorded"}`");
         md.AppendLine($"- Sampler settings: `{run.Metadata.SamplerSettings}`");
         md.AppendLine($"- Temperature: {run.Metadata.Temperature?.ToString("0.###") ?? "n/a"}");
         md.AppendLine($"- OS: {run.Metadata.OS}");
@@ -1126,9 +1138,9 @@ public sealed class BenchmarkService
     private static string ToCsv(BenchmarkRun run)
     {
         var csv = new StringBuilder();
-        csv.AppendLine("case,phase,iteration,passed,first_token_ms,total_ms,approx_tokens_per_second,quality,failure_category,error,kv_cache_type_k,kv_cache_type_v,flash_attention");
+        csv.AppendLine("case,phase,iteration,passed,first_token_ms,total_ms,approx_tokens_per_second,quality,failure_category,error,kv_cache_type_k,kv_cache_type_v,flash_attention,profile_fingerprint,observation_origin");
         foreach (var result in run.Results)
-            csv.AppendLine($"{Csv(result.CaseName)},{Csv(result.Phase)},{result.IterationIndex + 1},{result.Passed},{result.FirstTokenMs},{result.TotalMs},{result.ApproxTokensPerSecond:F2},{result.QualityScore:F4},{Csv(result.FailureCategory)},{Csv(result.Error)},{Csv(run.Metadata.KvCacheTypeK)},{Csv(run.Metadata.KvCacheTypeV)},{Csv(run.Metadata.FlashAttention)}");
+            csv.AppendLine($"{Csv(result.CaseName)},{Csv(result.Phase)},{result.IterationIndex + 1},{result.Passed},{result.FirstTokenMs},{result.TotalMs},{result.ApproxTokensPerSecond:F2},{result.QualityScore:F4},{Csv(result.FailureCategory)},{Csv(result.Error)},{Csv(run.Metadata.KvCacheTypeK)},{Csv(run.Metadata.KvCacheTypeV)},{Csv(run.Metadata.FlashAttention)},{Csv(run.Metadata.ProfileFingerprint?.StableId ?? string.Empty)},{Csv(run.Metadata.ObservationSource?.EvidenceOrigin.ToString() ?? string.Empty)}");
         return csv.ToString();
     }
 

@@ -18,6 +18,14 @@ snapshot. It does not expose arbitrary draft-model, backend-sampling, cache,
 or performance-debug controls without a stable runtime contract and measured
 single-user benefit.
 
+**r30 Batch #4 add-on:** benchmark runs now persist a fingerprint for the
+material model and inference configuration they measured, with direct-observation
+provenance. Memory relationships are typed, evidence-backed, and compatible
+with legacy related-memory ids. Recall remains hybrid lexical/vector retrieval;
+it can inspect only one direct relationship and makes that addition visible in
+the context receipt. This is foundation work, not a knowledge graph, automatic
+model selection, or an experience-learning pipeline.
+
 **Deferred to r31 before implementation starts:** audio feedback, normalized
 model-facing tool outcomes, and the empirical experience store. Those remain
 worthwhile cross-cutting designs. The bounded transcript-compaction and

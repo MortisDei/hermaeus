@@ -7,6 +7,8 @@ body:
       value: |
         Hermaeus is a solo-maintained project; local-AI setups vary a lot by
         GPU, driver, and model. The fields below help narrow that down fast.
+        Do not include account details, machine names, home paths, API keys,
+        private URLs, or private model content.
 
   - type: input
     id: version
@@ -31,7 +33,7 @@ body:
     id: os-details
     attributes:
       label: OS details
-      description: Windows build, or Linux distro + desktop/display server (e.g. Pop!_OS, Wayland).
+      description: Windows build, or Linux distro + desktop/display server. Do not include a device or account name.
     validations:
       required: true
 

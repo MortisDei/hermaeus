@@ -208,6 +208,15 @@
   pass shortly after startup and after memory writes, not on the send path.
   Archived and expired memories are excluded from search and injection, so a
   retired or forgotten memory never resurfaces.
+- Evidence-backed relationships: memories retain the compatible
+  `RelatedMemoryIds` list and can additionally link to a memory, Agent Lesson,
+  benchmark run, model profile, or runtime profile with a bounded relationship
+  type (`related to`, `derived from`, `supports`, `contradicts`, `updates`,
+  `supersedes`, or `tested by`) and shared source evidence. Normal recall stays
+  lexical/vector-first. It may add one directly related active memory at a
+  discounted score, and a superseded memory yields to its direct current fact.
+  The chat context receipt identifies relationship-expanded memory so this is
+  inspectable rather than hidden ranking behavior.
 - Relevance-aware injection: memories selected for chat context are ranked by
   the search's own relevance score blended with **decayed** importance (the
   same lifecycle decay the archiver uses), not recency-first as before;

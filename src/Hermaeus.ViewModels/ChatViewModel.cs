@@ -1990,7 +1990,7 @@ public partial class ChatViewModel : ViewModelBase
                 if (selected.Count > 0)
                 {
                     contextText = _memoryInjection.BuildMemoryContext(selected);
-                    sources.AddRange(selected.Where(m => m.Source is not null).Select(m => m.Source!));
+                    sources.AddRange(selected.Select(m => m.ToContextSource()));
                     injectedIds.AddRange(selected.Select(m => m.Id));
                     await _memoryStore.MarkRecalledAsync(injectedIds, ct);
                 }

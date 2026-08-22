@@ -61,6 +61,17 @@ limit.
 - The benchmark model-selection regression test now uses ephemeral loopback
   ports, so an unrelated listener cannot make it misreport that a benchmark
   restart was skipped.
+- Benchmark observations now carry a persistent fingerprint for the known model
+  and inference configuration, including prompt-processing threads, plus direct
+  local provenance. This identifies what was measured without turning results
+  into automatic recommendations or backfilling historical assumptions.
+- Memories now support typed, evidence-backed relationships while preserving
+  legacy related-memory ids. Recall remains lexical/vector-first, can inspect
+  one direct active relationship, and exposes relationship-expanded context in
+  the chat receipt. A superseded memory yields to its direct current fact.
+- Public release readiness now includes immutable official GitHub Action pins,
+  minimal CI and release token permissions, monthly Dependabot updates, and
+  release-first checksum verification guidance.
 
 From 0.29.0-alpha onward, every minor version is tagged and released on
 GitHub (see `docs/packaging.md` "Releases"); patch versions are tagged only

@@ -358,6 +358,10 @@ namespace Hermaeus.Tests
             Equal("q8_0", run.Metadata.KvCacheTypeK, "KV cache K type should come from the matching managed ServerConfig");
             Equal("q4_0", run.Metadata.KvCacheTypeV, "KV cache V type should come from the matching managed ServerConfig");
             Equal("on", run.Metadata.FlashAttention, "Flash Attention should come from the matching managed ServerConfig");
+            True(run.Metadata.ProfileFingerprint is not null, "a new benchmark run should persist its measured model/profile fingerprint");
+            Equal(modelPath, run.Metadata.ProfileFingerprint!.ModelIdentity, "the fingerprint should identify the measured model instance");
+            Equal(EvidenceOrigin.DirectObservation, run.Metadata.ObservationSource?.EvidenceOrigin,
+                "a benchmark observation should carry shared direct-observation provenance");
 
             var markdownPath = await service.ExportAsync(run.Id, temp.PathFor("exports"));
             var markdown = await File.ReadAllTextAsync(markdownPath);

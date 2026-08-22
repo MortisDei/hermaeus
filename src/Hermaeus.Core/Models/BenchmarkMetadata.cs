@@ -32,6 +32,7 @@ public sealed class BenchmarkRunMetadata
     public int? Seed { get; set; }
     public int? GpuLayers { get; set; }
     public int? Threads { get; set; }
+    public int? PromptThreads { get; set; }
     public int? BatchSize { get; set; }
 
     /// <summary>
@@ -72,6 +73,19 @@ public sealed class BenchmarkRunMetadata
     public int? SpeculativeNMin { get; set; }
     public double? SpeculativePMin { get; set; }
     public int? SpeculativeDraftGpuLayers { get; set; }
+
+    /// <summary>
+    /// Persistent identity of the model and inference configuration measured
+    /// by this run. Historical records remain empty rather than being
+    /// backfilled from presumed defaults.
+    /// </summary>
+    public EmpiricalProfileFingerprint? ProfileFingerprint { get; set; }
+
+    /// <summary>
+    /// Shared evidence pointer for this observation. Benchmark-generated data
+    /// is direct local evidence, not a claimed universal model capability.
+    /// </summary>
+    public SourceReference? ObservationSource { get; set; }
 
     /// <summary>
     /// The one-line description of this run's speculative configuration, used

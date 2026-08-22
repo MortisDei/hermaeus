@@ -1,8 +1,9 @@
 # Contributing
 
 Hermaeus is a source-available product project maintained by one person, not an
-open-governance open-source project. Outside code contributions are not being
-accepted.
+open-governance open-source project. External code contributions are considered
+only by prior arrangement. Opening a pull request does not grant review, merge,
+write, release, secret, or workflow authority.
 
 **Issues and bug reports are welcome and useful.** So are feature suggestions,
 though the answer to most of them will be no or not yet, and the "Explicit
@@ -41,9 +42,8 @@ and noncommercial use but may also be commercially licensed.
 - Run `dotnet test src/Hermaeus.Tests/Hermaeus.Tests.csproj` when changes
   affect storage, settings, security, RAG, backup, restore, or runtime launch.
 - Changes land as pull requests, never direct pushes to `main`; see
-  `docs/pull-requests.md`. One open pull request per maintainer at any one
-  time. Documentation-only changes may go straight to `main` when the owner
-  says so.
+  `docs/pull-requests.md`. Only the repository owner may approve, merge, push
+  protected branches, publish releases, or change workflow permissions.
 
 ## Vocabulary
 
