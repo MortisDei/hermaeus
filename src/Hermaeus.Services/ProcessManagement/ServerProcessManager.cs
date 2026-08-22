@@ -904,13 +904,14 @@ public sealed class ServerProcessManager : IDisposable
             {
                 var exited  = WhenProcessExitsAsync(process, iterationCts.Token);
                 var request = http.GetAsync(url, iterationCts.Token);
+                ObserveFault(request);
 
                 if (await Task.WhenAny(request, exited) != request)
                     continue;   // the process is gone; the top of the loop reports it
 
                 try
                 {
-                    var r = await request;
+                    using var r = await request;
                     if (r.IsSuccessStatusCode) return;
                 }
                 // The HttpClient's own 2 s timeout throws OperationCanceledException too, indistinguishable
@@ -939,9 +940,16 @@ public sealed class ServerProcessManager : IDisposable
             : process.WaitForExitAsync(ct);
         // Abandoned at the end of every poll iteration; observe the resulting
         // cancellation so it is not an unobserved task exception.
-        _ = task.ContinueWith(static t => _ = t.Exception, TaskScheduler.Default);
+        ObserveFault(task);
         return task;
     }
+
+    private static void ObserveFault(Task task) =>
+        _ = task.ContinueWith(
+            static completed => _ = completed.Exception,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 

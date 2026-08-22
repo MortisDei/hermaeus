@@ -34,8 +34,10 @@ public partial class DoctorViewModel : ObservableObject
     [ObservableProperty] private bool _isInstallingSpeechRecognition;
     [ObservableProperty] private string _speechRecognitionProgress = string.Empty;
 
-    private readonly System.Text.StringBuilder _embeddingLogBuffer = new();
+    private const int MaxEmbeddingDiagnosticLines = 200;
+    private readonly Queue<string> _embeddingLogLines = new();
     private readonly object _embeddingLogFileLock = new();
+    private string _lastEmbeddingProgress = string.Empty;
 
     public UiBoundCollection<DoctorCheck> Checks { get; } = [];
 
@@ -244,6 +246,9 @@ public partial class DoctorViewModel : ObservableObject
 
     private void HandleEmbeddingProgress(string s)
     {
+        if (string.Equals(s, _lastEmbeddingProgress, StringComparison.Ordinal))
+            return;
+        _lastEmbeddingProgress = s;
         EmbeddingModelProgress = s;
         try
         {
@@ -261,12 +266,9 @@ public partial class DoctorViewModel : ObservableObject
         }
         catch { EmbeddingModelProgressIsIndeterminate = true; }
 
-        // append to in-memory buffer
-        try
-        {
-            _embeddingLogBuffer.AppendLine($"{DateTime.UtcNow:O} {s}");
-        }
-        catch { }
+        _embeddingLogLines.Enqueue($"{DateTime.UtcNow:O} {s}");
+        while (_embeddingLogLines.Count > MaxEmbeddingDiagnosticLines)
+            _embeddingLogLines.Dequeue();
 
         // update the corresponding check diagnostics (if present)
         try
@@ -275,17 +277,17 @@ public partial class DoctorViewModel : ObservableObject
             if (idx >= 0)
             {
                 var existing = Checks[idx];
-                var updated = new DoctorCheck(existing.Key, existing.Title, existing.Status, existing.Summary, existing.Detail, existing.FixLabel, existing.CanFix, _embeddingLogBuffer.ToString(), existing.Category);
+                var updated = new DoctorCheck(existing.Key, existing.Title, existing.Status, existing.Summary, existing.Detail, existing.FixLabel, existing.CanFix, string.Join(Environment.NewLine, _embeddingLogLines), existing.Category);
                 // replace item to notify UI
                 Checks[idx] = updated;
             }
         }
         catch { }
 
-        // r12 03-runtime-vm-correctness.md 3.9: one fire-and-forget Task.Run
-        // per progress line let concurrent writes interleave in the log
-        // file. A progress callback fires often enough, but not on a hot
-        // per-render path, so a lock-serialized synchronous append is fine.
+        // ModelDownloadService limits progress reports to four per second and
+        // the embedding installer further coalesces to whole percentages. A
+        // lock-serialized append therefore preserves useful detail without
+        // turning each 80 KB network chunk into synchronous UI-thread I/O.
         try
         {
             var root = Hermaeus.Services.SettingsService.ResolveDataRoot(_settingsService.Settings);

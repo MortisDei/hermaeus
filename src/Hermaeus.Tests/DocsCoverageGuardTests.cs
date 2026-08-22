@@ -347,4 +347,16 @@ public sealed class DocsCoverageGuardTests
         var readme = File.ReadAllText(Path.Combine(RepoRoot, "README.md"));
         Assert.Contains("docs/review/deferred.md", readme, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void Agent_and_contributor_contracts_require_documentation_sync()
+    {
+        foreach (var relativePath in new[] { "AGENTS.md", "CONTRIBUTING.md" })
+        {
+            var content = File.ReadAllText(Path.Combine(RepoRoot, relativePath));
+            Assert.Contains("Stale documentation is a defect", content, StringComparison.Ordinal);
+            Assert.Contains("If no documentation update is required", content, StringComparison.Ordinal);
+            Assert.Contains("planned behaviour", content, StringComparison.OrdinalIgnoreCase);
+        }
+    }
 }

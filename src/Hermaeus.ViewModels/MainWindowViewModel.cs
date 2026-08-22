@@ -67,6 +67,8 @@ public partial class MainWindowViewModel : ViewModelBase
     public bool ShowLogs => ActivePanel == "logs";
     public bool ShowActivity => ActivePanel == "activity";
     public bool ShowWizard => ActivePanel == "wizard";
+    public bool SetupIncomplete => !_settingsService.Settings.SetupWizardCompleted;
+    public bool ShowSetupResume => SetupIncomplete && !ShowWizard;
     public object ActiveViewModel => ActivePanel switch
     {
         "settings" => Settings,
@@ -177,6 +179,8 @@ public partial class MainWindowViewModel : ViewModelBase
         Wizard.WizardCompleted += () =>
         {
             ActivePanel = "chat";
+            OnPropertyChanged(nameof(SetupIncomplete));
+            OnPropertyChanged(nameof(ShowSetupResume));
             Settings.Reload();
             Services.RefreshAllDetectedModels();
             // r12 03-runtime-vm-correctness.md 3.1: finishing (or skipping)
@@ -192,7 +196,11 @@ public partial class MainWindowViewModel : ViewModelBase
             });
         };
         // allow settings view to request re-running the setup wizard
-        Settings.RequestShowSetupWizard = () => ActivePanel = "wizard";
+        Settings.RequestShowSetupWizard = () =>
+        {
+            Wizard.LoadFromSettings(resetStep: true);
+            ActivePanel = "wizard";
+        };
         // r29 doc 01 1.1: the Services page hosts the Voice and STT cards, which
         // are the same DI singletons Settings edits. Nothing on Services wrote
         // them to disk, so every edit made there was lost on restart. Route its
@@ -324,6 +332,8 @@ public partial class MainWindowViewModel : ViewModelBase
 
         await LoadConversationsAsync();
         Settings.Reload();
+        OnPropertyChanged(nameof(SetupIncomplete));
+        OnPropertyChanged(nameof(ShowSetupResume));
         ShowQuickChat = Settings.ShowQuickChat;
         await LoadToastHistoryAsync();
         await Projects.EnsureLoadedAsync();
@@ -333,6 +343,7 @@ public partial class MainWindowViewModel : ViewModelBase
 
         if (!_settingsService.Settings.SetupWizardCompleted)
         {
+            Wizard.LoadFromSettings(resetStep: true);
             ActivePanel = "wizard";
             return;
         }
@@ -774,7 +785,14 @@ public partial class MainWindowViewModel : ViewModelBase
     }
     [RelayCommand] private void ShowLogsPanel()        => ActivePanel = "logs";
     [RelayCommand] private void ShowActivityPanel()    { ActivePanel = "activity"; RunBackgroundTaskAsync("refresh activity", Activity.RefreshAsync); }
-    [RelayCommand] private void ShowWizardPanel()      => ActivePanel = "wizard";
+    [RelayCommand] private void ResumeSetup()           => ActivePanel = "wizard";
+    [RelayCommand]
+    private void ShowWizardPanel()
+    {
+        if (!SetupIncomplete)
+            Wizard.LoadFromSettings(resetStep: true);
+        ActivePanel = "wizard";
+    }
     [RelayCommand] private void ShowSettingsPanel()    { ActivePanel = "settings"; Settings.Reload(); }
 
     [RelayCommand]
@@ -816,16 +834,6 @@ public partial class MainWindowViewModel : ViewModelBase
 
     partial void OnActivePanelChanged(string value)
     {
-        // Wizard is a DI singleton constructed once at startup; without
-        // refreshing here, re-entering it later (Settings' "re-run setup
-        // wizard", the chat empty-state's "Open setup wizard") shows
-        // whatever it last held, which can be blank fields (e.g. a startup
-        // race where settings hadn't loaded from disk yet at construction).
-        // Advancing "Next" from a blank Data roots step then saves those
-        // blanks over the user's real DataRootDirectory/LocalAiAssetsRoot.
-        if (value == "wizard")
-            Wizard.LoadFromSettings();
-
         OnPropertyChanged(nameof(ShowChat));
         OnPropertyChanged(nameof(ShowAgent));
         OnPropertyChanged(nameof(ShowSettings));
@@ -841,6 +849,7 @@ public partial class MainWindowViewModel : ViewModelBase
         // so anything binding to it never refreshed on navigation.
         OnPropertyChanged(nameof(ShowActivity));
         OnPropertyChanged(nameof(ShowWizard));
+        OnPropertyChanged(nameof(ShowSetupResume));
         OnPropertyChanged(nameof(ActiveViewModel));
         OnPropertyChanged(nameof(WindowTitle));
     }
@@ -884,6 +893,15 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private void OnToastRaised(ToastMessage toast)
     {
+        if (toast.Kind == ToastKind.Error)
+        {
+            _logs.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Error,
+                RuntimeLogCategory.Service,
+                $"{toast.Title}: {toast.Message}"));
+        }
+
         var vm = new ToastViewModel
         {
             Title = toast.Title,

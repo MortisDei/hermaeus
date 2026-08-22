@@ -1,4 +1,5 @@
 using Hermaeus.Core.Services;
+using Hermaeus.ViewModels;
 using Xunit;
 
 namespace Hermaeus.Tests;
@@ -52,5 +53,19 @@ public sealed class LocalTimeFormatTests
         Assert.Equal(local.ToString("yyyy-MM-dd HH:mm"), LocalTimeFormat.DateTimeMinutes(utc));
         Assert.Equal(local.ToString("HH:mm:ss"), LocalTimeFormat.ClockSeconds(utc));
         Assert.DoesNotContain("UTC", LocalTimeFormat.DateTimeMinutes(utc), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Notification_timestamp_labels_use_the_shared_local_time_formatter()
+    {
+        var utc = new DateTime(2026, 7, 30, 8, 20, 0, DateTimeKind.Utc);
+        var toast = new ToastViewModel
+        {
+            Title = "Example",
+            Message = "Example",
+            Timestamp = utc
+        };
+
+        Assert.Equal(LocalTimeFormat.DateTimeMinutes(utc), toast.TimestampLabel);
     }
 }

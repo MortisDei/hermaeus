@@ -987,8 +987,12 @@ attached to a conversation. See [docs/voice.md](voice.md).
   archive for your platform, extracts it with a zip-slip guard, and locates
   the executable inside (Windows resolution also tries `.exe`, so a fresh
   Windows install's default managed servers are startable out of the box).
+  Linux tar link entries are validated to stay inside the archive root and
+  materialized as regular companion-library files, so the loader can resolve
+  the release's SONAMEs without trusting archive-created filesystem links.
   Model downloads verify a SHA256 hash when Hermaeus has trusted hash metadata
-  for that exact URL.
+  for that exact URL. Models installed from Hermaeus's pinned Hugging Face
+  actions retain their repository provenance in the existing model manifest.
 - Local AI setup scans are voice-provider aware. Kokoro setup checks Kokoro
   Python imports and does not show XTTS script or model actions unless XTTS v2
   is selected.
@@ -1003,8 +1007,10 @@ attached to a conversation. See [docs/voice.md](voice.md).
 - First-run Setup Wizard: on first launch Hermaeus runs a guided 6-step
   setup wizard to select the data root, local AI assets root, chat backend,
   model folder, voice provider, and to run the Hermaeus Doctor for a quick
-  health check before you start using the app. The wizard can be skipped
-  or re-run from the Settings panel.
+  health check before you start using the app. Brief factual Moss guidance
+  explains each step and what can be skipped. The wizard can be skipped or
+  re-run from the Settings panel. If you navigate to Logs or another panel
+  mid-setup, **Resume setup** returns to the same incomplete step.
 - Finishing or skipping the wizard immediately starts configured servers and
   loads chat models, RAG datasets, and agent/benchmark data - no restart or
   extra navigation needed to make first use of the app work.
@@ -1013,10 +1019,17 @@ attached to a conversation. See [docs/voice.md](voice.md).
   change does (with a confirmation toast), instead of switching to an empty
   root. A target folder that already has conflicting data files is refused
   with an explanation, and the current data root is left untouched.
+  The fixed per-user `hermaeus.lock` is process coordination rather than user
+  data, so migration and backup enumeration leave it at the bootstrap root;
+  another process still cannot acquire it.
 
 ## Hermaeus Doctor
 
 - Hermaeus Doctor checks for storage, runtimes, voice, RAG, GPU, and secrets.
+- Doctor distinguishes a configured llama-server path from an executable that
+  actually runs and reports a recognizable build. A missing companion library
+  is an error rather than Ready. Update identifiers from different schemes are
+  reported as not comparable instead of being called current.
 - Hermaeus runs Doctor in the background after launch and raises a notification
   when errors or warnings are found, so startup problems are visible before the
   Doctor panel is opened.
@@ -1034,6 +1047,9 @@ attached to a conversation. See [docs/voice.md](voice.md).
   Hugging Face commit, verifies SHA256, removes failed downloads, and points the
   embedding server at the verified Qwen3-Embedding-0.6B file. Existing Nomic
   installations remain selected and untouched until that verified install completes.
+  Download progress is rate-limited and coalesced into one bounded updating
+  state. Navigating away does not destroy the singleton operation; returning to
+  Doctor shows the same progress or completion state.
 - Doctor flags a blank embedding endpoint (RAG's `EmbeddingBaseUrl`) while
   memory or RAG is enabled: embedding requests silently fall back to the chat
   server otherwise, queuing behind chat generation on a single-slot
@@ -1062,6 +1078,12 @@ attached to a conversation. See [docs/voice.md](voice.md).
   diagnosis instead of a generic message. Neutral breadcrumbs ("running", a
   completed session load) are not mistaken for the operation that was
   actually in flight when a crash happened.
+- Doctor's previous-session title now agrees with its warning detail. Error
+  notifications are also recorded through Runtime Logs, and notification
+  history formats stored UTC timestamps through the shared local-time display.
+- Managed embedding warm-up waits for the matching localhost embedding server
+  to reach Running. An intentionally stopped or not-yet-started service no
+  longer produces a misleading connection-refused startup warning.
 
 ## Activity
 

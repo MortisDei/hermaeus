@@ -13,6 +13,24 @@ limit.
 
 ### Fixed
 
+- Linux managed llama.cpp installs now preserve required SONAME companions from
+  safe in-archive links, and Doctor executes the configured binary before
+  calling it usable. Incomparable release identifiers report unknown instead
+  of "current enough."
+- Doctor model-download progress is rate-limited, coalesced, and bounded;
+  navigation preserves the active operation. Its install dialogs and Moss
+  diagnostics have solid readable backgrounds, and install approval remains
+  disabled until the specific plan has been reviewed.
+- Data-root migration excludes the process-owned `hermaeus.lock`, while the
+  single-instance guard remains exclusive. Error notifications also enter
+  Runtime Logs, notification times display locally, and the unclean-session
+  title now agrees with its detail.
+- Incomplete first-run setup has a persistent resume action, retains its exact
+  step across diagnostics navigation, and includes brief factual Moss guidance.
+  Managed embedding warm-up waits for its localhost server to be Running.
+- Expected localhost health races now observe abandoned probe faults instead of
+  leaking them to the unobserved-task log. Hermaeus-managed Hugging Face model
+  downloads retain their existing manifest provenance.
 - Model update checks persist a first calculated model hash before the remote
   lookup, so an interrupted lookup does not hash the same model again. Doctor
   now accepts current llama-server `build 10509` version output.

@@ -190,14 +190,15 @@
                                 <!-- ── Error banner ──────────────────────── -->
                                 <Border IsVisible="{Binding IsError}"
                                         CornerRadius="6" Padding="10,6"
-                                        Background="{DynamicResource SystemFillColorCriticalBackgroundBrush}">
+                                        Background="{DynamicResource SolidBackgroundFillColorBaseBrush}"
+                                        BorderBrush="{DynamicResource SystemFillColorCriticalBrush}"
+                                        BorderThickness="1">
                                     <StackPanel Orientation="Horizontal" Spacing="8">
                                         <controls:MossIcon Width="16" Height="16"
                                                             VerticalAlignment="Top"
                                                             ToolTip.Tip="Right. Let's see what broke." />
                                         <TextBlock Text="{Binding ErrorMessage}"
-                                                   FontSize="12" TextWrapping="Wrap"
-                                                   Foreground="{DynamicResource SystemFillColorCriticalBrush}" />
+                                                   FontSize="12" TextWrapping="Wrap" />
                                     </StackPanel>
                                 </Border>
 

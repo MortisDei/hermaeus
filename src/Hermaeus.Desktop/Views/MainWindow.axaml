@@ -30,7 +30,7 @@
             <Border Grid.Row="0" Padding="8,6"
                     BorderThickness="0,0,0,1"
                     BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
-                <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+                <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto">
 
                     <Button Grid.Column="0" Classes="icon-btn" Background="Transparent" Cursor="Hand"
                             Command="{Binding ToggleSidebarCommand}"
@@ -233,7 +233,14 @@
                         </Button>
                     </StackPanel>
 
-                    <TextBlock Grid.Column="2"
+                    <Button Grid.Column="2"
+                            Content="Resume setup"
+                            Command="{Binding ResumeSetupCommand}"
+                            IsVisible="{Binding ShowSetupResume}"
+                            Padding="10,5" Margin="0,0,10,0"
+                            ToolTip.Tip="Return to the incomplete first-run setup without losing your current step." />
+
+                    <TextBlock Grid.Column="3"
                                Text="{Binding Chat.ConversationTitle}"
                                IsVisible="{Binding ShowChat}"
                                VerticalAlignment="Center"
@@ -241,7 +248,7 @@
                                FontSize="12" MaxWidth="220"
                                TextTrimming="CharacterEllipsis" />
 
-                    <views:ProjectSwitcherView Grid.Column="3" DataContext="{Binding Projects}"
+                    <views:ProjectSwitcherView Grid.Column="4" DataContext="{Binding Projects}"
                                                 VerticalAlignment="Center" Margin="0,0,4,0" />
                 </Grid>
             </Border>
@@ -544,7 +551,7 @@
                                             </StackPanel>
                                         </Grid>
                                         <TextBlock Text="{Binding Message}" TextWrapping="Wrap" Margin="0,4,0,0" />
-                                        <TextBlock Text="{Binding Timestamp}" FontSize="11" Opacity="0.6" />
+                                        <TextBlock Text="{Binding TimestampLabel}" FontSize="11" Opacity="0.6" />
                                     </StackPanel>
                                 </Border>
                             </DataTemplate>

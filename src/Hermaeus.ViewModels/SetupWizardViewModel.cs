@@ -137,6 +137,15 @@ public partial class SetupWizardViewModel : ObservableObject
     public UiBoundCollection<string> VoiceOnboardingSteps { get; } = [];
 
     public string CurrentStepTitle => StepIndex >= 0 && StepIndex < Steps.Count ? Steps[StepIndex] : string.Empty;
+    public string GuidanceText => StepIndex switch
+    {
+        0 => "Moss: Choose where Hermaeus keeps its data and local AI assets. The defaults are safe, and you can change them later.",
+        1 => "Moss: Pick the runtime that will serve chat models. Setup only enables what you select.",
+        2 => "Moss: Use an existing GGUF or download a verified starter model. You can skip this and add a model later.",
+        3 => "Moss: Voice is optional. Kokoro can be installed here, and other providers can be configured later.",
+        4 => "Moss: Doctor checks the setup without changing it. If a check fails, inspect Logs and use Resume setup in the header to return here.",
+        _ => "Moss: Finish to apply this setup. Anything skipped remains available from Settings, Services, Models, or Doctor."
+    };
     public bool IsLastStep => StepIndex >= Steps.Count - 1;
     public bool IsNotLastStep => !IsLastStep;
     public bool IsStep0 => StepIndex == 0;
@@ -170,11 +179,13 @@ public partial class SetupWizardViewModel : ObservableObject
         _systemInfo = systemInfo;
         _modelDownloads = modelDownloads ?? new ModelDownloadService();
         _manifest = manifest ?? new ModelManifestStore(settings);
-        LoadFromSettings();
+        LoadFromSettings(resetStep: true);
     }
 
-    public void LoadFromSettings()
+    public void LoadFromSettings(bool resetStep = false)
     {
+        if (resetStep)
+            StepIndex = 0;
         var s = _settings.Settings;
         DataRootDirectory = s.DataManagement.DataRootDirectory;
         LocalAiAssetsRoot = s.DataManagement.LocalAiAssetsRoot;
@@ -491,6 +502,7 @@ public partial class SetupWizardViewModel : ObservableObject
     partial void OnStepIndexChanged(int value)
     {
         OnPropertyChanged(nameof(CurrentStepTitle));
+        OnPropertyChanged(nameof(GuidanceText));
         OnPropertyChanged(nameof(IsLastStep));
         OnPropertyChanged(nameof(IsNotLastStep));
         OnPropertyChanged(nameof(IsStep0));

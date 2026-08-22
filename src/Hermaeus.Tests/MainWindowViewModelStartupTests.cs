@@ -1,4 +1,5 @@
 using Hermaeus.Agent.Services;
+using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
 using Hermaeus.Rag;
 using Hermaeus.Rag.Eval;
@@ -24,7 +25,7 @@ public sealed class MainWindowViewModelStartupTests
 {
     private sealed record Harness(MainWindowViewModel Main, ScriptedModelsLlm Llm, IRuntimeLogService Logs, FakeToasts Toasts, IConversationStore ConvStore);
 
-    private static async Task<Harness> NewHarnessAsync(TempDir temp, bool initializeRagStore)
+    private static async Task<Harness> NewHarnessAsync(TempDir temp, bool initializeRagStore, IDoctorService? doctorService = null)
     {
         var settings = NewSettings(temp);
         settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
@@ -75,7 +76,7 @@ public sealed class MainWindowViewModelStartupTests
         var privacyAudit = new PrivacyAuditService(settings, secrets, logs, new FakeVoiceProviderRegistry(settings), traces);
         var systemOverview = new SystemOverviewViewModel(new FakeSystemInfo(), toasts, privacyAudit);
 
-        var doctor = new DoctorViewModel(new FakeDoctorService(), toasts, settings);
+        var doctor = new DoctorViewModel(doctorService ?? new FakeDoctorService(), toasts, settings);
         var memories = new MemoriesViewModel(memoryStore, convStore, settings, toasts);
         var logsVm = new LogsViewModel(logs, new RedactionService());
         var wizard = new SetupWizardViewModel(settings, new RuntimeProfileService(settings), new FakeVoiceProviderRegistry(settings), new FakeDoctorService(), toasts, new FakeSystemInfo());
@@ -134,6 +135,75 @@ public sealed class MainWindowViewModelStartupTests
 
         Assert.Equal("wizard", harness.Main.ActivePanel);
         Assert.Empty(harness.Main.Chat.AvailableModels);
+    }
+
+    [Fact]
+    public async Task Incomplete_onboarding_can_visit_logs_and_resume_the_same_step()
+    {
+        using var temp = new TempDir();
+        var harness = await NewHarnessAsync(temp, initializeRagStore: true);
+        await harness.Main.InitializeAsync();
+        harness.Main.Wizard.StepIndex = 4;
+
+        harness.Main.ActivePanel = "logs";
+
+        Assert.True(harness.Main.ShowSetupResume);
+        Assert.Equal(4, harness.Main.Wizard.StepIndex);
+
+        harness.Main.ShowWizardPanelCommand.Execute(null);
+
+        Assert.Equal("wizard", harness.Main.ActivePanel);
+        Assert.Equal(4, harness.Main.Wizard.StepIndex);
+        Assert.False(harness.Main.ShowSetupResume);
+    }
+
+    [Fact]
+    public async Task Doctor_download_survives_repeated_navigation_and_keeps_one_operation_state()
+    {
+        using var temp = new TempDir();
+        var doctorService = new ControlledEmbeddingInstallDoctorService();
+        var harness = await NewHarnessAsync(temp, initializeRagStore: true, doctorService);
+        var operationOwner = harness.Main.Doctor;
+        var check = new DoctorCheck(
+            "embedding-model",
+            "Embedding model",
+            DoctorCheckStatus.Warning,
+            "Missing",
+            "Install it.",
+            "Install",
+            true,
+            string.Empty,
+            "RAG");
+
+        harness.Main.ActivePanel = "doctor";
+        var install = harness.Main.Doctor.RunFixCommand.ExecuteAsync(check);
+        await doctorService.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        harness.Main.ActivePanel = "logs";
+        harness.Main.ActivePanel = "doctor";
+        harness.Main.ActivePanel = "logs";
+
+        Assert.True(harness.Main.Doctor.IsInstallingEmbeddingModel);
+        Assert.Same(operationOwner, harness.Main.Doctor);
+
+        doctorService.Complete.TrySetResult();
+        await install;
+
+        Assert.False(harness.Main.Doctor.IsInstallingEmbeddingModel);
+    }
+
+    [Fact]
+    public async Task Error_notifications_are_also_recorded_in_runtime_logs()
+    {
+        using var temp = new TempDir();
+        var harness = await NewHarnessAsync(temp, initializeRagStore: true);
+
+        harness.Toasts.Show("Data root not changed", "The current process owns hermaeus.lock.", ToastKind.Error);
+
+        Assert.Contains(harness.Logs.GetEntries(), entry =>
+            entry.Level == RuntimeLogLevel.Error
+            && entry.Message.Contains("Data root not changed", StringComparison.Ordinal)
+            && entry.Message.Contains("hermaeus.lock", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -230,5 +300,32 @@ public sealed class MainWindowViewModelStartupTests
 
         Assert.Equal("First keystroke test", saved?.Title);
         Assert.Same(item, Assert.Single(harness.Main.Conversations));
+    }
+
+    private sealed class ControlledEmbeddingInstallDoctorService : IDoctorService
+    {
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Complete { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task<DoctorReport> ScanAsync(CancellationToken ct = default) =>
+            Task.FromResult(new DoctorReport([], DateTime.UtcNow, "ok"));
+
+        public Task<bool> InstallRerankerAssetsAsync(CancellationToken ct = default) => Task.FromResult(true);
+        public Task<bool> InstallRerankerAssetsAsync(IProgress<string> progress, CancellationToken ct = default) => Task.FromResult(true);
+        public Task<bool> InstallEmbeddingModelAsync(CancellationToken ct = default) => InstallEmbeddingModelAsync(new Progress<string>(), ct);
+
+        public async Task<bool> InstallEmbeddingModelAsync(IProgress<string> progress, CancellationToken ct = default)
+        {
+            Started.TrySetResult();
+            progress.Report("Downloading embedding model... 42%");
+            await Complete.Task.WaitAsync(ct);
+            return true;
+        }
+
+        public Task<bool> InstallLlamaServerUpdateAsync(CancellationToken ct = default) => Task.FromResult(true);
+        public Task<bool> InstallLlamaServerUpdateAsync(IProgress<string> progress, CancellationToken ct = default) => Task.FromResult(true);
+        public Task<bool> InstallNativeKokoroAssetsAsync(CancellationToken ct = default) => Task.FromResult(true);
+        public Task<bool> InstallNativeKokoroAssetsAsync(IProgress<string> progress, CancellationToken ct = default) => Task.FromResult(true);
+        public Task<bool> InstallSpeechRecognitionAssetsAsync(IProgress<string> progress, CancellationToken ct = default) => Task.FromResult(true);
     }
 }

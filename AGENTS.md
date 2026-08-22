@@ -61,9 +61,14 @@ Any compiler warning fails the build. Fix the warning; do not suppress it withou
 
 ## Working agreement
 
+- Inspect the existing architecture and its authoritative docs before adding an abstraction.
+- Never weaken approval gates, deterministic risk classification, integrity checks, or other security boundaries to make a workflow easier.
+- Do not change the PolyForm Noncommercial/source-available licensing model unless the repository owner explicitly requests that legal change.
 - Smallest complete change that solves the task; no stubs, TODO placeholders, or partial implementations unless explicitly requested.
 - Do not invent APIs, files, or architecture; follow existing patterns unless improving them is the point of the task.
 - If you find a bug or unsafe pattern: fix it if in scope, otherwise record it and mention it in your final response.
+- Run focused tests while implementing behavioural changes, then the complete solution build and full repository suite before completion.
+- Keep documentation synchronized with behaviour, configuration, workflows, APIs, and UI semantics. Stale documentation is a defect. Planned behaviour must never read as implemented. If no documentation update is required, state that explicitly in the implementation or review rather than silently omitting it.
 
 Before finishing any task:
 1. `dotnet build Hermaeus.sln` and run the test harness.

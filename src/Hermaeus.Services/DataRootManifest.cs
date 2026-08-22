@@ -22,6 +22,7 @@ public static class DataRootManifest
     /// new, moving the very file that recorded that choice.
     /// </summary>
     private const string SettingsFileName = "settings.json";
+    private const string ProcessLockFileName = "hermaeus.lock";
 
     public static IEnumerable<(string SourcePath, string RelativePath)> EnumerateAll(string root)
     {
@@ -30,8 +31,13 @@ public static class DataRootManifest
 
         foreach (var path in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
         {
-            if (string.Equals(Path.GetFileName(path), SettingsFileName, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(Path.GetDirectoryName(path), root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
+            var isRootFile = string.Equals(
+                Path.GetDirectoryName(path),
+                root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                StringComparison.OrdinalIgnoreCase);
+            if (isRootFile
+                && (string.Equals(Path.GetFileName(path), SettingsFileName, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(Path.GetFileName(path), ProcessLockFileName, StringComparison.OrdinalIgnoreCase)))
                 continue;
 
             yield return (path, Path.GetRelativePath(root, path));

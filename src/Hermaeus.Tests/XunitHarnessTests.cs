@@ -32,6 +32,7 @@ public static class HarnessCases
         [new HarnessCase("data root migration moves db files and leaves no junk", BackupMigrationTests.DataRootMigrationMovesFiles)],
         [new HarnessCase("data root migration moves every known file family", BackupMigrationTests.DataRootMigrationMovesEveryKnownFileFamily)],
         [new HarnessCase("data root migration never moves settings.json", BackupMigrationTests.DataRootMigrationNeverMovesSettingsJson)],
+        [new HarnessCase("data root migration ignores the current process lock", BackupMigrationTests.DataRootMigrationIgnoresTheCurrentProcessLock)],
         [new HarnessCase("secrets resolve correctly after data root migration", BackupMigrationTests.SecretsResolveCorrectlyAfterDataRootMigration)],
         [new HarnessCase("backup excludes secrets and refuses overwrite restore", BackupMigrationTests.BackupExcludesSecretsAndRefusesOverwrite)],
         [new HarnessCase("backup of a database with an open writer yields a consistent snapshot", BackupMigrationTests.BackupOfADatabaseWithAnOpenWriterYieldsAConsistentSnapshot)],

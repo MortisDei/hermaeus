@@ -239,6 +239,26 @@ namespace Hermaeus.Tests
             False(File.Exists(Path.Combine(next, "settings.json")), "settings.json must not be copied into the new data root either");
         }
 
+        public static async Task DataRootMigrationIgnoresTheCurrentProcessLock()
+        {
+            using var temp = new TempDir();
+            var previous = temp.PathFor("previous");
+            var next = temp.PathFor("next");
+            Directory.CreateDirectory(previous);
+            File.WriteAllText(Path.Combine(previous, "conversations.db"), "db");
+            var lockPath = Path.Combine(previous, "hermaeus.lock");
+            await using var heldLock = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+
+            var service = NewSettings(temp);
+            service.Settings.DataManagement.DataRootDirectory = next;
+            var result = await service.SaveAsync(previous);
+
+            True(result.DataMigrated, "real data should still migrate while the process lock is held");
+            True(File.Exists(Path.Combine(next, "conversations.db")), "data should move to the new root");
+            True(File.Exists(lockPath), "the process-owned lock must stay at its fixed bootstrap location");
+            False(File.Exists(Path.Combine(next, "hermaeus.lock")), "the process lock is not user data and must not move");
+        }
+
         public static async Task BackupExcludesSecretsAndRefusesOverwrite()
         {
             using var temp = new TempDir();

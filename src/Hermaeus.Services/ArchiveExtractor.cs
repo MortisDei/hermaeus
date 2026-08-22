@@ -48,15 +48,26 @@ public static class ArchiveExtractor
 
     private static async Task ExtractTarGzAsync(string archivePath, string destinationRoot, CancellationToken ct)
     {
+        var deferredLinks = new List<(string LinkPath, string TargetPath)>();
         await using var fileStream = File.OpenRead(archivePath);
         await using var gzip = new GZipStream(fileStream, CompressionMode.Decompress);
         await using var tarReader = new TarReader(gzip);
 
         while (await tarReader.GetNextEntryAsync(cancellationToken: ct) is { } entry)
         {
-            // Never follow archive-declared links; only extract plain files/directories.
             if (entry.EntryType is TarEntryType.SymbolicLink or TarEntryType.HardLink)
+            {
+                if (string.IsNullOrWhiteSpace(entry.LinkName) || Path.IsPathFullyQualified(entry.LinkName))
+                    throw new InvalidOperationException($"Archive link '{entry.Name}' has an invalid target.");
+
+                var linkPath = ResolveEntryPath(destinationRoot, entry.Name);
+                var targetRelativePath = entry.EntryType == TarEntryType.SymbolicLink
+                    ? Path.Combine(Path.GetDirectoryName(entry.Name) ?? string.Empty, entry.LinkName)
+                    : entry.LinkName;
+                var targetPath = ResolveEntryPath(destinationRoot, targetRelativePath);
+                deferredLinks.Add((linkPath, targetPath));
                 continue;
+            }
 
             var destPath = ResolveEntryPath(destinationRoot, entry.Name);
 
@@ -70,6 +81,37 @@ public static class ArchiveExtractor
             await using var outStream = File.Create(destPath);
             if (entry.DataStream is not null)
                 await entry.DataStream.CopyToAsync(outStream, ct);
+        }
+
+        // Release archives use relative symlinks for ELF SONAMEs, for example
+        // libllama-common.so.0 -> libllama-common.so.0.0.10034. Materialise
+        // those links as regular files after extraction. This keeps the
+        // installed package runnable without creating filesystem links from
+        // archive-controlled data. Both link and target were already proven
+        // to stay under destinationRoot above.
+        var unresolved = deferredLinks;
+        while (unresolved.Count > 0)
+        {
+            var next = new List<(string LinkPath, string TargetPath)>();
+            var copied = 0;
+            foreach (var link in unresolved)
+            {
+                if (!File.Exists(link.TargetPath))
+                {
+                    next.Add(link);
+                    continue;
+                }
+
+                Directory.CreateDirectory(Path.GetDirectoryName(link.LinkPath)!);
+                File.Copy(link.TargetPath, link.LinkPath, overwrite: true);
+                copied++;
+            }
+
+            if (next.Count == 0)
+                break;
+            if (copied == 0)
+                throw new InvalidOperationException($"Archive link target was not extracted: {next[0].TargetPath}");
+            unresolved = next;
         }
     }
 

@@ -61,6 +61,7 @@ The smaller reports are confirmed gaps, not a new architecture:
 | `04-benchmark-truth.md` | False-fail fixtures from the owner's runs and narrowly corrected deterministic scoring |
 | `05-reasoning-and-capabilities.md` | Automatic GGUF/runtime capability detection and complete reasoning extraction, preservation, persistence, replay, UI, and export |
 | `06-roadmap.md` | 0.37.0-alpha, strict sequence, test budget, descope boundary, deferred work, and explicit rejections |
+| `07-final-dogfood.md` | Final dogfood root causes, bounded fixes, regression evidence, privacy audit, and remaining manual verification |
 
 ### r30 add-on: measured engine provenance
 

@@ -9,6 +9,14 @@ own `--help` at discovery and immediately before launch. The current Batch #3
 Linux development environment had no accessible configured `llama-server`
 binary, so it did not replace the b10215 full survey with a guessed newer one.
 
+Managed Linux releases are extracted with their archive link relationships
+validated against the install root and materialized as regular files. This
+preserves versioned companion-library SONAMEs without creating archive-directed
+filesystem links. Doctor then executes `--version`; a path that exists but
+cannot load its companion libraries is an error, not a usable installation.
+Build identifiers from different schemes are reported as not comparable rather
+than being ordered by a misleading numeric fallback.
+
 ## The rule
 
 **Only flags the installed binary lists in its own `--help` may be emitted.**

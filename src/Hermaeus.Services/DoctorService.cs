@@ -106,7 +106,7 @@ public sealed partial class DoctorService : IDoctorService
             CheckCleanShutdown(),
             await CheckDataRootAsync(ct),
             await CheckAiAssetsRootAsync(ct),
-            CheckLlamaServerBinary(),
+            await CheckLlamaServerBinaryAsync(ct),
             await CheckLlamaServerUpdateAsync(ct),
             await CheckAppUpdateAsync(ct),
             CheckGgufModels(),

@@ -86,7 +86,8 @@
 
         <!-- Reranker install modal overlay -->
         <Grid IsVisible="{Binding IsInstallingReranker}" Background="#80000000">
-        <Border HorizontalAlignment="Center" VerticalAlignment="Center" Background="{DynamicResource BackgroundBrush}" Padding="20" CornerRadius="8">
+        <Border HorizontalAlignment="Center" VerticalAlignment="Center" Background="{DynamicResource SolidBackgroundFillColorBaseBrush}" Padding="20" CornerRadius="8"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
             <StackPanel Spacing="12" Width="520">
                 <TextBlock Text="Installing Reranker" FontSize="16" FontWeight="SemiBold" />
                 <TextBlock Text="This will download and load the ONNX reranker model. You can cancel at any time." Opacity="0.7" TextWrapping="Wrap" />
@@ -100,7 +101,8 @@
         </Grid>
         <!-- Kokoro (native) install modal overlay -->
         <Grid IsVisible="{Binding IsInstallingNativeKokoro}" Background="#80000000">
-        <Border HorizontalAlignment="Center" VerticalAlignment="Center" Background="{DynamicResource BackgroundBrush}" Padding="20" CornerRadius="8">
+        <Border HorizontalAlignment="Center" VerticalAlignment="Center" Background="{DynamicResource SolidBackgroundFillColorBaseBrush}" Padding="20" CornerRadius="8"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
             <StackPanel Spacing="12" Width="520">
                 <TextBlock Text="Installing Kokoro (native)" FontSize="16" FontWeight="SemiBold" />
                 <TextBlock Text="This will download and verify the Kokoro ONNX model and built-in voice files. You can cancel at any time." Opacity="0.7" TextWrapping="Wrap" />
@@ -114,7 +116,8 @@
         </Grid>
         <!-- llama.cpp install modal overlay -->
         <Grid IsVisible="{Binding IsInstallingLlamaServer}" Background="#80000000">
-        <Border HorizontalAlignment="Center" VerticalAlignment="Center" Background="{DynamicResource BackgroundBrush}" Padding="20" CornerRadius="8">
+        <Border HorizontalAlignment="Center" VerticalAlignment="Center" Background="{DynamicResource SolidBackgroundFillColorBaseBrush}" Padding="20" CornerRadius="8"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
             <StackPanel Spacing="12" Width="520">
                 <TextBlock Text="Updating llama.cpp" FontSize="16" FontWeight="SemiBold" />
                 <TextBlock Text="This will download the latest matching llama-server asset and replace the managed binary. You can cancel at any time." Opacity="0.7" TextWrapping="Wrap" />
@@ -128,7 +131,8 @@
         </Grid>
         <!-- Embedding model install modal overlay -->
         <Grid IsVisible="{Binding IsInstallingEmbeddingModel}" Background="#80000000">
-        <Border HorizontalAlignment="Center" VerticalAlignment="Center" Background="{DynamicResource BackgroundBrush}" Padding="20" CornerRadius="8">
+        <Border HorizontalAlignment="Center" VerticalAlignment="Center" Background="{DynamicResource SolidBackgroundFillColorBaseBrush}" Padding="20" CornerRadius="8"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
             <StackPanel Spacing="12" Width="520">
                 <TextBlock Text="Installing Embedding Model" FontSize="16" FontWeight="SemiBold" />
                 <TextBlock Text="This will download the default embedding model (Qwen3-Embedding-0.6B-Q8_0.gguf). Existing Nomic files are retained. You can cancel at any time." Opacity="0.7" TextWrapping="Wrap" />

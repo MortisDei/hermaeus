@@ -121,7 +121,9 @@ public partial class LocalAiSetupSettingsViewModel : ObservableObject
             return;
         }
 
-        if (action.RequiresApproval && !string.Equals(LocalAiInstallPlanActionId, action.Id, StringComparison.Ordinal))
+        if (action.RequiresApproval
+            && (!action.PlanReviewed
+                || !string.Equals(LocalAiInstallPlanActionId, action.Id, StringComparison.Ordinal)))
         {
             PreviewLocalAiInstallPlan(action);
             _toasts.Show("Review install plan", "Review the install plan before approving this action.", ToastKind.Info, 6000);
@@ -166,6 +168,14 @@ public partial class LocalAiSetupSettingsViewModel : ObservableObject
     private void PreviewLocalAiInstallPlan(LocalAiSetupAction? action)
     {
         if (action is null) return;
+
+        for (var i = 0; i < LocalAiSetupActions.Count; i++)
+        {
+            var current = LocalAiSetupActions[i];
+            var reviewed = string.Equals(current.Id, action.Id, StringComparison.Ordinal);
+            if (current.PlanReviewed != reviewed)
+                LocalAiSetupActions[i] = current with { PlanReviewed = reviewed };
+        }
 
         LocalAiInstallPlanCreates.Clear();
         LocalAiInstallPlanInstalls.Clear();

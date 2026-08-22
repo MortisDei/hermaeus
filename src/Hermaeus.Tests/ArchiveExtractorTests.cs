@@ -71,6 +71,48 @@ public sealed class ArchiveExtractorTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => ArchiveExtractor.ExtractAsync(archivePath, destination));
     }
 
+    [Fact]
+    public async Task ExtractAsync_targz_materializes_safe_relative_library_links()
+    {
+        using var temp = new TempDir();
+        var archivePath = temp.PathFor("fixture.tar.gz");
+        Directory.CreateDirectory(Path.GetDirectoryName(archivePath)!);
+        await BuildTarGzAsync(archivePath, async writer =>
+        {
+            await AddTarEntryAsync(writer, "lib/libllama-common.so.0.0.10034", "shared-library");
+            await writer.WriteEntryAsync(new PaxTarEntry(TarEntryType.SymbolicLink, "lib/libllama-common.so.0")
+            {
+                LinkName = "libllama-common.so.0.0.10034"
+            });
+        });
+
+        var destination = temp.PathFor("out");
+        await ArchiveExtractor.ExtractAsync(archivePath, destination);
+
+        var soname = Path.Combine(destination, "lib", "libllama-common.so.0");
+        Assert.True(File.Exists(soname));
+        Assert.Equal("shared-library", await File.ReadAllTextAsync(soname));
+        Assert.Null(new FileInfo(soname).LinkTarget);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_targz_rejects_a_link_target_that_escapes_the_destination()
+    {
+        using var temp = new TempDir();
+        var archivePath = temp.PathFor("evil-link.tar.gz");
+        Directory.CreateDirectory(Path.GetDirectoryName(archivePath)!);
+        await BuildTarGzAsync(archivePath, async writer =>
+        {
+            await writer.WriteEntryAsync(new PaxTarEntry(TarEntryType.SymbolicLink, "lib/libllama.so.0")
+            {
+                LinkName = "../../outside"
+            });
+        });
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => ArchiveExtractor.ExtractAsync(archivePath, temp.PathFor("out")));
+    }
+
     private static void BuildZip(string path, Action<ZipArchive> populate)
     {
         using var stream = File.Create(path);

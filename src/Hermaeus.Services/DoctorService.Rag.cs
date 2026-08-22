@@ -356,9 +356,18 @@ public sealed partial class DoctorService
 
         progress?.Report($"Downloading embedding model to {destinationPath}...");
 
+        var lastPercent = -1;
         var downloadProgress = progress is null
             ? null
-            : new Progress<DownloadProgress>(p => progress.Report($"Downloading embedding model... {p.PercentComplete:F1}%"));
+            : new Progress<DownloadProgress>(p =>
+            {
+                var percent = (int)Math.Floor(p.PercentComplete);
+                if (percent <= lastPercent)
+                    return;
+
+                lastPercent = percent;
+                progress.Report($"Downloading embedding model... {percent}%");
+            });
 
         var result = await _downloads.DownloadAsync(_embeddingDownload.Url, destinationPath, downloadProgress, ct);
         if (!result.Success)

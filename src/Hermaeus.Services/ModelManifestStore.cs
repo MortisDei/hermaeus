@@ -14,7 +14,7 @@ public sealed class ModelManifestEntry
     public long SizeBytes { get; set; }
     public DateTime RecordedAtUtc { get; set; } = DateTime.UtcNow;
 
-    /// <summary>"starter" | "hf-browser" | "migration" | "manual".</summary>
+    /// <summary>"starter" | "hf-browser" | "local-ai-setup" | "migration" | "manual".</summary>
     public string Source { get; set; } = string.Empty;
 
     // Pending-update fields, set by a 3.2 check when the tree's lfs.oid differs from Sha256;
