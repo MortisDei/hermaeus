@@ -41,6 +41,15 @@ public partial class App : Application
         // Keeps the cursor a hand across the gaps in a row of icon buttons;
         // see Controls/IconBarCursor.cs for why those gaps flicker.
         IconBarCursor.Install();
+
+        if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime packageLifetime
+            && Program.PackageIntegrationLaunch is { } packageLaunch)
+        {
+            packageLifetime.MainWindow = new PackageIntegrationWindow(packageLaunch);
+            base.OnFrameworkInitializationCompleted();
+            return;
+        }
+
         var services = new ServiceCollection();
         ConfigureServices(services);
         var sp = services.BuildServiceProvider();

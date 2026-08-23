@@ -76,6 +76,7 @@ DOC_DIR="$PACKAGE_DIR/docs"
 APP_DIR="$PACKAGE_DIR/app"
 ICON_DIR="$PACKAGE_DIR/icons"
 LOCALAPI_DIR="$APP_DIR/LocalApi"
+INTEGRATION_DIR="$APP_DIR/integration"
 
 if [[ "$SKIP_RESTORE" == "false" ]]; then
   echo "Restoring..."
@@ -85,7 +86,7 @@ fi
 
 echo "Publishing $RUNTIME ($CONFIGURATION, self-contained=$SELF_CONTAINED)..."
 rm -rf "$PACKAGE_DIR" "$PUBLISH_DIR" "$LOCALAPI_PUBLISH_DIR" "$ARCHIVE" "$CHECKSUM"
-mkdir -p "$PACKAGE_DIR" "$PUBLISH_DIR" "$LOCALAPI_PUBLISH_DIR" "$DOC_DIR" "$APP_DIR" "$ICON_DIR" "$LOCALAPI_DIR"
+mkdir -p "$PACKAGE_DIR" "$PUBLISH_DIR" "$LOCALAPI_PUBLISH_DIR" "$DOC_DIR" "$APP_DIR" "$ICON_DIR" "$LOCALAPI_DIR" "$INTEGRATION_DIR"
 
 publish_args=(
   "$PROJECT"
@@ -116,7 +117,11 @@ dotnet publish "${localapi_publish_args[@]}"
 cp -a "$PUBLISH_DIR"/. "$APP_DIR"/
 cp -a "$LOCALAPI_PUBLISH_DIR"/. "$LOCALAPI_DIR"/
 mv "$APP_DIR/Hermaeus.Desktop" "$APP_DIR/hermaeus-app"
+cp "$APP_DIR/hermaeus-app" "$APP_DIR/install-hermaeus"
+cp "$APP_DIR/hermaeus-app" "$APP_DIR/uninstall-hermaeus"
 ln -s "app/hermaeus-app" "$PACKAGE_DIR/Hermaeus"
+ln -s "app/install-hermaeus" "$PACKAGE_DIR/Install Hermaeus"
+ln -s "app/uninstall-hermaeus" "$PACKAGE_DIR/Uninstall Hermaeus"
 cp "$ROOT_DIR/README.md" "$DOC_DIR/README.md"
 cp "$ROOT_DIR/docs/user-guide.md" "$DOC_DIR/user-guide.md"
 cp "$ROOT_DIR/LICENSE.md" "$DOC_DIR/LICENSE.md"
@@ -136,11 +141,11 @@ done
 
 find "$PACKAGE_DIR" -type f -iname '*.pdb' -delete
 
-cat > "$PACKAGE_DIR/install-desktop.sh" <<'INSTALL'
+cat > "$INTEGRATION_DIR/install-desktop.sh" <<'INSTALL'
 #!/usr/bin/env bash
 set -euo pipefail
 
-SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PACKAGE_ID="$(basename "$SOURCE_DIR")"
 APP_EXEC="$SOURCE_DIR/Hermaeus"
 INTERNAL_EXEC="$SOURCE_DIR/app/hermaeus-app"
@@ -166,7 +171,8 @@ if [[ "$SOURCE_DIR" != "$INSTALL_DIR" ]]; then
   cp -a "$SOURCE_DIR"/. "$INSTALL_DIR"/
 fi
 
-chmod +x "$INSTALL_DIR/app/hermaeus-app" "$INSTALL_DIR/install-desktop.sh" "$INSTALL_DIR/uninstall-desktop.sh"
+chmod +x "$INSTALL_DIR/app/hermaeus-app" "$INSTALL_DIR/app/install-hermaeus" "$INSTALL_DIR/app/uninstall-hermaeus"
+chmod +x "$INSTALL_DIR/app/integration/install-desktop.sh" "$INSTALL_DIR/app/integration/uninstall-desktop.sh"
 cp "$INSTALL_DIR/icons/hermaeus-app.png" "$PNG_ICON_FILE"
 
 cat > "$DESKTOP_FILE" <<DESKTOP
@@ -196,11 +202,11 @@ echo "Installed Hermaeus desktop launcher to $DESKTOP_FILE"
 echo "Installed Hermaeus package to $INSTALL_DIR"
 INSTALL
 
-cat > "$PACKAGE_DIR/uninstall-desktop.sh" <<'UNINSTALL'
+cat > "$INTEGRATION_DIR/uninstall-desktop.sh" <<'UNINSTALL'
 #!/usr/bin/env bash
 set -euo pipefail
 
-SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PACKAGE_ID="$(basename "$SOURCE_DIR")"
 DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 INSTALL_DIR="$DATA_HOME/hermaeus/$PACKAGE_ID"
@@ -227,7 +233,8 @@ fi
 echo "Removed Hermaeus desktop launcher and installed package."
 UNINSTALL
 
-chmod +x "$PACKAGE_DIR/app/hermaeus-app" "$PACKAGE_DIR/install-desktop.sh" "$PACKAGE_DIR/uninstall-desktop.sh"
+chmod +x "$APP_DIR/hermaeus-app" "$APP_DIR/install-hermaeus" "$APP_DIR/uninstall-hermaeus"
+chmod +x "$INTEGRATION_DIR/install-desktop.sh" "$INTEGRATION_DIR/uninstall-desktop.sh"
 rm -rf "$PUBLISH_DIR" "$LOCALAPI_PUBLISH_DIR"
 
 echo "Creating $ARCHIVE..."

@@ -1359,7 +1359,9 @@ The app icon, taskbar icon, and system tray icon use the "Archivist's Seal" mark
 (a gold H monogram grown through with a tree and book) - see `docs/mascot.md` for
 the icon source and cropping notes.
 Linux release archives expose a relocation-safe `Hermaeus` link to the native
-apphost for direct file-manager launch. The user-local desktop install uses the
+apphost for direct file-manager launch. Adjacent native `Install Hermaeus` and
+`Uninstall Hermaeus` actions provide graphical confirmation for user-local
+desktop integration without requiring a terminal. The installed entry uses the
 same `hermaeus` window identity and canonical themed icon for application-menu,
 taskbar, and window-switcher association.
 The UI theme uses the brand colour palette (Forest green accent, Copper/Amber

@@ -45,8 +45,11 @@ r30 branch. It does not add a new subsystem or broaden the release scope.
   the adjacent Desktop Entry was not a reliable archive launch surface. The
   package now exposes `Hermaeus` as a relocation-safe link to the native .NET
   apphost, with a suffix-free internal executable that file managers identify
-  as an application. The installer remains the standards-based application-menu
-  and themed-icon path.
+  as an application. Root shell scripts had the same file-manager failure, so
+  install and uninstall now use dedicated native apphost launchers with a
+  graphical confirmation/result window. Their shell implementations live under
+  `app/integration/`; the installed Desktop Entry remains the standards-based
+  application-menu and themed-icon path.
 - Debug and source launches use the same `hermaeus` WM class as release builds.
   A generic taskbar icon can still appear when the shell has no installed
   `hermaeus.desktop` entry to match; the installed package is the release icon

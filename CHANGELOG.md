@@ -17,7 +17,9 @@ limit.
   desktop entry, and icon theme resource one `hermaeus` identity, restoring
   taskbar association with the Moss icon. The extracted `Hermaeus` launcher is
   now a relocation-safe link to the native apphost, so file managers launch it
-  as an application instead of opening a shell script as text.
+  as an application instead of opening a shell script as text. Native
+  `Install Hermaeus` and `Uninstall Hermaeus` actions now provide graphical
+  confirmation while keeping their shell implementations under `app/`.
 - Doctor now turns Linux tray support Ready only after the current session's
   tray has responded to an interaction. Chat no longer offers first-run setup
   as recovery for a stopped or absent model after onboarding is complete, and

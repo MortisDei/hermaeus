@@ -42,17 +42,17 @@ without the required target and cause `NETSDK1047`.
 Framework-dependent packages require the .NET 10 desktop/runtime stack on the
 target machine. Self-contained packages include the runtime and are larger.
 
-The Linux package root contains only the public launcher and desktop install
-files. Its layout is:
+The Linux package root contains only public launch actions and grouped content.
+Its layout is:
 
 - `Hermaeus`, a relocation-safe link to the native application launcher
+- `Install Hermaeus`, the graphical user-local desktop installer
+- `Uninstall Hermaeus`, the graphical user-local desktop uninstaller
 - `app/`, containing the published desktop runtime and `app/LocalApi/`
 - `docs/README.md`, `docs/user-guide.md`, `docs/LICENSE.md`,
   `docs/NOTICE.md`, and `docs/COMMERCIAL.md`
 - `docs/hermaeus-branding.*` when present
 - `icons/`, containing desktop-install icon resources
-- `install-desktop.sh`
-- `uninstall-desktop.sh`
 
 Normal packages exclude `.pdb` symbol files.
 
@@ -63,11 +63,17 @@ The link and its target remain valid when the extracted directory is moved.
 The internal executable has a neutral filename so it is not misclassified as a
 Desktop Entry by file managers that treat `.Desktop` suffixes case-insensitively.
 
-To install the desktop launcher for the current user:
+To install the desktop launcher for the current user, double-click
+`Install Hermaeus` and confirm the action. No terminal or executable-text-file
+preference is required. The implementation scripts remain under
+`app/integration/` and are not part of the package's user-facing root.
+
+For release-package validation from a terminal, the same implementation can be
+invoked directly:
 
 ```bash
 tar -xzf dist/hermaeus-<version>-linux-x64.tar.gz -C dist
-dist/hermaeus-<version>-linux-x64/install-desktop.sh
+dist/hermaeus-<version>-linux-x64/app/integration/install-desktop.sh
 ```
 
 The installer copies the package under
@@ -84,10 +90,12 @@ builds, but a desktop shell can still show a generic icon when there is no
 installed `hermaeus.desktop` entry to associate with that running window. The
 installed package is the release taskbar and application-menu verification path.
 
-To remove the user-local launcher and installed package:
+To remove the user-local launcher and installed package, double-click
+`Uninstall Hermaeus` in the extracted archive and confirm. The terminal
+equivalent for release validation is:
 
 ```bash
-~/.local/share/hermaeus/hermaeus-<version>-linux-x64/uninstall-desktop.sh
+dist/hermaeus-<version>-linux-x64/app/integration/uninstall-desktop.sh
 ```
 
 ## Windows

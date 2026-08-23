@@ -1,4 +1,5 @@
 using Hermaeus.Services;
+using Hermaeus.Desktop;
 using Xunit;
 using static Hermaeus.Tests.Helpers;
 
@@ -54,6 +55,14 @@ public sealed class ReleaseReadinessRegressionTests
         Assert.Contains("PNG_ICON_FILE=\"$DATA_HOME/icons/hicolor/512x512/apps/hermaeus.png\"", buildScript, StringComparison.Ordinal);
         Assert.Contains("mv \"$APP_DIR/Hermaeus.Desktop\" \"$APP_DIR/hermaeus-app\"", buildScript, StringComparison.Ordinal);
         Assert.Contains("ln -s \"app/hermaeus-app\" \"$PACKAGE_DIR/Hermaeus\"", buildScript, StringComparison.Ordinal);
+        Assert.Contains("cp \"$APP_DIR/hermaeus-app\" \"$APP_DIR/install-hermaeus\"", buildScript, StringComparison.Ordinal);
+        Assert.Contains("cp \"$APP_DIR/hermaeus-app\" \"$APP_DIR/uninstall-hermaeus\"", buildScript, StringComparison.Ordinal);
+        Assert.Contains("ln -s \"app/install-hermaeus\" \"$PACKAGE_DIR/Install Hermaeus\"", buildScript, StringComparison.Ordinal);
+        Assert.Contains("ln -s \"app/uninstall-hermaeus\" \"$PACKAGE_DIR/Uninstall Hermaeus\"", buildScript, StringComparison.Ordinal);
+        Assert.Contains("cat > \"$INTEGRATION_DIR/install-desktop.sh\"", buildScript, StringComparison.Ordinal);
+        Assert.Contains("cat > \"$INTEGRATION_DIR/uninstall-desktop.sh\"", buildScript, StringComparison.Ordinal);
+        Assert.DoesNotContain("$PACKAGE_DIR/install-desktop.sh", buildScript, StringComparison.Ordinal);
+        Assert.DoesNotContain("$PACKAGE_DIR/uninstall-desktop.sh", buildScript, StringComparison.Ordinal);
         Assert.Contains("INTERNAL_EXEC=\"$SOURCE_DIR/app/hermaeus-app\"", buildScript, StringComparison.Ordinal);
         Assert.Contains("Exec=$INSTALL_DIR/Hermaeus", buildScript, StringComparison.Ordinal);
         Assert.DoesNotContain("cat > \"$PACKAGE_DIR/Hermaeus\"", buildScript, StringComparison.Ordinal);
@@ -67,6 +76,25 @@ public sealed class ReleaseReadinessRegressionTests
         var mainWindow = File.ReadAllText(Path.Combine(repoRoot, "src/Hermaeus.Desktop/Views/MainWindow.axaml"));
         Assert.Contains("WmClass = \"hermaeus\"", program, StringComparison.Ordinal);
         Assert.Contains("Icon=\"/Assets/hermaeus-app.png\"", mainWindow, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Linux_package_integration_actions_resolve_only_for_internal_native_launchers()
+    {
+        var packageRoot = Path.Combine(Path.GetTempPath(), "hermaeus-package");
+        var appDirectory = Path.Combine(packageRoot, "app");
+
+        var install = PackageIntegrationAction.Resolve(Path.Combine(appDirectory, "install-hermaeus"));
+        var uninstall = PackageIntegrationAction.Resolve(Path.Combine(appDirectory, "uninstall-hermaeus"));
+
+        Assert.NotNull(install);
+        Assert.Equal(PackageIntegrationActionKind.Install, install.Action);
+        Assert.Equal(packageRoot, install.PackageRoot);
+        Assert.Equal(Path.Combine(appDirectory, "integration", "install-desktop.sh"), install.ScriptPath);
+        Assert.NotNull(uninstall);
+        Assert.Equal(PackageIntegrationActionKind.Uninstall, uninstall.Action);
+        Assert.Null(PackageIntegrationAction.Resolve(Path.Combine(appDirectory, "hermaeus-app")));
+        Assert.Null(PackageIntegrationAction.Resolve(Path.Combine(packageRoot, "install-hermaeus")));
     }
 
     private static int CountOccurrences(string value, string fragment) =>

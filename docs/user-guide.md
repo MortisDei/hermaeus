@@ -7,10 +7,13 @@ IDE to use Hermaeus.
 
 Double-click `Hermaeus` in the extracted directory to launch it without a
 terminal. To add Hermaeus to the application menu with the canonical Moss icon,
-run `install-desktop.sh` once. Installation is user-local and does not require
-root. Source and Debug launches may show a generic taskbar icon when the desktop
-entry has not been installed; launch the installed entry to verify release icon
-association.
+double-click `Install Hermaeus` and confirm. To remove that installed copy and
+application-menu entry later, double-click `Uninstall Hermaeus` in the extracted
+archive. Both actions use native launchers and graphical confirmation; neither
+requires a terminal, root access, or a file-manager preference for executing
+text files. Source and Debug launches may show a generic taskbar icon when the
+desktop entry has not been installed; launch the installed entry to verify
+release icon association.
 
 ## First launch
 
