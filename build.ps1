@@ -59,24 +59,22 @@ function Import-MsvcEnvironment([string]$TargetRuntime) {
         throw "Visual Studio C++ tools for $TargetRuntime are required to build the native Windows launcher."
     }
 
-    $vcvarsName = if ($TargetRuntime -eq "win-arm64") { "vcvarsamd64_arm64.bat" } else { "vcvars64.bat" }
-    $vcvars = Join-Path $installationPath "VC/Auxiliary/Build/$vcvarsName"
-    if (-not (Test-Path $vcvars -PathType Leaf)) {
-        throw "Could not locate $vcvarsName for the native Windows launcher build."
+    $devShellModule = Join-Path $installationPath "Common7/Tools/Microsoft.VisualStudio.DevShell.dll"
+    if (-not (Test-Path $devShellModule -PathType Leaf)) {
+        throw "Could not locate the Visual Studio Developer PowerShell module."
     }
 
-    $environmentLines = & $env:ComSpec /d /s /c "call `"$vcvars`" -no_logo >nul && set"
-    if ($LASTEXITCODE -ne 0) {
-        throw "Could not initialize the Visual Studio C++ build environment."
-    }
-
-    foreach ($line in $environmentLines) {
-        $separator = $line.IndexOf('=')
-        if ($separator -le 0) { continue }
-        [Environment]::SetEnvironmentVariable(
-            $line.Substring(0, $separator),
-            $line.Substring($separator + 1),
-            [EnvironmentVariableTarget]::Process)
+    $targetArchitecture = if ($TargetRuntime -eq "win-arm64") { "arm64" } else { "amd64" }
+    try {
+        Import-Module $devShellModule -Force -ErrorAction Stop
+        $null = Enter-VsDevShell `
+            -VsInstallPath $installationPath `
+            -SkipAutomaticLocation `
+            -Arch $targetArchitecture `
+            -HostArch "amd64" `
+            -ErrorAction Stop
+    } catch {
+        throw "Could not initialize the Visual Studio C++ build environment: $($_.Exception.Message)"
     }
 }
 

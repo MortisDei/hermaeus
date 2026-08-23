@@ -138,6 +138,13 @@ public sealed class ReleaseReadinessRegressionTests
         Assert.Contains("\"app/LocalApi/Hermaeus.LocalApi.exe\"", buildScript, StringComparison.Ordinal);
         Assert.Contains("\"icons/hermaeus.ico\"", buildScript, StringComparison.Ordinal);
         Assert.Contains("Get-ChildItem $PackagePath -Filter \"*.pdb\" -File -Recurse", buildScript, StringComparison.Ordinal);
+        Assert.Contains("Microsoft.VisualStudio.DevShell.dll", buildScript, StringComparison.Ordinal);
+        Assert.Contains("Enter-VsDevShell", buildScript, StringComparison.Ordinal);
+        Assert.Contains("if ($TargetRuntime -eq \"win-arm64\") { \"arm64\" } else { \"amd64\" }", buildScript, StringComparison.Ordinal);
+        Assert.Contains("-Arch $targetArchitecture", buildScript, StringComparison.Ordinal);
+        Assert.Contains("-HostArch \"amd64\"", buildScript, StringComparison.Ordinal);
+        Assert.DoesNotContain("$env:ComSpec", buildScript, StringComparison.Ordinal);
+        Assert.DoesNotContain("-no_logo", buildScript, StringComparison.Ordinal);
         Assert.DoesNotContain("Set-Content -NoNewline -Encoding ASCII (Join-Path $packageDir \"Launch-Hermaeus.cmd\")", buildScript, StringComparison.Ordinal);
 
         Assert.Contains("minimal open-source launcher", packaging, StringComparison.OrdinalIgnoreCase);

@@ -13,6 +13,9 @@ limit.
 
 ### Fixed
 
+- Windows packaging now initializes MSVC and the Windows SDK through Visual
+  Studio Developer PowerShell, so `build.ps1` works from a normal PowerShell or
+  VS Code terminal without requiring a Developer Command Prompt.
 - Windows portable packages now keep desktop and Local API runtime files under
   `app/`, documentation under `docs/`, and icon assets under `icons/`. A tiny
   source-included native `Hermaeus.exe` at package root replaces the command
