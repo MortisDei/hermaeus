@@ -138,6 +138,11 @@ assets, repository license and commercial notices under `docs/`,
 `Launch-Hermaeus.cmd` for starting the app from the extracted folder. Normal
 packages exclude `.pdb` files.
 
+Linux tar headers use numeric root ownership and remove group/other write bits.
+This prevents a local builder username, group name, or permissive worktree mode
+from becoming part of a published archive. Extraction does not require root and
+the user who extracts the archive still owns the resulting files.
+
 ## Checksums
 
 Each script writes a SHA256 file next to the archive. Verify archives before

@@ -13,6 +13,13 @@ limit.
 
 ### Fixed
 
+- Agent patch apply, revert, reject, and block decisions no longer enter the
+  unrelated pending-tool approval path, preventing a patch review click from
+  executing or dismissing a different queued action.
+- Managed llama.cpp archives now verify SHA256 before extraction: the pinned
+  b10034 assets use source-controlled hashes and latest/CUDA assets require the
+  digest from GitHub release metadata. Linux package tar headers no longer
+  expose the builder's user/group name or preserve group-write bits.
 - Linux packages now give the Avalonia window, X11/XWayland WM class, installed
   desktop entry, and icon theme resource one `hermaeus` identity, restoring
   taskbar association with the Moss icon. The extracted `Hermaeus` launcher is

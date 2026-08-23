@@ -1513,7 +1513,7 @@ internal static class AgentTests
     False(recorded.PreImageExisted, "notes.md did not exist before create_file ran");
     Equal("brand new", await File.ReadAllTextAsync(Path.Combine(root, "notes.md")), "create_file should have written the approved content");
 
-    var patchReview = new AgentPatchReviewService(tools, store, service);
+    var patchReview = new AgentPatchReviewService(tools, store);
     var error = await patchReview.RevertAsync(reloaded, recorded, options);
     Equal(string.Empty, error, "reverting an approved create_file's recorded patch should succeed");
     False(File.Exists(Path.Combine(root, "notes.md")), "reverting a create_file-originated patch should delete the file it created");

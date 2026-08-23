@@ -14,14 +14,12 @@ public sealed class AgentPatchReviewService
 {
     private readonly IAgentWorkspaceTools _workspaceTools;
     private readonly IAgentTaskStateStore _store;
-    private readonly IAgentService _agent;
     private readonly IWorkspaceManifestStore? _manifests;
 
-    public AgentPatchReviewService(IAgentWorkspaceTools workspaceTools, IAgentTaskStateStore store, IAgentService agent, IWorkspaceManifestStore? manifests = null)
+    public AgentPatchReviewService(IAgentWorkspaceTools workspaceTools, IAgentTaskStateStore store, IWorkspaceManifestStore? manifests = null)
     {
         _workspaceTools = workspaceTools;
         _store = store;
-        _agent = agent;
         _manifests = manifests;
     }
 
@@ -58,11 +56,6 @@ public sealed class AgentPatchReviewService
         patch.PreImageExisted = preImage is not null;
         patch.AppliedContent = applied.Content;
         await _store.SaveAsync(task, ct);
-        // The draft-patch queue is independent of any PendingToolAction the
-        // task might also be sitting on; pass that action's OWN current
-        // fingerprint (or empty if there is none) so this call can never
-        // spuriously mismatch against a decision it is not making (r23 4.1).
-        await _agent.AppendApprovalAsync(task.TaskId, "draft_patch_apply", approved: true, AgentApprovalFingerprint.Resolve(task.PendingToolAction), options, ct);
     }
 
     /// <summary>
@@ -86,28 +79,25 @@ public sealed class AgentPatchReviewService
         patch.RevertedAt = DateTime.UtcNow;
         patch.RevertedBy = "User";
         await _store.SaveAsync(task, ct);
-        await _agent.AppendApprovalAsync(task.TaskId, "draft_patch_revert", approved: true, AgentApprovalFingerprint.Resolve(task.PendingToolAction), options, ct);
         return string.Empty;
     }
 
-    public async Task RejectAsync(AgentTaskState task, AgentDraftPatch patch, AgentWorkspaceOptions options, CancellationToken ct = default)
+    public async Task RejectAsync(AgentTaskState task, AgentDraftPatch patch, CancellationToken ct = default)
     {
         patch.Status = AgentDraftPatchStatus.Rejected;
         patch.BlockedAt = DateTime.UtcNow;
         patch.BlockedBy = "User";
         patch.BlockReason = "Rejected during review.";
         await _store.SaveAsync(task, ct);
-        await _agent.AppendApprovalAsync(task.TaskId, "draft_patch_reject", approved: false, AgentApprovalFingerprint.Resolve(task.PendingToolAction), options, ct);
     }
 
-    public async Task BlockAsync(AgentTaskState task, AgentDraftPatch patch, AgentWorkspaceOptions options, CancellationToken ct = default)
+    public async Task BlockAsync(AgentTaskState task, AgentDraftPatch patch, CancellationToken ct = default)
     {
         patch.Status = AgentDraftPatchStatus.Blocked;
         patch.BlockedAt = DateTime.UtcNow;
         patch.BlockedBy = "User";
         patch.BlockReason = string.IsNullOrWhiteSpace(patch.BlockReason) ? "Blocked during review." : patch.BlockReason;
         await _store.SaveAsync(task, ct);
-        await _agent.AppendApprovalAsync(task.TaskId, "draft_patch_block", approved: false, AgentApprovalFingerprint.Resolve(task.PendingToolAction), options, ct);
     }
 
     /// <summary>

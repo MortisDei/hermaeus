@@ -238,7 +238,8 @@ chmod +x "$INTEGRATION_DIR/install-desktop.sh" "$INTEGRATION_DIR/uninstall-deskt
 rm -rf "$PUBLISH_DIR" "$LOCALAPI_PUBLISH_DIR"
 
 echo "Creating $ARCHIVE..."
-tar -C "$DIST_DIR" -czf "$ARCHIVE" "$PACKAGE_NAME"
+tar --owner=0 --group=0 --numeric-owner --mode='go-w' \
+  -C "$DIST_DIR" -czf "$ARCHIVE" "$PACKAGE_NAME"
 
 echo "Writing $CHECKSUM..."
 (

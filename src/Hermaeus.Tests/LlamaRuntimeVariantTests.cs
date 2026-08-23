@@ -12,6 +12,30 @@ namespace Hermaeus.Tests;
 /// </summary>
 public sealed class LlamaRuntimeVariantTests
 {
+    [Fact]
+    public void Release_asset_digest_requires_a_well_formed_SHA256_value()
+    {
+        var asset = new GitHubReleaseAsset(
+            "llama-b10034-bin-ubuntu-x64.tar.gz",
+            "https://example.test/llama.tar.gz",
+            $"sha256:{new string('a', 64)}");
+
+        Assert.Equal(new string('a', 64), LlamaServerSetupService.RequireSha256Digest(asset));
+        Assert.Throws<InvalidOperationException>(() => LlamaServerSetupService.RequireSha256Digest(asset with { Digest = null }));
+        Assert.Throws<InvalidOperationException>(() => LlamaServerSetupService.RequireSha256Digest(asset with { Digest = "sha256:not-a-hash" }));
+    }
+
+    [Fact]
+    public void Pinned_release_has_a_SHA256_for_every_supported_platform()
+    {
+        foreach (var platform in Enum.GetValues<LlamaPlatform>())
+        {
+            var hash = LlamaServerSetupService.PinnedSha256For(platform);
+            Assert.Equal(64, hash.Length);
+            Assert.All(hash, c => Assert.True(Uri.IsHexDigit(c)));
+        }
+    }
+
     // Mirrors the live ggml-org/llama.cpp b10066 asset list (verified against
     // the GitHub releases API at implementation time, same discipline as r11).
     private static readonly GitHubReleaseAsset[] B10066Assets =

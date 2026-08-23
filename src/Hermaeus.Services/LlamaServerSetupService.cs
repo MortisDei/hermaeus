@@ -37,10 +37,9 @@ public sealed class LlamaServerSetupService
     /// <summary>
     /// llama.cpp release tag this pinned install downloads. Verified against
     /// the live GitHub releases API on 2026-07-16: tag b10034, published
-    /// 2026-07-15, assets confirmed for every platform below. GitHub does not
-    /// publish per-asset hashes in the release API; provenance for the
-    /// pinned path is tag+HTTPS+GitHub-origin only (recorded in
-    /// docs/security-review.md).
+    /// 2026-07-15, assets confirmed for every platform below. The pinned path
+    /// verifies source-controlled SHA256 values captured from GitHub's release
+    /// asset digests before extracting or executing an archive.
     /// </summary>
     public const string PinnedTag = "b10034";
 
@@ -53,11 +52,21 @@ public sealed class LlamaServerSetupService
 
     private readonly ModelDownloadService _downloader;
     private readonly HttpClient _http;
+    private readonly Func<LlamaPlatform, string> _pinnedSha256;
 
     public LlamaServerSetupService(ModelDownloadService? downloader = null, HttpClient? http = null)
+        : this(downloader, http, null)
+    {
+    }
+
+    internal LlamaServerSetupService(
+        ModelDownloadService? downloader,
+        HttpClient? http,
+        Func<LlamaPlatform, string>? pinnedSha256)
     {
         _downloader = downloader ?? new ModelDownloadService();
         _http = http ?? new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
+        _pinnedSha256 = pinnedSha256 ?? PinnedSha256For;
         // Set once at construction (r11 1.2): GetLatestDownloadInfoAsync used to
         // call ParseAdd on every invocation, appending a duplicate UA product
         // to the shared client's DefaultRequestHeaders on each call.
@@ -188,7 +197,9 @@ public sealed class LlamaServerSetupService
             var displayName = DisplayNameFor(platform.Value);
             var url = $"{ReleaseBaseUrl}/{PinnedTag}/{assetName}";
 
-            return await DownloadExtractAndLocateAsync(installPath, url, assetName, $"llama-server {PinnedTag} ({displayName})", progress, ct);
+            return await DownloadExtractAndLocateAsync(
+                installPath, url, assetName, _pinnedSha256(platform.Value),
+                $"llama-server {PinnedTag} ({displayName})", progress, ct);
         }
         catch (OperationCanceledException)
         {
@@ -247,7 +258,7 @@ public sealed class LlamaServerSetupService
                 else
                 {
                     var companion = await DownloadAndExtractArchiveAsync(
-                        versionedInstallPath, release.CompanionUrl!, release.CompanionAssetName!,
+                        versionedInstallPath, release.CompanionUrl!, release.CompanionAssetName!, release.CompanionSha256!,
                         $"CUDA runtime ({release.CompanionAssetName})", progress, ct);
                     if (!companion.Success)
                         return companion;
@@ -260,7 +271,8 @@ public sealed class LlamaServerSetupService
             }
 
             return await DownloadExtractAndLocateAsync(
-                versionedInstallPath, release.Url, release.AssetName, $"llama-server {release.TagName} ({release.DisplayName})", progress, ct);
+                versionedInstallPath, release.Url, release.AssetName, release.Sha256,
+                $"llama-server {release.TagName} ({release.DisplayName})", progress, ct);
         }
         catch (OperationCanceledException)
         {
@@ -276,6 +288,7 @@ public sealed class LlamaServerSetupService
         string installPath,
         string url,
         string assetName,
+        string expectedSha256,
         string label,
         IProgress<string>? progress,
         CancellationToken ct)
@@ -299,6 +312,14 @@ public sealed class LlamaServerSetupService
         if (!downloadResult.Success)
             return new LocalAiSetupResult(false, $"Failed to download: {downloadResult.Message}");
 
+        var verified = await _downloader.VerifyHashAsync(archivePath, expectedSha256, progress, ct);
+        if (!verified)
+        {
+            try { File.Delete(archivePath); }
+            catch { }
+            return new LocalAiSetupResult(false, $"{label} failed SHA256 verification and was not extracted.");
+        }
+
         try
         {
             progress?.Report("Extracting archive...");
@@ -317,11 +338,12 @@ public sealed class LlamaServerSetupService
         string installPath,
         string url,
         string assetName,
+        string expectedSha256,
         string label,
         IProgress<string>? progress,
         CancellationToken ct)
     {
-        var extracted = await DownloadAndExtractArchiveAsync(installPath, url, assetName, label, progress, ct);
+        var extracted = await DownloadAndExtractArchiveAsync(installPath, url, assetName, expectedSha256, label, progress, ct);
         if (!extracted.Success)
             return extracted;
 
@@ -483,11 +505,13 @@ public sealed class LlamaServerSetupService
 
         string? companionName = null;
         string? companionUrl = null;
+        string? companionSha256 = null;
         if (effectiveVariant == LlamaRuntimeVariant.Cuda)
         {
             var companion = SelectCudartAsset(release.Assets ?? [], asset.Name);
             companionName = companion?.Name;
             companionUrl = companion?.BrowserDownloadUrl;
+            companionSha256 = companion is null ? null : RequireSha256Digest(companion);
         }
 
         var display = platform is null
@@ -499,9 +523,28 @@ public sealed class LlamaServerSetupService
             asset.Name,
             asset.BrowserDownloadUrl,
             display,
+            RequireSha256Digest(asset),
             companionName,
             companionUrl,
-            release.PublishedAt);
+            release.PublishedAt,
+            companionSha256);
+    }
+
+    internal static string RequireSha256Digest(GitHubReleaseAsset asset)
+    {
+        const string prefix = "sha256:";
+        var digest = asset.Digest;
+        if (string.IsNullOrWhiteSpace(digest)
+            || !digest.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"GitHub did not publish a SHA256 digest for release asset '{asset.Name}'.");
+        }
+
+        var hash = digest[prefix.Length..];
+        if (hash.Length != 64 || hash.Any(c => !Uri.IsHexDigit(c)))
+            throw new InvalidOperationException($"GitHub published an invalid SHA256 digest for release asset '{asset.Name}'.");
+
+        return hash.ToLowerInvariant();
     }
 
     /// <summary>
@@ -709,6 +752,17 @@ public sealed class LlamaServerSetupService
 
     private static string AssetNameFor(LlamaPlatform platform, string tag) => $"llama-{tag}{SuffixFor(platform)}";
 
+    internal static string PinnedSha256For(LlamaPlatform platform) => platform switch
+    {
+        LlamaPlatform.WinX64 => "936539730059f642374c42d07eab51d974da3d0e50fcf59fd3b88d20293502e2",
+        LlamaPlatform.WinArm64 => "7137bb4638ccd31555167c2c1c3e1b79d49745f5e8bfa54d7312660cdf7b1d42",
+        LlamaPlatform.LinuxX64 => "5a6370a6d27e508e5efa0a348be8f52a4fbbc7f3d2403c1a22cadc41210792ca",
+        LlamaPlatform.LinuxArm64 => "3e6df9bd6d956bd48e9d85903097d6e2d75c37f0a217aa1c341449d426a06276",
+        LlamaPlatform.MacX64 => "54be7b368bcafcb7cd969834f802ac257001ee26cc90db598aef727ab2151fb7",
+        LlamaPlatform.MacArm64 => "a57a68565bd68509d860bc3cef5bfce91d3e3c47360c10132eb078c5eb4cd4db",
+        _ => throw new ArgumentOutOfRangeException(nameof(platform))
+    };
+
     private static bool IsWindows(LlamaPlatform platform) => platform is LlamaPlatform.WinX64 or LlamaPlatform.WinArm64;
 
     private static string ArchToken(LlamaPlatform platform) => platform switch
@@ -783,16 +837,19 @@ public sealed record LlamaServerLatestDownload(
     string AssetName,
     string Url,
     string DisplayName,
+    string Sha256,
     string? CompanionAssetName = null,
     string? CompanionUrl = null,
-    DateTimeOffset? PublishedAt = null);
+    DateTimeOffset? PublishedAt = null,
+    string? CompanionSha256 = null);
 public sealed record GitHubRelease(
     [property: JsonPropertyName("tag_name")] string TagName,
     [property: JsonPropertyName("assets")] List<GitHubReleaseAsset>? Assets,
     [property: JsonPropertyName("published_at")] DateTimeOffset? PublishedAt = null);
 public sealed record GitHubReleaseAsset(
     [property: JsonPropertyName("name")] string Name,
-    [property: JsonPropertyName("browser_download_url")] string BrowserDownloadUrl);
+    [property: JsonPropertyName("browser_download_url")] string BrowserDownloadUrl,
+    [property: JsonPropertyName("digest")] string? Digest = null);
 public sealed record LlamaReleaseSelection(
     GitHubRelease Release,
     GitHubReleaseAsset Asset,
