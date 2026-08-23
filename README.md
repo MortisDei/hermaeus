@@ -8,6 +8,15 @@ Hermaeus manages the local AI system around conversation: model and runtime conf
 
 Built with **Avalonia UI** and **.NET 10**. Continuous integration runs on Windows and Linux. Pop!_OS (Wayland) is a real-use target; other Linux environments are less exercised.
 
+The application is real and actively dogfooded, not just a collection of service
+adapters. This Chat capture shows a local Gemma 4 model running through
+`llama.cpp`, with the runtime and model attribution visible in the UI:
+
+![Hermaeus Chat showing a local Gemma 4 response](docs/images/chat.png)
+
+*Chat with a local model, including runtime attribution, context awareness, and
+explicit boundaries around web and tool access.*
+
 ---
 
 ## Why Hermaeus?
@@ -93,6 +102,14 @@ organisation, and explicit control over what is kept and what is forgotten.
   refused before the server starts rather than after
 - Complete model downloads: shards, vision projectors and MTP draft heads
   arrive together, each model in its own folder
+
+The Models workspace is where local files and provider-discovered models are
+reviewed, organized, tuned, and managed:
+
+![Hermaeus Models workspace](docs/images/models.png)
+
+*Models lists local model provenance and runtime state, with management and
+auto-tuning actions in the same workspace.*
 
 ### Local RAG
 
@@ -189,6 +206,14 @@ Includes:
 - A Settings page for preferences, kept separate from the Services page that
   manages processes and files on disk
 
+Doctor reports what is ready, missing, or needs attention, with the relevant
+remediation action alongside the check:
+
+![Hermaeus Doctor diagnostics](docs/images/doctor.png)
+
+*Doctor exposes runtime, model, voice, and RAG readiness instead of hiding
+operational problems behind a generic connection error.*
+
 ---
 
 # Quick Start
@@ -225,6 +250,13 @@ model, and start Chat. The in-app setup wizard can download a starter model.
 See the [user guide](docs/user-guide.md) for first-launch and troubleshooting
 workflows.
 
+On first launch, onboarding guides the initial data-root, runtime, model, and
+voice setup:
+
+![Hermaeus first-run setup](docs/images/onboarding.png)
+
+*First-run setup keeps storage and local AI asset locations explicit.*
+
 ## Build from source
 
 Install the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0),
@@ -239,9 +271,9 @@ dotnet run --project src/Hermaeus.Desktop
 
 ## Screenshots
 
-Release screenshots belong in [`docs/images/`](docs/images/). The first setup
-capture will sit near this introduction; further Chat, Services, and Doctor
-captures can be grouped here once they are real release captures.
+The release captures above are from the working desktop application. They are
+placed beside the workflows they demonstrate rather than collected as a
+gallery.
 
 ---
 
@@ -384,6 +416,8 @@ See:
 - NOTICE.md
 
 Hermaeus is **not** an OSI-approved open source project.
+
+Support development on [Ko-fi](https://ko-fi.com/mortisdei).
 
 For commercial licensing requests, see the Contact section of COMMERCIAL.md.
 
