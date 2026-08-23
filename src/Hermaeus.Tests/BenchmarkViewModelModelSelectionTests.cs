@@ -56,6 +56,7 @@ public sealed class BenchmarkViewModelModelSelectionTests
         vm.SelectedModel = localModel;
 
         Assert.Equal(0, starts);
+        Assert.Equal(string.Empty, services.Servers[0].ModelPath);
         Assert.Contains("when the benchmark runs", vm.Status, StringComparison.Ordinal);
 
         var suite = BenchmarkService.StarterSuites().First();
@@ -64,6 +65,15 @@ public sealed class BenchmarkViewModelModelSelectionTests
 
         await vm.RunCommand.ExecuteAsync(null);
 
+        // ServerProcessManager raises Starting synchronously, but the server row
+        // marshals that transition through the captured UI synchronization
+        // context. The command can complete before xUnit drains that post, so
+        // wait for the intentionally unconfigured start attempt to reach Error
+        // before checking the exact transition count.
+        await WaitForAsync(
+            () => services.Servers[0].Status == ServerStatus.Error,
+            "the intentionally unconfigured managed server restart to settle");
+        Assert.Equal(Path.GetFullPath(modelPath), services.Servers[0].ModelPath);
         Assert.Equal(1, starts);
     }
 }
