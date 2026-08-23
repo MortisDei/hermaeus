@@ -8,7 +8,7 @@
         CanResize="False">
     <Border Padding="18">
         <StackPanel Spacing="14">
-            <TextBlock Text="Backups intentionally exclude secrets.local.key. Restored encrypted secrets may be unreadable unless you preserved the original key."
+            <TextBlock Text="Backups do not include credentials or fallback secret material. Re-enter credentials after restoring on another machine."
                        TextWrapping="Wrap" />
             <TextBlock Text="Restore will overwrite data from the backup. Continue?"
                        TextWrapping="Wrap"

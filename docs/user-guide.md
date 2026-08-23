@@ -142,4 +142,6 @@ and Privacy Audit before using sensitive material.
 
 Use Settings' backup flow for Data Root. Back up AI Assets separately only if
 avoiding large re-downloads matters; those files are replaceable, while Data
-Root contains the user-created state that is not.
+Root contains the user-created state that is not. Credentials and fallback
+secret material are not included in Data Root backups. Re-enter credentials
+after restoring on another machine.

@@ -13,6 +13,10 @@ limit.
 
 ### Fixed
 
+- Fallback secret encryption keys now live outside the portable Hermaeus data
+  root in a user-specific OS configuration location. Existing same-root keys
+  migrate when the secret store initializes, and backup/restore copy now states
+  that credentials must be re-entered on another machine.
 - Agent patch apply, revert, reject, and block decisions no longer enter the
   unrelated pending-tool approval path, preventing a patch review click from
   executing or dismissing a different queued action.

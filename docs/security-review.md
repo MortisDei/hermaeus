@@ -63,8 +63,8 @@ penetration-test report.
 
 | Area | Current control | Residual risk |
 | --- | --- | --- |
-| Secrets | API keys are converted to `secret:` references and stored in Linux Secret Service, macOS Keychain, or Windows Credential Manager when available. A local fallback vault is used only when needed and writes encrypted values with a random salt per ciphertext plus atomic file replacement. Older fallback entries remain readable during migration. Decryption under a replaced or corrupt local key now reliably fails closed (r24): AES-CBC alone has no integrity check, so a wrong-key decrypt does not reliably throw on padding validation alone (~1-in-256 chance of a coincidental pass on random garbage); the decode path now also requires the result to be structurally valid UTF8, which real secrets always are and wrong-key garbage overwhelmingly is not. | Local fallback vault readability still depends on preserving `secrets.local.key`. The fallback format is still unauthenticated AES-CBC, not an AEAD cipher (AES-GCM) with a real cryptographic integrity tag - the UTF8 check closes the practical "silently returns wrong data" gap but is not a formal MAC. |
-| Backups | Backup excludes `secrets.local.json` and `secrets.local.key`. Restore rejects path traversal, path-prefix escapes, case-variant sibling escapes on case-sensitive platforms, directory entries, and existing-file overwrites. | Backup archives can still contain chat, RAG, benchmark, Agent, and path metadata. Restore has no total uncompressed-size budget and does not reject a pre-existing symlink ancestor under the selected data root, so only restore trusted Hermaeus backups. Restored encrypted secrets may be unreadable unless the original key is preserved. |
+| Secrets | API keys are converted to `secret:` references and stored in Linux Secret Service, macOS Keychain, or Windows Credential Manager when available. A local fallback vault is used only when needed and writes encrypted values with a random salt per ciphertext plus atomic file replacement. Its random key is stored outside the portable data root in a user-specific OS configuration location, and a legacy same-root key is migrated there and removed when the secret store initializes. Decryption under a replaced or unavailable key fails closed. | Copying the Hermaeus data root no longer supplies the fallback decryption key, but theft of the complete user profile or same-user access can still obtain both locations. The fallback format remains unauthenticated AES-CBC rather than an AEAD cipher with a cryptographic integrity tag. |
+| Backups | Backup excludes the fallback vault and legacy key filename. The active fallback key lives outside the data root, so it is outside the backup scope as well. Restore rejects path traversal, path-prefix escapes, case-variant sibling escapes on case-sensitive platforms, directory entries, and existing-file overwrites. | Credentials are not restored and must be re-entered on another machine. Backup archives can still contain chat, RAG, benchmark, Agent, and path metadata. Restore has no total uncompressed-size budget and does not reject a pre-existing symlink ancestor under the selected data root, so only restore trusted Hermaeus backups. |
 | Data root | Migration previews moved files, includes Agent state under `agent/`, refuses destination DB conflicts, rejects filesystem roots, and creates migration backup copies. | A user can still choose a broad writable directory that exposes metadata to other local apps. |
 | Process launch | `llama-server`, XTTS, Kokoro, voice helpers, and secret backend helpers use `ProcessStartInfo.ArgumentList` / no shell execution. Setup and voice subprocesses are killed on cancellation. PATH lookup ignores empty segments when detecting `llama-server`. | Extra args are still user-controlled runtime behavior and can weaken local-only assumptions. |
 | Managed llama.cpp downloads | The pinned b10034 install verifies source-controlled SHA256 values for all six supported platform archives. Latest-version and CUDA companion installs require the `sha256:` digest published in GitHub release asset metadata. Every archive is verified before extraction or execution and deleted on mismatch. Extraction rejects path traversal and unsafe links. | Latest installs still trust the `ggml-org/llama.cpp` GitHub publisher and release metadata. The digest is an integrity check, not an independent signature against publisher compromise. |
@@ -109,6 +109,11 @@ Current mitigations:
 - OS credential stores are preferred.
 - The local fallback vault derives each ciphertext key with a fresh random salt
   stored beside the IV and ciphertext.
+- Fallback source key material lives outside Data Root under
+  `%LOCALAPPDATA%\Hermaeus-Protected` on Windows,
+  `$XDG_CONFIG_HOME/Hermaeus/protected` on Linux (normally
+  `~/.config/Hermaeus/protected`), or
+  `~/Library/Preferences/Hermaeus/protected` on macOS.
 - Local fallback vault is excluded from backups.
 - Log output redacts `sk-*`, bearer tokens, GitHub-style tokens, query-string
   secret parameters, AWS-style access keys, Azure-style key assignments,
@@ -142,9 +147,9 @@ Current mitigations:
 - Restore rejects path-prefix escapes that only look like they are under the
   data root.
 - Restore refuses existing target files.
-- Restore UI warns that `secrets.local.key` is not included in backups. Keep the
-  original key with any backup if encrypted secrets must remain readable after
-  restore.
+- Restore UI states that credentials and fallback secret material are not
+  included in backups. Credentials must be re-entered after restoring on
+  another machine.
 - Data-root migration refuses conflicting destination DB files.
 - Migration creates timestamped backup copies under the destination.
 

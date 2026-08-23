@@ -13,6 +13,7 @@ public sealed class SecretStore : ISecretStore
     private readonly ISettingsService _settings;
     private readonly ISecretBackend _osBackend;
     private readonly IRuntimeLogService? _log;
+    private readonly string _fallbackKeyDirectory;
     private const string Prefix = "secret:";
     private const string EncryptedPrefix = "v2:";
     private const int SaltBytes = 16;
@@ -20,10 +21,19 @@ public sealed class SecretStore : ISecretStore
     private const int KeyIterations = 100_000;
 
     public SecretStore(ISettingsService settings, IRuntimeLogService? log = null)
+        : this(settings, log, null)
+    {
+    }
+
+    internal SecretStore(ISettingsService settings, IRuntimeLogService? log, string? fallbackKeyDirectory)
     {
         _settings = settings;
         _osBackend = CreateOsBackend();
         _log = log;
+        _fallbackKeyDirectory = string.IsNullOrWhiteSpace(fallbackKeyDirectory)
+            ? ResolveFallbackKeyDirectory()
+            : Path.GetFullPath(fallbackKeyDirectory);
+        TryMigrateLegacyKey();
     }
 
     public bool IsReference(string value) => value.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase);
@@ -159,29 +169,104 @@ public sealed class SecretStore : ISecretStore
 
     private string KeyPath()
     {
-        var root = SettingsService.ResolveDataRoot(_settings.Settings);
-        return Path.Combine(root, "secrets.local.key");
+        return Path.Combine(_fallbackKeyDirectory, "secrets.local.key");
+    }
+
+    private string LegacyKeyPath() =>
+        Path.Combine(SettingsService.ResolveDataRoot(_settings.Settings), "secrets.local.key");
+
+    private static string ResolveFallbackKeyDirectory()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            var localApplicationData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            if (!string.IsNullOrWhiteSpace(localApplicationData))
+                return Path.Combine(localApplicationData, "Hermaeus-Protected");
+        }
+
+        if (OperatingSystem.IsMacOS())
+        {
+            var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (!string.IsNullOrWhiteSpace(userProfile))
+                return Path.Combine(userProfile, "Library", "Preferences", "Hermaeus", "protected");
+        }
+
+        var applicationData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        if (!string.IsNullOrWhiteSpace(applicationData))
+            return Path.Combine(applicationData, "Hermaeus", "protected");
+
+        var fallbackProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (!string.IsNullOrWhiteSpace(fallbackProfile))
+            return Path.Combine(fallbackProfile, ".config", "Hermaeus", "protected");
+
+        throw new InvalidOperationException("A user-specific configuration directory is required for fallback secret key material.");
     }
 
     private byte[] GetOrCreateLocalKeyMaterial()
     {
         var path = KeyPath();
         if (File.Exists(path))
-            return Convert.FromBase64String(File.ReadAllText(path).Trim());
+        {
+            var existing = ReadLocalKeyMaterial(path);
+            RemoveLegacyKeyAfterMigration(path);
+            return existing;
+        }
+
+        var legacyPath = LegacyKeyPath();
+        if (!string.Equals(path, legacyPath, StringComparison.OrdinalIgnoreCase) && File.Exists(legacyPath))
+        {
+            var legacy = ReadLocalKeyMaterial(legacyPath);
+            WriteLocalKeyMaterial(path, legacy);
+            RemoveLegacyKeyAfterMigration(path);
+            return legacy;
+        }
 
         var key = RandomNumberGenerator.GetBytes(32);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        WriteLocalKeyMaterial(path, key);
+        return key;
+    }
 
-        // The most sensitive file in the data root: the AES key protecting
-        // every fallback-stored secret. Written temp-then-move with
-        // permissions restricted on the temp file *before* it is moved into
-        // place, so there is no window where the key sits world-readable, and
-        // a crash mid-write can never leave a truncated key that silently
-        // breaks every stored secret (docs/review/01-code-audit.md P2-8).
-        // Kept synchronous (this whole method is synchronous, called from
-        // encrypt/decrypt helpers) rather than awaiting the async atomic
-        // writer, to avoid sync-over-async deadlock risk on a UI thread with
-        // a captured SynchronizationContext.
+    private void TryMigrateLegacyKey()
+    {
+        var path = KeyPath();
+        var legacyPath = LegacyKeyPath();
+        if (string.Equals(path, legacyPath, StringComparison.OrdinalIgnoreCase)
+            || !File.Exists(legacyPath))
+            return;
+
+        try
+        {
+            if (!File.Exists(path))
+                WriteLocalKeyMaterial(path, ReadLocalKeyMaterial(legacyPath));
+            RemoveLegacyKeyAfterMigration(path);
+        }
+        catch
+        {
+            _log?.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Warning,
+                RuntimeLogCategory.Service,
+                "The legacy fallback secret key could not be migrated out of the data root. Fallback credentials may need to be re-entered."));
+        }
+    }
+
+    private static byte[] ReadLocalKeyMaterial(string path)
+    {
+        var key = Convert.FromBase64String(File.ReadAllText(path).Trim());
+        if (key.Length != 32)
+            throw new CryptographicException("The local fallback secret key has an invalid length.");
+        return key;
+    }
+
+    private static void WriteLocalKeyMaterial(string path, byte[] key)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        TryRestrictDirectoryPermissions(Path.GetDirectoryName(path)!);
+
+        // Key material lives in a user-specific configuration directory, not
+        // the portable data root that contains the encrypted vault. Restrict
+        // the temp file before moving it into place, leaving no world-readable
+        // window and no partially written primary key after a crash.
         var temp = $"{path}.{Guid.NewGuid():N}.tmp";
         try
         {
@@ -193,8 +278,40 @@ public sealed class SecretStore : ISecretStore
         {
             TryDelete(temp);
         }
+    }
 
-        return key;
+    private void RemoveLegacyKeyAfterMigration(string protectedPath)
+    {
+        var legacyPath = LegacyKeyPath();
+        if (string.Equals(protectedPath, legacyPath, StringComparison.OrdinalIgnoreCase)
+            || !File.Exists(legacyPath))
+            return;
+
+        TryDelete(legacyPath);
+        if (File.Exists(legacyPath))
+        {
+            _log?.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Warning,
+                RuntimeLogCategory.Service,
+                "The legacy fallback secret key could not be removed from the data root. Remove secrets.local.key from the data root after closing Hermaeus."));
+        }
+    }
+
+    private static void TryRestrictDirectoryPermissions(string path)
+    {
+        try
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(
+                    path,
+                    UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
+        }
+        catch
+        {
+        }
     }
 
     private string EncryptSecret(string secret)

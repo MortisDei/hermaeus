@@ -4,6 +4,8 @@ Date: 2026-08-23
 
 Audited base: `d80758b50a65d8972e8117ae79ec1d98a3fbd929` on `r30/round`
 
+SecretStore reassessment base: `9a646db8750482c218802f61354c79263963ae5d`
+
 Scope: complete release candidate, reachable Git history, packages, workflows,
 runtime boundaries, security-sensitive documentation, and bounded audit fixes
 
@@ -12,16 +14,18 @@ runtime boundaries, security-sensitive documentation, and bounded audit fixes
 **CONDITIONAL PASS**
 
 The frozen candidate contained one HIGH Agent approval-boundary failure and one
-MEDIUM executable supply-chain weakness. Both are remediated in the local audit
-commit with regression coverage. One LOW package information disclosure was
-also fixed. No CRITICAL, HIGH, or MEDIUM finding remains open in the audited
-local tree.
+MEDIUM executable supply-chain weakness. A focused follow-up found a second
+MEDIUM weakness: the fallback vault and its decryption key were both stored in
+the portable data root. All three are remediated in the local tree with
+regression coverage. One LOW package information disclosure was also fixed. No
+CRITICAL, HIGH, or MEDIUM finding remains open in the audited local tree.
 
-Public release must not proceed from the remote PR's previous head. The local
-security commit must first be incorporated into PR #8, both CI legs must pass on
-that head, and the planned Windows package/update-path smoke test must complete.
-No push, merge, tag, release, visibility change, or publication was performed
-by this audit.
+Public release must not proceed from remote PR head `9a646db...`. The local
+SecretStore follow-up must first be incorporated into PR #8, both CI legs must
+pass on that exact head, and the concise current-package Windows smoke test must
+complete. The owner has dropped updater-path testing as a release requirement,
+and this remediation does not change managed llama.cpp. No push, merge, tag,
+release, visibility change, or publication was performed by this audit.
 
 ## Findings summary
 
@@ -31,7 +35,7 @@ Counts describe findings as discovered, before local remediation:
 | --- | ---: | ---: |
 | Critical | 0 | 0 |
 | High | 1 | 0 |
-| Medium | 1 | 0 |
+| Medium | 2 | 0 |
 | Low | 6 | 5 |
 | Info | 2 | 2 |
 
@@ -234,6 +238,37 @@ Counts describe findings as discovered, before local remediation:
   for lifecycle monitoring. Product-specific per-route input limits are a
   reasonable future defence-in-depth improvement.
 
+### HERM-SEC-011: Fallback vault key was stored beside the encrypted vault
+
+- **Severity:** MEDIUM
+- **Component:** `SecretStore`, backup and restore documentation
+- **Evidence:** When an OS credential backend was unavailable or disabled,
+  both `secrets.local.json` and the random `secrets.local.key` used to derive
+  its AES keys were written below `SettingsService.ResolveDataRoot(...)`.
+  Owner-only file permissions restricted other live local accounts but did not
+  separate the key from a copied or stolen data root.
+- **Attack/preconditions:** An attacker obtains a copy of the complete Hermaeus
+  data root while fallback secrets are present.
+- **Impact:** The copy contains both ciphertext and exact decryption material,
+  allowing stored provider credentials and Local API tokens to be recovered
+  offline. Per-value salts and PBKDF2 do not mitigate possession of the random
+  source key.
+- **Why controls failed:** Fallback encryption protected against inspecting the
+  JSON file alone, but key co-location made the protection ineffective against
+  the stated portable data-root theft case. Documentation also implied that a
+  normal backup restored encrypted secrets and needed the original key, even
+  though backup excludes the fallback vault and legacy key filename.
+- **Remediation/status:** **Remediated locally and release-blocking until
+  incorporated.** OS credential stores remain preferred. The fallback key now
+  lives outside the portable data root in a user-specific OS configuration
+  location with owner-only Unix permissions. Existing same-root keys migrate
+  there and are removed when the secret store initializes. A copied data root
+  without that separate key fails closed, and restore guidance now requires
+  credential re-entry on another machine. Regression coverage verifies legacy migration,
+  key separation, atomic owner-only key creation, and refusal to decrypt a
+  copied vault without the separate key. Full user-profile theft and same-user
+  compromise remain residual risks rather than claims this fallback can solve.
+
 ## Public-repository exposure result
 
 No real credential, API key, bearer token, password, private key, certificate
@@ -259,6 +294,14 @@ Implementation materially matches the public local-first claims. Local models,
 RAG, memory, conversations, traces, crash logs, and lifecycle journals stay
 local by default. No analytics, telemetry, remote crash reporting, or hidden
 upload path was found.
+
+OS credential stores remain the primary secret backend. When the local
+fallback is required, its encrypted vault stays in the data root but its random
+key now lives in a separate user-specific OS configuration location. Normal
+Hermaeus backup excludes the vault and cannot make credentials portable;
+restoring elsewhere requires credential re-entry. This separation protects a
+copy of the data root, not theft of the complete user profile or same-user
+compromise.
 
 Meaningful outbound surfaces are explicit remote chat/voice/STT profiles,
 user-triggered RAG web ingest, user-triggered GitHub/Hugging Face/runtime/model
@@ -315,9 +358,13 @@ not a credible new privilege boundary.
 
 ## CI and GitHub result
 
-PR #8 was verified as open/draft from `r30/round` to `main` at remote head
-`d80758b...`; Ubuntu and Windows checks were successful on that head. All
-workflow actions use full commit SHA pins. Default permissions are
+PR #8 was rechecked as open/draft from `r30/round` to `main` at remote head
+`9a646db...`, which contains the first audit remediation commit. Windows CI is
+successful on that head. Ubuntu CI has one failure in
+`BenchmarkViewModelModelSelectionTests.Selecting_a_model_triggers_no_restart_and_running_triggers_exactly_one`,
+outside this focused SecretStore scope, so the release CI gate is not currently
+satisfied. All workflow actions use full commit SHA pins. Default permissions
+are
 `contents: read`, checkout does not persist credentials, PR CI receives no
 write permission or repository secrets, and the tag-only release job scopes
 `contents: write` to release creation after build artifacts are downloaded.
@@ -326,7 +373,7 @@ Public forks would increase untrusted PR volume but not grant fork code a
 write-capable token or repository secrets under this workflow. GitHub documents
 the default read-only fork-PR token posture in
 [Actions repository settings](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository?apiVersion=2022-11-28).
-The local security commit has not run in remote CI yet.
+The local SecretStore follow-up has not run in remote CI yet.
 
 ## Package result
 
@@ -358,8 +405,9 @@ successful in the pre-audit CI run; no Windows package was rebuilt locally.
   digests and inspected the pinned argument parser's host handling.
 - Ran NuGet direct/transitive vulnerability review with no reported advisory.
 - Focused security tests: 48 total, 47 passed, 1 expected Windows-only skip.
+- Focused SecretStore, migration, and harness-registration tests: 147 passed.
 - Full `dotnet build Hermaeus.sln`: succeeded, 0 warnings, 0 errors.
-- Full sequential test suite: 1,895 total, 1,879 passed, 16 expected platform
+- Full sequential test suite: 1,897 total, 1,881 passed, 16 expected platform
   skips, 0 failed. TRX was written outside the repository.
 - Linux `./build.sh --skip-restore`: succeeded. SHA256 sidecar verified; archive
   ownership/modes and sensitive/debug payload classes inspected.
@@ -368,9 +416,9 @@ successful in the pre-audit CI run; no Windows package was rebuilt locally.
 ## Limitations
 
 - No live Windows laptop smoke, Windows credential-manager exercise, job-object
-  runtime exercise, Windows archive rebuild, SmartScreen/signing check, or
-  update-path test was possible from this Linux host. Windows-specific tests
-  correctly reported skipped locally; the pre-audit Windows CI leg was green.
+  runtime exercise, Windows archive rebuild, or SmartScreen/signing check was
+  possible from this Linux host. Windows-specific tests correctly reported
+  skipped locally; Windows CI is green on remote head `9a646db...`.
 - No macOS host was available for Keychain or macOS archive execution.
 - ImageMagick `identify` was unavailable. Screenshot review used visual
   inspection plus `file` and printable-string metadata checks.
@@ -381,11 +429,11 @@ successful in the pre-audit CI run; no Windows package was rebuilt locally.
 
 ## Required actions before public release
 
-1. Incorporate the local security audit commit into PR #8 without dropping any
-   remediation or report change.
+1. Incorporate the local SecretStore security follow-up into PR #8 without
+   dropping any remediation or report change.
 2. Require fresh green Ubuntu and Windows CI on that exact head.
-3. Complete the owner's planned Windows laptop smoke and managed llama.cpp
-   install/update-path test against the verified-archive behavior.
+3. Complete the concise current-package smoke test on the owner's Windows
+   laptop. Updater-path testing is not a release requirement.
 
 ## Deferred hardening
 
@@ -401,14 +449,16 @@ successful in the pre-audit CI run; no Windows package was rebuilt locally.
 
 ## Release recommendation
 
-Do not release or make the repository public from remote head `d80758b...`.
+Do not release or make the repository public from remote head `9a646db...`.
 After the three required actions above, proceed to the owner's final release
 decision. No remaining audited finding independently blocks public release.
 
-Repository files were modified and committed locally with the Conventional
-Commit message `fix(security): close R30 release audit blockers`. The exact
-hash is recorded in the final audit handoff because a Git commit cannot contain
-its own stable hash.
+The first audit remediation was committed as `9a646db` with the Conventional
+Commit message `fix(security): close R30 release audit blockers`. This focused
+follow-up is committed separately as
+`fix(security): separate fallback key from portable data`; its exact hash is
+recorded in the final audit handoff because a Git commit cannot contain its own
+stable hash.
 
 Nothing was pushed, merged, tagged, released, made public, or used to change
 repository visibility during this audit.

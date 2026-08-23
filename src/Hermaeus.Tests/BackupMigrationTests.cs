@@ -194,7 +194,8 @@ namespace Hermaeus.Tests
                 service.Settings.DataManagement.DataRootDirectory = previous;
                 await service.SaveAsync();
 
-                var secrets = new SecretStore(service);
+                var protectedKeyDirectory = temp.PathFor("protected-secrets");
+                var secrets = new SecretStore(service, null, protectedKeyDirectory);
                 var reference = await secrets.StoreAsync("test-provider-key", "super-secret-value");
                 True(secrets.IsReference(reference), "storing a secret should return a reference");
 
@@ -204,6 +205,10 @@ namespace Hermaeus.Tests
 
                 var resolved = await secrets.ResolveAsync(reference);
                 Equal("super-secret-value", resolved, "secret should resolve correctly after its data root moved");
+                True(File.Exists(Path.Combine(protectedKeyDirectory, "secrets.local.key")),
+                    "data-root migration should leave fallback key material in the separate protected directory");
+                False(File.Exists(Path.Combine(next, "secrets.local.key")),
+                    "data-root migration should not move protected key material into the new data root");
             }
             finally
             {

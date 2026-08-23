@@ -121,6 +121,8 @@ public static class HarnessCases
         [new HarnessCase("secret store falls back without plaintext", ServiceTests.SecretStoreFallbackWithoutPlaintext)],
         [new HarnessCase("secret store key file is written atomically with restricted permissions", ServiceTests.SecretStoreKeyFileIsWrittenAtomicallyWithRestrictedPermissions)],
         [new HarnessCase("secret store logs a warning when a stored secret cannot be decrypted", ServiceTests.SecretStoreLogsWarningWhenStoredSecretCannotBeDecrypted)],
+        [new HarnessCase("secret store migrates a legacy key out of the data root", ServiceTests.SecretStoreMigratesLegacyKeyOutOfDataRoot)],
+        [new HarnessCase("copied data root cannot decrypt fallback secrets without the protected key", ServiceTests.CopiedDataRootCannotDecryptFallbackSecretsWithoutProtectedKey)],
         [new HarnessCase("runtime profile normalization and unsafe host validation", ServiceTests.RuntimeProfileValidation)],
         [new HarnessCase("runtime profile defaults are deduplicated", ServiceTests.RuntimeProfilesAreDeduplicated)],
         [new HarnessCase("settings save migrates OpenAI key to secret reference", ServiceTests.SettingsSaveMigratesOpenAiKey)],

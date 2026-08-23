@@ -1199,9 +1199,11 @@ a group, no "likely cause" field, and no correlation claim.
 - Settings are implemented as domain sections for LLM defaults, RAG, data,
   local AI setup, voice, UI, memory, and trust while preserving one save flow.
 - OS-backed secret references and redacted process logs.
-- Local fallback secrets use an app-created per-data-root key file restricted
-  to the current user, a random salt per encrypted value, and atomic vault
-  writes. Backup excludes both the fallback vault and key file.
+- Local fallback secrets use an app-created key stored outside the portable
+  data root in a user-specific OS configuration location, a random salt per
+  encrypted value, and atomic vault writes. Legacy same-root keys migrate when
+  the secret store initializes. Backup excludes the vault and does not restore
+  credentials.
 - Data-safety test harness for migration, backup/restore, and redaction.
 - Backup restore rejects traversal and path-prefix escape entries before
   extraction, while still excluding the local fallback secret vault and key.

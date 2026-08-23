@@ -1891,16 +1891,19 @@ namespace Hermaeus.Tests
             {
                 var settings = NewSettings(temp);
                 settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
-                var store = new SecretStore(settings);
+                var protectedKeyDirectory = temp.PathFor("protected-secrets");
+                var store = new SecretStore(settings, null, protectedKeyDirectory);
                 var reference = await store.StoreAsync("openai-api-key", "sk-test-secret");
                 Equal(true, store.IsReference(reference), "stored secret should return a reference");
                 Equal("sk-test-secret", await store.ResolveAsync(reference), "secret reference should resolve");
                 Equal("Local fallback file", await store.BackendLabelAsync(), "disabled keychain should use fallback label");
 
                 var localVault = Path.Combine(settings.Settings.DataManagement.DataRootDirectory, "secrets.local.json");
-                var localKey = Path.Combine(settings.Settings.DataManagement.DataRootDirectory, "secrets.local.key");
+                var localKey = Path.Combine(protectedKeyDirectory, "secrets.local.key");
                 True(File.Exists(localVault), "fallback vault should exist");
-                True(File.Exists(localKey), "fallback key should exist");
+                True(File.Exists(localKey), "fallback key should exist outside the data root");
+                False(File.Exists(Path.Combine(settings.Settings.DataManagement.DataRootDirectory, "secrets.local.key")),
+                    "fallback key should not remain beside the portable vault");
                 var json = await File.ReadAllTextAsync(localVault);
                 True(json.Contains("v2:", StringComparison.Ordinal), "fallback vault should use versioned encrypted values");
                 False(json.Contains("sk-test-secret", StringComparison.Ordinal), "fallback vault should not contain plaintext");
@@ -1930,14 +1933,15 @@ namespace Hermaeus.Tests
             {
                 var settings = NewSettings(temp);
                 var dataRoot = temp.PathFor("data");
+                var protectedKeyDirectory = temp.PathFor("protected-secrets");
                 settings.Settings.DataManagement.DataRootDirectory = dataRoot;
-                var store = new SecretStore(settings);
+                var store = new SecretStore(settings, null, protectedKeyDirectory);
 
                 await store.StoreAsync("openai-api-key", "sk-test-secret");
 
-                var localKey = Path.Combine(dataRoot, "secrets.local.key");
+                var localKey = Path.Combine(protectedKeyDirectory, "secrets.local.key");
                 True(File.Exists(localKey), "fallback key file should be created");
-                var leftoverTemp = Directory.GetFiles(dataRoot, "secrets.local.key.*.tmp");
+                var leftoverTemp = Directory.GetFiles(protectedKeyDirectory, "secrets.local.key.*.tmp");
                 Equal(0, leftoverTemp.Length, "the key file's temp-write artifact should not survive a successful write");
 
                 if (!OperatingSystem.IsWindows())
@@ -1961,19 +1965,80 @@ namespace Hermaeus.Tests
             {
                 var settings = NewSettings(temp);
                 var dataRoot = temp.PathFor("data");
+                var protectedKeyDirectory = temp.PathFor("protected-secrets");
                 settings.Settings.DataManagement.DataRootDirectory = dataRoot;
                 var log = new RuntimeLogService(settings);
-                var store = new SecretStore(settings, log);
+                var store = new SecretStore(settings, log, protectedKeyDirectory);
 
                 var reference = await store.StoreAsync("openai-api-key", "sk-test-secret");
 
-                var localKey = Path.Combine(dataRoot, "secrets.local.key");
+                var localKey = Path.Combine(protectedKeyDirectory, "secrets.local.key");
                 await File.WriteAllTextAsync(localKey, Convert.ToBase64String(new byte[32]));
 
                 var resolved = await store.ResolveAsync(reference);
                 Equal(string.Empty, resolved, "a secret that fails to decrypt under a replaced key should resolve empty rather than throw");
                 True(log.GetEntries().Any(e => e.Level == RuntimeLogLevel.Warning && e.Message.Contains("could not be decrypted", StringComparison.OrdinalIgnoreCase)),
                     "a total decrypt failure should be logged instead of silently swallowed");
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("HERMAEUS_DISABLE_OS_KEYCHAIN", previous);
+            }
+        }
+
+        public static async Task SecretStoreMigratesLegacyKeyOutOfDataRoot()
+        {
+            using var temp = new TempDir();
+            var previous = Environment.GetEnvironmentVariable("HERMAEUS_DISABLE_OS_KEYCHAIN");
+            Environment.SetEnvironmentVariable("HERMAEUS_DISABLE_OS_KEYCHAIN", "1");
+            try
+            {
+                var settings = NewSettings(temp);
+                var dataRoot = temp.PathFor("data");
+                var protectedKeyDirectory = temp.PathFor("protected-secrets");
+                settings.Settings.DataManagement.DataRootDirectory = dataRoot;
+
+                var legacyStore = new SecretStore(settings, null, dataRoot);
+                var reference = await legacyStore.StoreAsync("openai-api-key", "sk-legacy-secret");
+                var legacyKey = Path.Combine(dataRoot, "secrets.local.key");
+                True(File.Exists(legacyKey), "legacy setup should place the key beside the vault");
+
+                var migratedStore = new SecretStore(settings, null, protectedKeyDirectory);
+                True(File.Exists(Path.Combine(protectedKeyDirectory, "secrets.local.key")),
+                    "legacy key should move to the protected key directory during store initialization");
+                False(File.Exists(legacyKey), "legacy key should be removed from the data root during store initialization");
+                Equal("sk-legacy-secret", await migratedStore.ResolveAsync(reference),
+                    "existing fallback secrets should remain readable after key relocation");
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("HERMAEUS_DISABLE_OS_KEYCHAIN", previous);
+            }
+        }
+
+        public static async Task CopiedDataRootCannotDecryptFallbackSecretsWithoutProtectedKey()
+        {
+            using var temp = new TempDir();
+            var previous = Environment.GetEnvironmentVariable("HERMAEUS_DISABLE_OS_KEYCHAIN");
+            Environment.SetEnvironmentVariable("HERMAEUS_DISABLE_OS_KEYCHAIN", "1");
+            try
+            {
+                var settings = NewSettings(temp);
+                var originalDataRoot = temp.PathFor("original-data");
+                settings.Settings.DataManagement.DataRootDirectory = originalDataRoot;
+                var originalStore = new SecretStore(settings, null, temp.PathFor("original-protected-secrets"));
+                var reference = await originalStore.StoreAsync("openai-api-key", "sk-not-portable");
+
+                var copiedDataRoot = temp.PathFor("copied-data");
+                Directory.CreateDirectory(copiedDataRoot);
+                File.Copy(
+                    Path.Combine(originalDataRoot, "secrets.local.json"),
+                    Path.Combine(copiedDataRoot, "secrets.local.json"));
+
+                settings.Settings.DataManagement.DataRootDirectory = copiedDataRoot;
+                var copiedStore = new SecretStore(settings, null, temp.PathFor("copied-protected-secrets"));
+                Equal(string.Empty, await copiedStore.ResolveAsync(reference),
+                    "a copied data root without the separate protected key should not decrypt fallback credentials");
             }
             finally
             {
@@ -2096,7 +2161,7 @@ namespace Hermaeus.Tests
                 var settings = NewSettings(temp);
                 settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
                 settings.Settings.Llm.OpenAiApiKey = "sk-plain-key-123456";
-                var secrets = new SecretStore(settings);
+                var secrets = new SecretStore(settings, null, temp.PathFor("protected-secrets"));
                 var vm = NewSettingsViewModel(settings, secrets);
 
                 Equal("sk-plain-key-123456", vm.OpenAiApiKey, "plaintext setting should load into editable field");
@@ -2211,7 +2276,7 @@ namespace Hermaeus.Tests
             {
                 var settings = NewSettings(temp);
                 settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
-                var secrets = new SecretStore(settings);
+                var secrets = new SecretStore(settings, null, temp.PathFor("protected-secrets"));
                 var reference = await secrets.StoreAsync("openai-api-key", "sk-existing-secret");
                 settings.Settings.Llm.OpenAiApiKey = reference;
 
