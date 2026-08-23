@@ -823,7 +823,7 @@ public partial class AgentViewModel : ViewModelBase
         _lessons = lessons;
         _voice = voice;
         ScenarioSuite = scenarioSuite;
-        _patchReview = new AgentPatchReviewService(workspaceTools, store, agent, workspaceManifests);
+        _patchReview = new AgentPatchReviewService(workspaceTools, store, workspaceManifests);
         // r12 03-runtime-vm-correctness.md 3.5: defaulting to the whole user
         // profile meant every startup (and every Agent panel navigation)
         // silently enumerated and analyzed it, writing a "Workspace profile"
@@ -1814,7 +1814,7 @@ public partial class AgentViewModel : ViewModelBase
             var found = CurrentTask.DraftPatches.FirstOrDefault(p => p.Id == patch.Id);
             if (found is not null)
             {
-                await _patchReview.RejectAsync(CurrentTask, found, BuildOptions());
+                await _patchReview.RejectAsync(CurrentTask, found);
                 StatusMessage = $"Patch for {patch.RelativePath} rejected.";
                 await LoadTaskIfOpenAsync(CurrentTask.TaskId);
             }
@@ -1834,7 +1834,7 @@ public partial class AgentViewModel : ViewModelBase
             var found = CurrentTask.DraftPatches.FirstOrDefault(p => p.Id == patch.Id);
             if (found is not null)
             {
-                await _patchReview.BlockAsync(CurrentTask, found, BuildOptions());
+                await _patchReview.BlockAsync(CurrentTask, found);
                 StatusMessage = $"Patch for {patch.RelativePath} blocked.";
                 await LoadTaskIfOpenAsync(CurrentTask.TaskId);
             }

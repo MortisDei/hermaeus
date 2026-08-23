@@ -113,9 +113,51 @@ public class Memory
     public DateTime? ExpirationDate { get; set; }
 
     /// <summary>
-    /// IDs of related memories (for future relationship visualization).
+    /// Legacy IDs of related memories. Kept for existing callers and rows;
+    /// <see cref="Relationships"/> is the typed replacement.
     /// </summary>
     public List<string> RelatedMemoryIds { get; set; } = [];
+
+    /// <summary>
+    /// Typed, evidence-backed links to existing Hermaeus entities. This is
+    /// intentionally a bounded relationship list, not a knowledge graph.
+    /// </summary>
+    public List<KnowledgeRelationship> Relationships { get; set; } = [];
+
+    /// <summary>
+    /// Query-only reason this memory was added through a direct relationship.
+    /// Never persisted, and never traversed beyond the single recorded hop.
+    /// </summary>
+    public RelationshipRetrieval? RetrievedViaRelationship { get; set; }
+
+    /// <summary>
+    /// The source shown in a chat context receipt. A relationship-expanded
+    /// memory keeps its actual source while making the direct relationship
+    /// that admitted it visible to the user.
+    /// </summary>
+    public SourceReference ToContextSource()
+    {
+        var source = Source ?? new SourceReference(
+            ProvenanceKind.Memory,
+            string.IsNullOrWhiteSpace(Title) ? "Stored memory" : Title,
+            Locator: Id,
+            Snippet: Content,
+            Timestamp: UpdatedAt);
+
+        if (RetrievedViaRelationship is null)
+            return source;
+
+        var relationship = RetrievedViaRelationship;
+        var targetTitle = string.IsNullOrWhiteSpace(Title) ? source.Title : Title;
+        return new SourceReference(
+            ProvenanceKind.Memory,
+            $"{targetTitle} (via {KnowledgeRelationshipSemantics.DisplayName(relationship.Kind)} relationship from {relationship.SourceMemoryTitle})",
+            Locator: Id,
+            Snippet: relationship.Evidence?.Snippet ?? source.Snippet,
+            Score: source.Score,
+            Timestamp: source.Timestamp,
+            EvidenceOrigin: relationship.Evidence?.EvidenceOrigin ?? source.EvidenceOrigin);
+    }
 
     /// <summary>
     /// Whether this memory content is encrypted at rest.

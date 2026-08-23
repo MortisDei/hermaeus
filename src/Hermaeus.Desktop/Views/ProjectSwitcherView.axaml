@@ -10,7 +10,7 @@
         <views:ProjectColorConverter x:Key="ProjectColor" />
     </UserControl.Resources>
 
-    <Button Classes="icon-btn" Padding="8,4"
+    <Button Classes="icon-btn" Padding="8,4" Background="Transparent" Cursor="Hand"
             ToolTip.Tip="Switch project"
             Command="{Binding OpenSwitcherCommand}">
         <StackPanel Orientation="Horizontal" Spacing="6">

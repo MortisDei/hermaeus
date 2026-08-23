@@ -2,6 +2,43 @@
 
 ## Chat
 
+- Normal Chat adds a compact environment block built from live model locality,
+  attachment routing, attached Knowledge, memory, and Recall state. It keeps
+  intrinsic model abilities separate and explicitly says that web, shell,
+  tools, and Agent workspace actions are not exposed in ordinary Chat.
+- Deleting the active conversation creates a clean conversation and explicitly
+  returns keyboard focus to the composer.
+- **Reasoning is a separate transcript channel.** llama.cpp, OpenAI-compatible,
+  and Ollama streams may provide reasoning deltas without leaking them into the
+  final answer. Reasoning is stored, reloads with its assistant message, starts
+  collapsed, and can be copied from its own labelled section. Markdown export
+  labels it separately and JSON remains lossless. Ordinary Copy, speech, memory,
+  Recall, title generation, and transcript search use answer content only.
+- **Preserved reasoning is evidence-gated.** Hermaeus reports Unknown rather than
+  guessing from a model filename. History replay requires a managed llama.cpp
+  route, matching template evidence from `/props`, a compatible runtime launch,
+  and the per-server Preserve reasoning setting.
+
+## Models and setup
+
+- A starter model with a matching pinned hash is adopted on retry without a
+  second download. Conflicting files are never overwritten, and setup does not
+  finish until the selected path is present in the saved managed server and the
+  local model scan.
+- Model cards share context size and one KV-cache precision with Services. The
+  precision applies to both llama.cpp K and V flags. Hugging Face file sets show
+  On disk, Complete set, Downloading, or Download before the first click.
+- Deleting a local GGUF is confirmation-gated and removes only the exact validated
+  file, manifest entry, profile, and stopped server references. Running servers,
+  symlinks, traversal, and outside-root targets are refused.
+
+## Memories
+
+- Pin and delete actions bind through the named Memories view root. Permanent
+  deletion asks for confirmation and leaves the card and database unchanged when
+  cancelled.
+
+
 - **The model dropdown does not wait for a model to load** (r27). Startup used
   to auto-start every managed server one at a time, each behind a five-minute
   health deadline, before listing chat models, even though a server reaching
@@ -177,6 +214,15 @@
   pass shortly after startup and after memory writes, not on the send path.
   Archived and expired memories are excluded from search and injection, so a
   retired or forgotten memory never resurfaces.
+- Evidence-backed relationships: memories retain the compatible
+  `RelatedMemoryIds` list and can additionally link to a memory, Agent Lesson,
+  benchmark run, model profile, or runtime profile with a bounded relationship
+  type (`related to`, `derived from`, `supports`, `contradicts`, `updates`,
+  `supersedes`, or `tested by`) and shared source evidence. Normal recall stays
+  lexical/vector-first. It may add one directly related active memory at a
+  discounted score, and a superseded memory yields to its direct current fact.
+  The chat context receipt identifies relationship-expanded memory so this is
+  inspectable rather than hidden ranking behavior.
 - Relevance-aware injection: memories selected for chat context are ranked by
   the search's own relevance score blended with **decayed** importance (the
   same lifecycle decay the archiver uses), not recency-first as before;
@@ -191,7 +237,7 @@
   sweep runs. Pinned memories never decay and never expire.
 - The model can save a new memory anywhere in its response with
   `[MEMORY: <content>]` (up to 3 per turn, deduplicated against existing
-  memories so a repeated fact reinforces one row instead of piling up), and
+  memories so a repeated or near-equivalent fact reinforces one row instead of piling up), and
   correct or retire a memory it was shown this turn with
   `[MEMORY_UPDATE: <id> | <content>]` / `[MEMORY_FORGET: <id>]`; only ids
   actually injected into that turn are honored for update/forget, everything
@@ -254,6 +300,14 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
 
 - Local task workbench with explicit task state, a persisted step transcript,
   compact context packs, local logs/traces, and review queue controls.
+- **Transcript replay keeps repeated evidence legible without rewriting the
+  audit trail.** `transcript.jsonl` remains the complete raw sequence. For the
+  next model decision only, consecutive replay-safe tool outcomes with the same
+  tool, canonical arguments, and result collapse to the first outcome plus a
+  repeat count and deterministic range. Failed, timed-out, denied, changed,
+  and historical entries without matching provenance remain separate. Three or
+  more unchanged calls appear as an informational context-receipt diagnostic;
+  nothing is auto-blocked and the agent's status and loop budget do not change.
 - **Steer a task that is already running.** The reply box sends an instruction
   into a run in flight instead of only answering an `ask_user` question; its
   caption and button change so it is clear which of the two you are doing. The
@@ -478,17 +532,22 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
   provider gets its own glyph and label in the same slot.
 - The setup wizard offers a choice of starter models rather than one
   recommendation, and **states each model's licence before you download it**.
-  The list spans several licence families on purpose: Phi-4 mini (MIT),
-  Qwen2.5 7B/14B and Gemma 4 E4B (Apache-2.0), Llama 3.2 3B (Llama 3.2
-  Community License), and Qwen2.5 3B, which is research and non-commercial
-  only and says so. The VRAM-based recommendation is the starting selection,
-  not the only option, and it stops overriding you the moment you pick.
+  The deliberately small current list is Phi-4 mini, Gemma 4 E2B/E4B IT QAT,
+  and official Qwen3 8B/14B GGUFs. The 6-12 GB VRAM recommendation is Gemma 4
+  E4B QAT so common 6-8 GB cards retain room for context and runtime overhead.
+  The recommendation is the starting selection, not the only option, and it
+  stops overriding you the moment you pick.
 - Model profiles with display names, descriptions, tags, visibility, and defaults.
 - Runtime profiles for `llama.cpp`, Ollama, and OpenAI-compatible endpoints.
   Ollama chat streams incrementally like the other two providers, instead of
   buffering the full reply before the first token.
 - Managed `llama-server` start/stop, auto-start, logs, and GPU auto-tune that
   verifies GPU layer candidates before saving a per-GGUF tuned profile.
+- Settings, onboarding, and Doctor use the same b-number-aware llama.cpp
+  release and platform-asset selector. Semver tags and releases without a
+  compatible asset are skipped. Successful installs update the Services path,
+  while Doctor can also discover the newest managed b-numbered installation
+  when a configured field is stale.
 - GPU-aware llama.cpp builds. A runtime-variant setting (Auto by default)
   installs the CUDA build on NVIDIA hardware (with its `cudart` companion
   runtime), the Vulkan build on any other real GPU, and the CPU build when no
@@ -551,9 +610,12 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
 - Model benchmarks with GGUF discovery, one-click full-suite runs, saved run
   history, deterministic quality checks, rankings that group runs by model
   with a rank, a proportional score bar, and a Details button per run, test
-  info modal for case details, reruns, and Markdown/JSON/CSV export. Rerun is
-  disabled while a run is already in progress, so a second click can no
-  longer interrupt and leak the first run's state.
+  info modal for case details, reruns, and Markdown/JSON/CSV export. Run
+  provenance includes the managed server's KV cache K/V types and Flash
+  Attention setting when recorded, so results do not imply those engine
+  choices were held constant. Rerun is disabled while a run is already in
+  progress, so a second click can no longer interrupt and leak the first run's
+  state.
 - Benchmark views expose the test-details modal from both the per-result list
   and the best-run ranking rows, and saved benchmark history can be exported
   in bulk as one timestamped folder.
@@ -566,7 +628,7 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
   board), and names every suite and model it left out. When there is no
   honest answer, it says which case applies instead of naming a winner.
 - Doctor checks for untuned GGUF files, stale `llama.cpp` binaries, and pinned
-  `nomic-embed-text-v1.5` hash drift, with install actions where available.
+  `Qwen3-Embedding-0.6B` hash drift, with install actions where available.
 - Doctor advises when a real GPU is present but inference is still configured
   for the CPU (a CPU-only build is installed, or the chat server offloads zero
   layers), naming the measured consequence and linking the fix in Services.
@@ -645,7 +707,8 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
   an "Advanced engine options" section for `--mlock`, `--no-mmap`, and a
   speculative-decoding section (see below). Every default matches the prior
   hand-typed command line exactly (f16 KV cache, auto flash attention, everything else
-  off) - nothing is ever forced, and a value typed into Extra args always wins
+  off). Auto emits no `--flash-attn` override, leaving llama-server to select
+  its supported default; on and off are explicit overrides. Nothing is ever forced, and a value typed into Extra args always wins
   over the equivalent first-class control. A quantized V cache combined with
   flash attention off shows an inline warning (llama.cpp needs flash attention
   for a quantized V cache) but still launches with exactly what was chosen. A
@@ -659,8 +722,9 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
   same VRAM.
 - The Services card's server editor also exposes an optional "Vision
   projector" picker beside the model row: a `mmproj-*.gguf` file that sits
-  alone next to the selected model auto-fills, otherwise it lists every
-  `mmproj-*.gguf` found there for manual choice. Setting one launches the
+  alone next to the selected model auto-fills and follows a later model
+  switch, otherwise it lists every `mmproj-*.gguf` found there for manual
+  choice. Setting one launches the
   server with `--mmproj <path>`, enabling image attachments in chat for that
   server. A model path browsed or previously saved from outside the scanned
   assets root, and the models folder's own casing (`llm` vs `LLM`), are both
@@ -726,6 +790,13 @@ checkbox per technique, because llama-server's `--spec-type` takes a
 comma-separated list and n-gram speculation and draft-model drafting are not
 mutually exclusive:
 
+The selected executable's own `--help` is the gate. Hermaeus discovers the
+runtime's advertised speculative types and separate prompt-processing threads,
+but enables the n-gram and MTP controls only when that runtime proves them.
+Launch repeats the check, so an executable update cannot turn a saved setting
+into an ignored flag. Other discovered speculative types stay informational
+until Hermaeus has a complete drafter and compatibility workflow for them.
+
 - **N-gram drafting** (`ngram-mod`): costs no additional VRAM, because it
   drafts from the prompt and history themselves rather than from a second
   model.
@@ -735,17 +806,17 @@ mutually exclusive:
   and at tens of megabytes against a multi-gigabyte target it is the size ratio
   speculative decoding actually wants.
 - **The draft model itself** is found the same way the vision projector above
-  it is found, and has been since r19: a scan for `mtp-*.gguf` beside the
-  selected model and in its `MTP/` subfolder, with the sole candidate filled in
-  and anything you chose explicitly left alone. Finding the file does not turn
+  it is found: a scan for `mtp-*.gguf` beside the selected model and in its
+  `MTP/` subfolder. A sole candidate is filled in and follows a later model
+  switch; anything you chose explicitly is left alone. Finding the file does not turn
   drafting on. Nothing reaches the launch command until you tick the box, so
   discovery never silently changes how a server runs.
 
 Both boxes write into one underlying `--spec-type` list, because the flag
 genuinely is a list and the two techniques compose. Each box only ever adds or
-removes its own entry, so a more exotic list set by hand in `settings.json`
-(`ngram-simple`, `ngram-map-k`, `ngram-map-k4v`, `ngram-cache`,
-`draft-simple`) survives being toggled.
+removes its own entry. A manually saved type is never assumed compatible: it
+must appear in the selected runtime's help or launch is refused with the type
+named.
 - **n-max / n-min / p-min / draft ngl**: optional. Blank leaves llama-server's
   own defaults alone.
 
@@ -766,6 +837,15 @@ reasons, and llama.cpp spills to system memory rather than failing.
 Existing configurations upgrade automatically. The old N-gram checkbox becomes
 `Types = ["ngram-mod"]` exactly once, which is byte-identical to the flags that
 checkbox used to emit.
+
+### Runtime capability changes
+
+When a selected model and managed `llama-server` are probed, Hermaeus compares
+the resulting capability snapshot with the previous executable identity. It
+records only meaningful capability state changes and speculative types appearing
+or disappearing in Activity. Moss gives one short heads-up for that new
+snapshot, escalating a disappeared capability that may affect the configured
+server. It does not show raw help diffs or send a notification for every start.
 
 ### Complete downloads and per-model folders (r27)
 
@@ -918,8 +998,12 @@ attached to a conversation. See [docs/voice.md](voice.md).
   archive for your platform, extracts it with a zip-slip guard, and locates
   the executable inside (Windows resolution also tries `.exe`, so a fresh
   Windows install's default managed servers are startable out of the box).
+  Linux tar link entries are validated to stay inside the archive root and
+  materialized as regular companion-library files, so the loader can resolve
+  the release's SONAMEs without trusting archive-created filesystem links.
   Model downloads verify a SHA256 hash when Hermaeus has trusted hash metadata
-  for that exact URL.
+  for that exact URL. Models installed from Hermaeus's pinned Hugging Face
+  actions retain their repository provenance in the existing model manifest.
 - Local AI setup scans are voice-provider aware. Kokoro setup checks Kokoro
   Python imports and does not show XTTS script or model actions unless XTTS v2
   is selected.
@@ -934,20 +1018,33 @@ attached to a conversation. See [docs/voice.md](voice.md).
 - First-run Setup Wizard: on first launch Hermaeus runs a guided 6-step
   setup wizard to select the data root, local AI assets root, chat backend,
   model folder, voice provider, and to run the Hermaeus Doctor for a quick
-  health check before you start using the app. The wizard can be skipped
-  or re-run from the Settings panel.
+  health check before you start using the app. Brief factual Moss guidance
+  explains each step and what can be skipped. The wizard can be skipped or
+  re-run from the Settings panel. If you navigate to Logs or another panel
+  mid-setup, **Resume setup** returns to the same incomplete step.
 - Finishing or skipping the wizard immediately starts configured servers and
   loads chat models, RAG datasets, and agent/benchmark data - no restart or
   extra navigation needed to make first use of the app work.
+- Chat's no-model empty state offers the setup wizard only while first-run
+  onboarding is incomplete. After onboarding is complete, a missing or stopped
+  chat model routes recovery through Services; the intentional **Rerun wizard**
+  action remains in Settings.
 - Re-running the wizard and choosing a different data root moves your
   existing databases to the new location the same way Settings' data-root
   change does (with a confirmation toast), instead of switching to an empty
   root. A target folder that already has conflicting data files is refused
   with an explanation, and the current data root is left untouched.
+  The fixed per-user `hermaeus.lock` is process coordination rather than user
+  data, so migration and backup enumeration leave it at the bootstrap root;
+  another process still cannot acquire it.
 
 ## Hermaeus Doctor
 
 - Hermaeus Doctor checks for storage, runtimes, voice, RAG, GPU, and secrets.
+- Doctor distinguishes a configured llama-server path from an executable that
+  actually runs and reports a recognizable build. A missing companion library
+  is an error rather than Ready. Update identifiers from different schemes are
+  reported as not comparable instead of being called current.
 - Hermaeus runs Doctor in the background after launch and raises a notification
   when errors or warnings are found, so startup problems are visible before the
   Doctor panel is opened.
@@ -961,9 +1058,17 @@ attached to a conversation. See [docs/voice.md](voice.md).
   embedding backend health until one is installed, and leaves Linux global
   hotkeys out of problem reporting because system-wide support is not available
   there yet.
+- Linux tray support remains unknown until the current session's tray receives
+  an interaction. That runtime evidence makes the Doctor check Ready; desktop
+  environments where integration cannot be confirmed remain Info rather than
+  being guessed Ready. Windows and macOS retain their platform Ready result.
 - Doctor embedding model install downloads the default model from a pinned
   Hugging Face commit, verifies SHA256, removes failed downloads, and points the
-  embedding server at the verified file.
+  embedding server at the verified Qwen3-Embedding-0.6B file. Existing Nomic
+  installations remain selected and untouched until that verified install completes.
+  Download progress is rate-limited and coalesced into one bounded updating
+  state. Navigating away does not destroy the singleton operation; returning to
+  Doctor shows the same progress or completion state.
 - Doctor flags a blank embedding endpoint (RAG's `EmbeddingBaseUrl`) while
   memory or RAG is enabled: embedding requests silently fall back to the chat
   server otherwise, queuing behind chat generation on a single-slot
@@ -992,6 +1097,12 @@ attached to a conversation. See [docs/voice.md](voice.md).
   diagnosis instead of a generic message. Neutral breadcrumbs ("running", a
   completed session load) are not mistaken for the operation that was
   actually in flight when a crash happened.
+- Doctor's previous-session title now agrees with its warning detail. Error
+  notifications are also recorded through Runtime Logs, and notification
+  history formats stored UTC timestamps through the shared local-time display.
+- Managed embedding warm-up waits for the matching localhost embedding server
+  to reach Running. An intentionally stopped or not-yet-started service no
+  longer produces a misleading connection-refused startup warning.
 
 ## Activity
 
@@ -1088,9 +1199,11 @@ a group, no "likely cause" field, and no correlation claim.
 - Settings are implemented as domain sections for LLM defaults, RAG, data,
   local AI setup, voice, UI, memory, and trust while preserving one save flow.
 - OS-backed secret references and redacted process logs.
-- Local fallback secrets use an app-created per-data-root key file restricted
-  to the current user, a random salt per encrypted value, and atomic vault
-  writes. Backup excludes both the fallback vault and key file.
+- Local fallback secrets use an app-created key stored outside the portable
+  data root in a user-specific OS configuration location, a random salt per
+  encrypted value, and atomic vault writes. Legacy same-root keys migrate when
+  the secret store initializes. Backup excludes the vault and does not restore
+  credentials.
 - Data-safety test harness for migration, backup/restore, and redaction.
 - Backup restore rejects traversal and path-prefix escape entries before
   extraction, while still excluding the local fallback secret vault and key.
@@ -1247,6 +1360,12 @@ the chat transcript itself.
 The app icon, taskbar icon, and system tray icon use the "Archivist's Seal" mark
 (a gold H monogram grown through with a tree and book) - see `docs/mascot.md` for
 the icon source and cropping notes.
+Linux release archives expose a relocation-safe `Hermaeus` link to the native
+apphost for direct file-manager launch. Adjacent native `Install Hermaeus` and
+`Uninstall Hermaeus` actions provide graphical confirmation for user-local
+desktop integration without requiring a terminal. The installed entry uses the
+same `hermaeus` window identity and canonical themed icon for application-menu,
+taskbar, and window-switcher association.
 The UI theme uses the brand colour palette (Forest green accent, Copper/Amber
 highlights) - see `docs/mascot.md` for the full palette. Typography uses the
 OS-native UI font by default (r21: the three embedded brand typefaces were

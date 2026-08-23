@@ -24,12 +24,16 @@ traces, versioned SQLite schema migrations, and native eval support.
 ### Embedding Model Setup
 
 - Hermaeus requires an embedding model to run the embedding server. If none is found, the
-  **Doctor** panel can automatically download the recommended model (nomic-embed-text-v1.5-Q4_K_M)
+  **Doctor** panel can automatically download the recommended model (Qwen3-Embedding-0.6B-Q8_0)
   from a pinned Hugging Face commit and verify its SHA256 before configuring
   the embedding server.
 - Embedding GGUF files live under the configured local AI assets root in
-  `Models/embed`. Doctor installs the pinned nomic embedding model there and
+  `Models/embed`. Doctor installs the pinned Qwen embedding model there and
   moves a verified root-level copy into that folder when found.
+- Existing Nomic installations are not replaced or deleted. Doctor keeps Nomic
+  selected until the Qwen file has downloaded and verified, then changes the
+  dedicated embedding server to Qwen. Reindex RAG datasets and re-embed any
+  mismatched memories after that switch.
 - The Settings embedding selector lists dedicated embedding models only. Chat
   and code GGUF files in the model root are not shown as embedding choices.
 - Chat or code GGUF files are not treated as embedding models. Doctor will skip
@@ -39,7 +43,15 @@ traces, versioned SQLite schema migrations, and native eval support.
   pauses other LLM servers and TTS services** to reduce memory pressure, starts
   the managed embedding server if needed, then restores suspended services after
   ingestion completes.
-- For 6 GB VRAM systems, nomic-embed-text-v1.5-Q4_K_M (Q4 quantization) is recommended.
+- Qwen3-Embedding-0.6B is a small 0.6B embedding model. The official GGUF
+  release currently provides the verified Q8_0 file (about 640 MB), suitable
+  for the dedicated embedding server alongside a chat model.
+- Doctor rate-limits raw download progress and coalesces embedding progress to
+  whole percentages. Its bounded progress history remains attached to the
+  singleton Doctor operation when the panel is recreated during navigation.
+- Startup warm-up waits until a matching managed localhost embedding service
+  reports Running. It does not probe an incomplete or intentionally stopped
+  managed setup and turn that expected state into a connection warning.
 
 ## Features
 
@@ -233,7 +245,7 @@ outcome without holding anything open for the life of the process.
 - Settings discovers installed reranker folders under the configured local AI
   assets root at `Models/rerank/*` and lets you choose from the available
   rerankers instead of typing the path manually.
-- Doctor shows progress messages during the download and loading steps.
+- Doctor shows bounded progress messages during the download and loading steps.
 - Downloads are pinned to a specific Hugging Face commit and verified with
   SHA256 before the ONNX session or tokenizer loads.
 - This prevents heavy network activity during queries and makes reranker

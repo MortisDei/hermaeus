@@ -1,6 +1,6 @@
 namespace Hermaeus.LocalApi;
 
-public sealed record ChatMessageDto(string Role, string Content);
+public sealed record ChatMessageDto(string Role, string Content, string? ReasoningContent = null);
 
 public sealed record ChatCompletionRequest(
     string ModelId,
@@ -15,7 +15,7 @@ public sealed record ChatCompletionRequest(
     double? PresencePenalty = null,
     bool Stream = false);
 
-public sealed record ChatCompletionResponse(string Content, int? PromptTokens, int? CompletionTokens);
+public sealed record ChatCompletionResponse(string Content, int? PromptTokens, int? CompletionTokens, string ReasoningContent = "");
 
 public sealed record MemoryDto(string Id, string Category, string Content, double Importance);
 

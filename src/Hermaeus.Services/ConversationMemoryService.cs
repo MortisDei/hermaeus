@@ -12,6 +12,10 @@ public sealed class ConversationMemoryService : IConversationMemoryService
         "prefer", "like", "dislike", "always", "never", "important", "remember", "goal", "workflow",
         "project", "deadline", "bug", "performance", "privacy", "security"
     ];
+    private static readonly HashSet<string> DuplicateQualifierWords = new(StringComparer.Ordinal)
+    {
+        "a", "an", "the", "in", "on", "at", "for", "to", "of", "with", "all", "every", "each"
+    };
 
     private readonly ISettingsService _settings;
     private readonly IConversationStore _conversations;
@@ -373,7 +377,7 @@ public sealed class ConversationMemoryService : IConversationMemoryService
             memory.Source ??= new SourceReference(ProvenanceKind.Memory, MemoryExtractionService.TitleFrom(memory.Content), Locator: conversationId, Snippet: memory.Content, Timestamp: DateTime.UtcNow);
             var duplicate = existing.FirstOrDefault(m =>
                 string.Equals(m.Category, memory.Category, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(Normalize(m.Content), Normalize(memory.Content), StringComparison.Ordinal));
+                && AreNearDuplicates(m.Content, memory.Content));
 
             if (duplicate is null)
             {
@@ -394,6 +398,22 @@ public sealed class ConversationMemoryService : IConversationMemoryService
             duplicate.Source ??= new SourceReference(ProvenanceKind.Memory, MemoryExtractionService.TitleFrom(duplicate.Content), Locator: conversationId, Snippet: duplicate.Content, Timestamp: DateTime.UtcNow);
             await _memories.SaveAsync(duplicate, ct);
         }
+    }
+
+    private static bool AreNearDuplicates(string left, string right)
+    {
+        var normalizedLeft = Normalize(left);
+        var normalizedRight = Normalize(right);
+        if (string.Equals(normalizedLeft, normalizedRight, StringComparison.Ordinal))
+            return true;
+
+        var leftWords = DuplicateTerms(normalizedLeft);
+        var rightWords = DuplicateTerms(normalizedRight);
+        if (leftWords.Count < 4 || rightWords.Count < 4)
+            return false;
+
+        var shared = leftWords.Count(word => rightWords.Contains(word));
+        return shared / (double)Math.Max(leftWords.Count, rightWords.Count) >= 0.8;
     }
 
     private async Task EnforcePerConversationCapAsync(string conversationId, int maxMemoriesPerConversation, CancellationToken ct)
@@ -430,4 +450,16 @@ public sealed class ConversationMemoryService : IConversationMemoryService
             .Trim()
             .Split([' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries));
     }
+
+    private static HashSet<string> DuplicateTerms(string content) =>
+        content.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Select(term => term.Trim('.', ',', '!', '?', ':', ';', '\'', '"').ToLowerInvariant())
+            .Where(term => !string.IsNullOrWhiteSpace(term) && !DuplicateQualifierWords.Contains(term))
+            .Select(Singularize)
+            .ToHashSet(StringComparer.Ordinal);
+
+    private static string Singularize(string term) =>
+        term.Length > 4 && term.EndsWith("ies", StringComparison.Ordinal) ? term[..^3] + "y"
+        : term.Length > 3 && term.EndsWith('s') && !term.EndsWith("ss", StringComparison.Ordinal) ? term[..^1]
+        : term;
 }

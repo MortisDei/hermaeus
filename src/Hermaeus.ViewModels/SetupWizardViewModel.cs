@@ -15,6 +15,8 @@ public partial class SetupWizardViewModel : ObservableObject
     private readonly IToastService _toasts;
     private readonly ISystemInfoService _systemInfo;
     private readonly ModelDownloadService _modelDownloads;
+    private readonly ModelManifestStore _manifest;
+    private readonly LlamaServerSetupService _llamaSetup;
 
     [ObservableProperty] private int _stepIndex;
     [ObservableProperty] private string _dataRootDirectory = string.Empty;
@@ -35,9 +37,8 @@ public partial class SetupWizardViewModel : ObservableObject
     [ObservableProperty] private StarterModelEntry? _recommendedStarterModel;
     /// <summary>
     /// What will actually be downloaded. Starts at <see cref="RecommendedStarterModel"/>
-    /// and the user can pick any entry in <see cref="StarterModels"/>: the sizes
-    /// are close enough that VRAM is not the only thing worth choosing on, and
-    /// the licences differ (one entry is research and non-commercial only).
+    /// and the user can pick any entry in <see cref="StarterModels"/>: the sizes,
+    /// families, quantisations, and licences are all visible before download.
     /// </summary>
     [ObservableProperty] private StarterModelEntry? _selectedStarterModel;
     [ObservableProperty] private string _recommendedStarterModelFitLabel = string.Empty;
@@ -78,6 +79,14 @@ public partial class SetupWizardViewModel : ObservableObject
 
     partial void OnSelectedStarterModelChanged(StarterModelEntry? value)
     {
+        if (!IsDownloadingStarterModel && !string.IsNullOrEmpty(_starterModelDownloadId)
+            && !string.Equals(_starterModelDownloadId, value?.Id, StringComparison.Ordinal))
+        {
+            StarterModelDownloadCompleted = false;
+            StarterModelDownloadPercent = 0;
+            StarterModelDownloadStatus = string.Empty;
+            StarterModelDownloadError = string.Empty;
+        }
         OnPropertyChanged(nameof(SelectedStarterModelIsRecommended));
         // The fit badge describes the model that will be downloaded, so it has
         // to follow the selection rather than stay on the recommendation.
@@ -88,6 +97,7 @@ public partial class SetupWizardViewModel : ObservableObject
     [ObservableProperty] private string _starterModelDownloadStatus = string.Empty;
     [ObservableProperty] private string _starterModelDownloadError = string.Empty;
     [ObservableProperty] private bool _starterModelDownloadCompleted;
+    private string _starterModelDownloadId = string.Empty;
 
     // ── Voice install from the wizard (docs/review 02-onboarding-and-usability.md 2.2) ──
     [ObservableProperty] private bool _isInstallingVoice;
@@ -95,7 +105,18 @@ public partial class SetupWizardViewModel : ObservableObject
     [ObservableProperty] private string _voiceInstallError = string.Empty;
     [ObservableProperty] private bool _voiceInstallCompleted;
 
-    public bool CanInstallSelectedVoiceProvider => SelectedVoiceProvider?.Id == VoiceProvider.KokoroNative;
+    [ObservableProperty] private bool _isInstallingManagedLlama;
+    [ObservableProperty] private bool _managedLlamaReady;
+    [ObservableProperty] private string _managedLlamaInstallProgress = string.Empty;
+    [ObservableProperty] private string _managedLlamaInstallError = string.Empty;
+
+    public bool CanInstallSelectedVoiceProvider =>
+        SelectedVoiceProvider?.Id == VoiceProvider.KokoroNative && !VoiceInstallCompleted;
+    public bool SelectedRuntimeUsesManagedLlama => SelectedRuntime is { IsLlamaCpp: true, StartManagedLlamaServer: true };
+    public bool CanInstallManagedLlama => SelectedRuntimeUsesManagedLlama && !ManagedLlamaReady;
+    public string ManagedLlamaReadinessSummary => ManagedLlamaReady
+        ? "Managed llama.cpp is installed and linked to Services."
+        : "Install managed llama.cpp here before Doctor validates the runtime.";
 
     /// <summary>Shown on the Finish step; see docs/review 02-onboarding-and-usability.md item 2.2.</summary>
     public string VoiceReadinessSummary
@@ -127,6 +148,15 @@ public partial class SetupWizardViewModel : ObservableObject
     public UiBoundCollection<string> VoiceOnboardingSteps { get; } = [];
 
     public string CurrentStepTitle => StepIndex >= 0 && StepIndex < Steps.Count ? Steps[StepIndex] : string.Empty;
+    public string GuidanceText => StepIndex switch
+    {
+        0 => "Moss: Choose where Hermaeus keeps its data and local AI assets. The defaults are safe, and you can change them later.",
+        1 => "Moss: Pick the runtime that will serve chat models. Setup only enables what you select.",
+        2 => "Moss: Use an existing GGUF or download a verified starter model. You can skip this and add a model later.",
+        3 => "Moss: Voice is optional. Kokoro can be installed here, and other providers can be configured later.",
+        4 => "Moss: Doctor checks the setup without changing it. If a check fails, inspect Logs and use Resume setup in the header to return here.",
+        _ => "Moss: Finish to apply this setup. Anything skipped remains available from Settings, Services, Models, or Doctor."
+    };
     public bool IsLastStep => StepIndex >= Steps.Count - 1;
     public bool IsNotLastStep => !IsLastStep;
     public bool IsStep0 => StepIndex == 0;
@@ -149,7 +179,9 @@ public partial class SetupWizardViewModel : ObservableObject
         IDoctorService doctor,
         IToastService toasts,
         ISystemInfoService systemInfo,
-        ModelDownloadService? modelDownloads = null)
+        ModelDownloadService? modelDownloads = null,
+        ModelManifestStore? manifest = null,
+        LlamaServerSetupService? llamaSetup = null)
     {
         _settings = settings;
         _runtimeProfiles = runtimeProfiles;
@@ -158,11 +190,15 @@ public partial class SetupWizardViewModel : ObservableObject
         _toasts = toasts;
         _systemInfo = systemInfo;
         _modelDownloads = modelDownloads ?? new ModelDownloadService();
-        LoadFromSettings();
+        _manifest = manifest ?? new ModelManifestStore(settings);
+        _llamaSetup = llamaSetup ?? new LlamaServerSetupService(_modelDownloads);
+        LoadFromSettings(resetStep: true);
     }
 
-    public void LoadFromSettings()
+    public void LoadFromSettings(bool resetStep = false)
     {
+        if (resetStep)
+            StepIndex = 0;
         var s = _settings.Settings;
         DataRootDirectory = s.DataManagement.DataRootDirectory;
         LocalAiAssetsRoot = s.DataManagement.LocalAiAssetsRoot;
@@ -183,6 +219,8 @@ public partial class SetupWizardViewModel : ObservableObject
         SelectedVoiceProvider = VoiceOptions.FirstOrDefault(p => p.Id == activeProviderId)
             ?? VoiceOptions.FirstOrDefault();
         UpdateVoiceOnboarding(SelectedVoiceProvider);
+        RefreshVoiceInstallationState();
+        RefreshManagedLlamaState();
 
         _ = RefreshRecommendedStarterModelAsync();
     }
@@ -299,9 +337,32 @@ public partial class SetupWizardViewModel : ObservableObject
         StarterModelDownloadPercent = 0;
         try
         {
-            var folder = ResolveStarterModelFolder();
+            var root = ResolveStarterModelRoot();
+            if (!ModelPathSafety.TryResolveFileUnderRoot(root, Path.Combine(root, "Models", "chat", entry.FileName), out var destination, out var pathError))
+            {
+                StarterModelDownloadError = pathError;
+                StarterModelDownloadStatus = "Choose a different AI root.";
+                return;
+            }
+
+            var folder = Path.GetDirectoryName(destination)!;
             Directory.CreateDirectory(folder);
-            var destination = Path.Combine(folder, entry.FileName);
+
+            if (File.Exists(destination))
+            {
+                StarterModelDownloadStatus = "Checking the existing file...";
+                if (!await _modelDownloads.VerifyHashAsync(destination, entry.Sha256))
+                {
+                    StarterModelDownloadError = $"A different file already exists at {destination}. It was not changed.";
+                    StarterModelDownloadStatus = "Existing file conflicts with the selected starter model.";
+                    return;
+                }
+
+                await AdoptStarterModelAsync(entry, destination);
+                StarterModelDownloadPercent = 100;
+                StarterModelDownloadStatus = $"{entry.DisplayName} was already downloaded and is ready.";
+                return;
+            }
 
             StarterModelDownloadStatus = $"Downloading {entry.DisplayName}...";
             var progress = new Progress<DownloadProgress>(p => StarterModelDownloadPercent = p.PercentComplete);
@@ -317,16 +378,19 @@ public partial class SetupWizardViewModel : ObservableObject
             {
                 try { File.Delete(destination); } catch { }
                 StarterModelDownloadError = "The downloaded file failed hash verification and was removed. Please try again.";
+                StarterModelDownloadStatus = "Hash verification failed.";
                 return;
             }
 
-            ModelFolder = destination;
+            await AdoptStarterModelAsync(entry, destination);
+            StarterModelDownloadPercent = 100;
             StarterModelDownloadCompleted = true;
             StarterModelDownloadStatus = $"{entry.DisplayName} is ready.";
         }
         catch (Exception ex)
         {
             StarterModelDownloadError = ex.Message;
+            StarterModelDownloadStatus = "Starter model adoption failed.";
         }
         finally
         {
@@ -334,13 +398,43 @@ public partial class SetupWizardViewModel : ObservableObject
         }
     }
 
-    private string ResolveStarterModelFolder()
+    private async Task AdoptStarterModelAsync(StarterModelEntry entry, string destination)
+    {
+        var info = new FileInfo(destination);
+        if (!info.Exists)
+            throw new InvalidOperationException($"The downloaded model is missing at {destination}.");
+
+        await _manifest.UpsertAsync(new ModelManifestEntry
+        {
+            FilePath = Path.GetFullPath(destination),
+            RepoId = GetRepoId(entry.DownloadUrl),
+            RepoFile = entry.FileName,
+            Sha256 = entry.Sha256,
+            SizeBytes = info.Length,
+            Source = "starter"
+        });
+
+        ModelFolder = Path.GetFullPath(destination);
+        _starterModelDownloadId = entry.Id;
+        StarterModelDownloadCompleted = true;
+        StarterModelDownloadError = string.Empty;
+    }
+
+    private string ResolveStarterModelRoot()
     {
         var configured = _settings.Settings.DataManagement.LocalAiAssetsRoot?.Trim();
         var root = string.IsNullOrWhiteSpace(configured)
             ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Hermaeus")
             : Path.GetFullPath(configured);
-        return Path.Combine(root, "Models", "chat");
+        return root;
+    }
+
+    private static string GetRepoId(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+            return string.Empty;
+        var segments = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        return segments.Length >= 2 ? $"{segments[0]}/{segments[1]}" : string.Empty;
     }
 
     [RelayCommand]
@@ -358,6 +452,7 @@ public partial class SetupWizardViewModel : ObservableObject
             if (ok)
             {
                 VoiceInstallCompleted = true;
+                RefreshVoiceInstallationState();
                 VoiceInstallProgress = "Kokoro (native) voice installed.";
             }
             else
@@ -390,6 +485,10 @@ public partial class SetupWizardViewModel : ObservableObject
         {
             _syncingRuntimeSelection = false;
         }
+        RefreshManagedLlamaState();
+        OnPropertyChanged(nameof(SelectedRuntimeUsesManagedLlama));
+        OnPropertyChanged(nameof(CanInstallManagedLlama));
+        OnPropertyChanged(nameof(ManagedLlamaReadinessSummary));
     }
 
     partial void OnSelectedRuntimeIdChanged(string value)
@@ -412,17 +511,29 @@ public partial class SetupWizardViewModel : ObservableObject
     partial void OnSelectedVoiceProviderChanged(VoiceProviderInfo? value)
     {
         UpdateVoiceOnboarding(value);
+        VoiceInstallCompleted = false;
+        RefreshVoiceInstallationState();
         OnPropertyChanged(nameof(CanInstallSelectedVoiceProvider));
         OnPropertyChanged(nameof(VoiceReadinessSummary));
-        VoiceInstallCompleted = false;
         VoiceInstallError = string.Empty;
     }
 
-    partial void OnVoiceInstallCompletedChanged(bool value) => OnPropertyChanged(nameof(VoiceReadinessSummary));
+    partial void OnVoiceInstallCompletedChanged(bool value)
+    {
+        OnPropertyChanged(nameof(VoiceReadinessSummary));
+        OnPropertyChanged(nameof(CanInstallSelectedVoiceProvider));
+    }
+
+    partial void OnManagedLlamaReadyChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanInstallManagedLlama));
+        OnPropertyChanged(nameof(ManagedLlamaReadinessSummary));
+    }
 
     partial void OnStepIndexChanged(int value)
     {
         OnPropertyChanged(nameof(CurrentStepTitle));
+        OnPropertyChanged(nameof(GuidanceText));
         OnPropertyChanged(nameof(IsLastStep));
         OnPropertyChanged(nameof(IsNotLastStep));
         OnPropertyChanged(nameof(IsStep0));
@@ -431,6 +542,80 @@ public partial class SetupWizardViewModel : ObservableObject
         OnPropertyChanged(nameof(IsStep3));
         OnPropertyChanged(nameof(IsStep4));
         OnPropertyChanged(nameof(IsStep5));
+        if (value == 3)
+            RefreshVoiceInstallationState();
+        if (value is 1 or 4)
+            RefreshManagedLlamaState();
+    }
+
+    [RelayCommand]
+    private async Task InstallManagedLlamaAsync()
+    {
+        if (IsInstallingManagedLlama || !CanInstallManagedLlama)
+            return;
+
+        IsInstallingManagedLlama = true;
+        ManagedLlamaInstallError = string.Empty;
+        try
+        {
+            var progress = new Progress<string>(message => ManagedLlamaInstallProgress = message);
+            if (!await _doctor.InstallLlamaServerUpdateAsync(progress, CancellationToken.None))
+            {
+                ManagedLlamaInstallError = "llama.cpp installation failed. See Doctor diagnostics for details.";
+                return;
+            }
+
+            RefreshManagedLlamaState();
+            ManagedLlamaInstallProgress = "Managed llama.cpp is ready.";
+        }
+        catch (Exception ex)
+        {
+            ManagedLlamaInstallError = ex.Message;
+        }
+        finally
+        {
+            IsInstallingManagedLlama = false;
+        }
+    }
+
+    private void RefreshVoiceInstallationState()
+    {
+        if (SelectedVoiceProvider is null)
+            return;
+
+        var available = _voiceProviders.GetAvailableProviders()
+            .FirstOrDefault(provider => provider.Id == SelectedVoiceProvider.Id);
+        var installed = available?.IsInstalled == true;
+        try
+        {
+            var provider = _voiceProviders.GetVoiceProvider(SelectedVoiceProvider.Id);
+            if (provider.Id == SelectedVoiceProvider.Id)
+                installed |= provider.IsInstalled;
+        }
+        catch
+        {
+        }
+
+        if (available is not null || installed)
+            VoiceInstallCompleted = installed;
+    }
+
+    private void RefreshManagedLlamaState()
+    {
+        var server = _settings.Settings.ManagedServers.FirstOrDefault(s => !s.EmbeddingsMode)
+            ?? _settings.Settings.ManagedServers.FirstOrDefault();
+        var configured = server?.ExecutablePath?.Trim() ?? string.Empty;
+        if (!string.IsNullOrWhiteSpace(configured) && _llamaSetup.IsInstalled(configured))
+        {
+            ManagedLlamaReady = true;
+            return;
+        }
+
+        var root = LocalAiAssetsRoot.Trim();
+        if (string.IsNullOrWhiteSpace(root))
+            root = SettingsService.ResolveDataRoot(_settings.Settings);
+        var installRoot = _llamaSetup.GetDefaultInstallPath(root);
+        ManagedLlamaReady = LlamaServerSetupService.ResolveInstalledExecutable(installRoot) is not null;
     }
 
     private void UpdateVoiceOnboarding(VoiceProviderInfo? provider)
@@ -469,6 +654,12 @@ public partial class SetupWizardViewModel : ObservableObject
                     await _runtimeProfiles.SaveAsync(profile.ToProfile());
                 return true;
             case 2:
+                if (UseStarterModelDownload && (!StarterModelDownloadCompleted || string.IsNullOrWhiteSpace(ModelFolder) || !File.Exists(ModelFolder)))
+                {
+                    StarterModelDownloadError = $"Download a starter model before continuing. Expected file: {ModelFolder}";
+                    _toasts.Show("Model is not ready", StarterModelDownloadError, ToastKind.Error, 7000);
+                    return false;
+                }
                 var server = _settings.Settings.ManagedServers.FirstOrDefault();
                 if (server is null)
                 {
@@ -476,6 +667,11 @@ public partial class SetupWizardViewModel : ObservableObject
                     return true;
                 }
                 server.ModelPath = ModelFolder.Trim();
+                if (!File.Exists(server.ModelPath))
+                {
+                    StarterModelDownloadError = $"The selected model is missing at {server.ModelPath}. Retry the download or choose another model.";
+                    return false;
+                }
                 await _settings.SaveAsync();
                 return true;
             case 3:

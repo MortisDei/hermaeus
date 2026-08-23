@@ -31,9 +31,11 @@ public static class HermaeusServiceRegistration
         s.AddSingleton<IRuntimeLogService, RuntimeLogService>();
         s.AddSingleton<AppLifecycleJournalService>();
         s.AddSingleton<IStartupTimingService, StartupTimingService>();
+        s.AddSingleton<ITrayIntegrationState, TrayIntegrationState>();
         s.AddSingleton<PythonHealthValidator>();
         s.AddSingleton<BackupService>();
         s.AddSingleton<LocalAiSetupService>();
+        s.AddSingleton<LocalModelCapabilityService>();
         s.AddSingleton<TrustService>();
         s.AddSingleton<DoctorService>();
         s.AddSingleton<IDoctorService>(sp => sp.GetRequiredService<DoctorService>());

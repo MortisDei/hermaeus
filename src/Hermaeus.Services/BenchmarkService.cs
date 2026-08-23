@@ -153,6 +153,14 @@ public sealed class BenchmarkService
             HardwareSnapshot = await _system.CaptureAsync(ct)
         };
         run.Metadata = CreateMetadata(suite, model, run.HardwareSnapshot);
+        run.Metadata.ProfileFingerprint = EmpiricalProfileFingerprint.From(run.Metadata, model.Id);
+        run.Metadata.ObservationSource = new SourceReference(
+            ProvenanceKind.Benchmark,
+            suite.Name,
+            Locator: run.Id,
+            Snippet: "Local benchmark observation",
+            Timestamp: run.StartedAt,
+            EvidenceOrigin: EvidenceOrigin.DirectObservation);
 
         try
         {
@@ -212,6 +220,7 @@ public sealed class BenchmarkService
                 Prompt = r.Prompt,
                 SystemPrompt = r.SystemPrompt,
                 ExpectedKeywords = r.ExpectedKeywords.ToList(),
+                ExpectedKeywordAlternatives = r.ExpectedKeywordAlternatives.Select(g => g.ToList()).ToList(),
                 ExpectedRegexes = r.ExpectedRegexes.ToList(),
                 ShouldRefuse = r.ShouldRefuse,
                 // r11 2.7: reruns rebuild cases from stored results but used to
@@ -298,8 +307,8 @@ public sealed class BenchmarkService
 
     public static BenchmarkResult ScoreDeterministic(BenchmarkCase test, string output)
     {
-        var keywordHit = test.ExpectedKeywords.Count == 0
-            || test.ExpectedKeywords.All(k => output.Contains(k, StringComparison.OrdinalIgnoreCase));
+        var keywordHit = test.ExpectedKeywords.All(k => ContainsExpected(output, k))
+            && test.ExpectedKeywordAlternatives.All(group => group.Count > 0 && group.Any(k => ContainsExpected(output, k)));
         var regexHit = test.ExpectedRegexes.Count == 0
             || test.ExpectedRegexes.All(rx => IsRegexMatch(output, rx));
         var refusalCorrect = !test.ShouldRefuse || LooksLikeRefusal(output);
@@ -312,6 +321,7 @@ public sealed class BenchmarkService
             Prompt = test.Prompt,
             SystemPrompt = test.SystemPrompt,
             ExpectedKeywords = test.ExpectedKeywords.ToList(),
+            ExpectedKeywordAlternatives = test.ExpectedKeywordAlternatives.Select(g => g.ToList()).ToList(),
             ExpectedRegexes = test.ExpectedRegexes.ToList(),
             ShouldRefuse = test.ShouldRefuse,
             Tags = test.Tags.ToList(),
@@ -700,7 +710,7 @@ public sealed class BenchmarkService
             TimeoutSeconds = 180,
             Cases =
             [
-                new BenchmarkCase { Name = "Summarize constraints", Prompt = "Summarize these constraints into five concise bullets: local-first, no secret leakage, smallest complete change, update docs when behavior changes, run build and tests, do not rewrite unrelated code.", ExpectedKeywords = ["local", "secret", "docs", "tests"] },
+                new BenchmarkCase { Name = "Summarize constraints", Prompt = "Summarize these constraints into five concise bullets: local-first, no secret leakage, smallest complete change, update docs when behavior changes, run build and tests, do not rewrite unrelated code.", ExpectedKeywords = ["local", "secret", "tests"], ExpectedKeywordAlternatives = [["docs", "documentation"]] },
                 new BenchmarkCase { Name = "Prioritize tradeoffs", Prompt = "Rank these optimization goals for a local llama.cpp app and explain briefly: first-token latency, tokens/sec, VRAM stability, response quality.", ExpectedKeywords = ["latency", "VRAM", "quality"] }
             ]
         },
@@ -922,6 +932,7 @@ public sealed class BenchmarkService
             PromptTemplate = string.IsNullOrWhiteSpace(suite.Description) ? suite.Name : suite.Description,
             SamplerSettings = $"temperature={suite.Temperature}",
             Threads = managedServer?.Threads,
+            PromptThreads = managedServer?.PromptThreads,
             BatchSize = null,
             TopP = null,
             TopK = null,
@@ -931,6 +942,9 @@ public sealed class BenchmarkService
             ModelPath = managedServer?.ModelPath ?? string.Empty,
             ModelHash = string.Empty,
             Quantization = ggufInfo?.Quantization ?? string.Empty,
+            KvCacheTypeK = managedServer?.KvCacheTypeK ?? string.Empty,
+            KvCacheTypeV = managedServer?.KvCacheTypeV ?? string.Empty,
+            FlashAttention = managedServer?.FlashAttention ?? string.Empty,
 
             // r27 03 3.5: a run records the speculative configuration that
             // produced it. Without this, 3.6's comparison has nothing to key on.
@@ -1013,18 +1027,44 @@ public sealed class BenchmarkService
         return ex.GetType().Name;
     }
 
-    private static bool LooksLikeRefusal(string answer) =>
-        answer.Contains("not enough", StringComparison.OrdinalIgnoreCase)
-        || answer.Contains("insufficient", StringComparison.OrdinalIgnoreCase)
-        || answer.Contains("cannot determine", StringComparison.OrdinalIgnoreCase)
-        || answer.Contains("cannot answer", StringComparison.OrdinalIgnoreCase)
-        || answer.Contains("no context", StringComparison.OrdinalIgnoreCase);
+    private static bool LooksLikeRefusal(string answer)
+    {
+        if (string.IsNullOrWhiteSpace(answer)) return false;
+        var refusal = answer.Contains("not enough", StringComparison.OrdinalIgnoreCase)
+            || answer.Contains("insufficient", StringComparison.OrdinalIgnoreCase)
+            || answer.Contains("cannot determine", StringComparison.OrdinalIgnoreCase)
+            || answer.Contains("cannot answer", StringComparison.OrdinalIgnoreCase)
+            || answer.Contains("no context", StringComparison.OrdinalIgnoreCase)
+            || answer.Contains("cannot provide", StringComparison.OrdinalIgnoreCase)
+            || answer.Contains("did not provide", StringComparison.OrdinalIgnoreCase)
+            || answer.Contains("do not have access", StringComparison.OrdinalIgnoreCase)
+            || answer.Contains("don't have access", StringComparison.OrdinalIgnoreCase)
+            || answer.Contains("no record", StringComparison.OrdinalIgnoreCase)
+            || answer.Contains("unable to verify", StringComparison.OrdinalIgnoreCase)
+            || answer.Contains("can't verify", StringComparison.OrdinalIgnoreCase);
+        if (!refusal) return false;
+
+        return !Regex.IsMatch(answer,
+            @"\b(?:but|however|actually|the answer is|it is|it's)\s+(?:\$?\d|[A-Z][\w-]{2,})",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    }
+
+    private static bool ContainsExpected(string output, string expected)
+    {
+        if (string.IsNullOrEmpty(expected)) return true;
+        if (expected.All(char.IsDigit))
+        {
+            var normalizedOutput = Regex.Replace(output, @"(?<=\d)[,\s](?=\d)", string.Empty);
+            return normalizedOutput.Contains(expected, StringComparison.OrdinalIgnoreCase);
+        }
+        return output.Contains(expected, StringComparison.OrdinalIgnoreCase);
+    }
 
     private static bool IsRegexMatch(string output, string pattern)
     {
         try
         {
-            return Regex.IsMatch(output, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            return Regex.IsMatch(output, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Singleline);
         }
         catch (ArgumentException)
         {
@@ -1062,6 +1102,12 @@ public sealed class BenchmarkService
         md.AppendLine($"- Runtime kind: `{run.Metadata.RuntimeKind}`");
         md.AppendLine($"- Runtime version: `{run.Metadata.RuntimeVersion}`");
         md.AppendLine($"- Context size: {run.Metadata.ContextSize?.ToString() ?? "n/a"}");
+        md.AppendLine($"- Prompt threads: {run.Metadata.PromptThreads?.ToString() ?? "not recorded"}");
+        md.AppendLine($"- KV cache K type: `{ValueOrNotRecorded(run.Metadata.KvCacheTypeK)}`");
+        md.AppendLine($"- KV cache V type: `{ValueOrNotRecorded(run.Metadata.KvCacheTypeV)}`");
+        md.AppendLine($"- Flash Attention: `{ValueOrNotRecorded(run.Metadata.FlashAttention)}`");
+        md.AppendLine($"- Empirical profile fingerprint: `{run.Metadata.ProfileFingerprint?.StableId ?? "not recorded"}`");
+        md.AppendLine($"- Observation provenance: `{run.Metadata.ObservationSource?.EvidenceOrigin.ToString() ?? "not recorded"}`");
         md.AppendLine($"- Sampler settings: `{run.Metadata.SamplerSettings}`");
         md.AppendLine($"- Temperature: {run.Metadata.Temperature?.ToString("0.###") ?? "n/a"}");
         md.AppendLine($"- OS: {run.Metadata.OS}");
@@ -1092,9 +1138,9 @@ public sealed class BenchmarkService
     private static string ToCsv(BenchmarkRun run)
     {
         var csv = new StringBuilder();
-        csv.AppendLine("case,phase,iteration,passed,first_token_ms,total_ms,approx_tokens_per_second,quality,failure_category,error");
+        csv.AppendLine("case,phase,iteration,passed,first_token_ms,total_ms,approx_tokens_per_second,quality,failure_category,error,kv_cache_type_k,kv_cache_type_v,flash_attention,profile_fingerprint,observation_origin");
         foreach (var result in run.Results)
-            csv.AppendLine($"{Csv(result.CaseName)},{Csv(result.Phase)},{result.IterationIndex + 1},{result.Passed},{result.FirstTokenMs},{result.TotalMs},{result.ApproxTokensPerSecond:F2},{result.QualityScore:F4},{Csv(result.FailureCategory)},{Csv(result.Error)}");
+            csv.AppendLine($"{Csv(result.CaseName)},{Csv(result.Phase)},{result.IterationIndex + 1},{result.Passed},{result.FirstTokenMs},{result.TotalMs},{result.ApproxTokensPerSecond:F2},{result.QualityScore:F4},{Csv(result.FailureCategory)},{Csv(result.Error)},{Csv(run.Metadata.KvCacheTypeK)},{Csv(run.Metadata.KvCacheTypeV)},{Csv(run.Metadata.FlashAttention)},{Csv(run.Metadata.ProfileFingerprint?.StableId ?? string.Empty)},{Csv(run.Metadata.ObservationSource?.EvidenceOrigin.ToString() ?? string.Empty)}");
         return csv.ToString();
     }
 
@@ -1106,6 +1152,9 @@ public sealed class BenchmarkService
             .Replace('\n', ' ');
         return $"\"{normalized.Replace("\"", "\"\"")}\"";
     }
+
+    private static string ValueOrNotRecorded(string value) =>
+        string.IsNullOrWhiteSpace(value) ? "not recorded" : value;
 
     private static string EscapeMarkdown(string value) => value.Replace("|", "\\|", StringComparison.Ordinal);
 

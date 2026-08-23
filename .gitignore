@@ -68,3 +68,5 @@ temp/
 
 # Other
 CLAUDE.md
+# Owner-only temporary repository-readiness audit material.
+docs/.private-audit/

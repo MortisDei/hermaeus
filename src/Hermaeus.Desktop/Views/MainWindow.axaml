@@ -7,6 +7,7 @@
         x:Class="Hermaeus.Desktop.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Title="{Binding WindowTitle}"
+        Icon="/Assets/hermaeus-app.png"
         MinWidth="720" MinHeight="500"
         Width="1280"   Height="820"
         WindowStartupLocation="CenterScreen"
@@ -30,9 +31,9 @@
             <Border Grid.Row="0" Padding="8,6"
                     BorderThickness="0,0,0,1"
                     BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
-                <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+                <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto">
 
-                    <Button Grid.Column="0" Classes="icon-btn"
+                    <Button Grid.Column="0" Classes="icon-btn" Background="Transparent" Cursor="Hand"
                             Command="{Binding ToggleSidebarCommand}"
                             ToolTip.Tip="Toggle sidebar">
                         <PathIcon Data="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"
@@ -233,7 +234,14 @@
                         </Button>
                     </StackPanel>
 
-                    <TextBlock Grid.Column="2"
+                    <Button Grid.Column="2"
+                            Content="Resume setup"
+                            Command="{Binding ResumeSetupCommand}"
+                            IsVisible="{Binding ShowSetupResume}"
+                            Padding="10,5" Margin="0,0,10,0"
+                            ToolTip.Tip="Return to the incomplete first-run setup without losing your current step." />
+
+                    <TextBlock Grid.Column="3"
                                Text="{Binding Chat.ConversationTitle}"
                                IsVisible="{Binding ShowChat}"
                                VerticalAlignment="Center"
@@ -241,7 +249,7 @@
                                FontSize="12" MaxWidth="220"
                                TextTrimming="CharacterEllipsis" />
 
-                    <views:ProjectSwitcherView Grid.Column="3" DataContext="{Binding Projects}"
+                    <views:ProjectSwitcherView Grid.Column="4" DataContext="{Binding Projects}"
                                                 VerticalAlignment="Center" Margin="0,0,4,0" />
                 </Grid>
             </Border>
@@ -474,7 +482,7 @@
                       HorizontalAlignment="Left"
                       VerticalAlignment="Bottom"
                       Margin="18,0,0,18"
-                      IsHitTestVisible="False">
+                      IsHitTestVisible="True">
             <ItemsControl.ItemsPanel>
                 <ItemsPanelTemplate>
                     <StackPanel Spacing="8" />
@@ -506,6 +514,13 @@
                                        FontSize="12"
                                        Opacity="0.9"
                                        TextWrapping="Wrap" />
+                            <Button Content="Copy details"
+                                    IsVisible="{Binding CanCopyDetails}"
+                                    HorizontalAlignment="Left"
+                                    Padding="6,3"
+                                    Command="{Binding $parent[ItemsControl].DataContext.CopyToastDetailsCommand}"
+                                    CommandParameter="{Binding}"
+                                    ToolTip.Tip="Copies the diagnostic detail text to the clipboard." />
                         </StackPanel>
                     </Border>
                 </DataTemplate>
@@ -544,7 +559,15 @@
                                             </StackPanel>
                                         </Grid>
                                         <TextBlock Text="{Binding Message}" TextWrapping="Wrap" Margin="0,4,0,0" />
-                                        <TextBlock Text="{Binding Timestamp}" FontSize="11" Opacity="0.6" />
+                                        <Button Content="Copy details"
+                                                IsVisible="{Binding CanCopyDetails}"
+                                                HorizontalAlignment="Left"
+                                                Margin="0,4,0,0"
+                                                Padding="6,3"
+                                                Command="{Binding $parent[ItemsControl].DataContext.CopyToastDetailsCommand}"
+                                                CommandParameter="{Binding}"
+                                                ToolTip.Tip="Copies the diagnostic detail text to the clipboard." />
+                                        <TextBlock Text="{Binding TimestampLabel}" FontSize="11" Opacity="0.6" />
                                     </StackPanel>
                                 </Border>
                             </DataTemplate>

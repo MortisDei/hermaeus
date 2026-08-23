@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Net.Http.Headers;
+using System.Diagnostics;
 
 namespace Hermaeus.Services;
 
@@ -60,12 +61,15 @@ public sealed class ModelDownloadService
 
             var fileMode = canResume ? FileMode.Append : FileMode.Create;
             var startByte = canResume ? existingSize : 0L;
+            var progressClock = Stopwatch.StartNew();
+            var lastProgressReportAt = TimeSpan.MinValue;
+            long lastProgressReportBytes = -1;
+            long downloadedBytes = startByte;
 
             using (var contentStream = await response.Content.ReadAsStreamAsync(ct))
             using (var fileStream = new FileStream(tempPath, fileMode, FileAccess.Write, FileShare.None, 81920, FileOptions.SequentialScan))
             {
                 var buffer = new byte[81920];
-                long downloadedBytes = startByte;
                 int bytesRead;
 
                 while ((bytesRead = await contentStream.ReadAsync(buffer, 0, buffer.Length, ct)) != 0)
@@ -75,8 +79,24 @@ public sealed class ModelDownloadService
 
                     var progressBytes = totalBytes > 0 ? downloadedBytes : 0L;
                     var percentComplete = totalBytes > 0 ? (double)progressBytes / totalBytes * 100 : 0;
-                    progress?.Report(new DownloadProgress(progressBytes, totalBytes, percentComplete));
+                    var completed = totalBytes > 0 && downloadedBytes >= totalBytes;
+                    if (progress is not null
+                        && (lastProgressReportBytes < 0
+                            || completed
+                            || progressClock.Elapsed - lastProgressReportAt >= TimeSpan.FromMilliseconds(250)))
+                    {
+                        progress.Report(new DownloadProgress(progressBytes, totalBytes, percentComplete));
+                        lastProgressReportBytes = downloadedBytes;
+                        lastProgressReportAt = progressClock.Elapsed;
+                    }
                 }
+            }
+
+            if (progress is not null && lastProgressReportBytes != downloadedBytes)
+            {
+                var progressBytes = totalBytes > 0 ? downloadedBytes : 0L;
+                var percentComplete = totalBytes > 0 ? (double)progressBytes / totalBytes * 100 : 0;
+                progress.Report(new DownloadProgress(progressBytes, totalBytes, percentComplete));
             }
 
             File.Move(tempPath, destinationPath, overwrite: true);

@@ -27,38 +27,75 @@ Useful options:
 ./build.sh --self-contained
 ```
 
+The normal `./build.sh` path performs the required `linux-x64` restores. Use
+`--skip-restore` only as an optimisation after restoring every published
+project for that RID. For the default package:
+
+```bash
+dotnet restore Hermaeus.sln -r linux-x64
+./build.sh --skip-restore
+```
+
+An ordinary solution restore without the publish RID can leave `project.assets.json`
+without the required target and cause `NETSDK1047`.
+
 Framework-dependent packages require the .NET 10 desktop/runtime stack on the
 target machine. Self-contained packages include the runtime and are larger.
 
-The Linux package includes:
+The Linux package root contains only public launch actions and grouped content.
+Its layout is:
 
-- published Hermaeus desktop binaries
-- `docs/README.md`, `docs/LICENSE.md`, `docs/NOTICE.md`, and
-  `docs/COMMERCIAL.md`
+- `Hermaeus`, a relocation-safe link to the native application launcher
+- `Install Hermaeus`, the graphical user-local desktop installer
+- `Uninstall Hermaeus`, the graphical user-local desktop uninstaller
+- `app/`, containing the published desktop runtime and `app/LocalApi/`
+- `docs/README.md`, `docs/user-guide.md`, `docs/LICENSE.md`,
+  `docs/NOTICE.md`, and `docs/COMMERCIAL.md`
 - `docs/hermaeus-branding.*` when present
-- `hermaeus.desktop`
-- `hermaeus.ico`, `hermaeus-app.png`, `hermaeus-tray.png`,
-  `hermaeus-tray-dark.png`, and `hermaeus-tray-light.png`
-- `install-desktop.sh`
-- `uninstall-desktop.sh`
+- `icons/`, containing desktop-install icon resources
 
-To install the desktop launcher for the current user:
+Normal packages exclude `.pdb` symbol files.
+
+Double-click `Hermaeus` in the extracted directory to launch directly. It is a
+relative link to the package's native .NET apphost, not a shell script, so file
+managers can treat it as an executable without an execute-text-files preference.
+The link and its target remain valid when the extracted directory is moved.
+The internal executable has a neutral filename so it is not misclassified as a
+Desktop Entry by file managers that treat `.Desktop` suffixes case-insensitively.
+
+To install the desktop launcher for the current user, double-click
+`Install Hermaeus` and confirm the action. No terminal or executable-text-file
+preference is required. The implementation scripts remain under
+`app/integration/` and are not part of the package's user-facing root.
+
+For release-package validation from a terminal, the same implementation can be
+invoked directly:
 
 ```bash
 tar -xzf dist/hermaeus-<version>-linux-x64.tar.gz -C dist
-dist/hermaeus-<version>-linux-x64/install-desktop.sh
+dist/hermaeus-<version>-linux-x64/app/integration/install-desktop.sh
 ```
 
 The installer copies the package under
 `${XDG_DATA_HOME:-$HOME/.local/share}/hermaeus/`, installs a desktop entry under
 `${XDG_DATA_HOME:-$HOME/.local/share}/applications/`, and installs the icon
-under `${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/`. It does not require
+under `${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/512x512/apps/` using
+the canonical application icon. The installed desktop filename, its icon name,
+and the application's X11/XWayland WM class all use `hermaeus`, allowing the
+desktop shell to associate running windows with this entry. It does not require
 root and does not write to system paths.
 
-To remove the user-local launcher and installed package:
+Source and Debug launches use the same `hermaeus` window identity as release
+builds, but a desktop shell can still show a generic icon when there is no
+installed `hermaeus.desktop` entry to associate with that running window. The
+installed package is the release taskbar and application-menu verification path.
+
+To remove the user-local launcher and installed package, double-click
+`Uninstall Hermaeus` in the extracted archive and confirm. The terminal
+equivalent for release validation is:
 
 ```bash
-~/.local/share/hermaeus/hermaeus-<version>-linux-x64/uninstall-desktop.sh
+dist/hermaeus-<version>-linux-x64/app/integration/uninstall-desktop.sh
 ```
 
 ## Windows
@@ -84,13 +121,59 @@ pwsh ./build.ps1 -Configuration Debug
 pwsh ./build.ps1 -SelfContained
 ```
 
+The normal PowerShell build performs RID-specific restores. If the projects
+were already restored for the target RID, the equivalent optimised path is:
+
+```powershell
+dotnet restore Hermaeus.sln -r win-x64
+pwsh ./build.ps1 -SkipRestore -Runtime win-x64
+```
+
 Framework-dependent packages require the .NET 10 runtime on the target machine.
 Self-contained packages include the runtime and are larger.
 
-The Windows package includes published Hermaeus desktop binaries, app/tray icon
-assets, repository license and commercial notices under `docs/`,
-`docs/hermaeus-branding.*` when present, and `Launch-Hermaeus.cmd` for starting the
-app from the extracted folder.
+The Windows archive keeps its public root small:
+
+```text
+hermaeus-<version>-win-x64/
+    Hermaeus.exe
+    app/
+        Hermaeus.Desktop.exe
+        <desktop runtime files>
+        LocalApi/
+            <Local API runtime files>
+    docs/
+    icons/
+```
+
+`Hermaeus.exe` is a minimal open-source launcher implemented with Win32. Its
+auditable source is `src/Hermaeus.Launcher/launcher.c`, with the canonical
+application icon linked from `launcher.rc`. It resolves its own package
+directory and starts only the fixed bundled target
+`app\Hermaeus.Desktop.exe`, using `app\` as the working
+directory and forwarding the original command-line arguments. It performs no
+network, update, installation, elevation, registry, discovery, or persistence
+behavior. The launcher exists only to keep the portable archive tidy and give
+users a normal double-click entry point. The old `Launch-Hermaeus.cmd` is not
+packaged.
+
+The build requires a native compiler only for this small launcher. Windows
+builds use the Visual Studio C++ tools already present on GitHub's
+`windows-latest` release runner. A non-Windows `win-x64` build uses
+`x86_64-w64-mingw32-gcc` and `windres`; cross-building `win-arm64` requires a
+Windows host with the Visual Studio ARM64 C++ tools. No third-party library or
+launcher runtime is added to the package.
+
+Published desktop files live under `app/`, the Local API payload under
+`app/LocalApi/`, repository documentation and notices under `docs/`, and
+application/tray icon assets under `icons/`. Normal packages exclude `.pdb`
+files across the whole tree. `build.ps1` validates this layout before creating
+the ZIP and checksum.
+
+Linux tar headers use numeric root ownership and remove group/other write bits.
+This prevents a local builder username, group name, or permissive worktree mode
+from becoming part of a published archive. Extraction does not require root and
+the user who extracts the archive still owns the resulting files.
 
 ## Checksums
 
@@ -140,5 +223,5 @@ GitHub Release automatically; nothing about local packaging above changes.
 ## Licensing Posture
 
 Packages include the source-available noncommercial license, commercial license
-notice, and third-party notice documents. Commercial use still requires a
-separate paid commercial license.
+notice, and third-party notice documents. Uses outside PolyForm Noncommercial's
+permitted purposes require separate written permission; see `COMMERCIAL.md`.

@@ -6,51 +6,94 @@ using Hermaeus.Rag.Retrieval;
 using Hermaeus.Voice;
 using System.Diagnostics;
 using System.Linq;
-using System.Net.Http.Json;
 using System.Runtime.InteropServices;
-using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
 namespace Hermaeus.Services;
 
 public sealed partial class DoctorService
 {
-    private DoctorCheck CheckLlamaServerBinary()
+    private async Task<DoctorCheck> CheckLlamaServerBinaryAsync(CancellationToken ct)
     {
-        var server = _settings.Settings.ManagedServers.FirstOrDefault();
-        if (server is null || string.IsNullOrWhiteSpace(server.ExecutablePath))
+        var configuredPath = (_settings.Settings.ManagedServers.FirstOrDefault(s => !s.EmbeddingsMode)
+            ?? _settings.Settings.ManagedServers.FirstOrDefault())?.ExecutablePath ?? string.Empty;
+        var resolved = ResolveManagedLlamaExecutable(configuredPath);
+        if (string.IsNullOrWhiteSpace(resolved))
         {
             return BuildCheck(
                 "llama-server",
-                "llama-server found",
+                "llama-server usable",
                 DoctorCheckStatus.Error,
-                "llama-server not configured",
-                $"No llama-server executable is configured. Hermaeus can download the latest release for {RuntimeInformation.OSDescription} ({RuntimeInformation.ProcessArchitecture}) here, or you can set the path manually in Services.",
+                "llama-server not found",
+                $"No usable configured or managed llama-server executable was found. Hermaeus can download the latest release for {RuntimeInformation.OSDescription} ({RuntimeInformation.ProcessArchitecture}) here, or you can set the path manually in Services.",
                 "Download llama.cpp",
                 true,
-                "No managed server executable configured.",
+                $"Configured path: {configuredPath}\nManaged install root: {ResolveLlamaServerInstallDirectory()}",
                 "Runtime");
         }
 
-        var path = server.ExecutablePath.Trim();
-        var resolved = ResolveExecutable(path);
-        var ok = !string.IsNullOrWhiteSpace(resolved) && File.Exists(resolved);
+        var exists = !string.IsNullOrWhiteSpace(resolved) && File.Exists(resolved);
+        if (!exists)
+        {
+            return BuildCheck(
+                "llama-server",
+                "llama-server usable",
+                DoctorCheckStatus.Error,
+                "llama-server missing",
+                $"Executable not found on disk or PATH: {resolved}. Hermaeus can download the latest release for {RuntimeInformation.OSDescription} ({RuntimeInformation.ProcessArchitecture}) here.",
+                "Download llama.cpp",
+                true,
+                resolved,
+                "Runtime");
+        }
+
+        var probe = await ReadLlamaServerVersionAsync(resolved, ct);
+        if (!probe.Started)
+        {
+            return BuildCheck(
+                "llama-server",
+                "llama-server usable",
+                DoctorCheckStatus.Error,
+                "llama-server exists but cannot execute",
+                probe.Error,
+                "Download llama.cpp",
+                true,
+                $"Executable: {resolved}\n{probe.Error}",
+                "Runtime");
+        }
+
+        if (probe.ExitCode != 0)
+        {
+            return BuildCheck(
+                "llama-server",
+                "llama-server usable",
+                DoctorCheckStatus.Error,
+                $"llama-server failed its launch probe (exit {probe.ExitCode?.ToString() ?? "unknown"})",
+                "The executable exists, but it cannot run successfully. Reinstall the managed llama.cpp package or correct its companion libraries.",
+                "Download llama.cpp",
+                true,
+                $"Executable: {resolved}\n{probe.Raw}\n{probe.Error}".Trim(),
+                "Runtime");
+        }
+
+        var healthy = probe.BuildNumber is not null;
         return BuildCheck(
             "llama-server",
-            "llama-server found",
-            ok ? DoctorCheckStatus.Ready : DoctorCheckStatus.Error,
-            ok ? "llama-server available" : "llama-server missing",
-            ok ? resolved : $"Executable not found on disk or PATH: {resolved}. Hermaeus can download the latest release for {RuntimeInformation.OSDescription} ({RuntimeInformation.ProcessArchitecture}) here.",
-            ok ? "Open Services" : "Download llama.cpp",
+            "llama-server usable",
+            healthy ? DoctorCheckStatus.Ready : DoctorCheckStatus.Warning,
+            healthy ? $"llama-server executed successfully ({probe.Label})" : "llama-server executes, but health is unknown",
+            healthy ? resolved : "The executable ran successfully but did not report a recognizable llama.cpp build identifier.",
+            "Open Services",
             true,
-            resolved,
+            $"Executable: {resolved}\nVersion output: {probe.Raw}",
             "Runtime");
     }
 
     private async Task<DoctorCheck> CheckLlamaServerUpdateAsync(CancellationToken ct)
     {
-        var server = _settings.Settings.ManagedServers.FirstOrDefault();
-        var resolved = ResolveExecutable(server?.ExecutablePath ?? string.Empty);
+        var server = _settings.Settings.ManagedServers.FirstOrDefault(s => !s.EmbeddingsMode)
+            ?? _settings.Settings.ManagedServers.FirstOrDefault();
+        var resolved = ResolveManagedLlamaExecutable(server?.ExecutablePath ?? string.Empty);
         if (string.IsNullOrWhiteSpace(resolved))
         {
             return BuildCheck(
@@ -95,15 +138,21 @@ public sealed partial class DoctorService
                 "Runtime");
         }
 
-        var status = DoctorCheckStatus.Ready;
-        var summary = $"Installed {local.Label}; latest {latest.TagName}";
-        var detail = "llama-server appears current enough for the known release metadata.";
-        if (latest.BuildNumber is int latestBuild && local.BuildNumber.Value < latestBuild)
+        var comparison = CompareLlamaBuilds(local.BuildNumber.Value, latest.BuildNumber);
+        var status = comparison == LlamaVersionComparison.Outdated
+            ? DoctorCheckStatus.Warning
+            : comparison == LlamaVersionComparison.Incomparable
+                ? DoctorCheckStatus.Info
+                : DoctorCheckStatus.Ready;
+        var summary = comparison == LlamaVersionComparison.Incomparable
+            ? $"Installed {local.Label}; latest {latest.TagName} (not comparable)"
+            : $"Installed {local.Label}; latest {latest.TagName}";
+        var detail = comparison switch
         {
-            status = DoctorCheckStatus.Warning;
-            summary = $"llama-server may be outdated: {local.Label} < {latest.TagName}";
-            detail = "Download a newer llama.cpp release or rerun Local AI setup.";
-        }
+            LlamaVersionComparison.Outdated => "Download a newer llama.cpp release or rerun Local AI setup.",
+            LlamaVersionComparison.Incomparable => "The installed and upstream identifiers use different schemes, so Doctor cannot determine whether this build is current.",
+            _ => "The installed llama.cpp build is current for the comparable release metadata."
+        };
 
         return BuildCheck(
             "llama-server-update",
@@ -641,6 +690,16 @@ public sealed partial class DoctorService
         return _llamaSetup.GetDefaultInstallPath(root);
     }
 
+    private string ResolveManagedLlamaExecutable(string configuredPath)
+    {
+        var configured = ResolveExecutable(configuredPath);
+        if (!string.IsNullOrWhiteSpace(configured))
+            return configured;
+
+        return LlamaServerSetupService.ResolveInstalledExecutable(ResolveLlamaServerInstallDirectory())
+            ?? string.Empty;
+    }
+
     private static string ResolveExecutable(string executablePath)
     {
         if (string.IsNullOrWhiteSpace(executablePath))
@@ -655,16 +714,20 @@ public sealed partial class DoctorService
 
     private static async Task<LlamaVersionInfo> ReadLlamaServerVersionAsync(string executablePath, CancellationToken ct)
     {
-        var output = await RunVersionCommandAsync(executablePath, "--version", ct);
-        if (string.IsNullOrWhiteSpace(output))
-            output = await RunVersionCommandAsync(executablePath, "--help", ct);
+        var result = await RunVersionCommandAsync(executablePath, "--version", ct);
+        if (!result.Success || string.IsNullOrWhiteSpace(result.Output))
+        {
+            var help = await RunVersionCommandAsync(executablePath, "--help", ct);
+            if (help.Success || help.Output.Length > result.Output.Length)
+                result = help;
+        }
 
-        var build = TryParseLlamaBuild(output);
+        var build = TryParseLlamaBuild(result.Output);
         var label = build is int value ? $"b{value}" : "unknown build";
-        return new LlamaVersionInfo(label, build, output.Trim());
+        return new LlamaVersionInfo(label, build, result.Output.Trim(), result.Started, result.ExitCode, result.Error);
     }
 
-    private static async Task<string> RunVersionCommandAsync(string executablePath, string arg, CancellationToken ct)
+    private static async Task<LlamaCommandResult> RunVersionCommandAsync(string executablePath, string arg, CancellationToken ct)
     {
         using var process = new Process
         {
@@ -682,16 +745,20 @@ public sealed partial class DoctorService
         try
         {
             if (!process.Start())
-                return string.Empty;
+                return new LlamaCommandResult(false, null, string.Empty, "The operating system refused to start the executable.");
 
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeout.CancelAfter(TimeSpan.FromSeconds(3));
             var stdout = await process.StandardOutput.ReadToEndAsync(timeout.Token);
             var stderr = await process.StandardError.ReadToEndAsync(timeout.Token);
             await process.WaitForExitAsync(timeout.Token);
-            return $"{stdout}\n{stderr}".Trim();
+            return new LlamaCommandResult(true, process.ExitCode, $"{stdout}\n{stderr}".Trim(), string.Empty);
         }
-        catch
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException)
         {
             try
             {
@@ -702,27 +769,38 @@ public sealed partial class DoctorService
             {
             }
 
-            return string.Empty;
+            return new LlamaCommandResult(true, null, string.Empty, "The executable probe timed out after 3 seconds.");
+        }
+        catch (Exception ex)
+        {
+            try
+            {
+                if (!process.HasExited)
+                    process.Kill(entireProcessTree: true);
+            }
+            catch
+            {
+            }
+
+            return new LlamaCommandResult(false, null, string.Empty, ex.Message);
         }
     }
 
-    private Task<LlamaLatestRelease?> TryGetLatestLlamaReleaseAsync(CancellationToken ct) =>
-        GetCachedGitHubReleaseAsync("llama.cpp-latest-release", FetchLatestLlamaReleaseAsync, ct);
+    internal static LlamaVersionComparison CompareLlamaBuilds(int installedBuild, int? latestBuild) =>
+        latestBuild is null
+            ? LlamaVersionComparison.Incomparable
+            : installedBuild < latestBuild.Value
+                ? LlamaVersionComparison.Outdated
+                : LlamaVersionComparison.Current;
 
-    private static async Task<LlamaLatestRelease?> FetchLatestLlamaReleaseAsync(CancellationToken ct)
+    private Task<LlamaLatestRelease?> TryGetLatestLlamaReleaseAsync(CancellationToken ct) =>
+        GetCachedGitHubReleaseAsync("llama.cpp-latest-compatible-release", FetchLatestLlamaReleaseAsync, ct);
+
+    private async Task<LlamaLatestRelease?> FetchLatestLlamaReleaseAsync(CancellationToken ct)
     {
         try
         {
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeout.CancelAfter(TimeSpan.FromSeconds(4));
-            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(4) };
-            http.DefaultRequestHeaders.UserAgent.ParseAdd("Hermaeus-Doctor/1.0");
-            var release = await http.GetFromJsonAsync<GitHubRelease>(
-                "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest",
-                timeout.Token);
-            if (string.IsNullOrWhiteSpace(release?.TagName))
-                return null;
-
+            var release = await _llamaSetup.GetLatestDownloadInfoAsync(ct);
             return new LlamaLatestRelease(
                 release.TagName,
                 TryParseLlamaBuild(release.TagName),
@@ -744,9 +822,9 @@ public sealed partial class DoctorService
         if (match.Success && int.TryParse(match.Groups["build"].Value, out var build))
             return build;
 
-        // Current llama-server --version output dropped the "b" prefix, e.g.
-        // "version: 5750 (abcdef1)" or "build: 5750 (abcdef1)".
-        match = Regex.Match(value, @"(?:version|build)\s*[:=]\s*(?<build>\d{3,6})", RegexOptions.IgnoreCase);
+        // Current llama-server output uses both "build: 5750" and
+        // "(build 10509, commit ...)" forms. The latter is what b10509 emits.
+        match = Regex.Match(value, @"(?:version|build)\s*[:=]?\s*(?<build>\d{3,6})", RegexOptions.IgnoreCase);
         return match.Success && int.TryParse(match.Groups["build"].Value, out build) ? build : null;
     }
 
@@ -763,9 +841,18 @@ public sealed partial class DoctorService
             && profile.ModelModifiedAtUtc == file.LastWriteTimeUtc);
     }
 
-    private sealed record LlamaVersionInfo(string Label, int? BuildNumber, string Raw);
+    private sealed record LlamaCommandResult(bool Started, int? ExitCode, string Output, string Error)
+    {
+        public bool Success => Started && ExitCode == 0;
+    }
+
+    private sealed record LlamaVersionInfo(string Label, int? BuildNumber, string Raw, bool Started, int? ExitCode, string Error);
     private sealed record LlamaLatestRelease(string TagName, int? BuildNumber, DateTimeOffset PublishedAt);
-    private sealed record GitHubRelease(
-        [property: JsonPropertyName("tag_name")] string TagName,
-        [property: JsonPropertyName("published_at")] DateTimeOffset? PublishedAt);
+}
+
+internal enum LlamaVersionComparison
+{
+    Current,
+    Outdated,
+    Incomparable
 }

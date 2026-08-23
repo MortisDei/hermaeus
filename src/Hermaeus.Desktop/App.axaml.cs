@@ -41,6 +41,15 @@ public partial class App : Application
         // Keeps the cursor a hand across the gaps in a row of icon buttons;
         // see Controls/IconBarCursor.cs for why those gaps flicker.
         IconBarCursor.Install();
+
+        if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime packageLifetime
+            && Program.PackageIntegrationLaunch is { } packageLaunch)
+        {
+            packageLifetime.MainWindow = new PackageIntegrationWindow(packageLaunch);
+            base.OnFrameworkInitializationCompleted();
+            return;
+        }
+
         var services = new ServiceCollection();
         ConfigureServices(services);
         var sp = services.BuildServiceProvider();
@@ -55,7 +64,9 @@ public partial class App : Application
                 DataContext = vm,
                 PatchDiffService = sp.GetRequiredService<IPatchDiffService>()
             };
-            _desktopIntegration = new DesktopIntegrationService(vm);
+            _desktopIntegration = new DesktopIntegrationService(
+                vm,
+                sp.GetRequiredService<ITrayIntegrationState>());
             window.DesktopIntegration = _desktopIntegration;
             _desktopIntegration.Attach(window);
             desktop.MainWindow = window;
@@ -169,58 +180,96 @@ public partial class App : Application
             // happened to run at startup.
             sp.GetRequiredService<AppLifecycleJournalService>().RecordOperation("running");
 
-            // Warm up the embedding model to prevent "cold-start" delay on
-            // first chat, but off the critical path: conversations and
-            // panels must not wait behind an ONNX model load that only
-            // matters once memory injection is actually used.
-            _ = Task.Run(async () =>
-            {
-                var warmupTimer = Stopwatch.StartNew();
-                try
-                {
-                    var embeddings = sp.GetService<IEmbeddingService>();
-                    if (embeddings is not null)
-                    {
-                        await embeddings.EmbedAsync("warmup", CancellationToken.None);
-                        logs.Add(new RuntimeLogEntry(
-                            DateTime.UtcNow,
-                            RuntimeLogLevel.Info,
-                            RuntimeLogCategory.Startup,
-                            $"Embedding warm-up completed in {warmupTimer.ElapsedMilliseconds} ms"));
-                    }
-                }
-                catch (Exception ex)
-                {
-                    logs.Add(new RuntimeLogEntry(
-                        DateTime.UtcNow,
-                        RuntimeLogLevel.Warning,
-                        RuntimeLogCategory.Service,
-                        $"Embedding model warm-up failed: {ex.Message}"));
-                }
-
-                // Backfill runs off the send path (r9 01-send-path-latency.md
-                // 1.2): once here, after the warm-up above, and again after
-                // memory writes (MemoryStore.SaveAsync), never inside a chat
-                // send.
-                try
-                {
-                    var memoryStore = sp.GetService<IMemoryStore>();
-                    if (memoryStore is not null)
-                        await memoryStore.RunEmbeddingBackfillAsync();
-                }
-                catch (Exception ex)
-                {
-                    logs.Add(new RuntimeLogEntry(
-                        DateTime.UtcNow,
-                        RuntimeLogLevel.Warning,
-                        RuntimeLogCategory.Service,
-                        $"Startup embedding backfill failed: {ex.Message}"));
-                }
-            });
+            ScheduleEmbeddingWarmup(sp, vm, settingsService.Settings, logs);
         }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"Hermaeus startup initialization failed: {ex}");
+        }
+    }
+
+    /// <summary>
+    /// A managed localhost embedding server is expected to refuse connections
+    /// until it reaches Running. Wait for that state instead of logging a
+    /// misleading startup warning. Remote or otherwise unmanaged endpoints are
+    /// probed immediately because no local lifecycle event can make them ready.
+    /// </summary>
+    internal static void ScheduleEmbeddingWarmup(
+        IServiceProvider services,
+        MainWindowViewModel vm,
+        AppSettings settings,
+        IRuntimeLogService logs)
+    {
+        if (!settings.SetupWizardCompleted)
+            return;
+
+        var endpoint = Uri.TryCreate(settings.Rag.EmbeddingBaseUrl, UriKind.Absolute, out var parsed)
+            ? parsed
+            : null;
+        var managed = endpoint is { IsLoopback: true }
+            ? vm.Services.Servers.FirstOrDefault(server => server.EmbeddingsMode && server.Port == endpoint.Port)
+            : null;
+
+        if (managed is null)
+        {
+            _ = Task.Run(() => WarmEmbeddingsAndBackfillAsync(services, logs));
+            return;
+        }
+
+        var scheduled = 0;
+        EventHandler? availabilityChanged = null;
+        availabilityChanged = (_, _) => TrySchedule();
+        void TrySchedule()
+        {
+            if (!managed.IsRunning || Interlocked.Exchange(ref scheduled, 1) != 0)
+                return;
+
+            vm.Services.ServerAvailabilityChanged -= availabilityChanged;
+            _ = Task.Run(() => WarmEmbeddingsAndBackfillAsync(services, logs));
+        }
+
+        vm.Services.ServerAvailabilityChanged += availabilityChanged;
+        TrySchedule();
+    }
+
+    private static async Task WarmEmbeddingsAndBackfillAsync(IServiceProvider services, IRuntimeLogService logs)
+    {
+        var warmupTimer = Stopwatch.StartNew();
+        try
+        {
+            var embeddings = services.GetService<IEmbeddingService>();
+            if (embeddings is not null)
+            {
+                await embeddings.EmbedAsync("warmup", CancellationToken.None);
+                logs.Add(new RuntimeLogEntry(
+                    DateTime.UtcNow,
+                    RuntimeLogLevel.Info,
+                    RuntimeLogCategory.Startup,
+                    $"Embedding warm-up completed in {warmupTimer.ElapsedMilliseconds} ms"));
+            }
+        }
+        catch (Exception ex)
+        {
+            logs.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Warning,
+                RuntimeLogCategory.Service,
+                $"Embedding model warm-up failed: {ex.Message}"));
+        }
+
+        try
+        {
+            var memoryStore = services.GetService<IMemoryStore>();
+            if (memoryStore is not null)
+                await memoryStore.RunEmbeddingBackfillAsync();
+        }
+        catch (Exception ex)
+        {
+            logs.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Warning,
+                RuntimeLogCategory.Service,
+                $"Startup embedding backfill failed: {ex.Message}"));
         }
     }
 

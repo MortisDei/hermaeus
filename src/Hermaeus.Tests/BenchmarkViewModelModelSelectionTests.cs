@@ -2,6 +2,8 @@ using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
 using Hermaeus.Services;
 using Hermaeus.ViewModels;
+using System.Net;
+using System.Net.Sockets;
 using Xunit;
 using static Hermaeus.Tests.Helpers;
 
@@ -17,6 +19,13 @@ namespace Hermaeus.Tests;
 /// </summary>
 public sealed class BenchmarkViewModelModelSelectionTests
 {
+    private static int GetFreePort()
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        return ((IPEndPoint)listener.LocalEndpoint).Port;
+    }
+
     [Fact]
     public async Task Selecting_a_model_triggers_no_restart_and_running_triggers_exactly_one()
     {
@@ -26,8 +35,8 @@ public sealed class BenchmarkViewModelModelSelectionTests
         var modelPath = temp.PathFor("model.gguf");
         File.WriteAllText(modelPath, "fake");
         settings.Settings.ManagedServers.Clear();
-        settings.Settings.ManagedServers.Add(new ServerConfig { Name = "Chat", Port = 39555 });
-        settings.Settings.ManagedServers.Add(new ServerConfig { Name = "Embeddings", Port = 39556, EmbeddingsMode = true });
+        settings.Settings.ManagedServers.Add(new ServerConfig { Name = "Chat", Port = GetFreePort() });
+        settings.Settings.ManagedServers.Add(new ServerConfig { Name = "Embeddings", Port = GetFreePort(), EmbeddingsMode = true });
 
         var services = NewServicesViewModel(settings);
         var starts = 0;
@@ -47,6 +56,7 @@ public sealed class BenchmarkViewModelModelSelectionTests
         vm.SelectedModel = localModel;
 
         Assert.Equal(0, starts);
+        Assert.Equal(string.Empty, services.Servers[0].ModelPath);
         Assert.Contains("when the benchmark runs", vm.Status, StringComparison.Ordinal);
 
         var suite = BenchmarkService.StarterSuites().First();
@@ -55,6 +65,15 @@ public sealed class BenchmarkViewModelModelSelectionTests
 
         await vm.RunCommand.ExecuteAsync(null);
 
+        // ServerProcessManager raises Starting synchronously, but the server row
+        // marshals that transition through the captured UI synchronization
+        // context. The command can complete before xUnit drains that post, so
+        // wait for the intentionally unconfigured start attempt to reach Error
+        // before checking the exact transition count.
+        await WaitForAsync(
+            () => services.Servers[0].Status == ServerStatus.Error,
+            "the intentionally unconfigured managed server restart to settle");
+        Assert.Equal(Path.GetFullPath(modelPath), services.Servers[0].ModelPath);
         Assert.Equal(1, starts);
     }
 }

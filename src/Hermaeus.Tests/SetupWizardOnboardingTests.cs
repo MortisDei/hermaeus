@@ -22,9 +22,7 @@ internal static class SetupWizardOnboardingTests
     public static Task RecommendReturnsSmallTierWhenNoGpuIsPresent()
     {
         var snapshot = new SystemSnapshot { Gpus = [] };
-        // The low tier is Phi-4 mini (MIT), not Qwen2.5 3B, which is research
-        // and non-commercial only. A machine with no GPU is the least likely
-        // place to want a restricted default.
+        // The low tier stays small enough for CPU-only machines.
         Equal(StarterModelCatalog.Phi4Mini.Id, StarterModelCatalog.Recommend(snapshot).Id, "No GPU must recommend the permissively licensed low tier.");
         return Task.CompletedTask;
     }
@@ -68,10 +66,8 @@ internal static class SetupWizardOnboardingTests
             Equal(64, entry.Sha256.Length, $"{entry.Id} must declare a full 64-character SHA256 hash.");
             True(entry.SizeBytes > 0, $"{entry.Id} must declare a positive size.");
             True(entry.DisplayName.Contains("GB", StringComparison.Ordinal), $"{entry.Id}'s display name should state its approximate size so the wizard shows it before download.");
-            // Not every model offered here is permissively licensed: the
-            // smallest is research and non-commercial only, and one carries an
-            // attribution requirement. An entry with no licence would offer a
-            // download with no way for the user to know what they are taking on.
+            // An entry with no licence would offer a download with no way for
+            // the user to know what they are taking on.
             True(entry.HasLicense, $"{entry.Id} must declare the base model's licence; the wizard shows it before download.");
             True(entry.LicenseUrl.StartsWith("https://", StringComparison.Ordinal), $"{entry.Id} must link its licence over https.");
         }
@@ -88,8 +84,7 @@ internal static class SetupWizardOnboardingTests
 
     /// <summary>
     /// 0.36.0-alpha: the wizard offers a choice of starter models, not one
-    /// recommendation, because they differ in licence as well as size (the
-    /// smallest is research and non-commercial only). The hardware probe
+    /// recommendation, because they differ in family and size. The hardware probe
     /// finishes after the wizard is constructed, so the selection has to follow
     /// a recommendation that arrives late, and stop following it the moment the
     /// user picks for themselves.
@@ -124,20 +119,22 @@ internal static class SetupWizardOnboardingTests
     }
 
     /// <summary>
-    /// Every entry is offered with its licence, and the catalog covers more
-    /// than one licence family so the user actually has a choice of terms.
+    /// Every entry is offered with its licence, even though the current small
+    /// catalogue contains only permissive licences.
     /// </summary>
     public static Task CatalogOffersModelsUnderMoreThanOneLicence()
     {
         var licences = StarterModelCatalog.All.Select(e => e.License).Distinct(StringComparer.Ordinal).ToList();
-        True(licences.Count > 1, "the starter catalog should not lock every option to a single licence");
+        True(licences.Count > 1, "the starter catalog should retain explicit licence metadata from more than one model family");
         True(StarterModelCatalog.All.Any(e => e.License == "MIT" || e.License == "Apache-2.0"),
             "at least one starter model must be permissively licensed");
-        // The smallest, and therefore the default on a machine with no GPU, is
-        // the restricted one. That is a fact worth pinning: if it ever stops
-        // declaring its restriction, the wizard stops warning about it.
-        True(StarterModelCatalog.Small.LicenseNote.Contains("non-commercial", StringComparison.OrdinalIgnoreCase),
-            "Qwen2.5 3B is research/non-commercial only and must say so");
+        False(StarterModelCatalog.All.Any(entry => entry.Id.Contains("qwen2.5", StringComparison.OrdinalIgnoreCase)),
+            "the starter catalogue must not regress to Qwen2.5");
+        True(StarterModelCatalog.Gemma4_E2B.DisplayName.Contains("QAT", StringComparison.Ordinal),
+            "Gemma 4 E2B QAT must be available");
+        True(StarterModelCatalog.Medium.Id == StarterModelCatalog.Gemma4_E4B.Id
+             && StarterModelCatalog.Medium.DisplayName.Contains("QAT", StringComparison.Ordinal),
+            "the 6-12 GB recommendation must be Gemma 4 E4B QAT");
         return Task.CompletedTask;
     }
 

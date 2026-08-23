@@ -12,15 +12,16 @@ namespace Hermaeus.Services;
 /// </summary>
 internal static class OpenAiCompatibleToolWire
 {
-    public static List<object> BuildMessages(IReadOnlyList<ChatMessage> messages, string? systemPrompt)
+    public static List<object> BuildMessages(IReadOnlyList<ChatMessage> messages, string? systemPrompt, bool includeReasoning = false)
     {
         var msgs = messages.Select(m => (object)new OutgoingMessage(
             m.Role,
             BuildContent(m),
             m.ToolCallId,
-            m.ToolCalls?.Select(tc => new OutgoingToolCall(tc.Id, "function", new OutgoingFunctionCall(tc.Name, tc.ArgumentsJson))).ToList())).ToList();
+            m.ToolCalls?.Select(tc => new OutgoingToolCall(tc.Id, "function", new OutgoingFunctionCall(tc.Name, tc.ArgumentsJson))).ToList(),
+            includeReasoning && !string.IsNullOrWhiteSpace(m.ReasoningContent) ? m.ReasoningContent : null)).ToList();
         if (!string.IsNullOrWhiteSpace(systemPrompt))
-            msgs.Insert(0, new OutgoingMessage("system", systemPrompt, null, null));
+            msgs.Insert(0, new OutgoingMessage("system", systemPrompt, null, null, null));
         return msgs;
     }
 
@@ -121,7 +122,7 @@ internal static class OpenAiCompatibleToolWire
         }
     }
 
-    private sealed record OutgoingMessage(string role, object? content, string? tool_call_id, List<OutgoingToolCall>? tool_calls);
+    private sealed record OutgoingMessage(string role, object? content, string? tool_call_id, List<OutgoingToolCall>? tool_calls, string? reasoning_content);
     private sealed record OutgoingToolCall(string id, string type, OutgoingFunctionCall function);
     private sealed record OutgoingFunctionCall(string name, string arguments);
     private sealed record OutgoingTool(string type, OutgoingFunctionSpec function);

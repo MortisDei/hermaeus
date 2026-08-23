@@ -691,6 +691,7 @@ public partial class BenchmarkViewModel : ObservableObject
             Prompt = c.Prompt,
             SystemPrompt = c.SystemPrompt,
             ExpectedKeywords = c.ExpectedKeywords.ToList(),
+            ExpectedKeywordAlternatives = c.ExpectedKeywordAlternatives.Select(g => g.ToList()).ToList(),
             ExpectedRegexes = c.ExpectedRegexes.ToList(),
             ShouldRefuse = c.ShouldRefuse,
             Tags = c.Tags.ToList()

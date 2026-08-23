@@ -124,10 +124,10 @@
                                             <TextBlock Text="{Binding FitLabel}" FontSize="10" FontWeight="SemiBold" />
                                         </Border>
                                         <Button Grid.Column="3"
-                                                Content="{Binding IsDownloading, Converter={x:Static views:BoolToTextConverter.Instance}, ConverterParameter='Downloading...|Download'}"
+                                                Content="{Binding DownloadStateLabel}"
                                                 Command="{Binding $parent[ItemsControl].DataContext.DownloadHfFileCommand}"
                                                 CommandParameter="{Binding}"
-                                                IsEnabled="{Binding !IsDownloading}"
+                                                IsEnabled="{Binding DownloadState, Converter={x:Static views:NotDownloadedConverter.Instance}}"
                                                 FontSize="12" Padding="10,4" CornerRadius="6"
                                                 ToolTip.Tip="Downloads the whole file set into its own folder under Models\LLM\, each file SHA256-verified against the repo before use." />
                                     </Grid>
@@ -283,7 +283,7 @@
                                                TextTrimming="CharacterEllipsis" />
 
                                     <!-- Footer row -->
-                                    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="6" Margin="0,2,0,0">
+                                    <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="6" Margin="0,2,0,0">
                                         <TextBlock Grid.Column="0"
                                                    Text="{Binding ModifiedDisplay}"
                                                    FontSize="11" Classes="faint"
@@ -312,7 +312,7 @@
                                             <ToggleButton.Flyout>
                                                 <Flyout Placement="Bottom">
                                                     <ScrollViewer MaxHeight="520" VerticalScrollBarVisibility="Auto">
-                                                        <StackPanel Width="620" Spacing="6">
+                                                        <StackPanel MinWidth="620" MaxWidth="1100" Spacing="6">
                                                             <TextBlock Text="{Binding EffectiveName}"
                                                                        FontSize="14" FontWeight="SemiBold" />
                                                             <Grid ColumnDefinitions="1.1*,1.2*,0.9*"
@@ -347,13 +347,18 @@
                                                                                Increment="0.1"
                                                                                FormatString="F1"
                                                                                ToolTip.Tip="Per-model default temperature, overriding the global Settings > LLM value for this model only." />
-                                                                <NumericUpDown Grid.Row="1" Grid.Column="1"
-                                                                               Value="{Binding DefaultContextSize}"
-                                                                               Watermark="{Binding ContextWatermark}"
-                                                                               Minimum="0"
-                                                                               Maximum="262144"
-                                                                               Increment="512"
-                                                                               ToolTip.Tip="Context window size in tokens this model supports." />
+                                                                <StackPanel Grid.Row="1" Grid.Column="1" Spacing="3">
+                                                                    <TextBlock Text="Runtime defaults" FontSize="11" Opacity="0.65" />
+                                                                    <NumericUpDown Value="{Binding DefaultContextSize}"
+                                                                                   Watermark="{Binding ContextWatermark}"
+                                                                                   Minimum="0"
+                                                                                   Maximum="262144"
+                                                                                   Increment="512"
+                                                                                   ToolTip.Tip="Default context window size in tokens for this model." />
+                                                                    <ComboBox ItemsSource="{Binding KvCacheTypeOptions}"
+                                                                              SelectedItem="{Binding DefaultKvCacheType}"
+                                                                              ToolTip.Tip="Default KV cache precision applied to both K and V when this model is selected." />
+                                                                </StackPanel>
                                                                 <NumericUpDown Grid.Row="1" Grid.Column="2"
                                                                                Value="{Binding DefaultMaxTokens}"
                                                                                Watermark="Max tokens"
@@ -462,6 +467,14 @@
                                                 </Flyout>
                                             </ToggleButton.Flyout>
                                         </ToggleButton>
+                                        <Button Grid.Column="3" Classes="icon-btn"
+                                                IsVisible="{Binding IsLocalGguf}"
+                                                ToolTip.Tip="Delete this local model"
+                                                Command="{Binding $parent[ItemsControl].DataContext.DeleteModelCommand}"
+                                                CommandParameter="{Binding}">
+                                            <PathIcon Data="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"
+                                                      Width="14" Height="14" />
+                                        </Button>
                                     </Grid>
 
                                 </StackPanel>

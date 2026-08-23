@@ -35,20 +35,18 @@ public sealed class SpeculativeDecodingConfig
     public double? PMin { get; set; }
 
     /// <summary>
-    /// The full <c>--spec-type</c> list llama-server b10195 accepts. Offered in
-    /// the UI so a value is chosen rather than typed; eagle3, dflash and dspark
-    /// are deliberately absent (r27 doc 03 "what this doc does not do").
+    /// Configurable types Hermaeus understands, not an assertion about an
+    /// installed llama-server. The selected runtime's help output decides which
+    /// of these may actually be offered or launched.
     /// </summary>
-    public static IReadOnlyList<string> SupportedTypes { get; } =
-    [
-        "ngram-mod",
-        "ngram-simple",
-        "ngram-map-k",
-        "ngram-map-k4v",
-        "ngram-cache",
-        "draft-mtp",
-        "draft-simple"
-    ];
+    public static IReadOnlyList<string> KnownTypes { get; } =
+    ["ngram-mod", "draft-mtp", "draft-simple"];
+
+    /// <summary>
+    /// Kept for source compatibility with callers from before runtime discovery.
+    /// It must not be used to infer a selected runtime's support.
+    /// </summary>
+    public static IReadOnlyList<string> SupportedTypes => KnownTypes;
 
     /// <summary>True when any selected type needs a second model file on disk.</summary>
     public bool RequiresDraftModel =>

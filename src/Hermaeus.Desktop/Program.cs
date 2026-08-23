@@ -5,6 +5,8 @@ namespace Hermaeus.Desktop;
 
 class Program
 {
+    internal static PackageIntegrationLaunch? PackageIntegrationLaunch { get; private set; }
+
     // r19 1.3: crash logs must land where the user's other logs and data
     // live, not next to the executable (unwritable in a packaged install,
     // and nobody thinks to look there). Program.Main runs before DI exists,
@@ -52,10 +54,16 @@ class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        PackageIntegrationLaunch = PackageIntegrationAction.Resolve(Environment.ProcessPath);
+
         // A second instance would write to the same SQLite data root with no
         // cross-process coordination; refuse to start rather than risk it.
-        if (!SingleInstanceGuard.TryAcquire())
+        var ownsInstance = SingleInstanceGuard.TryAcquire();
+        if (!ownsInstance && PackageIntegrationLaunch is null)
             return;
+
+        if (PackageIntegrationLaunch is not null)
+            PackageIntegrationLaunch = PackageIntegrationLaunch with { CanRun = ownsInstance };
 
         try
         {
@@ -83,13 +91,15 @@ class Program
         }
         finally
         {
-            SingleInstanceGuard.Release();
+            if (ownsInstance)
+                SingleInstanceGuard.Release();
         }
     }
 
     public static AppBuilder BuildAvaloniaApp() =>
         AppBuilder.Configure<App>()
             .UsePlatformDetect()
+            .With(new X11PlatformOptions { WmClass = "hermaeus" })
             .WithInterFont()
             .LogToTrace();
 }

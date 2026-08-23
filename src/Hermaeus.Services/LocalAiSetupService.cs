@@ -30,15 +30,18 @@ public sealed class LocalAiSetupService
     private readonly PythonHealthValidator _pythonValidator;
     private readonly ModelDownloadService _modelDownloader;
     private readonly LlamaServerSetupService _llamaServerSetup;
+    private readonly ModelManifestStore? _modelManifest;
 
     public LocalAiSetupService(
         PythonHealthValidator pythonValidator,
         ModelDownloadService? modelDownloader = null,
-        LlamaServerSetupService? llamaServerSetup = null)
+        LlamaServerSetupService? llamaServerSetup = null,
+        ModelManifestStore? modelManifest = null)
     {
         _pythonValidator = pythonValidator;
         _modelDownloader = modelDownloader ?? new ModelDownloadService();
         _llamaServerSetup = llamaServerSetup ?? new LlamaServerSetupService();
+        _modelManifest = modelManifest;
     }
 
     public async Task<LocalAiReadinessReport> ScanAsync(AppSettings settings, CancellationToken ct = default)
@@ -257,6 +260,20 @@ public sealed class LocalAiSetupService
                 progress?.Report("Model integrity verified.");
             }
 
+            if (_modelManifest is not null)
+            {
+                var file = new FileInfo(action.TargetPath);
+                await _modelManifest.UpsertAsync(new ModelManifestEntry
+                {
+                    FilePath = Path.GetFullPath(action.TargetPath),
+                    RepoId = TryGetHuggingFaceRepoId(url) ?? string.Empty,
+                    RepoFile = Path.GetFileName(new Uri(url).AbsolutePath),
+                    Sha256 = ModelHashes.GetValueOrDefault(url, string.Empty),
+                    SizeBytes = file.Length,
+                    Source = "local-ai-setup"
+                }, ct);
+            }
+
             return new LocalAiSetupResult(true, result.Message, action.TargetPath);
         }
         catch (OperationCanceledException)
@@ -267,6 +284,16 @@ public sealed class LocalAiSetupService
         {
             return new LocalAiSetupResult(false, $"Failed to download GGUF model: {ex.Message}");
         }
+    }
+
+    internal static string? TryGetHuggingFaceRepoId(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)
+            || !string.Equals(uri.Host, "huggingface.co", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        var segments = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        return segments.Length >= 2 ? $"{segments[0]}/{segments[1]}" : null;
     }
 
     private async Task<LocalAiSetupResult> DownloadTtsModelAsync(
@@ -317,8 +344,7 @@ public sealed class LocalAiSetupService
         progress?.Report("Installing llama-server binary...");
         try
         {
-            var installPath = Path.GetDirectoryName(action.TargetPath) ?? action.TargetPath;
-            var result = await _llamaServerSetup.InstallAsync(installPath, progress, ct);
+            var result = await _llamaServerSetup.InstallLatestAsync(action.TargetPath, LlamaRuntimeVariant.Cpu, progress, ct);
             return result;
         }
         catch (OperationCanceledException)

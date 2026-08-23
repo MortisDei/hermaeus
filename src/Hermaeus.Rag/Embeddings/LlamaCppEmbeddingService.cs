@@ -9,7 +9,8 @@ namespace Hermaeus.Rag.Embeddings;
 /// <summary>
 /// Calls the llama.cpp server's /v1/embeddings endpoint (OpenAI-compatible).
 /// Default: RAG EmbeddingBaseUrl, which now defaults to a separate localhost port.
-/// Model: nomic-embed-text (768 dims)
+/// Model: Qwen3-Embedding-0.6B by default (1024 dims). Existing Nomic
+/// installations remain supported (768 dims).
 /// </summary>
 public sealed class LlamaCppEmbeddingService : IEmbeddingService, IDisposable
 {
@@ -19,15 +20,21 @@ public sealed class LlamaCppEmbeddingService : IEmbeddingService, IDisposable
     private readonly IRuntimeLogService? _runtimeLogs;
     private bool _fallbackLogged;
     private readonly object _fallbackLogGate = new();
+    private int _dimensions;
 
-    // nomic-embed-text outputs 768 dims; update if you switch models
-    public int Dimensions => 768;
+    /// <summary>
+    /// The last observed embedding dimensionality. A known default is supplied
+    /// before the first response so the local API remains useful at startup;
+    /// the server response remains authoritative for custom models.
+    /// </summary>
+    public int Dimensions => System.Threading.Volatile.Read(ref _dimensions);
 
     public LlamaCppEmbeddingService(ISettingsService settings, HttpClient? http = null, IRuntimeLogService? runtimeLogs = null)
     {
         _settings = settings;
         _http = http ?? SharedHttp;
         _runtimeLogs = runtimeLogs;
+        _dimensions = GetKnownDimensions(settings.Settings.Rag.EmbeddingModel);
     }
 
     private string Base
@@ -67,10 +74,15 @@ public sealed class LlamaCppEmbeddingService : IEmbeddingService, IDisposable
         var data = await resp.Content.ReadFromJsonAsync<EmbedResponse>(ct)
             ?? throw new InvalidOperationException("Null response from embedding endpoint");
 
-        return data.Data
+        var embeddings = data.Data
             .OrderBy(d => d.Index)
             .Select(d => d.Embedding)
             .ToList();
+
+        if (embeddings.Count > 0 && embeddings[0].Length > 0)
+            System.Threading.Volatile.Write(ref _dimensions, embeddings[0].Length);
+
+        return embeddings;
     }
 
     /// <summary>
@@ -129,6 +141,11 @@ public sealed class LlamaCppEmbeddingService : IEmbeddingService, IDisposable
     {
         // HttpClient is static and shared; do not dispose
     }
+
+    private static int GetKnownDimensions(string? model) =>
+        model?.Contains("qwen3-embedding-0.6b", StringComparison.OrdinalIgnoreCase) == true
+            ? 1024
+            : 768;
 
     private record EmbedResponse(
         [property: JsonPropertyName("data")] List<EmbedData> Data);

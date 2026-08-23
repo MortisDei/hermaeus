@@ -13,10 +13,30 @@ public enum ProvenanceKind
     Workspace,
     AgentTool,
 
+    /// <summary>A locally recorded benchmark or Speed Check observation.</summary>
+    Benchmark,
+
     /// <summary>r24 doc 02 2.6: a Recall hit injected into chat context. Untrusted text
     /// the model reads, never instruction the app acts on; cannot carry a memory id a
     /// [MEMORY_UPDATE]/[MEMORY_FORGET] marker could target.</summary>
     Recall
+}
+
+/// <summary>
+/// How strongly Hermaeus can stand behind an item of evidence. This is kept on
+/// the shared source reference so memories, lessons, benchmark observations,
+/// and future consumers do not grow competing provenance models.
+/// </summary>
+public enum EvidenceOrigin
+{
+    /// <summary>A local operation measured or deterministically produced it.</summary>
+    DirectObservation,
+
+    /// <summary>A person supplied it; it is not independently established.</summary>
+    UserProvided,
+
+    /// <summary>A model or heuristic inferred it from other evidence.</summary>
+    Inferred
 }
 
 /// <summary>
@@ -31,4 +51,5 @@ public sealed record SourceReference(
     string? Locator = null,
     string? Snippet = null,
     double? Score = null,
-    DateTime? Timestamp = null);
+    DateTime? Timestamp = null,
+    EvidenceOrigin EvidenceOrigin = EvidenceOrigin.DirectObservation);

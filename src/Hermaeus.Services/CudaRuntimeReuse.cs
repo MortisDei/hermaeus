@@ -5,11 +5,10 @@ namespace Hermaeus.Services;
 /// <summary>
 /// r19 2.3: the CUDA companion archive (several hundred MB) was downloaded
 /// into every fresh version directory on every llama.cpp update, even though
-/// it changes only when llama.cpp bumps its CUDA toolkit version. GitHub's
-/// releases API exposes no per-asset hash to key a content check on, so this
-/// keys on identity instead: a marker file recorded next to the companion's
-/// extracted files, matched by asset name, verified present with matching
-/// sizes before ever being trusted.
+/// it changes only when llama.cpp bumps its CUDA toolkit version. Fresh
+/// downloads are SHA256-verified before extraction. Reuse keys on the release
+/// asset identity and a marker recorded next to the extracted files, then
+/// verifies that every recorded file is still present with its expected size.
 /// </summary>
 internal static class CudaRuntimeReuse
 {

@@ -263,17 +263,15 @@
                 </Button>
 
                 <Button Grid.Column="9" Classes="icon-btn"
-                        Command="{Binding ExportMarkdownCommand}"
-                        ToolTip.Tip="Export conversation as Markdown">
+                        ToolTip.Tip="Export conversation">
                     <PathIcon Data="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zM13 9V3.5L18.5 9H13zM8 13h8v2H8v-2zm0 4h8v2H8v-2z"
                               Width="16" Height="16" />
-                </Button>
-
-                <Button Grid.Column="10" Classes="icon-btn"
-                        Command="{Binding ExportJsonCommand}"
-                        ToolTip.Tip="Export conversation as JSON">
-                    <PathIcon Data="M5 3h14v18H5V3zm2 2v14h10V5H7zm2 3h2v2H9V8zm4 0h2v2h-2V8zm-4 4h2v2H9v-2zm4 0h2v2h-2v-2z"
-                              Width="16" Height="16" />
+                    <Button.Flyout>
+                        <MenuFlyout>
+                            <MenuItem Header="Markdown" Command="{Binding ExportMarkdownCommand}" />
+                            <MenuItem Header="JSON" Command="{Binding ExportJsonCommand}" />
+                        </MenuFlyout>
+                    </Button.Flyout>
                 </Button>
 
                 <!-- r19 4.4: global stop for streamed auto-speech, which queues many
@@ -501,6 +499,7 @@
                     <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
                         <Button Content="Open setup wizard"
                                 Command="{Binding OpenSetupWizardFromEmptyStateCommand}"
+                                IsVisible="{Binding ShowSetupWizardFromEmptyState}"
                                 ToolTip.Tip="Walks you through choosing or downloading a model, a runtime, and voice." />
                         <Button Content="Open Services"
                                 Command="{Binding OpenServicesFromEmptyStateCommand}"
@@ -709,7 +708,7 @@
                             IsVisible="{Binding IsGenerating}"
                             Content="Stop" />
 
-                    <Button Grid.Column="5" Classes="icon-btn"
+                    <Button Grid.Column="5" Classes="icon-btn" Background="Transparent" Cursor="Hand"
                             Command="{Binding RegenerateCommand}"
                             IsEnabled="{Binding !IsGenerating}"
                             IsVisible="{Binding HasMessages}"

@@ -194,7 +194,8 @@ namespace Hermaeus.Tests
                 service.Settings.DataManagement.DataRootDirectory = previous;
                 await service.SaveAsync();
 
-                var secrets = new SecretStore(service);
+                var protectedKeyDirectory = temp.PathFor("protected-secrets");
+                var secrets = new SecretStore(service, null, protectedKeyDirectory);
                 var reference = await secrets.StoreAsync("test-provider-key", "super-secret-value");
                 True(secrets.IsReference(reference), "storing a secret should return a reference");
 
@@ -204,6 +205,10 @@ namespace Hermaeus.Tests
 
                 var resolved = await secrets.ResolveAsync(reference);
                 Equal("super-secret-value", resolved, "secret should resolve correctly after its data root moved");
+                True(File.Exists(Path.Combine(protectedKeyDirectory, "secrets.local.key")),
+                    "data-root migration should leave fallback key material in the separate protected directory");
+                False(File.Exists(Path.Combine(next, "secrets.local.key")),
+                    "data-root migration should not move protected key material into the new data root");
             }
             finally
             {
@@ -237,6 +242,26 @@ namespace Hermaeus.Tests
             True(result.DataMigrated, "migration should still move other data");
             True(File.Exists(settingsPath), "settings.json must never move out of its bootstrap location");
             False(File.Exists(Path.Combine(next, "settings.json")), "settings.json must not be copied into the new data root either");
+        }
+
+        public static async Task DataRootMigrationIgnoresTheCurrentProcessLock()
+        {
+            using var temp = new TempDir();
+            var previous = temp.PathFor("previous");
+            var next = temp.PathFor("next");
+            Directory.CreateDirectory(previous);
+            File.WriteAllText(Path.Combine(previous, "conversations.db"), "db");
+            var lockPath = Path.Combine(previous, "hermaeus.lock");
+            await using var heldLock = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+
+            var service = NewSettings(temp);
+            service.Settings.DataManagement.DataRootDirectory = next;
+            var result = await service.SaveAsync(previous);
+
+            True(result.DataMigrated, "real data should still migrate while the process lock is held");
+            True(File.Exists(Path.Combine(next, "conversations.db")), "data should move to the new root");
+            True(File.Exists(lockPath), "the process-owned lock must stay at its fixed bootstrap location");
+            False(File.Exists(Path.Combine(next, "hermaeus.lock")), "the process lock is not user data and must not move");
         }
 
         public static async Task BackupExcludesSecretsAndRefusesOverwrite()

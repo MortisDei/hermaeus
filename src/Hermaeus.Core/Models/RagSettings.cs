@@ -50,7 +50,7 @@ public class RagSettings
     /// <summary>
     /// Embedding model name used for document chunking and retrieval.
     /// </summary>
-    public string EmbeddingModel { get; set; } = "nomic-embed-text";
+    public string EmbeddingModel { get; set; } = "Qwen3-Embedding-0.6B";
 
     /// <summary>
     /// r21: token budget for the Knowledge context block injected into chat

@@ -12,6 +12,30 @@ namespace Hermaeus.Tests;
 /// </summary>
 public sealed class LlamaRuntimeVariantTests
 {
+    [Fact]
+    public void Release_asset_digest_requires_a_well_formed_SHA256_value()
+    {
+        var asset = new GitHubReleaseAsset(
+            "llama-b10034-bin-ubuntu-x64.tar.gz",
+            "https://example.test/llama.tar.gz",
+            $"sha256:{new string('a', 64)}");
+
+        Assert.Equal(new string('a', 64), LlamaServerSetupService.RequireSha256Digest(asset));
+        Assert.Throws<InvalidOperationException>(() => LlamaServerSetupService.RequireSha256Digest(asset with { Digest = null }));
+        Assert.Throws<InvalidOperationException>(() => LlamaServerSetupService.RequireSha256Digest(asset with { Digest = "sha256:not-a-hash" }));
+    }
+
+    [Fact]
+    public void Pinned_release_has_a_SHA256_for_every_supported_platform()
+    {
+        foreach (var platform in Enum.GetValues<LlamaPlatform>())
+        {
+            var hash = LlamaServerSetupService.PinnedSha256For(platform);
+            Assert.Equal(64, hash.Length);
+            Assert.All(hash, c => Assert.True(Uri.IsHexDigit(c)));
+        }
+    }
+
     // Mirrors the live ggml-org/llama.cpp b10066 asset list (verified against
     // the GitHub releases API at implementation time, same discipline as r11).
     private static readonly GitHubReleaseAsset[] B10066Assets =
@@ -97,6 +121,44 @@ public sealed class LlamaRuntimeVariantTests
         var cuda = LlamaServerSetupService.SelectDownloadAsset(B10066Assets, LlamaPlatform.WinX64, LlamaRuntimeVariant.Cuda)!;
         var cudart = LlamaServerSetupService.SelectCudartAsset(B10066Assets, cuda.Name);
         Assert.Equal("u/cudart-12.4", cudart?.BrowserDownloadUrl);
+    }
+
+    [Fact]
+    public void Latest_compatible_release_ignores_semver_and_skips_builds_without_an_asset()
+    {
+        var releases = new[]
+        {
+            new GitHubRelease("v0.2.0", [new("llama-v0.2.0.zip", "u/semver")]),
+            new GitHubRelease("b10070", [new("llama-b10070-bin-win-cpu-x64.zip", "u/win-only")]),
+            new GitHubRelease("b10066", [new("llama-b10066-bin-ubuntu-x64.tar.gz", "u/linux")]),
+            new GitHubRelease("b10034", [new("llama-b10034-bin-ubuntu-x64.tar.gz", "u/old")])
+        };
+
+        var selected = LlamaServerSetupService.SelectLatestCompatibleRelease(
+            releases, LlamaPlatform.LinuxX64, LlamaRuntimeVariant.Cpu);
+
+        Assert.NotNull(selected);
+        Assert.Equal("b10066", selected.Release.TagName);
+        Assert.Equal("u/linux", selected.Asset.BrowserDownloadUrl);
+        Assert.Equal(10066, selected.BuildNumber);
+    }
+
+    [Fact]
+    public void Managed_discovery_selects_the_highest_installed_b_build()
+    {
+        using var temp = new TempDir();
+        var executableName = OperatingSystem.IsWindows() ? "llama-server.exe" : "llama-server";
+        var installPath = temp.PathFor("llama-server");
+        var oldPath = Path.Combine(installPath, "b10034", executableName);
+        var currentPath = Path.Combine(installPath, "b10066", executableName);
+        Directory.CreateDirectory(Path.GetDirectoryName(oldPath)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(currentPath)!);
+        File.WriteAllText(oldPath, "old");
+        File.WriteAllText(currentPath, "current");
+
+        var resolved = LlamaServerSetupService.ResolveInstalledExecutable(installPath);
+
+        Assert.Equal(currentPath, resolved);
     }
 
     [Fact]

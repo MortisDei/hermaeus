@@ -42,6 +42,7 @@ public partial class MainWindowViewModel : ViewModelBase
     public UiBoundCollection<ToastViewModel> Toasts { get; } = [];
     public UiBoundCollection<ToastViewModel> ToastHistory { get; } = [];
     public UiBoundCollection<string> FolderFilters { get; } = ["All"];
+    public Action<string>? RequestCopyToastDetails { get; set; }
 
     [ObservableProperty] private bool   _isSidebarOpen = true;
     [ObservableProperty] private string _searchQuery   = string.Empty;
@@ -67,6 +68,8 @@ public partial class MainWindowViewModel : ViewModelBase
     public bool ShowLogs => ActivePanel == "logs";
     public bool ShowActivity => ActivePanel == "activity";
     public bool ShowWizard => ActivePanel == "wizard";
+    public bool SetupIncomplete => !_settingsService.Settings.SetupWizardCompleted;
+    public bool ShowSetupResume => SetupIncomplete && !ShowWizard;
     public object ActiveViewModel => ActivePanel switch
     {
         "settings" => Settings,
@@ -177,15 +180,29 @@ public partial class MainWindowViewModel : ViewModelBase
         Wizard.WizardCompleted += () =>
         {
             ActivePanel = "chat";
+            Chat.RefreshSetupState();
+            OnPropertyChanged(nameof(SetupIncomplete));
+            OnPropertyChanged(nameof(ShowSetupResume));
+            Settings.Reload();
+            Services.RefreshAllDetectedModels();
             // r12 03-runtime-vm-correctness.md 3.1: finishing (or skipping)
             // the wizard on first run used to leave the app on a dead chat
             // panel - InitializeAsync had already returned early to show the
             // wizard, so nothing here ever auto-started servers, listed
             // models, or loaded datasets/agent/benchmarks until a restart.
             RunBackgroundTaskAsync("complete post-setup initialization", CompletePostSetupInitializationAsync);
+            RunBackgroundTaskAsync("refresh models after setup", async () =>
+            {
+                Models.ForceRefresh = true;
+                await RunOnUiAsync(() => Models.RefreshAsync());
+            });
         };
         // allow settings view to request re-running the setup wizard
-        Settings.RequestShowSetupWizard = () => ActivePanel = "wizard";
+        Settings.RequestShowSetupWizard = () =>
+        {
+            Wizard.LoadFromSettings(resetStep: true);
+            ActivePanel = "wizard";
+        };
         // r29 doc 01 1.1: the Services page hosts the Voice and STT cards, which
         // are the same DI singletons Settings edits. Nothing on Services wrote
         // them to disk, so every edit made there was lost on restart. Route its
@@ -317,6 +334,8 @@ public partial class MainWindowViewModel : ViewModelBase
 
         await LoadConversationsAsync();
         Settings.Reload();
+        OnPropertyChanged(nameof(SetupIncomplete));
+        OnPropertyChanged(nameof(ShowSetupResume));
         ShowQuickChat = Settings.ShowQuickChat;
         await LoadToastHistoryAsync();
         await Projects.EnsureLoadedAsync();
@@ -326,6 +345,7 @@ public partial class MainWindowViewModel : ViewModelBase
 
         if (!_settingsService.Settings.SetupWizardCompleted)
         {
+            Wizard.LoadFromSettings(resetStep: true);
             ActivePanel = "wizard";
             return;
         }
@@ -767,7 +787,14 @@ public partial class MainWindowViewModel : ViewModelBase
     }
     [RelayCommand] private void ShowLogsPanel()        => ActivePanel = "logs";
     [RelayCommand] private void ShowActivityPanel()    { ActivePanel = "activity"; RunBackgroundTaskAsync("refresh activity", Activity.RefreshAsync); }
-    [RelayCommand] private void ShowWizardPanel()      => ActivePanel = "wizard";
+    [RelayCommand] private void ResumeSetup()           => ActivePanel = "wizard";
+    [RelayCommand]
+    private void ShowWizardPanel()
+    {
+        if (!SetupIncomplete)
+            Wizard.LoadFromSettings(resetStep: true);
+        ActivePanel = "wizard";
+    }
     [RelayCommand] private void ShowSettingsPanel()    { ActivePanel = "settings"; Settings.Reload(); }
 
     [RelayCommand]
@@ -809,16 +836,6 @@ public partial class MainWindowViewModel : ViewModelBase
 
     partial void OnActivePanelChanged(string value)
     {
-        // Wizard is a DI singleton constructed once at startup; without
-        // refreshing here, re-entering it later (Settings' "re-run setup
-        // wizard", the chat empty-state's "Open setup wizard") shows
-        // whatever it last held, which can be blank fields (e.g. a startup
-        // race where settings hadn't loaded from disk yet at construction).
-        // Advancing "Next" from a blank Data roots step then saves those
-        // blanks over the user's real DataRootDirectory/LocalAiAssetsRoot.
-        if (value == "wizard")
-            Wizard.LoadFromSettings();
-
         OnPropertyChanged(nameof(ShowChat));
         OnPropertyChanged(nameof(ShowAgent));
         OnPropertyChanged(nameof(ShowSettings));
@@ -834,6 +851,7 @@ public partial class MainWindowViewModel : ViewModelBase
         // so anything binding to it never refreshed on navigation.
         OnPropertyChanged(nameof(ShowActivity));
         OnPropertyChanged(nameof(ShowWizard));
+        OnPropertyChanged(nameof(ShowSetupResume));
         OnPropertyChanged(nameof(ActiveViewModel));
         OnPropertyChanged(nameof(WindowTitle));
     }
@@ -877,13 +895,23 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private void OnToastRaised(ToastMessage toast)
     {
+        if (toast.Kind == ToastKind.Error)
+        {
+            _logs.Add(new RuntimeLogEntry(
+                DateTime.UtcNow,
+                RuntimeLogLevel.Error,
+                RuntimeLogCategory.Service,
+                $"{toast.Title}: {toast.Message}"));
+        }
+
         var vm = new ToastViewModel
         {
             Title = toast.Title,
             Message = toast.Message,
             Timestamp = DateTime.UtcNow,
             Kind = toast.Kind,
-            DurationMs = toast.DurationMs
+            DurationMs = toast.DurationMs,
+            CanCopyDetails = toast.CanCopyDetails
         };
         const int MaxVisibleToasts = 5;
         RunOnUi(() =>
@@ -931,7 +959,7 @@ public partial class MainWindowViewModel : ViewModelBase
             {
                 ToastHistory.Clear();
                 foreach (var e in list.OrderByDescending(t => t.Timestamp))
-                    ToastHistory.Add(new ToastViewModel { Title = e.Title, Message = e.Message, Kind = e.Kind, DurationMs = e.DurationMs, Timestamp = e.Timestamp });
+                    ToastHistory.Add(new ToastViewModel { Title = e.Title, Message = e.Message, Kind = e.Kind, DurationMs = e.DurationMs, Timestamp = e.Timestamp, CanCopyDetails = e.CanCopyDetails });
                 // cap size
                 TrimToastHistory();
             });
@@ -950,7 +978,7 @@ public partial class MainWindowViewModel : ViewModelBase
             var root = Hermaeus.Services.SettingsService.ResolveDataRoot(_settingsService.Settings);
             Directory.CreateDirectory(root);
             var path = Path.Combine(root, "toasts.json");
-            var list = ToastHistory.Select(t => new ToastHistoryEntry { Title = t.Title, Message = t.Message, Kind = t.Kind, DurationMs = t.DurationMs, Timestamp = t.Timestamp }).ToList();
+            var list = ToastHistory.Select(t => new ToastHistoryEntry { Title = t.Title, Message = t.Message, Kind = t.Kind, DurationMs = t.DurationMs, Timestamp = t.Timestamp, CanCopyDetails = t.CanCopyDetails }).ToList();
             var opts = new System.Text.Json.JsonSerializerOptions { WriteIndented = true };
             var json = System.Text.Json.JsonSerializer.Serialize(list, opts);
             await WriteTextAtomicAsync(path, json);
@@ -1008,6 +1036,13 @@ public partial class MainWindowViewModel : ViewModelBase
     [RelayCommand]
     private async Task ClearToastHistoryAsync() => await MutateAndSaveHistoryAsync(() => ToastHistory.Clear());
 
+    [RelayCommand]
+    private void CopyToastDetails(ToastViewModel? item)
+    {
+        if (item is { CanCopyDetails: true })
+            RequestCopyToastDetails?.Invoke(item.Message);
+    }
+
     private sealed class ToastHistoryEntry
     {
         public string Title { get; set; } = string.Empty;
@@ -1015,6 +1050,7 @@ public partial class MainWindowViewModel : ViewModelBase
         public ToastKind Kind { get; set; }
         public int DurationMs { get; set; }
         public DateTime Timestamp { get; set; }
+        public bool CanCopyDetails { get; set; }
     }
 
     private async Task RemoveToastLaterAsync(ToastViewModel toast)

@@ -192,8 +192,8 @@ public sealed class OllamaService : IDisposable
                     continue;
                 }
 
-                if (!string.IsNullOrEmpty(chunk?.Message?.Content))
-                    yield return new LlmStreamEvent(chunk.Message.Content);
+                if (!string.IsNullOrEmpty(chunk?.Message?.Content) || !string.IsNullOrEmpty(chunk?.Message?.Thinking))
+                    yield return new LlmStreamEvent(chunk.Message?.Content ?? string.Empty, ReasoningDelta: chunk.Message?.Thinking ?? string.Empty);
                 if (chunk?.Done == true)
                 {
                     // Ollama returns tool calls whole in the terminal chunk
@@ -285,7 +285,8 @@ public sealed class OllamaService : IDisposable
         [property: JsonPropertyName("done_reason")] string? DoneReason);
     private sealed record ChatMessageChunk(
         [property: JsonPropertyName("content")] string Content,
-        [property: JsonPropertyName("tool_calls")] List<OllamaToolCallChunk>? ToolCalls);
+        [property: JsonPropertyName("tool_calls")] List<OllamaToolCallChunk>? ToolCalls,
+        [property: JsonPropertyName("thinking")] string? Thinking);
     private sealed record OllamaToolCallChunk([property: JsonPropertyName("function")] OllamaFunctionCallChunk? Function);
     private sealed record OllamaFunctionCallChunk(
         [property: JsonPropertyName("name")] string Name,

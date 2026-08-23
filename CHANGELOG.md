@@ -9,6 +9,135 @@ FIFO for changelog entries, 10 versions in this file max. Remove older entries
 and append them to `docs/changelog-archive.md` to maintain the 10 version
 limit.
 
+## [0.37.0-alpha] - 2026-08-20
+
+### Fixed
+
+- Windows packaging now initializes MSVC and the Windows SDK through Visual
+  Studio Developer PowerShell, so `build.ps1` works from a normal PowerShell or
+  VS Code terminal without requiring a Developer Command Prompt.
+- Windows portable packages now keep desktop and Local API runtime files under
+  `app/`, documentation under `docs/`, and icon assets under `icons/`. A tiny
+  source-included native `Hermaeus.exe` at package root replaces the command
+  launcher and starts only the bundled `app\Hermaeus.Desktop.exe`.
+- Fallback secret encryption keys now live outside the portable Hermaeus data
+  root in a user-specific OS configuration location. Existing same-root keys
+  migrate when the secret store initializes, and backup/restore copy now states
+  that credentials must be re-entered on another machine.
+- Agent patch apply, revert, reject, and block decisions no longer enter the
+  unrelated pending-tool approval path, preventing a patch review click from
+  executing or dismissing a different queued action.
+- Managed llama.cpp archives now verify SHA256 before extraction: the pinned
+  b10034 assets use source-controlled hashes and latest/CUDA assets require the
+  digest from GitHub release metadata. Linux package tar headers no longer
+  expose the builder's user/group name or preserve group-write bits.
+- Linux packages now give the Avalonia window, X11/XWayland WM class, installed
+  desktop entry, and icon theme resource one `hermaeus` identity, restoring
+  taskbar association with the Moss icon. The extracted `Hermaeus` launcher is
+  now a relocation-safe link to the native apphost, so file managers launch it
+  as an application instead of opening a shell script as text. Native
+  `Install Hermaeus` and `Uninstall Hermaeus` actions now provide graphical
+  confirmation while keeping their shell implementations under `app/`.
+- Doctor now turns Linux tray support Ready only after the current session's
+  tray has responded to an interaction. Chat no longer offers first-run setup
+  as recovery for a stopped or absent model after onboarding is complete, and
+  directs those users to Services instead.
+- Deleting the active conversation now returns keyboard focus to the fresh Chat
+  input. Normal Chat receives a compact, dynamic Hermaeus environment block
+  grounded in the selected runtime, attachments, Knowledge, memory, and Recall,
+  while explicitly excluding web, shell, tools, and Agent workspace actions.
+- The onboarding starter catalogue now uses verified current Phi-4 mini, Gemma
+  4 E2B/E4B QAT, and official Qwen3 8B/14B GGUF files. Native Kokoro readiness
+  rechecks after install and across step navigation and restart.
+- Managed llama.cpp release selection now ignores unrelated semver tags and
+  chooses the newest b-numbered release with a compatible platform asset.
+  Settings and onboarding share that installer with Doctor, successful installs
+  update Services paths, and Doctor can discover the newest managed build.
+- Diagnostic Moss notifications can expose a restrained Copy details action.
+  Linux packages now keep runtime internals under `app/`, resources under
+  `icons/` and `docs/`, use a public `Hermaeus` launcher, install the canonical
+  application-menu icon, and omit PDB files.
+- Added a release-user guide, clarified RID restore requirements for packaging
+  with skip-restore, and corrected the commercial-licensing summary so it does
+  not narrow PolyForm Noncommercial's permitted institutional uses.
+- Linux managed llama.cpp installs now preserve required SONAME companions from
+  safe in-archive links, and Doctor executes the configured binary before
+  calling it usable. Incomparable release identifiers report unknown instead
+  of "current enough."
+- Doctor model-download progress is rate-limited, coalesced, and bounded;
+  navigation preserves the active operation. Its install dialogs and Moss
+  diagnostics have solid readable backgrounds, and install approval remains
+  disabled until the specific plan has been reviewed.
+- Data-root migration excludes the process-owned `hermaeus.lock`, while the
+  single-instance guard remains exclusive. Error notifications also enter
+  Runtime Logs, notification times display locally, and the unclean-session
+  title now agrees with its detail.
+- Incomplete first-run setup has a persistent resume action, retains its exact
+  step across diagnostics navigation, and includes brief factual Moss guidance.
+  Managed embedding warm-up waits for its localhost server to be Running.
+- Expected localhost health races now observe abandoned probe faults instead of
+  leaking them to the unobserved-task log. Hermaeus-managed Hugging Face model
+  downloads retain their existing manifest provenance.
+- Model update checks persist a first calculated model hash before the remote
+  lookup, so an interrupted lookup does not hash the same model again. Doctor
+  now accepts current llama-server `build 10509` version output.
+- Changing models now replaces auto-selected vision projectors and MTP draft
+  heads with the sole companion belonging to the newly selected model, while
+  preserving explicit companion choices. Near-equivalent extracted memories
+  reinforce one row instead of accumulating paraphrases.
+- Expanded reasoning is visually boxed and labelled, separating it from the
+  final answer.
+- The default dedicated embedding model is now the SHA256-pinned
+  Qwen3-Embedding-0.6B-Q8_0 GGUF. Existing Nomic installations stay selected
+  and on disk until a verified Qwen download completes, then Doctor points the
+  embedding server at Qwen and leaves RAG/memory reindexing user-controlled.
+- Starter model downloads now adopt matching files on retry, verify hashes before
+  completion, write provenance, and refresh Services immediately after setup.
+- Models and Services share one context default and one KV-cache precision. Model
+  cards show download state and offer confirmation-gated safe deletion.
+- Reasoning deltas are preserved separately from answers through providers,
+  storage, history policy, local API, transcript rendering, and exports. Replay
+  requires proven managed llama.cpp template support and preservation settings.
+- Deterministic benchmark scoring now handles multiline structures, grouped
+  digits, explicit refusal language, and explicit keyword alternatives without
+  rewriting historical runs.
+- Benchmark runs now preserve the managed llama-server KV cache K/V types and
+  Flash Attention setting in saved provenance, run details, comparisons, and
+  JSON, Markdown, and CSV exports. Historical runs remain unmodified and show
+  these settings as not recorded.
+- Memories deletion is confirmation-gated and its item commands bind through the
+  named view root.
+- Agent transcript replay now compresses only consecutive, proven-identical
+  successful tool outcomes for the next model decision. Raw transcripts remain
+  intact; failed, partial, changed, and older unproven entries remain verbatim.
+  A repeated successful sequence is diagnostic-only and never auto-blocks work.
+- Voice orchestration tests now synchronize on provider start/completion signals
+  instead of fixed sleeps. Voice provider registry behavior is covered for
+  stored aliases, fallback logging, persistence, catalog metadata, and service
+  mapping.
+- Managed llama-server settings now discover speculative modes and
+  `--threads-batch` from the selected executable, recheck them at launch, and
+  refuse stale unsupported settings instead of silently emitting them. Prompt
+  processing threads are stored separately from generation threads when the
+  runtime supports them.
+- Capability snapshots now record meaningful runtime changes in Activity. Moss
+  reports one deduped heads-up for a changed snapshot, with a warning when a
+  disappeared capability can affect the configured server.
+- The benchmark model-selection regression test now uses ephemeral loopback
+  ports, so an unrelated listener cannot make it misreport that a benchmark
+  restart was skipped.
+- Benchmark observations now carry a persistent fingerprint for the known model
+  and inference configuration, including prompt-processing threads, plus direct
+  local provenance. This identifies what was measured without turning results
+  into automatic recommendations or backfilling historical assumptions.
+- Memories now support typed, evidence-backed relationships while preserving
+  legacy related-memory ids. Recall remains lexical/vector-first, can inspect
+  one direct active relationship, and exposes relationship-expanded context in
+  the chat receipt. A superseded memory yields to its direct current fact.
+- Public release readiness now includes immutable official GitHub Action pins,
+  minimal CI and release token permissions, monthly Dependabot updates, and
+  release-first checksum verification guidance.
+
 From 0.29.0-alpha onward, every minor version is tagged and released on
 GitHub (see `docs/packaging.md` "Releases"); patch versions are tagged only
 for urgent hotfixes.

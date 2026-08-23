@@ -9,13 +9,14 @@ supported with security fixes; there are no maintained older branches.
 
 Please do not open a public issue for a security vulnerability.
 
-Use GitHub's [private vulnerability reporting](https://github.com/MortisDei/hermaeus/security/advisories/new)
-for this repository. This notifies the maintainer directly without exposing
-the report publicly.
+If GitHub private vulnerability reporting is enabled for the repository, use
+[private vulnerability reporting](https://github.com/MortisDei/hermaeus/security/advisories/new).
+This keeps the report out of public issue history.
 
-If that is unavailable to you, open a GitHub issue with the `security` label
-containing only "I have a security report" and no details; the maintainer
-will follow up to arrange a private channel.
+If that option is unavailable, open a GitHub issue with the `security` label
+containing only "I have a security report" and no details. Do not include a
+proof of concept, logs, paths, account information, or vulnerability details
+in the issue. The maintainer will follow up to arrange a private channel.
 
 This is a solo-maintained project. Response times are best effort, typically
 within a week.

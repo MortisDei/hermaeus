@@ -338,7 +338,10 @@ namespace Hermaeus.Tests
                 ModelPath = modelPath,
                 ContextSize = 16384,
                 GpuLayers = 24,
-                Threads = 6
+                Threads = 6,
+                KvCacheTypeK = "q8_0",
+                KvCacheTypeV = "q4_0",
+                FlashAttention = "on"
             });
             var service = new BenchmarkService(settings, new FakeLlm(), new FakeSystemInfo(), new FakeEvalStore());
 
@@ -352,6 +355,23 @@ namespace Hermaeus.Tests
             Equal(6, run.Metadata.Threads, "Threads should come from the matching managed ServerConfig, not Environment.ProcessorCount");
             Equal(modelPath, run.Metadata.ModelPath, "ModelPath should come from the matching managed ServerConfig");
             False(string.IsNullOrEmpty(run.Metadata.Quantization), "a local GGUF model should carry a non-empty quantization label");
+            Equal("q8_0", run.Metadata.KvCacheTypeK, "KV cache K type should come from the matching managed ServerConfig");
+            Equal("q4_0", run.Metadata.KvCacheTypeV, "KV cache V type should come from the matching managed ServerConfig");
+            Equal("on", run.Metadata.FlashAttention, "Flash Attention should come from the matching managed ServerConfig");
+            True(run.Metadata.ProfileFingerprint is not null, "a new benchmark run should persist its measured model/profile fingerprint");
+            Equal(modelPath, run.Metadata.ProfileFingerprint!.ModelIdentity, "the fingerprint should identify the measured model instance");
+            Equal(EvidenceOrigin.DirectObservation, run.Metadata.ObservationSource?.EvidenceOrigin,
+                "a benchmark observation should carry shared direct-observation provenance");
+
+            var markdownPath = await service.ExportAsync(run.Id, temp.PathFor("exports"));
+            var markdown = await File.ReadAllTextAsync(markdownPath);
+            var json = await File.ReadAllTextAsync(Path.ChangeExtension(markdownPath, ".json"));
+            var csv = await File.ReadAllTextAsync(Path.ChangeExtension(markdownPath, ".csv"));
+            True(markdown.Contains("KV cache K type: `q8_0`", StringComparison.Ordinal), "Markdown export should preserve KV cache K type");
+            True(markdown.Contains("Flash Attention: `on`", StringComparison.Ordinal), "Markdown export should preserve Flash Attention");
+            True(json.Contains("\"KvCacheTypeV\": \"q4_0\"", StringComparison.Ordinal), "JSON export should preserve KV cache V type");
+            True(csv.Contains("kv_cache_type_k", StringComparison.Ordinal), "CSV export should label engine configuration provenance");
+            True(csv.Contains("\"q8_0\",\"q4_0\",\"on\"", StringComparison.Ordinal), "CSV export should preserve engine configuration provenance");
         }
 
         /// <summary>r17 02-benchmark-truth.md 2.5: RerunAsync used to rebuild the model as a bare
@@ -1423,6 +1443,56 @@ namespace Hermaeus.Tests
             Equal(expectedPath, settings.Settings.ManagedServers.Single(s => s.EmbeddingsMode).ModelPath, "embedding server should point at the migrated model");
         }
 
+        public static async Task DoctorEmbeddingInstallKeepsExistingNomicUntilVerifiedQwenIsReady()
+        {
+            using var temp = new TempDir();
+            var root = temp.PathFor("AI");
+            var embedDir = Path.Combine(root, "Models", "embed");
+            Directory.CreateDirectory(embedDir);
+            var nomicPath = Path.Combine(embedDir, "nomic-embed-text-v1.5-Q4_K_M.gguf");
+            await File.WriteAllTextAsync(nomicPath, "existing nomic model");
+
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.LocalAiAssetsRoot = root;
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            settings.Settings.Rag.EmbeddingModel = "nomic-embed-text-v1.5";
+            settings.Settings.ManagedServers.Clear();
+            settings.Settings.ManagedServers.Add(new ServerConfig
+            {
+                Name = "Embeddings",
+                EmbeddingsMode = true,
+                ModelPath = nomicPath
+            });
+
+            var qwenContent = "verified qwen model";
+            var spec = new EmbeddingModelDownloadSpec(
+                "Qwen3-Embedding-0.6B",
+                "Qwen3-Embedding-0.6B-Q8_0.gguf",
+                "https://example.test/Qwen3-Embedding-0.6B-Q8_0.gguf",
+                ExpectedSha256(qwenContent));
+            var doctor = new DoctorService(
+                settings,
+                new RuntimeProfileService(settings),
+                new FakeVoiceProviderRegistry(settings),
+                new FakeSecretStore(),
+                new SqliteRagStore(settings),
+                new ThrowingEmbeddingService(),
+                new FakeSystemInfo(),
+                new PythonHealthValidator(),
+                new NoOpReranker(),
+                new ModelDownloadService(new HttpClient(new CapturingRangeHttpHandler(qwenContent))),
+                spec);
+
+            var ok = await doctor.InstallEmbeddingModelAsync();
+            var qwenPath = Path.Combine(embedDir, spec.FileName);
+
+            True(ok, "verified Qwen download should succeed");
+            True(File.Exists(nomicPath), "installing Qwen must retain an existing Nomic model");
+            Equal("existing nomic model", await File.ReadAllTextAsync(nomicPath), "installing Qwen must not alter Nomic's file");
+            Equal(spec.ModelName, settings.Settings.Rag.EmbeddingModel, "settings should switch only after the Qwen file verifies");
+            Equal(qwenPath, settings.Settings.ManagedServers.Single(s => s.EmbeddingsMode).ModelPath, "embedding server should switch to verified Qwen");
+        }
+
         public static Task LlamaServerReleaseDataCoversSupportedPlatforms()
         {
             var service = new LlamaServerSetupService();
@@ -1821,16 +1891,19 @@ namespace Hermaeus.Tests
             {
                 var settings = NewSettings(temp);
                 settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
-                var store = new SecretStore(settings);
+                var protectedKeyDirectory = temp.PathFor("protected-secrets");
+                var store = new SecretStore(settings, null, protectedKeyDirectory);
                 var reference = await store.StoreAsync("openai-api-key", "sk-test-secret");
                 Equal(true, store.IsReference(reference), "stored secret should return a reference");
                 Equal("sk-test-secret", await store.ResolveAsync(reference), "secret reference should resolve");
                 Equal("Local fallback file", await store.BackendLabelAsync(), "disabled keychain should use fallback label");
 
                 var localVault = Path.Combine(settings.Settings.DataManagement.DataRootDirectory, "secrets.local.json");
-                var localKey = Path.Combine(settings.Settings.DataManagement.DataRootDirectory, "secrets.local.key");
+                var localKey = Path.Combine(protectedKeyDirectory, "secrets.local.key");
                 True(File.Exists(localVault), "fallback vault should exist");
-                True(File.Exists(localKey), "fallback key should exist");
+                True(File.Exists(localKey), "fallback key should exist outside the data root");
+                False(File.Exists(Path.Combine(settings.Settings.DataManagement.DataRootDirectory, "secrets.local.key")),
+                    "fallback key should not remain beside the portable vault");
                 var json = await File.ReadAllTextAsync(localVault);
                 True(json.Contains("v2:", StringComparison.Ordinal), "fallback vault should use versioned encrypted values");
                 False(json.Contains("sk-test-secret", StringComparison.Ordinal), "fallback vault should not contain plaintext");
@@ -1860,14 +1933,15 @@ namespace Hermaeus.Tests
             {
                 var settings = NewSettings(temp);
                 var dataRoot = temp.PathFor("data");
+                var protectedKeyDirectory = temp.PathFor("protected-secrets");
                 settings.Settings.DataManagement.DataRootDirectory = dataRoot;
-                var store = new SecretStore(settings);
+                var store = new SecretStore(settings, null, protectedKeyDirectory);
 
                 await store.StoreAsync("openai-api-key", "sk-test-secret");
 
-                var localKey = Path.Combine(dataRoot, "secrets.local.key");
+                var localKey = Path.Combine(protectedKeyDirectory, "secrets.local.key");
                 True(File.Exists(localKey), "fallback key file should be created");
-                var leftoverTemp = Directory.GetFiles(dataRoot, "secrets.local.key.*.tmp");
+                var leftoverTemp = Directory.GetFiles(protectedKeyDirectory, "secrets.local.key.*.tmp");
                 Equal(0, leftoverTemp.Length, "the key file's temp-write artifact should not survive a successful write");
 
                 if (!OperatingSystem.IsWindows())
@@ -1891,19 +1965,80 @@ namespace Hermaeus.Tests
             {
                 var settings = NewSettings(temp);
                 var dataRoot = temp.PathFor("data");
+                var protectedKeyDirectory = temp.PathFor("protected-secrets");
                 settings.Settings.DataManagement.DataRootDirectory = dataRoot;
                 var log = new RuntimeLogService(settings);
-                var store = new SecretStore(settings, log);
+                var store = new SecretStore(settings, log, protectedKeyDirectory);
 
                 var reference = await store.StoreAsync("openai-api-key", "sk-test-secret");
 
-                var localKey = Path.Combine(dataRoot, "secrets.local.key");
+                var localKey = Path.Combine(protectedKeyDirectory, "secrets.local.key");
                 await File.WriteAllTextAsync(localKey, Convert.ToBase64String(new byte[32]));
 
                 var resolved = await store.ResolveAsync(reference);
                 Equal(string.Empty, resolved, "a secret that fails to decrypt under a replaced key should resolve empty rather than throw");
                 True(log.GetEntries().Any(e => e.Level == RuntimeLogLevel.Warning && e.Message.Contains("could not be decrypted", StringComparison.OrdinalIgnoreCase)),
                     "a total decrypt failure should be logged instead of silently swallowed");
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("HERMAEUS_DISABLE_OS_KEYCHAIN", previous);
+            }
+        }
+
+        public static async Task SecretStoreMigratesLegacyKeyOutOfDataRoot()
+        {
+            using var temp = new TempDir();
+            var previous = Environment.GetEnvironmentVariable("HERMAEUS_DISABLE_OS_KEYCHAIN");
+            Environment.SetEnvironmentVariable("HERMAEUS_DISABLE_OS_KEYCHAIN", "1");
+            try
+            {
+                var settings = NewSettings(temp);
+                var dataRoot = temp.PathFor("data");
+                var protectedKeyDirectory = temp.PathFor("protected-secrets");
+                settings.Settings.DataManagement.DataRootDirectory = dataRoot;
+
+                var legacyStore = new SecretStore(settings, null, dataRoot);
+                var reference = await legacyStore.StoreAsync("openai-api-key", "sk-legacy-secret");
+                var legacyKey = Path.Combine(dataRoot, "secrets.local.key");
+                True(File.Exists(legacyKey), "legacy setup should place the key beside the vault");
+
+                var migratedStore = new SecretStore(settings, null, protectedKeyDirectory);
+                True(File.Exists(Path.Combine(protectedKeyDirectory, "secrets.local.key")),
+                    "legacy key should move to the protected key directory during store initialization");
+                False(File.Exists(legacyKey), "legacy key should be removed from the data root during store initialization");
+                Equal("sk-legacy-secret", await migratedStore.ResolveAsync(reference),
+                    "existing fallback secrets should remain readable after key relocation");
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("HERMAEUS_DISABLE_OS_KEYCHAIN", previous);
+            }
+        }
+
+        public static async Task CopiedDataRootCannotDecryptFallbackSecretsWithoutProtectedKey()
+        {
+            using var temp = new TempDir();
+            var previous = Environment.GetEnvironmentVariable("HERMAEUS_DISABLE_OS_KEYCHAIN");
+            Environment.SetEnvironmentVariable("HERMAEUS_DISABLE_OS_KEYCHAIN", "1");
+            try
+            {
+                var settings = NewSettings(temp);
+                var originalDataRoot = temp.PathFor("original-data");
+                settings.Settings.DataManagement.DataRootDirectory = originalDataRoot;
+                var originalStore = new SecretStore(settings, null, temp.PathFor("original-protected-secrets"));
+                var reference = await originalStore.StoreAsync("openai-api-key", "sk-not-portable");
+
+                var copiedDataRoot = temp.PathFor("copied-data");
+                Directory.CreateDirectory(copiedDataRoot);
+                File.Copy(
+                    Path.Combine(originalDataRoot, "secrets.local.json"),
+                    Path.Combine(copiedDataRoot, "secrets.local.json"));
+
+                settings.Settings.DataManagement.DataRootDirectory = copiedDataRoot;
+                var copiedStore = new SecretStore(settings, null, temp.PathFor("copied-protected-secrets"));
+                Equal(string.Empty, await copiedStore.ResolveAsync(reference),
+                    "a copied data root without the separate protected key should not decrypt fallback credentials");
             }
             finally
             {
@@ -2026,7 +2161,7 @@ namespace Hermaeus.Tests
                 var settings = NewSettings(temp);
                 settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
                 settings.Settings.Llm.OpenAiApiKey = "sk-plain-key-123456";
-                var secrets = new SecretStore(settings);
+                var secrets = new SecretStore(settings, null, temp.PathFor("protected-secrets"));
                 var vm = NewSettingsViewModel(settings, secrets);
 
                 Equal("sk-plain-key-123456", vm.OpenAiApiKey, "plaintext setting should load into editable field");
@@ -2141,7 +2276,7 @@ namespace Hermaeus.Tests
             {
                 var settings = NewSettings(temp);
                 settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
-                var secrets = new SecretStore(settings);
+                var secrets = new SecretStore(settings, null, temp.PathFor("protected-secrets"));
                 var reference = await secrets.StoreAsync("openai-api-key", "sk-existing-secret");
                 settings.Settings.Llm.OpenAiApiKey = reference;
 
@@ -2240,6 +2375,7 @@ namespace Hermaeus.Tests
             Equal(0, args[^1], "CPU fallback should be the final auto-tune candidate");
             Equal(12, ServerProcessManager.ParseGpuLayerLog("llm_load_tensors: offloaded 12/33 layers to GPU").Used, "offloaded layer logs should parse");
             Equal(4341, DoctorService.TryParseLlamaBuild("llama.cpp b4341"), "llama.cpp build tags should parse");
+            Equal(10509, DoctorService.TryParseLlamaBuild("version: 0.1.2-dev (build 10509, commit fe8156f78)"), "current llama-server parenthesized build output should parse");
             return Task.CompletedTask;
         }
 
@@ -2263,6 +2399,21 @@ namespace Hermaeus.Tests
                 True(ex.Message.Contains("--pooling mean", StringComparison.Ordinal), "error should suggest an OAI-compatible pooling mode");
                 True(ex.Message.Contains("embedding model", StringComparison.OrdinalIgnoreCase), "error should suggest using an embedding model");
             }
+        }
+
+        public static Task EmbeddingClientUsesKnownQwenAndLegacyNomicDimensions()
+        {
+            using var temp = new TempDir();
+            var qwenSettings = NewSettings(temp);
+            qwenSettings.Settings.Rag.EmbeddingModel = "Qwen3-Embedding-0.6B";
+            using var qwen = new LlamaCppEmbeddingService(qwenSettings);
+            Equal(1024, qwen.Dimensions, "Qwen3-Embedding-0.6B should report its known 1024 dimensions before the first server response");
+
+            var nomicSettings = NewSettings(temp);
+            nomicSettings.Settings.Rag.EmbeddingModel = "nomic-embed-text-v1.5";
+            using var nomic = new LlamaCppEmbeddingService(nomicSettings);
+            Equal(768, nomic.Dimensions, "existing Nomic configurations should retain their known 768 dimensions");
+            return Task.CompletedTask;
         }
 
         public static async Task ConversationStoreRoundTripsPerMessageModelAttribution()
@@ -2696,6 +2847,26 @@ namespace Hermaeus.Tests
             var matches = all.Where(m => m.Content == "User wants todos auto-continued without prompting.").ToList();
             Equal(1, matches.Count, "the same marker text saved twice across turns should dedupe into a single row, not pile up duplicates");
             Equal(2, matches[0].FrequencyCount, "the dedupe path should bump FrequencyCount on the second save");
+        }
+
+        public static async Task ConversationMemoryDedupesNearEquivalentMarkersAcrossTurns()
+        {
+            using var temp = new TempDir();
+            var settings = NewSettings(temp);
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            var store = new MemoryStore(settings);
+            await store.InitializeAsync();
+            var conversations = new ConversationStore(settings);
+            await conversations.InitializeAsync();
+            var service = new ConversationMemoryService(settings, conversations, store,
+                new MemoryExtractionService(), new FakeLlm(), new RuntimeLogService(settings));
+
+            await service.ApplyMemoryMarkersAsync("[MEMORY: User prefers Australian English spelling in all replies.]", [], "conv-near-dedupe");
+            await service.ApplyMemoryMarkersAsync("[MEMORY: User prefers Australian English spelling for every reply.]", [], "conv-near-dedupe");
+
+            var memories = await store.GetAllAsync();
+            Equal(1, memories.Count, "near-equivalent durable memories should reinforce one row rather than accumulating paraphrases");
+            Equal(2, memories[0].FrequencyCount, "merging a near-equivalent memory should retain the reinforcement count");
         }
 
         public static async Task ConversationMemoryAlwaysStripsMarkersRegardlessOfInjectionOrExtraction()

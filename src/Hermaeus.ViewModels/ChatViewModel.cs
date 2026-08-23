@@ -40,6 +40,54 @@ public sealed class ChatContextPartViewModel
     public string TokenLabel => $"{EstimatedTokens:N0} tokens";
 }
 
+public sealed record ChatEnvironmentCapabilities(
+    string ModelName,
+    bool IsRemote,
+    bool AcceptsImages,
+    int ReadyAttachmentCount,
+    string KnowledgeDatasetName,
+    bool MemoryContextEnabled,
+    bool RecallContextEnabled);
+
+public static class ChatEnvironmentContext
+{
+    public static string Build(ChatEnvironmentCapabilities capabilities)
+    {
+        var hasModel = !string.IsNullOrWhiteSpace(capabilities.ModelName);
+        var modelName = !hasModel
+            ? "the model selected for this conversation"
+            : $"the selected model \"{capabilities.ModelName.Trim()}\"";
+        var location = !hasModel
+            ? "the configured runtime route"
+            : capabilities.IsRemote ? "a remote provider" : "a local runtime";
+        var exposed = new List<string>
+        {
+            "text conversation",
+            "text, code, and document attachments"
+        };
+        if (capabilities.AcceptsImages)
+            exposed.Add("image attachments");
+        if (!string.IsNullOrWhiteSpace(capabilities.KnowledgeDatasetName))
+            exposed.Add($"retrieval from the attached Knowledge dataset \"{capabilities.KnowledgeDatasetName.Trim()}\"");
+        if (capabilities.MemoryContextEnabled)
+            exposed.Add("relevant saved-memory context when retrieval finds it");
+        if (capabilities.RecallContextEnabled)
+            exposed.Add("relevant Recall context when retrieval finds it");
+
+        var current = capabilities.ReadyAttachmentCount > 0
+            ? $" This turn includes {capabilities.ReadyAttachmentCount} ready attachment(s)."
+            : string.Empty;
+
+        return
+            "## Hermaeus Chat environment\n" +
+            $"You are {modelName}, running through {location} in Hermaeus normal Chat. " +
+            "Keep your intrinsic model abilities separate from features Hermaeus exposes.\n" +
+            $"Available here: {string.Join("; ", exposed)}.{current}\n" +
+            "Unavailable here: web access, shell commands, tool calls, and Agent workspace actions. " +
+            "Do not claim an unavailable capability.";
+    }
+}
+
 public sealed class ChatTraceViewModel
 {
     public string Id { get; init; } = Guid.NewGuid().ToString("N");
@@ -281,6 +329,13 @@ public partial class ChatViewModel : ViewModelBase
     /// <summary>Drives the "no model configured" empty state (r8 02-onboarding-and-usability.md 2.6).</summary>
     public bool HasNoAvailableModels => AvailableModels.Count == 0;
 
+    /// <summary>
+    /// First-run setup is a recovery path only while onboarding is incomplete.
+    /// A completed user with no live model belongs in Services instead.
+    /// </summary>
+    public bool ShowSetupWizardFromEmptyState =>
+        HasNoAvailableModels && !_settings.Settings.SetupWizardCompleted;
+
     public bool IsSelectedModelRemote =>
         SelectedModel is not null
         && CompositeLlmService.Providers.FirstOrDefault(p =>
@@ -357,6 +412,7 @@ public partial class ChatViewModel : ViewModelBase
     public event EventHandler?        ScrollToBottom;
     public event EventHandler<string>? ConversationSaved;
     public Action<string>?            RequestCopyToClipboard { get; set; }
+    public Action?                    RequestInputFocus { get; set; }
     public Action?                    RequestContextFilePicker { get; set; }
     public Func<ConversationExportFormat, Task<string?>>? RequestConversationExportPath { get; set; }
     public ISettingsService Settings => _settings;
@@ -762,7 +818,11 @@ public partial class ChatViewModel : ViewModelBase
             SendCommand.NotifyCanExecuteChanged();
             ScheduleContextUsageRefresh();
         };
-        AvailableModels.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasNoAvailableModels));
+        AvailableModels.CollectionChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(HasNoAvailableModels));
+            OnPropertyChanged(nameof(ShowSetupWizardFromEmptyState));
+        };
         RefreshEstimatedContextUsage();
         _ = Task.Run(RefreshMemoryStatusAsync);
         _ = Task.Run(LoadPersistedChatTracesAsync);
@@ -914,7 +974,11 @@ public partial class ChatViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private void OpenSetupWizardFromEmptyState() => RequestNavigate?.Invoke("wizard");
+    private void OpenSetupWizardFromEmptyState() =>
+        RequestNavigate?.Invoke(_settings.Settings.SetupWizardCompleted ? "services" : "wizard");
+
+    public void RefreshSetupState() =>
+        OnPropertyChanged(nameof(ShowSetupWizardFromEmptyState));
 
     [RelayCommand]
     private void OpenServicesFromEmptyState() => RequestNavigate?.Invoke("services");
@@ -966,6 +1030,7 @@ public partial class ChatViewModel : ViewModelBase
                 ParentId = msg.ParentId,
                 CreatedAt = msg.CreatedAt,
                 Content = msg.Content,
+                ReasoningContent = msg.ReasoningContent,
                 OriginalContent = msg.OriginalContent,
                 IsError = msg.IsError,
                 ModelId = msg.ModelId,
@@ -1025,6 +1090,7 @@ public partial class ChatViewModel : ViewModelBase
         RagDatasetId = project?.DatasetId ?? string.Empty;
         _ = Task.Run(RefreshMemoryStatusAsync);
         _ = ResolveSelectedRagDatasetAsync();
+        RequestInputFocus?.Invoke();
     }
 
     /// <summary>r21 1.2: picking an entry from the Knowledge flyout list (including the "None" sentinel).</summary>
@@ -1223,14 +1289,16 @@ public partial class ChatViewModel : ViewModelBase
             var ragAndRecallContext = ragContext + recallContext;
 
             var promptBuildSw = Stopwatch.StartNew();
-            var systemPromptTokens = EstimateTokens(SystemPrompt) + EstimateTokens(memoryContext) + EstimateTokens(ragAndRecallContext);
+            var composedSystemPrompt = ComposeSystemPrompt(memoryContext, ragAndRecallContext) ?? string.Empty;
+            var systemPromptTokens = EstimateTokens(composedSystemPrompt);
             var history = TruncateHistoryToContextWindow(
                 // r25 doc 01 1.6: the prompt is the conversation the user is
                 // actually having, not every branch they ever abandoned.
                 ActivePath.Where(m => !m.IsStreaming).ToList(),
                 ResolveContextWindowLimit(),
                 systemPromptTokens,
-                Math.Max(0, snapshot.EstimatedTokens - snapshot.HistoryTokens - systemPromptTokens));
+                Math.Max(0, snapshot.EstimatedTokens - snapshot.HistoryTokens - systemPromptTokens),
+                ShouldReplayReasoning());
             if (history.Count > 0 && history[^1].Role == "user")
             {
                 var images = attachments.Where(a => a.IsReady && a.IsImage)
@@ -1274,7 +1342,13 @@ public partial class ChatViewModel : ViewModelBase
                             SpeakStreamingChunk(chunk);
                 },
                 onUsage: usage => UpdateContextUsage(usage, "Reported by provider"),
-                _cts.Token);
+                _cts.Token,
+                onReasoning: reasoning =>
+                {
+                    asst.ReasoningContent += reasoning;
+                    asst.IsReasoningStreaming = true;
+                    ScrollToBottom?.Invoke(this, EventArgs.Empty);
+                });
 
             phaseCts.Cancel();
             try { await phaseLoop; } catch (OperationCanceledException) { }
@@ -1292,6 +1366,7 @@ public partial class ChatViewModel : ViewModelBase
                 ? $"cancelled after {result.TotalLatencyMs} ms"
                 : $"{timing.Format()} · render batches {accumulator.RenderBatches}";
             asst.IsStreaming = false;
+            asst.IsReasoningStreaming = false;
 
             if (!result.Cancelled && timing.IsSlow)
             {
@@ -1306,7 +1381,7 @@ public partial class ChatViewModel : ViewModelBase
 
             if (result.Cancelled)
             {
-                if (string.IsNullOrWhiteSpace(asst.Content))
+                if (string.IsNullOrWhiteSpace(asst.Content) && string.IsNullOrWhiteSpace(asst.ReasoningContent))
                 {
                     RemoveAndReanchor(asst);
                 }
@@ -1471,6 +1546,7 @@ public partial class ChatViewModel : ViewModelBase
                 ConversationId = CurrentConversationId,
                 Role = m.Role,
                 Content = m.Content,
+                ReasoningContent = m.ReasoningContent,
                 OriginalContent = m.OriginalContent,
                 CreatedAt = m.CreatedAt,
                 IsError = m.IsError,
@@ -1561,6 +1637,13 @@ public partial class ChatViewModel : ViewModelBase
     private void CopyMessage(MessageViewModel? msg)
     {
         if (msg is not null) RequestCopyToClipboard?.Invoke(msg.Content);
+    }
+
+    [RelayCommand]
+    private void CopyReasoning(MessageViewModel? msg)
+    {
+        if (msg is not null && !string.IsNullOrWhiteSpace(msg.ReasoningContent))
+            RequestCopyToClipboard?.Invoke(msg.ReasoningContent);
     }
 
     [RelayCommand]
@@ -1920,13 +2003,41 @@ public partial class ChatViewModel : ViewModelBase
         MinP = MinP,
         RepeatPenalty = RepeatPenalty,
         FrequencyPenalty = FrequencyPenalty,
-        PresencePenalty = PresencePenalty
+        PresencePenalty = PresencePenalty,
+        IncludeReasoningHistory = ShouldReplayReasoning(),
+        UseDeepseekReasoningFormat = string.Equals(SelectedModel?.ProviderTag, "llama.cpp", StringComparison.OrdinalIgnoreCase)
     };
 
     private string? ComposeSystemPrompt(string memoryContext, string ragContext = "")
     {
-        var combined = SystemPrompt + memoryContext + ragContext;
+        var combined = BuildEnvironmentContext() + "\n\n" + SystemPrompt + memoryContext + ragContext;
         return string.IsNullOrWhiteSpace(combined) ? null : combined;
+    }
+
+    private string BuildEnvironmentContext()
+    {
+        var datasetName = !string.IsNullOrWhiteSpace(RagDatasetId) && SelectedRagDataset is { Id.Length: > 0 }
+            ? SelectedRagDataset.Name
+            : string.Empty;
+        return ChatEnvironmentContext.Build(new ChatEnvironmentCapabilities(
+            SelectedModel?.DisplayName ?? string.Empty,
+            IsSelectedModelRemote,
+            CurrentModelHasConfirmedVisionCapability(),
+            ContextAttachments.Count(attachment => attachment.IsReady),
+            datasetName,
+            _settings.Settings.Memory.Enabled && _memoryInjection is not null,
+            _settings.Settings.Memory.RecallInjectionEnabled && _recallSearch is not null));
+    }
+
+    private bool CurrentModelHasConfirmedVisionCapability()
+    {
+        // OpenAI-compatible transports accept image_url parts, but the model
+        // record does not currently prove that a particular remote model can
+        // interpret them. Only a configured local projector is affirmative
+        // capability evidence suitable for the environment prompt.
+        if (string.Equals(SelectedModel?.ProviderTag, "openai", StringComparison.OrdinalIgnoreCase))
+            return false;
+        return CurrentModelAcceptsVisionAttachments();
     }
 
     /// <summary>
@@ -1971,7 +2082,7 @@ public partial class ChatViewModel : ViewModelBase
                 if (selected.Count > 0)
                 {
                     contextText = _memoryInjection.BuildMemoryContext(selected);
-                    sources.AddRange(selected.Where(m => m.Source is not null).Select(m => m.Source!));
+                    sources.AddRange(selected.Select(m => m.ToContextSource()));
                     injectedIds.AddRange(selected.Select(m => m.Id));
                     await _memoryStore.MarkRecalledAsync(injectedIds, ct);
                 }
@@ -2179,9 +2290,12 @@ public partial class ChatViewModel : ViewModelBase
     private ChatContextSnapshot BuildContextSnapshot(string text, IReadOnlyList<ChatContextAttachment> attachments)
     {
         var promptText = ChatContextAttachment.BuildPrompt(text, attachments);
-        var historyTokens = ActivePath.Where(m => !m.IsStreaming).Sum(m => EstimateTokens(m.Content));
+        var historyTokens = ActivePath.Where(m => !m.IsStreaming).Sum(m =>
+            EstimateTokens(m.Content) + (ShouldReplayReasoning() ? EstimateTokens(m.ReasoningContent) : 0));
 
         var contextParts = new List<ContextPart>();
+        var environmentContext = BuildEnvironmentContext();
+        contextParts.Add(new ContextPart("System", "Hermaeus Chat environment", environmentContext));
         if (!string.IsNullOrWhiteSpace(SystemPrompt))
             contextParts.Add(new ContextPart("System", "System prompt", SystemPrompt));
         contextParts.Add(new ContextPart("User", "Draft message", text));
@@ -2196,14 +2310,15 @@ public partial class ChatViewModel : ViewModelBase
             EstimatedTokens = part.EffectiveTokens
         }).ToList();
 
-        var total = EstimateTokens(SystemPrompt) + EstimateTokens(promptText) + historyTokens;
+        var total = EstimateTokens(environmentContext) + EstimateTokens(SystemPrompt) + EstimateTokens(promptText) + historyTokens;
         return new ChatContextSnapshot(promptText, total, parts, historyTokens);
     }
 
     private List<ChatMessage> BuildHistory(string promptText)
     {
         var history = ActivePath.Where(m => !m.IsStreaming)
-            .Select(m => new ChatMessage(m.Role, m.Content)).ToList();
+            .Select(m => new ChatMessage(m.Role, m.Content,
+                ReasoningContent: ShouldReplayReasoning() ? m.ReasoningContent : null)).ToList();
         history.Add(new ChatMessage("user", promptText));
         return history;
     }
@@ -2267,7 +2382,7 @@ public partial class ChatViewModel : ViewModelBase
             ModelId = modelId,
             Provider = model?.Provider ?? _llm.ProviderName,
             Runtime = model?.ProviderTag ?? _llm.ProviderName,
-            SystemPrompt = SystemPrompt,
+            SystemPrompt = ComposeSystemPrompt(string.Empty) ?? string.Empty,
             AttachmentCount = snapshot.Parts.Count(p => p.Kind == "Attachment"),
             RagContextItems = ragContextItems,
             RagMs = ragMs,
@@ -2442,12 +2557,25 @@ public partial class ChatViewModel : ViewModelBase
         IReadOnlyList<MessageViewModel> messages,
         int contextWindow,
         int systemTokens = 0,
-        int currentPromptTokens = 0) =>
+        int currentPromptTokens = 0,
+        bool includeReasoning = false) =>
         ChatContextUsageCalculator.TruncateHistoryToContextWindow(
-            messages.Select(m => new ChatMessage(m.Role, m.Content)).ToList(),
+            messages.Select(m => new ChatMessage(m.Role, m.Content,
+                ReasoningContent: includeReasoning ? m.ReasoningContent : null)).ToList(),
             contextWindow,
             systemTokens,
             currentPromptTokens);
+
+    private bool ShouldReplayReasoning()
+    {
+        var server = _settings.Settings.ManagedServers.FirstOrDefault(s => !s.EmbeddingsMode);
+        return ReasoningHistoryPolicy.CanReplay(
+            SelectedModel?.ProviderTag ?? string.Empty,
+            providerAccepts: SelectedModel?.DefaultPreserveReasoning is not null,
+            templatePreserves: SelectedModel?.DefaultPreserveReasoning == true,
+            preserveSetting: server?.PreserveReasoning == true,
+            launchApplied: SelectedModel?.DefaultPreserveReasoning == true);
+    }
 
     /// <summary>
     /// r21 3.3: "Open in chat" from the Dataset Manager attaches a dataset to
@@ -2516,6 +2644,7 @@ public partial class ChatViewModel : ViewModelBase
                 CreatedAt = m.CreatedAt,
                 Role = m.Role,
                 Content = m.Content,
+                ReasoningContent = m.ReasoningContent,
                 OriginalContent = m.OriginalContent,
                 IsError = m.IsError,
                 ModelId = m.ModelId,

@@ -44,6 +44,7 @@ public sealed class BenchmarkRunInfoViewModel
     public string Score => _run.RankingScore.ToString("P0");
     public string PassRate => _run.PassRate.ToString("P0");
     public string Speed => $"median {_run.MedianApproxTokensPerSecond:F1} tok/s";
+    public string InferenceEngine => _run.Metadata.InferenceEngineSummary;
     public List<BenchmarkResultViewModel> ResultSummaries { get; }
 
     public BenchmarkRunInfoViewModel(BenchmarkRun run, BenchmarkViewModel? parentVm = null)

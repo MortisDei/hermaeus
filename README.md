@@ -4,9 +4,18 @@
 
 Hermaeus is a native, local-first AI workspace for developers and power users.
 
-Rather than being another chat client, Hermaeus combines conversations, long-term memory, local retrieval, supervised agents, model management, benchmarking, diagnostics, and pluggable voice services into a single desktop application where every action is transparent, reviewable, and under the user's control.
+Hermaeus manages the local AI system around conversation: model and runtime configuration, RAG and knowledge, long-term memory, supervised agents, benchmarking, diagnostics, observability, and optional voice services. It is a desktop application where those operations remain transparent, reviewable, and under the user's control.
 
-Built with **Avalonia UI** and **.NET 10**. Tested on Windows and on Pop!_OS (Wayland); other Linux environments should work but are less exercised.
+Built with **Avalonia UI** and **.NET 10**. Continuous integration runs on Windows and Linux. Pop!_OS (Wayland) is a real-use target; other Linux environments are less exercised.
+
+The application is real and actively dogfooded, not just a collection of service
+adapters. This Chat capture shows a local Gemma 4 model running through
+`llama.cpp`, with the runtime and model attribution visible in the UI:
+
+![Hermaeus Chat showing a local Gemma 4 response](docs/images/chat.png)
+
+*Chat with a local model, including runtime attribution, context awareness, and
+explicit boundaries around web and tool access.*
 
 ---
 
@@ -93,6 +102,14 @@ organisation, and explicit control over what is kept and what is forgotten.
   refused before the server starts rather than after
 - Complete model downloads: shards, vision projectors and MTP draft heads
   arrive together, each model in its own folder
+
+The Models workspace is where local files and provider-discovered models are
+reviewed, organized, tuned, and managed:
+
+![Hermaeus Models workspace](docs/images/models.png)
+
+*Models lists local model provenance and runtime state, with management and
+auto-tuning actions in the same workspace.*
 
 ### Local RAG
 
@@ -189,11 +206,64 @@ Includes:
 - A Settings page for preferences, kept separate from the Services page that
   manages processes and files on disk
 
+Doctor reports what is ready, missing, or needs attention, with the relevant
+remediation action alongside the check:
+
+![Hermaeus Doctor diagnostics](docs/images/doctor.png)
+
+*Doctor exposes runtime, model, voice, and RAG readiness instead of hiding
+operational problems behind a generic connection error.*
+
 ---
 
 # Quick Start
 
-**Prerequisites:** [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0). A local model runtime (managed `llama.cpp`, Ollama, or an OpenAI-compatible endpoint) is configured later, in-app, via the setup wizard - nothing else needs to be installed up front.
+## Use a release archive
+
+Download the archive and matching `.sha256` file for your platform from the
+[latest GitHub Release](https://github.com/MortisDei/hermaeus/releases/latest).
+Release builds currently provide framework-dependent `linux-x64` `.tar.gz` and
+`win-x64` `.zip` archives. They require the .NET 10 runtime unless a future
+release explicitly says it is self-contained.
+
+Linux:
+
+```bash
+sha256sum -c hermaeus-<version>-linux-x64.tar.gz.sha256
+tar -xzf hermaeus-<version>-linux-x64.tar.gz
+./hermaeus-<version>-linux-x64/install-desktop.sh
+```
+
+Windows PowerShell:
+
+```powershell
+Get-FileHash -Algorithm SHA256 hermaeus-<version>-win-x64.zip
+Get-Content hermaeus-<version>-win-x64.zip.sha256
+```
+
+Compare the displayed hash with the companion checksum file, extract the
+archive, then double-click `Hermaeus.exe`. It is the small open-source package
+launcher for the actual application under `app\Hermaeus.Desktop.exe`. Release
+binaries are unsigned, so verify the checksum before accepting an
+operating-system warning.
+
+After starting Hermaeus, use **Services** to configure a runtime, select a
+model, and start Chat. The in-app setup wizard can download a starter model.
+See the [user guide](docs/user-guide.md) for first-launch and troubleshooting
+workflows.
+
+On first launch, onboarding guides the initial data-root, runtime, model, and
+voice setup:
+
+![Hermaeus first-run setup](docs/images/onboarding.png)
+
+*First-run setup keeps storage and local AI asset locations explicit.*
+
+## Build from source
+
+Install the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0),
+then clone and run the desktop project. A local model runtime is configured
+later in-app via the setup wizard.
 
 ```bash
 git clone https://github.com/MortisDei/hermaeus.git
@@ -201,7 +271,11 @@ cd hermaeus
 dotnet run --project src/Hermaeus.Desktop
 ```
 
-Open **Services**, configure a runtime, select a model, then start the Chat service. If you have no runtime set up yet, the in-app setup wizard walks through downloading a starter model.
+## Screenshots
+
+The release captures above are from the working desktop application. They are
+placed beside the workflows they demonstrate rather than collected as a
+gallery.
 
 ---
 
@@ -250,7 +324,8 @@ Highlights include:
 
 See **docs/security-review.md** for the complete engineering review, and **SECURITY.md** to report a vulnerability.
 
-An automated regression suite of **1,176 tests** runs on every commit across Windows and Linux, with warnings treated as build errors.
+The automated regression suite runs in Windows and Linux CI, with warnings
+treated as build errors.
 
 ---
 
@@ -266,6 +341,8 @@ Hermaeus has one maintainer. Issues get a best-effort response; pull requests mu
 
 ## User Features
 
+- [User guide](docs/user-guide.md)
+- [Packaging and installation](docs/packaging.md)
 - Chat & Context
 - Model Management
 - Local AI Setup
@@ -314,12 +391,15 @@ dotnet build Hermaeus.sln
 
 dotnet test src/Hermaeus.Tests/Hermaeus.Tests.csproj
 
-./build.sh --skip-restore
+./build.sh
 
-pwsh ./build.ps1 -SkipRestore
+pwsh ./build.ps1
 ```
 
-Packaging scripts create Linux `.tar.gz` and Windows `.zip` archives under `dist/`.
+Packaging scripts create Linux `.tar.gz` and Windows `.zip` archives under
+`dist/`. `--skip-restore`/`-SkipRestore` is only for a workspace already
+restored for the requested runtime identifier; see
+[Packaging](docs/packaging.md).
 
 ---
 
@@ -339,6 +419,8 @@ See:
 
 Hermaeus is **not** an OSI-approved open source project.
 
+Support development on [Ko-fi](https://ko-fi.com/mortisdei).
+
 For commercial licensing requests, see the Contact section of COMMERCIAL.md.
 
 ---
@@ -347,7 +429,7 @@ For commercial licensing requests, see the Contact section of COMMERCIAL.md.
 
 Current version:
 
-**0.36.0-alpha**
+**0.37.0-alpha**
 
 Major systems currently implemented include:
 
@@ -360,6 +442,9 @@ Major systems currently implemented include:
 - Benchmark suites
 - Local AI setup
 - Doctor diagnostics
+- Reasoning-aware local chat with capability evidence and preserved reasoning
+- Shared per-model context and KV-cache defaults
+- Safe model adoption, progress, and deletion workflows
 - Security review and threat model
 
 Hermaeus is alpha software. See [Known Issues](#known-issues--alpha-status) below and `CHANGELOG.md` for the current state and improvement cadence. Public release hardening continues in the areas of installer signing, OCR support, additional security tightening, and Linux global hotkeys.

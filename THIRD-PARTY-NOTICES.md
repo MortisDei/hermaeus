@@ -159,20 +159,18 @@ provider's terms before relying on one commercially.
 ## 5. Model weights Hermaeus offers to download
 
 Not redistributed. Hermaeus downloads them from Hugging Face at your request
-and verifies a pinned SHA256. Each is governed by its publisher's licence, and
-**they are not all permissive.** The setup wizard shows the licence of each
-starter model before you download it.
+and verifies a pinned SHA256. Each is governed by its publisher's licence. The
+setup wizard shows the licence of each starter model before you download it.
 
 ### Starter chat models (setup wizard)
 
 | Model | GGUF publisher | Licence |
 | --- | --- | --- |
-| Qwen2.5 3B Instruct | bartowski | **Qwen Research License: research and non-commercial use only.** Note this differs from its 7B and 14B siblings. |
-| Llama 3.2 3B Instruct | unsloth | Llama 3.2 Community License. Acceptable-use policy, and an attribution requirement if you build on or redistribute it. |
 | Phi-4 mini Instruct | unsloth | MIT |
-| Qwen2.5 7B Instruct | bartowski | Apache-2.0 |
-| Gemma 4 E4B Instruct | unsloth | Apache-2.0, plus Google's Gemma prohibited-use policy |
-| Qwen2.5 14B Instruct | bartowski | Apache-2.0 |
+| Gemma 4 E2B IT QAT | unsloth | Apache-2.0 |
+| Gemma 4 E4B IT QAT | unsloth | Apache-2.0 |
+| Qwen3 8B | Qwen | Apache-2.0 |
+| Qwen3 14B | Qwen | Apache-2.0 |
 
 ### Other model assets
 

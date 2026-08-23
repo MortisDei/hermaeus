@@ -38,6 +38,7 @@ dotnet run --project src/Hermaeus.Desktop                  # launch the app; see
 Any compiler warning fails the build. Fix the warning; do not suppress it without a comment explaining the constraint.
 
 - `docs/testing.md` is the reference for the suite: what it is, the platform-skip attribute, the injectable-timeout rule, the coverage floor, the guard tests, and why Windows CI is slower than Linux CI. Read it before adding or changing tests.
+- Run the documented suite from a normal VS Code or PowerShell terminal before diagnosing failures. Restricted runners may not be able to access the real `%LOCALAPPDATA%\Hermaeus` app-data root or NuGet user configuration, producing misleading temp-root, SQLite, or restore errors. Never modify `src/Hermaeus.Tests/Helpers.cs`, production root selection, or SQLite setup just to compensate for that environment; reproduce the same command with results outside the repo first.
 - New harness-style test methods must be registered in `XunitHarnessTests.HarnessCases`; a reflection guard (`HarnessRegistrationGuardTests`) fails the suite otherwise.
 - Platform-specific tests use `[WindowsOnlyFact]` so they report Skipped, never an early `return` that reports Passed; a guard test enforces this.
 - Never let test output land in the working tree: pass `--results-directory` outside the repo, and never `git add -A`.
@@ -52,7 +53,7 @@ Any compiler warning fails the build. Fix the warning; do not suppress it withou
   references. Runtime log output goes through `RedactionService`.
 - User-facing state files: write via atomic replacement (temp + move), like existing code in `SettingsService`/`BackupService`.
 - UI copy: icon-only controls need tooltips (a guard test scans axaml and fails without one); empty states use the shared `MossEmptyState` control; any text attributed to Moss follows `docs/mascot.md` "Voice in UI copy". When in doubt, drop the personality and state the fact.
-- Docs: user-visible behaviour changes must update `docs/features.md` and the relevant workflow doc (`docs/rag.md`, `docs/agent.md`, `docs/voice.md`, `docs/benchmarks.md`) plus `CHANGELOG.md`. Do not document planned behaviour as existing behaviour.
+- Docs: all authoritative repository documentation must stay synchronized with behaviour, architecture, security and privacy claims, setup and build instructions, configuration, workflows, APIs, UI semantics, licensing, and current feature descriptions. User-visible behaviour changes must update `docs/features.md`, `docs/user-guide.md` when the release-user workflow changes, the relevant workflow doc (`docs/rag.md`, `docs/agent.md`, `docs/voice.md`, `docs/benchmarks.md`), and `CHANGELOG.md`. Stale documentation is a defect. Do not document planned behaviour as existing behaviour. If no documentation update is required, state that explicitly in the implementation or review.
 
 ## Known hot spots (read before large edits)
 
@@ -60,9 +61,14 @@ Any compiler warning fails the build. Fix the warning; do not suppress it withou
 
 ## Working agreement
 
+- Inspect the existing architecture and its authoritative docs before adding an abstraction.
+- Never weaken approval gates, deterministic risk classification, integrity checks, or other security boundaries to make a workflow easier.
+- Do not change the PolyForm Noncommercial/source-available licensing model unless the repository owner explicitly requests that legal change.
 - Smallest complete change that solves the task; no stubs, TODO placeholders, or partial implementations unless explicitly requested.
 - Do not invent APIs, files, or architecture; follow existing patterns unless improving them is the point of the task.
 - If you find a bug or unsafe pattern: fix it if in scope, otherwise record it and mention it in your final response.
+- Run focused tests while implementing behavioural changes, then the complete solution build and full repository suite before completion.
+- Keep documentation synchronized with behaviour, configuration, workflows, APIs, and UI semantics. Stale documentation is a defect. Planned behaviour must never read as implemented. If no documentation update is required, state that explicitly in the implementation or review rather than silently omitting it.
 
 Before finishing any task:
 1. `dotnet build Hermaeus.sln` and run the test harness.

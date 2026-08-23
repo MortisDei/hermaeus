@@ -145,25 +145,39 @@ public sealed partial class DoctorService
         {
             return BuildCheck(
                 "embedding-model-update",
-                "nomic embedding model version",
+                "Qwen3 embedding model version",
                 DoctorCheckStatus.Info,
                 "Embedding model version check skipped",
-                "Install the pinned nomic embedding model before checking its file hash.",
+                "Install the pinned Qwen3-Embedding-0.6B model before checking its file hash.",
                 "Download embedding model",
                 true,
                 modelCheck.Diagnostics,
                 "RAG");
         }
 
-        if (!LooksLikeNomicEmbeddingName(configured) && !LooksLikeNomicEmbeddingName(Path.GetFileName(search.Path)))
+        if (LooksLikeNomicEmbeddingName(configured) || LooksLikeNomicEmbeddingName(Path.GetFileName(search.Path)))
         {
             return BuildCheck(
                 "embedding-model-update",
-                "nomic embedding model version",
+                "Qwen3 embedding model upgrade",
                 DoctorCheckStatus.Info,
-                "Non-nomic embedding model selected",
-                "Doctor only verifies the pinned nomic-embed-text-v1.5 model hash.",
-                "Open Settings",
+                "Nomic embedding model remains selected",
+                "Nomic remains configured and usable. Download the verified Qwen3-Embedding-0.6B default to switch this dedicated server; reindex RAG datasets and re-embed mismatched memories after it starts.",
+                "Download embedding model",
+                true,
+                search.Path,
+                "RAG");
+        }
+
+        if (!LooksLikeDefaultEmbeddingName(configured) && !LooksLikeDefaultEmbeddingName(Path.GetFileName(search.Path)))
+        {
+            return BuildCheck(
+                "embedding-model-update",
+                "Qwen3 embedding model version",
+                DoctorCheckStatus.Info,
+                "Custom embedding model selected",
+                "Doctor verifies the pinned Qwen3-Embedding-0.6B file only. Your selected embedding model remains unchanged.",
+                "Open Services",
                 true,
                 search.Path,
                 "RAG");
@@ -179,11 +193,11 @@ public sealed partial class DoctorService
         // download fix, for a genuinely missing model.
         return BuildCheck(
             "embedding-model-update",
-            "nomic embedding model version",
+            "Qwen3 embedding model version",
             hashOk ? DoctorCheckStatus.Ready : DoctorCheckStatus.Info,
-            hashOk ? "Pinned nomic embedding model verified" : "Installed nomic embedding model differs from the pinned build",
+            hashOk ? "Pinned Qwen3 embedding model verified" : "Installed Qwen3 embedding model differs from the pinned build",
             hashOk
-                ? "Installed file matches the pinned nomic-embed-text-v1.5 GGUF."
+                ? "Installed file matches the pinned Qwen3-Embedding-0.6B GGUF."
                 : "This does not mean the model is missing or broken; it just isn't byte-identical to Hermaeus's pinned reference build. Re-download from Services only if you suspect a corrupted file.",
             "Details",
             false,
@@ -342,9 +356,18 @@ public sealed partial class DoctorService
 
         progress?.Report($"Downloading embedding model to {destinationPath}...");
 
+        var lastPercent = -1;
         var downloadProgress = progress is null
             ? null
-            : new Progress<DownloadProgress>(p => progress.Report($"Downloading embedding model... {p.PercentComplete:F1}%"));
+            : new Progress<DownloadProgress>(p =>
+            {
+                var percent = (int)Math.Floor(p.PercentComplete);
+                if (percent <= lastPercent)
+                    return;
+
+                lastPercent = percent;
+                progress.Report($"Downloading embedding model... {percent}%");
+            });
 
         var result = await _downloads.DownloadAsync(_embeddingDownload.Url, destinationPath, downloadProgress, ct);
         if (!result.Success)
@@ -480,6 +503,7 @@ public sealed partial class DoctorService
             "embed",
             "embedding",
             "nomic",
+            "qwen",
             "bge",
             "gte"
         };
@@ -512,6 +536,12 @@ public sealed partial class DoctorService
         && value.Contains("nomic", StringComparison.OrdinalIgnoreCase)
         && (value.Contains("embed", StringComparison.OrdinalIgnoreCase)
             || value.Contains("text", StringComparison.OrdinalIgnoreCase));
+
+    private static bool LooksLikeDefaultEmbeddingName(string value) =>
+        !string.IsNullOrWhiteSpace(value)
+        && value.Contains("qwen3", StringComparison.OrdinalIgnoreCase)
+        && value.Contains("embedding", StringComparison.OrdinalIgnoreCase)
+        && value.Contains("0.6b", StringComparison.OrdinalIgnoreCase);
 
     private static bool LooksLikeE5EmbeddingName(string text) =>
         text.Equals("e5", StringComparison.OrdinalIgnoreCase)

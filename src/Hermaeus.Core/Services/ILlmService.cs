@@ -17,7 +17,8 @@ public record ChatMessage(
     string Content,
     string? ToolCallId = null,
     IReadOnlyList<LlmToolCallRequest>? ToolCalls = null,
-    IReadOnlyList<ChatMessageImage>? Images = null);
+    IReadOnlyList<ChatMessageImage>? Images = null,
+    string? ReasoningContent = null);
 
 /// <summary>One image attached to a chat turn (r19 5.3). <see cref="DataUri"/> is a complete
 /// <c>data:&lt;mediaType&gt;;base64,...</c> string, ready to embed directly in an OpenAI-style
@@ -66,7 +67,8 @@ public sealed record LlmStreamEvent(
     bool IsFinal = false,
     IReadOnlyList<LlmToolCallRequest>? ToolCalls = null,
     ChatServerTimings? ServerTimings = null,
-    string? FinishReason = null)
+    string? FinishReason = null,
+    string ReasoningDelta = "")
 {
     public static LlmStreamEvent Error(string message) => new(message, IsFinal: true);
 }
@@ -109,6 +111,8 @@ public sealed record LlmChatOptions
     /// <c>cache_prompt: true</c> stays the chat default.
     /// </summary>
     public bool DisablePromptCache { get; init; }
+    public bool IncludeReasoningHistory { get; init; }
+    public bool UseDeepseekReasoningFormat { get; init; }
 
     /// <summary>
     /// Constrains generation to a shape. Null means unconstrained, which is

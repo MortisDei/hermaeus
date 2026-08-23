@@ -1,7 +1,21 @@
 # llama.cpp: what Hermaeus uses, and what it does not
 
-A survey of `llama-server`'s current surface against what Hermaeus emits,
-carried out at **build b10215** (2026-08-01). Read this before adding a flag.
+A full-surface survey of `llama-server` against what Hermaeus emitted, carried
+out at **build b10215** (2026-08-01). Read this before adding a flag.
+
+This is the last complete baseline, not a claim that every later r30 change was
+verified against that exact build. Later changes use the selected executable's
+own `--help` at discovery and immediately before launch. The current Batch #3
+Linux development environment had no accessible configured `llama-server`
+binary, so it did not replace the b10215 full survey with a guessed newer one.
+
+Managed Linux releases are extracted with their archive link relationships
+validated against the install root and materialized as regular files. This
+preserves versioned companion-library SONAMEs without creating archive-directed
+filesystem links. Doctor then executes `--version`; a path that exists but
+cannot load its companion libraries is an error, not a usable installation.
+Build identifiers from different schemes are reported as not comparable rather
+than being ordered by a misleading numeric fallback.
 
 ## The rule
 
@@ -29,7 +43,43 @@ Every flag Hermaeus can emit still exists in b10215:
 `--cache-type-k`, `--cache-type-v`, `--flash-attn`, `--context-shift`,
 `--mlock`, `--no-mmap`, `--mmproj`, `--spec-type`, `--spec-draft-model`,
 `-ngld`, `--spec-draft-n-max`, `--spec-draft-n-min`, `--spec-draft-p-min`,
-`--n-cpu-moe`, `--cpu-moe`.
+`--n-cpu-moe`, `--cpu-moe`, `--reasoning-format`, `--reasoning-preserve`,
+`--no-reasoning-preserve`.
+
+## Adopted in 0.37.0-alpha
+
+### Capability evidence, runtime discovery, and reasoning transport
+
+Hermaeus reads bounded GGUF metadata, including the architecture-suffixed
+`nextn_predict_layers` scalar and the presence of `tokenizer.chat_template`.
+It combines that evidence with the selected executable's `--help` flags and a
+healthy managed server's `/props` response. Embedded MTP, separate reasoning
+output, template reasoning preservation, and modalities are each reported as
+Available, Unavailable, or Unknown with evidence. Results are cached by model
+and executable path, size, and modification time using an atomic state file.
+
+The same help probe now discovers the speculative type names printed beside
+`--spec-type`, `--threads-batch`, and `--perf` when present. A type is not made
+configurable merely because it was discovered. Hermaeus currently has complete
+semantics for self-drafting n-gram modes and the MTP-head path; unfamiliar
+types remain runtime facts until their drafter, model compatibility, memory,
+and launch semantics are understood. At launch the help probe is repeated:
+saved speculative settings or prompt threads are refused when the selected
+runtime cannot prove their flag, rather than emitted optimistically.
+
+Capability snapshots are compared across executable identities. Only meaningful
+state changes are retained: core capabilities changing state and speculative
+types appearing or disappearing. The detailed record is an Activity event.
+Moss raises one concise heads-up per newly observed snapshot, with a warning
+when a removed capability can affect a configured server. Raw help text is not
+stored or presented as a diff.
+
+llama.cpp reasoning uses `--reasoning-format deepseek` when supported. Stream
+events carry `reasoning_content` separately from answer content. The optional
+`--reasoning-preserve` and `--no-reasoning-preserve` flags are emitted only after
+the paired runtime capability is proven. Stored reasoning is replayed only when
+the matching template reports `supports_preserve_reasoning=true` and the saved
+server setting is enabled.
 
 ## Adopted in 0.36.0-alpha
 
@@ -53,7 +103,6 @@ Recorded so the next round starts from a survey rather than repeating it.
 
 | Flag | What it does | Why not now |
 | --- | --- | --- |
-| `--reasoning-format`, `-rea/--reasoning` | Extracts a model's thought tags into a separate `reasoning_content` field instead of leaving them inline in `message.content` | **The most valuable one left.** Hermaeus does not parse thinking output at all, so a reasoning model's `<think>` block currently lands raw in the reply. Doing it properly spans `LlmStreamEvent` (a reasoning delta), `LlamaCppService`'s stream parsing, the message model, persistence, and collapsible rendering in the transcript. That is a round's work, and half of it would be worse than none. Its own item, next round. |
 | `-cram`, `--cache-ram N` | Caps the RAM used to keep KV caches of idle slots warm | Already defaults to 8192 MiB, which is sensible. A knob with no observed problem behind it is a knob nobody sets correctly. |
 | `--swa-full` | Full-size sliding-window-attention cache | Trades memory for a narrow correctness/perf case on SWA models. No observed need. |
 | `-kvu/--kv-unified` | One KV buffer shared across sequences | Hermaeus runs `--parallel 1` by design (r14 2.1), so there is one sequence and nothing to unify. |
@@ -61,6 +110,17 @@ Recorded so the next round starts from a survey rather than repeating it.
 | `--no-op-offload`, `--no-host` | Low-level backend placement | Debugging switches, not user-facing settings. ExtraArgs covers them. |
 | `--jinja` / `--no-jinja` | Jinja chat templating | Already enabled by default upstream. |
 | `--lora`, `--lora-scaled` | LoRA adapters at load time | A real feature request would come with a workflow (where adapters live, how they are picked per conversation). Nobody has asked. |
+
+## Watchlist and evidence gates
+
+| Area | Current r30 position | Revisit only when |
+| --- | --- | --- |
+| DSpark, DFlash, EAGLE-3 and other speculative types | Runtime discovery reports them when installed help names them, but does not expose a control. Vocabulary equality alone does not establish drafter compatibility. | A supported runtime and documented end-to-end drafter workflow can be validated with model, vocabulary, GPU-layer, and Speed Check evidence. |
+| General external draft model | `draft-mtp` keeps the bounded MTP-head workflow. The generic picker remains incomplete. | Hermaeus can prove more than vocabulary equality, preserve detailed failure evidence, and measure acceptance, TTFT, throughput, and overhead for a known pair. |
+| Prompt cache and prefill effectiveness | Benchmarks distinguish cold and warm attempts and record prompt throughput and TTFT, but llama-server does not provide a stable reuse-token counter in this integration. | A stable machine-readable runtime counter or an explicit controlled shared-prefix workload can be added without fabricating reuse counts. |
+| Backend sampling | Not configured. No accessible runtime evidence in Batch #3 established a useful single-slot contract. | A selected runtime advertises a stable option and a Speed Check can isolate its effect for `--parallel 1`. |
+| Internal performance instrumentation | `--perf` is detected as a fact only. It is not enabled by normal launches or parsed as a benchmark contract. | Its diagnostic output is stable and machine-readable enough to explain a measured difference without coupling to log wording. |
+| Context checkpoints, cache RAM, multi-device placement | Not exposed. Their memory and placement behavior has no demonstrated single-user need. | A reproducible local workload and bounded failure behavior justify a user-facing workflow. |
 
 ## Also fixed here
 

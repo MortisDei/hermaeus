@@ -27,8 +27,13 @@ Runs record the following metrics and metadata:
 	see Resource Sampling Notes)
 - Pass rate, failure count, and weighted rankings
 - Run metadata including model identity, backend/runtime, context size, GPU
-	layers, thread count, model path, and quantization (all sourced from the
-	managed server actually serving a local GGUF model, not app-process values)
+  layers, generation and prompt thread counts, model path, quantization, KV
+  cache K/V types, and Flash Attention (all sourced from the managed server
+  actually serving a local GGUF model, not app-process values)
+- A persistent empirical profile fingerprint over the material model and
+  inference configuration, plus a shared direct-observation source reference.
+  This associates the run with what was actually measured. It is not a generic
+  capability score or an automatic model recommendation.
 - Suite version, case version, scoring profile, and run mode
 - Cold-only single-iteration runs, or cold and warm phase attempts when suites
 	use repeated iterations per case
@@ -45,10 +50,25 @@ without appearing here.
 `AppVersion`, `ModelPath`, `ModelHash`, `Quantization`, `Backend`,
 `RuntimeVersion`, `RuntimeKind`, `ContextSize`, `PromptTemplate`,
 `SamplerSettings`, `Temperature`, `TopP`, `TopK`, `RepeatPenalty`, `Seed`,
-`GpuLayers`, `Threads`, `BatchSize`, `EmbeddingModel`, `RerankerEnabled`,
-`OS`, `CPU`, `RAM`, `GPU`, `SpeculativeTypes`, `SpeculativeDraftModel`,
+`GpuLayers`, `Threads`, `PromptThreads`, `BatchSize`, `EmbeddingModel`, `RerankerEnabled`,
+`KvCacheTypeK`, `KvCacheTypeV`, `FlashAttention`, `OS`, `CPU`, `RAM`, `GPU`,
+`SpeculativeTypes`, `SpeculativeDraftModel`,
 `SpeculativeNMax`, `SpeculativeNMin`, `SpeculativePMin`,
-`SpeculativeDraftGpuLayers`.
+`SpeculativeDraftGpuLayers`, `ProfileFingerprint`, `ObservationSource`.
+
+KV cache and Flash Attention are configuration provenance, not a score or a
+recommendation. New local-GGUF runs record the managed server values in their
+saved record, run details, and JSON, Markdown, and CSV exports. Historical
+runs and runs that do not resolve to a managed llama-server show the settings
+as not recorded; Hermaeus does not infer a default after the fact.
+
+New runs also save a profile fingerprint covering the known material inference
+fields, including prompt threads, KV cache types, Flash Attention, and
+speculative configuration. The fingerprint changes when a recorded field
+changes and leaves unknown fields unknown. The associated observation source is
+local direct evidence for that one run, not a claim that the model behaves the
+same way on another machine or workload. Historical runs keep no fingerprint or
+observation source rather than being reconstructed from presumed defaults.
 
 The default action is a one-click benchmark pass. With **Run all suites**
 enabled, Hermaeus runs every built-in suite for the selected model. Turning it off
@@ -109,6 +129,13 @@ Hermaeus includes starter suites covering:
 	claims
 
 ### Suite Versioning
+
+The 0.37.0-alpha deterministic scorer is versioned separately from stored run
+data. It accepts multiline structural regexes, normalizes grouping separators
+only inside digit runs, recognizes explicit inability phrases, and supports
+additive all-required keyword alternative groups. Historical `run_json` rows are
+not rescored. A reasoning-only response still fails cases that score the final
+answer, because an explanation is not an answer.
 
 Suites and cases carry version identifiers so historical runs remain meaningful
 after prompts, scoring profiles, or evaluation rules change.
@@ -365,6 +392,13 @@ three separate answers, because they are three separate facts:
 expected pattern, or a refusal expectation, because a throughput number should
 not quietly become a pass or a fail.
 
+**Prompt cache boundaries.** Cold and warm phases report externally observable
+prompt throughput and time to first token. They can show whether the workflow
+changed, but they do not claim how many prompt tokens llama-server reused:
+this runtime integration has no stable reuse-token counter. A timing difference
+is not fabricated into a reuse count. Shared-prefix cache measurement remains a
+future controlled workload, not a normal-chat inference.
+
 **Comparing two runs.** Two Speed Check runs of the same suite against the same
 model can be shown side by side, with the difference in tokens per second,
 prompt tokens per second and time to first token, and the configuration
@@ -387,6 +421,11 @@ which depends on the model pair and on the content being generated. It can be a
 large speedup, a small one, or slower than not using it. That is why the Speed
 Check exists: the feature is worth having because the answer can now be
 measured, not because the measurement is guaranteed to be favourable.
+
+Read throughput, TTFT, drafted tokens, accepted draft tokens, and acceptance
+rate together. A higher tokens-per-second result with no drafted tokens, poor
+acceptance, or worse TTFT is a trade-off to inspect, not a "best" verdict.
+Hermaeus deliberately does not collapse those facts into a magic score.
 
 ### First recorded result (r27, 0.34.0-alpha)
 

@@ -56,7 +56,10 @@ Kokoro (native) is the default voice provider. It runs fully in-process with no
 Python subprocess: the Doctor install action downloads its ONNX model once,
 after which it runs fully offline. The first-run Setup Wizard shows Kokoro
 onboarding details in the voice step, including the install plan and risk
-notes before you continue.
+notes before you continue. When the assets are already present, onboarding
+reports Voice as ready and removes the install action. A successful install
+rechecks provider state immediately, and the same state is read again when the
+step is revisited or the app restarts.
 
 The Kokoro (Python) fallback, along with F5-TTS and XTTS v2, run as managed
 Python subprocesses. For those, Hermaeus can detect available hardware backends

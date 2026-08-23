@@ -34,7 +34,8 @@ public static class ChatSendOrchestrator
         // r14 4.2: fired once when the first stream event of any kind arrives,
         // so the caller can switch a live "reading prompt" placeholder to
         // "thinking" before any visible content exists.
-        Action? onFirstEvent = null)
+        Action? onFirstEvent = null,
+        Action<string>? onReasoning = null)
     {
         var clock = Stopwatch.StartNew();
         long? firstTokenMs = null;
@@ -73,6 +74,9 @@ public static class ChatSendOrchestrator
                     firstTokenMs ??= clock.ElapsedMilliseconds;
                     onToken(evt.ContentDelta);
                 }
+
+                if (!string.IsNullOrEmpty(evt.ReasoningDelta))
+                    onReasoning?.Invoke(evt.ReasoningDelta);
             }
 
             return new ChatSendResult(firstTokenMs ?? 0, clock.ElapsedMilliseconds, usage, Cancelled: false, Error: null, ServerTimings: serverTimings, FirstEventMs: firstEventMs ?? firstTokenMs ?? 0, FinishReason: finishReason);

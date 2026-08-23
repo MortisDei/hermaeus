@@ -47,6 +47,9 @@ follows these rules:
   lines should not.
 - He never speaks for the model. Answers, refusals, and mistakes belong to
   the model or the app, not to Moss.
+- Setup guidance follows the same contract: one factual next step, what can be
+  skipped, and no claims that a provider, model, or runtime is ready before it
+  has been verified.
 
 ## Brand personality
 

@@ -20,6 +20,8 @@ public sealed class RuntimeLogService : IRuntimeLogService
     {
         _settings = settings;
         _redactor = redactor;
+        if (settings is SettingsService concrete)
+            concrete.NormalizationWarning += message => Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Service, message));
     }
 
     public void Add(RuntimeLogEntry entry)

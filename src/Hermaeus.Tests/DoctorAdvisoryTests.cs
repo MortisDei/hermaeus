@@ -30,6 +30,42 @@ public sealed class DoctorAdvisoryTests
             Task.FromResult(new HardwareProfile(0, 8_000_000_000, "Fake GPU"));
     }
 
+    [Fact]
+    public void Linux_tray_support_is_ready_only_after_current_session_confirmation()
+    {
+        var unknown = DoctorService.BuildTraySupportCheck(
+            isWindows: false,
+            isMacOS: false,
+            isLinux: true,
+            integrationConfirmed: false,
+            diagnostics: "Linux");
+        var confirmed = DoctorService.BuildTraySupportCheck(
+            isWindows: false,
+            isMacOS: false,
+            isLinux: true,
+            integrationConfirmed: true,
+            diagnostics: "Linux");
+
+        Assert.Equal(DoctorCheckStatus.Info, unknown.Status);
+        Assert.Equal("Tray support not confirmed", unknown.Summary);
+        Assert.Equal(DoctorCheckStatus.Ready, confirmed.Status);
+        Assert.Equal("Tray integration confirmed", confirmed.Summary);
+    }
+
+    [Fact]
+    public void Windows_tray_support_remains_ready_without_runtime_confirmation()
+    {
+        var check = DoctorService.BuildTraySupportCheck(
+            isWindows: true,
+            isMacOS: false,
+            isLinux: false,
+            integrationConfirmed: false,
+            diagnostics: "Windows");
+
+        Assert.Equal(DoctorCheckStatus.Ready, check.Status);
+        Assert.Equal("Tray supported", check.Summary);
+    }
+
     /// <summary>
     /// The GPU-present-but-zero-layers advisory used to fire purely from
     /// static configuration, even for a server that was never started - a

@@ -63,7 +63,18 @@ public sealed class ConversationExportService
                     md.AppendLine($"- `{path}`");
             }
             md.AppendLine();
-            md.AppendLine(message.Content.Trim());
+            if (!string.IsNullOrWhiteSpace(message.ReasoningContent))
+            {
+                md.AppendLine("#### Reasoning");
+                md.AppendLine();
+                md.AppendLine(message.ReasoningContent.Trim());
+                md.AppendLine();
+                md.AppendLine("#### Answer");
+                md.AppendLine();
+            }
+            md.AppendLine(string.IsNullOrWhiteSpace(message.Content) && !string.IsNullOrWhiteSpace(message.ReasoningContent)
+                ? "No final answer was returned."
+                : message.Content.Trim());
         }
 
         return md.ToString();

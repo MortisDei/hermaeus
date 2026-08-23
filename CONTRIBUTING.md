@@ -1,8 +1,9 @@
 # Contributing
 
 Hermaeus is a source-available product project maintained by one person, not an
-open-governance open-source project. Outside code contributions are not being
-accepted.
+open-governance open-source project. External code contributions are considered
+only by prior arrangement. Opening a pull request does not grant review, merge,
+write, release, secret, or workflow authority.
 
 **Issues and bug reports are welcome and useful.** So are feature suggestions,
 though the answer to most of them will be no or not yet, and the "Explicit
@@ -40,10 +41,20 @@ and noncommercial use but may also be commercially licensed.
 - Run `dotnet build Hermaeus.sln` before submitting changes.
 - Run `dotnet test src/Hermaeus.Tests/Hermaeus.Tests.csproj` when changes
   affect storage, settings, security, RAG, backup, restore, or runtime launch.
+- Use a concise Conventional Commit-style subject for non-trivial commits, with
+  a useful body explaining intent, key changes, and relevant validation.
+  Subject-only commits are fine for genuinely trivial changes.
+- Keep all authoritative repository documentation synchronized with behaviour,
+  architecture, security and privacy claims, setup and build instructions,
+  configuration, workflows, APIs, UI semantics, licensing, and current feature
+  descriptions. Update the relevant workflow docs, `docs/features.md`,
+  `docs/user-guide.md` when the release-user workflow changes, and `CHANGELOG.md`
+  as appropriate. Stale documentation is a defect, and planned behaviour must
+  not be described as implemented. If no documentation update is required, say
+  so explicitly in the pull request or review instead of silently omitting it.
 - Changes land as pull requests, never direct pushes to `main`; see
-  `docs/pull-requests.md`. One open pull request per maintainer at any one
-  time. Documentation-only changes may go straight to `main` when the owner
-  says so.
+  `docs/pull-requests.md`. Only the repository owner may approve, merge, push
+  protected branches, publish releases, or change workflow permissions.
 
 ## Vocabulary
 

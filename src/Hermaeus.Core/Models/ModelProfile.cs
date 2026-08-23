@@ -8,6 +8,8 @@ public class ModelProfile
     public List<string> Tags { get; set; } = [];
     public double? DefaultTemperature { get; set; }
     public int? DefaultContextSize { get; set; }
+    public string? DefaultKvCacheType { get; set; }
+    public bool? DefaultPreserveReasoning { get; set; }
     public int? DefaultMaxTokens { get; set; }
     public double? DefaultTopP { get; set; }
     public int? DefaultTopK { get; set; }

@@ -45,7 +45,7 @@ public static class LocalApiEndpoints
                 return Results.BadRequest("modelId and a non-empty messages array are required.");
             }
 
-            var messages = req.Messages.Select(m => new ChatMessage(m.Role, m.Content)).ToList();
+            var messages = req.Messages.Select(m => new ChatMessage(m.Role, m.Content, ReasoningContent: m.ReasoningContent)).ToList();
             var options = BuildChatOptions(req, settingsService.Settings.Llm, profiles.Get(req.ModelId));
 
             if (req.Stream)
@@ -57,17 +57,19 @@ public static class LocalApiEndpoints
             }
 
             var content = new StringBuilder();
+            var reasoning = new StringBuilder();
             ChatTokenUsage? usage = null;
             await foreach (var evt in llm.StreamChatAsync(req.ModelId, messages, options, ct))
             {
                 content.Append(evt.ContentDelta);
+                reasoning.Append(evt.ReasoningDelta);
                 if (evt.Usage is not null)
                     usage = evt.Usage;
             }
 
             await LogCallAsync(traces, client, selfReported, "chat.completions", sw, string.Empty, ct,
                 modelId: req.ModelId, promptTokens: usage?.PromptTokens, completionTokens: usage?.CompletionTokens);
-            return Results.Ok(new ChatCompletionResponse(content.ToString(), usage?.PromptTokens, usage?.CompletionTokens));
+            return Results.Ok(new ChatCompletionResponse(content.ToString(), usage?.PromptTokens, usage?.CompletionTokens, reasoning.ToString()));
         });
 
         app.MapGet("/v1/memory/query", async (string q, int? limit, IMemoryStore memories, ITraceStore traces, HttpContext http, CancellationToken ct) =>
@@ -243,7 +245,8 @@ public static class LocalApiEndpoints
         MinP = req.MinP ?? profile?.DefaultMinP ?? defaults.MinP,
         RepeatPenalty = req.RepeatPenalty ?? profile?.DefaultRepeatPenalty ?? defaults.RepeatPenalty,
         FrequencyPenalty = req.FrequencyPenalty ?? profile?.DefaultFrequencyPenalty ?? defaults.FrequencyPenalty,
-        PresencePenalty = req.PresencePenalty ?? profile?.DefaultPresencePenalty ?? defaults.PresencePenalty
+        PresencePenalty = req.PresencePenalty ?? profile?.DefaultPresencePenalty ?? defaults.PresencePenalty,
+        IncludeReasoningHistory = req.Messages.Any(m => !string.IsNullOrWhiteSpace(m.ReasoningContent))
     };
 
     /// <summary>
@@ -274,19 +277,19 @@ public static class LocalApiEndpoints
             if (evt.Usage is not null)
                 usage = evt.Usage;
 
-            if (string.IsNullOrEmpty(evt.ContentDelta))
+            if (string.IsNullOrEmpty(evt.ContentDelta) && string.IsNullOrEmpty(evt.ReasoningDelta))
                 continue;
 
-            await WriteChunkAsync(http, completionId, created, modelId, evt.ContentDelta, finishReason: null, ct);
+            await WriteChunkAsync(http, completionId, created, modelId, evt.ContentDelta, evt.ReasoningDelta, finishReason: null, ct);
         }
 
-        await WriteChunkAsync(http, completionId, created, modelId, string.Empty, finishReason: "stop", ct);
+        await WriteChunkAsync(http, completionId, created, modelId, string.Empty, string.Empty, finishReason: "stop", ct);
         await http.Response.WriteAsync("data: [DONE]\n\n", ct);
         await http.Response.Body.FlushAsync(ct);
         return usage;
     }
 
-    private static async Task WriteChunkAsync(HttpContext http, string id, long created, string modelId, string delta, string? finishReason, CancellationToken ct)
+    private static async Task WriteChunkAsync(HttpContext http, string id, long created, string modelId, string delta, string reasoning, string? finishReason, CancellationToken ct)
     {
         var chunk = new
         {
@@ -299,7 +302,7 @@ public static class LocalApiEndpoints
                 new
                 {
                     index = 0,
-                    delta = new { content = delta },
+                    delta = new { content = delta, reasoning_content = reasoning },
                     finish_reason = finishReason
                 }
             }

@@ -78,33 +78,51 @@ public sealed partial class DoctorService
 
     private DoctorCheck CheckTraySupport()
     {
-        // Windows (Shell_NotifyIcon) and macOS (NSStatusItem) reliably support tray icons.
-        // Linux support depends on the desktop environment/app-indicator availability, so it
-        // stays advisory rather than a confirmed pass.
-        if (OperatingSystem.IsWindows() || OperatingSystem.IsMacOS())
+        return BuildTraySupportCheck(
+            OperatingSystem.IsWindows(),
+            OperatingSystem.IsMacOS(),
+            OperatingSystem.IsLinux(),
+            _trayIntegration?.IsConfirmed == true,
+            Environment.OSVersion.ToString());
+    }
+
+    internal static DoctorCheck BuildTraySupportCheck(
+        bool isWindows,
+        bool isMacOS,
+        bool isLinux,
+        bool integrationConfirmed,
+        string diagnostics)
+    {
+        // Shell_NotifyIcon and NSStatusItem are stable platform capabilities.
+        // Linux varies by desktop environment, so only a current-session tray
+        // interaction turns this check green.
+        if (isWindows || isMacOS || (isLinux && integrationConfirmed))
         {
             return BuildCheck(
                 "tray",
                 "Tray support",
                 DoctorCheckStatus.Ready,
-                "Tray supported",
-                "Tray icons are supported on this OS.",
+                integrationConfirmed ? "Tray integration confirmed" : "Tray supported",
+                integrationConfirmed
+                    ? "The Hermaeus tray responded in this session."
+                    : "Tray icons are supported on this OS.",
                 "Details",
                 false,
-                Environment.OSVersion.ToString(),
+                diagnostics,
                 "System");
         }
 
-        var supported = OperatingSystem.IsLinux();
         return BuildCheck(
             "tray",
             "Tray support",
-            supported ? DoctorCheckStatus.Info : DoctorCheckStatus.Warning,
-            supported ? "Tray likely supported" : "Tray not supported",
-            supported ? "Depends on the desktop environment." : "Tray icons are not supported on this OS.",
+            isLinux ? DoctorCheckStatus.Info : DoctorCheckStatus.Warning,
+            isLinux ? "Tray support not confirmed" : "Tray not supported",
+            isLinux
+                ? "Use the Hermaeus tray once, then rescan to confirm this desktop integration."
+                : "Tray icons are not supported on this OS.",
             "Details",
             false,
-            Environment.OSVersion.ToString(),
+            diagnostics,
             "System");
     }
 

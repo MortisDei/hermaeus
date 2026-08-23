@@ -1,16 +1,17 @@
 # Commercial Licensing
 
-Hermaeus is free for private and noncommercial use under the PolyForm
-Noncommercial License 1.0.0. Commercial use requires a separate paid commercial
-license from the copyright holder.
+Hermaeus is available under the PolyForm Noncommercial License 1.0.0. Uses that
+the licence permits do not require a separate commercial licence. Uses outside
+its permitted purposes require separate written permission, which may be
+offered as a paid commercial licence.
 
 ## Commercial Use
 
 Commercial use includes, but is not limited to:
 
 - using Hermaeus for business operations, paid work, consulting, or client work
-- deploying Hermaeus inside a company, agency, institution, or revenue-generating
-  organization outside the noncommercial license terms
+- deploying Hermaeus for business operations or another purpose outside the
+  noncommercial licence terms
 - bundling, reselling, hosting, white-labeling, or offering Hermaeus as part of a
   paid product or service
 - using Hermaeus to provide paid support, managed AI services, training services,
@@ -18,9 +19,15 @@ Commercial use includes, but is not limited to:
 
 ## Private And Noncommercial Use
 
-Private and noncommercial use is allowed under the noncommercial license. This
-includes personal study, hobby projects, private experimentation, research, and
-other uses permitted by PolyForm Noncommercial 1.0.0.
+PolyForm permits noncommercial purposes and specified personal uses. It also
+expressly permits use by charitable organizations, educational institutions,
+public research organizations, public safety or health organizations,
+environmental protection organizations, and government institutions,
+regardless of funding source or funding obligations. An institution in one of
+those categories does not need a commercial licence merely because it is an
+institution.
+
+The governing licence text controls. This summary does not narrow its grants.
 
 ## Commercial License Requests
 

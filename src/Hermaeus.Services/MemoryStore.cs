@@ -11,7 +11,7 @@ namespace Hermaeus.Services;
 /// </summary>
 public sealed class MemoryStore : IMemoryStore
 {
-    private const int SchemaVersion = 5;
+    private const int SchemaVersion = 6;
     private const int MaxBackfillAttemptsPerRow = 5;
     /// <summary>
     /// r9 01-send-path-latency.md 1.3: how long the query and save paths wait
@@ -99,6 +99,7 @@ public sealed class MemoryStore : IMemoryStore
                 last_merge_time TEXT,
                 expiration_date TEXT,
                 relationships_json TEXT DEFAULT '[]',
+                typed_relationships_json TEXT DEFAULT '[]',
                 is_encrypted INTEGER DEFAULT 0,
                 scope TEXT NOT NULL DEFAULT 'Global',
                 scope_id TEXT NOT NULL DEFAULT '',
@@ -135,7 +136,8 @@ public sealed class MemoryStore : IMemoryStore
                     changed |= await EnsureColumnAsync(db, "last_recalled_at", "TEXT", token);
                     return changed;
                 }),
-                new SqliteMigration(5, (db, token) => EnsureColumnAsync(db, "embedding_dim", "INTEGER", token))
+                new SqliteMigration(5, (db, token) => EnsureColumnAsync(db, "embedding_dim", "INTEGER", token)),
+                new SqliteMigration(6, (db, token) => EnsureColumnAsync(db, "typed_relationships_json", "TEXT DEFAULT '[]'", token))
             ], ct);
             if (!ftsExisted)
                 await RebuildFtsAsync(c, ct);
@@ -240,7 +242,15 @@ public sealed class MemoryStore : IMemoryStore
         await EnsureInitializedAsync(ct);
         memory.UpdatedAt = DateTime.UtcNow;
         var tagsJson = JsonSerializer.Serialize(NormalizeTags(memory.Tags));
+        var relationships = KnowledgeRelationshipSemantics.Normalize(memory.Relationships, memory.RelatedMemoryIds);
+        memory.Relationships = relationships;
+        memory.RelatedMemoryIds = relationships
+            .Where(r => r.Kind == KnowledgeRelationshipKind.RelatedTo && r.Target.Kind == KnowledgeEntityKind.Memory)
+            .Select(r => r.Target.Id)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
         var relationshipsJson = JsonSerializer.Serialize(memory.RelatedMemoryIds);
+        var typedRelationshipsJson = JsonSerializer.Serialize(relationships);
         var sourceJson = memory.Source is null ? null : JsonSerializer.Serialize(memory.Source);
 
         // Embedding is a recall-quality enhancement, not a correctness
@@ -272,8 +282,8 @@ public sealed class MemoryStore : IMemoryStore
         await c.OpenAsync(ct);
         var cmd = c.CreateCommand();
         cmd.CommandText = @"
-            INSERT INTO memories (id,category,content,created_at,updated_at,source_conversation_id,importance_score,tags_json,is_pinned,is_archived,frequency_count,last_merge_time,expiration_date,relationships_json,is_encrypted,scope,scope_id,title,source_json,embedding,embedding_dim)
-            VALUES ($id,$cat,$content,$ca,$ua,$src,$imp,$tags,$pin,$arch,$freq,$merge,$exp,$rel,$enc,$scope,$scopeId,$title,$sourceJson,$embedding,$embeddingDim)
+            INSERT INTO memories (id,category,content,created_at,updated_at,source_conversation_id,importance_score,tags_json,is_pinned,is_archived,frequency_count,last_merge_time,expiration_date,relationships_json,typed_relationships_json,is_encrypted,scope,scope_id,title,source_json,embedding,embedding_dim)
+            VALUES ($id,$cat,$content,$ca,$ua,$src,$imp,$tags,$pin,$arch,$freq,$merge,$exp,$rel,$typedRel,$enc,$scope,$scopeId,$title,$sourceJson,$embedding,$embeddingDim)
             ON CONFLICT(id) DO UPDATE SET
                 category=excluded.category,
                 content=excluded.content,
@@ -289,6 +299,7 @@ public sealed class MemoryStore : IMemoryStore
                 last_merge_time=excluded.last_merge_time,
                 expiration_date=excluded.expiration_date,
                 relationships_json=excluded.relationships_json,
+                typed_relationships_json=excluded.typed_relationships_json,
                 is_encrypted=excluded.is_encrypted,
                 source_json=excluded.source_json,
                 embedding=COALESCE(excluded.embedding, memories.embedding),
@@ -308,6 +319,7 @@ public sealed class MemoryStore : IMemoryStore
         cmd.Parameters.AddWithValue("$merge", memory.LastMergeTime?.ToString("O") ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("$exp", memory.ExpirationDate?.ToString("O") ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue("$rel", relationshipsJson);
+        cmd.Parameters.AddWithValue("$typedRel", typedRelationshipsJson);
         cmd.Parameters.AddWithValue("$enc", memory.IsEncrypted ? 1 : 0);
         cmd.Parameters.AddWithValue("$scope", memory.Scope.ToString());
         cmd.Parameters.AddWithValue("$scopeId", memory.ScopeId);
@@ -404,10 +416,81 @@ public sealed class MemoryStore : IMemoryStore
             // or not hybrid recall is available.
             for (var i = 0; i < ftsResults.Count; i++)
                 ftsResults[i].RelevanceScore = 1.0 / (i + 1);
-            return ftsResults;
+            return await ExpandOneHopRelationshipsAsync(c, ftsResults, ct);
         }
 
-        return await HybridRerankAsync(c, q, ftsResults, ct);
+        var hybridResults = await HybridRerankAsync(c, q, ftsResults, ct);
+        return await ExpandOneHopRelationshipsAsync(c, hybridResults, ct);
+    }
+
+    /// <summary>
+    /// Adds direct relationship targets after the normal lexical/vector search
+    /// has ranked its candidates. It does not discover paths, re-query the
+    /// index, or let relationship information replace the primary retrieval
+    /// score. A superseded assertion is hidden from ordinary recall while its
+    /// direct replacement can be considered with a discounted source score.
+    /// </summary>
+    private static async Task<List<Memory>> ExpandOneHopRelationshipsAsync(
+        SqliteConnection c,
+        List<Memory> primaryResults,
+        CancellationToken ct)
+    {
+        if (primaryResults.Count == 0)
+            return primaryResults;
+
+        var primaryById = primaryResults.ToDictionary(m => m.Id, StringComparer.Ordinal);
+        var expansions = new Dictionary<string, (Memory Source, KnowledgeRelationship Relationship)>(StringComparer.Ordinal);
+        foreach (var memory in primaryResults)
+        {
+            foreach (var relationship in memory.Relationships.Where(KnowledgeRelationshipSemantics.IsOneHopExpandable))
+            {
+                if (string.Equals(memory.Id, relationship.Target.Id, StringComparison.Ordinal)
+                    || primaryById.ContainsKey(relationship.Target.Id)
+                    || expansions.ContainsKey(relationship.Target.Id))
+                    continue;
+
+                expansions.Add(relationship.Target.Id, (memory, relationship));
+            }
+        }
+
+        var now = DateTime.UtcNow;
+        var expanded = new List<Memory>();
+        if (expansions.Count > 0)
+        {
+            var ids = expansions.Keys.ToList();
+            var parameterNames = ids.Select((_, i) => $"$related{i}").ToList();
+            var cmd = c.CreateCommand();
+            cmd.CommandText = $@"
+                SELECT * FROM memories
+                WHERE id IN ({string.Join(",", parameterNames)})
+                  AND is_archived = 0
+                  AND (is_pinned = 1 OR expiration_date IS NULL OR expiration_date > $now)";
+            cmd.Parameters.AddWithValue("$now", now.ToString("O"));
+            for (var i = 0; i < ids.Count; i++)
+                cmd.Parameters.AddWithValue(parameterNames[i], ids[i]);
+
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                var related = Map(reader);
+                var (source, relationship) = expansions[related.Id];
+                related.RelevanceScore = Math.Max(0.0, (source.RelevanceScore ?? 0.0) * 0.5);
+                related.RetrievedViaRelationship = new RelationshipRetrieval(
+                    source.Id,
+                    string.IsNullOrWhiteSpace(source.Title) ? source.Content : source.Title,
+                    relationship.Kind,
+                    relationship.Evidence);
+                expanded.Add(related);
+            }
+        }
+
+        var currentPrimary = primaryResults.Where(m => !KnowledgeRelationshipSemantics.IsSuperseded(m));
+        return currentPrimary
+            .Concat(expanded)
+            .OrderByDescending(m => m.IsPinned)
+            .ThenByDescending(m => m.RelevanceScore)
+            .Take(100)
+            .ToList();
     }
 
     /// <summary>
@@ -937,6 +1020,10 @@ public sealed class MemoryStore : IMemoryStore
     private static Memory Map(SqliteDataReader r)
     {
         var sourceConversationId = GetStringNullable(r, "source_conversation_id");
+        var legacyRelatedIds = DeserializeRelationships(GetString(r, "relationships_json", "[]"));
+        var relationships = KnowledgeRelationshipSemantics.Normalize(
+            DeserializeTypedRelationships(GetString(r, "typed_relationships_json", "[]")),
+            legacyRelatedIds);
         return new Memory
         {
             Id = GetString(r, "id"),
@@ -953,7 +1040,8 @@ public sealed class MemoryStore : IMemoryStore
             FrequencyCount = GetInt(r, "frequency_count", 1),
             LastMergeTime = GetDateTimeNullable(r, "last_merge_time"),
             ExpirationDate = GetDateTimeNullable(r, "expiration_date"),
-            RelatedMemoryIds = JsonSerializer.Deserialize<List<string>>(GetString(r, "relationships_json", "[]")) ?? [],
+            RelatedMemoryIds = legacyRelatedIds,
+            Relationships = relationships,
             IsEncrypted = GetInt(r, "is_encrypted") != 0,
             Scope = Enum.TryParse<MemoryScope>(GetString(r, "scope", "Global"), out var scope) ? scope : MemoryScope.Global,
             ScopeId = GetString(r, "scope_id"),
@@ -961,6 +1049,30 @@ public sealed class MemoryStore : IMemoryStore
             RecallCount = GetInt(r, "recall_count"),
             LastRecalledAt = GetDateTimeNullable(r, "last_recalled_at")
         };
+    }
+
+    private static List<string> DeserializeRelationships(string json)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<List<string>>(json) ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    private static List<KnowledgeRelationship> DeserializeTypedRelationships(string json)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<List<KnowledgeRelationship>>(json) ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
     }
 
     /// <summary>

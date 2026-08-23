@@ -37,6 +37,11 @@
                     </StackPanel>
                 </Grid>
 
+                <StackPanel Spacing="3">
+                    <TextBlock Text="Inference engine" Opacity="0.6" FontSize="11" />
+                    <TextBlock Text="{Binding InferenceEngine}" TextWrapping="Wrap" />
+                </StackPanel>
+
                 <TextBlock Text="Results" FontWeight="SemiBold" />
                 <ItemsControl ItemsSource="{Binding ResultSummaries}">
                     <ItemsControl.ItemTemplate>

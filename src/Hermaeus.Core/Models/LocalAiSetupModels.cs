@@ -56,6 +56,8 @@ public sealed record LocalAiSetupAction(
     bool RequiresApproval,
     bool CanRun)
 {
+    public bool PlanReviewed { get; init; }
+    public bool CanApprove => CanRun && (!RequiresApproval || PlanReviewed);
     public string RiskLabel => RiskLevel.ToString();
     public string CommandPreviewText => CommandPreview.Count == 0
         ? "Hermaeus file operation"

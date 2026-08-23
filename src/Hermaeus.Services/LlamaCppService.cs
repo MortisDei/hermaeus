@@ -299,7 +299,7 @@ public sealed class LlamaCppService : IDisposable
         LlmChatOptions options,
         int maxTokens)
     {
-        var msgs = OpenAiCompatibleToolWire.BuildMessages(messages, options.SystemPrompt);
+        var msgs = OpenAiCompatibleToolWire.BuildMessages(messages, options.SystemPrompt, options.IncludeReasoningHistory);
         var tools = OpenAiCompatibleToolWire.BuildTools(options.Tools);
 
         return new
@@ -328,6 +328,7 @@ public sealed class LlamaCppService : IDisposable
             repeat_penalty = options.RepeatPenalty,
             frequency_penalty = options.FrequencyPenalty,
             presence_penalty = options.PresencePenalty,
+            reasoning_format = options.UseDeepseekReasoningFormat ? "deepseek" : null,
             tools,
             tool_choice = tools is null ? null : "auto"
         };
@@ -345,7 +346,9 @@ public sealed class LlamaCppService : IDisposable
             return null;
         }
 
-        var c = chunk?.Choices?.FirstOrDefault()?.Delta?.Content ?? string.Empty;
+        var delta = chunk?.Choices?.FirstOrDefault()?.Delta;
+        var c = delta?.Content ?? string.Empty;
+        var reasoning = delta?.ReasoningContent ?? string.Empty;
         var usage = chunk?.Usage is null
             ? null
             : new ChatTokenUsage(chunk.Usage.PromptTokens, chunk.Usage.CompletionTokens, chunk.Usage.TotalTokens);
@@ -355,9 +358,9 @@ public sealed class LlamaCppService : IDisposable
                 chunk.Timings.DraftN, chunk.Timings.DraftNAccepted);
         var finishReason = chunk?.Choices?.FirstOrDefault()?.FinishReason;
         var isFinal = usage is not null || finishReason is not null;
-        if (string.IsNullOrEmpty(c) && usage is null && serverTimings is null && !isFinal)
+        if (string.IsNullOrEmpty(c) && string.IsNullOrEmpty(reasoning) && usage is null && serverTimings is null && !isFinal)
             return null;
-        return new LlmStreamEvent(c, usage, isFinal, ServerTimings: serverTimings, FinishReason: finishReason);
+        return new LlmStreamEvent(c, usage, isFinal, ServerTimings: serverTimings, FinishReason: finishReason, ReasoningDelta: reasoning);
     }
 
     public void Dispose()
@@ -374,7 +377,9 @@ public sealed class LlamaCppService : IDisposable
     private record Choice(
         [property: JsonPropertyName("delta")] Delta? Delta,
         [property: JsonPropertyName("finish_reason")] string? FinishReason);
-    private record Delta([property: JsonPropertyName("content")] string? Content);
+    private record Delta(
+        [property: JsonPropertyName("content")] string? Content,
+        [property: JsonPropertyName("reasoning_content")] string? ReasoningContent);
     private record UsageData(
         [property: JsonPropertyName("prompt_tokens")] int PromptTokens,
         [property: JsonPropertyName("completion_tokens")] int CompletionTokens,

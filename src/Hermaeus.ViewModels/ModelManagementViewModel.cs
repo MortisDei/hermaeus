@@ -79,6 +79,7 @@ public partial class ModelManagementViewModel : ObservableObject
     /// a second, separate confirmation from the move itself, and declining leaves the
     /// directories in place (never deletes files, r13 02-model-library.md 2.6).</summary>
     public Func<int, Task<bool>>? RequestEmptyDirectoryCleanupConfirmation { get; set; }
+    public Func<ModelDeletionPlan, Task<bool>>? RequestDeleteModelConfirmation { get; set; }
 
     public ModelManagementViewModel(ILlmService llm, ModelProfileService profiles, IToastService toasts, ISettingsService settings, ISystemInfoService system, ServicesViewModel services,
         ModelManifestStore manifest, HuggingFaceClient hf, ModelDownloadService downloader, IActivityRecorder? activity = null)
@@ -159,7 +160,7 @@ public partial class ModelManagementViewModel : ObservableObject
                 var ggufInfo = item.IsLocalGguf
                     ? await Task.Run(() => GgufMetadataReader.TryRead(item.ModelId))
                     : null;
-                ApplyFit(item, m.SizeBytes, hardware, ggufInfo, ResolveProbeContextSize(item, existingTune));
+                ApplyFit(item, m.SizeBytes, hardware, ggufInfo, ResolveProbeContextSize(item, existingTune), profile.DefaultKvCacheType);
                 ApplyManifestState(item, manifestEntries);
                 _allModels.Add(item);
             }
@@ -198,9 +199,36 @@ public partial class ModelManagementViewModel : ObservableObject
         _toasts.Show("Model profile reset", $"Hermaeus metadata for {item.RawName} was cleared.", ToastKind.Info);
     }
 
-    private static void ApplyFit(ModelProfileItemViewModel item, long sizeBytes, HardwareProfile hardware, GgufModelInfo? info, int contextSize)
+    [RelayCommand]
+    private async Task DeleteModelAsync(ModelProfileItemViewModel? item)
     {
-        var fit = ModelFitEstimator.Estimate(sizeBytes, hardware, info, contextSize);
+        if (item is null || !item.IsLocalGguf) return;
+        var running = _services.Servers.Any(s => s.IsRunning && string.Equals(Path.GetFullPath(s.ModelPath), Path.GetFullPath(item.ModelId), StringComparison.OrdinalIgnoreCase));
+        if (!ModelDeletionService.TryPlan(item.ModelId, _settings.Settings.DataManagement.LocalAiAssetsRoot, running, out var plan, out var error))
+        {
+            _toasts.Show("Cannot delete model", error, ToastKind.Warning, 7000);
+            return;
+        }
+        if (RequestDeleteModelConfirmation is null || !await RequestDeleteModelConfirmation(plan!)) return;
+        var remaining = ModelDeletionService.DeleteExact(plan!);
+        if (remaining.Count > 0)
+        {
+            _toasts.Show("Delete incomplete", $"Some files remain: {string.Join(", ", remaining)}", ToastKind.Warning, 8000);
+            return;
+        }
+        await _manifest.RemoveAsync(item.ModelId);
+        _settings.Settings.ModelProfiles.RemoveAll(p => string.Equals(Path.GetFullPath(p.ModelId), Path.GetFullPath(item.ModelId), StringComparison.OrdinalIgnoreCase));
+        foreach (var server in _settings.Settings.ManagedServers.Where(s => string.Equals(Path.GetFullPath(s.ModelPath), Path.GetFullPath(item.ModelId), StringComparison.OrdinalIgnoreCase)))
+            server.ModelPath = string.Empty;
+        await _settings.SaveAsync();
+        ForceRefresh = true;
+        await RefreshAsync();
+        _toasts.Show("Model deleted", $"Removed {item.RawName}.", ToastKind.Info);
+    }
+
+    private static void ApplyFit(ModelProfileItemViewModel item, long sizeBytes, HardwareProfile hardware, GgufModelInfo? info, int contextSize, string? kvCacheType = null)
+    {
+        var fit = ModelFitEstimator.Estimate(sizeBytes, hardware, info, contextSize, kvCacheType ?? "f16");
         item.FitTier = fit.Tier;
         item.FitReason = fit.Reason;
     }
@@ -590,6 +618,10 @@ public partial class ModelManagementViewModel : ObservableObject
                     {
                         UpdateCheckStatus = $"Hashing {item.EffectiveName} (first check after linking)...";
                         entry.Sha256 = await ComputeSha256Async(item.ModelId);
+                        // Hashing a multi-GB model is expensive. Persist it before the
+                        // network call so a timeout, cancellation, or failed repo lookup
+                        // cannot make the next check hash the exact same bytes again.
+                        await _manifest.UpsertAsync(entry);
                     }
                 }
 
@@ -801,6 +833,10 @@ public partial class ModelManagementViewModel : ObservableObject
             }
 
             var hardware = await _system.GetHardwareProfileAsync();
+            var layout = LocalAiAssetLocator.Detect(_settings.Settings.DataManagement.LocalAiAssetsRoot);
+            var modelsDir = string.IsNullOrWhiteSpace(layout.ModelsDirectory)
+                ? Path.Combine(_settings.Settings.DataManagement.LocalAiAssetsRoot, "Models")
+                : layout.ModelsDirectory;
             var ggufEntries = tree.Where(e => e.Path.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase)).ToList();
 
             // r27 04 4.1: a sharded model is listed once, as its first shard,
@@ -808,6 +844,7 @@ public partial class ModelManagementViewModel : ObservableObject
             // single shard is a model that will not load.
             var listed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var shardedSets = 0;
+            var manifestEntries = await _manifest.LoadAsync();
             foreach (var entry in ggufEntries)
             {
                 // Companions belong to their model's set, not to a row of their own.
@@ -827,7 +864,9 @@ public partial class ModelManagementViewModel : ObservableObject
 
                 var setBytes = fileSet.Entries.Where(e => e.Role is ModelFileRole.Model or ModelFileRole.Shard).Sum(e => e.SizeBytes ?? 0);
                 var fit = ModelFitEstimator.Estimate(setBytes, hardware);
-                HfFiles.Add(new HfFileResultViewModel(repo.RepoId, entry.Path, entry.SizeBytes, entry.LfsSha256, fit.Tier, fit.Reason, fileSet));
+                var fileVm = new HfFileResultViewModel(repo.RepoId, entry.Path, entry.SizeBytes, entry.LfsSha256, fit.Tier, fit.Reason, fileSet);
+                fileVm.UpdateDownloadState(modelsDir, manifestEntries);
+                HfFiles.Add(fileVm);
             }
 
             HfBrowserStatus = shardedSets > 0
@@ -873,6 +912,7 @@ public partial class ModelManagementViewModel : ObservableObject
             return;
 
         file.IsDownloading = true;
+        file.DownloadState = HfDownloadState.Downloading;
         // r28 doc 03 3.3: a download is one of the four sources r24 named and
         // never wired. r27 made it a file set, so a partial set is Partial and
         // the reason names what is missing.
@@ -971,6 +1011,7 @@ public partial class ModelManagementViewModel : ObservableObject
         finally
         {
             file.IsDownloading = false;
+            file.UpdateDownloadState(modelsDir, await _manifest.LoadAsync());
         }
     }
 }
@@ -988,6 +1029,8 @@ public sealed partial class HfRepoResultViewModel : ObservableObject
     }
 }
 
+public enum HfDownloadState { NotDownloaded, Partial, Downloaded, Downloading }
+
 public sealed partial class HfFileResultViewModel : ObservableObject
 {
     public string RepoId { get; }
@@ -1002,6 +1045,16 @@ public sealed partial class HfFileResultViewModel : ObservableObject
 
     [ObservableProperty] private bool _isDownloading;
     [ObservableProperty] private double _downloadPercent;
+    [ObservableProperty] private HfDownloadState _downloadState = HfDownloadState.NotDownloaded;
+    public string DownloadStateLabel => DownloadState switch
+    {
+        HfDownloadState.Downloaded => "On disk",
+        HfDownloadState.Partial => "Complete set",
+        HfDownloadState.Downloading => $"Downloading {DownloadPercent:F0}%",
+        _ => "Download"
+    };
+    partial void OnDownloadStateChanged(HfDownloadState value) => OnPropertyChanged(nameof(DownloadStateLabel));
+    partial void OnDownloadPercentChanged(double value) => OnPropertyChanged(nameof(DownloadStateLabel));
 
     // ── r27 04-models-arrive-complete.md 4.1: a model is a file set ─────────
 
@@ -1040,6 +1093,17 @@ public sealed partial class HfFileResultViewModel : ObservableObject
     /// <summary>Total size of what is currently ticked, so the number on screen is the number that downloads.</summary>
     public long SelectedBytes => SelectedEntries().Sum(e => e.SizeBytes ?? 0);
 
+    public void UpdateDownloadState(string modelsDirectory, IReadOnlyList<ModelManifestEntry> manifest)
+    {
+        if (IsDownloading) { DownloadState = HfDownloadState.Downloading; return; }
+        var selected = SelectedEntries();
+        var paths = selected.Select(e => HuggingFaceBrowserSupport.PlanDestination(modelsDirectory, e.RepoPath, RepoId).DestinationPath).ToList();
+        var present = paths.Count(p => File.Exists(p));
+        DownloadState = present == paths.Count
+            ? HfDownloadState.Downloaded
+            : present > 0 ? HfDownloadState.Partial : HfDownloadState.NotDownloaded;
+    }
+
     public IReadOnlyList<ModelFileSetEntry> SelectedEntries() =>
     [
         .. FileSet.Entries.Where(e => e.Required
@@ -1064,11 +1128,15 @@ public sealed partial class HfFileResultViewModel : ObservableObject
 
 public partial class ModelProfileItemViewModel : ObservableObject
 {
+    public static IReadOnlyList<string> KvCacheTypeOptions { get; } =
+        ["f16", "bf16", "q8_0", "q5_1", "q5_0", "q4_1", "q4_0", "iq4_nl"];
     private readonly string _originalDisplayName;
     private readonly string _originalDescription;
     private readonly string _originalTagsText;
     private readonly double? _originalTemperature;
     private readonly int? _originalContextSize;
+    private readonly string? _originalKvCacheType;
+    private readonly bool? _originalPreserveReasoning;
     private readonly int? _originalMaxTokens;
     private readonly double? _originalTopP;
     private readonly int? _originalTopK;
@@ -1094,6 +1162,8 @@ public partial class ModelProfileItemViewModel : ObservableObject
     [ObservableProperty] private string _tagsText;
     [ObservableProperty] private double? _defaultTemperature;
     [ObservableProperty] private int? _defaultContextSize;
+    [ObservableProperty] private string? _defaultKvCacheType;
+    [ObservableProperty] private bool? _defaultPreserveReasoning;
     [ObservableProperty] private int? _defaultMaxTokens;
     [ObservableProperty] private double? _defaultTopP;
     [ObservableProperty] private int? _defaultTopK;
@@ -1228,6 +1298,8 @@ public partial class ModelProfileItemViewModel : ObservableObject
         _tagsText = string.Join(", ", profile.Tags);
         _defaultTemperature = profile.DefaultTemperature;
         _defaultContextSize = profile.DefaultContextSize;
+        _defaultKvCacheType = profile.DefaultKvCacheType;
+        _defaultPreserveReasoning = profile.DefaultPreserveReasoning;
         _defaultMaxTokens = profile.DefaultMaxTokens;
         _defaultTopP = profile.DefaultTopP;
         _defaultTopK = profile.DefaultTopK;
@@ -1243,6 +1315,8 @@ public partial class ModelProfileItemViewModel : ObservableObject
         _originalTagsText = TagsText;
         _originalTemperature = DefaultTemperature;
         _originalContextSize = DefaultContextSize;
+        _originalKvCacheType = DefaultKvCacheType;
+        _originalPreserveReasoning = DefaultPreserveReasoning;
         _originalMaxTokens = DefaultMaxTokens;
         _originalTopP = DefaultTopP;
         _originalTopK = DefaultTopK;
@@ -1265,6 +1339,8 @@ public partial class ModelProfileItemViewModel : ObservableObject
         Tags = Tags,
         DefaultTemperature = DefaultTemperature,
         DefaultContextSize = DefaultContextSize,
+        DefaultKvCacheType = DefaultKvCacheType,
+        DefaultPreserveReasoning = DefaultPreserveReasoning,
         DefaultMaxTokens = DefaultMaxTokens,
         DefaultTopP = DefaultTopP,
         DefaultTopK = DefaultTopK,
@@ -1290,6 +1366,8 @@ public partial class ModelProfileItemViewModel : ObservableObject
         TagsText = string.Empty;
         DefaultTemperature = null;
         DefaultContextSize = null;
+        DefaultKvCacheType = null;
+        DefaultPreserveReasoning = null;
         DefaultMaxTokens = null;
         DefaultTopP = null;
         DefaultTopK = null;
@@ -1309,6 +1387,8 @@ public partial class ModelProfileItemViewModel : ObservableObject
         TagsText = _originalTagsText;
         DefaultTemperature = _originalTemperature;
         DefaultContextSize = _originalContextSize;
+        DefaultKvCacheType = _originalKvCacheType;
+        DefaultPreserveReasoning = _originalPreserveReasoning;
         DefaultMaxTokens = _originalMaxTokens;
         DefaultTopP = _originalTopP;
         DefaultTopK = _originalTopK;

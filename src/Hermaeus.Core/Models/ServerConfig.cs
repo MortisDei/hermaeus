@@ -21,6 +21,12 @@ public class ServerConfig
     public int    Threads        { get; set; } = 4;
 
     /// <summary>
+    /// Threads used while ingesting a prompt. Zero preserves the runtime default
+    /// and is deliberately separate from generation threads.
+    /// </summary>
+    public int    PromptThreads  { get; set; } = 0;
+
+    /// <summary>
     /// Parallel request slots (r14 2.1), emitted as <c>--parallel N</c>. Hermaeus
     /// is a single-user chat app, so the default of 1 gives the whole
     /// <see cref="ContextSize"/> to one conversation and keeps every send on the
@@ -37,8 +43,15 @@ public class ServerConfig
     /// defaults and produces a byte-identical launch). Every option is the user's explicit
     /// choice; nothing here is ever forced or auto-changed.
     /// </summary>
+    /// <summary>One user-facing KV precision applied to both llama.cpp caches.</summary>
+    public string KvCacheType    { get; set; } = "f16";
+
+    /// <summary>Legacy compatibility fields read during the r30 migration.</summary>
     public string KvCacheTypeK   { get; set; } = "f16";
     public string KvCacheTypeV   { get; set; } = "f16";
+    public bool PreserveReasoning { get; set; } = true;
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool ReasoningPreserveSupported { get; set; }
 
     /// <summary>Tri-state: "auto" (server default, emits nothing), "on", or "off".</summary>
     public string FlashAttention { get; set; } = "auto";
@@ -87,4 +100,17 @@ public class ServerConfig
     /// <c>--mmproj &lt;path&gt;</c> is appended.
     /// </summary>
     public string MmprojPath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Runtime facts are populated immediately before launch. They are not
+    /// preferences and therefore never belong in settings.json.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool RuntimeHelpProbed { get; set; }
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public IReadOnlyList<string> RuntimeSpeculativeTypes { get; set; } = [];
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool RuntimeSupportsPromptThreads { get; set; }
 }

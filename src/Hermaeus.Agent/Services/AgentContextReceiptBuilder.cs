@@ -23,6 +23,8 @@ public static class AgentContextReceiptBuilder
         AddSection(sections, "RAG", pack.RetrievedMemory.Where(i => i.Source == "rag"));
         AddSection(sections, "Workspace files", pack.RetrievedFiles);
         AddSection(sections, "Project instructions", pack.ProjectInstructions);
+        AddSection(sections, "Transcript replay", pack.TranscriptHistory);
+        AddStringSection(sections, "Transcript diagnostics", pack.TranscriptDiagnostics);
         AddSection(sections, "Lessons", pack.Lessons);
         AddSection(sections, "Sub-tasks", pack.SubTaskReports);
         return sections;
@@ -38,5 +40,16 @@ public static class AgentContextReceiptBuilder
             list.Count,
             list.Sum(i => ContextPackBuilder.EstimateTokens(i.Content)),
             list.Select(i => i.Title).ToList()));
+    }
+
+    private static void AddStringSection(List<AgentContextReceiptSection> sections, string label, IReadOnlyList<string> entries)
+    {
+        if (entries.Count == 0) return;
+
+        sections.Add(new AgentContextReceiptSection(
+            label,
+            entries.Count,
+            entries.Sum(ContextPackBuilder.EstimateTokens),
+            entries));
     }
 }

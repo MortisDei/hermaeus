@@ -80,7 +80,7 @@ public sealed partial class DoctorService
 
         return BuildCheck(
             "clean-shutdown",
-            "Previous session exited cleanly",
+            "Previous session did not exit cleanly",
             DoctorCheckStatus.Warning,
             "Hermaeus did not shut down cleanly last time",
             detail,
