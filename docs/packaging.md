@@ -27,20 +27,35 @@ Useful options:
 ./build.sh --self-contained
 ```
 
+The normal `./build.sh` path performs the required `linux-x64` restores. Use
+`--skip-restore` only as an optimisation after restoring every published
+project for that RID. For the default package:
+
+```bash
+dotnet restore Hermaeus.sln -r linux-x64
+./build.sh --skip-restore
+```
+
+An ordinary solution restore without the publish RID can leave `project.assets.json`
+without the required target and cause `NETSDK1047`.
+
 Framework-dependent packages require the .NET 10 desktop/runtime stack on the
 target machine. Self-contained packages include the runtime and are larger.
 
-The Linux package includes:
+The Linux package root contains only the public launcher and desktop install
+files. Its layout is:
 
-- published Hermaeus desktop binaries
-- `docs/README.md`, `docs/LICENSE.md`, `docs/NOTICE.md`, and
-  `docs/COMMERCIAL.md`
+- `Hermaeus`, the public launcher
+- `app/`, containing the published desktop runtime and `app/LocalApi/`
+- `docs/README.md`, `docs/user-guide.md`, `docs/LICENSE.md`,
+  `docs/NOTICE.md`, and `docs/COMMERCIAL.md`
 - `docs/hermaeus-branding.*` when present
+- `icons/`, containing desktop-install icon resources
 - `hermaeus.desktop`
-- `hermaeus.ico`, `hermaeus-app.png`, `hermaeus-tray.png`,
-  `hermaeus-tray-dark.png`, and `hermaeus-tray-light.png`
 - `install-desktop.sh`
 - `uninstall-desktop.sh`
+
+Normal packages exclude `.pdb` symbol files.
 
 To install the desktop launcher for the current user:
 
@@ -52,8 +67,9 @@ dist/hermaeus-<version>-linux-x64/install-desktop.sh
 The installer copies the package under
 `${XDG_DATA_HOME:-$HOME/.local/share}/hermaeus/`, installs a desktop entry under
 `${XDG_DATA_HOME:-$HOME/.local/share}/applications/`, and installs the icon
-under `${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/`. It does not require
-root and does not write to system paths.
+under `${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/512x512/apps/` using
+the canonical application icon. It does not require root and does not write to
+system paths.
 
 To remove the user-local launcher and installed package:
 
@@ -84,13 +100,22 @@ pwsh ./build.ps1 -Configuration Debug
 pwsh ./build.ps1 -SelfContained
 ```
 
+The normal PowerShell build performs RID-specific restores. If the projects
+were already restored for the target RID, the equivalent optimised path is:
+
+```powershell
+dotnet restore Hermaeus.sln -r win-x64
+pwsh ./build.ps1 -SkipRestore -Runtime win-x64
+```
+
 Framework-dependent packages require the .NET 10 runtime on the target machine.
 Self-contained packages include the runtime and are larger.
 
 The Windows package includes published Hermaeus desktop binaries, app/tray icon
 assets, repository license and commercial notices under `docs/`,
-`docs/hermaeus-branding.*` when present, and `Launch-Hermaeus.cmd` for starting the
-app from the extracted folder.
+`docs/user-guide.md`, `docs/hermaeus-branding.*` when present, and
+`Launch-Hermaeus.cmd` for starting the app from the extracted folder. Normal
+packages exclude `.pdb` files.
 
 ## Checksums
 
@@ -140,5 +165,5 @@ GitHub Release automatically; nothing about local packaging above changes.
 ## Licensing Posture
 
 Packages include the source-available noncommercial license, commercial license
-notice, and third-party notice documents. Commercial use still requires a
-separate paid commercial license.
+notice, and third-party notice documents. Uses outside PolyForm Noncommercial's
+permitted purposes require separate written permission; see `COMMERCIAL.md`.

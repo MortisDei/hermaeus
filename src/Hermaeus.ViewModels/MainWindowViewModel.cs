@@ -42,6 +42,7 @@ public partial class MainWindowViewModel : ViewModelBase
     public UiBoundCollection<ToastViewModel> Toasts { get; } = [];
     public UiBoundCollection<ToastViewModel> ToastHistory { get; } = [];
     public UiBoundCollection<string> FolderFilters { get; } = ["All"];
+    public Action<string>? RequestCopyToastDetails { get; set; }
 
     [ObservableProperty] private bool   _isSidebarOpen = true;
     [ObservableProperty] private string _searchQuery   = string.Empty;
@@ -908,7 +909,8 @@ public partial class MainWindowViewModel : ViewModelBase
             Message = toast.Message,
             Timestamp = DateTime.UtcNow,
             Kind = toast.Kind,
-            DurationMs = toast.DurationMs
+            DurationMs = toast.DurationMs,
+            CanCopyDetails = toast.CanCopyDetails
         };
         const int MaxVisibleToasts = 5;
         RunOnUi(() =>
@@ -956,7 +958,7 @@ public partial class MainWindowViewModel : ViewModelBase
             {
                 ToastHistory.Clear();
                 foreach (var e in list.OrderByDescending(t => t.Timestamp))
-                    ToastHistory.Add(new ToastViewModel { Title = e.Title, Message = e.Message, Kind = e.Kind, DurationMs = e.DurationMs, Timestamp = e.Timestamp });
+                    ToastHistory.Add(new ToastViewModel { Title = e.Title, Message = e.Message, Kind = e.Kind, DurationMs = e.DurationMs, Timestamp = e.Timestamp, CanCopyDetails = e.CanCopyDetails });
                 // cap size
                 TrimToastHistory();
             });
@@ -975,7 +977,7 @@ public partial class MainWindowViewModel : ViewModelBase
             var root = Hermaeus.Services.SettingsService.ResolveDataRoot(_settingsService.Settings);
             Directory.CreateDirectory(root);
             var path = Path.Combine(root, "toasts.json");
-            var list = ToastHistory.Select(t => new ToastHistoryEntry { Title = t.Title, Message = t.Message, Kind = t.Kind, DurationMs = t.DurationMs, Timestamp = t.Timestamp }).ToList();
+            var list = ToastHistory.Select(t => new ToastHistoryEntry { Title = t.Title, Message = t.Message, Kind = t.Kind, DurationMs = t.DurationMs, Timestamp = t.Timestamp, CanCopyDetails = t.CanCopyDetails }).ToList();
             var opts = new System.Text.Json.JsonSerializerOptions { WriteIndented = true };
             var json = System.Text.Json.JsonSerializer.Serialize(list, opts);
             await WriteTextAtomicAsync(path, json);
@@ -1033,6 +1035,13 @@ public partial class MainWindowViewModel : ViewModelBase
     [RelayCommand]
     private async Task ClearToastHistoryAsync() => await MutateAndSaveHistoryAsync(() => ToastHistory.Clear());
 
+    [RelayCommand]
+    private void CopyToastDetails(ToastViewModel? item)
+    {
+        if (item is { CanCopyDetails: true })
+            RequestCopyToastDetails?.Invoke(item.Message);
+    }
+
     private sealed class ToastHistoryEntry
     {
         public string Title { get; set; } = string.Empty;
@@ -1040,6 +1049,7 @@ public partial class MainWindowViewModel : ViewModelBase
         public ToastKind Kind { get; set; }
         public int DurationMs { get; set; }
         public DateTime Timestamp { get; set; }
+        public bool CanCopyDetails { get; set; }
     }
 
     private async Task RemoveToastLaterAsync(ToastViewModel toast)

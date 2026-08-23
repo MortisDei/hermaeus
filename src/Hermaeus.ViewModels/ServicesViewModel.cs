@@ -1454,11 +1454,11 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         var affected = drift.Where(change => change.AffectsConfiguredCapability).ToArray();
         if (affected.Length > 0)
         {
-            _toasts.Show("Moss: runtime capability changed", string.Join(" ", affected.Select(change => change.Detail)) + " Check Services before starting.", ToastKind.Warning, 8000);
+            _toasts.ShowDetails("Moss: runtime capability changed", string.Join(" ", affected.Select(change => change.Detail)) + " Check Services before starting.", ToastKind.Warning, 8000);
             return;
         }
 
-        _toasts.Show("Moss: llama.cpp learned something", string.Join(" ", drift.Select(change => change.Detail)), ToastKind.Info, 7000);
+        _toasts.ShowDetails("Moss: llama.cpp learned something", string.Join(" ", drift.Select(change => change.Detail)), ToastKind.Info, 7000);
     }
 
     /// <summary>

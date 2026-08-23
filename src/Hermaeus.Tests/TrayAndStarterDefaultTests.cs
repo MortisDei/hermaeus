@@ -56,13 +56,16 @@ public sealed class TrayAndStarterDefaultTests
     }
 
     [Fact]
-    public void The_no_gpu_recommendation_is_phi_4_mini_not_the_research_licensed_model()
+    public void The_no_gpu_recommendation_is_phi_4_mini_and_permissively_licensed()
     {
         var recommended = StarterModelCatalog.Recommend(new SystemSnapshot { Gpus = [] });
 
         Assert.Equal(StarterModelCatalog.Phi4Mini.Id, recommended.Id);
-        Assert.NotEqual(StarterModelCatalog.Small.Id, recommended.Id);
-        // Still offered, just not recommended.
-        Assert.Contains(StarterModelCatalog.Small, StarterModelCatalog.All);
+        Assert.Equal(StarterModelCatalog.Small.Id, recommended.Id);
+        Assert.Equal("MIT", recommended.License);
+        Assert.DoesNotContain(
+            StarterModelCatalog.All,
+            entry => entry.LicenseNote.Contains("research", StringComparison.OrdinalIgnoreCase)
+                     || entry.LicenseNote.Contains("non-commercial", StringComparison.OrdinalIgnoreCase));
     }
 }

@@ -222,6 +222,8 @@ verify the checksum before accepting an operating-system warning.
 
 After starting Hermaeus, use **Services** to configure a runtime, select a
 model, and start Chat. The in-app setup wizard can download a starter model.
+See the [user guide](docs/user-guide.md) for first-launch and troubleshooting
+workflows.
 
 ## Build from source
 
@@ -305,6 +307,8 @@ Hermaeus has one maintainer. Issues get a best-effort response; pull requests mu
 
 ## User Features
 
+- [User guide](docs/user-guide.md)
+- [Packaging and installation](docs/packaging.md)
 - Chat & Context
 - Model Management
 - Local AI Setup
@@ -353,12 +357,15 @@ dotnet build Hermaeus.sln
 
 dotnet test src/Hermaeus.Tests/Hermaeus.Tests.csproj
 
-./build.sh --skip-restore
+./build.sh
 
-pwsh ./build.ps1 -SkipRestore
+pwsh ./build.ps1
 ```
 
-Packaging scripts create Linux `.tar.gz` and Windows `.zip` archives under `dist/`.
+Packaging scripts create Linux `.tar.gz` and Windows `.zip` archives under
+`dist/`. `--skip-restore`/`-SkipRestore` is only for a workspace already
+restored for the requested runtime identifier; see
+[Packaging](docs/packaging.md).
 
 ---
 

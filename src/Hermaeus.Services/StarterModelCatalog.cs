@@ -3,24 +3,10 @@ using Hermaeus.Core.Models;
 namespace Hermaeus.Services;
 
 /// <summary>
-/// One downloadable starter chat model offered by the setup wizard for
-/// users who do not already have a GGUF model on disk (docs/review
-/// 02-onboarding-and-usability.md item 2.1). Every entry pins a SHA256
-/// hash verified via <see cref="ModelDownloadService.VerifyHashAsync"/>
-/// before the download is trusted, per the security-posture skill.
+/// One verified starter chat model offered by onboarding. The publisher's
+/// licence and provenance are shown before download and every file is checked
+/// by <see cref="ModelDownloadService.VerifyHashAsync"/> before adoption.
 /// </summary>
-/// <param name="License">
-/// The base model's licence, short form, shown in the wizard before the user
-/// downloads anything. Not every model here is permissively licensed and the
-/// differences are real: one is research and non-commercial only, and one
-/// carries an attribution requirement. A user choosing a model deserves to
-/// know which terms they are taking on at the moment they choose, not after.
-/// </param>
-/// <param name="LicenseUrl">Where to read the licence in full.</param>
-/// <param name="LicenseNote">
-/// The obligation or restriction in one line; empty when there is nothing to
-/// say beyond the licence name. A pointer, never a legal opinion.
-/// </param>
 public sealed record StarterModelEntry(
     string Id,
     string DisplayName,
@@ -32,7 +18,6 @@ public sealed record StarterModelEntry(
     string LicenseUrl = "",
     string LicenseNote = "")
 {
-    /// <summary>"MIT" or "Llama 3.2 Community License - attribution required...".</summary>
     public string LicenseDisplay => string.IsNullOrEmpty(LicenseNote)
         ? License
         : $"{License} - {LicenseNote}";
@@ -42,62 +27,20 @@ public sealed record StarterModelEntry(
 
 public static class StarterModelCatalog
 {
-    // Quantized GGUF builds from public, ungated repositories. The SHA256
-    // values are the Hugging Face LFS object ids (`lfs.oid` from the tree
-    // API), which is the SHA256 of the file contents; re-checked 2026-08-01.
-    //
-    // Publishers: bartowski for the Qwen tiers (unchanged since r8, one
-    // consistent quantizer across all three), unsloth for the three added in
-    // 0.36.0-alpha. Both are widely used and ungated, and publish a matching
-    // base_model link on every repo.
+    // Provenance is deliberately narrow: Qwen's own GGUF repositories for
+    // Qwen3, Unsloth's official-base-model QAT conversions for Gemma 4, and
+    // Unsloth's Phi-4 mini conversion. All are ungated and document llama.cpp
+    // use. Sizes and Hugging Face LFS/Xet SHA256 values were checked 2026-08-23.
 
-    // ── Qwen2.5, the original three tiers ────────────────────────────────────
-
-    public static readonly StarterModelEntry Small = new(
-        "qwen2.5-3b-instruct-q4",
-        "Qwen2.5 3B Instruct (Q4_K_M, ~1.9 GB)",
-        "Qwen2.5-3B-Instruct-Q4_K_M.gguf",
-        "https://huggingface.co/bartowski/Qwen2.5-3B-Instruct-GGUF/resolve/main/Qwen2.5-3B-Instruct-Q4_K_M.gguf",
-        1_929_903_264,
-        "9c9f56a391a3abbd5b89d0245bf6106081bcc3173119d4229235dd9d23253f94",
-        // The one entry in this catalog that is NOT permissively licensed. Its
-        // 7B and 14B siblings are Apache-2.0; this size alone is not.
-        License: "Qwen Research License",
-        LicenseUrl: "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct/blob/main/LICENSE",
-        LicenseNote: "research and non-commercial use only");
-
-    public static readonly StarterModelEntry Medium = new(
-        "qwen2.5-7b-instruct-q4",
-        "Qwen2.5 7B Instruct (Q4_K_M, ~4.7 GB)",
-        "Qwen2.5-7B-Instruct-Q4_K_M.gguf",
-        "https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
-        4_683_074_240,
-        "65b8fcd92af6b4fefa935c625d1ac27ea29dcb6ee14589c55a8f115ceaaa1423",
+    public static readonly StarterModelEntry Gemma4_E2B = new(
+        "gemma-4-e2b-it-qat-ud-q4",
+        "Gemma 4 E2B IT QAT (UD-Q4_K_XL, ~2.6 GB)",
+        "gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf",
+        "https://huggingface.co/unsloth/gemma-4-E2B-it-qat-GGUF/resolve/main/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf",
+        2_620_370_976,
+        "e531007218dfab990486a5de7676a6932d6ea8dea233d1f698d7c21cf8a16889",
         License: "Apache-2.0",
-        LicenseUrl: "https://huggingface.co/Qwen/Qwen2.5-7B-Instruct");
-
-    public static readonly StarterModelEntry Large = new(
-        "qwen2.5-14b-instruct-q4",
-        "Qwen2.5 14B Instruct (Q4_K_M, ~9.0 GB)",
-        "Qwen2.5-14B-Instruct-Q4_K_M.gguf",
-        "https://huggingface.co/bartowski/Qwen2.5-14B-Instruct-GGUF/resolve/main/Qwen2.5-14B-Instruct-Q4_K_M.gguf",
-        8_988_110_976,
-        "e47ad95dad6ff848b431053b375adb5d39321290ea2c638682577dafca87c008",
-        License: "Apache-2.0",
-        LicenseUrl: "https://huggingface.co/Qwen/Qwen2.5-14B-Instruct");
-
-    // ── Alternatives, so the choice is the user's ────────────────────────────
-
-    public static readonly StarterModelEntry Llama32_3B = new(
-        "llama-3.2-3b-instruct-q4",
-        "Llama 3.2 3B Instruct (Q4_K_M, ~2.0 GB)",
-        "Llama-3.2-3B-Instruct-Q4_K_M.gguf",
-        "https://huggingface.co/unsloth/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
-        2_019_377_600,
-        "6c99cc00ae910f6a532a80022cb4bc1939094527a089c29294b841c0bd87f74d",
-        License: "Llama 3.2 Community License",
-        LicenseUrl: "https://huggingface.co/meta-llama/Llama-3.2-3B-Instruct/blob/main/LICENSE.txt",
-        LicenseNote: "acceptable-use policy, and attribution if you build on it");
+        LicenseUrl: "https://huggingface.co/unsloth/gemma-4-E2B-it-qat-GGUF");
 
     public static readonly StarterModelEntry Phi4Mini = new(
         "phi-4-mini-instruct-q4",
@@ -110,33 +53,47 @@ public static class StarterModelCatalog
         LicenseUrl: "https://huggingface.co/microsoft/Phi-4-mini-instruct");
 
     public static readonly StarterModelEntry Gemma4_E4B = new(
-        "gemma-4-e4b-it-q4",
-        "Gemma 4 E4B Instruct (Q4_K_M, ~5.0 GB)",
-        "gemma-4-E4B-it-Q4_K_M.gguf",
-        "https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/resolve/main/gemma-4-E4B-it-Q4_K_M.gguf",
-        4_977_171_584,
-        "85a896a047553e842f25297ee5b031d64ff30147d9c4af17b1e4b394cd1fab87",
+        "gemma-4-e4b-it-qat-ud-q4",
+        "Gemma 4 E4B IT QAT (UD-Q4_K_XL, ~4.2 GB)",
+        "gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf",
+        "https://huggingface.co/unsloth/gemma-4-E4B-it-qat-GGUF/resolve/main/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf",
+        4_215_695_776,
+        "df0fd4ee07072c607c29a0a1cb4f98918426cca12f45a2776bdd6ee6d09a4de3",
         License: "Apache-2.0",
-        LicenseUrl: "https://ai.google.dev/gemma/docs/gemma_4_license",
-        LicenseNote: "plus Google's Gemma prohibited-use policy");
+        LicenseUrl: "https://huggingface.co/unsloth/gemma-4-E4B-it-qat-GGUF");
 
-    /// <summary>
-    /// Everything the wizard offers, roughly smallest first. <see cref="Recommend"/>
-    /// picks a default from the machine's VRAM; the user picks from this list.
-    /// </summary>
+    public static readonly StarterModelEntry Qwen3_8B = new(
+        "qwen3-8b-q4",
+        "Qwen3 8B (Q4_K_M, ~5.0 GB)",
+        "Qwen3-8B-Q4_K_M.gguf",
+        "https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/Qwen3-8B-Q4_K_M.gguf",
+        5_027_783_488,
+        "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
+        License: "Apache-2.0",
+        LicenseUrl: "https://huggingface.co/Qwen/Qwen3-8B-GGUF");
+
+    public static readonly StarterModelEntry Qwen3_14B = new(
+        "qwen3-14b-q4",
+        "Qwen3 14B (Q4_K_M, ~9.0 GB)",
+        "Qwen3-14B-Q4_K_M.gguf",
+        "https://huggingface.co/Qwen/Qwen3-14B-GGUF/resolve/main/Qwen3-14B-Q4_K_M.gguf",
+        9_001_752_960,
+        "500a8806e85ee9c83f3ae08420295592451379b4f8cf2d0f41c15dffeb6b81f0",
+        License: "Apache-2.0",
+        LicenseUrl: "https://huggingface.co/Qwen/Qwen3-14B-GGUF");
+
+    // Stable tier aliases used by onboarding and its tests.
+    public static StarterModelEntry Small => Phi4Mini;
+    public static StarterModelEntry Medium => Gemma4_E4B;
+    public static StarterModelEntry Large => Qwen3_14B;
+
     public static readonly IReadOnlyList<StarterModelEntry> All =
-        [Small, Llama32_3B, Phi4Mini, Medium, Gemma4_E4B, Large];
+        [Phi4Mini, Gemma4_E2B, Gemma4_E4B, Qwen3_8B, Qwen3_14B];
 
     /// <summary>
-    /// Picks a tier from the best available GPU's VRAM. No GPU (or a probe
-    /// that came back "unavailable") is treated as the smallest tier so the
-    /// recommendation is always safe on CPU-only machines.
-    ///
-    /// The low tier is <see cref="Phi4Mini"/> (MIT) rather than Qwen2.5 3B,
-    /// which is research and non-commercial only. Recommending a restricted
-    /// model by default to exactly the users least likely to read a licence
-    /// was the wrong default; Qwen2.5 3B is still offered, with its terms
-    /// stated, for anyone who wants it.
+    /// Picks a conservative tier from the best available GPU's VRAM. Gemma 4
+    /// E4B QAT leaves room for context and runtime overhead on common 6-8 GB
+    /// cards. Qwen3 8B remains an explicit alternative rather than the default.
     /// </summary>
     public static StarterModelEntry Recommend(SystemSnapshot snapshot)
     {

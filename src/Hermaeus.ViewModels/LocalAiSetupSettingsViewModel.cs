@@ -268,6 +268,10 @@ public partial class LocalAiSetupSettingsViewModel : ObservableObject
             case LocalAiSetupActionKind.CreateDirectory when action.Id == "create-output":
                 _tts.TtsOutputDirectory = result.UpdatedPath;
                 break;
+            case LocalAiSetupActionKind.DownloadLlamaServer:
+                foreach (var server in _settings.Settings.ManagedServers)
+                    server.ExecutablePath = result.UpdatedPath;
+                break;
         }
     }
 

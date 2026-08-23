@@ -79,8 +79,8 @@ public sealed class ThirdPartyNoticeGuardTests
     public void The_notices_state_the_licence_of_the_things_hermaeus_downloads_but_does_not_ship()
     {
         // These are not in any dependency closure, so nothing else would catch
-        // their removal. They are the entries most likely to matter: the CUDA
-        // runtime is not open source, and one starter model is non-commercial.
+        // their removal. They are the entries most likely to matter, including
+        // the CUDA runtime because it is not open source.
         var notices = File.ReadAllText(Path.Combine(RepoRoot, "THIRD-PARTY-NOTICES.md"));
 
         foreach (var subject in new[]
@@ -88,8 +88,8 @@ public sealed class ThirdPartyNoticeGuardTests
                      "llama.cpp",
                      "NVIDIA",          // the cudart companion archive is not open source
                      "Hugging Face",    // terms of service and trademark
-                     "Qwen Research",   // research/non-commercial starter model
-                     "Llama 3.2 Community License",
+                     "Qwen3",
+                     "Gemma 4",
                      "Kokoro",
                      "whisper",
                  })

@@ -73,7 +73,9 @@ LOCALAPI_PUBLISH_DIR="$DIST_DIR/.publish-localapi-$RUNTIME"
 ARCHIVE="$DIST_DIR/$PACKAGE_NAME.tar.gz"
 CHECKSUM="$ARCHIVE.sha256"
 DOC_DIR="$PACKAGE_DIR/docs"
-LOCALAPI_DIR="$PACKAGE_DIR/LocalApi"
+APP_DIR="$PACKAGE_DIR/app"
+ICON_DIR="$PACKAGE_DIR/icons"
+LOCALAPI_DIR="$APP_DIR/LocalApi"
 
 if [[ "$SKIP_RESTORE" == "false" ]]; then
   echo "Restoring..."
@@ -83,7 +85,7 @@ fi
 
 echo "Publishing $RUNTIME ($CONFIGURATION, self-contained=$SELF_CONTAINED)..."
 rm -rf "$PACKAGE_DIR" "$PUBLISH_DIR" "$LOCALAPI_PUBLISH_DIR" "$ARCHIVE" "$CHECKSUM"
-mkdir -p "$PACKAGE_DIR" "$PUBLISH_DIR" "$LOCALAPI_PUBLISH_DIR" "$DOC_DIR" "$LOCALAPI_DIR"
+mkdir -p "$PACKAGE_DIR" "$PUBLISH_DIR" "$LOCALAPI_PUBLISH_DIR" "$DOC_DIR" "$APP_DIR" "$ICON_DIR" "$LOCALAPI_DIR"
 
 publish_args=(
   "$PROJECT"
@@ -111,17 +113,18 @@ localapi_publish_args=(
 
 dotnet publish "${localapi_publish_args[@]}"
 
-cp -a "$PUBLISH_DIR"/. "$PACKAGE_DIR"/
+cp -a "$PUBLISH_DIR"/. "$APP_DIR"/
 cp -a "$LOCALAPI_PUBLISH_DIR"/. "$LOCALAPI_DIR"/
 cp "$ROOT_DIR/README.md" "$DOC_DIR/README.md"
+cp "$ROOT_DIR/docs/user-guide.md" "$DOC_DIR/user-guide.md"
 cp "$ROOT_DIR/LICENSE.md" "$DOC_DIR/LICENSE.md"
 cp "$ROOT_DIR/NOTICE.md" "$DOC_DIR/NOTICE.md"
 cp "$ROOT_DIR/COMMERCIAL.md" "$DOC_DIR/COMMERCIAL.md"
-cp "$ROOT_DIR/src/Hermaeus.Desktop/Assets/hermaeus.ico" "$PACKAGE_DIR/hermaeus.ico"
-cp "$ROOT_DIR/src/Hermaeus.Desktop/Assets/hermaeus-app.png" "$PACKAGE_DIR/hermaeus-app.png"
-cp "$ROOT_DIR/src/Hermaeus.Desktop/Assets/hermaeus-tray.png" "$PACKAGE_DIR/hermaeus-tray.png"
-cp "$ROOT_DIR/src/Hermaeus.Desktop/Assets/hermaeus-tray-dark.png" "$PACKAGE_DIR/hermaeus-tray-dark.png"
-cp "$ROOT_DIR/src/Hermaeus.Desktop/Assets/hermaeus-tray-light.png" "$PACKAGE_DIR/hermaeus-tray-light.png"
+cp "$ROOT_DIR/src/Hermaeus.Desktop/Assets/hermaeus.ico" "$ICON_DIR/hermaeus.ico"
+cp "$ROOT_DIR/src/Hermaeus.Desktop/Assets/hermaeus-app.png" "$ICON_DIR/hermaeus-app.png"
+cp "$ROOT_DIR/src/Hermaeus.Desktop/Assets/hermaeus-tray.png" "$APP_DIR/hermaeus-tray.png"
+cp "$ROOT_DIR/src/Hermaeus.Desktop/Assets/hermaeus-tray-dark.png" "$APP_DIR/hermaeus-tray-dark.png"
+cp "$ROOT_DIR/src/Hermaeus.Desktop/Assets/hermaeus-tray-light.png" "$APP_DIR/hermaeus-tray-light.png"
 
 for branding in "$ROOT_DIR"/docs/hermaeus-branding.*; do
   if [[ -f "$branding" ]]; then
@@ -129,12 +132,23 @@ for branding in "$ROOT_DIR"/docs/hermaeus-branding.*; do
   fi
 done
 
+find "$PACKAGE_DIR" -type f -iname '*.pdb' -delete
+
+cat > "$PACKAGE_DIR/Hermaeus" <<'LAUNCHER'
+#!/usr/bin/env bash
+set -euo pipefail
+
+APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/app" && pwd)"
+cd "$APP_DIR"
+exec "$APP_DIR/Hermaeus.Desktop" "$@"
+LAUNCHER
+
 cat > "$PACKAGE_DIR/hermaeus.desktop" <<'DESKTOP'
 [Desktop Entry]
 Type=Application
 Name=Hermaeus
 Comment=Local-first AI workspace
-Exec=sh -c 'appdir=$(dirname "$1"); cd "$appdir"; exec "$appdir/Hermaeus.Desktop"' sh %k
+Exec=sh -c 'appdir=$(dirname "$1"); exec "$appdir/Hermaeus"' sh %k
 Icon=hermaeus
 Terminal=false
 Categories=Utility;Development;
@@ -147,10 +161,11 @@ set -euo pipefail
 
 SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PACKAGE_ID="$(basename "$SOURCE_DIR")"
-APP_EXEC="$SOURCE_DIR/Hermaeus.Desktop"
+APP_EXEC="$SOURCE_DIR/Hermaeus"
+INTERNAL_EXEC="$SOURCE_DIR/app/Hermaeus.Desktop"
 
-if [[ ! -x "$APP_EXEC" ]]; then
-  echo "Missing executable: $APP_EXEC" >&2
+if [[ ! -x "$APP_EXEC" || ! -x "$INTERNAL_EXEC" ]]; then
+  echo "Missing package launcher or application executable." >&2
   exit 1
 fi
 
@@ -158,7 +173,7 @@ DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 APP_BASE="$DATA_HOME/hermaeus"
 INSTALL_DIR="$APP_BASE/$PACKAGE_ID"
 APPLICATIONS_DIR="$DATA_HOME/applications"
-PNG_ICON_DIR="$DATA_HOME/icons/hicolor/256x256/apps"
+PNG_ICON_DIR="$DATA_HOME/icons/hicolor/512x512/apps"
 DESKTOP_FILE="$APPLICATIONS_DIR/hermaeus.desktop"
 PNG_ICON_FILE="$PNG_ICON_DIR/hermaeus.png"
 
@@ -170,15 +185,15 @@ if [[ "$SOURCE_DIR" != "$INSTALL_DIR" ]]; then
   cp -a "$SOURCE_DIR"/. "$INSTALL_DIR"/
 fi
 
-chmod +x "$INSTALL_DIR/Hermaeus.Desktop" "$INSTALL_DIR/install-desktop.sh" "$INSTALL_DIR/uninstall-desktop.sh"
-cp "$INSTALL_DIR/hermaeus-app.png" "$PNG_ICON_FILE"
+chmod +x "$INSTALL_DIR/Hermaeus" "$INSTALL_DIR/app/Hermaeus.Desktop" "$INSTALL_DIR/install-desktop.sh" "$INSTALL_DIR/uninstall-desktop.sh"
+cp "$INSTALL_DIR/icons/hermaeus-app.png" "$PNG_ICON_FILE"
 
 cat > "$DESKTOP_FILE" <<DESKTOP
 [Desktop Entry]
 Type=Application
 Name=Hermaeus
 Comment=Local-first AI workspace
-Exec=$INSTALL_DIR/Hermaeus.Desktop
+Exec=$INSTALL_DIR/Hermaeus
 Icon=hermaeus
 Terminal=false
 Categories=Utility;Development;
@@ -208,7 +223,7 @@ PACKAGE_ID="$(basename "$SOURCE_DIR")"
 DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 INSTALL_DIR="$DATA_HOME/hermaeus/$PACKAGE_ID"
 DESKTOP_FILE="$DATA_HOME/applications/hermaeus.desktop"
-PNG_ICON_FILE="$DATA_HOME/icons/hicolor/256x256/apps/hermaeus.png"
+PNG_ICON_FILE="$DATA_HOME/icons/hicolor/512x512/apps/hermaeus.png"
 
 rm -f "$DESKTOP_FILE" "$PNG_ICON_FILE"
 
@@ -230,7 +245,7 @@ fi
 echo "Removed Hermaeus desktop launcher and installed package."
 UNINSTALL
 
-chmod +x "$PACKAGE_DIR/install-desktop.sh" "$PACKAGE_DIR/uninstall-desktop.sh"
+chmod +x "$PACKAGE_DIR/Hermaeus" "$PACKAGE_DIR/app/Hermaeus.Desktop" "$PACKAGE_DIR/install-desktop.sh" "$PACKAGE_DIR/uninstall-desktop.sh"
 rm -rf "$PUBLISH_DIR" "$LOCALAPI_PUBLISH_DIR"
 
 echo "Creating $ARCHIVE..."

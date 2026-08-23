@@ -41,11 +41,17 @@ and noncommercial use but may also be commercially licensed.
 - Run `dotnet build Hermaeus.sln` before submitting changes.
 - Run `dotnet test src/Hermaeus.Tests/Hermaeus.Tests.csproj` when changes
   affect storage, settings, security, RAG, backup, restore, or runtime launch.
-- Update the relevant workflow docs, `docs/features.md`, and `CHANGELOG.md`
-  whenever behaviour, configuration, APIs, workflows, or UI semantics change.
-  Stale documentation is a defect, and planned behaviour must not be described
-  as implemented. If no documentation update is required, say so explicitly in
-  the pull request or review instead of silently omitting it.
+- Use a concise Conventional Commit-style subject for non-trivial commits, with
+  a useful body explaining intent, key changes, and relevant validation.
+  Subject-only commits are fine for genuinely trivial changes.
+- Keep all authoritative repository documentation synchronized with behaviour,
+  architecture, security and privacy claims, setup and build instructions,
+  configuration, workflows, APIs, UI semantics, licensing, and current feature
+  descriptions. Update the relevant workflow docs, `docs/features.md`,
+  `docs/user-guide.md` when the release-user workflow changes, and `CHANGELOG.md`
+  as appropriate. Stale documentation is a defect, and planned behaviour must
+  not be described as implemented. If no documentation update is required, say
+  so explicitly in the pull request or review instead of silently omitting it.
 - Changes land as pull requests, never direct pushes to `main`; see
   `docs/pull-requests.md`. Only the repository owner may approve, merge, push
   protected branches, publish releases, or change workflow permissions.

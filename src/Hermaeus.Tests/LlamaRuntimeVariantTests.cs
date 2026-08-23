@@ -100,6 +100,43 @@ public sealed class LlamaRuntimeVariantTests
     }
 
     [Fact]
+    public void Latest_compatible_release_ignores_semver_and_skips_builds_without_an_asset()
+    {
+        var releases = new[]
+        {
+            new GitHubRelease("v0.2.0", [new("llama-v0.2.0.zip", "u/semver")]),
+            new GitHubRelease("b10070", [new("llama-b10070-bin-win-cpu-x64.zip", "u/win-only")]),
+            new GitHubRelease("b10066", [new("llama-b10066-bin-ubuntu-x64.tar.gz", "u/linux")]),
+            new GitHubRelease("b10034", [new("llama-b10034-bin-ubuntu-x64.tar.gz", "u/old")])
+        };
+
+        var selected = LlamaServerSetupService.SelectLatestCompatibleRelease(
+            releases, LlamaPlatform.LinuxX64, LlamaRuntimeVariant.Cpu);
+
+        Assert.NotNull(selected);
+        Assert.Equal("b10066", selected.Release.TagName);
+        Assert.Equal("u/linux", selected.Asset.BrowserDownloadUrl);
+        Assert.Equal(10066, selected.BuildNumber);
+    }
+
+    [Fact]
+    public void Managed_discovery_selects_the_highest_installed_b_build()
+    {
+        using var temp = new TempDir();
+        var executableName = OperatingSystem.IsWindows() ? "llama-server.exe" : "llama-server";
+        var oldPath = temp.PathFor($"llama-server/b10034/{executableName}");
+        var currentPath = temp.PathFor($"llama-server/b10066/{executableName}");
+        Directory.CreateDirectory(Path.GetDirectoryName(oldPath)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(currentPath)!);
+        File.WriteAllText(oldPath, "old");
+        File.WriteAllText(currentPath, "current");
+
+        var resolved = LlamaServerSetupService.ResolveInstalledExecutable(temp.PathFor("llama-server"));
+
+        Assert.Equal(currentPath, resolved);
+    }
+
+    [Fact]
     public void ResolveInstallRoot_walks_up_nested_tag_directories()
         => Assert.Equal(
             NormPath(@"C:\AI\llama.cpp"),

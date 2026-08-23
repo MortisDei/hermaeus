@@ -40,6 +40,11 @@ public partial class MainWindow : Window
                     $"Permanently delete \"{item.Title}\"? This cannot be undone.");
                 return await dialog.ShowDialog<bool>(this);
             };
+            vm.RequestCopyToastDetails = async text =>
+            {
+                if (Clipboard is { } clipboard)
+                    await clipboard.SetTextAsync(text);
+            };
             vm.Projects.RequestOpenEditor = () =>
             {
                 var editor = new ProjectEditorWindow { DataContext = vm.Projects };

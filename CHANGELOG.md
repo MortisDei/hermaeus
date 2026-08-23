@@ -13,6 +13,24 @@ limit.
 
 ### Fixed
 
+- Deleting the active conversation now returns keyboard focus to the fresh Chat
+  input. Normal Chat receives a compact, dynamic Hermaeus environment block
+  grounded in the selected runtime, attachments, Knowledge, memory, and Recall,
+  while explicitly excluding web, shell, tools, and Agent workspace actions.
+- The onboarding starter catalogue now uses verified current Phi-4 mini, Gemma
+  4 E2B/E4B QAT, and official Qwen3 8B/14B GGUF files. Native Kokoro readiness
+  rechecks after install and across step navigation and restart.
+- Managed llama.cpp release selection now ignores unrelated semver tags and
+  chooses the newest b-numbered release with a compatible platform asset.
+  Settings and onboarding share that installer with Doctor, successful installs
+  update Services paths, and Doctor can discover the newest managed build.
+- Diagnostic Moss notifications can expose a restrained Copy details action.
+  Linux packages now keep runtime internals under `app/`, resources under
+  `icons/` and `docs/`, use a public `Hermaeus` launcher, install the canonical
+  application-menu icon, and omit PDB files.
+- Added a release-user guide, clarified RID restore requirements for packaging
+  with skip-restore, and corrected the commercial-licensing summary so it does
+  not narrow PolyForm Noncommercial's permitted institutional uses.
 - Linux managed llama.cpp installs now preserve required SONAME companions from
   safe in-archive links, and Doctor executes the configured binary before
   calling it usable. Incomparable release identifiers report unknown instead

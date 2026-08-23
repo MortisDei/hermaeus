@@ -51,6 +51,7 @@ public partial class ChatView : UserControl
             if (_vm is not null)
             {
                 _vm.RequestCopyToClipboard = null;
+                _vm.RequestInputFocus = null;
                 _vm.RequestContextFilePicker = null;
                 _vm.RequestConversationExportPath = null;
                 if (_micTranscriptHandler is not null)
@@ -94,6 +95,9 @@ public partial class ChatView : UserControl
                 if (TopLevel.GetTopLevel(this)?.Clipboard is { } cb)
                     await cb.SetTextAsync(text);
             };
+
+            vm.RequestInputFocus = () =>
+                Dispatcher.UIThread.Post(() => this.FindControl<TextBox>("InputBox")?.Focus());
 
             vm.RequestContextFilePicker = async () =>
             {

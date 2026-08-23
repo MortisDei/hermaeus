@@ -80,7 +80,7 @@ public sealed class LlamaServerSetupService
                 if (File.Exists(installPath))
                     searchPaths.Add(installPath);
 
-                var found = FindInstalledExecutable(installPath);
+                var found = ResolveInstalledExecutable(installPath);
                 if (found is not null)
                     searchPaths.Add(found);
             }
@@ -110,7 +110,7 @@ public sealed class LlamaServerSetupService
     /// <summary>
     /// Gets the expected path to the llama-server executable directly inside
     /// installPath. The archive may actually extract it into a nested
-    /// subdirectory; use <see cref="FindInstalledExecutable"/> after install
+    /// subdirectory; use <see cref="ResolveInstalledExecutable"/> after install
     /// to get the real, possibly-nested, location.
     /// </summary>
     public string GetExecutablePath(string installPath)
@@ -173,7 +173,7 @@ public sealed class LlamaServerSetupService
             progress?.Report("Preparing llama-server installation...");
             Directory.CreateDirectory(installPath);
 
-            var existing = FindInstalledExecutable(installPath);
+            var existing = ResolveInstalledExecutable(installPath);
             if (existing is not null)
             {
                 progress?.Report($"llama-server already exists at {existing}");
@@ -325,7 +325,7 @@ public sealed class LlamaServerSetupService
         if (!extracted.Success)
             return extracted;
 
-        var exePath = FindInstalledExecutable(installPath);
+        var exePath = ResolveInstalledExecutable(installPath);
         if (exePath is null)
             return new LocalAiSetupResult(false, $"Archive extracted but no llama-server executable was found under {installPath}.");
 
@@ -438,18 +438,21 @@ public sealed class LlamaServerSetupService
         }
     }
 
-    /// <summary>Direct probe, then a recursive search: archives sometimes nest the binary under a build/bin-style subdirectory.</summary>
-    private static string? FindInstalledExecutable(string installPath)
+    /// <summary>
+    /// Resolves an installed managed executable. Versioned b-number directories
+    /// are ordered numerically so discovery selects the newest installed build
+    /// rather than filesystem enumeration order; unversioned files are fallback.
+    /// </summary>
+    public static string? ResolveInstalledExecutable(string installPath)
     {
         if (!Directory.Exists(installPath))
             return null;
 
-        var direct = ExecutableResolver.ResolveInDirectory(installPath, "llama-server");
-        if (direct is not null)
-            return direct;
-
         var matches = ExecutableResolver.FindAllInDirectory(installPath, "llama-server", SearchOption.AllDirectories);
-        return matches.Count > 0 ? matches[0] : null;
+        return matches
+            .OrderByDescending(path => TryParseBuildTag(NearestTagDirectoryName(path)) ?? -1)
+            .ThenByDescending(path => File.GetLastWriteTimeUtc(path))
+            .FirstOrDefault();
     }
 
     public Task<LlamaServerLatestDownload> GetLatestDownloadInfoAsync(CancellationToken ct = default)
@@ -457,10 +460,10 @@ public sealed class LlamaServerSetupService
 
     public async Task<LlamaServerLatestDownload> GetLatestDownloadInfoAsync(LlamaRuntimeVariant variant, CancellationToken ct = default)
     {
-        GitHubRelease? release;
+        List<GitHubRelease>? releases;
         try
         {
-            release = await _http.GetFromJsonAsync<GitHubRelease>($"{ReleaseApiBaseUrl}/latest", ct);
+            releases = await _http.GetFromJsonAsync<List<GitHubRelease>>($"{ReleaseApiBaseUrl}?per_page=30", ct);
         }
         catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Forbidden)
         {
@@ -469,29 +472,20 @@ public sealed class LlamaServerSetupService
                 + "latest llama.cpp release. Wait about an hour and try again.", ex);
         }
 
-        if (release is null)
+        if (releases is null)
             throw new InvalidOperationException("GitHub did not return llama.cpp release metadata.");
-        var assets = release.Assets ?? [];
         var platform = CurrentPlatform();
-
-        // A requested accelerator build the release does not publish for this
-        // platform falls back to the default CPU asset rather than failing the
-        // whole install (r14 1.1); the caller can still verify and re-fall-back.
-        var asset = SelectDownloadAsset(assets, platform, variant);
-        var effectiveVariant = variant;
-        if (asset is null && variant != LlamaRuntimeVariant.Cpu)
-        {
-            asset = SelectDownloadAsset(assets, platform, LlamaRuntimeVariant.Cpu);
-            effectiveVariant = LlamaRuntimeVariant.Cpu;
-        }
-        if (asset is null)
-            throw new InvalidOperationException($"No llama-server asset matched this platform in release {release.TagName}.");
+        var selection = SelectLatestCompatibleRelease(releases, platform, variant)
+            ?? throw new InvalidOperationException("No b-numbered llama.cpp release contained a supported llama-server asset for this platform.");
+        var release = selection.Release;
+        var asset = selection.Asset;
+        var effectiveVariant = selection.Variant;
 
         string? companionName = null;
         string? companionUrl = null;
         if (effectiveVariant == LlamaRuntimeVariant.Cuda)
         {
-            var companion = SelectCudartAsset(assets, asset.Name);
+            var companion = SelectCudartAsset(release.Assets ?? [], asset.Name);
             companionName = companion?.Name;
             companionUrl = companion?.BrowserDownloadUrl;
         }
@@ -506,7 +500,47 @@ public sealed class LlamaServerSetupService
             asset.BrowserDownloadUrl,
             display,
             companionName,
-            companionUrl);
+            companionUrl,
+            release.PublishedAt);
+    }
+
+    /// <summary>
+    /// Selects the highest b-numbered release that also contains a compatible
+    /// asset. Unrelated semver releases and incomplete release objects are
+    /// skipped instead of becoming a false "latest" answer.
+    /// </summary>
+    public static LlamaReleaseSelection? SelectLatestCompatibleRelease(
+        IReadOnlyList<GitHubRelease> releases,
+        LlamaPlatform? platform,
+        LlamaRuntimeVariant variant)
+    {
+        foreach (var release in releases
+                     .Select(release => (Release: release, Build: TryParseBuildTag(release.TagName)))
+                     .Where(candidate => candidate.Build is not null)
+                     .OrderByDescending(candidate => candidate.Build))
+        {
+            var assets = release.Release.Assets ?? [];
+            var asset = SelectDownloadAsset(assets, platform, variant);
+            var effectiveVariant = variant;
+            if (asset is null && variant != LlamaRuntimeVariant.Cpu)
+            {
+                asset = SelectDownloadAsset(assets, platform, LlamaRuntimeVariant.Cpu);
+                effectiveVariant = LlamaRuntimeVariant.Cpu;
+            }
+
+            if (asset is not null)
+                return new LlamaReleaseSelection(release.Release, asset, effectiveVariant, release.Build!.Value);
+        }
+
+        return null;
+    }
+
+    public static int? TryParseBuildTag(string? tag)
+    {
+        if (string.IsNullOrWhiteSpace(tag))
+            return null;
+        var match = Regex.Match(tag, @"^b(?<build>\d{3,7})$", RegexOptions.IgnoreCase);
+        return match.Success && int.TryParse(match.Groups["build"].Value, out var build) ? build : null;
     }
 
     private static readonly Regex TagDirectoryPattern = new(@"^b\d+$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
@@ -750,10 +784,17 @@ public sealed record LlamaServerLatestDownload(
     string Url,
     string DisplayName,
     string? CompanionAssetName = null,
-    string? CompanionUrl = null);
+    string? CompanionUrl = null,
+    DateTimeOffset? PublishedAt = null);
 public sealed record GitHubRelease(
     [property: JsonPropertyName("tag_name")] string TagName,
-    [property: JsonPropertyName("assets")] List<GitHubReleaseAsset>? Assets);
+    [property: JsonPropertyName("assets")] List<GitHubReleaseAsset>? Assets,
+    [property: JsonPropertyName("published_at")] DateTimeOffset? PublishedAt = null);
 public sealed record GitHubReleaseAsset(
     [property: JsonPropertyName("name")] string Name,
     [property: JsonPropertyName("browser_download_url")] string BrowserDownloadUrl);
+public sealed record LlamaReleaseSelection(
+    GitHubRelease Release,
+    GitHubReleaseAsset Asset,
+    LlamaRuntimeVariant Variant,
+    int BuildNumber);

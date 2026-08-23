@@ -257,6 +257,25 @@ public sealed class MainWindowViewModelStartupTests
         Assert.Null(await harness.ConvStore.GetByIdAsync("conv-remove"));
     }
 
+    [Fact]
+    public async Task Delete_active_conversation_requests_chat_input_focus()
+    {
+        using var temp = new TempDir();
+        var harness = await NewHarnessAsync(temp, initializeRagStore: true);
+        await harness.ConvStore.SaveAsync(new Hermaeus.Core.Models.Conversation { Id = "conv-active", Title = "Active" });
+        await harness.Main.Chat.LoadConversationAsync("conv-active");
+        var item = new ConversationItemViewModel { Id = "conv-active", Title = "Active", ModelId = "m", UpdatedAt = DateTime.UtcNow, Folder = string.Empty };
+        harness.Main.Conversations.Add(item);
+        harness.Main.RequestDeleteConversationConfirmation = _ => Task.FromResult(true);
+        var focusRequests = 0;
+        harness.Main.Chat.RequestInputFocus = () => focusRequests++;
+
+        await harness.Main.DeleteConversationCommand.ExecuteAsync(item);
+
+        Assert.Equal(string.Empty, harness.Main.Chat.CurrentConversationId);
+        Assert.Equal(1, focusRequests);
+    }
+
     /// <summary>
     /// r18 01-finish-the-open-work.md 1.1: every keystroke in the title/folder/tags fields of
     /// the details flyout used to save immediately and reload the whole Conversations list,

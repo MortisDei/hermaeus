@@ -48,10 +48,10 @@ internal static class LocalAiSetupActionFactory
     internal static LocalAiSetupAction DownloadLlamaServerAction(string installPath) =>
         new("download-llama-server", LocalAiSetupActionKind.DownloadLlamaServer,
             "Download llama-server Binary",
-            Path.Combine(installPath, OperatingSystem.IsWindows() ? "llama-server.exe" : "llama-server"),
+            installPath,
             [LocalAiSetupConstants.LlamaCppReleasesUrl],
             LocalAiSetupRiskLevel.Medium,
-            "Downloads the llama-server binary for running local LLMs.",
+            "Downloads the newest compatible b-numbered llama.cpp release into this managed folder.",
             true, true, true);
 
     private static string DefaultPythonCommand() =>

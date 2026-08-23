@@ -85,22 +85,29 @@ public sealed class OrphanServerDetectorTests
     [Fact]
     public void TryStop_succeeds_when_the_pid_and_executable_still_match()
     {
-        // Use this test process's own PID so Process.GetProcessById + Kill has a
-        // real target; the OS lets a process query itself even if killing it would
-        // fail, but here we just verify the identify/verify decision short circuits
-        // to the exact expected shape without reaching a real Kill by using a PID
-        // that is guaranteed not to match after a deliberate re-check mismatch below.
         var exe = @"C:\hermaeus\llama-server.exe";
         var lookup = new FakePortOwnerLookup { Owner = new PortOwnerInfo(4321, "llama-server", exe) };
-        var detector = new OrphanServerDetector(lookup);
+        int? stoppedPid = null;
+        var detector = new OrphanServerDetector(lookup, pid => stoppedPid = pid);
 
         var result = detector.TryStop(NewConfig(exe), expectedPid: 4321);
 
-        // No process with this PID actually exists, so the kill itself fails, but the
-        // identify/verify checks (the part under test) must have passed to reach that point.
+        Assert.True(result.Success);
+        Assert.Equal(4321, stoppedPid);
+    }
+
+    [Fact]
+    public void TryStop_reports_a_process_termination_failure()
+    {
+        var exe = @"C:\hermaeus\llama-server.exe";
+        var lookup = new FakePortOwnerLookup { Owner = new PortOwnerInfo(4321, "llama-server", exe) };
+        var detector = new OrphanServerDetector(lookup, _ => throw new InvalidOperationException("test failure"));
+
+        var result = detector.TryStop(NewConfig(exe), expectedPid: 4321);
+
         Assert.False(result.Success);
-        Assert.DoesNotContain("changed since it was detected", result.Message);
-        Assert.DoesNotContain("no longer matches", result.Message);
+        Assert.Contains("Failed to stop process 4321", result.Message);
+        Assert.Contains("test failure", result.Message);
     }
 
     [Fact]
@@ -140,7 +147,7 @@ public sealed class OrphanServerDetectorTests
     {
         var exe = @"C:\hermaeus\llama-server.exe";
         var lookup = new FakePortOwnerLookup { Owner = new PortOwnerInfo(4321, "llama-server", exe) };
-        var detector = new OrphanServerDetector(lookup);
+        var detector = new OrphanServerDetector(lookup, _ => { });
 
         _ = detector.TryStop(NewConfig(exe), expectedPid: 4321);
 

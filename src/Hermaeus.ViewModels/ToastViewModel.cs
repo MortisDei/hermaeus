@@ -10,6 +10,7 @@ public partial class ToastViewModel : ObservableObject
     public DateTime Timestamp { get; init; } = DateTime.UtcNow;
     public ToastKind Kind { get; init; }
     public int DurationMs { get; init; } = 3500;
+    public bool CanCopyDetails { get; init; }
     public string TimestampLabel => LocalTimeFormat.DateTimeMinutes(Timestamp);
 
     public string KindLabel => Kind switch

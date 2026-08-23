@@ -25,10 +25,17 @@ public sealed record OrphanStopResult(bool Success, string Message)
 public sealed class OrphanServerDetector
 {
     private readonly IPortOwnerLookup _lookup;
+    private readonly Action<int> _stopProcess;
 
     public OrphanServerDetector(IPortOwnerLookup? lookup = null)
+        : this(lookup, StopProcess)
+    {
+    }
+
+    internal OrphanServerDetector(IPortOwnerLookup? lookup, Action<int> stopProcess)
     {
         _lookup = lookup ?? PortOwnerLookup.Default;
+        _stopProcess = stopProcess ?? throw new ArgumentNullException(nameof(stopProcess));
     }
 
     /// <summary>Null when the port is free. Otherwise names the occupying process and whether it is this server's own binary.</summary>
@@ -59,14 +66,19 @@ public sealed class OrphanServerDetector
 
         try
         {
-            using var process = Process.GetProcessById(expectedPid);
-            process.Kill(entireProcessTree: true);
+            _stopProcess(expectedPid);
             return OrphanStopResult.Ok();
         }
         catch (Exception ex)
         {
             return OrphanStopResult.Refused($"Failed to stop process {expectedPid}: {ex.Message}");
         }
+    }
+
+    private static void StopProcess(int pid)
+    {
+        using var process = Process.GetProcessById(pid);
+        process.Kill(entireProcessTree: true);
     }
 
     /// <summary>

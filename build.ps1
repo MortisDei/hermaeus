@@ -77,6 +77,7 @@ dotnet publish @localApiPublishArgs
 Copy-Item -Path (Join-Path $publishDir "*") -Destination $packageDir -Recurse -Force
 Copy-Item -Path (Join-Path $localApiPublishDir "*") -Destination $localApiDir -Recurse -Force
 Copy-Item (Join-Path $root "README.md") (Join-Path $docDir "README.md") -Force
+Copy-Item (Join-Path $root "docs/user-guide.md") (Join-Path $docDir "user-guide.md") -Force
 Copy-Item (Join-Path $root "LICENSE.md") (Join-Path $docDir "LICENSE.md") -Force
 Copy-Item (Join-Path $root "NOTICE.md") (Join-Path $docDir "NOTICE.md") -Force
 Copy-Item (Join-Path $root "COMMERCIAL.md") (Join-Path $docDir "COMMERCIAL.md") -Force
@@ -87,6 +88,9 @@ Copy-Item (Join-Path $root "src/Hermaeus.Desktop/Assets/hermaeus-app.png") (Join
 Copy-Item (Join-Path $root "src/Hermaeus.Desktop/Assets/hermaeus-tray.png") (Join-Path $packageDir "hermaeus-tray.png") -Force
 Copy-Item (Join-Path $root "src/Hermaeus.Desktop/Assets/hermaeus-tray-dark.png") (Join-Path $packageDir "hermaeus-tray-dark.png") -Force
 Copy-Item (Join-Path $root "src/Hermaeus.Desktop/Assets/hermaeus-tray-light.png") (Join-Path $packageDir "hermaeus-tray-light.png") -Force
+
+Get-ChildItem $packageDir -Filter "*.pdb" -File -Recurse -ErrorAction SilentlyContinue |
+    Remove-Item -Force
 
 @'
 @echo off

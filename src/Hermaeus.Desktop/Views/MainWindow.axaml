@@ -481,7 +481,7 @@
                       HorizontalAlignment="Left"
                       VerticalAlignment="Bottom"
                       Margin="18,0,0,18"
-                      IsHitTestVisible="False">
+                      IsHitTestVisible="True">
             <ItemsControl.ItemsPanel>
                 <ItemsPanelTemplate>
                     <StackPanel Spacing="8" />
@@ -513,6 +513,13 @@
                                        FontSize="12"
                                        Opacity="0.9"
                                        TextWrapping="Wrap" />
+                            <Button Content="Copy details"
+                                    IsVisible="{Binding CanCopyDetails}"
+                                    HorizontalAlignment="Left"
+                                    Padding="6,3"
+                                    Command="{Binding $parent[ItemsControl].DataContext.CopyToastDetailsCommand}"
+                                    CommandParameter="{Binding}"
+                                    ToolTip.Tip="Copies the diagnostic detail text to the clipboard." />
                         </StackPanel>
                     </Border>
                 </DataTemplate>
@@ -551,6 +558,14 @@
                                             </StackPanel>
                                         </Grid>
                                         <TextBlock Text="{Binding Message}" TextWrapping="Wrap" Margin="0,4,0,0" />
+                                        <Button Content="Copy details"
+                                                IsVisible="{Binding CanCopyDetails}"
+                                                HorizontalAlignment="Left"
+                                                Margin="0,4,0,0"
+                                                Padding="6,3"
+                                                Command="{Binding $parent[ItemsControl].DataContext.CopyToastDetailsCommand}"
+                                                CommandParameter="{Binding}"
+                                                ToolTip.Tip="Copies the diagnostic detail text to the clipboard." />
                                         <TextBlock Text="{Binding TimestampLabel}" FontSize="11" Opacity="0.6" />
                                     </StackPanel>
                                 </Border>

@@ -2,6 +2,12 @@
 
 ## Chat
 
+- Normal Chat adds a compact environment block built from live model locality,
+  attachment routing, attached Knowledge, memory, and Recall state. It keeps
+  intrinsic model abilities separate and explicitly says that web, shell,
+  tools, and Agent workspace actions are not exposed in ordinary Chat.
+- Deleting the active conversation creates a clean conversation and explicitly
+  returns keyboard focus to the composer.
 - **Reasoning is a separate transcript channel.** llama.cpp, OpenAI-compatible,
   and Ollama streams may provide reasoning deltas without leaking them into the
   final answer. Reasoning is stored, reloads with its assistant message, starts
@@ -526,17 +532,22 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
   provider gets its own glyph and label in the same slot.
 - The setup wizard offers a choice of starter models rather than one
   recommendation, and **states each model's licence before you download it**.
-  The list spans several licence families on purpose: Phi-4 mini (MIT),
-  Qwen2.5 7B/14B and Gemma 4 E4B (Apache-2.0), Llama 3.2 3B (Llama 3.2
-  Community License), and Qwen2.5 3B, which is research and non-commercial
-  only and says so. The VRAM-based recommendation is the starting selection,
-  not the only option, and it stops overriding you the moment you pick.
+  The deliberately small current list is Phi-4 mini, Gemma 4 E2B/E4B IT QAT,
+  and official Qwen3 8B/14B GGUFs. The 6-12 GB VRAM recommendation is Gemma 4
+  E4B QAT so common 6-8 GB cards retain room for context and runtime overhead.
+  The recommendation is the starting selection, not the only option, and it
+  stops overriding you the moment you pick.
 - Model profiles with display names, descriptions, tags, visibility, and defaults.
 - Runtime profiles for `llama.cpp`, Ollama, and OpenAI-compatible endpoints.
   Ollama chat streams incrementally like the other two providers, instead of
   buffering the full reply before the first token.
 - Managed `llama-server` start/stop, auto-start, logs, and GPU auto-tune that
   verifies GPU layer candidates before saving a per-GGUF tuned profile.
+- Settings, onboarding, and Doctor use the same b-number-aware llama.cpp
+  release and platform-asset selector. Semver tags and releases without a
+  compatible asset are skipped. Successful installs update the Services path,
+  while Doctor can also discover the newest managed b-numbered installation
+  when a configured field is stale.
 - GPU-aware llama.cpp builds. A runtime-variant setting (Auto by default)
   installs the CUDA build on NVIDIA hardware (with its `cudart` companion
   runtime), the Vulkan build on any other real GPU, and the CPU build when no

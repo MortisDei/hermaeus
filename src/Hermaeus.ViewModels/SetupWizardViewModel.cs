@@ -16,6 +16,7 @@ public partial class SetupWizardViewModel : ObservableObject
     private readonly ISystemInfoService _systemInfo;
     private readonly ModelDownloadService _modelDownloads;
     private readonly ModelManifestStore _manifest;
+    private readonly LlamaServerSetupService _llamaSetup;
 
     [ObservableProperty] private int _stepIndex;
     [ObservableProperty] private string _dataRootDirectory = string.Empty;
@@ -36,9 +37,8 @@ public partial class SetupWizardViewModel : ObservableObject
     [ObservableProperty] private StarterModelEntry? _recommendedStarterModel;
     /// <summary>
     /// What will actually be downloaded. Starts at <see cref="RecommendedStarterModel"/>
-    /// and the user can pick any entry in <see cref="StarterModels"/>: the sizes
-    /// are close enough that VRAM is not the only thing worth choosing on, and
-    /// the licences differ (one entry is research and non-commercial only).
+    /// and the user can pick any entry in <see cref="StarterModels"/>: the sizes,
+    /// families, quantisations, and licences are all visible before download.
     /// </summary>
     [ObservableProperty] private StarterModelEntry? _selectedStarterModel;
     [ObservableProperty] private string _recommendedStarterModelFitLabel = string.Empty;
@@ -105,7 +105,18 @@ public partial class SetupWizardViewModel : ObservableObject
     [ObservableProperty] private string _voiceInstallError = string.Empty;
     [ObservableProperty] private bool _voiceInstallCompleted;
 
-    public bool CanInstallSelectedVoiceProvider => SelectedVoiceProvider?.Id == VoiceProvider.KokoroNative;
+    [ObservableProperty] private bool _isInstallingManagedLlama;
+    [ObservableProperty] private bool _managedLlamaReady;
+    [ObservableProperty] private string _managedLlamaInstallProgress = string.Empty;
+    [ObservableProperty] private string _managedLlamaInstallError = string.Empty;
+
+    public bool CanInstallSelectedVoiceProvider =>
+        SelectedVoiceProvider?.Id == VoiceProvider.KokoroNative && !VoiceInstallCompleted;
+    public bool SelectedRuntimeUsesManagedLlama => SelectedRuntime is { IsLlamaCpp: true, StartManagedLlamaServer: true };
+    public bool CanInstallManagedLlama => SelectedRuntimeUsesManagedLlama && !ManagedLlamaReady;
+    public string ManagedLlamaReadinessSummary => ManagedLlamaReady
+        ? "Managed llama.cpp is installed and linked to Services."
+        : "Install managed llama.cpp here before Doctor validates the runtime.";
 
     /// <summary>Shown on the Finish step; see docs/review 02-onboarding-and-usability.md item 2.2.</summary>
     public string VoiceReadinessSummary
@@ -169,7 +180,8 @@ public partial class SetupWizardViewModel : ObservableObject
         IToastService toasts,
         ISystemInfoService systemInfo,
         ModelDownloadService? modelDownloads = null,
-        ModelManifestStore? manifest = null)
+        ModelManifestStore? manifest = null,
+        LlamaServerSetupService? llamaSetup = null)
     {
         _settings = settings;
         _runtimeProfiles = runtimeProfiles;
@@ -179,6 +191,7 @@ public partial class SetupWizardViewModel : ObservableObject
         _systemInfo = systemInfo;
         _modelDownloads = modelDownloads ?? new ModelDownloadService();
         _manifest = manifest ?? new ModelManifestStore(settings);
+        _llamaSetup = llamaSetup ?? new LlamaServerSetupService(_modelDownloads);
         LoadFromSettings(resetStep: true);
     }
 
@@ -206,6 +219,8 @@ public partial class SetupWizardViewModel : ObservableObject
         SelectedVoiceProvider = VoiceOptions.FirstOrDefault(p => p.Id == activeProviderId)
             ?? VoiceOptions.FirstOrDefault();
         UpdateVoiceOnboarding(SelectedVoiceProvider);
+        RefreshVoiceInstallationState();
+        RefreshManagedLlamaState();
 
         _ = RefreshRecommendedStarterModelAsync();
     }
@@ -437,6 +452,7 @@ public partial class SetupWizardViewModel : ObservableObject
             if (ok)
             {
                 VoiceInstallCompleted = true;
+                RefreshVoiceInstallationState();
                 VoiceInstallProgress = "Kokoro (native) voice installed.";
             }
             else
@@ -469,6 +485,10 @@ public partial class SetupWizardViewModel : ObservableObject
         {
             _syncingRuntimeSelection = false;
         }
+        RefreshManagedLlamaState();
+        OnPropertyChanged(nameof(SelectedRuntimeUsesManagedLlama));
+        OnPropertyChanged(nameof(CanInstallManagedLlama));
+        OnPropertyChanged(nameof(ManagedLlamaReadinessSummary));
     }
 
     partial void OnSelectedRuntimeIdChanged(string value)
@@ -491,13 +511,24 @@ public partial class SetupWizardViewModel : ObservableObject
     partial void OnSelectedVoiceProviderChanged(VoiceProviderInfo? value)
     {
         UpdateVoiceOnboarding(value);
+        VoiceInstallCompleted = false;
+        RefreshVoiceInstallationState();
         OnPropertyChanged(nameof(CanInstallSelectedVoiceProvider));
         OnPropertyChanged(nameof(VoiceReadinessSummary));
-        VoiceInstallCompleted = false;
         VoiceInstallError = string.Empty;
     }
 
-    partial void OnVoiceInstallCompletedChanged(bool value) => OnPropertyChanged(nameof(VoiceReadinessSummary));
+    partial void OnVoiceInstallCompletedChanged(bool value)
+    {
+        OnPropertyChanged(nameof(VoiceReadinessSummary));
+        OnPropertyChanged(nameof(CanInstallSelectedVoiceProvider));
+    }
+
+    partial void OnManagedLlamaReadyChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanInstallManagedLlama));
+        OnPropertyChanged(nameof(ManagedLlamaReadinessSummary));
+    }
 
     partial void OnStepIndexChanged(int value)
     {
@@ -511,6 +542,80 @@ public partial class SetupWizardViewModel : ObservableObject
         OnPropertyChanged(nameof(IsStep3));
         OnPropertyChanged(nameof(IsStep4));
         OnPropertyChanged(nameof(IsStep5));
+        if (value == 3)
+            RefreshVoiceInstallationState();
+        if (value is 1 or 4)
+            RefreshManagedLlamaState();
+    }
+
+    [RelayCommand]
+    private async Task InstallManagedLlamaAsync()
+    {
+        if (IsInstallingManagedLlama || !CanInstallManagedLlama)
+            return;
+
+        IsInstallingManagedLlama = true;
+        ManagedLlamaInstallError = string.Empty;
+        try
+        {
+            var progress = new Progress<string>(message => ManagedLlamaInstallProgress = message);
+            if (!await _doctor.InstallLlamaServerUpdateAsync(progress, CancellationToken.None))
+            {
+                ManagedLlamaInstallError = "llama.cpp installation failed. See Doctor diagnostics for details.";
+                return;
+            }
+
+            RefreshManagedLlamaState();
+            ManagedLlamaInstallProgress = "Managed llama.cpp is ready.";
+        }
+        catch (Exception ex)
+        {
+            ManagedLlamaInstallError = ex.Message;
+        }
+        finally
+        {
+            IsInstallingManagedLlama = false;
+        }
+    }
+
+    private void RefreshVoiceInstallationState()
+    {
+        if (SelectedVoiceProvider is null)
+            return;
+
+        var available = _voiceProviders.GetAvailableProviders()
+            .FirstOrDefault(provider => provider.Id == SelectedVoiceProvider.Id);
+        var installed = available?.IsInstalled == true;
+        try
+        {
+            var provider = _voiceProviders.GetVoiceProvider(SelectedVoiceProvider.Id);
+            if (provider.Id == SelectedVoiceProvider.Id)
+                installed |= provider.IsInstalled;
+        }
+        catch
+        {
+        }
+
+        if (available is not null || installed)
+            VoiceInstallCompleted = installed;
+    }
+
+    private void RefreshManagedLlamaState()
+    {
+        var server = _settings.Settings.ManagedServers.FirstOrDefault(s => !s.EmbeddingsMode)
+            ?? _settings.Settings.ManagedServers.FirstOrDefault();
+        var configured = server?.ExecutablePath?.Trim() ?? string.Empty;
+        if (!string.IsNullOrWhiteSpace(configured) && _llamaSetup.IsInstalled(configured))
+        {
+            ManagedLlamaReady = true;
+            return;
+        }
+
+        var root = LocalAiAssetsRoot.Trim();
+        if (string.IsNullOrWhiteSpace(root))
+            root = SettingsService.ResolveDataRoot(_settings.Settings);
+        var installRoot = _llamaSetup.GetDefaultInstallPath(root);
+        ManagedLlamaReady = LlamaServerSetupService.ResolveInstalledExecutable(installRoot) is not null;
     }
 
     private void UpdateVoiceOnboarding(VoiceProviderInfo? provider)

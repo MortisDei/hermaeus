@@ -53,7 +53,7 @@ Any compiler warning fails the build. Fix the warning; do not suppress it withou
   references. Runtime log output goes through `RedactionService`.
 - User-facing state files: write via atomic replacement (temp + move), like existing code in `SettingsService`/`BackupService`.
 - UI copy: icon-only controls need tooltips (a guard test scans axaml and fails without one); empty states use the shared `MossEmptyState` control; any text attributed to Moss follows `docs/mascot.md` "Voice in UI copy". When in doubt, drop the personality and state the fact.
-- Docs: user-visible behaviour changes must update `docs/features.md` and the relevant workflow doc (`docs/rag.md`, `docs/agent.md`, `docs/voice.md`, `docs/benchmarks.md`) plus `CHANGELOG.md`. Do not document planned behaviour as existing behaviour.
+- Docs: all authoritative repository documentation must stay synchronized with behaviour, architecture, security and privacy claims, setup and build instructions, configuration, workflows, APIs, UI semantics, licensing, and current feature descriptions. User-visible behaviour changes must update `docs/features.md`, `docs/user-guide.md` when the release-user workflow changes, the relevant workflow doc (`docs/rag.md`, `docs/agent.md`, `docs/voice.md`, `docs/benchmarks.md`), and `CHANGELOG.md`. Stale documentation is a defect. Do not document planned behaviour as existing behaviour. If no documentation update is required, state that explicitly in the implementation or review.
 
 ## Known hot spots (read before large edits)
 

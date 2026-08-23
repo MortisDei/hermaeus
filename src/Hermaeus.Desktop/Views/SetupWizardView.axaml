@@ -59,6 +59,18 @@
                                 </DataTemplate>
                             </ComboBox.ItemTemplate>
                         </ComboBox>
+                        <Border Classes="settings-card" Padding="12" IsVisible="{Binding SelectedRuntimeUsesManagedLlama}">
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="{Binding ManagedLlamaReadinessSummary}" FontSize="12" TextWrapping="Wrap" />
+                                <Button Content="Install managed llama.cpp"
+                                        Command="{Binding InstallManagedLlamaCommand}"
+                                        IsVisible="{Binding CanInstallManagedLlama}"
+                                        IsEnabled="{Binding !IsInstallingManagedLlama}"
+                                        ToolTip.Tip="Downloads the newest compatible b-numbered llama.cpp build and links it to Services." />
+                                <TextBlock Text="{Binding ManagedLlamaInstallProgress}" FontSize="11" Opacity="0.6" TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding ManagedLlamaInstallError}" FontSize="11" Foreground="#EF5350" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
 
                     <StackPanel IsVisible="{Binding IsStep2}" Spacing="10">
@@ -82,8 +94,7 @@
 
                         <StackPanel IsVisible="{Binding UseStarterModelDownload}" Spacing="8">
                             <!-- The wizard suggests a size from the machine's VRAM, but the
-                                 choice is the user's: these models differ in licence as well
-                                 as size, and one of them is research/non-commercial only. -->
+                                 choice is the user's: model family and fit still matter. -->
                             <ComboBox ItemsSource="{Binding StarterModels}"
                                       SelectedItem="{Binding SelectedStarterModel}"
                                       HorizontalAlignment="Stretch"

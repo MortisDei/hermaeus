@@ -344,8 +344,7 @@ public sealed class LocalAiSetupService
         progress?.Report("Installing llama-server binary...");
         try
         {
-            var installPath = Path.GetDirectoryName(action.TargetPath) ?? action.TargetPath;
-            var result = await _llamaServerSetup.InstallAsync(installPath, progress, ct);
+            var result = await _llamaServerSetup.InstallLatestAsync(action.TargetPath, LlamaRuntimeVariant.Cpu, progress, ct);
             return result;
         }
         catch (OperationCanceledException)

@@ -41,6 +41,24 @@ public sealed class ReleaseReadinessRegressionTests
         Assert.Equal(LlamaVersionComparison.Current, DoctorService.CompareLlamaBuilds(10035, 10034));
     }
 
+    [Fact]
+    public void Linux_desktop_install_uses_the_canonical_icon_and_uninstall_removes_it()
+    {
+        var repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../"));
+        var buildScript = File.ReadAllText(Path.Combine(repoRoot, "build.sh"));
+
+        Assert.Contains("cp \"$ROOT_DIR/src/Hermaeus.Desktop/Assets/hermaeus-app.png\" \"$ICON_DIR/hermaeus-app.png\"", buildScript, StringComparison.Ordinal);
+        Assert.Contains("PNG_ICON_DIR=\"$DATA_HOME/icons/hicolor/512x512/apps\"", buildScript, StringComparison.Ordinal);
+        Assert.Contains("PNG_ICON_FILE=\"$PNG_ICON_DIR/hermaeus.png\"", buildScript, StringComparison.Ordinal);
+        Assert.Contains("cp \"$INSTALL_DIR/icons/hermaeus-app.png\" \"$PNG_ICON_FILE\"", buildScript, StringComparison.Ordinal);
+        Assert.Contains("PNG_ICON_FILE=\"$DATA_HOME/icons/hicolor/512x512/apps/hermaeus.png\"", buildScript, StringComparison.Ordinal);
+        Assert.Equal(2, CountOccurrences(buildScript, "Icon=hermaeus"));
+        Assert.Contains("rm -f \"$DESKTOP_FILE\" \"$PNG_ICON_FILE\"", buildScript, StringComparison.Ordinal);
+    }
+
+    private static int CountOccurrences(string value, string fragment) =>
+        value.Split(fragment, StringSplitOptions.None).Length - 1;
+
     private sealed class InlineProgress<T>(Action<T> report) : IProgress<T>
     {
         public void Report(T value) => report(value);
