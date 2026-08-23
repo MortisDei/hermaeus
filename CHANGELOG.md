@@ -13,6 +13,10 @@ limit.
 
 ### Fixed
 
+- Windows portable packages now keep desktop and Local API runtime files under
+  `app/`, documentation under `docs/`, and icon assets under `icons/`. A tiny
+  source-included native `Hermaeus.exe` at package root replaces the command
+  launcher and starts only the bundled `app\Hermaeus.Desktop.exe`.
 - Fallback secret encryption keys now live outside the portable Hermaeus data
   root in a user-specific OS configuration location. Existing same-root keys
   migrate when the secret store initializes, and backup/restore copy now states

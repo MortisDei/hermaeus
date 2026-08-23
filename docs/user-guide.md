@@ -15,6 +15,16 @@ text files. Source and Debug launches may show a generic taskbar icon when the
 desktop entry has not been installed; launch the installed entry to verify
 release icon association.
 
+## Launching the Windows archive
+
+Extract the ZIP and double-click `Hermaeus.exe` at its root. This small native
+launcher exists only to provide a clean entry point while the actual application
+and runtime files remain under `app\`. It resolves and starts only the bundled
+`app\Hermaeus.Desktop.exe`; it does not install, elevate, update, access the
+network or registry, or persist anything. Its source is included in the
+repository. Keep the package directories together when moving the extracted
+archive.
+
 ## First launch
 
 Onboarding asks for two locations:

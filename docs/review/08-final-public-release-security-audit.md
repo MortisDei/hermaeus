@@ -6,6 +6,8 @@ Audited base: `d80758b50a65d8972e8117ae79ec1d98a3fbd929` on `r30/round`
 
 SecretStore reassessment base: `9a646db8750482c218802f61354c79263963ae5d`
 
+Final Windows packaging base: `d32e928825bc911a21a1c8c4fa68795020cf4e42`
+
 Scope: complete release candidate, reachable Git history, packages, workflows,
 runtime boundaries, security-sensitive documentation, and bounded audit fixes
 
@@ -20,12 +22,13 @@ the portable data root. All three are remediated in the local tree with
 regression coverage. One LOW package information disclosure was also fixed. No
 CRITICAL, HIGH, or MEDIUM finding remains open in the audited local tree.
 
-Public release must not proceed from remote PR head `9a646db...`. The local
-SecretStore follow-up must first be incorporated into PR #8, both CI legs must
-pass on that exact head, and the concise current-package Windows smoke test must
-complete. The owner has dropped updater-path testing as a release requirement,
-and this remediation does not change managed llama.cpp. No push, merge, tag,
-release, visibility change, or publication was performed by this audit.
+Public release must not proceed from remote PR head `d32e928...`. The final
+Windows packaging commit must first be incorporated into PR #8, both CI legs
+must pass on that exact head, and the package-root `Hermaeus.exe` must be
+double-clicked once on Windows to confirm it starts the bundled application.
+Broader Windows 11 and Linux dogfooding is complete. Updater-path testing is not
+a release requirement. No push, merge, tag, release, visibility change, or
+publication was performed by this audit.
 
 ## Findings summary
 
@@ -358,22 +361,18 @@ not a credible new privilege boundary.
 
 ## CI and GitHub result
 
-PR #8 was rechecked as open/draft from `r30/round` to `main` at remote head
-`9a646db...`, which contains the first audit remediation commit. Windows CI is
-successful on that head. Ubuntu CI has one failure in
-`BenchmarkViewModelModelSelectionTests.Selecting_a_model_triggers_no_restart_and_running_triggers_exactly_one`,
-outside this focused SecretStore scope, so the release CI gate is not currently
-satisfied. All workflow actions use full commit SHA pins. Default permissions
-are
-`contents: read`, checkout does not persist credentials, PR CI receives no
-write permission or repository secrets, and the tag-only release job scopes
-`contents: write` to release creation after build artifacts are downloaded.
+Remote `r30/round` is at `d32e928...`, containing both security remediations and
+the deterministic benchmark restart test repair. The final Windows packaging
+commit is local only and therefore has no remote CI result yet. All workflow
+actions use full commit SHA pins. Default permissions are `contents: read`,
+checkout does not persist credentials, PR CI receives no write permission or
+repository secrets, and the tag-only release job scopes `contents: write` to
+release creation after build artifacts are downloaded.
 
 Public forks would increase untrusted PR volume but not grant fork code a
 write-capable token or repository secrets under this workflow. GitHub documents
 the default read-only fork-PR token posture in
 [Actions repository settings](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository?apiVersion=2022-11-28).
-The local SecretStore follow-up has not run in remote CI yet.
 
 ## Package result
 
@@ -387,8 +386,16 @@ Install/uninstall scripts quote paths, derive the package identity from the
 validated package root, install only under the user's data home, and delete only
 the matching installed package plus fixed desktop/icon files. No plausible
 path-confusion route to system or unrelated user-data deletion was found.
-Windows package scripts were statically inspected and Windows packaging was
-successful in the pre-audit CI run; no Windows package was rebuilt locally.
+The Windows package now exposes only a 25,088-byte native `Hermaeus.exe` plus
+`app/`, `docs/`, and `icons/` at its root. Desktop runtime files live under
+`app/`, and Local API files under `app/LocalApi/`. The launcher imports only
+`KERNEL32.dll` and `USER32.dll`, uses the Windows GUI subsystem, embeds the
+canonical seven-image icon, derives a fixed
+`app\Hermaeus.Desktop.exe` target from its own location, forwards arguments,
+and uses `app\` as the working directory. A Wine probe against a disposable
+fixed target verified the target path, spaced argument forwarding, and working
+directory. No PDB or command launcher remains. The ZIP sidecar checksum was
+verified.
 
 ## Validation performed
 
@@ -406,19 +413,29 @@ successful in the pre-audit CI run; no Windows package was rebuilt locally.
 - Ran NuGet direct/transitive vulnerability review with no reported advisory.
 - Focused security tests: 48 total, 47 passed, 1 expected Windows-only skip.
 - Focused SecretStore, migration, and harness-registration tests: 147 passed.
+- Focused Windows package and launcher guards: 7 passed.
 - Full `dotnet build Hermaeus.sln`: succeeded, 0 warnings, 0 errors.
-- Full sequential test suite: 1,897 total, 1,881 passed, 16 expected platform
+- Full sequential test suite: 1,899 total, 1,883 passed, 16 expected platform
   skips, 0 failed. TRX was written outside the repository.
 - Linux `./build.sh --skip-restore`: succeeded. SHA256 sidecar verified; archive
   ownership/modes and sensitive/debug payload classes inspected.
+- Windows `pwsh ./build.ps1 -SkipRestore -Runtime win-x64`: succeeded on Linux
+  with the supported MinGW cross-toolchain. Package layout validation passed,
+  the ZIP sidecar verified, and inspection confirmed the GUI subsystem, fixed
+  target, minimal imports, canonical icon resources, and PDB/cmd exclusions.
+- The packaged launcher executed successfully under Wine against a disposable
+  fixed target; the probe recorded the spaced argument and `app\` working
+  directory exactly.
 - `git diff --check`: passed.
 
 ## Limitations
 
-- No live Windows laptop smoke, Windows credential-manager exercise, job-object
-  runtime exercise, Windows archive rebuild, or SmartScreen/signing check was
-  possible from this Linux host. Windows-specific tests correctly reported
-  skipped locally; Windows CI is green on remote head `9a646db...`.
+- Broader Windows 11 and Linux dogfooding completed successfully before the
+  final package layout change. This Linux host cross-built and executed the new
+  launcher under Wine against a disposable probe target, but the final packaged
+  root launcher has not yet been double-clicked on Windows. Windows credential
+  manager, job-object runtime, and SmartScreen/signing behavior were not
+  re-exercised for this packaging-only change.
 - No macOS host was available for Keychain or macOS archive execution.
 - ImageMagick `identify` was unavailable. Screenshot review used visual
   inspection plus `file` and printable-string metadata checks.
@@ -429,11 +446,12 @@ successful in the pre-audit CI run; no Windows package was rebuilt locally.
 
 ## Required actions before public release
 
-1. Incorporate the local SecretStore security follow-up into PR #8 without
-   dropping any remediation or report change.
+1. Incorporate the local final Windows packaging commit into PR #8 without
+   dropping any earlier remediation or report change.
 2. Require fresh green Ubuntu and Windows CI on that exact head.
-3. Complete the concise current-package smoke test on the owner's Windows
-   laptop. Updater-path testing is not a release requirement.
+3. Double-click the packaged root `Hermaeus.exe` on the owner's Windows laptop
+   and confirm it starts `app\Hermaeus.Desktop.exe`. No broader smoke campaign
+   or updater-path test is required.
 
 ## Deferred hardening
 
@@ -449,15 +467,14 @@ successful in the pre-audit CI run; no Windows package was rebuilt locally.
 
 ## Release recommendation
 
-Do not release or make the repository public from remote head `9a646db...`.
+Do not release or make the repository public from remote head `d32e928...`.
 After the three required actions above, proceed to the owner's final release
 decision. No remaining audited finding independently blocks public release.
 
-The first audit remediation was committed as `9a646db` with the Conventional
-Commit message `fix(security): close R30 release audit blockers`. This focused
-follow-up is committed separately as
-`fix(security): separate fallback key from portable data`; its exact hash is
-recorded in the final audit handoff because a Git commit cannot contain its own
+The security remediations are committed as `9a646db` and `c3fa533`; the Ubuntu
+benchmark test repair is `d32e928`. The final packaging change is committed
+separately as `fix(packaging): tidy Windows portable release`; its exact hash
+is recorded in the final handoff because a Git commit cannot contain its own
 stable hash.
 
 Nothing was pushed, merged, tagged, released, made public, or used to change

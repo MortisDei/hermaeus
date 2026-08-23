@@ -36,7 +36,123 @@ $localApiPublishDir = Join-Path $dist ".publish-localapi-$Runtime"
 $archive = Join-Path $dist "$packageName.zip"
 $checksum = "$archive.sha256"
 $docDir = Join-Path $packageDir "docs"
-$localApiDir = Join-Path $packageDir "LocalApi"
+$appDir = Join-Path $packageDir "app"
+$iconDir = Join-Path $packageDir "icons"
+$localApiDir = Join-Path $appDir "LocalApi"
+$launcherSourceDir = Join-Path $root "src/Hermaeus.Launcher"
+$launcherBuildDir = Join-Path $dist ".launcher-$Runtime"
+$launcherPath = Join-Path $packageDir "Hermaeus.exe"
+
+function Import-MsvcEnvironment([string]$TargetRuntime) {
+    $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
+    if (-not (Test-Path $vswhere -PathType Leaf)) {
+        throw "Visual Studio Build Tools are required to build the native Windows launcher."
+    }
+
+    $requiredComponent = if ($TargetRuntime -eq "win-arm64") {
+        "Microsoft.VisualStudio.Component.VC.Tools.ARM64"
+    } else {
+        "Microsoft.VisualStudio.Component.VC.Tools.x86.x64"
+    }
+    $installationPath = & $vswhere -latest -products * -requires $requiredComponent -property installationPath
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($installationPath)) {
+        throw "Visual Studio C++ tools for $TargetRuntime are required to build the native Windows launcher."
+    }
+
+    $vcvarsName = if ($TargetRuntime -eq "win-arm64") { "vcvarsamd64_arm64.bat" } else { "vcvars64.bat" }
+    $vcvars = Join-Path $installationPath "VC/Auxiliary/Build/$vcvarsName"
+    if (-not (Test-Path $vcvars -PathType Leaf)) {
+        throw "Could not locate $vcvarsName for the native Windows launcher build."
+    }
+
+    $environmentLines = & $env:ComSpec /d /s /c "call `"$vcvars`" -no_logo >nul && set"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not initialize the Visual Studio C++ build environment."
+    }
+
+    foreach ($line in $environmentLines) {
+        $separator = $line.IndexOf('=')
+        if ($separator -le 0) { continue }
+        [Environment]::SetEnvironmentVariable(
+            $line.Substring(0, $separator),
+            $line.Substring($separator + 1),
+            [EnvironmentVariableTarget]::Process)
+    }
+}
+
+function Build-NativeLauncher([string]$TargetRuntime, [string]$OutputPath) {
+    if ($TargetRuntime -notin @("win-x64", "win-arm64")) {
+        throw "The native Windows launcher supports win-x64 and win-arm64, not '$TargetRuntime'."
+    }
+
+    New-Item -ItemType Directory -Force $launcherBuildDir | Out-Null
+    $objectPath = Join-Path $launcherBuildDir "launcher.obj"
+    $resourcePath = Join-Path $launcherBuildDir "launcher.res"
+
+    Push-Location $launcherSourceDir
+    try {
+        if ($IsWindows) {
+            Import-MsvcEnvironment $TargetRuntime
+            $resourceCompiler = (Get-Command "rc.exe" -ErrorAction Stop).Source
+            $compiler = (Get-Command "cl.exe" -ErrorAction Stop).Source
+            $linker = (Get-Command "link.exe" -ErrorAction Stop).Source
+
+            & $resourceCompiler /nologo "/fo$resourcePath" "launcher.rc"
+            & $compiler /nologo /c /TC /O1 /Os /GS- /W4 /WX /DUNICODE /D_UNICODE "/Fo$objectPath" "launcher.c"
+            & $linker /nologo /SUBSYSTEM:WINDOWS /ENTRY:wWinMainCRTStartup /NODEFAULTLIB "/OUT:$OutputPath" $objectPath $resourcePath kernel32.lib user32.lib
+        } else {
+            if ($TargetRuntime -ne "win-x64") {
+                throw "Cross-building the $TargetRuntime launcher requires a Windows host with Visual Studio C++ tools."
+            }
+
+            $resourceCompiler = (Get-Command "x86_64-w64-mingw32-windres" -ErrorAction Stop).Source
+            $compiler = (Get-Command "x86_64-w64-mingw32-gcc" -ErrorAction Stop).Source
+            & $resourceCompiler "launcher.rc" -O coff -o $resourcePath
+            & $compiler -mwindows -Os -s -fno-stack-protector -nostdlib `
+                "-Wl,--subsystem,windows,--entry,wWinMainCRTStartup" `
+                -o $OutputPath "launcher.c" $resourcePath -lkernel32 -luser32
+        }
+    } finally {
+        Pop-Location
+    }
+}
+
+function Assert-WindowsPackageLayout([string]$PackagePath) {
+    $requiredFiles = @(
+        "Hermaeus.exe",
+        "app/Hermaeus.Desktop.exe",
+        "app/Hermaeus.Desktop.dll",
+        "app/Hermaeus.Desktop.runtimeconfig.json",
+        "app/LocalApi/Hermaeus.LocalApi.exe",
+        "app/LocalApi/Hermaeus.LocalApi.dll",
+        "docs/README.md",
+        "docs/user-guide.md",
+        "docs/LICENSE.md",
+        "docs/NOTICE.md",
+        "docs/COMMERCIAL.md",
+        "icons/hermaeus.ico",
+        "icons/hermaeus-app.png",
+        "icons/hermaeus-tray.png",
+        "icons/hermaeus-tray-dark.png",
+        "icons/hermaeus-tray-light.png"
+    )
+    foreach ($relativePath in $requiredFiles) {
+        if (-not (Test-Path (Join-Path $PackagePath $relativePath) -PathType Leaf)) {
+            throw "Windows package is missing required file '$relativePath'."
+        }
+    }
+
+    $unexpectedRootFiles = @(Get-ChildItem $PackagePath -File | Where-Object Name -ne "Hermaeus.exe")
+    if ($unexpectedRootFiles.Count -ne 0) {
+        throw "Windows package root contains unexpected files: $($unexpectedRootFiles.Name -join ', ')."
+    }
+    if (Test-Path (Join-Path $PackagePath "Launch-Hermaeus.cmd")) {
+        throw "Windows package still contains the retired command launcher."
+    }
+    if (@(Get-ChildItem $PackagePath -Filter "*.pdb" -File -Recurse).Count -ne 0) {
+        throw "Windows package contains PDB files."
+    }
+}
 
 if (-not $SkipRestore) {
     Write-Host "Restoring..."
@@ -45,8 +161,8 @@ if (-not $SkipRestore) {
 }
 
 Write-Host "Publishing $Runtime ($Configuration, self-contained=$selfContainedValue)..."
-Remove-Item -Recurse -Force $packageDir, $publishDir, $localApiPublishDir, $archive, $checksum -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force $packageDir, $publishDir, $localApiPublishDir, $docDir, $localApiDir | Out-Null
+Remove-Item -Recurse -Force $packageDir, $publishDir, $localApiPublishDir, $launcherBuildDir, $archive, $checksum -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force $packageDir, $publishDir, $localApiPublishDir, $docDir, $appDir, $iconDir, $localApiDir | Out-Null
 
 $publishArgs = @(
     $project,
@@ -74,7 +190,7 @@ $localApiPublishArgs = @(
 
 dotnet publish @localApiPublishArgs
 
-Copy-Item -Path (Join-Path $publishDir "*") -Destination $packageDir -Recurse -Force
+Copy-Item -Path (Join-Path $publishDir "*") -Destination $appDir -Recurse -Force
 Copy-Item -Path (Join-Path $localApiPublishDir "*") -Destination $localApiDir -Recurse -Force
 Copy-Item (Join-Path $root "README.md") (Join-Path $docDir "README.md") -Force
 Copy-Item (Join-Path $root "docs/user-guide.md") (Join-Path $docDir "user-guide.md") -Force
@@ -83,23 +199,20 @@ Copy-Item (Join-Path $root "NOTICE.md") (Join-Path $docDir "NOTICE.md") -Force
 Copy-Item (Join-Path $root "COMMERCIAL.md") (Join-Path $docDir "COMMERCIAL.md") -Force
 Get-ChildItem (Join-Path $root "docs") -Filter "hermaeus-branding.*" -File -ErrorAction SilentlyContinue |
     Copy-Item -Destination $docDir -Force
-Copy-Item (Join-Path $root "src/Hermaeus.Desktop/Assets/hermaeus.ico") (Join-Path $packageDir "hermaeus.ico") -Force
-Copy-Item (Join-Path $root "src/Hermaeus.Desktop/Assets/hermaeus-app.png") (Join-Path $packageDir "hermaeus-app.png") -Force
-Copy-Item (Join-Path $root "src/Hermaeus.Desktop/Assets/hermaeus-tray.png") (Join-Path $packageDir "hermaeus-tray.png") -Force
-Copy-Item (Join-Path $root "src/Hermaeus.Desktop/Assets/hermaeus-tray-dark.png") (Join-Path $packageDir "hermaeus-tray-dark.png") -Force
-Copy-Item (Join-Path $root "src/Hermaeus.Desktop/Assets/hermaeus-tray-light.png") (Join-Path $packageDir "hermaeus-tray-light.png") -Force
+Copy-Item (Join-Path $root "src/Hermaeus.Desktop/Assets/hermaeus.ico") (Join-Path $iconDir "hermaeus.ico") -Force
+Copy-Item (Join-Path $root "src/Hermaeus.Desktop/Assets/hermaeus-app.png") (Join-Path $iconDir "hermaeus-app.png") -Force
+Copy-Item (Join-Path $root "src/Hermaeus.Desktop/Assets/hermaeus-tray.png") (Join-Path $iconDir "hermaeus-tray.png") -Force
+Copy-Item (Join-Path $root "src/Hermaeus.Desktop/Assets/hermaeus-tray-dark.png") (Join-Path $iconDir "hermaeus-tray-dark.png") -Force
+Copy-Item (Join-Path $root "src/Hermaeus.Desktop/Assets/hermaeus-tray-light.png") (Join-Path $iconDir "hermaeus-tray-light.png") -Force
+
+Write-Host "Building native Windows launcher..."
+Build-NativeLauncher $Runtime $launcherPath
 
 Get-ChildItem $packageDir -Filter "*.pdb" -File -Recurse -ErrorAction SilentlyContinue |
     Remove-Item -Force
 
-@'
-@echo off
-setlocal
-cd /d "%~dp0"
-start "" "%~dp0Hermaeus.Desktop.exe"
-'@ | Set-Content -NoNewline -Encoding ASCII (Join-Path $packageDir "Launch-Hermaeus.cmd")
-
-Remove-Item -Recurse -Force $publishDir, $localApiPublishDir
+Assert-WindowsPackageLayout $packageDir
+Remove-Item -Recurse -Force $publishDir, $localApiPublishDir, $launcherBuildDir
 
 Write-Host "Creating $archive..."
 Compress-Archive -Path $packageDir -DestinationPath $archive -Force

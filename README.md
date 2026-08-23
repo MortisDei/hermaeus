@@ -242,8 +242,10 @@ Get-Content hermaeus-<version>-win-x64.zip.sha256
 ```
 
 Compare the displayed hash with the companion checksum file, extract the
-archive, then run `Launch-Hermaeus.cmd`. Release binaries are unsigned, so
-verify the checksum before accepting an operating-system warning.
+archive, then double-click `Hermaeus.exe`. It is the small open-source package
+launcher for the actual application under `app\Hermaeus.Desktop.exe`. Release
+binaries are unsigned, so verify the checksum before accepting an
+operating-system warning.
 
 After starting Hermaeus, use **Services** to configure a runtime, select a
 model, and start Chat. The in-app setup wizard can download a starter model.

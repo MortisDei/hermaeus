@@ -97,6 +97,56 @@ public sealed class ReleaseReadinessRegressionTests
         Assert.Null(PackageIntegrationAction.Resolve(Path.Combine(packageRoot, "install-hermaeus")));
     }
 
+    [Fact]
+    public void Windows_package_uses_a_fixed_target_auditable_native_launcher()
+    {
+        var repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../"));
+        var launcherSourcePath = Path.Combine(repoRoot, "src/Hermaeus.Launcher/launcher.c");
+        var launcherResourcePath = Path.Combine(repoRoot, "src/Hermaeus.Launcher/launcher.rc");
+        var launcherSource = File.ReadAllText(launcherSourcePath);
+        var launcherResource = File.ReadAllText(launcherResourcePath);
+
+        Assert.Contains("GetModuleFileNameW(NULL, self_path", launcherSource, StringComparison.Ordinal);
+        Assert.Contains("L\"\\\\app\\\\Hermaeus.Desktop.exe\"", launcherSource, StringComparison.Ordinal);
+        Assert.Contains("GetFileAttributesW(target_path)", launcherSource, StringComparison.Ordinal);
+        Assert.Contains("CreateProcessW(", launcherSource, StringComparison.Ordinal);
+        Assert.Contains("target_path,", launcherSource, StringComparison.Ordinal);
+        Assert.Contains("working_directory,", launcherSource, StringComparison.Ordinal);
+        Assert.Contains("GetCommandLineW()", launcherSource, StringComparison.Ordinal);
+        Assert.Contains("MessageBoxW(NULL, failure_message", launcherSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("ShellExecute", launcherSource, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("WinExec", launcherSource, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("system(", launcherSource, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("RegOpen", launcherSource, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("../Hermaeus.Desktop/Assets/hermaeus.ico", launcherResource, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Windows_package_layout_and_launcher_are_guarded_and_documented()
+    {
+        var repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../"));
+        var buildScript = File.ReadAllText(Path.Combine(repoRoot, "build.ps1"));
+        var packaging = File.ReadAllText(Path.Combine(repoRoot, "docs/packaging.md"));
+        var userGuide = File.ReadAllText(Path.Combine(repoRoot, "docs/user-guide.md"));
+
+        Assert.Contains("$appDir = Join-Path $packageDir \"app\"", buildScript, StringComparison.Ordinal);
+        Assert.Contains("$iconDir = Join-Path $packageDir \"icons\"", buildScript, StringComparison.Ordinal);
+        Assert.Contains("$localApiDir = Join-Path $appDir \"LocalApi\"", buildScript, StringComparison.Ordinal);
+        Assert.Contains("Build-NativeLauncher $Runtime $launcherPath", buildScript, StringComparison.Ordinal);
+        Assert.Contains("Assert-WindowsPackageLayout $packageDir", buildScript, StringComparison.Ordinal);
+        Assert.Contains("\"app/Hermaeus.Desktop.exe\"", buildScript, StringComparison.Ordinal);
+        Assert.Contains("\"app/LocalApi/Hermaeus.LocalApi.exe\"", buildScript, StringComparison.Ordinal);
+        Assert.Contains("\"icons/hermaeus.ico\"", buildScript, StringComparison.Ordinal);
+        Assert.Contains("Get-ChildItem $PackagePath -Filter \"*.pdb\" -File -Recurse", buildScript, StringComparison.Ordinal);
+        Assert.DoesNotContain("Set-Content -NoNewline -Encoding ASCII (Join-Path $packageDir \"Launch-Hermaeus.cmd\")", buildScript, StringComparison.Ordinal);
+
+        Assert.Contains("minimal open-source launcher", packaging, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("app\\Hermaeus.Desktop.exe", packaging, StringComparison.Ordinal);
+        Assert.Contains("src/Hermaeus.Launcher/launcher.c", packaging, StringComparison.Ordinal);
+        Assert.Contains("Hermaeus.exe", userGuide, StringComparison.Ordinal);
+        Assert.Contains("app\\Hermaeus.Desktop.exe", userGuide, StringComparison.Ordinal);
+    }
+
     private static int CountOccurrences(string value, string fragment) =>
         value.Split(fragment, StringSplitOptions.None).Length - 1;
 

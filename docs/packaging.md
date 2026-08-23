@@ -132,11 +132,43 @@ pwsh ./build.ps1 -SkipRestore -Runtime win-x64
 Framework-dependent packages require the .NET 10 runtime on the target machine.
 Self-contained packages include the runtime and are larger.
 
-The Windows package includes published Hermaeus desktop binaries, app/tray icon
-assets, repository license and commercial notices under `docs/`,
-`docs/user-guide.md`, `docs/hermaeus-branding.*` when present, and
-`Launch-Hermaeus.cmd` for starting the app from the extracted folder. Normal
-packages exclude `.pdb` files.
+The Windows archive keeps its public root small:
+
+```text
+hermaeus-<version>-win-x64/
+    Hermaeus.exe
+    app/
+        Hermaeus.Desktop.exe
+        <desktop runtime files>
+        LocalApi/
+            <Local API runtime files>
+    docs/
+    icons/
+```
+
+`Hermaeus.exe` is a minimal open-source launcher implemented with Win32. Its
+auditable source is `src/Hermaeus.Launcher/launcher.c`, with the canonical
+application icon linked from `launcher.rc`. It resolves its own package
+directory and starts only the fixed bundled target
+`app\Hermaeus.Desktop.exe`, using `app\` as the working
+directory and forwarding the original command-line arguments. It performs no
+network, update, installation, elevation, registry, discovery, or persistence
+behavior. The launcher exists only to keep the portable archive tidy and give
+users a normal double-click entry point. The old `Launch-Hermaeus.cmd` is not
+packaged.
+
+The build requires a native compiler only for this small launcher. Windows
+builds use the Visual Studio C++ tools already present on GitHub's
+`windows-latest` release runner. A non-Windows `win-x64` build uses
+`x86_64-w64-mingw32-gcc` and `windres`; cross-building `win-arm64` requires a
+Windows host with the Visual Studio ARM64 C++ tools. No third-party library or
+launcher runtime is added to the package.
+
+Published desktop files live under `app/`, the Local API payload under
+`app/LocalApi/`, repository documentation and notices under `docs/`, and
+application/tray icon assets under `icons/`. Normal packages exclude `.pdb`
+files across the whole tree. `build.ps1` validates this layout before creating
+the ZIP and checksum.
 
 Linux tar headers use numeric root ownership and remove group/other write bits.
 This prevents a local builder username, group name, or permissive worktree mode
