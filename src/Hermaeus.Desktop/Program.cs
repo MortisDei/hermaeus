@@ -90,6 +90,7 @@ class Program
     public static AppBuilder BuildAvaloniaApp() =>
         AppBuilder.Configure<App>()
             .UsePlatformDetect()
+            .With(new X11PlatformOptions { WmClass = "hermaeus" })
             .WithInterFont()
             .LogToTrace();
 }

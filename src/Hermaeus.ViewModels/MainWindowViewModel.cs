@@ -180,6 +180,7 @@ public partial class MainWindowViewModel : ViewModelBase
         Wizard.WizardCompleted += () =>
         {
             ActivePanel = "chat";
+            Chat.RefreshSetupState();
             OnPropertyChanged(nameof(SetupIncomplete));
             OnPropertyChanged(nameof(ShowSetupResume));
             Settings.Reload();

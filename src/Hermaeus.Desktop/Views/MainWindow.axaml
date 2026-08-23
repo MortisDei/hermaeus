@@ -7,6 +7,7 @@
         x:Class="Hermaeus.Desktop.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Title="{Binding WindowTitle}"
+        Icon="/Assets/hermaeus-app.png"
         MinWidth="720" MinHeight="500"
         Width="1280"   Height="820"
         WindowStartupLocation="CenterScreen"

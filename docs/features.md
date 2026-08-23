@@ -1025,6 +1025,10 @@ attached to a conversation. See [docs/voice.md](voice.md).
 - Finishing or skipping the wizard immediately starts configured servers and
   loads chat models, RAG datasets, and agent/benchmark data - no restart or
   extra navigation needed to make first use of the app work.
+- Chat's no-model empty state offers the setup wizard only while first-run
+  onboarding is incomplete. After onboarding is complete, a missing or stopped
+  chat model routes recovery through Services; the intentional **Rerun wizard**
+  action remains in Settings.
 - Re-running the wizard and choosing a different data root moves your
   existing databases to the new location the same way Settings' data-root
   change does (with a confirmation toast), instead of switching to an empty
@@ -1054,6 +1058,10 @@ attached to a conversation. See [docs/voice.md](voice.md).
   embedding backend health until one is installed, and leaves Linux global
   hotkeys out of problem reporting because system-wide support is not available
   there yet.
+- Linux tray support remains unknown until the current session's tray receives
+  an interaction. That runtime evidence makes the Doctor check Ready; desktop
+  environments where integration cannot be confirmed remain Info rather than
+  being guessed Ready. Windows and macOS retain their platform Ready result.
 - Doctor embedding model install downloads the default model from a pinned
   Hugging Face commit, verifies SHA256, removes failed downloads, and points the
   embedding server at the verified Qwen3-Embedding-0.6B file. Existing Nomic

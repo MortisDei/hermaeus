@@ -329,6 +329,13 @@ public partial class ChatViewModel : ViewModelBase
     /// <summary>Drives the "no model configured" empty state (r8 02-onboarding-and-usability.md 2.6).</summary>
     public bool HasNoAvailableModels => AvailableModels.Count == 0;
 
+    /// <summary>
+    /// First-run setup is a recovery path only while onboarding is incomplete.
+    /// A completed user with no live model belongs in Services instead.
+    /// </summary>
+    public bool ShowSetupWizardFromEmptyState =>
+        HasNoAvailableModels && !_settings.Settings.SetupWizardCompleted;
+
     public bool IsSelectedModelRemote =>
         SelectedModel is not null
         && CompositeLlmService.Providers.FirstOrDefault(p =>
@@ -811,7 +818,11 @@ public partial class ChatViewModel : ViewModelBase
             SendCommand.NotifyCanExecuteChanged();
             ScheduleContextUsageRefresh();
         };
-        AvailableModels.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasNoAvailableModels));
+        AvailableModels.CollectionChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(HasNoAvailableModels));
+            OnPropertyChanged(nameof(ShowSetupWizardFromEmptyState));
+        };
         RefreshEstimatedContextUsage();
         _ = Task.Run(RefreshMemoryStatusAsync);
         _ = Task.Run(LoadPersistedChatTracesAsync);
@@ -963,7 +974,11 @@ public partial class ChatViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private void OpenSetupWizardFromEmptyState() => RequestNavigate?.Invoke("wizard");
+    private void OpenSetupWizardFromEmptyState() =>
+        RequestNavigate?.Invoke(_settings.Settings.SetupWizardCompleted ? "services" : "wizard");
+
+    public void RefreshSetupState() =>
+        OnPropertyChanged(nameof(ShowSetupWizardFromEmptyState));
 
     [RelayCommand]
     private void OpenServicesFromEmptyState() => RequestNavigate?.Invoke("services");

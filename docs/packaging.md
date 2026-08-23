@@ -57,6 +57,16 @@ files. Its layout is:
 
 Normal packages exclude `.pdb` symbol files.
 
+Run `./Hermaeus` from a terminal to launch directly from the extracted package,
+or use `hermaeus.desktop` where the file manager permits launching desktop
+entries. Linux has no portable file metadata that assigns an application icon
+to the `Hermaeus` shell launcher itself, so file managers normally show their
+generic script or executable icon for that file. The adjacent desktop entry is
+the standards-based representation. Its themed Moss icon resolves after the
+user-local desktop installation below; using an absolute icon path in the
+archive would break relocation, while relative `Icon` paths are not part of the
+Desktop Entry specification.
+
 To install the desktop launcher for the current user:
 
 ```bash
@@ -68,8 +78,10 @@ The installer copies the package under
 `${XDG_DATA_HOME:-$HOME/.local/share}/hermaeus/`, installs a desktop entry under
 `${XDG_DATA_HOME:-$HOME/.local/share}/applications/`, and installs the icon
 under `${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/512x512/apps/` using
-the canonical application icon. It does not require root and does not write to
-system paths.
+the canonical application icon. The installed desktop filename, its icon name,
+and the application's X11/XWayland WM class all use `hermaeus`, allowing the
+desktop shell to associate running windows with this entry. It does not require
+root and does not write to system paths.
 
 To remove the user-local launcher and installed package:
 

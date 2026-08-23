@@ -3,6 +3,15 @@
 This guide is for the release archive. You do not need the source tree or an
 IDE to use Hermaeus.
 
+## Launching the Linux archive
+
+Run `./Hermaeus` from the extracted directory, or run
+`./install-desktop.sh` once to install a user-local application-menu entry and
+the canonical Moss icon. A Linux file manager may show a generic executable
+icon for the extracted `Hermaeus` shell launcher itself; portable desktop icon
+association begins with the adjacent `hermaeus.desktop` entry and the installed
+icon theme resource. Installation does not require root.
+
 ## First launch
 
 Onboarding asks for two locations:
@@ -32,6 +41,11 @@ source.
 the resolved `llama-server` executable, a GGUF model, a localhost port, and
 launch settings. Start it there, then select its model in Chat. Runtime Logs
 show the exact startup stage and sanitized process output.
+
+If onboarding is already complete and Chat reports that no chat model is set
+up, go to **Services** to configure or start the current model server. A stopped
+server does not reset onboarding. The setup wizard remains available from
+Settings when you intentionally want to rerun it.
 
 Ollama and OpenAI-compatible endpoints use runtime profiles. Remote providers
 receive the prompts and context sent to them. Hermaeus never turns a remote

@@ -148,11 +148,12 @@ cat > "$PACKAGE_DIR/hermaeus.desktop" <<'DESKTOP'
 Type=Application
 Name=Hermaeus
 Comment=Local-first AI workspace
-Exec=sh -c 'appdir=$(dirname "$1"); exec "$appdir/Hermaeus"' sh %k
+Exec=sh -c "exec \"\\${1%%/*}/Hermaeus\"" sh %k
 Icon=hermaeus
 Terminal=false
 Categories=Utility;Development;
-StartupWMClass=Hermaeus
+StartupWMClass=hermaeus
+StartupNotify=true
 DESKTOP
 
 cat > "$PACKAGE_DIR/install-desktop.sh" <<'INSTALL'
@@ -197,7 +198,8 @@ Exec=$INSTALL_DIR/Hermaeus
 Icon=hermaeus
 Terminal=false
 Categories=Utility;Development;
-StartupWMClass=Hermaeus
+StartupWMClass=hermaeus
+StartupNotify=true
 DESKTOP
 
 chmod 0644 "$DESKTOP_FILE" "$PNG_ICON_FILE"

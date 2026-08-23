@@ -499,6 +499,7 @@
                     <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
                         <Button Content="Open setup wizard"
                                 Command="{Binding OpenSetupWizardFromEmptyStateCommand}"
+                                IsVisible="{Binding ShowSetupWizardFromEmptyState}"
                                 ToolTip.Tip="Walks you through choosing or downloading a model, a runtime, and voice." />
                         <Button Content="Open Services"
                                 Command="{Binding OpenServicesFromEmptyStateCommand}"

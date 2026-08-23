@@ -53,7 +53,15 @@ public sealed class ReleaseReadinessRegressionTests
         Assert.Contains("cp \"$INSTALL_DIR/icons/hermaeus-app.png\" \"$PNG_ICON_FILE\"", buildScript, StringComparison.Ordinal);
         Assert.Contains("PNG_ICON_FILE=\"$DATA_HOME/icons/hicolor/512x512/apps/hermaeus.png\"", buildScript, StringComparison.Ordinal);
         Assert.Equal(2, CountOccurrences(buildScript, "Icon=hermaeus"));
+        Assert.Equal(2, CountOccurrences(buildScript, "StartupWMClass=hermaeus"));
+        Assert.Equal(2, CountOccurrences(buildScript, "StartupNotify=true"));
+        Assert.Contains("Exec=sh -c \"exec \\\"\\\\${1%%/*}/Hermaeus\\\"\" sh %k", buildScript, StringComparison.Ordinal);
         Assert.Contains("rm -f \"$DESKTOP_FILE\" \"$PNG_ICON_FILE\"", buildScript, StringComparison.Ordinal);
+
+        var program = File.ReadAllText(Path.Combine(repoRoot, "src/Hermaeus.Desktop/Program.cs"));
+        var mainWindow = File.ReadAllText(Path.Combine(repoRoot, "src/Hermaeus.Desktop/Views/MainWindow.axaml"));
+        Assert.Contains("WmClass = \"hermaeus\"", program, StringComparison.Ordinal);
+        Assert.Contains("Icon=\"/Assets/hermaeus-app.png\"", mainWindow, StringComparison.Ordinal);
     }
 
     private static int CountOccurrences(string value, string fragment) =>

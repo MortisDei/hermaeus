@@ -44,6 +44,7 @@ public sealed partial class DoctorService : IDoctorService
     private readonly IBenchmarkInsightsService? _benchmarkInsights;
     private readonly ISpeechRecognitionProviderRegistry? _sttProviders;
     private readonly IAudioCapture? _audioCapture;
+    private readonly ITrayIntegrationState? _trayIntegration;
 
     /// <summary>
     /// Caches GitHub API release lookups (llama.cpp's update check, Hermaeus's
@@ -76,7 +77,8 @@ public sealed partial class DoctorService : IDoctorService
         AppLifecycleJournalService? lifecycleJournal = null,
         IBenchmarkInsightsService? benchmarkInsights = null,
         ISpeechRecognitionProviderRegistry? sttProviders = null,
-        IAudioCapture? audioCapture = null)
+        IAudioCapture? audioCapture = null,
+        ITrayIntegrationState? trayIntegration = null)
     {
         _settings = settings;
         _runtimes = runtimes;
@@ -95,6 +97,7 @@ public sealed partial class DoctorService : IDoctorService
         _benchmarkInsights = benchmarkInsights;
         _sttProviders = sttProviders;
         _audioCapture = audioCapture;
+        _trayIntegration = trayIntegration;
     }
 
     public async Task<DoctorReport> ScanAsync(CancellationToken ct = default)

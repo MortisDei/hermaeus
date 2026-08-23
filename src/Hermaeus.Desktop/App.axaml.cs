@@ -55,7 +55,9 @@ public partial class App : Application
                 DataContext = vm,
                 PatchDiffService = sp.GetRequiredService<IPatchDiffService>()
             };
-            _desktopIntegration = new DesktopIntegrationService(vm);
+            _desktopIntegration = new DesktopIntegrationService(
+                vm,
+                sp.GetRequiredService<ITrayIntegrationState>());
             window.DesktopIntegration = _desktopIntegration;
             _desktopIntegration.Attach(window);
             desktop.MainWindow = window;

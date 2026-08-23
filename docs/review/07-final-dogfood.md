@@ -36,6 +36,24 @@ r30 branch. It does not add a new subsystem or broaden the release scope.
   observed. Both race participants are now observed and responses are disposed.
 - Doctor popups and service error callouts now use solid, readable surfaces;
   the previous-session warning title now agrees with its warning detail.
+- The Linux window used Avalonia's default `Hermaeus.Desktop` WM class while
+  the installed desktop entry expected `Hermaeus`, and the main window did not
+  set its canonical icon. The application now emits the `hermaeus` X11/XWayland
+  identity used by `hermaeus.desktop`, sets the Moss window icon, and keeps the
+  installed theme icon under the same name.
+- Linux has no standards-based portable way to assign an application icon to
+  the extracted `Hermaeus` shell script. The adjacent relocation-safe desktop
+  entry remains the user-facing standard representation. Its relocation-safe
+  `%k` launch command now passes `desktop-file-validate`, and packaging docs
+  state that its themed icon resolves after desktop installation rather than
+  claiming the script itself can be decorated everywhere.
+- Doctor previously had only an OS heuristic for Linux tray support. A click on
+  the current session's Hermaeus tray now records positive integration evidence
+  shared with Doctor, producing Ready; no evidence remains Info.
+- Chat's empty state equated zero currently available models with incomplete
+  onboarding. Setup completion now gates the wizard affordance, so completed
+  users are directed to Services while incomplete and intentional rerun flows
+  remain available.
 
 ## Preserved behavior
 

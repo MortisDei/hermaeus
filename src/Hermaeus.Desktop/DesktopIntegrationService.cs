@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Platform;
+using Hermaeus.Core.Services;
 using Hermaeus.ViewModels;
 using System.ComponentModel;
 
@@ -10,15 +11,17 @@ namespace Hermaeus.Desktop;
 public sealed class DesktopIntegrationService : IDisposable
 {
     private readonly MainWindowViewModel _vm;
+    private readonly ITrayIntegrationState _trayIntegration;
     private readonly GlobalHotkeyService _globalHotkeys = new();
     private Window? _window;
     private TrayIcon? _tray;
     private EventHandler<AvaloniaPropertyChangedEventArgs>? _windowPropertyChangedHandler;
     private bool _isQuitting;
 
-    public DesktopIntegrationService(MainWindowViewModel vm)
+    public DesktopIntegrationService(MainWindowViewModel vm, ITrayIntegrationState trayIntegration)
     {
         _vm = vm;
+        _trayIntegration = trayIntegration;
     }
 
     public void Attach(Window window)
@@ -145,7 +148,11 @@ public sealed class DesktopIntegrationService : IDisposable
         {
             Console.Error.WriteLine($"Hermaeus tray icon could not be loaded: {ex.Message}");
         }
-        tray.Clicked += (_, _) => ShowAndActivate();
+        tray.Clicked += (_, _) =>
+        {
+            _trayIntegration.Confirm();
+            ShowAndActivate();
+        };
         _tray = tray;
     }
 

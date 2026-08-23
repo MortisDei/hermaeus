@@ -48,6 +48,37 @@ public sealed class ChatWorkbenchTests
     }
 
     [Fact]
+    public void NoModelRecoveryOnlyOffersTheWizardForIncompleteOnboarding()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var vm = new ChatViewModel(
+            new UsageLlm(),
+            new InMemoryConversationStore(),
+            new EmptyMemoryStore(),
+            settings,
+            new FakeTts(),
+            new ModelProfileService(settings),
+            new FakeToasts(),
+            new NoOpConversationMemoryService(),
+            new RuntimeLogService(settings),
+            new ConversationExportService());
+        var destinations = new List<string>();
+        vm.RequestNavigate = destinations.Add;
+
+        Assert.True(vm.ShowSetupWizardFromEmptyState);
+        vm.OpenSetupWizardFromEmptyStateCommand.Execute(null);
+        Assert.Equal("wizard", destinations[^1]);
+
+        settings.Settings.SetupWizardCompleted = true;
+        vm.RefreshSetupState();
+
+        Assert.False(vm.ShowSetupWizardFromEmptyState);
+        vm.OpenSetupWizardFromEmptyStateCommand.Execute(null);
+        Assert.Equal("services", destinations[^1]);
+    }
+
+    [Fact]
     public async Task LongConversationRendersOnlyTheNewestWindowUntilShowEarlierIsClicked()
     {
         using var temp = new TempDir();
