@@ -115,6 +115,8 @@ dotnet publish "${localapi_publish_args[@]}"
 
 cp -a "$PUBLISH_DIR"/. "$APP_DIR"/
 cp -a "$LOCALAPI_PUBLISH_DIR"/. "$LOCALAPI_DIR"/
+mv "$APP_DIR/Hermaeus.Desktop" "$APP_DIR/hermaeus-app"
+ln -s "app/hermaeus-app" "$PACKAGE_DIR/Hermaeus"
 cp "$ROOT_DIR/README.md" "$DOC_DIR/README.md"
 cp "$ROOT_DIR/docs/user-guide.md" "$DOC_DIR/user-guide.md"
 cp "$ROOT_DIR/LICENSE.md" "$DOC_DIR/LICENSE.md"
@@ -134,28 +136,6 @@ done
 
 find "$PACKAGE_DIR" -type f -iname '*.pdb' -delete
 
-cat > "$PACKAGE_DIR/Hermaeus" <<'LAUNCHER'
-#!/usr/bin/env bash
-set -euo pipefail
-
-APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/app" && pwd)"
-cd "$APP_DIR"
-exec "$APP_DIR/Hermaeus.Desktop" "$@"
-LAUNCHER
-
-cat > "$PACKAGE_DIR/hermaeus.desktop" <<'DESKTOP'
-[Desktop Entry]
-Type=Application
-Name=Hermaeus
-Comment=Local-first AI workspace
-Exec=sh -c "exec \"\\${1%%/*}/Hermaeus\"" sh %k
-Icon=hermaeus
-Terminal=false
-Categories=Utility;Development;
-StartupWMClass=hermaeus
-StartupNotify=true
-DESKTOP
-
 cat > "$PACKAGE_DIR/install-desktop.sh" <<'INSTALL'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -163,9 +143,9 @@ set -euo pipefail
 SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PACKAGE_ID="$(basename "$SOURCE_DIR")"
 APP_EXEC="$SOURCE_DIR/Hermaeus"
-INTERNAL_EXEC="$SOURCE_DIR/app/Hermaeus.Desktop"
+INTERNAL_EXEC="$SOURCE_DIR/app/hermaeus-app"
 
-if [[ ! -x "$APP_EXEC" || ! -x "$INTERNAL_EXEC" ]]; then
+if [[ ! -L "$APP_EXEC" || "$(readlink "$APP_EXEC")" != "app/hermaeus-app" || ! -x "$INTERNAL_EXEC" ]]; then
   echo "Missing package launcher or application executable." >&2
   exit 1
 fi
@@ -186,7 +166,7 @@ if [[ "$SOURCE_DIR" != "$INSTALL_DIR" ]]; then
   cp -a "$SOURCE_DIR"/. "$INSTALL_DIR"/
 fi
 
-chmod +x "$INSTALL_DIR/Hermaeus" "$INSTALL_DIR/app/Hermaeus.Desktop" "$INSTALL_DIR/install-desktop.sh" "$INSTALL_DIR/uninstall-desktop.sh"
+chmod +x "$INSTALL_DIR/app/hermaeus-app" "$INSTALL_DIR/install-desktop.sh" "$INSTALL_DIR/uninstall-desktop.sh"
 cp "$INSTALL_DIR/icons/hermaeus-app.png" "$PNG_ICON_FILE"
 
 cat > "$DESKTOP_FILE" <<DESKTOP
@@ -247,7 +227,7 @@ fi
 echo "Removed Hermaeus desktop launcher and installed package."
 UNINSTALL
 
-chmod +x "$PACKAGE_DIR/Hermaeus" "$PACKAGE_DIR/app/Hermaeus.Desktop" "$PACKAGE_DIR/install-desktop.sh" "$PACKAGE_DIR/uninstall-desktop.sh"
+chmod +x "$PACKAGE_DIR/app/hermaeus-app" "$PACKAGE_DIR/install-desktop.sh" "$PACKAGE_DIR/uninstall-desktop.sh"
 rm -rf "$PUBLISH_DIR" "$LOCALAPI_PUBLISH_DIR"
 
 echo "Creating $ARCHIVE..."

@@ -15,9 +15,9 @@ limit.
 
 - Linux packages now give the Avalonia window, X11/XWayland WM class, installed
   desktop entry, and icon theme resource one `hermaeus` identity, restoring
-  taskbar association with the Moss icon. The extracted shell launcher remains
-  relocation-safe; Linux file managers may still render that script with their
-  generic file-type icon until the desktop entry and themed icon are installed.
+  taskbar association with the Moss icon. The extracted `Hermaeus` launcher is
+  now a relocation-safe link to the native apphost, so file managers launch it
+  as an application instead of opening a shell script as text.
 - Doctor now turns Linux tray support Ready only after the current session's
   tray has responded to an interaction. Chat no longer offers first-run setup
   as recovery for a stopped or absent model after onboarding is complete, and

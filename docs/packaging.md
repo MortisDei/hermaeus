@@ -45,27 +45,23 @@ target machine. Self-contained packages include the runtime and are larger.
 The Linux package root contains only the public launcher and desktop install
 files. Its layout is:
 
-- `Hermaeus`, the public launcher
+- `Hermaeus`, a relocation-safe link to the native application launcher
 - `app/`, containing the published desktop runtime and `app/LocalApi/`
 - `docs/README.md`, `docs/user-guide.md`, `docs/LICENSE.md`,
   `docs/NOTICE.md`, and `docs/COMMERCIAL.md`
 - `docs/hermaeus-branding.*` when present
 - `icons/`, containing desktop-install icon resources
-- `hermaeus.desktop`
 - `install-desktop.sh`
 - `uninstall-desktop.sh`
 
 Normal packages exclude `.pdb` symbol files.
 
-Run `./Hermaeus` from a terminal to launch directly from the extracted package,
-or use `hermaeus.desktop` where the file manager permits launching desktop
-entries. Linux has no portable file metadata that assigns an application icon
-to the `Hermaeus` shell launcher itself, so file managers normally show their
-generic script or executable icon for that file. The adjacent desktop entry is
-the standards-based representation. Its themed Moss icon resolves after the
-user-local desktop installation below; using an absolute icon path in the
-archive would break relocation, while relative `Icon` paths are not part of the
-Desktop Entry specification.
+Double-click `Hermaeus` in the extracted directory to launch directly. It is a
+relative link to the package's native .NET apphost, not a shell script, so file
+managers can treat it as an executable without an execute-text-files preference.
+The link and its target remain valid when the extracted directory is moved.
+The internal executable has a neutral filename so it is not misclassified as a
+Desktop Entry by file managers that treat `.Desktop` suffixes case-insensitively.
 
 To install the desktop launcher for the current user:
 
@@ -82,6 +78,11 @@ the canonical application icon. The installed desktop filename, its icon name,
 and the application's X11/XWayland WM class all use `hermaeus`, allowing the
 desktop shell to associate running windows with this entry. It does not require
 root and does not write to system paths.
+
+Source and Debug launches use the same `hermaeus` window identity as release
+builds, but a desktop shell can still show a generic icon when there is no
+installed `hermaeus.desktop` entry to associate with that running window. The
+installed package is the release taskbar and application-menu verification path.
 
 To remove the user-local launcher and installed package:
 

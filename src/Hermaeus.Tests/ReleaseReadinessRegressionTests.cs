@@ -42,7 +42,7 @@ public sealed class ReleaseReadinessRegressionTests
     }
 
     [Fact]
-    public void Linux_desktop_install_uses_the_canonical_icon_and_uninstall_removes_it()
+    public void Linux_package_uses_a_native_launcher_and_consistent_desktop_identity()
     {
         var repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../"));
         var buildScript = File.ReadAllText(Path.Combine(repoRoot, "build.sh"));
@@ -52,10 +52,15 @@ public sealed class ReleaseReadinessRegressionTests
         Assert.Contains("PNG_ICON_FILE=\"$PNG_ICON_DIR/hermaeus.png\"", buildScript, StringComparison.Ordinal);
         Assert.Contains("cp \"$INSTALL_DIR/icons/hermaeus-app.png\" \"$PNG_ICON_FILE\"", buildScript, StringComparison.Ordinal);
         Assert.Contains("PNG_ICON_FILE=\"$DATA_HOME/icons/hicolor/512x512/apps/hermaeus.png\"", buildScript, StringComparison.Ordinal);
-        Assert.Equal(2, CountOccurrences(buildScript, "Icon=hermaeus"));
-        Assert.Equal(2, CountOccurrences(buildScript, "StartupWMClass=hermaeus"));
-        Assert.Equal(2, CountOccurrences(buildScript, "StartupNotify=true"));
-        Assert.Contains("Exec=sh -c \"exec \\\"\\\\${1%%/*}/Hermaeus\\\"\" sh %k", buildScript, StringComparison.Ordinal);
+        Assert.Contains("mv \"$APP_DIR/Hermaeus.Desktop\" \"$APP_DIR/hermaeus-app\"", buildScript, StringComparison.Ordinal);
+        Assert.Contains("ln -s \"app/hermaeus-app\" \"$PACKAGE_DIR/Hermaeus\"", buildScript, StringComparison.Ordinal);
+        Assert.Contains("INTERNAL_EXEC=\"$SOURCE_DIR/app/hermaeus-app\"", buildScript, StringComparison.Ordinal);
+        Assert.Contains("Exec=$INSTALL_DIR/Hermaeus", buildScript, StringComparison.Ordinal);
+        Assert.DoesNotContain("cat > \"$PACKAGE_DIR/Hermaeus\"", buildScript, StringComparison.Ordinal);
+        Assert.DoesNotContain("$PACKAGE_DIR/hermaeus.desktop", buildScript, StringComparison.Ordinal);
+        Assert.Equal(1, CountOccurrences(buildScript, "Icon=hermaeus"));
+        Assert.Equal(1, CountOccurrences(buildScript, "StartupWMClass=hermaeus"));
+        Assert.Equal(1, CountOccurrences(buildScript, "StartupNotify=true"));
         Assert.Contains("rm -f \"$DESKTOP_FILE\" \"$PNG_ICON_FILE\"", buildScript, StringComparison.Ordinal);
 
         var program = File.ReadAllText(Path.Combine(repoRoot, "src/Hermaeus.Desktop/Program.cs"));

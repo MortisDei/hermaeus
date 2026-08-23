@@ -41,12 +41,16 @@ r30 branch. It does not add a new subsystem or broaden the release scope.
   set its canonical icon. The application now emits the `hermaeus` X11/XWayland
   identity used by `hermaeus.desktop`, sets the Moss window icon, and keeps the
   installed theme icon under the same name.
-- Linux has no standards-based portable way to assign an application icon to
-  the extracted `Hermaeus` shell script. The adjacent relocation-safe desktop
-  entry remains the user-facing standard representation. Its relocation-safe
-  `%k` launch command now passes `desktop-file-validate`, and packaging docs
-  state that its themed icon resolves after desktop installation rather than
-  claiming the script itself can be decorated everywhere.
+- The extracted Linux shell launcher was opened as text by COSMIC Files, while
+  the adjacent Desktop Entry was not a reliable archive launch surface. The
+  package now exposes `Hermaeus` as a relocation-safe link to the native .NET
+  apphost, with a suffix-free internal executable that file managers identify
+  as an application. The installer remains the standards-based application-menu
+  and themed-icon path.
+- Debug and source launches use the same `hermaeus` WM class as release builds.
+  A generic taskbar icon can still appear when the shell has no installed
+  `hermaeus.desktop` entry to match; the installed package is the release icon
+  verification path.
 - Doctor previously had only an OS heuristic for Linux tray support. A click on
   the current session's Hermaeus tray now records positive integration evidence
   shared with Doctor, producing Ready; no evidence remains Info.
