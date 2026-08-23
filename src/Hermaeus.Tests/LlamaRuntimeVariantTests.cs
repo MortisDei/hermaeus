@@ -124,14 +124,15 @@ public sealed class LlamaRuntimeVariantTests
     {
         using var temp = new TempDir();
         var executableName = OperatingSystem.IsWindows() ? "llama-server.exe" : "llama-server";
-        var oldPath = temp.PathFor($"llama-server/b10034/{executableName}");
-        var currentPath = temp.PathFor($"llama-server/b10066/{executableName}");
+        var installPath = temp.PathFor("llama-server");
+        var oldPath = Path.Combine(installPath, "b10034", executableName);
+        var currentPath = Path.Combine(installPath, "b10066", executableName);
         Directory.CreateDirectory(Path.GetDirectoryName(oldPath)!);
         Directory.CreateDirectory(Path.GetDirectoryName(currentPath)!);
         File.WriteAllText(oldPath, "old");
         File.WriteAllText(currentPath, "current");
 
-        var resolved = LlamaServerSetupService.ResolveInstalledExecutable(temp.PathFor("llama-server"));
+        var resolved = LlamaServerSetupService.ResolveInstalledExecutable(installPath);
 
         Assert.Equal(currentPath, resolved);
     }
