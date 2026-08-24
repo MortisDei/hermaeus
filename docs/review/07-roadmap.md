@@ -39,7 +39,7 @@ and evidence origins are reliable.
 
 | Batch | Deliverable | Depends on | Classification | Landed |
 | ---: | --- | --- | --- | --- |
-| 0 | Re-verify current selected Linux/Windows runtime facts, re-run coverage baseline, freeze exact accepted schemas/terms from docs 01-06 | planning pack | mandatory foundation | No |
+| 0 | Re-verify current selected Linux/Windows runtime facts, re-run coverage baseline, freeze exact accepted schemas/terms from docs 01-06 | planning pack | mandatory foundation | Yes (`evidence/r31-batch-0.md`) |
 | 1 | Five evidence origins, compatibility converter, normalized outcome records and deterministic normalizers for every built-in/MCP/approval path, raw evidence preserved | 0 | mandatory spine | No |
 | 2 | `experience.db`, typed experience codecs/query, provenance, correction/removal/export, Lab Evidence inspection tab | 1 | mandatory spine | No |
 | 3 | Runtime capability registry, v2 runtime/model/hardware/config identities, capability-cache migration, stricter model-specific MTP evidence | 1 | mandatory spine | No |
