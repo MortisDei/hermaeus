@@ -30,10 +30,13 @@ Runs record the following metrics and metadata:
   layers, generation and prompt thread counts, model path, quantization, KV
   cache K/V types, and Flash Attention (all sourced from the managed server
   actually serving a local GGUF model, not app-process values)
-- A persistent empirical profile fingerprint over the material model and
+- Persistent empirical profile fingerprints over the material model and
   inference configuration, plus a shared direct-observation source reference.
-  This associates the run with what was actually measured. It is not a generic
-  capability score or an automatic model recommendation.
+  The historical v1 fingerprint remains readable. New runs also carry a v2
+  composition of runtime, model, hardware, and configuration identity whose
+  stable id excludes local paths. These associate the run with what was
+  actually measured. They are not a generic capability score or an automatic
+  model recommendation.
 - Suite version, case version, scoring profile, and run mode
 - Cold-only single-iteration runs, or cold and warm phase attempts when suites
 	use repeated iterations per case
@@ -54,7 +57,8 @@ without appearing here.
 `KvCacheTypeK`, `KvCacheTypeV`, `FlashAttention`, `OS`, `CPU`, `RAM`, `GPU`,
 `SpeculativeTypes`, `SpeculativeDraftModel`,
 `SpeculativeNMax`, `SpeculativeNMin`, `SpeculativePMin`,
-`SpeculativeDraftGpuLayers`, `ProfileFingerprint`, `ObservationSource`.
+`SpeculativeDraftGpuLayers`, `ProfileFingerprint`, `ProfileFingerprintV2`,
+`ObservationSource`.
 
 KV cache and Flash Attention are configuration provenance, not a score or a
 recommendation. New local-GGUF runs record the managed server values in their
@@ -62,13 +66,16 @@ saved record, run details, and JSON, Markdown, and CSV exports. Historical
 runs and runs that do not resolve to a managed llama-server show the settings
 as not recorded; Hermaeus does not infer a default after the fact.
 
-New runs also save a profile fingerprint covering the known material inference
-fields, including prompt threads, KV cache types, Flash Attention, and
-speculative configuration. The fingerprint changes when a recorded field
-changes and leaves unknown fields unknown. The associated observation source is
-local direct evidence for that one run, not a claim that the model behaves the
-same way on another machine or workload. Historical runs keep no fingerprint or
-observation source rather than being reconstructed from presumed defaults.
+New runs save both the compatibility v1 fingerprint and a v2 fingerprint over
+runtime, model, hardware, and configuration sub-identities. The v2 runtime uses
+the selected executable hash where a managed runtime is available. The model
+uses verified hash or manifest identity when already known, with file metadata
+explicitly marked as a weaker fallback. Unknown extra runtime arguments make
+the configuration incomplete and are not persisted verbatim. The associated
+observation source is local direct evidence for that one run, not a claim that
+the model behaves the same way on another machine or workload. Historical runs
+keep their absent or v1 identity rather than being reconstructed from presumed
+defaults.
 
 The default action is a one-click benchmark pass. With **Run all suites**
 enabled, Hermaeus runs every built-in suite for the selected model. Turning it off

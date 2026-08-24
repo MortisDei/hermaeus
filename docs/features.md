@@ -858,11 +858,18 @@ checkbox used to emit.
 ### Runtime capability changes
 
 When a selected model and managed `llama-server` are probed, Hermaeus compares
-the resulting capability snapshot with the previous executable identity. It
+the resulting capability snapshot with the previous exact runtime identity. It
 records only meaningful capability state changes and speculative types appearing
 or disappearing in Activity. Moss gives one short heads-up for that new
 snapshot, escalating a disappeared capability that may affect the configured
 server. It does not show raw help diffs or send a notification for every start.
+
+Capabilities are retained in an extensible dotted-id registry with evidence,
+runtime identity, optional model identity, and bounded parsed parameters.
+Unknown ids are preserved instead of discarded. A failed probe is `Unknown`,
+not `Unavailable`. Embedded MTP remains `Unknown` when the only evidence is
+NextN metadata plus generic `draft-mtp` help; it becomes `Available` only from
+model-specific capability or direct drafting evidence.
 
 ### Complete downloads and per-model folders (r27)
 

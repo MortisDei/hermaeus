@@ -82,6 +82,12 @@ public sealed class BenchmarkRunMetadata
     public EmpiricalProfileFingerprint? ProfileFingerprint { get; set; }
 
     /// <summary>
+    /// Portable v2 identity for new observations. It composes runtime, model,
+    /// hardware, and configuration identity without persisting local paths.
+    /// </summary>
+    public EmpiricalProfileFingerprintV2? ProfileFingerprintV2 { get; set; }
+
+    /// <summary>
     /// Shared evidence pointer for this observation. Benchmark-generated data
     /// is direct local evidence, not a claimed universal model capability.
     /// </summary>

@@ -22,6 +22,16 @@ limit.
   typed Agent, GPU Fit, and Lab-run evidence, with exact filters, redacted
   export, linked corrections, confirmed hard removal, and data-root migration
   and backup coverage.
+- Runtime capability evidence now uses an extensible dotted-id registry with
+  exact runtime and optional model identities. New benchmark evidence also
+  carries a path-free v2 runtime/model/hardware/configuration fingerprint while
+  historical v1 fingerprints and capability caches remain readable.
+
+### Changed
+
+- Embedded MTP is now `Available` only after model-specific capability or
+  observed drafting evidence. NextN metadata plus generic runtime help remains
+  `Unknown`, and a failed probe never becomes `Unavailable`.
 
 ## [0.37.0-alpha] - 2026-08-20
 

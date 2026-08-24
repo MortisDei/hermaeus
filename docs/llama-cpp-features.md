@@ -3,11 +3,12 @@
 A full-surface survey of `llama-server` against what Hermaeus emitted, carried
 out at **build b10215** (2026-08-01). Read this before adding a flag.
 
-This is the last complete baseline, not a claim that every later r30 change was
+This is the last complete baseline, not a claim that every later change was
 verified against that exact build. Later changes use the selected executable's
-own `--help` at discovery and immediately before launch. The current Batch #3
-Linux development environment had no accessible configured `llama-server`
-binary, so it did not replace the b10215 full survey with a guessed newer one.
+own `--help` at discovery and immediately before launch. R31 Batch 0 directly
+observed the selected Windows CUDA runtime at build b10590. Linux runtime facts
+remain unverified until the published branch is checked on the owner's COSMIC
+machine, so this document does not infer Linux support from Windows evidence.
 
 Managed Linux releases are extracted with their archive link relationships
 validated against the install root and materialized as regular files. This
@@ -46,6 +47,40 @@ Every flag Hermaeus can emit still exists in b10215:
 `--n-cpu-moe`, `--cpu-moe`, `--reasoning-format`, `--reasoning-preserve`,
 `--no-reasoning-preserve`.
 
+## Adopted in 0.38.0-alpha
+
+### Extensible capability evidence and portable identity
+
+Capability observations are now data records keyed by stable dotted ids such
+as `runtime.prompt-threads`, `speculative.draft.eagle3`, and
+`reasoning.preserve-template`. Each record retains `Available`, `Unavailable`,
+or `Unknown`, an evidence code and explanation, the exact runtime identity, an
+optional model identity, bounded parsed parameters, and observation time.
+Unknown future ids survive cache and JSON round trips without adding settings
+or model properties. Raw help text is never stored in the parameter map.
+
+The runtime identity includes the executable SHA256, size, modification time,
+parsed version/build/compiler/backend facts when available, and managed asset
+identity. Its portable stable id excludes the executable path. Model identity
+uses an existing verified hash or manifest when available, otherwise records a
+clearly weaker file size/mtime fallback. Benchmark evidence composes these with
+hardware and configuration identities in a v2 fingerprint. Historical v1
+fingerprints keep their original stable-id meaning and load as incomplete.
+
+Capability-cache v2 replacement compares runtime and model stable ids. Older
+path/size/mtime entries remain readable and migrate when a successful new probe
+replaces them.
+
+### Model-specific MTP evidence
+
+GGUF NextN metadata proves that relevant weights or metadata exist. Generic
+`draft-mtp` help proves that the runtime contains a mechanism. Neither proves
+that the selected runtime graph engages it for the selected model. Hermaeus now
+keeps that pair `Unknown` until a model-specific capability response or direct
+positive draft count is observed. A successful authoritative runtime probe
+that lacks `draft-mtp` can still report `Unavailable`; a failed probe reports
+`Unknown`.
+
 ## Adopted in 0.37.0-alpha
 
 ### Capability evidence, runtime discovery, and reasoning transport
@@ -56,7 +91,7 @@ It combines that evidence with the selected executable's `--help` flags and a
 healthy managed server's `/props` response. Embedded MTP, separate reasoning
 output, template reasoning preservation, and modalities are each reported as
 Available, Unavailable, or Unknown with evidence. Results are cached by model
-and executable path, size, and modification time using an atomic state file.
+and runtime identity using an atomic state file.
 
 The same help probe now discovers the speculative type names printed beside
 `--spec-type`, `--threads-batch`, and `--perf` when present. A type is not made

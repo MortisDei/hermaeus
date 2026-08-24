@@ -55,6 +55,12 @@ the resolved `llama-server` executable, a GGUF model, a localhost port, and
 launch settings. Start it there, then select its model in Chat. Runtime Logs
 show the exact startup stage and sanitized process output.
 
+Capability status is evidence-scoped. `Available` means the selected runtime,
+and the selected model where relevant, advertised or demonstrated the feature.
+`Unavailable` requires a successful authoritative probe. A failed probe is
+`Unknown`. In particular, finding NextN metadata and a generic `draft-mtp` flag
+does not prove that MTP engages for that model.
+
 If onboarding is already complete and Chat reports that no chat model is set
 up, go to **Services** to configure or start the current model server. A stopped
 server does not reset onboarding. The setup wizard remains available from

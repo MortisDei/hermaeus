@@ -20,7 +20,8 @@ public sealed record LlamaRuntimeCapabilityFacts(
     IReadOnlyList<string> SpeculativeTypes,
     bool SupportsPromptThreads,
     bool SupportsBackendSampling,
-    bool SupportsPerformanceInstrumentation);
+    bool SupportsPerformanceInstrumentation,
+    bool ModelSpecificMtpConfirmed = false);
 
 /// <summary>A meaningful change between two capability snapshots, never a raw help-text diff.</summary>
 public sealed record CapabilityDrift(string Capability, string Detail, bool AffectsConfiguredCapability = false);
@@ -132,11 +133,15 @@ public sealed class LocalModelCapabilityService
                     modalities.Add(modalityElement.GetString()!);
             }
 
+            var modelSpecificMtp = HasPositiveDraftCount(root)
+                || HasCapability(root, "speculative.draft.mtp");
+
             return facts with
             {
                 PropsProbeSucceeded = true,
                 SupportsPreserveReasoningTemplate = preserve,
-                Modalities = modalities
+                Modalities = modalities,
+                ModelSpecificMtpConfirmed = modelSpecificMtp
             };
         }
         catch (JsonException)
@@ -147,10 +152,25 @@ public sealed class LocalModelCapabilityService
 
     public static LocalModelCapabilities Combine(string modelPath, GgufModelInfo? gguf, LlamaRuntimeCapabilityFacts runtime)
     {
-        var mtp = gguf?.NextnPredictLayers > 0
+        var runtimeIdentity = RuntimeIdentityFactory.Unknown("llama.cpp");
+        var modelIdentity = RuntimeIdentityFactory.CreateModelIdentity(modelPath, gguf);
+        return Combine(modelPath, gguf, runtime, runtimeIdentity, modelIdentity, DateTime.UtcNow);
+    }
+
+    public static LocalModelCapabilities Combine(
+        string modelPath,
+        GgufModelInfo? gguf,
+        LlamaRuntimeCapabilityFacts runtime,
+        RuntimeIdentityV2 runtimeIdentity,
+        ModelIdentityV2 modelIdentity,
+        DateTime observedAtUtc)
+    {
+        var mtp = runtime.ModelSpecificMtpConfirmed
+            ? Available("runtime-model-mtp-confirmed", "The selected model/runtime pair reported direct MTP drafting evidence.")
+            : gguf?.NextnPredictLayers > 0
             ? runtime.HelpProbeSucceeded
                 ? runtime.SupportsDraftMtp
-                    ? Available("gguf-nextn+runtime-draft-mtp", $"{Path.GetFileName(modelPath)} reports NextN layers and llama-server advertises draft-mtp.")
+                    ? Unknown("model-mtp-engagement-unknown", "NextN metadata and generic draft-mtp support do not prove that this model/runtime pair engages MTP.")
                     : Unavailable("runtime-no-draft-mtp", "The selected llama-server does not advertise draft-mtp.")
                 : Unknown("runtime-help-unknown", "A successful llama-server help probe is required.")
             : Unknown("gguf-nextn-unknown", "The GGUF does not provide positive NextN metadata.");
@@ -192,8 +212,11 @@ public sealed class LocalModelCapabilityService
             .Select(type => new RuntimeSpeculativeCapability(type, ClassifyDrafter(type), IsConfigurableType(type)))
             .ToArray();
 
-        return new(modelPath, mtp, reasoning, preserve, vision, DateTime.UtcNow,
-            new RuntimeCapabilitySurface(speculative, promptThreads, backendSampling, perf));
+        var surface = new RuntimeCapabilitySurface(speculative, promptThreads, backendSampling, perf);
+        var observations = BuildObservations(
+            runtime, mtp, reasoning, preserve, vision, promptThreads, backendSampling, perf,
+            runtimeIdentity, modelIdentity, observedAtUtc);
+        return new(modelPath, mtp, reasoning, preserve, vision, observedAtUtc, surface, observations);
     }
 
     public async Task<LocalModelCapabilities> ProbeAsync(string modelPath, string executablePath, string? propsJson = null, CancellationToken ct = default)
@@ -209,8 +232,11 @@ public sealed class LocalModelCapabilityService
 
         var previous = await TryGetPreviousSnapshotAsync(modelPath, executablePath, ct);
         var runtime = ParseProps(propsJson, ParseHelp(help));
-        var result = Combine(modelPath, gguf, runtime);
-        try { await SaveCacheAsync(modelPath, executablePath, result, ct); }
+        var observedAtUtc = DateTime.UtcNow;
+        var runtimeIdentity = await RuntimeIdentityFactory.CreateRuntimeIdentityAsync(executablePath, help, ct);
+        var modelIdentity = RuntimeIdentityFactory.CreateModelIdentity(modelPath, gguf);
+        var result = Combine(modelPath, gguf, runtime, runtimeIdentity, modelIdentity, observedAtUtc);
+        try { await SaveCacheAsync(modelPath, executablePath, result, ct, runtimeIdentity, modelIdentity); }
         catch (Exception ex)
         {
                 _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Service, $"Capability cache write failed: {ex.Message}"));
@@ -237,13 +263,18 @@ public sealed class LocalModelCapabilityService
             await using var stream = File.OpenRead(cachePath);
             var entries = await JsonSerializer.DeserializeAsync<List<CapabilityCacheEntry>>(stream, JsonOptions, ct) ?? [];
             var identity = Identity(modelPath, executablePath);
+            var runtimeIdentity = await RuntimeIdentityFactory.CreateRuntimeIdentityAsync(executablePath, null, ct);
+            var modelIdentity = RuntimeIdentityFactory.CreateModelIdentity(modelPath, GgufMetadataReader.TryRead(modelPath));
             return entries.LastOrDefault(e =>
-                string.Equals(e.ModelPath, identity.ModelPath, StringComparison.Ordinal)
-                && e.ModelSize == identity.ModelSize
-                && e.ModelMtime == identity.ModelMtime
-                && string.Equals(e.ExecutablePath, identity.ExecutablePath, StringComparison.Ordinal)
-                && e.ExecutableSize == identity.ExecutableSize
-                && e.ExecutableMtime == identity.ExecutableMtime)?.Capabilities;
+                e.RuntimeIdentity is not null && e.ModelIdentity is not null
+                    ? e.RuntimeIdentity.IdentifiesSameRuntime(runtimeIdentity)
+                        && string.Equals(e.ModelIdentity.StableId, modelIdentity.StableId, StringComparison.Ordinal)
+                    : string.Equals(e.ModelPath, identity.ModelPath, StringComparison.Ordinal)
+                        && e.ModelSize == identity.ModelSize
+                        && e.ModelMtime == identity.ModelMtime
+                        && string.Equals(e.ExecutablePath, identity.ExecutablePath, StringComparison.Ordinal)
+                        && e.ExecutableSize == identity.ExecutableSize
+                        && e.ExecutableMtime == identity.ExecutableMtime)?.Capabilities;
         }
         catch (JsonException)
         {
@@ -278,38 +309,51 @@ public sealed class LocalModelCapabilityService
         if (!resolution.Success || string.IsNullOrWhiteSpace(resolution.Path))
             return null;
 
-        using var process = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = resolution.Path,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true
-            }
-        };
-        process.StartInfo.ArgumentList.Add("--help");
-        if (!process.Start())
-            return null;
-
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(TimeSpan.FromSeconds(5));
         try
         {
-            var output = await process.StandardOutput.ReadToEndAsync(timeout.Token);
-            var error = await process.StandardError.ReadToEndAsync(timeout.Token);
-            await process.WaitForExitAsync(timeout.Token);
-            return output + Environment.NewLine + error;
+            using var process = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = resolution.Path,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true
+                }
+            };
+            process.StartInfo.ArgumentList.Add("--help");
+            if (!process.Start())
+                return null;
+
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(TimeSpan.FromSeconds(5));
+            try
+            {
+                var output = await process.StandardOutput.ReadToEndAsync(timeout.Token);
+                var error = await process.StandardError.ReadToEndAsync(timeout.Token);
+                await process.WaitForExitAsync(timeout.Token);
+                return output + Environment.NewLine + error;
+            }
+            catch (OperationCanceledException)
+            {
+                try { process.Kill(entireProcessTree: true); } catch { }
+                return null;
+            }
         }
-        catch (OperationCanceledException)
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or IOException or UnauthorizedAccessException)
         {
-            try { process.Kill(entireProcessTree: true); } catch { }
             return null;
         }
     }
 
-    private async Task SaveCacheAsync(string modelPath, string executablePath, LocalModelCapabilities capabilities, CancellationToken ct)
+    private async Task SaveCacheAsync(
+        string modelPath,
+        string executablePath,
+        LocalModelCapabilities capabilities,
+        CancellationToken ct,
+        RuntimeIdentityV2? knownRuntimeIdentity = null,
+        ModelIdentityV2? knownModelIdentity = null)
     {
         var cachePath = Path.Combine(SettingsService.ResolveDataRoot(_settings.Settings), "capability-cache.json");
         var entries = new List<CapabilityCacheEntry>();
@@ -324,9 +368,19 @@ public sealed class LocalModelCapabilityService
         }
 
         var identity = Identity(modelPath, executablePath);
-        entries.RemoveAll(e => e.ModelPath.Equals(identity.ModelPath, StringComparison.Ordinal)
-            && e.ExecutablePath.Equals(identity.ExecutablePath, StringComparison.Ordinal));
-        entries.Add(new CapabilityCacheEntry(identity.ModelPath, identity.ModelSize, identity.ModelMtime, identity.ExecutablePath, identity.ExecutableSize, identity.ExecutableMtime, capabilities));
+        var runtimeIdentity = knownRuntimeIdentity
+            ?? await RuntimeIdentityFactory.CreateRuntimeIdentityAsync(executablePath, null, ct);
+        var modelIdentity = knownModelIdentity
+            ?? RuntimeIdentityFactory.CreateModelIdentity(modelPath, GgufMetadataReader.TryRead(modelPath));
+        entries.RemoveAll(e => e.RuntimeIdentity is not null && e.ModelIdentity is not null
+            ? e.RuntimeIdentity.IdentifiesSameRuntime(runtimeIdentity)
+                && string.Equals(e.ModelIdentity.StableId, modelIdentity.StableId, StringComparison.Ordinal)
+            : e.ModelPath.Equals(identity.ModelPath, StringComparison.Ordinal)
+                && e.ExecutablePath.Equals(identity.ExecutablePath, StringComparison.Ordinal));
+        entries.Add(new CapabilityCacheEntry(
+            identity.ModelPath, identity.ModelSize, identity.ModelMtime,
+            identity.ExecutablePath, identity.ExecutableSize, identity.ExecutableMtime,
+            capabilities, runtimeIdentity, modelIdentity, 2));
         await AtomicFile.WriteAllTextAsync(cachePath, JsonSerializer.Serialize(entries, JsonOptions), ct);
     }
 
@@ -355,6 +409,81 @@ public sealed class LocalModelCapabilityService
     private static bool IsConfigurableType(string type) =>
         type.StartsWith("ngram-", StringComparison.OrdinalIgnoreCase)
         || string.Equals(type, "draft-mtp", StringComparison.OrdinalIgnoreCase);
+
+    private static IReadOnlyList<RuntimeCapabilityObservation> BuildObservations(
+        LlamaRuntimeCapabilityFacts runtime,
+        CapabilityEvidence mtp,
+        CapabilityEvidence reasoning,
+        CapabilityEvidence preserve,
+        CapabilityEvidence vision,
+        CapabilityEvidence promptThreads,
+        CapabilityEvidence backendSampling,
+        CapabilityEvidence perf,
+        RuntimeIdentityV2 runtimeIdentity,
+        ModelIdentityV2 modelIdentity,
+        DateTime observedAtUtc)
+    {
+        var result = new List<RuntimeCapabilityObservation>();
+        Add("speculative.draft.mtp", mtp, modelIdentity);
+        Add("reasoning.separate-output", reasoning, modelIdentity);
+        Add("reasoning.preserve-template", preserve, modelIdentity);
+        Add("modality.vision", vision, modelIdentity);
+        Add("runtime.prompt-threads", promptThreads, null);
+        Add("runtime.backend-sampling", backendSampling, null);
+        Add("runtime.performance-metrics", perf, null);
+
+        foreach (var type in runtime.SpeculativeTypes)
+        {
+            var id = CapabilityIdForSpeculativeType(type);
+            if (string.Equals(id, "speculative.draft.mtp", StringComparison.Ordinal))
+                continue;
+            var evidence = Available("runtime-spec-type", $"The selected runtime advertises speculative type {type}.");
+            Add(id, evidence, null, new Dictionary<string, string>(StringComparer.Ordinal) { ["runtime_type"] = type });
+        }
+
+        return result;
+
+        void Add(string id, CapabilityEvidence evidence, ModelIdentityV2? observedModel, IReadOnlyDictionary<string, string>? parameters = null) =>
+            result.Add(RuntimeCapabilityObservation.Create(
+                id, evidence.State, evidence.EvidenceCode, evidence.Detail, runtimeIdentity,
+                observedModel, parameters, observedAtUtc));
+    }
+
+    public static string CapabilityIdForSpeculativeType(string type)
+    {
+        var normalized = Regex.Replace(type.Trim().ToLowerInvariant(), "[^a-z0-9]+", ".").Trim('.');
+        return normalized switch
+        {
+            "draft.simple" => "speculative.draft.simple",
+            "draft.mtp" => "speculative.draft.mtp",
+            "ngram.mod" => "speculative.ngram.mod",
+            "eagle3" => "speculative.draft.eagle3",
+            "dflash" => "speculative.draft.dflash",
+            _ => $"speculative.observed.{normalized}"
+        };
+    }
+
+    private static bool HasPositiveDraftCount(JsonElement root)
+    {
+        if (TryPositiveNumber(root, "draft_n") || TryPositiveNumber(root, "draft_tokens"))
+            return true;
+        return root.TryGetProperty("speculative", out var speculative)
+            && speculative.ValueKind == JsonValueKind.Object
+            && (TryPositiveNumber(speculative, "draft_n") || TryPositiveNumber(speculative, "draft_tokens"));
+    }
+
+    private static bool TryPositiveNumber(JsonElement element, string propertyName) =>
+        element.TryGetProperty(propertyName, out var value)
+        && value.ValueKind == JsonValueKind.Number
+        && value.TryGetDouble(out var number)
+        && number > 0;
+
+    private static bool HasCapability(JsonElement root, string capabilityId) =>
+        root.TryGetProperty("capabilities", out var capabilities)
+        && capabilities.ValueKind == JsonValueKind.Array
+        && capabilities.EnumerateArray().Any(item =>
+            item.ValueKind == JsonValueKind.String
+            && string.Equals(item.GetString(), capabilityId, StringComparison.OrdinalIgnoreCase));
 
     public static IReadOnlyList<CapabilityDrift> Compare(LocalModelCapabilities? previous, LocalModelCapabilities current)
     {
@@ -391,5 +520,8 @@ public sealed class LocalModelCapabilityService
         string ExecutablePath,
         long ExecutableSize,
         DateTime ExecutableMtime,
-        LocalModelCapabilities Capabilities);
+        LocalModelCapabilities Capabilities,
+        RuntimeIdentityV2? RuntimeIdentity = null,
+        ModelIdentityV2? ModelIdentity = null,
+        int SchemaVersion = 1);
 }

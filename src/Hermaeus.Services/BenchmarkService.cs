@@ -154,6 +154,8 @@ public sealed class BenchmarkService
         };
         run.Metadata = CreateMetadata(suite, model, run.HardwareSnapshot);
         run.Metadata.ProfileFingerprint = EmpiricalProfileFingerprint.From(run.Metadata, model.Id);
+        run.Metadata.ProfileFingerprintV2 = await CreateProfileFingerprintV2Async(
+            run.Metadata, run.HardwareSnapshot, model, ct);
         run.Metadata.ObservationSource = new SourceReference(
             ProvenanceKind.Benchmark,
             suite.Name,
@@ -957,6 +959,75 @@ public sealed class BenchmarkService
             SpeculativePMin = managedServer?.Speculative?.PMin,
             SpeculativeDraftGpuLayers = managedServer?.Speculative?.DraftGpuLayers
         };
+    }
+
+    private async Task<EmpiricalProfileFingerprintV2> CreateProfileFingerprintV2Async(
+        BenchmarkRunMetadata metadata,
+        SystemSnapshot snapshot,
+        LlmModel model,
+        CancellationToken ct)
+    {
+        var isLocalGguf = model.Id.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase) && File.Exists(model.Id);
+        var managedServer = isLocalGguf
+            ? _settings.Settings.ManagedServers.FirstOrDefault(server =>
+                !string.IsNullOrWhiteSpace(server.ModelPath)
+                && string.Equals(Path.GetFullPath(server.ModelPath), Path.GetFullPath(model.Id), StringComparison.OrdinalIgnoreCase))
+            : null;
+
+        var runtime = managedServer is null
+            ? new RuntimeIdentityV2(
+                metadata.RuntimeKind, string.Empty, null, null, metadata.RuntimeVersion,
+                string.Empty, string.Empty, metadata.Backend, string.Empty,
+                IdentityCompleteness.Incomplete)
+            : await RuntimeIdentityFactory.CreateRuntimeIdentityAsync(managedServer.ExecutablePath, null, ct);
+
+        var gguf = isLocalGguf ? GgufMetadataReader.TryRead(model.Id) : null;
+        var modelIdentity = isLocalGguf
+            ? RuntimeIdentityFactory.CreateModelIdentity(model.Id, gguf, metadata.ModelHash)
+            : new ModelIdentityV2(
+                model.Id, metadata.ModelHash, null, null, string.Empty,
+                metadata.Quantization, string.Empty,
+                string.IsNullOrWhiteSpace(metadata.ModelHash) ? ModelIdentityStrength.Manifest : ModelIdentityStrength.VerifiedHash,
+                IdentityCompleteness.Complete);
+
+        var knownVram = snapshot.Gpus.Where(gpu => gpu.MemoryTotalBytes.HasValue).ToArray();
+        var hardware = new HardwareIdentityV2(
+            snapshot.OSDescription,
+            snapshot.Architecture,
+            string.Join(",", snapshot.Gpus.Select(gpu => gpu.Provider).Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.OrdinalIgnoreCase)),
+            string.Join(",", snapshot.Gpus.Select(gpu => gpu.Name).Where(value => !string.IsNullOrWhiteSpace(value))),
+            knownVram.Length == 0 ? null : knownVram.Sum(gpu => gpu.MemoryTotalBytes),
+            snapshot.TotalMemoryBytes > 0 ? snapshot.TotalMemoryBytes : null,
+            string.Empty,
+            snapshot.Gpus.Count <= 1 ? "single" : $"multi:{snapshot.Gpus.Count}",
+            IdentityCompleteness.Incomplete);
+
+        var companionIdentity = string.Empty;
+        if (!string.IsNullOrWhiteSpace(managedServer?.Speculative?.DraftModelPath))
+            companionIdentity = RuntimeIdentityFactory.CreateModelIdentity(managedServer.Speculative.DraftModelPath, null).StableId;
+
+        var configuration = new ConfigurationIdentityV2(
+            metadata.ContextSize,
+            metadata.GpuLayers,
+            metadata.GpuLayers switch { 0 => "cpu", -1 => "gpu-all", > 0 => "gpu-partial", _ => string.Empty },
+            metadata.Threads,
+            metadata.PromptThreads,
+            managedServer?.Slots,
+            metadata.BatchSize,
+            null,
+            metadata.KvCacheTypeK,
+            metadata.KvCacheTypeV,
+            metadata.FlashAttention,
+            metadata.SpeculativeTypes,
+            companionIdentity,
+            $"nmax={metadata.SpeculativeNMax?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty};nmin={metadata.SpeculativeNMin?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty};pmin={metadata.SpeculativePMin?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty}",
+            managedServer?.CpuMoeLayers,
+            new Dictionary<string, string>(StringComparer.Ordinal),
+            managedServer is not null && string.IsNullOrWhiteSpace(managedServer.ExtraArgs)
+                ? IdentityCompleteness.Complete
+                : IdentityCompleteness.Incomplete);
+
+        return new EmpiricalProfileFingerprintV2(runtime, modelIdentity, hardware, configuration);
     }
 
     /// <summary>Prefers the model's own ProviderTag ("llama.cpp"/"ollama"/"openai") over the

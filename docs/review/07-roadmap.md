@@ -42,7 +42,7 @@ and evidence origins are reliable.
 | 0 | Re-verify current selected Linux/Windows runtime facts, re-run coverage baseline, freeze exact accepted schemas/terms from docs 01-06 | planning pack | mandatory foundation | Yes (`evidence/r31-batch-0.md`) |
 | 1 | Five evidence origins, compatibility converter, normalized outcome records and deterministic normalizers for every built-in/MCP/approval path, raw evidence preserved | 0 | mandatory spine | Yes |
 | 2 | `experience.db`, typed experience codecs/query, provenance, correction/removal/export, Lab Evidence inspection tab | 1 | mandatory spine | Yes |
-| 3 | Runtime capability registry, v2 runtime/model/hardware/config identities, capability-cache migration, stricter model-specific MTP evidence | 1 | mandatory spine | No |
+| 3 | Runtime capability registry, v2 runtime/model/hardware/config identities, capability-cache migration, stricter model-specific MTP evidence | 1 | mandatory spine | Yes |
 | 4 | Structured GPU Fit breakdown, telemetry source, prediction/observation experience and compatible-discrepancy display | 2, 3 | mandatory spine | No |
 | 5 | Lab navigation/shell, isolated temporary runtime lifecycle, immutable definition/run/observation/comparison, correctness/equivalence core, explicit Apply review | 2, 3, 4 | mandatory spine | No |
 | 6 | Engine-profile recipes plus context/KV/Flash/CPU-MoE experiments; prediction-versus-observation comparison | 5 | mandatory measured optimization | No |
