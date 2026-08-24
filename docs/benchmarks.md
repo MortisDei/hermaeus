@@ -324,6 +324,13 @@ is therefore always neutral rather than computed from that delta. The before/
 after memory and VRAM snapshots are still recorded and exported for manual
 inspection.
 
+Lab recipes keep performance evidence separate from quality evidence. A recipe
+may require an explicit `quality.score` observation or reference an existing
+benchmark run identifier; it does not copy benchmark history into Lab evidence.
+The initial low-bit KV-cache recipe records `quality.score` as Missing and
+therefore refuses Apply. A successful load or an exact short output hash is not
+a substitute for a benchmarked quality result.
+
 For GPU-capable systems, record:
 
 - VRAM before

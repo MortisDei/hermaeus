@@ -534,6 +534,16 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
   runtime, or model identity and routes confirmed changes through the single
   settings save flow. Speed-only or correctness-failing runs cannot recommend
   Apply.
+- Lab includes bounded GPU-layer, context, KV, Flash Attention, and CPU-MoE
+  recipes. Conditional candidates come only from exact runtime capability
+  observations; each plan keeps its baseline, changes one dimension, runs three
+  greedy repetitions, stops on repeated failures or deterministic mismatch,
+  and never auto-applies a winner. The trade-off view keeps GPU Fit prediction,
+  observed memory/source, throughput, missing TTFT, correctness, and low-bit
+  quality evidence distinct.
+- Repeated run evidence is stored as bounded immutable per-configuration child
+  records with one compact completion decision, rather than widening the
+  experience document limit or discarding raw observations.
 - The Evidence surface filters typed
   Agent, GPU Fit, and Lab-run records by scope, fingerprints, outcome, origin,
   status, and date.

@@ -144,6 +144,21 @@ speed-only, uncontrolled, missing-correctness, or stale result is refused.
 runtime/model identity, and saves through the normal Settings path. Review is
 separate from running an experiment, and experiment evidence is retained.
 
+Choose **Inspect runtime recipes** to see GPU placement, context, KV, Flash
+Attention, and CPU-MoE plans for the selected runtime. `Unknown` means the
+runtime has not supplied the exact evidence needed; it is not an invitation to
+force the flag. Select an Available recipe, enter a controlled prompt, and use
+**Run selected recipe**. Lab runs the baseline plus a small candidate set with
+three fixed greedy repetitions. **Cancel recipe** stops at the owned request or
+process boundary.
+
+The trade-off table reports decode speed, predicted and observed RAM/GPU,
+correctness, and any refusal together. Buffered llama-server replies do not
+provide trustworthy TTFT, so it remains Unknown. Low-bit KV results without a
+referenced quality score cannot be applied. CPU-MoE may likewise show an
+Unknown analytical total while retaining measured memory and throughput. Lab
+never selects or applies the fastest row automatically.
+
 Use **Lab > Evidence** to inspect structured Agent,
 GPU Fit, and experiment evidence. Filters cover domain, project/workspace
 scope, model/runtime fingerprints, normalized outcome, evidence origin, status,

@@ -48,8 +48,20 @@ public interface ILabExperimentService
         IReadOnlyList<string>? failures = null,
         CancellationToken ct = default);
 
+    Task<LabRunSnapshot> SwitchConfigurationAsync(
+        string runId,
+        ServerConfig source,
+        string configurationId,
+        CancellationToken ct = default);
+
     Task<LabRunSnapshot> CancelAsync(string runId, CancellationToken ct = default);
     LabRunSnapshot? GetRun(string runId);
     LabApplyReview CreateApplyReview(string runId, string candidateId);
     Task ApplyAsync(LabApplyReview review, CancellationToken ct = default);
+}
+
+public interface ILabRecipeService
+{
+    Task<IReadOnlyList<LabRecipePlan>> InspectAsync(ServerConfig source, CancellationToken ct = default);
+    Task<LabRunSnapshot> RunAsync(LabRecipePlan plan, ServerConfig source, string prompt, CancellationToken ct = default);
 }

@@ -35,6 +35,29 @@ public enum LabCorrectnessRequirement
     SpeedOnly
 }
 
+public enum LabRecipeKind
+{
+    EngineProfile,
+    Context,
+    KvCache,
+    FlashAttention,
+    CpuMoePlacement
+}
+
+public sealed record LabRecipePlan(
+    string Id,
+    string Label,
+    LabRecipeKind Kind,
+    CapabilityState Availability,
+    string AvailabilityDetail,
+    LabConfiguration Baseline,
+    IReadOnlyList<LabConfiguration> Candidates,
+    int MaximumRunCount,
+    bool TestsInteraction,
+    IReadOnlyList<string> RequiredCapabilityIds,
+    IReadOnlyList<string> RequiredMetrics,
+    LabCorrectnessRequirement CorrectnessRequirement);
+
 public sealed record LabConfiguration
 {
     public string Id { get; init; } = string.Empty;
@@ -65,6 +88,8 @@ public sealed record LabExperimentDefinition
     public IReadOnlyList<LabConfiguration> Candidates { get; init; } = [];
     public IReadOnlyDictionary<string, string> ConfigurationFingerprints { get; init; } =
         new Dictionary<string, string>(StringComparer.Ordinal);
+    public IReadOnlyDictionary<string, ConfigurationIdentityV2> ConfigurationIdentities { get; init; } =
+        new Dictionary<string, ConfigurationIdentityV2>(StringComparer.Ordinal);
     public string WorkloadId { get; init; } = string.Empty;
     public IReadOnlyList<string> PromptHashes { get; init; } = [];
     public string SamplingPolicy { get; init; } = "greedy";
@@ -157,6 +182,8 @@ public sealed record LabRunSnapshot
     public DateTime? CompletedAtUtc { get; init; }
     public int? TemporaryPort { get; init; }
     public string RuntimeOwnershipId { get; init; } = string.Empty;
+    public int? RuntimeProcessId { get; init; }
+    public DateTime? RuntimeProcessStartedAtUtc { get; init; }
     public IReadOnlyList<LabObservation> Observations { get; init; } = [];
     public IReadOnlyList<LabOutputEvidence> Outputs { get; init; } = [];
     public IReadOnlyList<LabComparison> Comparisons { get; init; } = [];
@@ -164,6 +191,41 @@ public sealed record LabRunSnapshot
     public string StartEvidenceId { get; init; } = string.Empty;
     public string CompletionEvidenceId { get; init; } = string.Empty;
 }
+
+public sealed record LabRunEvidenceSlice(
+    string RunId,
+    string DefinitionHash,
+    string ConfigurationId,
+    IReadOnlyList<LabObservation> Observations,
+    IReadOnlyList<LabOutputEvidence> Outputs);
+
+public sealed record LabComparisonDecision(
+    string BaselineConfigurationId,
+    string CandidateConfigurationId,
+    bool IsControlled,
+    IReadOnlyList<string> FingerprintDifferences,
+    LabEquivalenceResult Equivalence,
+    bool CorrectnessPassed,
+    bool CanShowHeadlineDelta,
+    string RefusalReason);
+
+public sealed record LabRunCompletionSummary(
+    string RunId,
+    string DefinitionHash,
+    LabRunStatus Status,
+    DateTime StartedAtUtc,
+    DateTime? CompletedAtUtc,
+    IReadOnlyList<string> Failures,
+    IReadOnlyList<LabComparisonDecision> Comparisons,
+    IReadOnlyList<string> EvidenceSliceIds);
+
+public sealed record LabApplyEvidence(
+    string RunId,
+    string DefinitionHash,
+    string ReviewId,
+    string TargetServerId,
+    string CandidateConfigurationId,
+    IReadOnlyList<LabApplyChange> Changes);
 
 public sealed record LabApplyChange(string Field, string CurrentValue, string ProposedValue);
 

@@ -40,9 +40,12 @@ recommendation even when performance improved. Speed-only protocols are
 explicit and can never recommend Apply.
 
 Start and completion are separate immutable `lab-run` experience records.
-Completion retains observations, failures, comparisons, output hashes, and
-provenance, but omits prompt/output bodies and token values from the exportable
-record. Cancellation preserves partial evidence and normalizes the result as
+Repeated observations and output hashes are split into bounded immutable
+per-configuration evidence slices linked to the frozen start record. The final
+completion stores only comparison decisions, failures, and links to those raw
+slices, keeping every experience document inside its existing 32 KiB bound.
+Prompt/output bodies and token values are omitted from exportable records.
+Cancellation preserves partial evidence and normalizes the result as
 `Cancelled` or `PartiallySucceeded`.
 
 **Apply to Services** is a separate review after a controlled, correctness-
@@ -52,9 +55,45 @@ rechecks all three, clones `AppSettings`, and uses the normal settings save
 flow. A stale review is refused, and applying never deletes prior configuration
 or experiment evidence.
 
-The first shell protocol proves definition, isolation, lifecycle, evidence,
-comparison, correctness, and Apply boundaries. Bounded engine, KV, speculation,
-prefix, and CPU-MoE recipes land in subsequent R31 batches on this same core.
+## Bounded engine recipes
+
+**Inspect runtime recipes** builds a fixed catalogue for the selected Chat
+server. Every plan keeps the baseline, allows at most eight total launches, and
+changes one declared dimension:
+
+- GPU-layer placement uses CPU, partial where model block count is known, and
+  all-GPU candidates;
+- context uses adjacent values from Hermaeus's reviewed 2K to 128K ladder;
+- KV offers only `f16`, `q8_0`, or `q4_0` when the exact runtime advertised
+  both the baseline and candidate representation;
+- Flash Attention appears only from `runtime.flash-attention` evidence;
+- CPU-MoE placement appears only from `runtime.moe.cpu-placement` evidence and
+  stays distinct from the still-Unknown expert-cache mechanism.
+
+**Run selected recipe** freezes the plan and a SHA256 of the controlled prompt,
+then launches baseline and candidates sequentially in separate owned Lab
+sessions. It uses greedy temperature-zero sampling, one fixed seed, three
+repetitions, and a 128-token cap. Two consecutive launch/workload failures,
+user cancellation, or a deterministic output difference stop the remaining
+candidates while preserving completed and failed evidence.
+
+GPU Fit is evaluated for every configuration before launch and remains labelled
+as deterministic prediction. After each repetition the shared telemetry source
+captures process RAM and honest per-process GPU `Unknown` where no trustworthy
+counter exists. Runtime response counters provide prompt/decode throughput and
+token counts. The current buffered protocol cannot establish TTFT, so TTFT is
+stored and displayed as missing rather than inferred from request duration.
+
+The trade-off table shows speed, predicted RAM/GPU, observed memory peak,
+correctness, and comparison refusal together. Low-bit KV requires a referenced
+quality score; without one the missing `quality.score` evidence blocks Apply.
+Loading success never becomes a quality claim. CPU-MoE analytical totals remain
+Unknown when GGUF/runtime evidence cannot identify expert tensor placement,
+while observed memory and throughput are still retained. No recipe chooses or
+applies a winner automatically.
+
+Speculation and prompt-prefix recipe families land in subsequent R31 batches on
+this same experiment core.
 
 ## Evidence
 

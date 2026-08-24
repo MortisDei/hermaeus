@@ -42,6 +42,30 @@
             <Expander Header="Frozen definition JSON">
               <TextBox Text="{Binding DefinitionPreview}" IsReadOnly="True" AcceptsReturn="True" MinHeight="140" FontFamily="Consolas" TextWrapping="Wrap" />
             </Expander>
+            <TextBlock Text="Bounded recipes" FontSize="18" FontWeight="SemiBold" />
+            <TextBlock Text="Recipes always keep the baseline, change one declared dimension, check GPU Fit before launch, and preserve failures. Conditional controls remain Unknown until this exact runtime advertises them." TextWrapping="Wrap" />
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Button Content="Inspect runtime recipes" Command="{Binding RefreshRecipesCommand}" />
+              <Button Content="Run selected recipe" Command="{Binding RunSelectedRecipeCommand}" IsEnabled="{Binding !IsRecipeRunning}" />
+              <Button Content="Cancel recipe" Command="{Binding CancelRecipeCommand}" IsEnabled="{Binding IsRecipeRunning}" />
+            </StackPanel>
+            <ListBox ItemsSource="{Binding RecipeOptions}" SelectedItem="{Binding SelectedRecipe}" MaxHeight="220">
+              <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="vm:LabRecipeRowViewModel">
+                  <Grid ColumnDefinitions="180,100,*" ColumnSpacing="8" Margin="4">
+                    <TextBlock Text="{Binding Label}" FontWeight="SemiBold" />
+                    <TextBlock Grid.Column="1" Text="{Binding AvailabilityLabel}" />
+                    <StackPanel Grid.Column="2">
+                      <TextBlock Text="{Binding CandidateLabel}" />
+                      <TextBlock Text="{Binding Detail}" Opacity="0.7" TextWrapping="Wrap" />
+                    </StackPanel>
+                  </Grid>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+            <TextBox Text="{Binding RecipePrompt}" Watermark="Controlled prompt" MaxLength="4096" />
+            <TextBlock Text="Trade-off table" FontWeight="SemiBold" />
+            <TextBlock Text="{Binding TradeoffSummary}" FontFamily="Consolas" TextWrapping="Wrap" />
             <TextBlock Text="Apply to Services" FontSize="18" FontWeight="SemiBold" />
             <TextBlock Text="Apply is a separate review. It lists exact persisted fields, rejects stale runtime/model/config identity, and saves only after explicit confirmation." TextWrapping="Wrap" />
             <StackPanel Orientation="Horizontal" Spacing="8">

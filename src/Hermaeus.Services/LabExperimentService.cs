@@ -47,6 +47,9 @@ public static class LabDefinitionValidator
         if (ids.Any(id => !definition.ConfigurationFingerprints.TryGetValue(id, out var fingerprint)
             || string.IsNullOrWhiteSpace(fingerprint)))
             throw new InvalidOperationException("Every Lab configuration requires a frozen v2 configuration fingerprint.");
+        if (ids.Any(id => !definition.ConfigurationIdentities.TryGetValue(id, out var identity)
+            || definition.ConfigurationFingerprints[id] != identity.StableId))
+            throw new InvalidOperationException("Every Lab configuration requires its matching frozen v2 configuration identity.");
         if (definition.PromptHashes.Count > 64 || definition.RequiredMetrics.Count > 32
             || definition.StopConditions.Count > 16 || definition.RequestedCapabilityIds.Count > 32)
             throw new InvalidOperationException("Lab definition collections exceed their bounded limits.");
@@ -282,6 +285,12 @@ public static class LabComparisonEngine
             LabCorrectnessRequirement.Behavioral => equivalence.State == LabEquivalenceState.Equivalent,
             _ => true
         };
+        var missingCorrectnessMetric = definition.RequiredMetrics
+            .Where(metric => metric == "quality.score")
+            .FirstOrDefault(metric => !HasMetric(observations, definition.Baseline.Id, metric)
+                || !HasMetric(observations, candidate.Id, metric));
+        if (missingCorrectnessMetric is not null)
+            correctnessPassed = false;
         var controlled = fingerprints.Count == 0;
         var canHeadline = controlled && correctnessPassed && definition.CorrectnessRequirement != LabCorrectnessRequirement.SpeedOnly;
         return new LabComparison
@@ -296,10 +305,14 @@ public static class LabComparisonEngine
             CorrectnessPassed = correctnessPassed,
             CanShowHeadlineDelta = canHeadline,
             RefusalReason = controlled
-                ? correctnessPassed ? definition.CorrectnessRequirement == LabCorrectnessRequirement.SpeedOnly ? "Speed-only experiments cannot produce an Apply recommendation." : string.Empty : "The declared correctness requirement failed."
+                ? correctnessPassed ? definition.CorrectnessRequirement == LabCorrectnessRequirement.SpeedOnly ? "Speed-only experiments cannot produce an Apply recommendation." : string.Empty
+                    : missingCorrectnessMetric is not null ? $"Required correctness evidence {missingCorrectnessMetric} is missing." : "The declared correctness requirement failed."
                 : "Uncontrolled fingerprint differences prevent a headline delta."
         };
     }
+
+    private static bool HasMetric(IEnumerable<LabObservation> observations, string configurationId, string metricId) =>
+        observations.Any(item => item.ConfigurationId == configurationId && item.MetricId == metricId && item.Value.HasValue);
 
     private static IReadOnlyList<string> ValidateFingerprints(LabExperimentDefinition definition, IReadOnlyList<LabObservation> observations)
     {
@@ -365,13 +378,16 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
     {
         var profile = await CreateFingerprintAsync(source, baseline, ct);
         LabDefinitionValidator.ValidateIsolationArguments(source.ExtraArgs);
-        var configurationFingerprints = candidates.Append(baseline)
-            .ToDictionary(item => item.Id, item => CreateConfigurationIdentity(source, item).StableId, StringComparer.Ordinal);
+        var configurationIdentities = candidates.Append(baseline)
+            .ToDictionary(item => item.Id, item => CreateConfigurationIdentity(source, item), StringComparer.Ordinal);
+        var configurationFingerprints = configurationIdentities
+            .ToDictionary(item => item.Key, item => item.Value.StableId, StringComparer.Ordinal);
         var definition = new LabExperimentDefinition
         {
             Name = name.Trim(), ProtocolId = protocolId.Trim(), TargetServerId = source.Id,
             ProfileFingerprint = profile, Baseline = baseline,
             ConfigurationFingerprints = configurationFingerprints,
+            ConfigurationIdentities = configurationIdentities,
             Candidates = candidates.ToArray(), WorkloadId = "lab-shell-baseline",
             Repetitions = repetitions, RequiredMetrics = ["runtime.ready", "process.ram.current"],
             CorrectnessRequirement = correctness
@@ -415,7 +431,9 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
             {
                 Status = LabRunStatus.Running,
                 TemporaryPort = state.Session.Port,
-                RuntimeOwnershipId = state.Session.OwnershipId
+                RuntimeOwnershipId = state.Session.OwnershipId,
+                RuntimeProcessId = state.Session.Process?.ProcessId,
+                RuntimeProcessStartedAtUtc = state.Session.Process?.StartedAtUtc
             };
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -430,6 +448,31 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
                 "The isolated Lab runtime did not start.", [], CancellationToken.None);
             state.Snapshot = state.Snapshot with { CompletionEvidenceId = evidence.Id };
         }
+        return state.Snapshot;
+    }
+
+    public async Task<LabRunSnapshot> SwitchConfigurationAsync(string runId, ServerConfig source,
+        string configurationId, CancellationToken ct = default)
+    {
+        var state = GetActive(runId);
+        if (state.Snapshot.Status != LabRunStatus.Running)
+            throw new InvalidOperationException("Only a running Lab experiment can switch configurations.");
+        if (state.Snapshot.Definition.TargetServerId != source.Id
+            || LabConfigurationMapper.Differences(source, state.Snapshot.Definition.Baseline).Count != 0)
+            throw new InvalidOperationException("The Services source changed after the Lab run started.");
+        var configuration = state.Snapshot.Definition.Candidates.Append(state.Snapshot.Definition.Baseline)
+            .FirstOrDefault(item => item.Id == configurationId)
+            ?? throw new KeyNotFoundException("The requested Lab configuration does not exist.");
+        LabDefinitionValidator.ValidateIsolationArguments(source.ExtraArgs);
+        await DisposeSessionAsync(state, ct);
+        state.Session = await _runtimeHost.StartAsync(runId, source, configuration, ct);
+        state.Snapshot = state.Snapshot with
+        {
+            TemporaryPort = state.Session.Port,
+            RuntimeOwnershipId = state.Session.OwnershipId,
+            RuntimeProcessId = state.Session.Process?.ProcessId,
+            RuntimeProcessStartedAtUtc = state.Session.Process?.StartedAtUtc
+        };
         return state.Snapshot;
     }
 
@@ -459,8 +502,7 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
         await DisposeSessionAsync(state, ct);
         var outcome = status == LabRunStatus.Succeeded ? NormalizedOutcome.Succeeded
             : status == LabRunStatus.PartiallySucceeded ? NormalizedOutcome.PartiallySucceeded : NormalizedOutcome.Failed;
-        var evidence = await PersistAsync(state.Snapshot, "lab-run-completed", outcome,
-            $"Lab run completed as {status} with {observations.Count} observations.", [state.Snapshot.StartEvidenceId], ct);
+        var evidence = await PersistCompletionAsync(state.Snapshot, outcome, ct);
         state.Snapshot = state.Snapshot with { CompletionEvidenceId = evidence.Id };
         return state.Snapshot;
     }
@@ -525,9 +567,7 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
         var candidate = run.Definition.Candidates.First(item => item.Id == review.CandidateConfigurationId);
         LabConfigurationMapper.ApplyTo(target, candidate);
         await _settings.SaveAsync(clone);
-        await PersistAsync(run, "lab-apply-confirmed", NormalizedOutcome.Succeeded,
-            $"User applied {review.Changes.Count} reviewed Services field changes.", [run.CompletionEvidenceId], ct,
-            EvidenceOrigin.UserProvided);
+        await PersistApplyAsync(run, review, ct);
     }
 
     private async Task<EmpiricalProfileFingerprintV2> CreateFingerprintAsync(ServerConfig source, LabConfiguration configuration, CancellationToken ct)
@@ -585,6 +625,80 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
             Outcome = NormalizedToolOutcome.Create(outcome, code, detail)
         }, ct);
     }
+
+    private async Task<EmpiricalExperience> PersistCompletionAsync(
+        LabRunSnapshot run, NormalizedOutcome outcome, CancellationToken ct)
+    {
+        var sliceIds = new List<string>();
+        var configurationIds = run.Definition.Candidates.Select(item => item.Id)
+            .Prepend(run.Definition.Baseline.Id).ToArray();
+        foreach (var configurationId in configurationIds)
+        {
+            var slice = new LabRunEvidenceSlice(
+                run.Id, run.DefinitionHash, configurationId,
+                run.Observations.Where(item => item.ConfigurationId == configurationId).ToArray(),
+                run.Outputs.Where(item => item.ConfigurationId == configurationId).ToArray());
+            var saved = await _experience.AddAsync(new EmpiricalExperienceDraft
+            {
+                Domain = EmpiricalExperienceDomains.LabRun,
+                ContextJson = LabCanonicalJson.Serialize(new { runId = run.Id, run.DefinitionHash, configurationId }),
+                ActionJson = LabCanonicalJson.Serialize(slice),
+                RuntimeFingerprint = run.Definition.ProfileFingerprint.Runtime.StableId,
+                ModelFingerprint = run.Definition.ProfileFingerprint.Model.StableId,
+                Provenance =
+                [
+                    new EmpiricalExperienceProvenance(run.StartEvidenceId,
+                        new SourceReference(ProvenanceKind.Lab, "Frozen Lab definition", run.StartEvidenceId,
+                            EvidenceOrigin: EvidenceOrigin.Extracted))
+                ],
+                Outcome = NormalizedToolOutcome.Create(
+                    slice.Observations.Count > 0 ? NormalizedOutcome.Succeeded : NormalizedOutcome.Unknown,
+                    "lab-run-evidence-slice",
+                    $"Immutable {configurationId} evidence contains {slice.Observations.Count} observations and {slice.Outputs.Count} output hashes.")
+            }, ct);
+            sliceIds.Add(saved.Id);
+        }
+
+        var decisions = run.Comparisons.Select(comparison => new LabComparisonDecision(
+            comparison.BaselineConfigurationId, comparison.CandidateConfigurationId,
+            comparison.IsControlled, comparison.FingerprintDifferences, comparison.Equivalence,
+            comparison.CorrectnessPassed, comparison.CanShowHeadlineDelta, comparison.RefusalReason)).ToArray();
+        var summary = new LabRunCompletionSummary(run.Id, run.DefinitionHash, run.Status,
+            run.StartedAtUtc, run.CompletedAtUtc, run.Failures, decisions, sliceIds);
+        return await _experience.AddAsync(new EmpiricalExperienceDraft
+        {
+            Domain = EmpiricalExperienceDomains.LabRun,
+            ContextJson = LabCanonicalJson.Serialize(new { runId = run.Id, run.DefinitionHash }),
+            ActionJson = LabCanonicalJson.Serialize(summary),
+            RuntimeFingerprint = run.Definition.ProfileFingerprint.Runtime.StableId,
+            ModelFingerprint = run.Definition.ProfileFingerprint.Model.StableId,
+            Provenance = sliceIds.Select(id => new EmpiricalExperienceProvenance(id,
+                new SourceReference(ProvenanceKind.Lab, "Immutable configuration evidence", id,
+                    EvidenceOrigin: EvidenceOrigin.Extracted))).ToArray(),
+            Outcome = NormalizedToolOutcome.Create(outcome, "lab-run-completed",
+                $"Lab run completed as {run.Status} with {run.Observations.Count} observations across {sliceIds.Count} configuration slices.")
+        }, ct);
+    }
+
+    private Task<EmpiricalExperience> PersistApplyAsync(LabRunSnapshot run, LabApplyReview review, CancellationToken ct) =>
+        _experience.AddAsync(new EmpiricalExperienceDraft
+        {
+            Domain = EmpiricalExperienceDomains.LabRun,
+            ContextJson = LabCanonicalJson.Serialize(new { runId = run.Id, run.DefinitionHash, review.ReviewId }),
+            ActionJson = LabCanonicalJson.Serialize(new LabApplyEvidence(
+                run.Id, run.DefinitionHash, review.ReviewId, review.TargetServerId,
+                review.CandidateConfigurationId, review.Changes)),
+            RuntimeFingerprint = run.Definition.ProfileFingerprint.Runtime.StableId,
+            ModelFingerprint = run.Definition.ProfileFingerprint.Model.StableId,
+            Provenance =
+            [
+                new EmpiricalExperienceProvenance(run.CompletionEvidenceId,
+                    new SourceReference(ProvenanceKind.Lab, "Completed Lab comparison", run.CompletionEvidenceId,
+                        EvidenceOrigin: EvidenceOrigin.Extracted))
+            ],
+            Outcome = NormalizedToolOutcome.Create(NormalizedOutcome.Succeeded, "lab-apply-confirmed",
+                $"User applied {review.Changes.Count} reviewed Services field changes.")
+        }, ct);
 
     private RunState GetActive(string runId) => _runs.TryGetValue(runId, out var state)
         ? state : throw new KeyNotFoundException("The Lab run is not available in this session.");

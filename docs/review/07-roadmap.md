@@ -45,7 +45,7 @@ and evidence origins are reliable.
 | 3 | Runtime capability registry, v2 runtime/model/hardware/config identities, capability-cache migration, stricter model-specific MTP evidence | 1 | mandatory spine | Yes |
 | 4 | Structured GPU Fit breakdown, telemetry source, prediction/observation experience and compatible-discrepancy display | 2, 3 | mandatory spine | Yes |
 | 5 | Lab navigation/shell, isolated temporary runtime lifecycle, immutable definition/run/observation/comparison, correctness/equivalence core, explicit Apply review | 2, 3, 4 | mandatory spine | Yes |
-| 6 | Engine-profile recipes plus context/KV/Flash/CPU-MoE experiments; prediction-versus-observation comparison | 5 | mandatory measured optimization | No |
+| 6 | Engine-profile recipes plus context/KV/Flash/CPU-MoE experiments; prediction-versus-observation comparison | 5 | mandatory measured optimization | Yes |
 | 7 | General external draft and EAGLE-3 adapters, speculative parameter recipes, acceptance/TTFT/memory/correctness/equivalence; unsupported mechanisms stay Unknown | 5, 6 | mandatory conditional runtime feature | No |
 | 8 | Prompt/shared-prefix evidence adapter and optional build-scoped diagnostics; direct counters only when observed | 5 | independently shippable, evidence-gated | No |
 | 9 | Project State persistence/editor/proposals/context receipt | 1, 2 | mandatory independent | No |

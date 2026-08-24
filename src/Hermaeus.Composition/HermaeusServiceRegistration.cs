@@ -47,6 +47,9 @@ public static class HermaeusServiceRegistration
         s.AddSingleton<GpuFitExperienceService>();
         s.AddSingleton<ILabRuntimeHost, IsolatedLabRuntimeHost>();
         s.AddSingleton<ILabExperimentService, LabExperimentService>();
+        s.AddSingleton<ILabWorkloadExecutor, LlamaServerLabWorkloadExecutor>();
+        s.AddSingleton<LabRecipeRunner>();
+        s.AddSingleton<ILabRecipeService, LabRecipeService>();
         s.AddSingleton<EvalEngine>();
         s.AddSingleton<BenchmarkService>();
         s.AddSingleton<IBenchmarkInsightsService, BenchmarkInsightsService>();

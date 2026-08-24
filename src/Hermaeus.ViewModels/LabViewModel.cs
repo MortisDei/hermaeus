@@ -21,25 +21,38 @@ public partial class ExperienceRowViewModel : ViewModelBase
     [ObservableProperty] private bool _isExportSelected;
 }
 
+public sealed class LabRecipeRowViewModel
+{
+    public LabRecipeRowViewModel(LabRecipePlan plan) => Plan = plan;
+    public LabRecipePlan Plan { get; }
+    public string Label => Plan.Label;
+    public string AvailabilityLabel => Plan.Availability.ToString();
+    public string Detail => Plan.AvailabilityDetail;
+    public string CandidateLabel => $"Baseline + {Plan.Candidates.Count} candidate(s), max {Plan.MaximumRunCount} runs";
+    public bool CanRun => Plan.Availability == CapabilityState.Available;
+}
+
 public partial class LabViewModel : ViewModelBase
 {
     private readonly IEmpiricalExperienceStore _store;
     private readonly IToastService _toasts;
     private readonly ILabExperimentService? _experiments;
+    private readonly ILabRecipeService? _recipes;
     private readonly ISettingsService? _settings;
 
     public LabViewModel(IEmpiricalExperienceStore store, IToastService toasts)
-        : this(store, toasts, null, null)
+        : this(store, toasts, null, null, null)
     {
     }
 
     public LabViewModel(IEmpiricalExperienceStore store, IToastService toasts,
-        ILabExperimentService? experiments, ISettingsService? settings)
+        ILabExperimentService? experiments, ISettingsService? settings, ILabRecipeService? recipes)
     {
         _store = store;
         _toasts = toasts;
         _experiments = experiments;
         _settings = settings;
+        _recipes = recipes;
         SelectedServer = settings?.Settings.ManagedServers.FirstOrDefault(server => !server.EmbeddingsMode);
         if (SelectedServer is not null)
             CandidateContextSize = SelectedServer.ContextSize;
@@ -76,12 +89,18 @@ public partial class LabViewModel : ViewModelBase
     [ObservableProperty] private string _comparisonSummary = string.Empty;
     [ObservableProperty] private string _applyReviewSummary = string.Empty;
     [ObservableProperty] private bool _isRunActive;
+    [ObservableProperty] private LabRecipeRowViewModel? _selectedRecipe;
+    [ObservableProperty] private string _recipePrompt = "Reply with exactly: Hermaeus Lab.";
+    [ObservableProperty] private bool _isRecipeRunning;
+    [ObservableProperty] private string _tradeoffSummary = string.Empty;
 
     private LabRunSnapshot? _currentRun;
     private LabApplyReview? _applyReview;
+    private CancellationTokenSource? _recipeCts;
 
     public bool HasSelection => SelectedExperience is not null;
     public IReadOnlyList<ServerConfig> ConfiguredServers => _settings?.Settings.ManagedServers.Where(server => !server.EmbeddingsMode).ToArray() ?? [];
+    public UiBoundCollection<LabRecipeRowViewModel> RecipeOptions { get; } = [];
     public Func<EmpiricalExperience, Task<bool>>? ConfirmRemoval { get; set; }
     public Func<LabApplyReview, Task<bool>>? ConfirmApply { get; set; }
 
@@ -164,6 +183,50 @@ public partial class LabViewModel : ViewModelBase
         try { ExportJson = await _store.ExportAsync(ids); StatusMessage = $"Prepared {ids.Length} record(s) for copy or save."; }
         catch (Exception ex) { _toasts.Show("Could not export evidence", ex.Message, ToastKind.Error, 5000); }
     }
+
+    [RelayCommand]
+    private async Task RefreshRecipesAsync()
+    {
+        if (_recipes is null || SelectedServer is null || IsRecipeRunning) return;
+        try
+        {
+            var plans = await _recipes.InspectAsync(SelectedServer);
+            RecipeOptions.Clear();
+            foreach (var plan in plans) RecipeOptions.Add(new LabRecipeRowViewModel(plan));
+            SelectedRecipe = RecipeOptions.FirstOrDefault(row => row.CanRun) ?? RecipeOptions.FirstOrDefault();
+        }
+        catch (Exception ex) { _toasts.Show("Could not inspect Lab recipes", ex.Message, ToastKind.Error, 5000); }
+    }
+
+    [RelayCommand]
+    private async Task RunSelectedRecipeAsync()
+    {
+        if (_recipes is null || SelectedServer is null || SelectedRecipe?.CanRun != true || IsRecipeRunning) return;
+        _recipeCts = new CancellationTokenSource();
+        IsRecipeRunning = true;
+        IsBusy = true;
+        try
+        {
+            _currentRun = await _recipes.RunAsync(SelectedRecipe.Plan, SelectedServer, RecipePrompt, _recipeCts.Token);
+            ShowCompletedRun(_currentRun);
+            TradeoffSummary = BuildTradeoffSummary(_currentRun);
+            await RefreshAsync();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _toasts.Show("Lab recipe failed", ex.Message, ToastKind.Error, 5000);
+        }
+        finally
+        {
+            IsRecipeRunning = false;
+            IsBusy = false;
+            _recipeCts.Dispose();
+            _recipeCts = null;
+        }
+    }
+
+    [RelayCommand]
+    private void CancelRecipe() => _recipeCts?.Cancel();
 
     [RelayCommand]
     private async Task FreezeAndStartAsync()
@@ -266,6 +329,28 @@ public partial class LabViewModel : ViewModelBase
             : string.Join(Environment.NewLine, run.Comparisons.Select(comparison => comparison.CanShowHeadlineDelta
                 ? $"{comparison.CandidateConfigurationId}: controlled and correctness-gated"
                 : $"{comparison.CandidateConfigurationId}: {comparison.RefusalReason}"));
+    }
+
+    private static string BuildTradeoffSummary(LabRunSnapshot run)
+    {
+        if (run.Comparisons.Count == 0) return "No candidate comparison completed.";
+        return string.Join(Environment.NewLine, run.Comparisons.Select(comparison =>
+        {
+            var baseline = comparison.BaselineMetrics.FirstOrDefault(metric => metric.MetricId == "decode.tokens_per_second");
+            var candidate = comparison.CandidateMetrics.FirstOrDefault(metric => metric.MetricId == "decode.tokens_per_second");
+            var speed = baseline?.Median is double before && candidate?.Median is double after
+                ? $"decode {before:0.0} -> {after:0.0} tokens/s"
+                : "decode Unknown";
+            var predictedRam = comparison.CandidateMetrics.FirstOrDefault(metric => metric.MetricId == "memory.ram.predicted")?.Median;
+            var observedRam = comparison.CandidateMetrics.FirstOrDefault(metric => metric.MetricId == "memory.ram.observed")?.Maximum;
+            var predictedGpu = comparison.CandidateMetrics.FirstOrDefault(metric => metric.MetricId == "memory.gpu.predicted")?.Median;
+            var observedGpu = comparison.CandidateMetrics.FirstOrDefault(metric => metric.MetricId == "memory.gpu.observed")?.Maximum;
+            return $"{comparison.CandidateConfigurationId}: {speed}; RAM {Bytes(predictedRam)} predicted/{Bytes(observedRam)} observed peak; "
+                + $"GPU {Bytes(predictedGpu)} predicted/{Bytes(observedGpu)} observed peak; correctness {comparison.Equivalence.State}; "
+                + (comparison.CanShowHeadlineDelta ? "controlled" : comparison.RefusalReason);
+        }));
+
+        static string Bytes(double? value) => value.HasValue ? $"{value.Value / 1024 / 1024 / 1024:0.00} GiB" : "Unknown";
     }
 
     private static LabConfiguration ConfigurationFrom(ServerConfig source, string id, string label) => new()

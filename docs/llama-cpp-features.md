@@ -62,6 +62,11 @@ The selected help surface also contributes exact advertised KV cache type ids;
 GPU Fit will not apply low-bit byte representations until the matching type is
 positively advertised.
 
+Lab also records `runtime.flash-attention` only when `--flash-attn` appears in a
+successful exact help probe, and `runtime.moe.cpu-placement` only when both
+CPU-MoE placement controls appear. Probe failure leaves either capability
+`Unknown`; CPU placement is not treated as expert caching.
+
 The runtime identity includes the executable SHA256, size, modification time,
 parsed version/build/compiler/backend facts when available, and managed asset
 identity. Its portable stable id excludes the executable path. Model identity

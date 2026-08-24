@@ -22,7 +22,9 @@ public sealed record LlamaRuntimeCapabilityFacts(
     bool SupportsBackendSampling,
     bool SupportsPerformanceInstrumentation,
     bool ModelSpecificMtpConfirmed = false,
-    IReadOnlyList<string>? SupportedKvCacheTypes = null);
+    IReadOnlyList<string>? SupportedKvCacheTypes = null,
+    bool SupportsFlashAttention = false,
+    bool SupportsCpuMoePlacement = false);
 
 /// <summary>A meaningful change between two capability snapshots, never a raw help-text diff.</summary>
 public sealed record CapabilityDrift(string Capability, string Detail, bool AffectsConfiguredCapability = false);
@@ -66,7 +68,10 @@ public sealed class LocalModelCapabilityService
             // this r30 environment. Do not infer it from generic sampler flags.
             false,
             help.Contains("--perf", StringComparison.Ordinal),
-            SupportedKvCacheTypes: ParseKvCacheTypes(help));
+            SupportedKvCacheTypes: ParseKvCacheTypes(help),
+            SupportsFlashAttention: help.Contains("--flash-attn", StringComparison.Ordinal),
+            SupportsCpuMoePlacement: help.Contains("--cpu-moe", StringComparison.Ordinal)
+                && help.Contains("--n-cpu-moe", StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -459,6 +464,20 @@ public sealed class LocalModelCapabilityService
             Add($"runtime.kv.type.{type.ToLowerInvariant()}", evidence, null,
                 new Dictionary<string, string>(StringComparer.Ordinal) { ["cache_type"] = type });
         }
+
+        var flash = runtime.HelpProbeSucceeded
+            ? runtime.SupportsFlashAttention
+                ? Available("runtime-flash-attention", "The selected runtime advertises --flash-attn.")
+                : Unavailable("runtime-no-flash-attention", "The selected runtime help does not advertise --flash-attn.")
+            : Unknown("runtime-help-unknown", "A successful runtime help probe is required.");
+        Add("runtime.flash-attention", flash, null);
+
+        var cpuMoe = runtime.HelpProbeSucceeded
+            ? runtime.SupportsCpuMoePlacement
+                ? Available("runtime-cpu-moe", "The selected runtime advertises CPU-MoE placement controls.")
+                : Unavailable("runtime-no-cpu-moe", "The selected runtime help does not advertise CPU-MoE placement controls.")
+            : Unknown("runtime-help-unknown", "A successful runtime help probe is required.");
+        Add("runtime.moe.cpu-placement", cpuMoe, null);
 
         return result;
 

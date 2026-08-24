@@ -14,12 +14,15 @@ public sealed class LabExperimentTests
         FlashAttention = "auto", ExtraArgumentsSha256 = extraHash
     };
 
+    private static ConfigurationIdentityV2 ConfigurationIdentity(int context = 4096) =>
+        new(context, 0, "cpu", 4, 0, 1, null, null, "f16", "f16", "auto", "", "", "", 0,
+            new Dictionary<string, string>(), IdentityCompleteness.Complete);
+
     private static EmpiricalProfileFingerprintV2 Fingerprint() => new(
         new RuntimeIdentityV2("test", "runtime-hash", 1, DateTime.UnixEpoch, "v", "b", "c", "cpu", "", IdentityCompleteness.Complete),
         new ModelIdentityV2("model", "model-hash", 1, DateTime.UnixEpoch, "test", "q4", "", ModelIdentityStrength.VerifiedHash, IdentityCompleteness.Complete),
         new HardwareIdentityV2("test", "x64", "cpu", "cpu", null, 1024, "", "single", IdentityCompleteness.Complete),
-        new ConfigurationIdentityV2(4096, 0, "cpu", 4, 0, 1, null, null, "f16", "f16", "auto", "", "", "", 0,
-            new Dictionary<string, string>(), IdentityCompleteness.Complete));
+        ConfigurationIdentity());
 
     private static LabExperimentDefinition Definition(LabConfiguration? baseline = null,
         IReadOnlyList<LabConfiguration>? candidates = null, LabCorrectnessRequirement correctness = LabCorrectnessRequirement.ExactEquivalence) => new()
@@ -29,8 +32,13 @@ public sealed class LabExperimentTests
         Candidates = candidates ?? [Config("candidate", 8192)], Repetitions = 3,
         ConfigurationFingerprints = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["baseline"] = "baseline-config",
-            ["candidate"] = "candidate-config"
+            ["baseline"] = ConfigurationIdentity().StableId,
+            ["candidate"] = ConfigurationIdentity(8192).StableId
+        },
+        ConfigurationIdentities = new Dictionary<string, ConfigurationIdentityV2>(StringComparer.Ordinal)
+        {
+            ["baseline"] = ConfigurationIdentity(),
+            ["candidate"] = ConfigurationIdentity(8192)
         },
         CorrectnessRequirement = correctness
     };

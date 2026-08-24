@@ -36,6 +36,11 @@ limit.
   source-labelled observations and correctness-gated comparisons, cleans up by
   exact process ownership, and exposes a stale-identity-guarded Apply review
   through the normal settings save flow.
+- Added bounded Lab recipes for GPU layers, context, runtime-advertised KV,
+  Flash Attention, and CPU-MoE placement. Each preserves its baseline, combines
+  GPU Fit prediction with shared process telemetry and greedy correctness
+  evidence, stops on repeated failure or mismatch, and stores repeated evidence
+  in bounded immutable configuration slices without auto-selecting a winner.
 
 ### Changed
 
