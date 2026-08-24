@@ -228,6 +228,40 @@ public sealed class ChatWorkbenchTests
     }
 
     [Fact]
+    public async Task SendAsyncInjectsAcceptedProjectStateAndLabelsItsReceipt()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        var projects = new ProjectStore(settings);
+        var project = new Project { Id = "p-state", Name = "Stateful" };
+        await projects.SaveAsync(project);
+        await projects.SaveStateAsync(new ProjectState
+        {
+            ProjectId = project.Id,
+            CurrentObjective = "Verify project context",
+            Items = [new ProjectStateItem { Kind = ProjectStateItemKind.Constraint, Text = "Accepted only" }]
+        }, 0);
+        var capturing = new CapturingLlm();
+        var vm = new ChatViewModel(
+            capturing, new InMemoryConversationStore(), new EmptyMemoryStore(), settings,
+            new FakeTts(), new ModelProfileService(settings), new FakeToasts(),
+            new NoOpConversationMemoryService(), new RuntimeLogService(settings),
+            new ConversationExportService(), projectState: projects);
+        vm.ActiveProjectProvider = () => project;
+        vm.NewConversation();
+        await vm.LoadModelsAsync(force: true);
+        vm.InputText = "What is next?";
+        await vm.SendCommand.ExecuteAsync(null);
+
+        Assert.Contains("Verify project context", capturing.LastOptions!.SystemPrompt, StringComparison.Ordinal);
+        var assistant = vm.Messages.Last(message => message.IsAssistant);
+        var section = Assert.Single(assistant.ContextSections, item => item.Kind == ProvenanceKind.ProjectState);
+        Assert.Equal("Project State", section.Label);
+        Assert.Contains(":state:1:", Assert.Single(section.Items).Locator, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task SendAsyncSkipsMemoryInjectionWhenMemoryDisabled()
     {
         using var temp = new TempDir();

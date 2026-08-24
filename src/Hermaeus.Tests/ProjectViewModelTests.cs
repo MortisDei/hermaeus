@@ -35,7 +35,7 @@ public sealed class ProjectViewModelTests
         await agentTasks.InitializeAsync();
         await rag.InitializeAsync();
 
-        var vm = new ProjectViewModel(projects, settings, new FakeToasts(), memories, conversations, agentTasks, rag);
+        var vm = new ProjectViewModel(projects, settings, new FakeToasts(), memories, conversations, agentTasks, rag, projects);
         return new Harness(vm, projects, conversations, memories, agentTasks, rag, settings);
     }
 
@@ -238,5 +238,51 @@ public sealed class ProjectViewModelTests
     {
         Assert.False(PathRootValidator.TryValidate("C:\\a\\..\\b", out _, out var err1));
         Assert.NotEqual(string.Empty, err1);
+    }
+
+    [Fact]
+    public async Task State_editor_saves_and_removes_user_owned_fields_and_items()
+    {
+        using var temp = new TempDir(); var h = await NewHarnessAsync(temp);
+        var project = new Project { Name = "Stateful" }; await h.Projects.SaveAsync(project);
+        await h.Vm.OpenEditForCommand.ExecuteAsync(project);
+        h.Vm.EditingState.CurrentObjective = "Ship";
+        h.Vm.NewStateItemKind = ProjectStateItemKind.Constraint;
+        h.Vm.NewStateItemText = "No silent authority";
+        h.Vm.AddStateItemCommand.Execute(null);
+        await h.Vm.SaveEditingProjectCommand.ExecuteAsync(null);
+        var saved = await h.Projects.GetStateAsync(project.Id);
+        Assert.Equal("Ship", saved.CurrentObjective); Assert.Equal(EvidenceOrigin.UserProvided, Assert.Single(saved.Items).Origin);
+
+        await h.Vm.OpenEditForCommand.ExecuteAsync(project);
+        h.Vm.EditingState.CurrentObjective = string.Empty;
+        h.Vm.RemoveStateItemCommand.Execute(Assert.Single(h.Vm.EditingState.Items));
+        await h.Vm.SaveEditingProjectCommand.ExecuteAsync(null);
+        var removed = await h.Projects.GetStateAsync(project.Id);
+        Assert.Equal(string.Empty, removed.CurrentObjective); Assert.Empty(removed.Items);
+    }
+
+    [Fact]
+    public async Task Proposal_review_commands_accept_edits_and_reject_without_auto_accept()
+    {
+        using var temp = new TempDir(); var h = await NewHarnessAsync(temp);
+        var project = new Project { Name = "Review" }; await h.Projects.SaveAsync(project);
+        var accepted = await h.Projects.SaveStateAsync(new ProjectState { ProjectId = project.Id, Status = "Open" }, 0);
+        var first = await h.Projects.CreateProposalAsync(new ProjectStateProposal
+        { ProjectId = project.Id, BaseRevision = 1, ProposedState = accepted.Clone(), Origin = EvidenceOrigin.ModelInference });
+        await h.Vm.OpenEditForCommand.ExecuteAsync(project);
+        Assert.Equal(first.Id, h.Vm.SelectedStateProposal!.Id);
+        h.Vm.EditingProposalState.Status = "Edited then accepted";
+        await h.Vm.AcceptStateProposalCommand.ExecuteAsync(null);
+        Assert.Equal("Edited then accepted", (await h.Projects.GetStateAsync(project.Id)).Status);
+
+        var current = await h.Projects.GetStateAsync(project.Id);
+        var second = await h.Projects.CreateProposalAsync(new ProjectStateProposal
+        { ProjectId = project.Id, BaseRevision = current.Revision, ProposedState = current.Clone() });
+        await h.Vm.OpenEditForCommand.ExecuteAsync(project);
+        Assert.Equal(second.Id, h.Vm.SelectedStateProposal!.Id);
+        h.Vm.ProposalRejectionReason = "No";
+        await h.Vm.RejectStateProposalCommand.ExecuteAsync(null);
+        Assert.Equal("Edited then accepted", (await h.Projects.GetStateAsync(project.Id)).Status);
     }
 }

@@ -53,6 +53,11 @@ limit.
   correctness. Direct reused-token counts remain Missing unless the exact
   runtime proves a reviewed response field; timing is never converted into a
   token count.
+- Added revisioned, user-owned Project State with directly editable objectives,
+  milestones, status, and structured continuity items. Model-origin proposals
+  remain in a provenance-visible review queue until edited/accepted or rejected,
+  stale revisions fail atomically, and only bounded accepted state reaches
+  project-bound Chat and Agent context receipts.
 
 ### Changed
 

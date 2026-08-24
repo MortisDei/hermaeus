@@ -31,7 +31,10 @@ public enum ProvenanceKind
     Lab,
 
     /// <summary>A direct runtime or operating-system measurement.</summary>
-    RuntimeObservation
+    RuntimeObservation,
+
+    /// <summary>Accepted, user-owned Project State injected into a bounded context.</summary>
+    ProjectState
 }
 
 /// <summary>

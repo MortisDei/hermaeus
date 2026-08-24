@@ -188,6 +188,7 @@ public partial class ChatViewModel : ViewModelBase
     private readonly RagQueryService? _rag;
     private readonly Hermaeus.Services.Recall.RecallIndexingService? _recallIndexing;
     private readonly Hermaeus.Services.Recall.RecallService? _recallSearch;
+    private readonly IProjectStateStore? _projectState;
     private bool _suppressRagDatasetWrite;
     private CancellationTokenSource? _cts;
     private CancellationTokenSource? _ttsCts;
@@ -758,12 +759,14 @@ public partial class ChatViewModel : ViewModelBase
         Hermaeus.Services.Recall.RecallIndexingService? recallIndexing = null,
         Hermaeus.Services.Recall.RecallService? recallSearch = null,
         IAudioCapture? audioCapture = null,
-        ISpeechRecognitionProviderRegistry? sttProviders = null)
+        ISpeechRecognitionProviderRegistry? sttProviders = null,
+        IProjectStateStore? projectState = null)
     {
         _artifacts = artifacts;
         _rag = rag;
         _recallIndexing = recallIndexing;
         _recallSearch = recallSearch;
+        _projectState = projectState;
         ChatMic = new MicButtonViewModel(audioCapture, sttProviders, settings);
         SaveCodeBlockAction = (lang, code, markdown) => _ = SaveCodeBlockAsync(lang, code, markdown);
         _llm = llm; _store = store; _settings = settings; _tts = tts; _profiles = profiles; _toasts = toasts;
@@ -1265,17 +1268,19 @@ public partial class ChatViewModel : ViewModelBase
             var memoryTask = BuildMemoryInjectionAsync(text, _cts.Token);
             var ragTask = BuildRagInjectionAsync(text, _cts.Token);
             var recallTask = BuildRecallInjectionAsync(text, _cts.Token);
+            var projectStateTask = BuildProjectStateInjectionAsync(_cts.Token);
 
             // Let all three settle before observing any of them: one throwing
             // must not leave the other two unobserved or cancelled. The awaits
             // below then surface a failure in exactly the order it surfaced when
             // this was a sequence.
-            try { await Task.WhenAll(memoryTask, ragTask, recallTask); }
+            try { await Task.WhenAll(memoryTask, ragTask, recallTask, projectStateTask); }
             catch { /* observed individually below, in the original order */ }
 
             var (memoryContext, memorySources, injectedMemoryIds, recallMs, selectMs, lessonMs) = await memoryTask;
             var (ragContext, ragSources, ragMs, ragContextItems, ragNote) = await ragTask;
             var (recallContext, recallSources, recallInjectionMs, recallItems, recallNote) = await recallTask;
+            var projectStateContext = await projectStateTask;
 
             // The order sources appear in is memory, then RAG, then recall,
             // regardless of which finished first. Concurrency is an
@@ -1286,7 +1291,9 @@ public partial class ChatViewModel : ViewModelBase
                 asst.Sources.Add(source);
             foreach (var source in recallSources)
                 asst.Sources.Add(source);
-            var ragAndRecallContext = ragContext + recallContext;
+            foreach (var source in projectStateContext.Sources)
+                asst.Sources.Add(source);
+            var ragAndRecallContext = ragContext + recallContext + projectStateContext.Text;
 
             var promptBuildSw = Stopwatch.StartNew();
             var composedSystemPrompt = ComposeSystemPrompt(memoryContext, ragAndRecallContext) ?? string.Empty;
@@ -2027,6 +2034,26 @@ public partial class ChatViewModel : ViewModelBase
             datasetName,
             _settings.Settings.Memory.Enabled && _memoryInjection is not null,
             _settings.Settings.Memory.RecallInjectionEnabled && _recallSearch is not null));
+    }
+
+    private async Task<ProjectStateContext> BuildProjectStateInjectionAsync(CancellationToken ct)
+    {
+        if (_projectState is null || string.IsNullOrWhiteSpace(_currentProjectId))
+            return ProjectStateContext.Empty;
+        try
+        {
+            var state = await _projectState.GetStateAsync(_currentProjectId, ct);
+            var context = ProjectStateContextBuilder.Build(state);
+            return string.IsNullOrEmpty(context.Text)
+                ? context
+                : context with { Text = $"\n\n{context.Text}" };
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _runtimeLogs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning,
+                RuntimeLogCategory.Service, $"Project State context unavailable: {ex.Message}"));
+            return ProjectStateContext.Empty;
+        }
     }
 
     private bool CurrentModelHasConfirmedVisionCapability()

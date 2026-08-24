@@ -59,7 +59,9 @@ public static class HermaeusServiceRegistration
         s.AddSingleton<ChatTraceService>();
         s.AddSingleton<ICommandRegistry, CommandRegistry>();
         s.AddSingleton<IConversationStore, ConversationStore>();
-        s.AddSingleton<IProjectStore, ProjectStore>();
+        s.AddSingleton<ProjectStore>();
+        s.AddSingleton<IProjectStore>(provider => provider.GetRequiredService<ProjectStore>());
+        s.AddSingleton<IProjectStateStore>(provider => provider.GetRequiredService<ProjectStore>());
         s.AddSingleton<ConversationExportService>();
         s.AddSingleton<ChatArtifactService>();
         s.AddSingleton<IMemoryStore, MemoryStore>();

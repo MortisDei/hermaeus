@@ -48,7 +48,7 @@ and evidence origins are reliable.
 | 6 | Engine-profile recipes plus context/KV/Flash/CPU-MoE experiments; prediction-versus-observation comparison | 5 | mandatory measured optimization | Yes |
 | 7 | General external draft and EAGLE-3 adapters, speculative parameter recipes, acceptance/TTFT/memory/correctness/equivalence; unsupported mechanisms stay Unknown | 5, 6 | mandatory conditional runtime feature | Yes (live pair gate Unknown) |
 | 8 | Prompt/shared-prefix evidence adapter and optional build-scoped diagnostics; direct counters only when observed | 5 | independently shippable, evidence-gated | Yes (direct counter Unknown; optional diagnostics deferred) |
-| 9 | Project State persistence/editor/proposals/context receipt | 1, 2 | mandatory independent | No |
+| 9 | Project State persistence/editor/proposals/context receipt | 1, 2 | mandatory independent | Yes (Linux/COSMIC live gate pending) |
 | 10 | Per-subtask model selection through approved plan, task/transcript/report/synthesis identity and no-fallback behavior | 1, 3 | mandatory independent | No |
 | 11 | Agent Local API policy/contracts and single-owner decision; implement safe scoped endpoints only if the ownership gate is satisfied | 1, 9, 10 | mandatory design, conditional execution | No |
 | 12 | Live telemetry pop-out and deterministic deduplicated health conditions using the shared telemetry/experience foundations | 4 | mandatory independent | No |

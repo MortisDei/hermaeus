@@ -29,10 +29,12 @@ public partial class ProjectViewModel : ViewModelBase
     private readonly IConversationStore _conversations;
     private readonly IAgentTaskStateStore _agentTasks;
     private readonly SqliteRagStore? _rag;
+    private readonly IProjectStateStore? _stateStore;
     private bool _loaded;
 
     public UiBoundCollection<Project> Projects { get; } = [];
     public UiBoundCollection<RagDataset> AvailableDatasets { get; } = [];
+    public UiBoundCollection<ProjectStateProposal> StateProposals { get; } = [];
 
     [ObservableProperty] private Project? _activeProject;
     [ObservableProperty] private bool _isSwitcherOpen;
@@ -48,9 +50,16 @@ public partial class ProjectViewModel : ViewModelBase
     [ObservableProperty] private int _editingDatasetChunkCount;
     [ObservableProperty] private int _adoptableWorkspaceNoteCount;
     [ObservableProperty] private bool _adoptWorkspaceNotes = true;
+    [ObservableProperty] private ProjectState _editingState = new();
+    [ObservableProperty] private ProjectStateProposal? _selectedStateProposal;
+    [ObservableProperty] private ProjectState _editingProposalState = new();
+    [ObservableProperty] private string _newStateItemText = string.Empty;
+    [ObservableProperty] private ProjectStateItemKind _newStateItemKind = ProjectStateItemKind.NextAction;
+    [ObservableProperty] private string _proposalRejectionReason = string.Empty;
     private string _pendingAdoptionWorkspaceRoot = string.Empty;
 
     public IReadOnlyList<string> ColorKeys => ProjectColors.All;
+    public IReadOnlyList<ProjectStateItemKind> StateItemKinds { get; } = Enum.GetValues<ProjectStateItemKind>();
     public string ActiveProjectLabel => ActiveProject is null ? "No project" : ActiveProject.Name;
     public string EditorTitle => IsNewProject ? "New project" : "Edit project";
     public string ArchiveToggleLabel => EditingProject.IsArchived ? "Unarchive" : "Archive";
@@ -82,7 +91,8 @@ public partial class ProjectViewModel : ViewModelBase
         IMemoryStore memories,
         IConversationStore conversations,
         IAgentTaskStateStore agentTasks,
-        SqliteRagStore? rag = null)
+        SqliteRagStore? rag = null,
+        IProjectStateStore? stateStore = null)
     {
         _store = store;
         _settings = settings;
@@ -91,6 +101,7 @@ public partial class ProjectViewModel : ViewModelBase
         _conversations = conversations;
         _agentTasks = agentTasks;
         _rag = rag;
+        _stateStore = stateStore;
     }
 
     /// <summary>doc 04 4.1: registered next to the ViewModel that owns the action.</summary>
@@ -224,7 +235,7 @@ public partial class ProjectViewModel : ViewModelBase
     private async Task OpenEditForAsync(Project project)
     {
         OpenEditor(project.Clone(), isNew: false);
-        await RefreshEditingCountsAsync(project);
+        await Task.WhenAll(RefreshEditingCountsAsync(project), RefreshProjectStateAsync(project.Id));
     }
 
     private async Task RefreshAvailableDatasetsAsync()
@@ -245,6 +256,10 @@ public partial class ProjectViewModel : ViewModelBase
             project.Color = ProjectColors.Default;
         EditingProject = project;
         IsNewProject = isNew;
+        EditingState = new ProjectState { ProjectId = project.Id };
+        EditingProposalState = new ProjectState { ProjectId = project.Id };
+        SelectedStateProposal = null;
+        StateProposals.Clear();
         FolderRootError = string.Empty;
         if (!isNew)
         {
@@ -318,6 +333,22 @@ public partial class ProjectViewModel : ViewModelBase
         EditingProject.Name = EditingProject.Name.Trim();
         await _store.SaveAsync(EditingProject);
 
+        if (_stateStore is not null && (EditingState.Revision > 0 || !ProjectStateIsEmpty(EditingState)))
+        {
+            EditingState.ProjectId = EditingProject.Id;
+            EditingState.UpdatedByOrigin = EvidenceOrigin.UserProvided;
+            try
+            {
+                EditingState = await _stateStore.SaveStateAsync(EditingState, EditingState.Revision);
+            }
+            catch (ProjectStateRevisionConflictException ex)
+            {
+                await RefreshProjectStateAsync(EditingProject.Id);
+                _toasts.Show("Project State changed", ex.Message, ToastKind.Warning);
+                return;
+            }
+        }
+
         if (IsNewProject && AdoptWorkspaceNotes && !string.IsNullOrWhiteSpace(_pendingAdoptionWorkspaceRoot))
             await AdoptWorkspaceNotesAsync(_pendingAdoptionWorkspaceRoot, EditingProject.Id);
 
@@ -328,6 +359,90 @@ public partial class ProjectViewModel : ViewModelBase
             ActiveProject = EditingProject;
         _toasts.Show("Project saved", EditingProject.Name, ToastKind.Success);
     }
+
+    [RelayCommand]
+    private void AddStateItem()
+    {
+        if (string.IsNullOrWhiteSpace(NewStateItemText)) return;
+        EditingState.Items.Add(new ProjectStateItem
+        {
+            Kind = NewStateItemKind,
+            Text = NewStateItemText.Trim(),
+            Order = EditingState.Items.Count,
+            Origin = EvidenceOrigin.UserProvided
+        });
+        NewStateItemText = string.Empty;
+        OnPropertyChanged(nameof(EditingState));
+    }
+
+    [RelayCommand]
+    private void RemoveStateItem(ProjectStateItem? item)
+    {
+        if (item is null) return;
+        EditingState.Items.Remove(item);
+        for (var index = 0; index < EditingState.Items.Count; index++) EditingState.Items[index].Order = index;
+        OnPropertyChanged(nameof(EditingState));
+    }
+
+    [RelayCommand]
+    private void RemoveProposalStateItem(ProjectStateItem? item)
+    {
+        if (item is null) return;
+        EditingProposalState.Items.Remove(item);
+        for (var index = 0; index < EditingProposalState.Items.Count; index++) EditingProposalState.Items[index].Order = index;
+        OnPropertyChanged(nameof(EditingProposalState));
+    }
+
+    partial void OnSelectedStateProposalChanged(ProjectStateProposal? value)
+    {
+        EditingProposalState = value?.ProposedState.Clone() ?? new ProjectState { ProjectId = EditingProject.Id };
+        ProposalRejectionReason = string.Empty;
+    }
+
+    [RelayCommand]
+    private async Task AcceptStateProposalAsync()
+    {
+        if (_stateStore is null || SelectedStateProposal is null) return;
+        try
+        {
+            EditingState = await _stateStore.AcceptProposalAsync(SelectedStateProposal.Id, EditingProposalState);
+            await RefreshProjectStateAsync(EditingProject.Id);
+            _toasts.Show("Project State proposal accepted", $"Revision {EditingState.Revision}", ToastKind.Success);
+        }
+        catch (ProjectStateRevisionConflictException ex)
+        {
+            await RefreshProjectStateAsync(EditingProject.Id);
+            _toasts.Show("Proposal is stale", ex.Message, ToastKind.Warning);
+        }
+    }
+
+    [RelayCommand]
+    private async Task RejectStateProposalAsync()
+    {
+        if (_stateStore is null || SelectedStateProposal is null) return;
+        await _stateStore.RejectProposalAsync(SelectedStateProposal.Id, ProposalRejectionReason);
+        await RefreshProjectStateAsync(EditingProject.Id);
+        _toasts.Show("Project State proposal rejected", "Accepted state was not changed.", ToastKind.Info);
+    }
+
+    private async Task RefreshProjectStateAsync(string projectId)
+    {
+        if (_stateStore is null) return;
+        EditingState = await _stateStore.GetStateAsync(projectId);
+        var proposals = await _stateStore.GetProposalsAsync(projectId);
+        RunOnUi(() =>
+        {
+            StateProposals.Clear();
+            foreach (var proposal in proposals) StateProposals.Add(proposal);
+            SelectedStateProposal = StateProposals.FirstOrDefault();
+        });
+    }
+
+    private static bool ProjectStateIsEmpty(ProjectState state) =>
+        string.IsNullOrWhiteSpace(state.CurrentObjective)
+        && string.IsNullOrWhiteSpace(state.Milestone)
+        && string.IsNullOrWhiteSpace(state.Status)
+        && state.Items.Count == 0;
 
     /// <summary>Reassigns every Workspace-scoped memory note under this root into the new
     /// project's scope. A copy of the note's meaning, not the workspace itself; the

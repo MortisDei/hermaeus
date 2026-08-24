@@ -103,6 +103,25 @@ context, prompt, draft, history estimate, attachments, and attached Knowledge
 context. Normal Chat does not expose web access, a shell, tool calls, or Agent
 workspace actions.
 
+## Projects and Project State
+
+Use the header project switcher or `Ctrl+K` to create and switch Projects. A
+Project supplies defaults for new Chat conversations, Agent workspace setup,
+and Knowledge selection. Existing work is not silently rebound when you switch.
+
+Open an existing Project's editor to maintain its optional State: current
+objective, milestone, status, accepted/rejected decisions, constraints,
+unresolved questions, important artifacts, and next actions. These fields are
+user-owned and directly editable. Proposed updates stay in a review queue until
+you inspect, optionally edit, and accept them; rejecting one does not alter the
+accepted revision. Stale proposals are refused after another edit lands.
+
+Accepted State may be included in bounded Chat and Agent context when that work
+is bound to the Project. Expand the context receipt to see the separate Project
+State section and revision. Pending or rejected proposals are never treated as
+accepted context. Project State remains separate from Memories, Recall,
+Knowledge/RAG, conversations, and Agent task history.
+
 ## Knowledge, Memory, and Recall
 
 **Knowledge** ingests files into a local RAG dataset. Attach a dataset to a Chat

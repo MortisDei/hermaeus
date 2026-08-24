@@ -22,7 +22,8 @@ predates Projects.
    currently-selected Agent workspace (its folder root and accumulated
    workspace-memory notes come along).
 3. Set a folder root, default model, default RAG dataset, default system
-   prompt, and a color.
+   prompt, and a color. The State section is optional: edit the current
+   objective, milestone, status, and structured continuity items directly.
 4. Switch projects any time from the same switcher. New conversations
    started while a project is active inherit its defaults; the Agent panel
    pre-fills (never auto-selects) the project's folder root as the
@@ -37,6 +38,19 @@ Project(
   Color,
   CreatedAt, UpdatedAt, LastOpenedAt, IsArchived)
 ```
+
+Project State is a separate user-owned record with its own revision. It has
+three singular fields, objective, milestone, and status, plus ordered items of
+these fixed kinds: `AcceptedDecision`, `RejectedApproach`, `Constraint`,
+`UnresolvedQuestion`, `ImportantArtifact`, and `NextAction`. Each item retains
+its origin and optional source/artifact locator. It is not Memory, Recall, RAG,
+conversation history, Agent task state, or a graph.
+
+Pending proposed revisions appear in the Project editor review queue. Inspect
+and edit the field/item diff before accepting, or reject it with an optional
+reason. A proposal never changes accepted state by itself, and a proposal based
+on an old revision is refused rather than merged silently. There is no
+auto-accept setting.
 
 `FolderRoot` is validated the same way every other user-supplied root path in
 Hermaeus is: normalized, traversal rejected, symlinks rejected
@@ -53,10 +67,14 @@ a free hex value, so the switcher's color dots stay legible in both themes.
   folder.
 - **Archiving** hides a project from the switcher's default list without
   deleting it or touching anything it is bound to.
-- **Deleting a project** does not delete its conversations, datasets, or
-  tasks; they keep their project id pointing at a project that no longer
-  resolves, the same as any other soft foreign-key reference in Hermaeus's
-  local-first stores.
+- **Deleting a project** removes that project's State and proposal queue. It
+  keeps conversations, datasets, tasks, and memories: live conversation and
+  dataset bindings are cleared, project memories become global, and historical
+  Agent task files remain intact.
+- **Accepted context only.** A project-bound Chat conversation or Agent task
+  may receive a bounded accepted State block. Its context receipt names Project
+  State and the exact revision separately. Pending and rejected proposals are
+  never injected. Empty State changes no context-construction bytes.
 - A DI-singleton project list loads once per app session; the switcher
   reloads from that same live list rather than re-querying on every open, so
   a rename or new project is reflected without a restart as long as it went

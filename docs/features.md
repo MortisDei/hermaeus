@@ -83,7 +83,7 @@
   you navigated away from. The prompt sent to the model, token accounting, memory
   extraction and export all follow the version you are currently looking at.
 - **One context receipt per answer.** Everything injected into a turn - memories,
-  Recall hits, knowledge excerpts - collapses behind a single line reading, for
+  Recall hits, knowledge excerpts, and accepted Project State - collapses behind a single line reading, for
   example, `Context: 3 memories, 2 recall hits, 4 knowledge excerpts`, expandable
   to the individual items. Collapsed means nothing from any source is shown.
   Inline `[1]`, `[2]` citation markers in the answer itself are unaffected.
@@ -1300,7 +1300,12 @@ workspace, and RAG's default dataset follows. Conversations, RAG datasets,
 and agent tasks each carry an optional project id so they can be scoped and
 filtered later. A project can be created empty, from an existing
 conversation, or by adopting an already-selected Agent workspace (including
-its accumulated workspace-memory notes). See [docs/projects.md](projects.md)
+its accumulated workspace-memory notes). Its editor also owns a separate,
+revisioned Project State: directly editable objective/milestone/status and six
+structured item kinds, plus an explicit proposal queue with provenance,
+edit-before-accept, rejection, and stale-revision refusal. Only accepted,
+bounded State reaches project-bound Chat or Agent context; the receipt names
+its revision and pending proposals never enter the prompt. See [docs/projects.md](projects.md)
 for the full model and switcher/editor behaviour.
 
 This absorbs and supersedes the per-workspace "root folder / preferred

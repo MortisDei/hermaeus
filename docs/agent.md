@@ -105,6 +105,9 @@ The panel is a fixed status line, a pinned decision strip, and four tabs.
 - **Run.** Goal, workspace, model and RAG dataset; the Start Agent button; the
   run outcome for a finished task; the agent's own response; sub-tasks and
   plan; and the task state, context receipt and retrieved context, collapsed.
+  A project-bound task receives a separate bounded `Project State` receipt
+  section only when accepted State exists. It names the accepted revision;
+  pending and rejected proposals are excluded.
 - **Changes.** The draft patch queue and the run ledger (files, before/after,
   commands, approvals, and Rewind run). Carries a count when patches are
   waiting on you; no other tab has a badge.

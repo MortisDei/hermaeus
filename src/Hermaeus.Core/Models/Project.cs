@@ -47,6 +47,96 @@ public class Project
     };
 }
 
+public enum ProjectStateItemKind
+{
+    AcceptedDecision,
+    RejectedApproach,
+    Constraint,
+    UnresolvedQuestion,
+    ImportantArtifact,
+    NextAction
+}
+
+public enum ProjectStateProposalStatus
+{
+    Pending,
+    Accepted,
+    Rejected
+}
+
+/// <summary>User-owned continuity data for a project. This is deliberately
+/// separate from memories, Recall, RAG, conversations, and Agent task state.</summary>
+public sealed class ProjectState
+{
+    public string ProjectId { get; set; } = string.Empty;
+    public long Revision { get; set; }
+    public string CurrentObjective { get; set; } = string.Empty;
+    public string Milestone { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public List<ProjectStateItem> Items { get; set; } = [];
+    public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
+    public EvidenceOrigin UpdatedByOrigin { get; set; } = EvidenceOrigin.UserProvided;
+
+    public ProjectState Clone() => new()
+    {
+        ProjectId = ProjectId,
+        Revision = Revision,
+        CurrentObjective = CurrentObjective,
+        Milestone = Milestone,
+        Status = Status,
+        Items = Items.Select(item => item.Clone()).ToList(),
+        UpdatedAtUtc = UpdatedAtUtc,
+        UpdatedByOrigin = UpdatedByOrigin
+    };
+}
+
+public sealed class ProjectStateItem
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public ProjectStateItemKind Kind { get; set; }
+    public string Text { get; set; } = string.Empty;
+    public string? ArtifactLocator { get; set; }
+    public int Order { get; set; }
+    public EvidenceOrigin Origin { get; set; } = EvidenceOrigin.UserProvided;
+    public SourceReference? Source { get; set; }
+    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
+
+    public ProjectStateItem Clone() => new()
+    {
+        Id = Id,
+        Kind = Kind,
+        Text = Text,
+        ArtifactLocator = ArtifactLocator,
+        Order = Order,
+        Origin = Origin,
+        Source = Source,
+        CreatedAtUtc = CreatedAtUtc,
+        UpdatedAtUtc = UpdatedAtUtc
+    };
+}
+
+public sealed class ProjectStateProposal
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string ProjectId { get; set; } = string.Empty;
+    public long BaseRevision { get; set; }
+    public ProjectState ProposedState { get; set; } = new();
+    public EvidenceOrigin Origin { get; set; } = EvidenceOrigin.ModelInference;
+    public SourceReference? Source { get; set; }
+    public ProjectStateProposalStatus Status { get; set; } = ProjectStateProposalStatus.Pending;
+    public string RejectionReason { get; set; } = string.Empty;
+    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
+}
+
+public sealed class ProjectStateRevisionConflictException(long expected, long actual)
+    : InvalidOperationException($"Project State revision changed from {expected} to {actual}.")
+{
+    public long ExpectedRevision { get; } = expected;
+    public long ActualRevision { get; } = actual;
+}
+
 /// <summary>
 /// The small, fixed set of brand-palette accent keys (docs/mascot.md "Brand
 /// colour palette") a project's colour dot may use. Never a raw hex string:

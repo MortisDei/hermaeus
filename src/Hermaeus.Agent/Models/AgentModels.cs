@@ -547,6 +547,9 @@ public sealed class AgentContextPack
     public List<AgentRetrievedItem> RetrievedMemory { get; set; } = [];
     public List<AgentRetrievedItem> RetrievedFiles { get; set; } = [];
     public List<AgentRetrievedItem> ProjectInstructions { get; set; } = [];
+    /// <summary>Accepted, bounded, user-owned Project State. Empty when the task
+    /// is not project-bound or the project has no accepted state.</summary>
+    public List<AgentRetrievedItem> ProjectState { get; set; } = [];
     public List<AgentToolResult> ToolResults { get; set; } = [];
     /// <summary>
     /// Budgeted replay of the task's persisted step transcript (assistant
