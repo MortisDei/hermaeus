@@ -450,10 +450,16 @@ public sealed class AgentDraftPatch
 }
 
 /// <summary>Outcome of attempting to revert an applied patch.</summary>
-public sealed record AgentRevertResult(bool Reverted, string Message);
+public sealed record AgentRevertResult(bool Reverted, string Message)
+{
+    public NormalizedToolOutcome NormalizedOutcome { get; init; } = new();
+}
 
 /// <summary>One file's outcome within a whole-run Task Rewind (r23 1.3).</summary>
-public sealed record AgentTaskRevertFileOutcome(string RelativePath, bool Reverted, string Message);
+public sealed record AgentTaskRevertFileOutcome(string RelativePath, bool Reverted, string Message)
+{
+    public NormalizedToolOutcome NormalizedOutcome { get; init; } = new();
+}
 
 /// <summary>
 /// Outcome of AgentPatchReviewService.RevertTaskAsync: a truthful partial-success
@@ -464,6 +470,7 @@ public sealed record AgentTaskRevertResult(IReadOnlyList<AgentTaskRevertFileOutc
 {
     public int RevertedCount => Files.Count(f => f.Reverted);
     public int TotalCount => Files.Count;
+    public NormalizedToolOutcome NormalizedOutcome { get; init; } = new();
 }
 
 /// <summary>
@@ -606,6 +613,13 @@ public sealed class AgentToolResult
     /// <summary>True only when run_command hit its 5-minute timeout and was killed; ExitCode is meaningless then.</summary>
     public bool TimedOut { get; set; }
 
+    /// <summary>
+    /// Deterministic semantic interpretation of the raw fields above. Missing
+    /// pre-R31 JSON keeps the legacy Unknown default and is never guessed from
+    /// ResultSummary text.
+    /// </summary>
+    public NormalizedToolOutcome NormalizedOutcome { get; set; } = new();
+
 }
 
 public sealed class AgentPendingToolAction
@@ -717,7 +731,8 @@ public sealed record AgentTranscriptEntry(
     string Content,
     DateTime Timestamp,
     string? ArgumentsCanonical = null,
-    bool? ReplaySafe = null);
+    bool? ReplaySafe = null,
+    NormalizedToolOutcome? NormalizedOutcome = null);
 
 public sealed record AgentStepResult(
     AgentTaskState State,
@@ -757,7 +772,9 @@ public sealed record AgentFileReadResult(
     /// Lines returned in this result. With <see cref="LineOffset"/> this is
     /// exactly what the model needs to ask for the next slice.
     /// </summary>
-    int? LineCount = null)
+    int? LineCount = null,
+    /// <summary>Meaningful only for mutation tools; reads leave the default.</summary>
+    bool Changed = true)
 {
     /// <summary>
     /// What to do about a truncated read, in the result itself. A bare

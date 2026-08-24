@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Hermaeus.Core.Services;
 
 namespace Hermaeus.Mcp;
 
@@ -130,6 +131,9 @@ public sealed class McpClient : IAsyncDisposable
     }
 
     public async Task<string> CallToolAsync(string toolName, IReadOnlyDictionary<string, object?> arguments, CancellationToken ct = default)
+        => (await CallToolDetailedAsync(toolName, arguments, ct)).Content;
+
+    public async Task<McpToolExecutionResult> CallToolDetailedAsync(string toolName, IReadOnlyDictionary<string, object?> arguments, CancellationToken ct = default)
     {
         var argsNode = new JsonObject();
         foreach (var (key, value) in arguments)
@@ -142,15 +146,19 @@ public sealed class McpClient : IAsyncDisposable
         };
 
         var result = await SendRequestAsync("tools/call", callParams, ct);
+        bool? isError = result.TryGetProperty("isError", out var errorElement)
+            && errorElement.ValueKind is JsonValueKind.True or JsonValueKind.False
+                ? errorElement.GetBoolean()
+                : null;
         if (result.TryGetProperty("content", out var content) && content.ValueKind == JsonValueKind.Array)
         {
             var texts = content.EnumerateArray()
                 .Where(part => part.TryGetProperty("type", out var t) && t.GetString() == "text")
                 .Select(part => part.TryGetProperty("text", out var txt) ? txt.GetString() ?? string.Empty : string.Empty);
-            return string.Join("\n", texts);
+            return new McpToolExecutionResult(string.Join("\n", texts), isError);
         }
 
-        return result.GetRawText();
+        return new McpToolExecutionResult(result.GetRawText(), isError);
     }
 
     /// <summary>

@@ -554,7 +554,10 @@ public sealed class AgentService : IAgentService
                     {
                         Tool = nextTool,
                         Arguments = response.NextAction.Arguments,
-                        ResultSummary = "The tool required approval, but no local executor is registered for it."
+                        ResultSummary = "The tool required approval, but no local executor is registered for it.",
+                        NormalizedOutcome = AgentToolOutcomeNormalizer.Normalize(nextTool,
+                            new AgentToolOutcomeEvidence(AgentToolOutcomeSignal.Unavailable,
+                                Detail: "No registered executor exists for the requested tool."))
                     });
                 }
             }
@@ -570,7 +573,19 @@ public sealed class AgentService : IAgentService
                     ["disposition"] = decision.Disposition.ToString(),
                     ["risk_level"] = decision.RiskLevel.ToString()
                 },
-                ResultSummary = decision.Reason
+                ResultSummary = decision.Reason,
+                NormalizedOutcome = AgentToolOutcomeNormalizer.Normalize("safety_gate",
+                    new AgentToolOutcomeEvidence(decision.Disposition switch
+                    {
+                        AgentToolDisposition.Allowed => AgentToolOutcomeSignal.Completed,
+                        AgentToolDisposition.RequiresApproval => AgentToolOutcomeSignal.ApprovalRequired,
+                        _ => AgentToolOutcomeSignal.PolicyBlocked
+                    }, Detail: decision.Disposition switch
+                    {
+                        AgentToolDisposition.Allowed => "The deterministic safety gate allowed the requested action.",
+                        AgentToolDisposition.RequiresApproval => "The deterministic safety gate requires user approval before execution.",
+                        _ => "The deterministic safety gate refused the requested action."
+                    }))
             });
 
             if (decision.Disposition == AgentToolDisposition.Allowed)
@@ -642,9 +657,18 @@ public sealed class AgentService : IAgentService
                     state.FileReadCount = toolOptions.ReadBudget!.UsedReads;
                     state.ToolResults.Add(toolResult);
                     executedToolResult = toolResult;
+                    if (toolResult.NormalizedOutcome.Outcome == NormalizedOutcome.Cancelled && ct.IsCancellationRequested)
+                    {
+                        state.Status = AgentTaskStatus.WaitingForUser;
+                        await _store.AppendTranscriptEntryAsync(taskId,
+                            AgentTranscriptCompactor.FromToolResult(state.StepCount, toolResult, DateTime.UtcNow), CancellationToken.None);
+                        await _store.SaveAsync(state, CancellationToken.None);
+                        ct.ThrowIfCancellationRequested();
+                    }
                     state.Status = AgentTaskStatus.Running;
                     response.UserMessage = $"Executed {nextTool}.";
-                    await RecordLessonEvidenceForToolAsync(state, options, nextTool, response.NextAction.Arguments, toolResult.ResultSummary, success: true, ct, toolResult.ExitCode, toolResult.TimedOut);
+                    await RecordLessonEvidenceForToolAsync(state, options, nextTool, response.NextAction.Arguments,
+                        toolResult.ResultSummary, IsSuccessfulOutcome(toolResult), ct, toolResult.ExitCode, toolResult.TimedOut);
                 }
                 else
                 {
@@ -653,7 +677,10 @@ public sealed class AgentService : IAgentService
                     {
                         Tool = nextTool,
                         Arguments = response.NextAction.Arguments,
-                        ResultSummary = "Supported policy allowed the tool, but no local executor is registered for it."
+                        ResultSummary = "Supported policy allowed the tool, but no local executor is registered for it.",
+                        NormalizedOutcome = AgentToolOutcomeNormalizer.Normalize(nextTool,
+                            new AgentToolOutcomeEvidence(AgentToolOutcomeSignal.Unavailable,
+                                Detail: "No registered executor exists for the requested tool."))
                     });
                 }
             }
@@ -1121,11 +1148,14 @@ public sealed class AgentService : IAgentService
             // stays waiting_for_review. Rejections do not need this refusal
             // (rejecting the wrong thing executes nothing) - only the trace
             // event above, already written.
-            await _store.AppendLogAsync(taskId, $"approval refused: pending action changed since it was displayed ({pendingAtStart!.ToolName})", ct);
+            state.ToolResults.Add(BuildApprovalToolResult(pendingAtStart!.ToolName, approved: true, fingerprintBlocked: true));
+            await _store.SaveAsync(state, ct);
+            await _store.AppendLogAsync(taskId, $"approval refused: pending action changed since it was displayed ({pendingAtStart.ToolName})", ct);
             return new AgentApprovalResult(false, "The pending action changed since it was displayed. Review it again.");
         }
 
         state.ApprovalHistory.Add(new AgentApprovalRecord(action, approved, DateTime.UtcNow));
+        state.ToolResults.Add(BuildApprovalToolResult(state.PendingToolAction!.ToolName, approved, fingerprintBlocked: false));
         if (approved && state.PendingToolAction is not null && string.Equals(state.PendingToolAction.ToolName, "plan_subtasks", StringComparison.OrdinalIgnoreCase))
         {
             await ApplyPlanSubtasksApprovalAsync(state, state.PendingToolAction, ct);
@@ -1177,8 +1207,17 @@ public sealed class AgentService : IAgentService
             }
 
             state.ToolResults.Add(result);
+            if (result.NormalizedOutcome.Outcome == NormalizedOutcome.Cancelled && ct.IsCancellationRequested)
+            {
+                state.Status = AgentTaskStatus.WaitingForUser;
+                await _store.AppendTranscriptEntryAsync(taskId,
+                    AgentTranscriptCompactor.FromToolResult(state.StepCount, result, DateTime.UtcNow), CancellationToken.None);
+                await _store.SaveAsync(state, CancellationToken.None);
+                ct.ThrowIfCancellationRequested();
+            }
             RememberCommandApprovalIfApplicable(state, pending);
-            await RecordLessonEvidenceForToolAsync(state, effectiveOptions, pending.ToolName, pending.Arguments, result.ResultSummary, success: true, ct, result.ExitCode, result.TimedOut);
+            await RecordLessonEvidenceForToolAsync(state, effectiveOptions, pending.ToolName, pending.Arguments,
+                result.ResultSummary, IsSuccessfulOutcome(result), ct, result.ExitCode, result.TimedOut);
             await RecordApprovalApprovedCounterEvidenceAsync(state, effectiveOptions, pending.ToolName, ct);
             // The approved tool's result is what the model most needs to see
             // next (it is why the step paused), so it belongs in the
@@ -2227,27 +2266,51 @@ public sealed class AgentService : IAgentService
             // RunStepAsync closes the common case, this closes the race.
             const string duplicatePlanError = "This task already has a sub-task plan; the proposed plan was rejected.";
             state.Status = AgentTaskStatus.WaitingForUser;
-            state.ToolResults.Add(new AgentToolResult { Tool = "plan_subtasks", Arguments = argumentsCopy, ResultSummary = duplicatePlanError });
-            await _store.AppendTranscriptEntryAsync(state.TaskId, new AgentTranscriptEntry(
-                state.StepCount, "tool", "plan_subtasks", duplicatePlanError, DateTime.UtcNow), ct);
+            state.ToolResults.Add(new AgentToolResult
+            {
+                Tool = "plan_subtasks",
+                Arguments = argumentsCopy,
+                ResultSummary = duplicatePlanError,
+                NormalizedOutcome = AgentToolOutcomeNormalizer.Normalize("plan_subtasks",
+                    new AgentToolOutcomeEvidence(AgentToolOutcomeSignal.PolicyBlocked,
+                        Detail: "A deterministic duplicate-plan guard refused the proposed plan."))
+            });
+            await _store.AppendTranscriptEntryAsync(state.TaskId,
+                AgentTranscriptCompactor.FromToolResult(state.StepCount, state.ToolResults[^1], DateTime.UtcNow), ct);
             return;
         }
 
         if (!TryParsePlanSubtasks(pending.Arguments, out var specs, out var error))
         {
             state.Status = AgentTaskStatus.WaitingForUser;
-            state.ToolResults.Add(new AgentToolResult { Tool = "plan_subtasks", Arguments = argumentsCopy, ResultSummary = error });
-            await _store.AppendTranscriptEntryAsync(state.TaskId, new AgentTranscriptEntry(
-                state.StepCount, "tool", "plan_subtasks", error, DateTime.UtcNow), ct);
+            state.ToolResults.Add(new AgentToolResult
+            {
+                Tool = "plan_subtasks",
+                Arguments = argumentsCopy,
+                ResultSummary = error,
+                NormalizedOutcome = AgentToolOutcomeNormalizer.Normalize("plan_subtasks",
+                    new AgentToolOutcomeEvidence(AgentToolOutcomeSignal.PolicyBlocked,
+                        Detail: "The proposed plan failed deterministic validation."))
+            });
+            await _store.AppendTranscriptEntryAsync(state.TaskId,
+                AgentTranscriptCompactor.FromToolResult(state.StepCount, state.ToolResults[^1], DateTime.UtcNow), ct);
             return;
         }
 
         state.SubTaskPlan = specs;
         state.Status = AgentTaskStatus.Running;
         var summary = $"Approved sub-task plan ({specs.Count}): " + string.Join("; ", specs.Select(s => $"[{s.ProfileName}] {s.Goal}"));
-        state.ToolResults.Add(new AgentToolResult { Tool = "plan_subtasks", Arguments = argumentsCopy, ResultSummary = summary });
-        await _store.AppendTranscriptEntryAsync(state.TaskId, new AgentTranscriptEntry(
-            state.StepCount, "tool", "plan_subtasks", summary, DateTime.UtcNow), ct);
+        state.ToolResults.Add(new AgentToolResult
+        {
+            Tool = "plan_subtasks",
+            Arguments = argumentsCopy,
+            ResultSummary = summary,
+            NormalizedOutcome = AgentToolOutcomeNormalizer.Normalize("plan_subtasks",
+                new AgentToolOutcomeEvidence(AgentToolOutcomeSignal.Completed,
+                    Detail: "The approved sub-task plan was persisted."))
+        });
+        await _store.AppendTranscriptEntryAsync(state.TaskId,
+            AgentTranscriptCompactor.FromToolResult(state.StepCount, state.ToolResults[^1], DateTime.UtcNow), ct);
     }
 
     /// <summary>
@@ -2328,6 +2391,11 @@ public sealed class AgentService : IAgentService
             }
         }
 
+        var changed = state.Plan.Count != plan.Count
+            || state.Plan.Where((current, index) =>
+                    !string.Equals(current.Description, plan[index].Description, StringComparison.Ordinal)
+                    || current.Status != plan[index].Status)
+                .Any();
         state.Plan = plan;
         return new AgentToolResult
         {
@@ -2336,8 +2404,39 @@ public sealed class AgentService : IAgentService
             ResultSummary = plan.Count == 0
                 ? "Plan cleared."
                 : string.Join("; ", plan.Select(p => $"[{p.Status}] {p.Description}")),
+            NormalizedOutcome = AgentToolOutcomeNormalizer.Normalize("set_plan",
+                new AgentToolOutcomeEvidence(changed ? AgentToolOutcomeSignal.Completed : AgentToolOutcomeSignal.NoEffect,
+                    Detail: changed ? "The task plan was replaced." : "The submitted plan matched the persisted plan."))
         };
     }
+
+    private static AgentToolResult BuildApprovalToolResult(string toolName, bool approved, bool fingerprintBlocked)
+    {
+        var signal = fingerprintBlocked
+            ? AgentToolOutcomeSignal.PolicyBlocked
+            : approved
+                ? AgentToolOutcomeSignal.Completed
+                : AgentToolOutcomeSignal.UserDenied;
+        return new AgentToolResult
+        {
+            Tool = "approval",
+            Arguments = new Dictionary<string, object?> { ["tool_name"] = toolName },
+            ResultSummary = fingerprintBlocked
+                ? "Approval was refused because the pending action fingerprint changed."
+                : approved
+                    ? $"User approved {toolName}; execution outcome is recorded separately."
+                    : $"User rejected {toolName}.",
+            NormalizedOutcome = AgentToolOutcomeNormalizer.Normalize("approval",
+                new AgentToolOutcomeEvidence(signal, Detail: fingerprintBlocked
+                    ? "The approval fingerprint guard refused the stale decision."
+                    : approved
+                        ? "The user approval decision was recorded; it does not claim execution success."
+                        : "The user explicitly rejected the requested action."))
+        };
+    }
+
+    private static bool IsSuccessfulOutcome(AgentToolResult result) =>
+        result.NormalizedOutcome.Outcome is NormalizedOutcome.Succeeded or NormalizedOutcome.NoEffect;
 
     private static string BuildSummary(AgentTaskState state, AgentPlannerResponse response)
     {

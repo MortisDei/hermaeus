@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Text;
 using System.Text.Json;
 using Hermaeus.Agent.Models;
+using Hermaeus.Core.Models;
 
 namespace Hermaeus.Agent.Services;
 
@@ -63,7 +64,8 @@ public static class AgentTranscriptCompactor
     /// compacted because their arguments and outcome cannot be proven equal.
     /// </summary>
     public static AgentTranscriptEntry FromToolResult(int step, AgentToolResult result, DateTime timestamp) =>
-        new(step, "tool", result.Tool, result.ResultSummary, timestamp, CanonicalizeArguments(result.Arguments), IsReplaySafe(result));
+        new(step, "tool", result.Tool, result.ResultSummary, timestamp, CanonicalizeArguments(result.Arguments),
+            IsReplaySafe(result), result.NormalizedOutcome);
 
     public static string CanonicalizeArguments(IReadOnlyDictionary<string, object?> arguments)
     {
@@ -89,6 +91,7 @@ public static class AgentTranscriptCompactor
 
     private static bool IsReplaySafe(AgentToolResult result) =>
         result.Source is not null
+        && result.NormalizedOutcome.Outcome == NormalizedOutcome.Succeeded
         && !result.TimedOut
         && (result.ExitCode is not { } exitCode || exitCode == 0)
         && !result.ResultSummary.Contains("[truncated:", StringComparison.Ordinal)

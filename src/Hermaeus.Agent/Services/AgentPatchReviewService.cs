@@ -158,7 +158,10 @@ public sealed class AgentPatchReviewService
                 var latest = patches[^1];
                 var result = await _workspaceTools.RevertAppliedPatchAsync(
                     taskOptions, group.Key, first.PreImageContent, latest.AppliedContent, ct);
-                outcomes.Add(new AgentTaskRevertFileOutcome(group.Key, result.Reverted, result.Message));
+                outcomes.Add(new AgentTaskRevertFileOutcome(group.Key, result.Reverted, result.Message)
+                {
+                    NormalizedOutcome = result.NormalizedOutcome
+                });
 
                 if (result.Reverted)
                 {
@@ -183,7 +186,19 @@ public sealed class AgentPatchReviewService
             logged_at = DateTime.UtcNow
         }, ct);
 
-        return new AgentTaskRevertResult(outcomes, summary);
+        var aggregateSignal = outcomes.Count switch
+        {
+            0 => AgentToolOutcomeSignal.NoEffect,
+            _ when outcomes.All(o => o.Reverted) => AgentToolOutcomeSignal.Completed,
+            _ when outcomes.Any(o => o.Reverted) => AgentToolOutcomeSignal.Partial,
+            _ => AgentToolOutcomeSignal.PolicyBlocked
+        };
+        return new AgentTaskRevertResult(outcomes, summary)
+        {
+            NormalizedOutcome = AgentToolOutcomeNormalizer.Normalize("apply_draft_patch",
+                new AgentToolOutcomeEvidence(aggregateSignal,
+                    Detail: "The whole-run rewind outcome was derived from its per-file results."))
+        };
     }
 
     private static string BuildSummary(IReadOnlyList<AgentTaskRevertFileOutcome> outcomes)

@@ -23,7 +23,7 @@ public sealed class McpToolBridge : IMcpToolBridge, IAsyncDisposable
         return config is not null && IsToolAllowed(config, remoteToolName);
     }
 
-    public async Task<string> ExecuteAsync(string toolName, Dictionary<string, object?> arguments, CancellationToken ct = default)
+    public async Task<McpToolExecutionResult> ExecuteAsync(string toolName, Dictionary<string, object?> arguments, CancellationToken ct = default)
     {
         if (!TryParse(toolName, out var serverId, out var remoteToolName))
             throw new InvalidOperationException($"'{toolName}' is not a recognized mcp: tool reference.");
@@ -43,7 +43,7 @@ public sealed class McpToolBridge : IMcpToolBridge, IAsyncDisposable
         if (!session.Tools.Any(t => string.Equals(t.Name, remoteToolName, StringComparison.Ordinal)))
             throw new InvalidOperationException($"MCP server '{config.Name}' does not declare a tool named '{remoteToolName}'.");
 
-        return await session.Client.CallToolAsync(remoteToolName, arguments, ct);
+        return await session.Client.CallToolDetailedAsync(remoteToolName, arguments, ct);
     }
 
     private static bool IsToolAllowed(McpServerConfig config, string toolName) =>

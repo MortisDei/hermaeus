@@ -242,6 +242,10 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
         var full = ResolveSafePath(root, relativePath);
         EnforceWritePolicy(options, ToRelative(root, full));
         var content = proposedContent.Replace("\r\n", "\n").Replace('\r', '\n');
+        var changed = !File.Exists(full) || !string.Equals(await File.ReadAllTextAsync(full, ct), content, StringComparison.Ordinal);
+
+        if (!changed)
+            return new AgentFileReadResult(ToRelative(root, full), content, false, Changed: false);
 
         // This is the one write path that touches files the user did not ask
         // Hermaeus to back up (their own source code), so it gets the same
@@ -249,7 +253,7 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
         // plain WriteAllText that a crash mid-write could truncate
         // (docs/review/01-code-audit.md P2-5).
         await AtomicFileWriter.WriteAllTextAsync(full, content, ct);
-        return new AgentFileReadResult(ToRelative(root, full), content, false);
+        return new AgentFileReadResult(ToRelative(root, full), content, false, Changed: true);
     }
 
     public string DraftPatch(string relativePath, string rationale, string proposedContent)
@@ -277,8 +281,10 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
 
         var index = content.IndexOf(oldString, StringComparison.Ordinal);
         var updated = string.Concat(content.AsSpan(0, index), newString, content.AsSpan(index + oldString.Length));
+        if (string.Equals(updated, content, StringComparison.Ordinal))
+            return new AgentFileReadResult(ToRelative(root, full), content, false, Changed: false);
         await AtomicFileWriter.WriteAllTextAsync(full, updated, ct);
-        return new AgentFileReadResult(ToRelative(root, full), updated, false);
+        return new AgentFileReadResult(ToRelative(root, full), updated, false, Changed: true);
     }
 
     public async Task<AgentFileReadResult> CreateFileAsync(AgentWorkspaceOptions options, string relativePath, string content, CancellationToken ct = default)
@@ -294,7 +300,7 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
             Directory.CreateDirectory(directory);
 
         await AtomicFileWriter.WriteAllTextAsync(full, content, ct);
-        return new AgentFileReadResult(ToRelative(root, full), content, false);
+        return new AgentFileReadResult(ToRelative(root, full), content, false, Changed: true);
     }
 
     public async Task<string?> ReadFileForRevertAsync(AgentWorkspaceOptions options, string relativePath, CancellationToken ct = default)
@@ -316,14 +322,24 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
         // (r23 3.2 - one code path, not a second implementation).
         var writeVerdict = WorkspacePolicyEvaluator.EvaluateWrite(options.Policy, ToRelative(root, full));
         if (!writeVerdict.Allowed)
-            return new AgentRevertResult(false, $"revert blocked by workspace policy: {writeVerdict.Reason}");
+            return new AgentRevertResult(false, $"revert blocked by workspace policy: {writeVerdict.Reason}")
+            {
+                NormalizedOutcome = AgentToolOutcomeNormalizer.Normalize("apply_draft_patch",
+                    new AgentToolOutcomeEvidence(AgentToolOutcomeSignal.PolicyBlocked,
+                        Detail: "Workspace policy refused the revert."))
+            };
 
         var currentContent = File.Exists(full) ? await File.ReadAllTextAsync(full, ct) : null;
         if (currentContent != expectedCurrentContent)
         {
             return new AgentRevertResult(
                 Reverted: false,
-                "The file changed again after this patch was applied; revert refused to avoid overwriting the newer content.");
+                "The file changed again after this patch was applied; revert refused to avoid overwriting the newer content.")
+            {
+                NormalizedOutcome = AgentToolOutcomeNormalizer.Normalize("apply_draft_patch",
+                    new AgentToolOutcomeEvidence(AgentToolOutcomeSignal.PolicyBlocked,
+                        Detail: "The stale-content guard refused the revert."))
+            };
         }
 
         if (preImageContent is null)
@@ -336,7 +352,12 @@ public sealed class AgentWorkspaceTools : IAgentWorkspaceTools
             await AtomicFileWriter.WriteAllTextAsync(full, preImageContent, ct);
         }
 
-        return new AgentRevertResult(Reverted: true, Message: string.Empty);
+        return new AgentRevertResult(Reverted: true, Message: string.Empty)
+        {
+            NormalizedOutcome = AgentToolOutcomeNormalizer.Normalize("apply_draft_patch",
+                new AgentToolOutcomeEvidence(AgentToolOutcomeSignal.Completed,
+                    Detail: "The requested file was restored to its pre-image."))
+        };
     }
 
     /// <summary>

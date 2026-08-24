@@ -11,6 +11,14 @@ limit.
 
 ## [0.37.0-alpha] - 2026-08-20
 
+### Added
+
+- Agent tool, MCP, approval, safety-gate, and rewind records now retain a
+  deterministic provider-neutral outcome beside their raw evidence. Historical
+  tasks remain loadable as `Unknown`, and the five evidence origins now remain
+  distinct through JSON persistence while legacy `Inferred` values load as
+  model inference.
+
 ### Fixed
 
 - Windows packaging now initializes MSVC and the Windows SDK through Visual

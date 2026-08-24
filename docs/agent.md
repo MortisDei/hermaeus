@@ -66,6 +66,17 @@ explicit user approval before it executes.
   entries without the required provenance stay separate. Three or more
   unchanged successful calls add an informational context-receipt diagnostic;
   it never blocks a call or changes task status or loop behavior.
+- Every new tool, approval, safety-gate, and rewind result carries a
+  provider-neutral normalized outcome alongside its existing raw summary,
+  exit code, timeout, patch detail, and provenance. Outcomes distinguish
+  success, partial success, no effect, unavailable dependencies, user denial,
+  deterministic blocking, failure, cancellation, timeout, and unknown. They
+  are derived only from executor or gate evidence, never from model-authored
+  result prose. Pre-R31 task files load as `Unknown` without reinterpretation.
+- Model-facing replay includes that normalized label plus the bounded raw
+  summary. Only deterministically successful results are replay-safe; outcome
+  labels never grant authority or bypass an approval, workspace, token, or
+  destructive-action guard.
 - Surfaces relevant lessons from the self-learning store (see below).
 - Classifies risky actions before execution.
 
