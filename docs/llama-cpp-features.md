@@ -58,6 +58,9 @@ or `Unknown`, an evidence code and explanation, the exact runtime identity, an
 optional model identity, bounded parsed parameters, and observation time.
 Unknown future ids survive cache and JSON round trips without adding settings
 or model properties. Raw help text is never stored in the parameter map.
+The selected help surface also contributes exact advertised KV cache type ids;
+GPU Fit will not apply low-bit byte representations until the matching type is
+positively advertised.
 
 The runtime identity includes the executable SHA256, size, modification time,
 parsed version/build/compiler/backend facts when available, and managed asset

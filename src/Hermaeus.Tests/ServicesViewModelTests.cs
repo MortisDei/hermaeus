@@ -92,6 +92,31 @@ public sealed class ServicesViewModelTests
     }
 
     [Fact]
+    public async Task Gpu_fit_breakdown_recomputes_for_unsaved_what_if_controls()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var modelPath = WriteLlamaGgufFixture(temp);
+        var hw = new HardwareProfile(64L * 1024 * 1024 * 1024, 8L * 1024 * 1024 * 1024, "Test GPU");
+        var config = new ServerConfig { Name = "Chat", ModelPath = modelPath, ContextSize = 8192, GpuLayers = -1 };
+        var vm = new ServerProcessViewModel(
+            config,
+            settings, new RedactionService(), new TrustService(), new FakeToasts(), new RuntimeLogService(settings),
+            hardwareProfile: hw);
+        await Task.Delay(200);
+
+        Assert.True(vm.HasGpuFitBreakdown);
+        Assert.Contains("KV key cache", vm.GpuFitBreakdown, StringComparison.Ordinal);
+        var before = vm.GpuFitBreakdown;
+
+        vm.ContextSize = 65536;
+
+        Assert.NotEqual(before, vm.GpuFitBreakdown);
+        Assert.Contains("65,536", vm.GpuFitBreakdown, StringComparison.Ordinal);
+        Assert.Equal(8192, config.ContextSize);
+    }
+
+    [Fact]
     public async Task Context_fit_falls_back_to_the_flat_threshold_when_metadata_is_unavailable()
     {
         using var temp = new TempDir();

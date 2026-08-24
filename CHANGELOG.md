@@ -26,6 +26,11 @@ limit.
   exact runtime and optional model identities. New benchmark evidence also
   carries a path-free v2 runtime/model/hardware/configuration fingerprint while
   historical v1 fingerprints and capability caches remain readable.
+- GPU Fit now exposes a deterministic weights, separate K/V, runtime overhead,
+  companion, and policy-headroom breakdown in Services. A shared runtime
+  telemetry source records process-scoped RAM and honest Unknown GPU evidence,
+  and fingerprint-matched observations can be stored and compared without
+  modifying the analytical prediction.
 
 ### Changed
 

@@ -300,6 +300,21 @@ Example:
 
 ### Resource Sampling Notes
 
+GPU Fit and Lab use one shared runtime telemetry contract. A sample records its
+metric, value or `Unknown`, source, trust state, timestamp, runtime identity,
+and process-instance boundary. The current platform source provides the
+matching runtime process working set. Per-process GPU memory remains `Unknown`
+unless a trustworthy runtime or platform counter is available. Optional
+whole-device GPU readings are labelled `DeviceTotal` and are never subtracted
+or attributed to the model.
+
+High-frequency series are bounded. Persisted GPU Fit experience keeps
+min/max/mean/current/count summaries plus exact early, current, and extrema
+samples. Prediction and observation remain separate. Signed discrepancies are
+calculated only for exact v2 fingerprint matches and comparable process-scoped
+or runtime-reported values; incompatible observations are listed separately and
+never rewrite the deterministic formula.
+
 Resource deltas are sampled before, during, and after a run and shown for
 reference. They are best-effort and may miss short-lived spikes on some
 platforms. The model itself runs in a separate process (`llama-server`) or on

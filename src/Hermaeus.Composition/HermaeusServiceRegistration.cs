@@ -41,8 +41,10 @@ public static class HermaeusServiceRegistration
         s.AddSingleton<IDoctorService>(sp => sp.GetRequiredService<DoctorService>());
         s.AddSingleton<PrivacyAuditService>();
         s.AddSingleton<ISystemInfoService, SystemInfoService>();
+        s.AddSingleton<IRuntimeTelemetrySource, ProcessRuntimeTelemetrySource>();
         s.AddSingleton<IEvalStore, SqliteEvalStore>();
         s.AddSingleton<IEmpiricalExperienceStore, SqliteEmpiricalExperienceStore>();
+        s.AddSingleton<GpuFitExperienceService>();
         s.AddSingleton<EvalEngine>();
         s.AddSingleton<BenchmarkService>();
         s.AddSingleton<IBenchmarkInsightsService, BenchmarkInsightsService>();

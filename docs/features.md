@@ -531,6 +531,10 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
 - Experience is descriptive only. It cannot approve an action, widen workspace
   access, change Local API scope, or create a normalized success from model
   prose. See [Lab](lab.md).
+- GPU Fit observations retain an immutable analytical prediction beside a
+  process/runtime observation series. Exact v2 fingerprint matches show signed
+  GPU/RAM discrepancies where the source is genuinely comparable; mismatches
+  and device-total-only GPU readings remain separate and display `Unknown`.
 
 ## Model Management
 
@@ -621,6 +625,13 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
   fit verdict, notes when the configured context exceeds the model's own
   training context. Both are informational only: nothing here edits a value
   or blocks Start.
+- The same card shows an inspectable analytical GPU Fit breakdown for the
+  current unsaved what-if values: model weights, K and V cache separately,
+  runtime/compute overhead, projector or speculative companions, GPU and RAM
+  headroom, placements, and named Unknown components. Context, cache type, GPU
+  layers, slots, CPU-MoE, and companion selections recompute the preview but do
+  not save settings. Low-bit KV byte maths is used only when the selected
+  runtime advertised that exact cache type.
 - Compare Models provides an in-chat practical comparison path for trying the
   same prompt across multiple visible models before choosing one for normal
   conversation.

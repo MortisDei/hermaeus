@@ -25,6 +25,22 @@ public sealed class LocalModelCapabilityServiceTests
     }
 
     [Fact]
+    public void ParseHelp_discovers_only_kv_types_printed_near_cache_type_option()
+    {
+        var facts = LocalModelCapabilityService.ParseHelp("""
+            --cache-type-k TYPE    allowed: f16, q8_0, q4_0, iq4_nl
+            --cache-type-v TYPE    allowed: f16, q8_0, q4_0, iq4_nl
+            elsewhere future_q2
+            """);
+
+        Assert.Equal(["f16", "q8_0", "q4_0", "iq4_nl"], facts.SupportedKvCacheTypes);
+        var capabilities = LocalModelCapabilityService.Combine("model.gguf", null, facts);
+        Assert.Contains(capabilities.Observations!, item =>
+            item.CapabilityId == "runtime.kv.type.q4_0" && item.State == CapabilityState.Available);
+        Assert.DoesNotContain(capabilities.Observations!, item => item.CapabilityId.Contains("future", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Combine_marks_unknown_speculative_mechanisms_as_not_configurable()
     {
         var facts = LocalModelCapabilityService.ParseHelp("--spec-type TYPE: ngram-mod, draft-mtp, eagle3");

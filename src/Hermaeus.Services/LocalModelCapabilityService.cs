@@ -21,7 +21,8 @@ public sealed record LlamaRuntimeCapabilityFacts(
     bool SupportsPromptThreads,
     bool SupportsBackendSampling,
     bool SupportsPerformanceInstrumentation,
-    bool ModelSpecificMtpConfirmed = false);
+    bool ModelSpecificMtpConfirmed = false,
+    IReadOnlyList<string>? SupportedKvCacheTypes = null);
 
 /// <summary>A meaningful change between two capability snapshots, never a raw help-text diff.</summary>
 public sealed record CapabilityDrift(string Capability, string Detail, bool AffectsConfiguredCapability = false);
@@ -64,7 +65,8 @@ public sealed class LocalModelCapabilityService
             // Backend sampling has no stable, installed-runtime contract in
             // this r30 environment. Do not infer it from generic sampler flags.
             false,
-            help.Contains("--perf", StringComparison.Ordinal));
+            help.Contains("--perf", StringComparison.Ordinal),
+            SupportedKvCacheTypes: ParseKvCacheTypes(help));
     }
 
     /// <summary>
@@ -101,6 +103,16 @@ public sealed class LocalModelCapabilityService
                 types.Add(name);
 
         return types.Order(StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    public static IReadOnlyList<string> ParseKvCacheTypes(string help)
+    {
+        if (string.IsNullOrWhiteSpace(help)) return [];
+        var start = help.IndexOf("--cache-type-k", StringComparison.Ordinal);
+        if (start < 0) return [];
+        var section = help[start..Math.Min(help.Length, start + 1400)];
+        var known = new[] { "f32", "f16", "bf16", "q8_0", "q5_0", "q5_1", "q4_0", "q4_1", "iq4_nl" };
+        return known.Where(type => Regex.IsMatch(section, $@"\b{Regex.Escape(type)}\b", RegexOptions.IgnoreCase)).ToArray();
     }
 
     public static async Task<LlamaRuntimeCapabilityFacts> ProbeRuntimeAsync(string executablePath, CancellationToken ct = default) =>
@@ -439,6 +451,13 @@ public sealed class LocalModelCapabilityService
                 continue;
             var evidence = Available("runtime-spec-type", $"The selected runtime advertises speculative type {type}.");
             Add(id, evidence, null, new Dictionary<string, string>(StringComparer.Ordinal) { ["runtime_type"] = type });
+        }
+
+        foreach (var type in runtime.SupportedKvCacheTypes ?? [])
+        {
+            var evidence = Available("runtime-kv-cache-type", $"The selected runtime advertises KV cache type {type}.");
+            Add($"runtime.kv.type.{type.ToLowerInvariant()}", evidence, null,
+                new Dictionary<string, string>(StringComparer.Ordinal) { ["cache_type"] = type });
         }
 
         return result;

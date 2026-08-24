@@ -9,6 +9,8 @@ using Hermaeus.Services;
 
 namespace Hermaeus.Services.ProcessManagement;
 
+public sealed record ManagedRuntimeProcessIdentity(int ProcessId, DateTime StartedAtUtc);
+
 /// <summary>
 /// Manages a single llama-server (or compatible) child process.
 /// Launches with configured args, health-polls /health until ready,
@@ -29,6 +31,24 @@ public sealed class ServerProcessManager : IDisposable
 
     public event Action<ServerStatus>? StatusChanged;
     public event Action<string>?       LogLine;
+
+    public ManagedRuntimeProcessIdentity? CurrentProcessIdentity
+    {
+        get
+        {
+            var process = _process;
+            try
+            {
+                return process is { HasExited: false }
+                    ? new ManagedRuntimeProcessIdentity(process.Id, process.StartTime.ToUniversalTime())
+                    : null;
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+            {
+                return null;
+            }
+        }
+    }
 
     private static readonly Regex OffloadedLayersRegex =
         new(@"offloaded\s+(?<used>\d+)\s*/\s*(?<total>\d+)\s+layers", RegexOptions.Compiled | RegexOptions.IgnoreCase);

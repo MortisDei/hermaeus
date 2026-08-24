@@ -349,6 +349,11 @@
                                                        IsVisible="{Binding HasContextFitWarning}"
                                                        TextWrapping="Wrap"
                                                        Opacity="0.7" FontSize="12" />
+                                            <TextBlock Text="{Binding GpuFitBreakdown}"
+                                                       IsVisible="{Binding HasGpuFitBreakdown}"
+                                                       TextWrapping="Wrap"
+                                                       Opacity="0.62" FontSize="11"
+                                                       ToolTip.Tip="Analytical GPU Fit breakdown. Prediction only; runtime observations remain separate." />
                                         </StackPanel>
                                     </Grid>
 

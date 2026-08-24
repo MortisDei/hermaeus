@@ -61,6 +61,13 @@ and the selected model where relevant, advertised or demonstrated the feature.
 `Unknown`. In particular, finding NextN metadata and a generic `draft-mtp` flag
 does not prove that MTP engages for that model.
 
+The server card's **GPU Fit** text is a prediction for the values currently in
+the editor, including unsaved changes. It lists weights, K/V cache, runtime
+overhead, companions, and headroom separately. `Unknown` means a material input
+or trustworthy measurement is missing; it is not treated as zero. Runtime
+observations remain separate and are comparable only under the exact v2
+runtime/model/hardware/configuration fingerprint.
+
 If onboarding is already complete and Chat reports that no chat model is set
 up, go to **Services** to configure or start the current model server. A stopped
 server does not reset onboarding. The setup wizard remains available from

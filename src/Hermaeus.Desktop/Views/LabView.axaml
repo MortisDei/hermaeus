@@ -49,6 +49,8 @@
         <StackPanel Spacing="8" IsVisible="{Binding HasSelection}">
           <TextBlock Text="Evidence detail" FontSize="18" FontWeight="SemiBold" />
           <TextBlock Text="{Binding SelectedExperience.Experience.Id}" FontFamily="Consolas" TextWrapping="Wrap" />
+          <TextBlock Text="Normalized outcome" FontWeight="SemiBold" />
+          <TextBlock Text="{Binding SelectedExperience.Experience.Outcome.Detail}" TextWrapping="Wrap" />
           <TextBlock Text="Context" FontWeight="SemiBold" />
           <TextBlock Text="{Binding SelectedExperience.Experience.ContextJson}" FontFamily="Consolas" TextWrapping="Wrap" />
           <TextBlock Text="Action or configuration" FontWeight="SemiBold" />

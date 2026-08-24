@@ -21,6 +21,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     private readonly ModelProfileService?  _modelProfiles;
     private readonly IActivityRecorder?    _activity;
     private readonly LocalModelCapabilityService? _capabilityService;
+    private LocalModelCapabilities? _localCapabilities;
     private ServerStatus _lastRecordedStatus = ServerStatus.Stopped;
     private ServerConfig                   _config;
     private OrphanServerInfo? _orphanInfo;
@@ -165,6 +166,9 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private string       _orphanBannerText = string.Empty;
     [ObservableProperty] private string       _contextFitNote = string.Empty;
     [ObservableProperty] private bool         _hasContextFitWarning;
+    [ObservableProperty] private string       _gpuFitBreakdown = string.Empty;
+    public bool HasGpuFitBreakdown => !string.IsNullOrWhiteSpace(GpuFitBreakdown);
+    partial void OnGpuFitBreakdownChanged(string value) => OnPropertyChanged(nameof(HasGpuFitBreakdown));
 
     /// <summary>r19 2.1: names where the current Context Size value came from ("Context from model card" / "Context from Auto Tune"), empty when the user set it directly.</summary>
     [ObservableProperty] private string       _contextSourceLabel = string.Empty;
@@ -621,10 +625,52 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
 
     private void ApplyContextFitNote()
     {
+        GpuFitBreakdown = ComputeGpuFitBreakdown();
         var note = ComputeContextFitNote();
         ContextFitNote = note;
         HasContextFitWarning = !string.IsNullOrEmpty(note);
     }
+
+    private string ComputeGpuFitBreakdown()
+    {
+        if (_hardwareProfile is null || _ggufInfo is null || TryGetModelFileSizeBytes() is not long modelBytes)
+            return string.Empty;
+
+        var companions = new List<FitCompanionInput>();
+        AddCompanion("Vision projector", MmprojPath, FitPlacement.Unknown);
+        if (UseDraftModelDecoding)
+            AddCompanion("Speculative draft model", DraftModelPath, FitPlacement.Unknown);
+
+        var prediction = ModelFitPredictor.Predict(new ModelFitPredictionRequest(
+            null,
+            modelBytes,
+            ContextSize,
+            GpuLayers,
+            Slots,
+            KvCacheTypeK,
+            KvCacheTypeV,
+            CapabilityStateForKv(KvCacheTypeK),
+            CapabilityStateForKv(KvCacheTypeV),
+            KvCacheMath.HasSwaFull(ExtraArgs),
+            ParseCpuMoeLayers(CpuMoeLayersText),
+            _hardwareProfile,
+            companions), _ggufInfo);
+        return ModelFitPredictor.FormatBreakdown(prediction);
+
+        void AddCompanion(string name, string path, FitPlacement placement)
+        {
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
+            companions.Add(new FitCompanionInput(
+                name, new FileInfo(path).Length, placement,
+                EvidenceOrigin.DeterministicCalculation,
+                "Separate companion file allocation using its observed file size."));
+        }
+    }
+
+    private CapabilityState CapabilityStateForKv(string type) =>
+        _localCapabilities?.Observations?.FirstOrDefault(observation =>
+            string.Equals(observation.CapabilityId, $"runtime.kv.type.{type.ToLowerInvariant()}", StringComparison.Ordinal))?.State
+        ?? CapabilityState.Unknown;
 
     /// <summary>
     /// Hardware-aware context-fit assessment (r17 01-gguf-context-and-tuning.md 1.4), replacing
@@ -1336,7 +1382,11 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(HasUnsavedChanges));
         OnPropertyChanged(nameof(HasPromptThreadsControl));
     }
-    partial void OnSlotsChanged(int value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnSlotsChanged(int value)
+    {
+        OnPropertyChanged(nameof(HasUnsavedChanges));
+        ApplyContextFitNote();
+    }
     partial void OnEmbeddingsModeChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
     partial void OnAutoStartChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
     partial void OnExtraArgsChanged(string value)
@@ -1364,11 +1414,16 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     {
         OnPropertyChanged(nameof(HasUnsavedChanges));
         OnPropertyChanged(nameof(NeedsFlashAttentionForQuantizedV));
+        ApplyContextFitNote();
     }
     partial void OnContextShiftChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
     partial void OnMemoryLockChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
     partial void OnNoMemoryMapChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
-    partial void OnCpuMoeLayersTextChanged(string value) => OnPropertyChanged(nameof(HasUnsavedChanges));
+    partial void OnCpuMoeLayersTextChanged(string value)
+    {
+        OnPropertyChanged(nameof(HasUnsavedChanges));
+        ApplyContextFitNote();
+    }
 
     /// <summary>
     /// Empty/0 off, "all" (or any negative) all layers, otherwise N. Public
@@ -1419,14 +1474,20 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         var generation = ++_runtimeCapabilityGeneration;
         var facts = await LocalModelCapabilityService.ProbeRuntimeAsync(executablePath);
         IReadOnlyList<CapabilityDrift> drift = [];
+        LocalModelCapabilities? capabilities = null;
         if (_capabilityService is not null && File.Exists(ModelPath))
-            drift = (await _capabilityService.ProbeWithDriftAsync(ModelPath, executablePath)).Drift;
+        {
+            var probe = await _capabilityService.ProbeWithDriftAsync(ModelPath, executablePath);
+            drift = probe.Drift;
+            capabilities = probe.Capabilities;
+        }
         RunOnUi(() =>
         {
             if (generation != _runtimeCapabilityGeneration)
                 return;
 
             _runtimeSpeculativeTypes.Clear();
+            _localCapabilities = capabilities;
             foreach (var type in facts.SpeculativeTypes)
                 _runtimeSpeculativeTypes.Add(type);
             SupportsPromptThreads = facts.SupportsPromptThreads;
@@ -1442,6 +1503,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(CanEditNgramDecoding));
             OnPropertyChanged(nameof(CanEditDraftModelDecoding));
             OnPropertyChanged(nameof(HasPromptThreadsControl));
+            ApplyContextFitNote();
             ShowCapabilityDrift(drift);
         });
     }
