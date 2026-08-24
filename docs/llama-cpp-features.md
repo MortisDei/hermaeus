@@ -76,6 +76,14 @@ draft support, or file size/mtime identity fallback cannot make the pair
 Available. Drafted and accepted runtime counters remain direct observations;
 the acceptance ratio is a deterministic calculation over those counters.
 
+Prompt-cache reuse has two evidence levels. Lab can always run the controlled
+cache-disabled/cache-enabled timing protocol against isolated llama-server
+requests. A direct reused-token count remains `Unknown` until an exact runtime
+capability names a reviewed machine-readable response field. The selected R31
+runtime proves no such schema, and Hermaeus does not infer token reuse from
+prompt milliseconds or throughput. No prompt-diff diagnostic flags are added
+to normal Chat launches.
+
 The runtime identity includes the executable SHA256, size, modification time,
 parsed version/build/compiler/backend facts when available, and managed asset
 identity. Its portable stable id excludes the executable path. Model identity
@@ -170,7 +178,7 @@ Recorded so the next round starts from a survey rather than repeating it.
 | --- | --- | --- |
 | DSpark, DFlash and other unreviewed speculative types | Runtime discovery retains them when installed help names them, but does not expose a control. | A stable mechanism-specific asset and launch contract plus measured benefit is required before another adapter is added. |
 | EAGLE-3 and general external draft models | Lab provides conditional adapters for exact runtime-advertised `draft-eagle3` and `draft-simple` pairs. Verified target/companion identity, tokenizer/vocabulary evidence, and EAGLE target binding are required; actual engagement and benefit are still a live gate. | Reduced-vocabulary mapping remains Unknown from bounded GGUF metadata, and no external/EAGLE pair was available in the R31 Windows inventory. |
-| Prompt cache and prefill effectiveness | Benchmarks distinguish cold and warm attempts and record prompt throughput and TTFT, but llama-server does not provide a stable reuse-token counter in this integration. | A stable machine-readable runtime counter or an explicit controlled shared-prefix workload can be added without fabricating reuse counts. |
+| Prompt cache and prefill effectiveness | Benchmarks distinguish cold/warm attempts; Lab compares identical shared-prefix prompts with request caching disabled/enabled and labels the result as a controlled timing effect. The selected runtime has no proven stable reuse-token counter. | A direct token count appears only if an exact future runtime capability proves a reviewed machine-readable response field. |
 | Backend sampling | Not configured. No accessible runtime evidence in Batch #3 established a useful single-slot contract. | A selected runtime advertises a stable option and a Speed Check can isolate its effect for `--parallel 1`. |
 | Internal performance instrumentation | `--perf` is detected as a fact only. It is not enabled by normal launches or parsed as a benchmark contract. | Its diagnostic output is stable and machine-readable enough to explain a measured difference without coupling to log wording. |
 | Context checkpoints, cache RAM, multi-device placement | Not exposed. Their memory and placement behavior has no demonstrated single-user need. | A reproducible local workload and bounded failure behavior justify a user-facing workflow. |

@@ -47,7 +47,8 @@ public enum LabRecipeKind
     SpeculativeDraftMaximum,
     SpeculativeDraftMinimum,
     SpeculativeProbabilityMinimum,
-    SpeculativeDraftGpuLayers
+    SpeculativeDraftGpuLayers,
+    PromptPrefixReuse
 }
 
 public sealed record LabRecipePlan(
@@ -83,7 +84,15 @@ public sealed record LabConfiguration
     public int? SpeculativeNMax { get; init; }
     public int? SpeculativeNMin { get; init; }
     public double? SpeculativePMin { get; init; }
+    public string PromptCacheMode { get; init; } = "default";
     public string ExtraArgumentsSha256 { get; init; } = string.Empty;
+}
+
+public enum PromptReuseEvidenceLevel
+{
+    DirectCounter,
+    ControlledTimingEffect,
+    Unknown
 }
 
 public sealed record LabExperimentDefinition

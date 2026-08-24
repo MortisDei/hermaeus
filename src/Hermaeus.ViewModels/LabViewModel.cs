@@ -345,12 +345,23 @@ public partial class LabViewModel : ViewModelBase
             var observedRam = comparison.CandidateMetrics.FirstOrDefault(metric => metric.MetricId == "memory.ram.observed")?.Maximum;
             var predictedGpu = comparison.CandidateMetrics.FirstOrDefault(metric => metric.MetricId == "memory.gpu.predicted")?.Median;
             var observedGpu = comparison.CandidateMetrics.FirstOrDefault(metric => metric.MetricId == "memory.gpu.observed")?.Maximum;
-            return $"{comparison.CandidateConfigurationId}: {speed}; RAM {Bytes(predictedRam)} predicted/{Bytes(observedRam)} observed peak; "
+            var prefix = run.Definition.ProtocolId == "prompt-prefix-reuse-v1"
+                ? PrefixSummary(comparison) : string.Empty;
+            return $"{comparison.CandidateConfigurationId}: {speed}; {prefix}RAM {Bytes(predictedRam)} predicted/{Bytes(observedRam)} observed peak; "
                 + $"GPU {Bytes(predictedGpu)} predicted/{Bytes(observedGpu)} observed peak; correctness {comparison.Equivalence.State}; "
                 + (comparison.CanShowHeadlineDelta ? "controlled" : comparison.RefusalReason);
         }));
 
         static string Bytes(double? value) => value.HasValue ? $"{value.Value / 1024 / 1024 / 1024:0.00} GiB" : "Unknown";
+        static string PrefixSummary(LabComparison comparison)
+        {
+            var before = comparison.BaselineMetrics.FirstOrDefault(metric => metric.MetricId == "prompt.milliseconds")?.Median;
+            var after = comparison.CandidateMetrics.FirstOrDefault(metric => metric.MetricId == "prompt.milliseconds")?.Median;
+            var reused = comparison.CandidateMetrics.FirstOrDefault(metric => metric.MetricId == "prompt.reused.tokens")?.Median;
+            var timing = before.HasValue && after.HasValue ? $"prompt {before:0.0} -> {after:0.0} ms" : "prompt timing Unknown";
+            var evidence = reused.HasValue ? $"direct reused {reused:0} tokens" : "controlled timing effect; reused tokens Unknown";
+            return $"{timing}; {evidence}; ";
+        }
     }
 
     private static LabConfiguration ConfigurationFrom(ServerConfig source, string id, string label) => new()

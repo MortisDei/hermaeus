@@ -421,12 +421,14 @@ three separate answers, because they are three separate facts:
 expected pattern, or a refusal expectation, because a throughput number should
 not quietly become a pass or a fail.
 
-**Prompt cache boundaries.** Cold and warm phases report externally observable
-prompt throughput and time to first token. They can show whether the workflow
-changed, but they do not claim how many prompt tokens llama-server reused:
-this runtime integration has no stable reuse-token counter. A timing difference
-is not fabricated into a reuse count. Shared-prefix cache measurement remains a
-future controlled workload, not a normal-chat inference.
+**Prompt cache boundaries.** Cold and warm benchmark phases report externally
+observable prompt throughput and time to first token. Lab now owns the separate
+controlled shared-prefix protocol: identical reconstructed prompts run with
+request caching disabled and enabled, preserving prompt timing, throughput, and
+output correctness. Neither surface claims how many tokens were reused unless
+the exact runtime proves a reviewed machine-readable counter field. A timing
+difference is not fabricated into a reuse count, and normal Chat is not sampled
+to infer one.
 
 **Comparing two runs.** Two Speed Check runs of the same suite against the same
 model can be shown side by side, with the difference in tokens per second,

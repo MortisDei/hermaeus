@@ -72,6 +72,8 @@ public static class LabDefinitionValidator
             || configuration.SpeculativePMin is < 0 or > 1
             || configuration.SpeculativeDraftGpuLayers is < 0 or > 4096)
             throw new InvalidOperationException("Lab speculative configuration is outside the reviewed bounds.");
+        if (configuration.PromptCacheMode is not ("default" or "enabled" or "disabled"))
+            throw new InvalidOperationException("Lab prompt-cache mode must be default, enabled, or disabled.");
         if (!string.IsNullOrWhiteSpace(configuration.ExtraArgumentsSha256)
             && (configuration.ExtraArgumentsSha256.Length != 64
                 || configuration.ExtraArgumentsSha256.Any(character => !Uri.IsHexDigit(character))))
@@ -149,6 +151,7 @@ public static class LabConfigurationMapper
         SpeculativeNMax = source.Speculative?.NMax,
         SpeculativeNMin = source.Speculative?.NMin,
         SpeculativePMin = source.Speculative?.PMin,
+        PromptCacheMode = "enabled",
         ExtraArgumentsSha256 = string.IsNullOrWhiteSpace(source.ExtraArgs)
             ? string.Empty : LabCanonicalJson.Hash(source.ExtraArgs)
     };
@@ -623,12 +626,14 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
 
     private static ConfigurationIdentityV2 CreateConfigurationIdentity(ServerConfig source, LabConfiguration configuration)
     {
-        IReadOnlyDictionary<string, string> parsed = string.IsNullOrWhiteSpace(configuration.ExtraArgumentsSha256)
+        var parsed = string.IsNullOrWhiteSpace(configuration.ExtraArgumentsSha256)
             ? new Dictionary<string, string>(StringComparer.Ordinal)
             : new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["extraArgumentsSha256"] = configuration.ExtraArgumentsSha256
             };
+        if (configuration.PromptCacheMode != "default")
+            parsed["promptCacheMode"] = configuration.PromptCacheMode;
         return new ConfigurationIdentityV2(configuration.ContextSize, configuration.GpuLayers,
             configuration.GpuLayers switch { 0 => "cpu", -1 => "gpu-all", _ => "gpu-partial" },
             configuration.Threads, configuration.PromptThreads, configuration.Slots, null, null,

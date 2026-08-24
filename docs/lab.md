@@ -124,8 +124,28 @@ external-draft or EAGLE-3 pair. The adapters and refusal gates are automated;
 actual engagement, performance benefit, memory behavior, and equivalence remain
 unverified until a known pair is run on the published revision.
 
-Prompt-prefix recipe families land in a subsequent R31 batch on this same
-experiment core.
+## Prompt/shared-prefix evidence
+
+The prompt-prefix recipe compares request-level prompt caching disabled and
+enabled in separate isolated sessions. Each side receives the same three
+reconstructed prompts: the user-controlled prefix plus a small deterministic
+suffix. Only the three SHA256 prompt identities enter the frozen definition;
+the prompt bodies are not persisted in Lab evidence. Exact output comparison
+still gates the result.
+
+Prompt processing milliseconds and throughput are direct runtime counters when
+reported. Without a proven machine-readable reused-token schema, Lab labels the
+comparison `ControlledTimingEffect` and keeps `prompt.reused.tokens` Missing.
+It never converts a timing difference into a token count. A direct count can be
+consumed only when an Available capability record names one of Hermaeus's
+reviewed response fields for that exact runtime identity; the field's absence
+from a response remains Missing rather than zero.
+
+The selected R31 runtime exposes no stable direct reused-token counter, so the
+direct-counter level remains Unknown. Optional prompt-diff log parsing was not
+added: no observed stable, build-scoped format justified adding diagnostic
+flags or a parser. Normal Chat launch arguments and Agent prompt construction
+are unchanged.
 
 ## Evidence
 

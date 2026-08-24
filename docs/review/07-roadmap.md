@@ -47,7 +47,7 @@ and evidence origins are reliable.
 | 5 | Lab navigation/shell, isolated temporary runtime lifecycle, immutable definition/run/observation/comparison, correctness/equivalence core, explicit Apply review | 2, 3, 4 | mandatory spine | Yes |
 | 6 | Engine-profile recipes plus context/KV/Flash/CPU-MoE experiments; prediction-versus-observation comparison | 5 | mandatory measured optimization | Yes |
 | 7 | General external draft and EAGLE-3 adapters, speculative parameter recipes, acceptance/TTFT/memory/correctness/equivalence; unsupported mechanisms stay Unknown | 5, 6 | mandatory conditional runtime feature | Yes (live pair gate Unknown) |
-| 8 | Prompt/shared-prefix evidence adapter and optional build-scoped diagnostics; direct counters only when observed | 5 | independently shippable, evidence-gated | No |
+| 8 | Prompt/shared-prefix evidence adapter and optional build-scoped diagnostics; direct counters only when observed | 5 | independently shippable, evidence-gated | Yes (direct counter Unknown; optional diagnostics deferred) |
 | 9 | Project State persistence/editor/proposals/context receipt | 1, 2 | mandatory independent | No |
 | 10 | Per-subtask model selection through approved plan, task/transcript/report/synthesis identity and no-fallback behavior | 1, 3 | mandatory independent | No |
 | 11 | Agent Local API policy/contracts and single-owner decision; implement safe scoped endpoints only if the ownership gate is satisfied | 1, 9, 10 | mandatory design, conditional execution | No |

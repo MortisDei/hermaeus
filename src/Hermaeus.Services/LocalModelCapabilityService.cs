@@ -461,6 +461,9 @@ public sealed class LocalModelCapabilityService
         Add("reasoning.preserve-template", preserve, modelIdentity);
         Add("modality.vision", vision, modelIdentity);
         Add("runtime.prompt-threads", promptThreads, null);
+        Add("runtime.prompt-cache.reused-token-counter",
+            Unknown("runtime-no-stable-reuse-counter",
+                "No stable machine-readable reused-token counter schema is proven for this runtime."), null);
         Add("runtime.backend-sampling", backendSampling, null);
         Add("runtime.performance-metrics", perf, null);
 

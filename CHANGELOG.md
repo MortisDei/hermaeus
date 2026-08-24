@@ -47,6 +47,12 @@ limit.
   tokenizer/vocabulary compatibility, EAGLE target binding, draft acceptance,
   memory, and output equivalence remain explicit gates; missing proof stays
   `Unknown`.
+- Added a controlled prompt/shared-prefix Lab recipe that pairs identical
+  reconstructed prompts with request caching disabled and enabled, retains only
+  prompt hashes, and reports prompt timing/throughput plus exact output
+  correctness. Direct reused-token counts remain Missing unless the exact
+  runtime proves a reviewed response field; timing is never converted into a
+  token count.
 
 ### Changed
 

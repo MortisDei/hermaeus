@@ -547,6 +547,11 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
   compatibility, and any EAGLE target binding are proven. Draft/accepted token
   counters and derived acceptance stay distinct from missing TTFT, memory, and
   exact-output correctness. Missing assets or evidence remain `Unknown`.
+- A prompt/shared-prefix Lab recipe compares the same three hash-recorded
+  reconstructed prompts with request caching disabled and enabled. It reports
+  prompt timing/throughput as a controlled effect and exact output correctness.
+  Reused-token counts remain Missing unless the exact runtime proves a reviewed
+  machine-readable response field; timing is never relabelled as token reuse.
 - Repeated run evidence is stored as bounded immutable per-configuration child
   records with one compact completion decision, rather than widening the
   experience document limit or discarding raw observations.

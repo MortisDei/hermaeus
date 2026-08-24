@@ -169,6 +169,14 @@ probability, or draft GPU layers, because Lab does not assume runtime defaults.
 Drafted and accepted counters appear only when the runtime reports them; zero
 drafted remains zero while its acceptance ratio is undefined.
 
+The **Prompt/shared-prefix timing effect** recipe sends the same three
+reconstructed prompts with prompt caching disabled and enabled. The comparison
+shows prompt milliseconds and throughput plus exact output correctness. It does
+not show a reused-token estimate. `Reused tokens Unknown` means the selected
+runtime has no proven direct counter schema, even if the cached side is faster.
+Only prompt hashes, not the typed prefix, are stored in the experiment
+definition.
+
 Use **Lab > Evidence** to inspect structured Agent,
 GPU Fit, and experiment evidence. Filters cover domain, project/workspace
 scope, model/runtime fingerprints, normalized outcome, evidence origin, status,

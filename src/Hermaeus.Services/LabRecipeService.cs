@@ -36,6 +36,7 @@ public static class LabRecipeCatalog
                 kind, "runtime.speculative.parameter.p-min", gguf, draftGguf, targetIdentity, draftIdentity),
             LabRecipeKind.SpeculativeDraftGpuLayers => SpeculativeTuning(source, baseline, capabilities,
                 kind, "runtime.speculative.parameter.draft-gpu-layers", gguf, draftGguf, targetIdentity, draftIdentity),
+            LabRecipeKind.PromptPrefixReuse => PromptPrefixReuse(baseline),
             _ => throw new ArgumentOutOfRangeException(nameof(kind))
         };
         Validate(plan);
@@ -239,6 +240,24 @@ public static class LabRecipeCatalog
         "memory.ram.observed", "memory.gpu.observed", "memory.ram.predicted", "memory.gpu.predicted"
     ];
 
+    private static LabRecipePlan PromptPrefixReuse(LabConfiguration original)
+    {
+        var baseline = original with
+        {
+            Id = "prefix-cache-off", Label = "Prompt cache disabled", PromptCacheMode = "disabled"
+        };
+        var candidate = original with
+        {
+            Id = "prefix-cache-on", Label = "Prompt cache enabled", PromptCacheMode = "enabled"
+        };
+        return new LabRecipePlan("prompt-prefix-reuse-v1", "Prompt/shared-prefix timing effect",
+            LabRecipeKind.PromptPrefixReuse, CapabilityState.Available,
+            "The controlled effect compares identical reconstructed prompts with request-level prompt caching disabled and enabled. It does not infer reused-token counts.",
+            baseline, [candidate], 2, false, [],
+            ["prompt.milliseconds", "prompt.tokens_per_second", "prompt.reused.tokens", "decode.tokens_per_second"],
+            LabCorrectnessRequirement.ExactEquivalence);
+    }
+
     private static LabRecipePlan Plan(string id, string label, LabRecipeKind kind, CapabilityState state,
         string detail, LabConfiguration baseline, IReadOnlyList<LabConfiguration> candidates,
         IReadOnlyList<string> capabilities, bool lowBitQuality = false) => new(
@@ -263,6 +282,7 @@ public static class LabRecipeCatalog
         LabRecipeKind.SpeculativeDraftMinimum => new HashSet<string>([nameof(LabConfiguration.SpeculativeNMin)], StringComparer.Ordinal),
         LabRecipeKind.SpeculativeProbabilityMinimum => new HashSet<string>([nameof(LabConfiguration.SpeculativePMin)], StringComparer.Ordinal),
         LabRecipeKind.SpeculativeDraftGpuLayers => new HashSet<string>([nameof(LabConfiguration.SpeculativeDraftGpuLayers)], StringComparer.Ordinal),
+        LabRecipeKind.PromptPrefixReuse => new HashSet<string>([nameof(LabConfiguration.PromptCacheMode)], StringComparer.Ordinal),
         _ => new HashSet<string>(StringComparer.Ordinal)
     };
 
@@ -284,6 +304,7 @@ public static class LabRecipeCatalog
         Add(nameof(LabConfiguration.SpeculativeNMax), left.SpeculativeNMax, right.SpeculativeNMax);
         Add(nameof(LabConfiguration.SpeculativeNMin), left.SpeculativeNMin, right.SpeculativeNMin);
         Add(nameof(LabConfiguration.SpeculativePMin), left.SpeculativePMin, right.SpeculativePMin);
+        Add(nameof(LabConfiguration.PromptCacheMode), left.PromptCacheMode, right.PromptCacheMode);
         Add(nameof(LabConfiguration.ExtraArgumentsSha256), left.ExtraArgumentsSha256, right.ExtraArgumentsSha256);
         return differences;
         void Add<T>(string field, T a, T b) { if (!EqualityComparer<T>.Default.Equals(a, b)) differences.Add(field); }
@@ -307,7 +328,9 @@ public sealed record LabWorkloadRequest(
     int MaximumTokens,
     string CaseId,
     int Repetition,
-    TimeSpan Timeout);
+    TimeSpan Timeout,
+    bool DisablePromptCache = false,
+    string DirectReusedTokenCounterField = "");
 
 public sealed record LabWorkloadResult(
     IReadOnlyList<LabObservation> Observations,
@@ -334,7 +357,8 @@ public sealed class LlamaServerLabWorkloadExecutor : ILabWorkloadExecutor
                 temperature = 0,
                 seed = request.Seed,
                 max_tokens = request.MaximumTokens,
-                stream = false
+                stream = false,
+                cache_prompt = !request.DisablePromptCache
             }, ct);
             var body = await response.Content.ReadAsStringAsync(ct);
             timer.Stop();
@@ -366,6 +390,7 @@ public sealed class LlamaServerLabWorkloadExecutor : ILabWorkloadExecutor
             {
                 MissingReason = "The runtime reported zero drafted tokens, so an acceptance ratio is undefined."
             };
+        var reused = PromptReuseEvidenceAdapter.ReadDirectCounter(root, request.DirectReusedTokenCounterField);
         var observations = new List<LabObservation>
         {
             Metric(request, "request.total.milliseconds", elapsed.TotalMilliseconds, "ms", "wall-clock", EvidenceOrigin.DirectObservation),
@@ -374,6 +399,16 @@ public sealed class LlamaServerLabWorkloadExecutor : ILabWorkloadExecutor
             Metric(request, "tokens.served", Number(usage, "total_tokens"), "tokens", "runtime-response", EvidenceOrigin.DirectObservation),
             Metric(request, "context.accepted.tokens", Number(usage, "prompt_tokens"), "tokens", "runtime-response", EvidenceOrigin.DirectObservation),
             Metric(request, "prompt.tokens_per_second", Number(timings, "prompt_per_second"), "tokens/s", "runtime-timings", EvidenceOrigin.DirectObservation),
+            Metric(request, "prompt.milliseconds", Number(timings, "prompt_ms"), "ms", "runtime-timings", EvidenceOrigin.DirectObservation),
+            Metric(request, "prompt.reused.tokens", reused, "tokens",
+                request.DirectReusedTokenCounterField.Length == 0 ? "unavailable" : "runtime-counter",
+                EvidenceOrigin.DirectObservation) with
+            {
+                MissingReason = reused.HasValue ? string.Empty
+                    : request.DirectReusedTokenCounterField.Length == 0
+                        ? "No proven machine-readable reused-token counter schema is available for this runtime."
+                        : "The proven reused-token counter field was absent from this response."
+            },
             Metric(request, "decode.tokens_per_second", Number(timings, "predicted_per_second"), "tokens/s", "runtime-timings", EvidenceOrigin.DirectObservation),
             Metric(request, "speculative.draft.tokens", drafted, "tokens", "runtime-timings", EvidenceOrigin.DirectObservation),
             Metric(request, "speculative.accepted.tokens", accepted, "tokens", "runtime-timings", EvidenceOrigin.DirectObservation),
@@ -412,6 +447,40 @@ public sealed class LlamaServerLabWorkloadExecutor : ILabWorkloadExecutor
         Metric(request, metric, null, unit, "unavailable", EvidenceOrigin.DirectObservation) with { MissingReason = reason, Trust = "Unknown" };
 }
 
+public static class PromptReuseEvidenceAdapter
+{
+    private static readonly IReadOnlySet<string> ReviewedFields =
+        new HashSet<string>(["reused_tokens", "prompt_tokens_reused"], StringComparer.Ordinal);
+
+    public static string ProvenCounterField(IEnumerable<RuntimeCapabilityObservation> observations)
+    {
+        var capability = observations.FirstOrDefault(item =>
+            item.CapabilityId == "runtime.prompt-cache.reused-token-counter"
+            && item.State == CapabilityState.Available);
+        if (capability is null || !capability.Parameters.TryGetValue("response_field", out var field)
+            || !ReviewedFields.Contains(field)) return string.Empty;
+        return field;
+    }
+
+    public static double? ReadDirectCounter(JsonElement root, string provenField)
+    {
+        if (!ReviewedFields.Contains(provenField)) return null;
+        if (root.TryGetProperty(provenField, out var direct) && direct.TryGetDouble(out var value)) return value;
+        return root.TryGetProperty("timings", out var timings) && timings.ValueKind == JsonValueKind.Object
+            && timings.TryGetProperty(provenField, out var nested) && nested.TryGetDouble(out value)
+                ? value : null;
+    }
+}
+
+public static class SharedPrefixPromptFixture
+{
+    public static string Build(string sharedPrefix, int repetition)
+    {
+        if (repetition is < 0 or > 19) throw new ArgumentOutOfRangeException(nameof(repetition));
+        return $"{sharedPrefix.TrimEnd()}\n\nControlled suffix {repetition + 1}: answer with one concise sentence.";
+    }
+}
+
 public sealed class LabRecipeRunner
 {
     private readonly ILabExperimentService _experiments;
@@ -439,7 +508,10 @@ public sealed class LabRecipeRunner
         definition = definition with
         {
             WorkloadId = "greedy-chat-completion-v1",
-            PromptHashes = [LabCanonicalJson.Hash(prompt)],
+            PromptHashes = plan.Kind == LabRecipeKind.PromptPrefixReuse
+                ? Enumerable.Range(0, 3).Select(repetition =>
+                    LabCanonicalJson.Hash(SharedPrefixPromptFixture.Build(prompt, repetition))).ToArray()
+                : [LabCanonicalJson.Hash(prompt)],
             SamplingPolicy = "greedy-temperature-zero",
             Seed = 1,
             Repetitions = 3,
@@ -465,6 +537,7 @@ public sealed class LabRecipeRunner
             var outputs = new List<LabOutputEvidence>();
             var failures = new List<string>();
             var consecutiveFailures = 0;
+            var reusedCounterField = PromptReuseEvidenceAdapter.ProvenCounterField(capabilities.Observations ?? []);
             var configurations = plan.Candidates.Prepend(plan.Baseline).ToArray();
             foreach (var configuration in configurations)
             {
@@ -484,14 +557,22 @@ public sealed class LabRecipeRunner
                     Configuration = definition.ConfigurationIdentities[configuration.Id]
                 };
                 observations.AddRange(PredictionObservations(run.Id, configuration.Id, fingerprint, plannedPredictions[configuration.Id]));
+                if (plan.Kind == LabRecipeKind.PromptPrefixReuse)
+                    observations.Add(PromptReuseLevelObservation(run.Id, configuration.Id, fingerprint,
+                        reusedCounterField.Length == 0 ? PromptReuseEvidenceLevel.ControlledTimingEffect : PromptReuseEvidenceLevel.DirectCounter));
                 if (plan.RequiredMetrics.Contains("quality.score", StringComparer.Ordinal))
                     observations.Add(MissingQualityObservation(run.Id, configuration.Id, fingerprint));
                 for (var repetition = 0; repetition < definition.Repetitions; repetition++)
                 {
+                    var workloadPrompt = plan.Kind == LabRecipeKind.PromptPrefixReuse
+                        ? SharedPrefixPromptFixture.Build(prompt, repetition) : prompt;
+                    var caseId = plan.Kind == LabRecipeKind.PromptPrefixReuse
+                        ? $"shared-prefix-{repetition + 1}" : "greedy-reference";
                     var result = await _workload.ExecuteAsync(new LabWorkloadRequest(
-                        run.Id, run.TemporaryPort!.Value, configuration, fingerprint, prompt,
-                        definition.Seed, 128, "greedy-reference", repetition,
-                        TimeSpan.FromSeconds(definition.TimeoutSeconds)), ct);
+                        run.Id, run.TemporaryPort!.Value, configuration, fingerprint, workloadPrompt,
+                        definition.Seed, 128, caseId, repetition,
+                        TimeSpan.FromSeconds(definition.TimeoutSeconds),
+                        configuration.PromptCacheMode == "disabled", reusedCounterField), ct);
                     observations.AddRange(result.Observations);
                     if (result.Output is not null) outputs.Add(result.Output);
                     observations.AddRange(await CaptureTelemetryAsync(run, configuration, fingerprint, ct));
@@ -623,6 +704,18 @@ public sealed class LabRecipeRunner
         MissingReason = "No referenced benchmark/quality run was supplied; loading success is not quality evidence.",
         RuntimeFingerprint = fingerprint.Runtime.StableId, ModelFingerprint = fingerprint.Model.StableId,
         HardwareFingerprint = fingerprint.Hardware.StableId, ConfigurationFingerprint = fingerprint.Configuration.StableId
+    };
+
+    private static LabObservation PromptReuseLevelObservation(string runId, string configurationId,
+        EmpiricalProfileFingerprintV2 fingerprint, PromptReuseEvidenceLevel level) => new()
+    {
+        RunId = runId, ConfigurationId = configurationId, CaseId = "shared-prefix", Repetition = 0,
+        MetricId = "prompt.reuse.evidence-level", Value = (double)level, Unit = "enum",
+        Source = level == PromptReuseEvidenceLevel.DirectCounter ? "runtime-capability" : "controlled-protocol",
+        Origin = level == PromptReuseEvidenceLevel.DirectCounter ? EvidenceOrigin.Extracted : EvidenceOrigin.DeterministicCalculation,
+        Trust = level.ToString(), RuntimeFingerprint = fingerprint.Runtime.StableId,
+        ModelFingerprint = fingerprint.Model.StableId, HardwareFingerprint = fingerprint.Hardware.StableId,
+        ConfigurationFingerprint = fingerprint.Configuration.StableId
     };
 }
 

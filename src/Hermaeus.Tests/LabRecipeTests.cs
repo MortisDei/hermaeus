@@ -233,6 +233,84 @@ public sealed class LabRecipeTests
         await fixture.Experiments.CancelAsync(switched.Id);
     }
 
+    [Fact]
+    public void Prompt_prefix_recipe_changes_only_request_cache_mode()
+    {
+        var plan = LabRecipeCatalog.Build(LabRecipeKind.PromptPrefixReuse, Server(), []);
+
+        Assert.Equal(CapabilityState.Available, plan.Availability);
+        Assert.Equal("disabled", plan.Baseline.PromptCacheMode);
+        Assert.Equal("enabled", Assert.Single(plan.Candidates).PromptCacheMode);
+        Assert.Contains("prompt.reused.tokens", plan.RequiredMetrics);
+        LabRecipeCatalog.Validate(plan);
+    }
+
+    [Fact]
+    public void Shared_prefix_fixture_changes_only_a_bounded_suffix()
+    {
+        const string prefix = "A controlled project-state prefix with no private workspace content.";
+        var first = SharedPrefixPromptFixture.Build(prefix, 0);
+        var second = SharedPrefixPromptFixture.Build(prefix, 1);
+
+        Assert.StartsWith(prefix, first, StringComparison.Ordinal);
+        Assert.StartsWith(prefix, second, StringComparison.Ordinal);
+        Assert.NotEqual(first, second);
+        Assert.NotEqual(LabCanonicalJson.Hash(first), LabCanonicalJson.Hash(second));
+    }
+
+    [Fact]
+    public void Direct_reuse_counter_requires_available_reviewed_schema()
+    {
+        var unknown = RuntimeCapabilityObservation.Create("runtime.prompt-cache.reused-token-counter",
+            CapabilityState.Unknown, "test", "unknown", Runtime(), null,
+            new Dictionary<string, string> { ["response_field"] = "reused_tokens" }, DateTime.UtcNow);
+        var available = unknown with { State = CapabilityState.Available };
+        var unreviewed = available with
+        {
+            Parameters = new Dictionary<string, string> { ["response_field"] = "some_future_guess" }
+        };
+
+        Assert.Empty(PromptReuseEvidenceAdapter.ProvenCounterField([unknown]));
+        Assert.Empty(PromptReuseEvidenceAdapter.ProvenCounterField([unreviewed]));
+        Assert.Equal("reused_tokens", PromptReuseEvidenceAdapter.ProvenCounterField([available]));
+    }
+
+    [Fact]
+    public void Runtime_response_never_infers_reused_tokens_from_prompt_timing()
+    {
+        var withoutCapability = LlamaServerLabWorkloadExecutor.ParseSuccessfulResponse(WorkloadRequest(),
+            """{"choices":[{"message":{"content":"same"}}],"timings":{"prompt_ms":12,"prompt_per_second":900,"reused_tokens":40}}""",
+            TimeSpan.Zero);
+        var directRequest = WorkloadRequest() with { DirectReusedTokenCounterField = "reused_tokens" };
+        var withCapability = LlamaServerLabWorkloadExecutor.ParseSuccessfulResponse(directRequest,
+            """{"choices":[{"message":{"content":"same"}}],"timings":{"prompt_ms":12,"reused_tokens":40}}""",
+            TimeSpan.Zero);
+
+        Assert.Null(withoutCapability.Observations.Single(item => item.MetricId == "prompt.reused.tokens").Value);
+        Assert.Equal(12, withoutCapability.Observations.Single(item => item.MetricId == "prompt.milliseconds").Value);
+        Assert.Equal(40, withCapability.Observations.Single(item => item.MetricId == "prompt.reused.tokens").Value);
+    }
+
+    [Fact]
+    public async Task Prefix_runner_pairs_identical_prompts_with_cache_disabled_and_enabled()
+    {
+        using var fixture = new RecipeFixture();
+        var plan = LabRecipeCatalog.Build(LabRecipeKind.PromptPrefixReuse, fixture.Source, []);
+
+        var run = await fixture.Runner.RunAsync(plan, fixture.Source, fixture.Capabilities([]), "shared prefix");
+
+        Assert.Equal(LabRunStatus.Succeeded, run.Status);
+        Assert.Equal(6, fixture.Workload.Requests.Count);
+        var disabled = fixture.Workload.Requests.Where(request => request.DisablePromptCache).ToArray();
+        var enabled = fixture.Workload.Requests.Where(request => !request.DisablePromptCache).ToArray();
+        Assert.Equal(3, disabled.Length);
+        Assert.Equal(3, enabled.Length);
+        Assert.Equal(disabled.Select(request => request.Prompt), enabled.Select(request => request.Prompt));
+        Assert.All(fixture.Workload.Requests, request => Assert.Empty(request.DirectReusedTokenCounterField));
+        Assert.Equal(3, run.Definition.PromptHashes.Count);
+        Assert.DoesNotContain("shared prefix", run.Definition.CanonicalJson(), StringComparison.Ordinal);
+    }
+
     private sealed class RecipeFixture : IDisposable
     {
         private readonly TempDir _temp = new();
@@ -294,10 +372,12 @@ public sealed class LabRecipeTests
     private sealed class FakeWorkload : ILabWorkloadExecutor
     {
         public int CallCount { get; private set; }
+        public List<LabWorkloadRequest> Requests { get; } = [];
         public bool DifferentCandidateOutput { get; set; }
         public Task<LabWorkloadResult> ExecuteAsync(LabWorkloadRequest request, CancellationToken ct = default)
         {
             CallCount++;
+            Requests.Add(request);
             var value = request.Configuration.Id == "baseline" ? 10d : 12d;
             var observation = new LabObservation
             {
