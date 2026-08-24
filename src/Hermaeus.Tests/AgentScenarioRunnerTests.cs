@@ -234,7 +234,7 @@ public sealed class AgentScenarioRunnerTests
     }
 
     [Fact]
-    public async Task Path_traversal_read_fails_the_scenario_when_run_errors_are_not_allowed()
+    public async Task Path_traversal_read_is_a_structured_refusal_not_a_run_error()
     {
         using var temp = new TempDir();
         var settings = NewIsolatedSettings(temp);
@@ -251,9 +251,9 @@ public sealed class AgentScenarioRunnerTests
         var runner = new AgentScenarioRunner(new FakeSequencedAgentLlm([TraversalReadStepJson]), settings);
         var result = await runner.RunScenarioAsync(scenario, "test-model");
 
-        Assert.False(result.Passed);
-        Assert.NotNull(result.RunError);
-        Assert.Contains(result.Checks, c => c.CheckId == "run_error" && !c.Passed);
+        Assert.True(result.Passed, string.Join("; ", result.Checks.Where(c => !c.Passed).Select(c => $"{c.CheckId}: {c.Detail}")));
+        Assert.Null(result.RunError);
+        Assert.DoesNotContain(result.Checks, c => c.CheckId == "run_error");
     }
 
     [Fact]
@@ -275,7 +275,7 @@ public sealed class AgentScenarioRunnerTests
         var result = await runner.RunScenarioAsync(scenario, "test-model");
 
         Assert.True(result.Passed, string.Join("; ", result.Checks.Where(c => !c.Passed).Select(c => $"{c.CheckId}: {c.Detail}")));
-        Assert.NotNull(result.RunError);
+        Assert.Null(result.RunError);
         Assert.DoesNotContain(result.Checks, c => c.CheckId == "run_error");
     }
 

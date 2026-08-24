@@ -9,7 +9,7 @@ FIFO for changelog entries, 10 versions in this file max. Remove older entries
 and append them to `docs/changelog-archive.md` to maintain the 10 version
 limit.
 
-## [0.37.0-alpha] - 2026-08-20
+## [0.38.0-alpha] - 2026-08-24
 
 ### Added
 
@@ -18,6 +18,12 @@ limit.
   tasks remain loadable as `Unknown`, and the five evidence origins now remain
   distinct through JSON persistence while legacy `Inferred` values load as
   model inference.
+- Added the Lab Evidence surface and the additive `experience.db` store for
+  typed Agent, GPU Fit, and Lab-run evidence, with exact filters, redacted
+  export, linked corrections, confirmed hard removal, and data-root migration
+  and backup coverage.
+
+## [0.37.0-alpha] - 2026-08-20
 
 ### Fixed
 

@@ -29,6 +29,7 @@ public partial class MainWindowViewModel : ViewModelBase
     public RagViewModel             Rag      { get; }
     public ServicesViewModel        Services { get; }
     public BenchmarkViewModel       Benchmarks { get; }
+    public LabViewModel             Lab { get; }
     public SystemOverviewViewModel  SystemOverview { get; }
     public DoctorViewModel          Doctor { get; }
     public MemoriesViewModel        Memories { get; }
@@ -62,6 +63,7 @@ public partial class MainWindowViewModel : ViewModelBase
     public bool ShowRag      => ActivePanel == "rag";
     public bool ShowServices => ActivePanel == "services";
     public bool ShowBenchmarks => ActivePanel == "benchmarks";
+    public bool ShowLab => ActivePanel == "lab";
     public bool ShowSystem => ActivePanel == "system";
     public bool ShowDoctor => ActivePanel == "doctor";
     public bool ShowMemories => ActivePanel == "memories";
@@ -78,6 +80,7 @@ public partial class MainWindowViewModel : ViewModelBase
         "rag"      => Rag,
         "services" => Services,
         "benchmarks" => Benchmarks,
+        "lab"       => Lab,
         "system"   => SystemOverview,
         "doctor"   => Doctor,
         "memories" => Memories,
@@ -99,6 +102,7 @@ public partial class MainWindowViewModel : ViewModelBase
         RagViewModel rag,
         ServicesViewModel services,
         BenchmarkViewModel benchmarks,
+        LabViewModel lab,
         SystemOverviewViewModel systemOverview,
         DoctorViewModel doctor,
         MemoriesViewModel memories,
@@ -123,7 +127,7 @@ public partial class MainWindowViewModel : ViewModelBase
         _settingsService = settingsService;
         _store = store; Chat = chat; Agent = agent; Settings = settings;
         Models = models; Rag = rag; Services = services;
-        Benchmarks = benchmarks; SystemOverview = systemOverview; Doctor = doctor; Memories = memories; Logs = logs; Wizard = wizard;
+        Benchmarks = benchmarks; Lab = lab; SystemOverview = systemOverview; Doctor = doctor; Memories = memories; Logs = logs; Wizard = wizard;
         Projects = projects;
         // r24 doc 01 1.6: switching a project only ever changes what NEW work
         // inherits. Existing conversations/tasks/datasets are never rewritten.
@@ -259,6 +263,7 @@ public partial class MainWindowViewModel : ViewModelBase
         Nav("nav.models", "Models", "Models", "Ctrl+4", "models");
         Nav("nav.services", "Services", "Services", "Ctrl+5", "services");
         Nav("nav.benchmarks", "Benchmarks", "Benchmarks", "", "benchmarks");
+        Nav("nav.lab", "Lab", "Lab", "", "lab");
         Nav("nav.system", "System overview", "System", "", "system");
         Nav("nav.doctor", "Doctor", "Doctor", "", "doctor");
         Nav("nav.memories", "Memories", "Memory", "", "memories");
@@ -774,6 +779,7 @@ public partial class MainWindowViewModel : ViewModelBase
     // wizard) would be written back over the real value.
     [RelayCommand] private void ShowServicesPanel()    { ActivePanel = "services"; Settings.Reload(); }
     [RelayCommand] private void ShowBenchmarksPanel()  { ActivePanel = "benchmarks"; RunBackgroundTaskAsync("load benchmarks panel", () => Benchmarks.LoadCommand.ExecuteAsync(null)); }
+    [RelayCommand] private void ShowLabPanel()         { ActivePanel = "lab"; RunBackgroundTaskAsync("load lab evidence", Lab.RefreshAsync); }
     [RelayCommand] private void ShowSystemPanel()      { ActivePanel = "system"; RunBackgroundTaskAsync("refresh system panel", () => SystemOverview.RefreshCommand.ExecuteAsync(null)); }
     [RelayCommand] private void ShowDoctorPanel()
     {
@@ -843,6 +849,7 @@ public partial class MainWindowViewModel : ViewModelBase
         OnPropertyChanged(nameof(ShowRag));
         OnPropertyChanged(nameof(ShowServices));
         OnPropertyChanged(nameof(ShowBenchmarks));
+        OnPropertyChanged(nameof(ShowLab));
         OnPropertyChanged(nameof(ShowSystem));
         OnPropertyChanged(nameof(ShowDoctor));
         OnPropertyChanged(nameof(ShowMemories));

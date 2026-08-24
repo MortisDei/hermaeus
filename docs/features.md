@@ -515,6 +515,23 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
   claiming blanket approval; the stated-lesson gate-claim filter must reject
   it, checked by a new forbid_active_lesson_matching scenario check).
 
+## Lab evidence
+
+- A dedicated Lab panel keeps empirical operational evidence separate from
+  Memories and reusable benchmark suites. Its Evidence surface filters typed
+  Agent, GPU Fit, and Lab-run records by scope, fingerprints, outcome, origin,
+  status, and date.
+- `{DataRoot}/experience.db` stores bounded canonical context/action documents,
+  deterministic hashes, normalized outcomes, and redacted provenance links.
+  Agent source task state and transcripts remain independently authoritative.
+- Typed correction creates a linked replacement and supersedes the prior row
+  atomically. Confirmed removal is a hard delete and refuses while another
+  correction depends on the selected row. Checked or selected rows export as
+  versioned redacted JSON.
+- Experience is descriptive only. It cannot approve an action, widen workspace
+  access, change Local API scope, or create a normalized success from model
+  prose. See [Lab](lab.md).
+
 ## Model Management
 
 - The model list is a wrapping grid of cards rather than full-width rows. Each

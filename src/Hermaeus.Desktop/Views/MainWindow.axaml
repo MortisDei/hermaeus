@@ -150,6 +150,14 @@
                             </StackPanel>
                         </Button>
 
+                        <Button Classes="icon-btn" Command="{Binding ShowLabPanelCommand}" Classes.nav-active="{Binding ShowLab}"
+                                ToolTip.Tip="Lab - experiments and evidence">
+                            <StackPanel Orientation="Horizontal" Spacing="4">
+                                <PathIcon Data="M9 2v2h1v5.59L4.59 18A2 2 0 0 0 6.27 21h11.46a2 2 0 0 0 1.68-3L14 9.59V4h1V2H9zm3 8.17L17.73 19H6.27L12 10.17z" Width="17" Height="17" />
+                                <TextBlock Text="Lab" FontSize="11" VerticalAlignment="Center" IsVisible="{Binding Settings.Ui.ShowNavLabels}" />
+                            </StackPanel>
+                        </Button>
+
                         <Button Classes="icon-btn" Command="{Binding ShowSystemPanelCommand}" Classes.nav-active="{Binding ShowSystem}"
                                 ToolTip.Tip="System overview">
                             <StackPanel Orientation="Horizontal" Spacing="4">
@@ -273,6 +281,9 @@
                     </DataTemplate>
                     <DataTemplate DataType="vm:BenchmarkViewModel">
                         <views:BenchmarkView />
+                    </DataTemplate>
+                    <DataTemplate DataType="vm:LabViewModel">
+                        <views:LabView />
                     </DataTemplate>
                     <DataTemplate DataType="vm:SystemOverviewViewModel">
                         <views:SystemOverviewView />

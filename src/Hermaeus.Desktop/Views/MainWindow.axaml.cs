@@ -40,6 +40,13 @@ public partial class MainWindow : Window
                     $"Permanently delete \"{item.Title}\"? This cannot be undone.");
                 return await dialog.ShowDialog<bool>(this);
             };
+            vm.Lab.ConfirmRemoval = async experience =>
+            {
+                var dialog = new ConfirmActionDialog(
+                    "Remove empirical evidence",
+                    $"Permanently remove experience {experience.Id}? Its stored context, action and provenance are hard-deleted. Raw source task or Lab evidence is not changed.");
+                return await dialog.ShowDialog<bool>(this);
+            };
             vm.RequestCopyToastDetails = async text =>
             {
                 if (Clipboard is { } clipboard)

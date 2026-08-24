@@ -190,6 +190,7 @@ public sealed class AgentService : IAgentService
     private readonly ISettingsService? _settings;
     private readonly ILessonStore? _lessons;
     private readonly IAgentWorkspaceTools? _workspaceTools;
+    private readonly IEmpiricalExperienceStore? _experiences;
 
     /// <summary>
     /// r29 doc 03 3.4: one interrupt source per running task, held for the
@@ -224,7 +225,8 @@ public sealed class AgentService : IAgentService
         IWorkspaceManifestStore? manifests = null,
         ISettingsService? settings = null,
         ILessonStore? lessons = null,
-        IAgentWorkspaceTools? workspaceTools = null)
+        IAgentWorkspaceTools? workspaceTools = null,
+        IEmpiricalExperienceStore? experiences = null)
     {
         _store = store;
         _contextBuilder = contextBuilder;
@@ -236,6 +238,7 @@ public sealed class AgentService : IAgentService
         _lessons = lessons;
         _settings = settings;
         _workspaceTools = workspaceTools;
+        _experiences = experiences;
     }
 
     private static readonly IReadOnlyList<string> BaseTaskConstraints =
@@ -312,6 +315,7 @@ public sealed class AgentService : IAgentService
     {
         var state = await _store.LoadAsync(taskId, ct)
             ?? throw new InvalidOperationException("Agent task was not found.");
+        var firstNewToolResult = state.ToolResults.Count;
         if (state.Status is AgentTaskStatus.Complete or AgentTaskStatus.Failed or AgentTaskStatus.Cancelled)
             throw new InvalidOperationException("Agent task is already finished.");
         if (state.SubTaskPlan.Any(s => s.Status is AgentSubTaskStatus.Pending or AgentSubTaskStatus.Running))
@@ -663,6 +667,7 @@ public sealed class AgentService : IAgentService
                         await _store.AppendTranscriptEntryAsync(taskId,
                             AgentTranscriptCompactor.FromToolResult(state.StepCount, toolResult, DateTime.UtcNow), CancellationToken.None);
                         await _store.SaveAsync(state, CancellationToken.None);
+                        await RecordExperiencesAsync(state, options, firstNewToolResult, CancellationToken.None);
                         ct.ThrowIfCancellationRequested();
                     }
                     state.Status = AgentTaskStatus.Running;
@@ -805,6 +810,7 @@ public sealed class AgentService : IAgentService
         }
 
         await _store.SaveAsync(state, ct);
+        await RecordExperiencesAsync(state, options, firstNewToolResult, ct);
 
         if (_traces is not null)
         {
@@ -1106,6 +1112,7 @@ public sealed class AgentService : IAgentService
     {
         var state = await _store.LoadAsync(taskId, ct)
             ?? throw new InvalidOperationException("Agent task was not found.");
+        var firstNewToolResult = state.ToolResults.Count;
 
         // A task with nothing pending has no decision to record (r26 01 1.2).
         // Before this, an approval here appended a history record and set the
@@ -1150,6 +1157,7 @@ public sealed class AgentService : IAgentService
             // event above, already written.
             state.ToolResults.Add(BuildApprovalToolResult(pendingAtStart!.ToolName, approved: true, fingerprintBlocked: true));
             await _store.SaveAsync(state, ct);
+            await RecordExperiencesAsync(state, options ?? new AgentWorkspaceOptions(state.WorkspaceRoot), firstNewToolResult, ct);
             await _store.AppendLogAsync(taskId, $"approval refused: pending action changed since it was displayed ({pendingAtStart.ToolName})", ct);
             return new AgentApprovalResult(false, "The pending action changed since it was displayed. Review it again.");
         }
@@ -1213,6 +1221,7 @@ public sealed class AgentService : IAgentService
                 await _store.AppendTranscriptEntryAsync(taskId,
                     AgentTranscriptCompactor.FromToolResult(state.StepCount, result, DateTime.UtcNow), CancellationToken.None);
                 await _store.SaveAsync(state, CancellationToken.None);
+                await RecordExperiencesAsync(state, effectiveOptions, firstNewToolResult, CancellationToken.None);
                 ct.ThrowIfCancellationRequested();
             }
             RememberCommandApprovalIfApplicable(state, pending);
@@ -1255,6 +1264,7 @@ public sealed class AgentService : IAgentService
             state.PendingToolAction = null;
         }
         await _store.SaveAsync(state, ct);
+        await RecordExperiencesAsync(state, options ?? new AgentWorkspaceOptions(state.WorkspaceRoot), firstNewToolResult, ct);
         await _store.AppendLogAsync(taskId, $"approval recorded: {action} approved={approved}", ct);
         return new AgentApprovalResult(true, string.Empty);
     }
@@ -2437,6 +2447,60 @@ public sealed class AgentService : IAgentService
 
     private static bool IsSuccessfulOutcome(AgentToolResult result) =>
         result.NormalizedOutcome.Outcome is NormalizedOutcome.Succeeded or NormalizedOutcome.NoEffect;
+
+    private async Task RecordExperiencesAsync(
+        AgentTaskState state,
+        AgentWorkspaceOptions options,
+        int firstResultIndex,
+        CancellationToken ct)
+    {
+        if (_experiences is null || firstResultIndex >= state.ToolResults.Count) return;
+        var workspaceFingerprint = OpaqueFingerprint("workspace", state.WorkspaceRoot);
+        var modelFingerprint = OpaqueFingerprint("model", options.ModelId);
+        for (var index = firstResultIndex; index < state.ToolResults.Count; index++)
+        {
+            var result = state.ToolResults[index];
+            try
+            {
+                var arguments = result.Arguments.ToDictionary(
+                    pair => pair.Key,
+                    pair => string.Equals(pair.Key, "command", StringComparison.OrdinalIgnoreCase)
+                        ? (object?)"[command retained in source task only]"
+                        : pair.Value,
+                    StringComparer.OrdinalIgnoreCase);
+                var codec = new AgentToolExperienceCodec();
+                await _experiences.AddAsync(new EmpiricalExperienceDraft
+                {
+                    Domain = codec.Domain,
+                    ProjectId = string.IsNullOrWhiteSpace(state.ProjectId) ? null : state.ProjectId,
+                    WorkspaceFingerprint = workspaceFingerprint,
+                    ContextJson = codec.EncodeContext(new AgentToolExperienceContext(state.TaskId, state.StepCount, index, result.Tool)),
+                    ActionJson = codec.EncodeAction(new AgentToolExperienceAction(
+                        JsonSerializer.Serialize(arguments), result.NormalizedOutcome.DerivationVersion)),
+                    Outcome = result.NormalizedOutcome,
+                    Provenance =
+                    [
+                        new EmpiricalExperienceProvenance($"{state.TaskId}:tool-result:{index}", new SourceReference(
+                            ProvenanceKind.AgentTool, $"{result.Tool} result", state.TaskId,
+                            Timestamp: result.Timestamp, EvidenceOrigin: EvidenceOrigin.DirectObservation))
+                    ],
+                    ModelFingerprint = modelFingerprint
+                }, ct);
+            }
+            catch
+            {
+                // Experience is a secondary index. The task file and transcript
+                // remain authoritative and must not fail because indexing did.
+            }
+        }
+    }
+
+    private static string? OpaqueFingerprint(string prefix, string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var hash = System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(value.Trim()));
+        return $"{prefix}-{Convert.ToHexString(hash).ToLowerInvariant()}";
+    }
 
     private static string BuildSummary(AgentTaskState state, AgentPlannerResponse response)
     {

@@ -429,7 +429,7 @@ For commercial licensing requests, see the Contact section of COMMERCIAL.md.
 
 Current version:
 
-**0.37.0-alpha**
+**0.38.0-alpha**
 
 Major systems currently implemented include:
 
@@ -440,6 +440,7 @@ Major systems currently implemented include:
 - Long-term memory
 - Voice providers
 - Benchmark suites
+- Controlled Lab evidence inspection
 - Local AI setup
 - Doctor diagnostics
 - Reasoning-aware local chat with capability evidence and preserved reasoning

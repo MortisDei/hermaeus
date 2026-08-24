@@ -800,8 +800,10 @@ internal static class AgentTests
     var result = await executor.ExecuteAsync("run_command", new Dictionary<string, object?> { ["command"] = "dotnet build" }, options);
     True(result.ResultSummary.Contains("Exit code", StringComparison.Ordinal), "run_command result should report an exit code");
 
-    await ThrowsAsync<InvalidOperationException>(() =>
-        executor.ExecuteAsync("run_command", new Dictionary<string, object?> { ["command"] = "rm -rf /" }, options));
+    var blocked = await executor.ExecuteAsync(
+        "run_command", new Dictionary<string, object?> { ["command"] = "rm -rf /" }, options);
+    Equal(NormalizedOutcome.Blocked, blocked.NormalizedOutcome.Outcome,
+        "a command outside the fixed templates should return a structured blocked outcome");
     }
 
     public static async Task RunCommandAcceptsAnOptionalPathWithinTheWorkspace()
@@ -824,10 +826,14 @@ internal static class AgentTests
     var result = await executor.ExecuteAsync("run_command", new Dictionary<string, object?> { ["command"] = "dotnet build src/sample.csproj" }, options);
     True(result.ResultSummary.Contains("Exit code", StringComparison.Ordinal), "dotnet build with a workspace-relative project path should run");
 
-    await ThrowsAsync<InvalidOperationException>(() =>
-        executor.ExecuteAsync("run_command", new Dictionary<string, object?> { ["command"] = "dotnet build ../outside.csproj" }, options));
-    await ThrowsAsync<InvalidOperationException>(() =>
-        executor.ExecuteAsync("run_command", new Dictionary<string, object?> { ["command"] = "dotnet build /etc/passwd" }, options));
+    var traversal = await executor.ExecuteAsync(
+        "run_command", new Dictionary<string, object?> { ["command"] = "dotnet build ../outside.csproj" }, options);
+    Equal(NormalizedOutcome.Blocked, traversal.NormalizedOutcome.Outcome,
+        "a traversal argument should return a structured blocked outcome");
+    var absolute = await executor.ExecuteAsync(
+        "run_command", new Dictionary<string, object?> { ["command"] = "dotnet build /etc/passwd" }, options);
+    Equal(NormalizedOutcome.Blocked, absolute.NormalizedOutcome.Outcome,
+        "an absolute path argument should return a structured blocked outcome");
     }
 
     public static async Task RunCommandNpmRunOnlyAllowsScriptsDeclaredInPackageJson()
@@ -850,8 +856,10 @@ internal static class AgentTests
     // it's exercised without depending on npm actually being present.
     var executor = new AgentToolExecutor(new AgentWorkspaceTools());
     var options = new AgentWorkspaceOptions(workspace);
-    await ThrowsAsync<InvalidOperationException>(() =>
-        executor.ExecuteAsync("run_command", new Dictionary<string, object?> { ["command"] = "npm run undeclared-script" }, options));
+    var blocked = await executor.ExecuteAsync(
+        "run_command", new Dictionary<string, object?> { ["command"] = "npm run undeclared-script" }, options);
+    Equal(NormalizedOutcome.Blocked, blocked.NormalizedOutcome.Outcome,
+        "an undeclared script should return a structured blocked outcome before process start");
     }
 
     public static Task AgentSafetyGateDeclaredFamilyCoversArgumentVariants()

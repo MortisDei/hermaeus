@@ -71,6 +71,7 @@ public sealed class MainWindowViewModelStartupTests
         var rag = new RagViewModel(ragQuery, ragPipeline, ragEval, toasts, logs, settings, servicesVm);
 
         var benchmarks = new BenchmarkViewModel(new BenchmarkService(settings, llm, new FakeSystemInfo(), new FakeEvalStore()), llm, new ModelProfileService(settings), settings, toasts);
+        var lab = new LabViewModel(new SqliteEmpiricalExperienceStore(settings, new RedactionService()), toasts);
 
         var traces = new SqliteTraceStore(settings);
         var privacyAudit = new PrivacyAuditService(settings, secrets, logs, new FakeVoiceProviderRegistry(settings), traces);
@@ -96,7 +97,7 @@ public sealed class MainWindowViewModelStartupTests
         var activity = new ActivityViewModel(toasts, new SqliteTraceStore(settings));
 
         var main = new MainWindowViewModel(
-            convStore, chat, agent, settingsVm, models, rag, servicesVm, benchmarks, systemOverview, doctor, memories, logsVm, wizard, projects,
+            convStore, chat, agent, settingsVm, models, rag, servicesVm, benchmarks, lab, systemOverview, doctor, memories, logsVm, wizard, projects,
             commandRegistry, palette, activity, settings, toasts, logs, new ConversationExportService(), recallIndexing);
 
         return new Harness(main, llm, logs, toasts, convStore);

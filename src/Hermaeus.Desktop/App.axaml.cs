@@ -288,6 +288,7 @@ public partial class App : Application
         s.AddSingleton<RagViewModel>();
         s.AddSingleton<ServicesViewModel>();
         s.AddSingleton<BenchmarkViewModel>();
+        s.AddSingleton<LabViewModel>();
         s.AddSingleton<SystemOverviewViewModel>();
         s.AddSingleton<DoctorViewModel>();
         s.AddSingleton<MemoriesViewModel>();

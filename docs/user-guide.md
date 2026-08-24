@@ -110,6 +110,20 @@ scope and proposed actions, and approve gated operations explicitly. Task state
 and patch queues remain inspectable. Workspace authority does not carry into
 another workspace or into ordinary Chat.
 
+## Lab evidence
+
+Open **Lab** and use the **Evidence** surface to inspect structured Agent,
+GPU Fit, and experiment evidence. Filters cover domain, project/workspace
+scope, model/runtime fingerprints, normalized outcome, evidence origin, status,
+and date. Select a record to inspect its canonical context and action plus the
+raw-source links.
+
+**Save correction** creates a linked replacement without rewriting the source
+task or run. **Remove** asks for confirmation and permanently deletes only the
+selected empirical index record; a record with a dependent correction must be
+handled from the dependent record first. Check one or more rows and choose
+**Export selected** to prepare versioned redacted JSON in the detail pane.
+
 ## Voice
 
 Native Kokoro runs locally after its verified assets are installed. Other voice

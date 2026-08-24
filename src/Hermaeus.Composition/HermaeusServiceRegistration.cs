@@ -42,6 +42,7 @@ public static class HermaeusServiceRegistration
         s.AddSingleton<PrivacyAuditService>();
         s.AddSingleton<ISystemInfoService, SystemInfoService>();
         s.AddSingleton<IEvalStore, SqliteEvalStore>();
+        s.AddSingleton<IEmpiricalExperienceStore, SqliteEmpiricalExperienceStore>();
         s.AddSingleton<EvalEngine>();
         s.AddSingleton<BenchmarkService>();
         s.AddSingleton<IBenchmarkInsightsService, BenchmarkInsightsService>();

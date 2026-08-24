@@ -1,9 +1,12 @@
+using System.Text.Json.Serialization;
+
 namespace Hermaeus.Core.Models;
 
 /// <summary>
 /// Provider-neutral semantic outcome derived from retained executor evidence.
 /// Unknown is intentionally distinct from failure.
 /// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum NormalizedOutcome
 {
     Succeeded,
