@@ -541,6 +541,12 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
   and never auto-applies a winner. The trade-off view keeps GPU Fit prediction,
   observed memory/source, throughput, missing TTFT, correctness, and low-bit
   quality evidence distinct.
+- Lab also exposes general external-draft, EAGLE-3, and four one-at-a-time
+  speculative parameter plans. A pair is Available only when the exact runtime
+  mechanism, verified target/companion identities, tokenizer/vocabulary
+  compatibility, and any EAGLE target binding are proven. Draft/accepted token
+  counters and derived acceptance stay distinct from missing TTFT, memory, and
+  exact-output correctness. Missing assets or evidence remain `Unknown`.
 - Repeated run evidence is stored as bounded immutable per-configuration child
   records with one compact completion decision, rather than widening the
   experience document limit or discarding raw observations.

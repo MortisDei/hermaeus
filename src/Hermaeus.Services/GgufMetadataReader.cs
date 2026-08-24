@@ -29,7 +29,19 @@ public sealed record GgufModelInfo(
     /// </summary>
     int? VocabularySize = null,
     int? NextnPredictLayers = null,
-    bool HasChatTemplate = false);
+    bool HasChatTemplate = false,
+    string Name = "",
+    string RepositoryUrl = "",
+    string BaseModelName = "",
+    string BaseModelRepositoryUrl = "",
+    string TokenizerModel = "",
+    string TokenizerPre = "")
+{
+    public string TokenizerIdentity =>
+        string.IsNullOrWhiteSpace(TokenizerModel) || string.IsNullOrWhiteSpace(TokenizerPre)
+            ? string.Empty
+            : $"{TokenizerModel.Trim().ToLowerInvariant()}:{TokenizerPre.Trim().ToLowerInvariant()}:{VocabularySize?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty}";
+}
 
 /// <summary>
 /// Reads only the metadata key/value section of a GGUF file header; tensor data is never
@@ -119,6 +131,12 @@ public static class GgufMetadataReader
             long? vocabularySize = null;
             long? nextnPredictLayers = null;
             var hasChatTemplate = false;
+            var name = string.Empty;
+            var repositoryUrl = string.Empty;
+            var baseModelName = string.Empty;
+            var baseModelRepositoryUrl = string.Empty;
+            var tokenizerModel = string.Empty;
+            var tokenizerPre = string.Empty;
             IReadOnlyList<bool>? slidingWindowPattern = null;
 
             for (ulong i = 0; i < kvCount; i++)
@@ -132,6 +150,14 @@ public static class GgufMetadataReader
                 // shape keys never matters.
                 if (key == "general.architecture")
                     architecture = ReadValue(reader, valueType, 0) as string ?? string.Empty;
+                else if (key == "general.name")
+                    name = ReadValue(reader, valueType, 0) as string ?? string.Empty;
+                else if (key == "general.repo_url")
+                    repositoryUrl = ReadValue(reader, valueType, 0) as string ?? string.Empty;
+                else if (key == "general.base_model.0.name")
+                    baseModelName = ReadValue(reader, valueType, 0) as string ?? string.Empty;
+                else if (key == "general.base_model.0.repo_url")
+                    baseModelRepositoryUrl = ReadValue(reader, valueType, 0) as string ?? string.Empty;
                 else if (key == "general.file_type")
                     fileType = ToScalarLong(ReadValue(reader, valueType, 0));
                 else if (key.EndsWith(".block_count", StringComparison.Ordinal))
@@ -161,6 +187,10 @@ public static class GgufMetadataReader
                     _ = ReadValue(reader, valueType, 0);
                     hasChatTemplate = true;
                 }
+                else if (key == "tokenizer.ggml.model")
+                    tokenizerModel = ReadValue(reader, valueType, 0) as string ?? string.Empty;
+                else if (key == "tokenizer.ggml.pre")
+                    tokenizerPre = ReadValue(reader, valueType, 0) as string ?? string.Empty;
                 else if (key == "tokenizer.ggml.tokens" && valueType == 9)
                     // The token array itself is never materialised: only its
                     // declared length is read, then the elements are skipped.
@@ -189,7 +219,13 @@ public static class GgufMetadataReader
                 SlidingWindowPattern: slidingWindowPattern,
                 VocabularySize: ToInt(vocabularySize),
                 NextnPredictLayers: ToInt(nextnPredictLayers),
-                HasChatTemplate: hasChatTemplate);
+                HasChatTemplate: hasChatTemplate,
+                Name: name,
+                RepositoryUrl: repositoryUrl,
+                BaseModelName: baseModelName,
+                BaseModelRepositoryUrl: baseModelRepositoryUrl,
+                TokenizerModel: tokenizerModel,
+                TokenizerPre: tokenizerPre);
         }
         catch (EndOfStreamException) { return null; }
         catch (IOException) { return null; }

@@ -67,6 +67,15 @@ successful exact help probe, and `runtime.moe.cpu-placement` only when both
 CPU-MoE placement controls appear. Probe failure leaves either capability
 `Unknown`; CPU placement is not treated as expert caching.
 
+The exact speculative help surface now records `draft-simple`,
+`draft-eagle3`, and the four reviewed tuning flags as separate capability
+observations. Lab's external-draft adapters additionally require verified
+target and companion identities, tokenizer/vocabulary evidence, and EAGLE-3
+base-model binding. A self-described filename, equal vocabulary size, generic
+draft support, or file size/mtime identity fallback cannot make the pair
+Available. Drafted and accepted runtime counters remain direct observations;
+the acceptance ratio is a deterministic calculation over those counters.
+
 The runtime identity includes the executable SHA256, size, modification time,
 parsed version/build/compiler/backend facts when available, and managed asset
 identity. Its portable stable id excludes the executable path. Model identity
@@ -101,10 +110,11 @@ output, template reasoning preservation, and modalities are each reported as
 Available, Unavailable, or Unknown with evidence. Results are cached by model
 and runtime identity using an atomic state file.
 
-The same help probe now discovers the speculative type names printed beside
+The same help probe discovers the speculative type names printed beside
 `--spec-type`, `--threads-batch`, and `--perf` when present. A type is not made
 configurable merely because it was discovered. Hermaeus currently has complete
-semantics for self-drafting n-gram modes and the MTP-head path; unfamiliar
+semantics for self-drafting n-gram modes, the MTP-head path, general external
+drafting, and EAGLE-3 under their stricter Lab asset gates; unfamiliar
 types remain runtime facts until their drafter, model compatibility, memory,
 and launch semantics are understood. At launch the help probe is repeated:
 saved speculative settings or prompt threads are refused when the selected
@@ -158,8 +168,8 @@ Recorded so the next round starts from a survey rather than repeating it.
 
 | Area | Current r30 position | Revisit only when |
 | --- | --- | --- |
-| DSpark, DFlash, EAGLE-3 and other speculative types | Runtime discovery reports them when installed help names them, but does not expose a control. Vocabulary equality alone does not establish drafter compatibility. | A supported runtime and documented end-to-end drafter workflow can be validated with model, vocabulary, GPU-layer, and Speed Check evidence. |
-| General external draft model | `draft-mtp` keeps the bounded MTP-head workflow. The generic picker remains incomplete. | Hermaeus can prove more than vocabulary equality, preserve detailed failure evidence, and measure acceptance, TTFT, throughput, and overhead for a known pair. |
+| DSpark, DFlash and other unreviewed speculative types | Runtime discovery retains them when installed help names them, but does not expose a control. | A stable mechanism-specific asset and launch contract plus measured benefit is required before another adapter is added. |
+| EAGLE-3 and general external draft models | Lab provides conditional adapters for exact runtime-advertised `draft-eagle3` and `draft-simple` pairs. Verified target/companion identity, tokenizer/vocabulary evidence, and EAGLE target binding are required; actual engagement and benefit are still a live gate. | Reduced-vocabulary mapping remains Unknown from bounded GGUF metadata, and no external/EAGLE pair was available in the R31 Windows inventory. |
 | Prompt cache and prefill effectiveness | Benchmarks distinguish cold and warm attempts and record prompt throughput and TTFT, but llama-server does not provide a stable reuse-token counter in this integration. | A stable machine-readable runtime counter or an explicit controlled shared-prefix workload can be added without fabricating reuse counts. |
 | Backend sampling | Not configured. No accessible runtime evidence in Batch #3 established a useful single-slot contract. | A selected runtime advertises a stable option and a Speed Check can isolate its effect for `--parallel 1`. |
 | Internal performance instrumentation | `--perf` is detected as a fact only. It is not enabled by normal launches or parsed as a benchmark contract. | Its diagnostic output is stable and machine-readable enough to explain a measured difference without coupling to log wording. |

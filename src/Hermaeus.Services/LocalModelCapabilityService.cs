@@ -24,7 +24,11 @@ public sealed record LlamaRuntimeCapabilityFacts(
     bool ModelSpecificMtpConfirmed = false,
     IReadOnlyList<string>? SupportedKvCacheTypes = null,
     bool SupportsFlashAttention = false,
-    bool SupportsCpuMoePlacement = false);
+    bool SupportsCpuMoePlacement = false,
+    bool SupportsSpeculativeNMax = false,
+    bool SupportsSpeculativeNMin = false,
+    bool SupportsSpeculativePMin = false,
+    bool SupportsSpeculativeDraftGpuLayers = false);
 
 /// <summary>A meaningful change between two capability snapshots, never a raw help-text diff.</summary>
 public sealed record CapabilityDrift(string Capability, string Detail, bool AffectsConfiguredCapability = false);
@@ -71,7 +75,13 @@ public sealed class LocalModelCapabilityService
             SupportedKvCacheTypes: ParseKvCacheTypes(help),
             SupportsFlashAttention: help.Contains("--flash-attn", StringComparison.Ordinal),
             SupportsCpuMoePlacement: help.Contains("--cpu-moe", StringComparison.Ordinal)
-                && help.Contains("--n-cpu-moe", StringComparison.Ordinal));
+                && help.Contains("--n-cpu-moe", StringComparison.Ordinal),
+            SupportsSpeculativeNMax: help.Contains("--spec-draft-n-max", StringComparison.Ordinal),
+            SupportsSpeculativeNMin: help.Contains("--spec-draft-n-min", StringComparison.Ordinal),
+            SupportsSpeculativePMin: help.Contains("--spec-draft-p-min", StringComparison.Ordinal),
+            SupportsSpeculativeDraftGpuLayers: help.Contains("--spec-draft-ngl", StringComparison.Ordinal)
+                || help.Contains("--gpu-layers-draft", StringComparison.Ordinal)
+                || help.Contains("-ngld", StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -419,13 +429,18 @@ public sealed class LocalModelCapabilityService
             ? SpeculativeDrafterKind.Self
             : string.Equals(type, "draft-mtp", StringComparison.OrdinalIgnoreCase)
                 ? SpeculativeDrafterKind.EmbeddedMtp
-                : string.Equals(type, "draft-simple", StringComparison.OrdinalIgnoreCase)
+                : type is not null && (string.Equals(type, "draft-simple", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(type, "draft-eagle3", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(type, "eagle3", StringComparison.OrdinalIgnoreCase))
                     ? SpeculativeDrafterKind.External
                     : SpeculativeDrafterKind.Unknown;
 
     private static bool IsConfigurableType(string type) =>
         type.StartsWith("ngram-", StringComparison.OrdinalIgnoreCase)
-        || string.Equals(type, "draft-mtp", StringComparison.OrdinalIgnoreCase);
+        || string.Equals(type, "draft-mtp", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(type, "draft-simple", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(type, "draft-eagle3", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(type, "eagle3", StringComparison.OrdinalIgnoreCase);
 
     private static IReadOnlyList<RuntimeCapabilityObservation> BuildObservations(
         LlamaRuntimeCapabilityFacts runtime,
@@ -479,12 +494,29 @@ public sealed class LocalModelCapabilityService
             : Unknown("runtime-help-unknown", "A successful runtime help probe is required.");
         Add("runtime.moe.cpu-placement", cpuMoe, null);
 
+        AddRuntimeFlag("runtime.speculative.parameter.n-max", runtime.SupportsSpeculativeNMax, "--spec-draft-n-max");
+        AddRuntimeFlag("runtime.speculative.parameter.n-min", runtime.SupportsSpeculativeNMin, "--spec-draft-n-min");
+        AddRuntimeFlag("runtime.speculative.parameter.p-min", runtime.SupportsSpeculativePMin, "--spec-draft-p-min");
+        AddRuntimeFlag("runtime.speculative.parameter.draft-gpu-layers", runtime.SupportsSpeculativeDraftGpuLayers, "--spec-draft-ngl/-ngld");
+
         return result;
 
         void Add(string id, CapabilityEvidence evidence, ModelIdentityV2? observedModel, IReadOnlyDictionary<string, string>? parameters = null) =>
             result.Add(RuntimeCapabilityObservation.Create(
                 id, evidence.State, evidence.EvidenceCode, evidence.Detail, runtimeIdentity,
                 observedModel, parameters, observedAtUtc));
+
+        void AddRuntimeFlag(string id, bool supported, string flag)
+        {
+            var evidence = runtime.HelpProbeSucceeded
+                ? supported
+                    ? Available("runtime-help-flag", $"The selected runtime advertises {flag}.")
+                    : Unavailable("runtime-help-no-flag", $"The selected runtime help does not advertise {flag}.")
+                : Unknown("runtime-help-unknown", "A successful runtime help probe is required.");
+            Add(id, evidence, null, supported
+                ? new Dictionary<string, string>(StringComparer.Ordinal) { ["flag"] = flag }
+                : null);
+        }
     }
 
     public static string CapabilityIdForSpeculativeType(string type)
@@ -495,7 +527,9 @@ public sealed class LocalModelCapabilityService
             "draft.simple" => "speculative.draft.simple",
             "draft.mtp" => "speculative.draft.mtp",
             "ngram.mod" => "speculative.ngram.mod",
-            "eagle3" => "speculative.draft.eagle3",
+            "eagle3" or "draft.eagle3" => "speculative.draft.eagle3",
+            "draft.dflash" => "speculative.draft.dflash",
+            "draft.dspark" => "speculative.draft.dspark",
             "dflash" => "speculative.draft.dflash",
             _ => $"speculative.observed.{normalized}"
         };

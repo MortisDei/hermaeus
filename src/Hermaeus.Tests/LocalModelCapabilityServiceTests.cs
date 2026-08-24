@@ -41,7 +41,7 @@ public sealed class LocalModelCapabilityServiceTests
     }
 
     [Fact]
-    public void Combine_marks_unknown_speculative_mechanisms_as_not_configurable()
+    public void Combine_exposes_only_reviewed_speculative_mechanisms_as_configurable()
     {
         var facts = LocalModelCapabilityService.ParseHelp("--spec-type TYPE: ngram-mod, draft-mtp, eagle3");
 
@@ -52,8 +52,8 @@ public sealed class LocalModelCapabilityServiceTests
         Assert.Equal(SpeculativeDrafterKind.Self, types.Single(t => t.Type == "ngram-mod").DrafterKind);
         Assert.True(types.Single(t => t.Type == "draft-mtp").Configurable);
         Assert.Equal(SpeculativeDrafterKind.EmbeddedMtp, types.Single(t => t.Type == "draft-mtp").DrafterKind);
-        Assert.False(types.Single(t => t.Type == "eagle3").Configurable);
-        Assert.Equal(SpeculativeDrafterKind.Unknown, types.Single(t => t.Type == "eagle3").DrafterKind);
+        Assert.True(types.Single(t => t.Type == "eagle3").Configurable);
+        Assert.Equal(SpeculativeDrafterKind.External, types.Single(t => t.Type == "eagle3").DrafterKind);
     }
 
     [Fact]

@@ -12,9 +12,13 @@ public static class LabRecipeCatalog
     private static readonly string[] ReviewedKvTypes = ["f16", "q8_0", "q4_0"];
 
     public static LabRecipePlan Build(LabRecipeKind kind, ServerConfig source,
-        IReadOnlyCollection<RuntimeCapabilityObservation> capabilities, GgufModelInfo? gguf = null)
+        IReadOnlyCollection<RuntimeCapabilityObservation> capabilities, GgufModelInfo? gguf = null,
+        GgufModelInfo? draftGguf = null, ModelIdentityV2? targetIdentity = null,
+        ModelIdentityV2? draftIdentity = null)
     {
         var baseline = LabConfigurationMapper.FromServer(source, "baseline", "Baseline");
+        if (draftIdentity is not null && baseline.SpeculativeTypes.Count > 0)
+            baseline = baseline with { SpeculativeCompanionIdentity = draftIdentity.StableId };
         var plan = kind switch
         {
             LabRecipeKind.EngineProfile => EngineProfile(baseline, gguf),
@@ -22,6 +26,16 @@ public static class LabRecipeCatalog
             LabRecipeKind.KvCache => Kv(baseline, capabilities),
             LabRecipeKind.FlashAttention => Flash(baseline, capabilities),
             LabRecipeKind.CpuMoePlacement => CpuMoe(baseline, capabilities, gguf),
+            LabRecipeKind.ExternalDraft => ExternalDraft(source, baseline, capabilities, gguf, draftGguf, targetIdentity, draftIdentity),
+            LabRecipeKind.Eagle3 => Eagle3(source, baseline, capabilities, gguf, draftGguf, targetIdentity, draftIdentity),
+            LabRecipeKind.SpeculativeDraftMaximum => SpeculativeTuning(source, baseline, capabilities,
+                kind, "runtime.speculative.parameter.n-max", gguf, draftGguf, targetIdentity, draftIdentity),
+            LabRecipeKind.SpeculativeDraftMinimum => SpeculativeTuning(source, baseline, capabilities,
+                kind, "runtime.speculative.parameter.n-min", gguf, draftGguf, targetIdentity, draftIdentity),
+            LabRecipeKind.SpeculativeProbabilityMinimum => SpeculativeTuning(source, baseline, capabilities,
+                kind, "runtime.speculative.parameter.p-min", gguf, draftGguf, targetIdentity, draftIdentity),
+            LabRecipeKind.SpeculativeDraftGpuLayers => SpeculativeTuning(source, baseline, capabilities,
+                kind, "runtime.speculative.parameter.draft-gpu-layers", gguf, draftGguf, targetIdentity, draftIdentity),
             _ => throw new ArgumentOutOfRangeException(nameof(kind))
         };
         Validate(plan);
@@ -121,6 +135,110 @@ public static class LabRecipeCatalog
             ["runtime.moe.cpu-placement"]);
     }
 
+    private static LabRecipePlan ExternalDraft(ServerConfig source, LabConfiguration original,
+        IReadOnlyCollection<RuntimeCapabilityObservation> capabilities, GgufModelInfo? target, GgufModelInfo? draft,
+        ModelIdentityV2? targetIdentity, ModelIdentityV2? draftIdentity)
+        => DraftPairPlan("external-draft-v1", "External draft model", LabRecipeKind.ExternalDraft,
+            "draft-simple", source, original, capabilities, target, draft, targetIdentity, draftIdentity);
+
+    private static LabRecipePlan Eagle3(ServerConfig source, LabConfiguration original,
+        IReadOnlyCollection<RuntimeCapabilityObservation> capabilities, GgufModelInfo? target, GgufModelInfo? draft,
+        ModelIdentityV2? targetIdentity, ModelIdentityV2? draftIdentity)
+        => DraftPairPlan("eagle3-v1", "EAGLE-3", LabRecipeKind.Eagle3,
+            "draft-eagle3", source, original, capabilities, target, draft, targetIdentity, draftIdentity);
+
+    private static LabRecipePlan DraftPairPlan(string id, string label, LabRecipeKind kind,
+        string mechanism, ServerConfig source, LabConfiguration original,
+        IReadOnlyCollection<RuntimeCapabilityObservation> capabilities, GgufModelInfo? target, GgufModelInfo? draft,
+        ModelIdentityV2? targetIdentity, ModelIdentityV2? draftIdentity)
+    {
+        var inspection = SpeculativePairInspector.Inspect(mechanism, source, capabilities, target, draft,
+            targetIdentity, draftIdentity);
+        var baseline = original with
+        {
+            Id = "baseline", Label = "Speculation off", SpeculativeTypes = [],
+            SpeculativeCompanionIdentity = string.Empty, SpeculativeDraftGpuLayers = null,
+            SpeculativeNMax = null, SpeculativeNMin = null, SpeculativePMin = null
+        };
+        var candidate = original with
+        {
+            Id = "speculative", Label = label, SpeculativeTypes = [mechanism],
+            SpeculativeCompanionIdentity = inspection.CompanionIdentity.StableId
+        };
+        return new LabRecipePlan(id, label, kind, inspection.State, inspection.Detail,
+            baseline, [candidate], 2, false, [LocalModelCapabilityService.CapabilityIdForSpeculativeType(mechanism)],
+            SpeculativeMetrics(), LabCorrectnessRequirement.ExactEquivalence);
+    }
+
+    private static LabRecipePlan SpeculativeTuning(ServerConfig source, LabConfiguration baseline,
+        IReadOnlyCollection<RuntimeCapabilityObservation> capabilities, LabRecipeKind kind,
+        string parameterCapability, GgufModelInfo? target, GgufModelInfo? draft,
+        ModelIdentityV2? targetIdentity, ModelIdentityV2? draftIdentity)
+    {
+        var mechanism = baseline.SpeculativeTypes.Count == 1 ? baseline.SpeculativeTypes[0] : string.Empty;
+        var mechanismId = mechanism.Length == 0 ? string.Empty : LocalModelCapabilityService.CapabilityIdForSpeculativeType(mechanism);
+        var mechanismState = mechanismId.Length == 0 ? CapabilityState.Unknown : State(capabilities, mechanismId);
+        var parameterState = State(capabilities, parameterCapability);
+        var pairState = mechanism is "draft-simple" or "draft-eagle3"
+            ? SpeculativePairInspector.Inspect(mechanism, source, capabilities, target, draft,
+                targetIdentity, draftIdentity).State
+            : mechanismState;
+        var explicitBaseline = kind switch
+        {
+            LabRecipeKind.SpeculativeDraftMaximum => baseline.SpeculativeNMax.HasValue,
+            LabRecipeKind.SpeculativeDraftMinimum => baseline.SpeculativeNMin.HasValue,
+            LabRecipeKind.SpeculativeProbabilityMinimum => baseline.SpeculativePMin.HasValue,
+            LabRecipeKind.SpeculativeDraftGpuLayers => baseline.SpeculativeDraftGpuLayers.HasValue,
+            _ => false
+        };
+        var state = mechanismState == CapabilityState.Unavailable || parameterState == CapabilityState.Unavailable
+            || pairState == CapabilityState.Unavailable
+                ? CapabilityState.Unavailable
+                : mechanismState == CapabilityState.Available && parameterState == CapabilityState.Available
+                    && pairState == CapabilityState.Available && explicitBaseline
+                    ? CapabilityState.Available : CapabilityState.Unknown;
+        var candidates = TuningCandidates(kind, baseline, draft ?? GgufMetadataReader.TryRead(source.Speculative?.DraftModelPath ?? string.Empty));
+        var label = kind switch
+        {
+            LabRecipeKind.SpeculativeDraftMaximum => "Speculative draft maximum",
+            LabRecipeKind.SpeculativeDraftMinimum => "Speculative draft minimum",
+            LabRecipeKind.SpeculativeProbabilityMinimum => "Speculative probability minimum",
+            _ => "Speculative draft GPU layers"
+        };
+        var detail = state == CapabilityState.Available
+            ? "The exact mechanism and parameter flag are advertised, pair validation passed where required, and the baseline value is explicit."
+            : "Select one proven speculative mechanism and set an explicit baseline value; runtime defaults are not assumed stable.";
+        return new LabRecipePlan($"{kind.ToString().ToLowerInvariant()}-v1", label, kind, state, detail,
+            baseline, candidates, Math.Min(8, candidates.Count + 1), false,
+            new[] { mechanismId, parameterCapability }.Where(value => value.Length > 0).ToArray(),
+            SpeculativeMetrics(), LabCorrectnessRequirement.ExactEquivalence);
+    }
+
+    private static IReadOnlyList<LabConfiguration> TuningCandidates(LabRecipeKind kind,
+        LabConfiguration baseline, GgufModelInfo? companion) => kind switch
+    {
+        LabRecipeKind.SpeculativeDraftMaximum => new[] { 1, 3, 5, 8 }
+            .Where(value => value != baseline.SpeculativeNMax && value >= (baseline.SpeculativeNMin ?? 0))
+            .Select((value, index) => baseline with { Id = $"spec-nmax-{index + 1}", Label = $"Draft maximum {value}", SpeculativeNMax = value }).ToArray(),
+        LabRecipeKind.SpeculativeDraftMinimum => new[] { 0, 1, 2, 3 }
+            .Where(value => value != baseline.SpeculativeNMin && value <= (baseline.SpeculativeNMax ?? 128))
+            .Select((value, index) => baseline with { Id = $"spec-nmin-{index + 1}", Label = $"Draft minimum {value}", SpeculativeNMin = value }).ToArray(),
+        LabRecipeKind.SpeculativeProbabilityMinimum => new[] { 0d, 0.1d, 0.25d, 0.5d }
+            .Where(value => value != baseline.SpeculativePMin)
+            .Select((value, index) => baseline with { Id = $"spec-pmin-{index + 1}", Label = $"Draft probability {value:0.##}", SpeculativePMin = value }).ToArray(),
+        LabRecipeKind.SpeculativeDraftGpuLayers => new[] { 0, Math.Max(1, companion?.BlockCount ?? 1) }
+            .Distinct().Where(value => value != baseline.SpeculativeDraftGpuLayers)
+            .Select((value, index) => baseline with { Id = $"spec-ngld-{index + 1}", Label = $"Draft GPU layers {value}", SpeculativeDraftGpuLayers = value }).ToArray(),
+        _ => []
+    };
+
+    private static IReadOnlyList<string> SpeculativeMetrics() =>
+    [
+        "prompt.tokens_per_second", "decode.tokens_per_second", "ttft.milliseconds",
+        "speculative.draft.tokens", "speculative.accepted.tokens", "speculative.acceptance.rate",
+        "memory.ram.observed", "memory.gpu.observed", "memory.ram.predicted", "memory.gpu.predicted"
+    ];
+
     private static LabRecipePlan Plan(string id, string label, LabRecipeKind kind, CapabilityState state,
         string detail, LabConfiguration baseline, IReadOnlyList<LabConfiguration> candidates,
         IReadOnlyList<string> capabilities, bool lowBitQuality = false) => new(
@@ -137,6 +255,14 @@ public static class LabRecipeCatalog
         LabRecipeKind.KvCache => new HashSet<string>([nameof(LabConfiguration.KvCacheTypeK), nameof(LabConfiguration.KvCacheTypeV)], StringComparer.Ordinal),
         LabRecipeKind.FlashAttention => new HashSet<string>([nameof(LabConfiguration.FlashAttention)], StringComparer.Ordinal),
         LabRecipeKind.CpuMoePlacement => new HashSet<string>([nameof(LabConfiguration.CpuMoeLayers)], StringComparer.Ordinal),
+        LabRecipeKind.ExternalDraft or LabRecipeKind.Eagle3 => new HashSet<string>(
+            [nameof(LabConfiguration.SpeculativeTypes), nameof(LabConfiguration.SpeculativeCompanionIdentity),
+             nameof(LabConfiguration.SpeculativeDraftGpuLayers), nameof(LabConfiguration.SpeculativeNMax),
+             nameof(LabConfiguration.SpeculativeNMin), nameof(LabConfiguration.SpeculativePMin)], StringComparer.Ordinal),
+        LabRecipeKind.SpeculativeDraftMaximum => new HashSet<string>([nameof(LabConfiguration.SpeculativeNMax)], StringComparer.Ordinal),
+        LabRecipeKind.SpeculativeDraftMinimum => new HashSet<string>([nameof(LabConfiguration.SpeculativeNMin)], StringComparer.Ordinal),
+        LabRecipeKind.SpeculativeProbabilityMinimum => new HashSet<string>([nameof(LabConfiguration.SpeculativePMin)], StringComparer.Ordinal),
+        LabRecipeKind.SpeculativeDraftGpuLayers => new HashSet<string>([nameof(LabConfiguration.SpeculativeDraftGpuLayers)], StringComparer.Ordinal),
         _ => new HashSet<string>(StringComparer.Ordinal)
     };
 
@@ -152,6 +278,12 @@ public static class LabRecipeCatalog
         Add(nameof(LabConfiguration.KvCacheTypeV), left.KvCacheTypeV, right.KvCacheTypeV);
         Add(nameof(LabConfiguration.FlashAttention), left.FlashAttention, right.FlashAttention);
         Add(nameof(LabConfiguration.CpuMoeLayers), left.CpuMoeLayers, right.CpuMoeLayers);
+        Add(nameof(LabConfiguration.SpeculativeTypes), string.Join(',', left.SpeculativeTypes), string.Join(',', right.SpeculativeTypes));
+        Add(nameof(LabConfiguration.SpeculativeCompanionIdentity), left.SpeculativeCompanionIdentity, right.SpeculativeCompanionIdentity);
+        Add(nameof(LabConfiguration.SpeculativeDraftGpuLayers), left.SpeculativeDraftGpuLayers, right.SpeculativeDraftGpuLayers);
+        Add(nameof(LabConfiguration.SpeculativeNMax), left.SpeculativeNMax, right.SpeculativeNMax);
+        Add(nameof(LabConfiguration.SpeculativeNMin), left.SpeculativeNMin, right.SpeculativeNMin);
+        Add(nameof(LabConfiguration.SpeculativePMin), left.SpeculativePMin, right.SpeculativePMin);
         Add(nameof(LabConfiguration.ExtraArgumentsSha256), left.ExtraArgumentsSha256, right.ExtraArgumentsSha256);
         return differences;
         void Add<T>(string field, T a, T b) { if (!EqualityComparer<T>.Default.Equals(a, b)) differences.Add(field); }
@@ -224,6 +356,16 @@ public sealed class LlamaServerLabWorkloadExecutor : ILabWorkloadExecutor
         var text = ReadContent(root);
         var usage = root.TryGetProperty("usage", out var usageElement) ? usageElement : default;
         var timings = root.TryGetProperty("timings", out var timingsElement) ? timingsElement : default;
+        var drafted = Number(timings, "draft_n") ?? Number(root, "draft_n");
+        var accepted = Number(timings, "draft_n_accepted") ?? Number(root, "draft_n_accepted");
+        double? acceptance = drafted is > 0 && accepted.HasValue ? accepted.Value / drafted.Value : null;
+        var acceptanceObservation = Metric(request, "speculative.acceptance.rate", acceptance, "ratio",
+            "runtime-timings", EvidenceOrigin.DeterministicCalculation);
+        if (!acceptance.HasValue && drafted == 0)
+            acceptanceObservation = acceptanceObservation with
+            {
+                MissingReason = "The runtime reported zero drafted tokens, so an acceptance ratio is undefined."
+            };
         var observations = new List<LabObservation>
         {
             Metric(request, "request.total.milliseconds", elapsed.TotalMilliseconds, "ms", "wall-clock", EvidenceOrigin.DirectObservation),
@@ -233,6 +375,9 @@ public sealed class LlamaServerLabWorkloadExecutor : ILabWorkloadExecutor
             Metric(request, "context.accepted.tokens", Number(usage, "prompt_tokens"), "tokens", "runtime-response", EvidenceOrigin.DirectObservation),
             Metric(request, "prompt.tokens_per_second", Number(timings, "prompt_per_second"), "tokens/s", "runtime-timings", EvidenceOrigin.DirectObservation),
             Metric(request, "decode.tokens_per_second", Number(timings, "predicted_per_second"), "tokens/s", "runtime-timings", EvidenceOrigin.DirectObservation),
+            Metric(request, "speculative.draft.tokens", drafted, "tokens", "runtime-timings", EvidenceOrigin.DirectObservation),
+            Metric(request, "speculative.accepted.tokens", accepted, "tokens", "runtime-timings", EvidenceOrigin.DirectObservation),
+            acceptanceObservation,
             Missing(request, "ttft.milliseconds", "ms", "The buffered llama-server response does not expose trustworthy TTFT.")
         };
         return new(observations, LabCorrectnessEvaluator.Capture(
@@ -382,11 +527,28 @@ public sealed class LabRecipeRunner
         var hardware = await _systemInfo.GetHardwareProfileAsync(ct);
         var info = GgufMetadataReader.TryRead(source.ModelPath);
         var modelBytes = File.Exists(source.ModelPath) ? new FileInfo(source.ModelPath).Length : 0;
+        var companions = new List<FitCompanionInput>();
+        if (configuration.SpeculativeTypes.Any(type => type.StartsWith("draft-", StringComparison.OrdinalIgnoreCase)))
+        {
+            var path = source.Speculative?.DraftModelPath ?? string.Empty;
+            var bytes = File.Exists(path) ? new FileInfo(path).Length : 0;
+            var companionInfo = GgufMetadataReader.TryRead(path);
+            var placement = configuration.SpeculativeDraftGpuLayers switch
+            {
+                0 => FitPlacement.SystemRam,
+                > 0 when companionInfo?.BlockCount is int blocks
+                    && configuration.SpeculativeDraftGpuLayers >= blocks => FitPlacement.Gpu,
+                _ => FitPlacement.Unknown
+            };
+            companions.Add(new FitCompanionInput("Speculative companion", bytes, placement,
+                EvidenceOrigin.DeterministicCalculation,
+                "Companion file bytes placed from the explicit draft GPU-layer setting; partial placement is not inferred."));
+        }
         return ModelFitPredictor.Predict(new ModelFitPredictionRequest(
             fingerprint, modelBytes, configuration.ContextSize, configuration.GpuLayers, configuration.Slots,
             configuration.KvCacheTypeK, configuration.KvCacheTypeV,
             KvState(capabilities, configuration.KvCacheTypeK), KvState(capabilities, configuration.KvCacheTypeV),
-            KvCacheMath.HasSwaFull(source.ExtraArgs), configuration.CpuMoeLayers, hardware, []), info);
+            KvCacheMath.HasSwaFull(source.ExtraArgs), configuration.CpuMoeLayers, hardware, companions), info);
     }
 
     private static IReadOnlyList<LabObservation> PredictionObservations(string runId,
@@ -468,11 +630,14 @@ public sealed class LabRecipeService : ILabRecipeService
 {
     private readonly LocalModelCapabilityService _capabilities;
     private readonly LabRecipeRunner _runner;
+    private readonly ModelManifestStore _manifest;
 
-    public LabRecipeService(LocalModelCapabilityService capabilities, LabRecipeRunner runner)
+    public LabRecipeService(LocalModelCapabilityService capabilities, LabRecipeRunner runner,
+        ModelManifestStore manifest)
     {
         _capabilities = capabilities;
         _runner = runner;
+        _manifest = manifest;
     }
 
     public async Task<IReadOnlyList<LabRecipePlan>> InspectAsync(ServerConfig source, CancellationToken ct = default)
@@ -480,8 +645,13 @@ public sealed class LabRecipeService : ILabRecipeService
         var capabilities = await _capabilities.ProbeAsync(source.ModelPath, source.ExecutablePath, ct: ct);
         var observations = capabilities.Observations ?? [];
         var gguf = GgufMetadataReader.TryRead(source.ModelPath);
+        var draftPath = source.Speculative?.DraftModelPath ?? string.Empty;
+        var draftGguf = GgufMetadataReader.TryRead(draftPath);
+        var targetIdentity = await ProvenIdentityAsync(source.ModelPath, gguf, ct);
+        var draftIdentity = await ProvenIdentityAsync(draftPath, draftGguf, ct);
         return Enum.GetValues<LabRecipeKind>()
-            .Select(kind => LabRecipeCatalog.Build(kind, source, observations, gguf))
+            .Select(kind => LabRecipeCatalog.Build(kind, source, observations, gguf, draftGguf,
+                targetIdentity, draftIdentity))
             .ToArray();
     }
 
@@ -490,7 +660,23 @@ public sealed class LabRecipeService : ILabRecipeService
     {
         if (string.IsNullOrWhiteSpace(prompt) || prompt.Length > 4096)
             throw new InvalidOperationException("A Lab recipe prompt must contain 1 to 4,096 characters.");
+        var currentPlan = (await InspectAsync(source, ct)).SingleOrDefault(item => item.Id == plan.Id)
+            ?? throw new InvalidOperationException("The selected Lab recipe is no longer available.");
+        if (currentPlan.Availability != CapabilityState.Available)
+            throw new InvalidOperationException($"Recipe {currentPlan.Label} is {currentPlan.Availability}: {currentPlan.AvailabilityDetail}");
+        if (LabCanonicalJson.Hash(LabCanonicalJson.Serialize(currentPlan))
+            != LabCanonicalJson.Hash(LabCanonicalJson.Serialize(plan)))
+            throw new InvalidOperationException("The recipe capability, asset identity, or baseline changed after inspection. Inspect it again.");
         var capabilities = await _capabilities.ProbeAsync(source.ModelPath, source.ExecutablePath, ct: ct);
-        return await _runner.RunAsync(plan, source, capabilities, prompt, ct);
+        return await _runner.RunAsync(currentPlan, source, capabilities, prompt, ct);
+    }
+
+    private async Task<ModelIdentityV2?> ProvenIdentityAsync(string path, GgufModelInfo? gguf, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return null;
+        var manifest = await _manifest.FindAsync(path, ct);
+        if (manifest is null || string.IsNullOrWhiteSpace(manifest.Sha256)) return null;
+        var manifestIdentity = string.Join(':', manifest.RepoId, manifest.RevisionSha, manifest.RepoFile);
+        return RuntimeIdentityFactory.CreateModelIdentity(path, gguf, manifest.Sha256, manifestIdentity);
     }
 }

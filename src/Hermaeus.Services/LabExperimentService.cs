@@ -65,6 +65,13 @@ public static class LabDefinitionValidator
         if (configuration.GpuLayers < -1 || configuration.Threads < 0 || configuration.PromptThreads < 0
             || configuration.Slots is < 1 or > 64 || configuration.CpuMoeLayers < -1)
             throw new InvalidOperationException("Lab configuration contains an out-of-range runtime value.");
+        if (configuration.SpeculativeTypes.Count > 4
+            || configuration.SpeculativeNMax is < 0 or > 128
+            || configuration.SpeculativeNMin is < 0 or > 128
+            || configuration.SpeculativeNMin > configuration.SpeculativeNMax
+            || configuration.SpeculativePMin is < 0 or > 1
+            || configuration.SpeculativeDraftGpuLayers is < 0 or > 4096)
+            throw new InvalidOperationException("Lab speculative configuration is outside the reviewed bounds.");
         if (!string.IsNullOrWhiteSpace(configuration.ExtraArgumentsSha256)
             && (configuration.ExtraArgumentsSha256.Length != 64
                 || configuration.ExtraArgumentsSha256.Any(character => !Uri.IsHexDigit(character))))
@@ -136,6 +143,12 @@ public static class LabConfigurationMapper
         KvCacheTypeV = EffectiveKv(source.KvCacheTypeV, source.KvCacheType),
         FlashAttention = source.FlashAttention,
         CpuMoeLayers = source.CpuMoeLayers,
+        SpeculativeTypes = source.Speculative?.Types.ToArray() ?? [],
+        SpeculativeCompanionIdentity = CompanionIdentity(source.Speculative?.DraftModelPath),
+        SpeculativeDraftGpuLayers = source.Speculative?.DraftGpuLayers,
+        SpeculativeNMax = source.Speculative?.NMax,
+        SpeculativeNMin = source.Speculative?.NMin,
+        SpeculativePMin = source.Speculative?.PMin,
         ExtraArgumentsSha256 = string.IsNullOrWhiteSpace(source.ExtraArgs)
             ? string.Empty : LabCanonicalJson.Hash(source.ExtraArgs)
     };
@@ -164,7 +177,16 @@ public static class LabConfigurationMapper
         MemoryLock = source.MemoryLock,
         NoMemoryMap = source.NoMemoryMap,
         CpuMoeLayers = configuration.CpuMoeLayers,
-        Speculative = CloneSpeculative(source.Speculative),
+        Speculative = new SpeculativeDecodingConfig
+        {
+            Types = configuration.SpeculativeTypes.ToList(),
+            DraftModelPath = configuration.SpeculativeTypes.Any(type => type.StartsWith("draft-", StringComparison.OrdinalIgnoreCase))
+                ? source.Speculative?.DraftModelPath ?? string.Empty : string.Empty,
+            DraftGpuLayers = configuration.SpeculativeDraftGpuLayers,
+            NMax = configuration.SpeculativeNMax,
+            NMin = configuration.SpeculativeNMin,
+            PMin = configuration.SpeculativePMin
+        },
         MmprojPath = source.MmprojPath
     };
 
@@ -184,6 +206,11 @@ public static class LabConfigurationMapper
         Add(nameof(ServerConfig.KvCacheTypeV), current.KvCacheTypeV, proposed.KvCacheTypeV);
         Add(nameof(ServerConfig.FlashAttention), current.FlashAttention, proposed.FlashAttention);
         Add(nameof(ServerConfig.CpuMoeLayers), current.CpuMoeLayers, proposed.CpuMoeLayers);
+        Add(nameof(SpeculativeDecodingConfig.Types), string.Join(',', current.SpeculativeTypes), string.Join(',', proposed.SpeculativeTypes));
+        Add(nameof(SpeculativeDecodingConfig.DraftGpuLayers), current.SpeculativeDraftGpuLayers, proposed.SpeculativeDraftGpuLayers);
+        Add(nameof(SpeculativeDecodingConfig.NMax), current.SpeculativeNMax, proposed.SpeculativeNMax);
+        Add(nameof(SpeculativeDecodingConfig.NMin), current.SpeculativeNMin, proposed.SpeculativeNMin);
+        Add(nameof(SpeculativeDecodingConfig.PMin), current.SpeculativePMin, proposed.SpeculativePMin);
         return changes;
 
         void Add<T>(string field, T before, T after)
@@ -207,20 +234,23 @@ public static class LabConfigurationMapper
             target.KvCacheType = proposed.KvCacheTypeK;
         target.FlashAttention = proposed.FlashAttention;
         target.CpuMoeLayers = proposed.CpuMoeLayers;
+        target.Speculative ??= new SpeculativeDecodingConfig();
+        target.Speculative.Types = proposed.SpeculativeTypes.ToList();
+        target.Speculative.DraftGpuLayers = proposed.SpeculativeDraftGpuLayers;
+        target.Speculative.NMax = proposed.SpeculativeNMax;
+        target.Speculative.NMin = proposed.SpeculativeNMin;
+        target.Speculative.PMin = proposed.SpeculativePMin;
     }
 
     private static string EffectiveKv(string specific, string shared) =>
         string.IsNullOrWhiteSpace(specific) ? shared : specific;
 
-    private static SpeculativeDecodingConfig CloneSpeculative(SpeculativeDecodingConfig? source) => new()
+    private static string CompanionIdentity(string? path)
     {
-        Types = source?.Types.ToList() ?? [],
-        DraftModelPath = source?.DraftModelPath ?? string.Empty,
-        DraftGpuLayers = source?.DraftGpuLayers,
-        NMax = source?.NMax,
-        NMin = source?.NMin,
-        PMin = source?.PMin
-    };
+        if (string.IsNullOrWhiteSpace(path)) return string.Empty;
+        return RuntimeIdentityFactory.CreateModelIdentity(path, GgufMetadataReader.TryRead(path)).StableId;
+    }
+
 }
 
 public static class LabCorrectnessEvaluator
@@ -361,15 +391,17 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
     private readonly ISystemInfoService _systemInfo;
     private readonly IEmpiricalExperienceStore _experience;
     private readonly ILabRuntimeHost _runtimeHost;
+    private readonly ModelManifestStore? _manifest;
     private readonly ConcurrentDictionary<string, RunState> _runs = new(StringComparer.Ordinal);
 
     public LabExperimentService(ISettingsService settings, ISystemInfoService systemInfo,
-        IEmpiricalExperienceStore experience, ILabRuntimeHost runtimeHost)
+        IEmpiricalExperienceStore experience, ILabRuntimeHost runtimeHost, ModelManifestStore? manifest = null)
     {
         _settings = settings;
         _systemInfo = systemInfo;
         _experience = experience;
         _runtimeHost = runtimeHost;
+        _manifest = manifest;
     }
 
     public async Task<LabExperimentDefinition> CreateDefinitionAsync(string name, string protocolId,
@@ -574,7 +606,10 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
     {
         var runtime = await RuntimeIdentityFactory.CreateRuntimeIdentityAsync(source.ExecutablePath, null, ct);
         var gguf = GgufMetadataReader.TryRead(source.ModelPath);
-        var model = RuntimeIdentityFactory.CreateModelIdentity(source.ModelPath, gguf);
+        var manifest = _manifest is null ? null : await _manifest.FindAsync(source.ModelPath, ct);
+        var verifiedHash = string.IsNullOrWhiteSpace(manifest?.Sha256) ? null : manifest.Sha256;
+        var model = RuntimeIdentityFactory.CreateModelIdentity(source.ModelPath, gguf,
+            verifiedHash, verifiedHash is null ? null : string.Join(':', manifest!.RepoId, manifest.RevisionSha, manifest.RepoFile));
         var hardwareProfile = await _systemInfo.GetHardwareProfileAsync(ct);
         var hardware = new HardwareIdentityV2(
             RuntimeInformation.OSDescription, RuntimeInformation.OSArchitecture.ToString(), string.Empty,
@@ -598,7 +633,11 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
             configuration.GpuLayers switch { 0 => "cpu", -1 => "gpu-all", _ => "gpu-partial" },
             configuration.Threads, configuration.PromptThreads, configuration.Slots, null, null,
             configuration.KvCacheTypeK, configuration.KvCacheTypeV, configuration.FlashAttention,
-            string.Join(',', source.Speculative?.Types ?? []), string.Empty, string.Empty,
+            string.Join(',', configuration.SpeculativeTypes), configuration.SpeculativeCompanionIdentity,
+            $"nmax={configuration.SpeculativeNMax?.ToString(CultureInfo.InvariantCulture) ?? string.Empty};" +
+            $"nmin={configuration.SpeculativeNMin?.ToString(CultureInfo.InvariantCulture) ?? string.Empty};" +
+            $"pmin={configuration.SpeculativePMin?.ToString(CultureInfo.InvariantCulture) ?? string.Empty};" +
+            $"ngld={configuration.SpeculativeDraftGpuLayers?.ToString(CultureInfo.InvariantCulture) ?? string.Empty}",
             configuration.CpuMoeLayers, parsed,
             string.IsNullOrWhiteSpace(configuration.ExtraArgumentsSha256) ? IdentityCompleteness.Complete : IdentityCompleteness.Incomplete);
     }

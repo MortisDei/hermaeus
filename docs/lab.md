@@ -92,8 +92,40 @@ Unknown when GGUF/runtime evidence cannot identify expert tensor placement,
 while observed memory and throughput are still retained. No recipe chooses or
 applies a winner automatically.
 
-Speculation and prompt-prefix recipe families land in subsequent R31 batches on
-this same experiment core.
+## External drafting and speculative tuning
+
+External draft and EAGLE-3 plans use the same isolated baseline/candidate
+protocol, but appear as Available only for a proven runtime and asset pair.
+Inspection requires the exact `draft-simple` or `draft-eagle3` capability, two
+distinct readable non-link GGUF files, verified model hashes from the model
+manifest, vocabulary and tokenizer identity, and compatible model-family
+metadata. EAGLE-3 additionally requires the companion's base-model name or
+repository metadata to bind exactly to the target. Vocabulary equality alone
+is never sufficient. A missing hash, tokenizer field, reduced-vocabulary
+mapping, target binding, or failed runtime probe remains `Unknown`.
+
+The controlled baseline disables speculation without changing the active Chat
+server. The candidate records the companion's path-free identity and its
+GPU/RAM allocation in GPU Fit. Runtime timing counters retain drafted and
+accepted token counts, with acceptance calculated only when the drafted count
+is positive. Zero drafted is an observed zero and an undefined acceptance
+ratio; an omitted counter is Missing. The buffered endpoint still leaves TTFT
+Missing, and exact output equivalence remains a required correctness gate.
+
+Four separate one-at-a-time tuning plans cover draft maximum, draft minimum,
+minimum probability, and draft GPU layers. They require the exact parameter
+flag, one already-proven speculative mechanism, and an explicit baseline value.
+Hermaeus never substitutes or assumes the runtime's current default. Candidate
+ranges are reviewed and bounded, and stale capability, asset, or baseline state
+is re-inspected immediately before launch.
+
+The Windows asset inventory used during R31 implementation contained no general
+external-draft or EAGLE-3 pair. The adapters and refusal gates are automated;
+actual engagement, performance benefit, memory behavior, and equivalence remain
+unverified until a known pair is run on the published revision.
+
+Prompt-prefix recipe families land in a subsequent R31 batch on this same
+experiment core.
 
 ## Evidence
 

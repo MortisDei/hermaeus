@@ -41,7 +41,13 @@ public enum LabRecipeKind
     Context,
     KvCache,
     FlashAttention,
-    CpuMoePlacement
+    CpuMoePlacement,
+    ExternalDraft,
+    Eagle3,
+    SpeculativeDraftMaximum,
+    SpeculativeDraftMinimum,
+    SpeculativeProbabilityMinimum,
+    SpeculativeDraftGpuLayers
 }
 
 public sealed record LabRecipePlan(
@@ -71,6 +77,12 @@ public sealed record LabConfiguration
     public string KvCacheTypeV { get; init; } = "f16";
     public string FlashAttention { get; init; } = "auto";
     public int CpuMoeLayers { get; init; }
+    public IReadOnlyList<string> SpeculativeTypes { get; init; } = [];
+    public string SpeculativeCompanionIdentity { get; init; } = string.Empty;
+    public int? SpeculativeDraftGpuLayers { get; init; }
+    public int? SpeculativeNMax { get; init; }
+    public int? SpeculativeNMin { get; init; }
+    public double? SpeculativePMin { get; init; }
     public string ExtraArgumentsSha256 { get; init; } = string.Empty;
 }
 

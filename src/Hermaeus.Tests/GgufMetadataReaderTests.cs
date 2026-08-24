@@ -176,6 +176,29 @@ public sealed class GgufMetadataReaderTests
     }
 
     [Fact]
+    public void Speculative_pair_identity_metadata_is_read_without_tensor_data()
+    {
+        using var temp = new TempDir();
+        var w = new GgufWriter().Magic().Header(3, tensorCount: 99, kvCount: 8)
+            .StringValue("general.architecture", "eagle3")
+            .StringValue("general.name", "Qwen3 4B EAGLE-3")
+            .StringValue("general.repo_url", "draft/repository")
+            .StringValue("general.base_model.0.name", "Qwen3 4B")
+            .StringValue("general.base_model.0.repo_url", "Qwen/Qwen3-4B")
+            .StringValue("tokenizer.ggml.model", "gpt2")
+            .StringValue("tokenizer.ggml.pre", "qwen2")
+            .U32Value("eagle3.vocab_size", 128);
+        var path = w.WriteToTempFile(temp, "companion.gguf");
+
+        var info = GgufMetadataReader.TryRead(path);
+
+        Assert.NotNull(info);
+        Assert.Equal("Qwen3 4B EAGLE-3", info!.Name);
+        Assert.Equal("Qwen/Qwen3-4B", info.BaseModelRepositoryUrl);
+        Assert.Equal("gpt2:qwen2:128", info.TokenizerIdentity);
+    }
+
+    [Fact]
     public void Unknown_key_values_are_skipped_including_string_arrays_so_later_keys_are_still_reached()
     {
         using var temp = new TempDir();

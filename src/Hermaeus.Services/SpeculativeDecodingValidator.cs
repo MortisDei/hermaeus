@@ -117,3 +117,127 @@ public static class SpeculativeDecodingValidator
             ? $"{bytes / 1024d / 1024d / 1024d:0.#} GB"
             : $"{bytes / 1024d / 1024d:0.#} MB";
 }
+
+public sealed record SpeculativePairInspection(
+    string Mechanism,
+    CapabilityState State,
+    string Detail,
+    ModelIdentityV2 TargetIdentity,
+    ModelIdentityV2 CompanionIdentity,
+    string TargetArchitecture,
+    string CompanionArchitecture,
+    string TokenizerIdentity,
+    int? TargetVocabularySize,
+    int? CompanionVocabularySize,
+    long TargetBytes,
+    long CompanionBytes);
+
+/// <summary>
+/// Lab-only compatibility gate for a specific target, companion, and runtime
+/// mechanism. It is intentionally stricter than the normal Services advisory:
+/// Lab cannot run an unproven pair and label the result controlled.
+/// </summary>
+public static class SpeculativePairInspector
+{
+    public static SpeculativePairInspection Inspect(string mechanism, ServerConfig source,
+        IReadOnlyCollection<RuntimeCapabilityObservation> capabilities,
+        GgufModelInfo? target = null, GgufModelInfo? companion = null,
+        ModelIdentityV2? provenTargetIdentity = null, ModelIdentityV2? provenCompanionIdentity = null)
+    {
+        var normalizedMechanism = mechanism.Trim().ToLowerInvariant();
+        var capabilityId = LocalModelCapabilityService.CapabilityIdForSpeculativeType(normalizedMechanism);
+        var capability = capabilities.FirstOrDefault(item => item.CapabilityId == capabilityId);
+        var targetPath = source.ModelPath?.Trim() ?? string.Empty;
+        var companionPath = source.Speculative?.DraftModelPath?.Trim() ?? string.Empty;
+        target ??= GgufMetadataReader.TryRead(targetPath);
+        companion ??= GgufMetadataReader.TryRead(companionPath);
+        var targetIdentity = provenTargetIdentity ?? RuntimeIdentityFactory.CreateModelIdentity(targetPath, target);
+        var companionIdentity = provenCompanionIdentity ?? RuntimeIdentityFactory.CreateModelIdentity(companionPath, companion);
+        var targetBytes = SafeLength(targetPath);
+        var companionBytes = SafeLength(companionPath);
+
+        SpeculativePairInspection Result(CapabilityState state, string detail, string tokenizer = "") => new(
+            normalizedMechanism, state, detail, targetIdentity, companionIdentity,
+            target?.Architecture ?? string.Empty, companion?.Architecture ?? string.Empty,
+            tokenizer, target?.VocabularySize, companion?.VocabularySize, targetBytes, companionBytes);
+
+        if (capability is null || capability.State == CapabilityState.Unknown)
+            return Result(CapabilityState.Unknown, "The exact runtime has not proven this speculative mechanism.");
+        if (capability.State == CapabilityState.Unavailable)
+            return Result(CapabilityState.Unavailable, "The exact runtime reports this speculative mechanism unavailable.");
+        if (!capability.Parameters.TryGetValue("runtime_type", out var runtimeType)
+            || !string.Equals(runtimeType, normalizedMechanism, StringComparison.OrdinalIgnoreCase))
+            return Result(CapabilityState.Unknown,
+                "The capability record does not retain this exact runtime --spec-type value.");
+        if (targetPath.Length == 0 || companionPath.Length == 0)
+            return Result(CapabilityState.Unknown, "Select both a target and a companion model before inspecting this recipe.");
+        if (!TryFullPath(targetPath, out var fullTarget) || !TryFullPath(companionPath, out var fullCompanion)
+            || string.Equals(fullTarget, fullCompanion, StringComparison.OrdinalIgnoreCase))
+            return Result(CapabilityState.Unavailable, "Target and companion must be distinct valid model assets.");
+        if (!ReadableRegularFile(fullTarget) || !ReadableRegularFile(fullCompanion))
+            return Result(CapabilityState.Unknown, "The target and companion must be readable non-link model assets.");
+        if (target is null || companion is null)
+            return Result(CapabilityState.Unknown, "Both model headers must expose readable GGUF metadata.");
+        if (targetIdentity.Completeness != IdentityCompleteness.Complete
+            || companionIdentity.Completeness != IdentityCompleteness.Complete)
+            return Result(CapabilityState.Unknown,
+                "Both model assets require a verified hash or trusted manifest identity before this pair can run.");
+        if (target.VocabularySize is null || companion.VocabularySize is null)
+            return Result(CapabilityState.Unknown, "Both model headers must expose vocabulary size evidence.");
+        if (target.VocabularySize != companion.VocabularySize)
+            return Result(CapabilityState.Unknown,
+                "Vocabulary sizes differ and Hermaeus cannot prove a reduced-vocabulary mapping from bounded GGUF metadata.");
+
+        var tokenizer = target.TokenizerIdentity;
+        if (tokenizer.Length == 0 || companion.TokenizerIdentity.Length == 0)
+            return Result(CapabilityState.Unknown, "Both model headers must expose a tokenizer model and pre-tokenizer identity.");
+        if (!string.Equals(tokenizer, companion.TokenizerIdentity, StringComparison.Ordinal))
+            return Result(CapabilityState.Unavailable, "Target and companion tokenizer identities do not match.");
+
+        if (normalizedMechanism == "draft-eagle3")
+        {
+            if (!HasExactTargetBinding(target, companion))
+                return Result(CapabilityState.Unknown,
+                    "The EAGLE-3 companion does not expose an exact base-model name or repository binding to this target.", tokenizer);
+        }
+        else if (!string.Equals(target.Architecture, companion.Architecture, StringComparison.OrdinalIgnoreCase))
+        {
+            return Result(CapabilityState.Unavailable, "Target and companion model families do not match.", tokenizer);
+        }
+
+        return Result(CapabilityState.Available,
+            "Runtime mechanism, distinct assets, GGUF identities, vocabulary, tokenizer, and target binding are proven for this pair.", tokenizer);
+    }
+
+    private static bool HasExactTargetBinding(GgufModelInfo target, GgufModelInfo companion)
+    {
+        var targetValues = new[] { target.Name, target.RepositoryUrl, target.BaseModelName, target.BaseModelRepositoryUrl }
+            .Select(NormalizeBinding).Where(value => value.Length > 0).ToHashSet(StringComparer.Ordinal);
+        var companionValues = new[] { companion.BaseModelName, companion.BaseModelRepositoryUrl }
+            .Select(NormalizeBinding).Where(value => value.Length > 0);
+        return companionValues.Any(targetValues.Contains);
+    }
+
+    private static string NormalizeBinding(string value) =>
+        value.Trim().TrimEnd('/').Replace("https://huggingface.co/", string.Empty, StringComparison.OrdinalIgnoreCase)
+            .Replace(" ", string.Empty, StringComparison.Ordinal).ToLowerInvariant();
+
+    private static bool TryFullPath(string path, out string fullPath)
+    {
+        try { fullPath = Path.GetFullPath(path); return true; }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        { fullPath = string.Empty; return false; }
+    }
+
+    private static bool ReadableRegularFile(string path)
+    {
+        try { return File.Exists(path) && !File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
+    }
+
+    private static long SafeLength(string path)
+    {
+        try { return File.Exists(path) ? new FileInfo(path).Length : 0; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return 0; }
+    }
+}

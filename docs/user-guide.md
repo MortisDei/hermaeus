@@ -145,7 +145,8 @@ runtime/model identity, and saves through the normal Settings path. Review is
 separate from running an experiment, and experiment evidence is retained.
 
 Choose **Inspect runtime recipes** to see GPU placement, context, KV, Flash
-Attention, and CPU-MoE plans for the selected runtime. `Unknown` means the
+Attention, CPU-MoE, external draft, EAGLE-3, and speculative parameter plans
+for the selected runtime. `Unknown` means the
 runtime has not supplied the exact evidence needed; it is not an invitation to
 force the flag. Select an Available recipe, enter a controlled prompt, and use
 **Run selected recipe**. Lab runs the baseline plus a small candidate set with
@@ -158,6 +159,15 @@ provide trustworthy TTFT, so it remains Unknown. Low-bit KV results without a
 referenced quality score cannot be applied. CPU-MoE may likewise show an
 Unknown analytical total while retaining measured memory and throughput. Lab
 never selects or applies the fastest row automatically.
+
+External drafting requires a target and companion already selected in the
+Services configuration and represented by verified model-manifest hashes. Lab
+also checks tokenizer, vocabulary, model family, and EAGLE target-binding
+metadata. Equal vocabulary sizes alone do not unlock the recipe. Parameter
+sweeps require an explicit saved baseline for draft maximum/minimum,
+probability, or draft GPU layers, because Lab does not assume runtime defaults.
+Drafted and accepted counters appear only when the runtime reports them; zero
+drafted remains zero while its acceptance ratio is undefined.
 
 Use **Lab > Evidence** to inspect structured Agent,
 GPU Fit, and experiment evidence. Filters cover domain, project/workspace

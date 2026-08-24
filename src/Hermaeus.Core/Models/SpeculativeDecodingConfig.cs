@@ -40,7 +40,7 @@ public sealed class SpeculativeDecodingConfig
     /// of these may actually be offered or launched.
     /// </summary>
     public static IReadOnlyList<string> KnownTypes { get; } =
-    ["ngram-mod", "draft-mtp", "draft-simple"];
+    ["ngram-mod", "draft-mtp", "draft-simple", "draft-eagle3"];
 
     /// <summary>
     /// Kept for source compatibility with callers from before runtime discovery.
