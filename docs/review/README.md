@@ -1,107 +1,191 @@
-# Review round 30: What is actually broken
+# Review round 31: Experience, not intuition
 
-Audience: the implementing agent. Read this file, then the numbered docs in
-order. Doc 06 is the roadmap and sequencing contract.
+Audience: the implementing agent. Read this file, then the numbered documents
+in order. Doc 07 is the sequencing and release contract.
 
 ## Why this round exists
 
-r30 is a one-month live-use repair round. It comes from the owner's Windows
-dogfooding and a clean Pop!_OS installation, not from a speculative code audit.
-The local source notes are [`docs/temp/owner-notes.md`](../temp/owner-notes.md)
-and [`docs/temp/tlb-lessons.md`](../temp/tlb-lessons.md). They are intentionally
-outside the committed product documentation, but they are the wording and
-evidence behind this pack.
+R30 made Hermaeus public and established evidence-backed capability discovery,
+benchmark fingerprints, separate reasoning transport, and truthful Unknown
+states. R31 turns those foundations into a product rule:
 
-The severe failure is the first-run path. On Pop!_OS the wizard recommended an
-appropriate model, downloaded enough of it that a retry said it already
-existed, then left Services unable to use it. The same run appeared to accept a
-Data Root and AI Root before Settings showed different values. A new user did
-everything the product asked and ended with no model.
+`normalized outcomes -> empirical experience -> measured optimisation / improved prediction`
 
-The most repeated daily-use request is one model setting shown as several
-different truths. Services still exposes independent K and V cache controls
-(`ServerConfig.KvCacheTypeK/V`, `ServicesView.axaml:405-419`), while the Models
-editor has no cache control at all. Its fit chip uses the default f16-sized KV
-projection even when the owner has selected q8_0. r30 makes context and one KV
-cache type shared per-model defaults, without pretending that ports,
-executables, slots, or other server-instance settings belong to a model.
+The order is load-bearing. A tuning workflow built before normalized evidence
+would optimize strings and exit codes. An estimator changed directly from a
+handful of observations would turn local measurements into folklore. R31 first
+defines what happened, then stores the evidence and its provenance, then lets
+bounded consumers compare prediction with observation.
 
-r30 also closes the reasoning gap instead of adding a cosmetic server toggle.
-GGUF NextN metadata and llama-server's own help and `/props` capability data
-provide automatic evidence for built-in MTP, reasoning extraction, template
-preservation, and modalities. Separate reasoning then runs through the full
-transport, message, persistence, branch, history, transcript, local API, and
-export path. Unknown remains visible and never becomes a filename guess.
+This is not an autonomous learning round. Experience may inform a model or a
+user, but it never changes a safety decision, silently selects a model, rewrites
+an analytical formula, applies a runtime configuration, trains an adapter, or
+promotes an inference into a fact.
 
-The smaller reports are confirmed gaps, not a new architecture:
+## Verified starting point
 
-- r29's cursor fix deliberately skips mixed-content containers. The Projects
-  switcher, sidebar toggle, message action row, edit action, and regenerate row
-  are all outside its automatic coverage.
-- the Models download view already tracks `DownloadPercent`, but the button
-  renders only `Downloading...`.
-- the Hugging Face browser does not calculate an on-disk state until the user
-  clicks Download and hits a collision.
-- Memories has commands and parameters in source. The disabled live controls
-  therefore require a binding/runtime reproduction, not new commands.
-- benchmark run data under the owner's real data root proves several
-  deterministic false fails. Doc 04 names the exact runs and scorer causes.
-- benchmark exports and comparisons must identify the KV cache K/V types and
-  Flash Attention setting that produced a local llama-server result. Those
-  engine choices materially affect memory use and can affect performance, so
-  an omitted value is not reproducibility.
+The contract was written against `fd63b3e`, the R30 merge on `main`, released as
+`v0.37.0-alpha`.
 
-## Scope
+- `AgentToolResult` preserves summary, source, command exit code, and timeout,
+  but has no shared semantic outcome. Policy refusals and unavailable MCP tools
+  are still represented through several different paths.
+- `SourceReference.EvidenceOrigin` currently has `DirectObservation`,
+  `UserProvided`, and `Inferred`. Its documentation explicitly groups
+  deterministic calculation with observation and model inference with
+  heuristics. That is incompatible with R31's five-category rule and must be
+  corrected before the experience store consumes it.
+- Benchmark runs already retain `EmpiricalProfileFingerprint` and a direct
+  observation source. This is a useful seed, not an experience store.
+- GPU Fit already reads GGUF layer, KV-head, key/value dimension, context, and
+  sliding-window pattern metadata. `KvCacheMath` accounts for interleaved
+  sliding-window attention. The remaining gap is a complete, inspectable
+  breakdown for the selected runtime configuration, companion models,
+  placement, measured overhead, and prediction-versus-observation comparison.
+- Runtime capability discovery already uses bounded GGUF metadata, the selected
+  executable's `--help`, and a healthy server's `/props`. It discovers unknown
+  speculative type names but its cache identity is still path, size, and mtime,
+  and the capability shape is fixed around R30 features.
+- General speculative launch arguments and vocabulary checks already exist.
+  The exposed workflow is intentionally limited to n-gram and MTP.
+- Benchmarks already carry llama-server prompt/decode timings, TTFT, draft and
+  accepted-token counters, quality results, cold/warm phases, and exact known
+  configuration. Lab should share those measurement primitives without turning
+  Benchmarks into a settings sweeper.
+- Projects are metadata and defaults in `projects.db`; there is no explicit
+  reviewable current-state record.
+- Approved orchestration children inherit `AgentWorkspaceOptions.ModelId`.
+  Neither `AgentSubTaskSpec`, child task state, transcript, nor synthesis owns a
+  child model identity.
+- Local API exposes chat, embeddings, memory, RAG, models, and capabilities.
+  It has no Agent surface, token scope, or non-desktop approval protocol.
+- Chat already tracks whether its message scroll is pinned to the bottom and
+  stops following when the user scrolls away. Item 24 is therefore a regression
+  and live-verification item, not a greenfield rewrite.
+- `AudioPlayback` is a shared cross-platform WAV launcher, but there is no cue
+  policy, event vocabulary, volume/mute setting, non-audio equivalent, or
+  arbitration with TTS.
 
-| Doc | Theme |
+## Upstream facts checked for this contract
+
+These are upstream state, not promises that the owner's installed runtime has
+the feature. Every live use remains gated by the selected executable's observed
+capabilities.
+
+- Current llama.cpp documentation names `draft-simple`, `draft-eagle3`,
+  `draft-dflash`, `draft-dspark`, `draft-mtp`, and several n-gram mechanisms:
+  <https://github.com/ggml-org/llama.cpp/blob/master/docs/speculative.md>.
+- EAGLE-3 and DFlash have documented target-specific conversion and launch
+  workflows. Filename shape is not capability evidence.
+- The generic MTP implementation exists, but current GLM-family support is not
+  established end to end. A GLM GGUF carrying NextN tensors must remain Unknown
+  unless the selected runtime both advertises the mechanism and produces direct
+  drafting evidence.
+- llama.cpp publishes semantic prereleases beside rapid b-numbered builds and
+  states that semantic versioning is still work in progress:
+  <https://github.com/ggml-org/llama.cpp/releases/>. R31 does not label that
+  channel Stable.
+- Runtime reconfiguration without unloading weights is still a proposal:
+  <https://github.com/ggml-org/llama.cpp/discussions/25674>.
+- A public high-level speculative C API is still an open request:
+  <https://github.com/ggml-org/llama.cpp/issues/27469>.
+
+## Documents
+
+| Doc | Architectural group |
 | --- | --- |
-| `01-linux-onboarding.md` | A starter download that becomes a usable selected model, recoverable failure, and roots that remain saved on Linux |
-| `02-models-and-services.md` | One per-model KV default, truthful fit, download state and progress, safe deletion, responsive editor, and honest companion pickers |
-| `03-ui-correctness.md` | Cursor gaps, dropdown wheel input, Memories actions, neutral numeric defaults, and one Chat export action |
-| `04-benchmark-truth.md` | False-fail fixtures from the owner's runs and narrowly corrected deterministic scoring |
-| `05-reasoning-and-capabilities.md` | Automatic GGUF/runtime capability detection and complete reasoning extraction, preservation, persistence, replay, UI, and export |
-| `06-roadmap.md` | 0.37.0-alpha, strict sequence, test budget, descope boundary, deferred work, and explicit rejections |
-| `07-final-dogfood.md` | Final dogfood root causes, bounded fixes, regression evidence, privacy audit, and remaining manual verification |
-| `08-final-public-release-security-audit.md` | Adversarial public-release security sign-off, findings, remediation, validation, and release conditions |
+| `01-evidence-and-experience.md` | Five evidence categories, deterministic normalized outcomes, raw-evidence preservation, and the empirical experience store |
+| `02-runtime-identity-and-gpu-fit.md` | Extensible capability registry, runtime/configuration identity, analytical GPU Fit, observed memory, MTP evolution, and update-channel truth |
+| `03-lab.md` | Lab ownership and experiment protocol, bounded sweeps, speculative mechanisms, prefix/KV/MoE work, correctness, comparison, and explicit application |
+| `04-project-state-agent-and-api.md` | Reviewable Project State, per-subtask model selection, and the Agent Local API approval contract |
+| `05-live-telemetry-and-daily-use.md` | Live telemetry pop-out, restrained health notifications, Chat scroll anchoring verification, and audio feedback |
+| `06-quality-and-research.md` | Measured test work plus reconfiguration, public speculative API, DFlash, MoE streaming, and reconstructable-KV watch work |
+| `07-roadmap.md` | Dependencies, batches, acceptance gates, test budget, Linux checks, descope order, and explicit rejections |
 
-### r30 add-on: measured engine provenance
+## Scope traceability
 
-The r30 draft PR also records the managed llama-server KV cache K/V types and
-Flash Attention setting on new local-GGUF benchmark runs. The additive fields
-flow through saved `run_json`, details, comparisons, and JSON, Markdown, and
-CSV exports. Historical data stays unchanged and says not recorded rather than
-being backfilled from a presumed default.
+No scope item is implied by an umbrella. Each row has an explicit home.
 
-### r30 add-on: compact agent replay and voice test signals
+| # | Scope item | Contract |
+| ---: | --- | --- |
+| 1 | Normalized model-facing tool outcomes | 01 sections 1.2-1.4 |
+| 2 | Empirical experience store | 01 sections 1.5-1.9 |
+| 3 | GPU Fit empirical learning | 02 sections 2.3-2.7 |
+| 4 | Workspace / Project State | 04 sections 4.1-4.4 |
+| 5 | Per-specialist / per-subtask model selection | 04 sections 4.5-4.8 |
+| 6 | Agent Local API | 04 sections 4.9-4.13 |
+| 7 | Lab View | 03 sections 3.1-3.4 |
+| 8 | Empirical engine-profile optimisation | 03 section 3.5 |
+| 9 | General external speculative draft models | 03 section 3.6 |
+| 10 | EAGLE-3 | 03 section 3.7 |
+| 11 | Speculative tuning recipes | 03 section 3.8 |
+| 12 | Prompt/shared-prefix reuse measurement | 03 section 3.9 |
+| 13 | KV/context memory budgeting | 02 section 2.5 and 03 section 3.10 |
+| 14 | MoE expert caching experiments | 03 section 3.11 |
+| 15 | MoE expert prefetch / streaming research | 06 section 6.4 |
+| 16 | Advanced KV-cache experiments | 03 section 3.10 |
+| 17 | Speculative deterministic-equivalence validation | 03 section 3.12 |
+| 18 | Lab correctness principle | 03 sections 3.2-3.4 and 3.12 |
+| 19 | Extensible runtime capability registry | 02 sections 2.1-2.2 |
+| 20 | GLM MTP / current llama.cpp MTP evolution | 02 section 2.8 |
+| 21 | llama.cpp update channels | 02 section 2.9 |
+| 22 | Live Model Telemetry pop-out | 05 sections 5.1-5.3 |
+| 23 | Runtime health notifications | 05 sections 5.4-5.5 |
+| 24 | Chat streaming scroll anchoring | 05 section 5.6 |
+| 25 | Audio feedback | 05 sections 5.7-5.10 |
+| 26 | Measured quality/coverage work | 06 sections 6.1-6.2 |
+| 27 | Reconfigurable llama-server runtime | 06 section 6.3 |
+| 28 | Public llama.cpp speculative API | 06 section 6.5 |
+| 29 | DFlash | 03 section 3.13 and 06 section 6.6 |
+| 30 | KV-Direct / reconstructable KV research | 06 section 6.7 |
 
-The add-on also compacts only proven-identical successful tool outcomes in the
-model-facing agent transcript replay, leaving the raw transcript untouched and
-making a three-or-more unchanged sequence visible as a diagnostic without
-blocking it. `VoiceOrchestratorTests` now use provider signals rather than
-fixed sleeps, and `VoiceProviderRegistry` has behavior coverage for settings
-aliases, fallback, persistence, catalog metadata, and service mapping.
+## Classification
 
-## Deliberately not in r30
+- **Mandatory spine:** outcomes, evidence taxonomy, experience storage,
+  capability/runtime identity, GPU Fit breakdown and observed comparison, Lab
+  protocol/correctness, and evidence-gated runtime measurement.
+- **Mandatory independent groups:** Project State, explicit subtask model
+  selection, telemetry, notifications, audio, scroll regression coverage, and
+  measured quality work. They may land after the spine but are not silently
+  absorbed into it.
+- **Mandatory design, conditional execution:** Agent Local API approval
+  protocol, general external drafting, EAGLE-3, GLM MTP, prompt-reuse counters,
+  advanced KV types, and MoE caching. Hermaeus ships the workflow only where a
+  selected runtime proves the required contract. Unknown is a valid result.
+- **Research/watch:** semantic update-channel promotion, runtime
+  reconfiguration, public speculative API, MoE prefetch/streaming, DFlash
+  production integration, and reconstructable KV. Investigation and dated
+  findings ship; unstable integration does not.
 
-- Audio feedback. It is a feature request, not part of repairing a broken
-  one-month round.
-- Normalized model-facing tool outcomes and an empirical experience store. They
-  remain larger cross-cutting designs; transcript compaction and its diagnostic
-  are the bounded r30 add-on described above.
+## Standing implementation rules
 
-Every deferred item is recorded in `docs/review/deferred.md`; none is silently
-dropped.
+- Observed facts, deterministic calculations, user-provided information,
+  extracted information, and model inference are distinct serialized values.
+- A normalized outcome is derived by deterministic code from raw evidence. It
+  cannot be supplied or overridden by a model.
+- Raw evidence remains authoritative and recoverable. Derived experience keeps
+  references, not lossy replacements.
+- Capability means `Available | Unavailable | Unknown`, with evidence and an
+  exact runtime identity. Failure to probe is Unknown, not Unavailable.
+- Experience never enters `AgentSafetyGate`, approval fingerprinting,
+  workspace policy, or API authorization.
+- Lab never writes settings while running. Applying a result is a separate,
+  explicit, reviewable action through the normal settings flow.
+- No result is a universal winner. Comparisons show conditions, measurements,
+  correctness, missing counters, and trade-offs.
+- No new NuGet package is expected. Any exception requires a written reason
+  showing why the existing BCL, SQLite, Avalonia, and current services are
+  materially inadequate.
+- Never store credentials, raw secrets, private environment dumps, or
+  unredacted command lines in experience, Lab, telemetry, traces, exports, or
+  documentation.
+- Linux/COSMIC is a live release target, not only a CI compile target. Doc 07
+  names the required live checks per batch.
+- No em dashes. Zero-warning build. Tests remain sequential and write results
+  outside the checkout.
 
-## Standing rules
+## Recovery if implementation is interrupted
 
-- Branch `r30/round` from `main`; one PR; the owner alone pushes the tag.
-- No new NuGet packages.
-- No shell-string process launches, raw secrets, non-atomic state writes,
-  path traversal, or symlink-following deletion.
-- `SettingsService` remains the one settings save flow.
-- User-visible changes update `docs/features.md`, the relevant workflow docs,
-  `CHANGELOG.md`, and the version surfaces named in doc 06.
-- Read `docs/testing.md` before changing tests. Register every new harness case,
-  use `[WindowsOnlyFact]` for Windows-only work, and put test results outside
-  the repository.
-- No em dashes in code, docs, or UI text.
+Doc 07 contains the only progress table. Update its Landed column in the same
+commit as each completed batch. `git log --oneline main..HEAD`, that table, and
+the persisted acceptance evidence are the recovery procedure.
