@@ -124,7 +124,9 @@ public sealed class AgentContextBuilder : IAgentContextBuilder
             .Select(spec => new ContextPart(
                 "subtask",
                 spec.Goal,
-                $"[{spec.Status}, profile {spec.ProfileName}] {spec.Goal}"
+                $"[{spec.Status}, profile {spec.ProfileName}"
+                    + (string.IsNullOrWhiteSpace(spec.ResolvedModelId) ? string.Empty : $", model {spec.ModelDisplayName} ({spec.ResolvedModelId})")
+                    + $"] {spec.Goal}"
                     + (string.IsNullOrWhiteSpace(spec.ResultSummary) ? string.Empty : $" -> {spec.ResultSummary}"),
                 Data: spec))
             .Reverse() // most recent children favored if the budget can't fit all of them

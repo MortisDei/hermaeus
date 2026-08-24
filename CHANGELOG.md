@@ -58,6 +58,11 @@ limit.
   remain in a provenance-visible review queue until edited/accepted or rejected,
   stale revisions fail atomically, and only bounded accepted state reaches
   project-bound Chat and Agent context receipts.
+- Agent plan review now supports a configured visible model per sub-task or an
+  explicit parent-model inheritance choice. Resolved identities persist through
+  task state, transcripts, traces, reports, restart, and parent synthesis; a
+  missing selected model pauses without silent fallback, and paused task model
+  changes require the audited **Use for task** action.
 
 ### Changed
 

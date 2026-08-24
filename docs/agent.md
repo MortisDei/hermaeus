@@ -105,6 +105,10 @@ The panel is a fixed status line, a pinned decision strip, and four tabs.
 - **Run.** Goal, workspace, model and RAG dataset; the Start Agent button; the
   run outcome for a finished task; the agent's own response; sub-tasks and
   plan; and the task state, context receipt and retrieved context, collapsed.
+  The task's frozen model identity is shown independently of the current model
+  picker. Changing the picker does not retarget an existing task. A paused task
+  can use **Use for task** to make an explicit, audited model change after the
+  newly selected model is checked against the current visible model list.
   A project-bound task receives a separate bounded `Project State` receipt
   section only when accepted State exists. It names the accepted revision;
   pending and rejected proposals are excluded.
@@ -367,13 +371,30 @@ step itself fails or returns something unusable, a deterministic fallback
 report (built from the sub-task specs themselves) takes its place instead of
 failing the whole run - the sub-task work already happened.
 
+### Per-subtask model selection
+
+The plan review shows a model selector for every proposed child. Choices are
+limited to configured visible models plus an explicit **Inherit parent** option.
+The selection is written back into the pending plan and its approval fingerprint
+is recomputed before approval, so the approved payload is exactly the plan that
+materializes. Unknown, hidden, removed, or unavailable explicit model ids are
+rejected before any child is created.
+
+Each resolved child model is persisted on the sub-task spec and child task before
+execution. Task state, recent-task and sub-task rows, transcripts, traces,
+context receipts, child reports, and the final synthesis input retain that model
+identity. Siblings may use different models, while synthesis always returns to
+the parent's persisted model. A stopped or missing frozen model blocks visibly
+with an actionable message and no inference call or silent fallback. Model choice
+does not change tools, workspace policy, risk classification, approvals, depth,
+or orchestration budgets.
+
 Explicit design limitations: no parallel child execution (one local
-model, one GPU), no nesting beyond depth 1, no user-editable specialist
+model at a time, one GPU), no nesting beyond depth 1, no user-editable specialist
 profiles yet (the fixed catalog - `general`, `correctness`, `security`,
-`tests`, `performance`, `docs` - ships first), no per-child model selection
-(children inherit the parent's model and workspace), no approval inheritance
-of any kind, and no background/detached orchestration (the run lives in the
-workbench session like any agent run; a crash-resumable parent is enough).
+`tests`, `performance`, `docs` - ships first), no approval inheritance of any
+kind, and no background/detached orchestration (the run lives in the workbench
+session like any agent run; a crash-resumable parent is enough).
 
 ## Transcript
 

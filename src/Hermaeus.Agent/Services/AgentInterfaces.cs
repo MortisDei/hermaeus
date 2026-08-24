@@ -103,6 +103,10 @@ public interface IAgentService
     /// </summary>
     Task<AgentStepResult> RunAsync(string taskId, AgentWorkspaceOptions options, Action<AgentStepResult>? onStep = null, CancellationToken ct = default);
     Task<IReadOnlyList<AgentTaskListItem>> LoadRecentTasksAsync(CancellationToken ct = default);
+    /// <summary>Explicitly changes a paused task's frozen model after validating
+    /// that the exact visible model is currently available. This is a user
+    /// review action, never automatic fallback.</summary>
+    Task<AgentTaskState> ChangeTaskModelAsync(string taskId, string modelId, CancellationToken ct = default);
     /// <summary>
     /// Approves or rejects the task's currently pending tool action.
     /// <paramref name="expectedFingerprint"/> must match the pending

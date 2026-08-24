@@ -45,6 +45,9 @@
                                  ToolTip.Tip="The agent is working. Stop cancels the run." />
                     <TextBlock Text="{Binding CurrentTaskStatusLabel}" FontSize="12" FontWeight="SemiBold" />
                     <TextBlock Text="{Binding CurrentStepCountLabel}" FontSize="12" Opacity="0.6" />
+                    <TextBlock Text="{Binding CurrentTaskModelLabel}" FontSize="11" Opacity="0.55"
+                               MaxWidth="220" TextTrimming="CharacterEllipsis"
+                               ToolTip.Tip="The model frozen for this task. Changing the picker does not change an in-flight task." />
                 </StackPanel>
                 <StackPanel Grid.Column="2" Spacing="1" VerticalAlignment="Center">
                     <TextBlock Text="{Binding CurrentTaskGoalLabel}" FontSize="12" Opacity="0.75"
@@ -141,6 +144,27 @@
                                             <TextBlock Text="{Binding PendingReason}" FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
                                             <TextBlock Text="{Binding RecipePreview}" FontSize="11" Opacity="0.75" TextWrapping="Wrap"
                                                        FontFamily="{DynamicResource AppMonoFont}" IsVisible="{Binding HasRecipePreview}" />
+                                            <ItemsControl ItemsSource="{Binding SubTaskModelChoices}"
+                                                          IsVisible="{Binding HasSubTaskModelChoices}"
+                                                          x:CompileBindings="False">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Grid ColumnDefinitions="*,220" Margin="0,3,0,0">
+                                                            <TextBlock Grid.Column="0" Text="{Binding Goal}" TextTrimming="CharacterEllipsis"
+                                                                       VerticalAlignment="Center" FontSize="11" />
+                                                            <ComboBox Grid.Column="1" ItemsSource="{Binding Options}"
+                                                                      SelectedItem="{Binding SelectedOption, Mode=TwoWay}"
+                                                                      ToolTip.Tip="Choose the exact model for this sub-task, or inherit the parent model.">
+                                                                <ComboBox.ItemTemplate>
+                                                                    <DataTemplate>
+                                                                        <TextBlock Text="{Binding Label}" />
+                                                                    </DataTemplate>
+                                                                </ComboBox.ItemTemplate>
+                                                            </ComboBox>
+                                                        </Grid>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
                                         </StackPanel>
                                         <TextBlock Text="{Binding DifferentWorkspaceLabel}"
                                                    FontSize="10"
@@ -322,6 +346,11 @@
                                     </DataTemplate>
                                 </ComboBox.ItemTemplate>
                             </ComboBox>
+                            <Button Grid.Row="2" Grid.Column="2"
+                                    Content="Use for task"
+                                    Command="{Binding ChangeTaskModelCommand}"
+                                    Padding="8,4"
+                                    ToolTip.Tip="Explicitly changes the paused task to the selected available model. Hermaeus never falls back automatically." />
 
                             <TextBlock Grid.Row="3" Grid.Column="0"
                                        Text="RAG dataset"
@@ -428,6 +457,8 @@
                                                     <TextBlock Text="{Binding Status}" FontSize="10" FontWeight="SemiBold" Foreground="White" HorizontalAlignment="Center" />
                                                 </Border>
                                                 <TextBlock Text="{Binding ProfileName}" FontSize="11" Opacity="0.55" Width="80" />
+                                                <TextBlock Text="{Binding ModelLabel}" FontSize="11" Opacity="0.65" Width="170"
+                                                           TextTrimming="CharacterEllipsis" />
                                                 <TextBlock Text="{Binding Goal}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" FontSize="12" />
                                             </StackPanel>
                                         </DataTemplate>
@@ -1147,6 +1178,8 @@
                                                     </Border>
                                                     <StackPanel Grid.Column="2" VerticalAlignment="Center" Spacing="1">
                                                         <TextBlock Text="{Binding Goal}" FontSize="12" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                                                        <TextBlock Text="{Binding ModelLabel}" FontSize="10" Opacity="0.55"
+                                                                   TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
                                                         <!-- r19 3.3: a half-done task should be recognizable at a glance in this list too. -->
                                                         <TextBlock Text="{Binding PrematureCompleteNote}" FontSize="10" Foreground="#FFB74D"
                                                                    IsVisible="{Binding IsPrematureComplete}" />

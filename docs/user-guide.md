@@ -142,6 +142,14 @@ scope and proposed actions, and approve gated operations explicitly. Task state
 and patch queues remain inspectable. Workspace authority does not carry into
 another workspace or into ordinary Chat.
 
+When a proposed plan contains sub-tasks, its review card has one model selector
+per child. Choose a configured visible model or **Inherit parent** before
+approving. Hermaeus persists the approved identities, runs each child on its own
+selection, and returns final synthesis to the parent's model. Changing the main
+model picker later does not retarget an existing task. If a task's frozen model
+is no longer available, the task pauses without fallback; select an available
+model and use **Use for task** to record an explicit change before continuing.
+
 ## Lab experiments and evidence
 
 Open **Lab > Experiment**, select a configured Chat server, name the run, and

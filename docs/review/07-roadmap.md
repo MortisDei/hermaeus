@@ -49,7 +49,7 @@ and evidence origins are reliable.
 | 7 | General external draft and EAGLE-3 adapters, speculative parameter recipes, acceptance/TTFT/memory/correctness/equivalence; unsupported mechanisms stay Unknown | 5, 6 | mandatory conditional runtime feature | Yes (live pair gate Unknown) |
 | 8 | Prompt/shared-prefix evidence adapter and optional build-scoped diagnostics; direct counters only when observed | 5 | independently shippable, evidence-gated | Yes (direct counter Unknown; optional diagnostics deferred) |
 | 9 | Project State persistence/editor/proposals/context receipt | 1, 2 | mandatory independent | Yes (Linux/COSMIC live gate pending) |
-| 10 | Per-subtask model selection through approved plan, task/transcript/report/synthesis identity and no-fallback behavior | 1, 3 | mandatory independent | No |
+| 10 | Per-subtask model selection through approved plan, task/transcript/report/synthesis identity and no-fallback behavior | 1, 3 | mandatory independent | Yes (Linux/COSMIC two-model gate pending) |
 | 11 | Agent Local API policy/contracts and single-owner decision; implement safe scoped endpoints only if the ownership gate is satisfied | 1, 9, 10 | mandatory design, conditional execution | No |
 | 12 | Live telemetry pop-out and deterministic deduplicated health conditions using the shared telemetry/experience foundations | 4 | mandatory independent | No |
 | 13 | Chat scroll regression seam/tests and audio-feedback service/settings/assets/safe playback arbitration | none for scroll; telemetry notification service may be reused for cue events | mandatory independent | No |

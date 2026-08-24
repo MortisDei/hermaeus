@@ -59,8 +59,10 @@ public static class AgentApprovalPreview
             if (item.ValueKind != JsonValueKind.Object) continue;
             var goal = item.TryGetProperty("goal", out var g) ? g.GetString() ?? string.Empty : string.Empty;
             var profile = item.TryGetProperty("profile", out var p) ? p.GetString() ?? string.Empty : string.Empty;
+            var modelId = item.TryGetProperty("model_id", out var m) ? m.GetString() ?? string.Empty : string.Empty;
             if (goal.Length == 0) continue;
-            lines.Add($"[{(profile.Length == 0 ? "general" : profile)}] {goal}");
+            var model = string.IsNullOrWhiteSpace(modelId) ? "inherit parent" : modelId;
+            lines.Add($"[{(profile.Length == 0 ? "general" : profile)}, model {model}] {goal}");
         }
 
         if (lines.Count == 0)

@@ -179,8 +179,8 @@ internal static class AgentTests
 
     var preview = AgentApprovalPreview.Describe(step.State.PendingToolAction!, options);
     True(preview.Contains("2 sub-task", StringComparison.Ordinal), "the preview should show the sub-task count");
-    True(preview.Contains("[correctness] Fix the bug", StringComparison.Ordinal), "the preview should show each sub-task's profile and goal");
-    True(preview.Contains("[tests] Add a regression test", StringComparison.Ordinal), "the preview should show each sub-task's profile and goal");
+    True(preview.Contains("[correctness, model inherit parent] Fix the bug", StringComparison.Ordinal), "the preview should show each sub-task's profile, model, and goal");
+    True(preview.Contains("[tests, model inherit parent] Add a regression test", StringComparison.Ordinal), "the preview should show each sub-task's profile, model, and goal");
 
     var malformed = new AgentPendingToolAction { ToolName = "plan_subtasks", Arguments = new Dictionary<string, object?>() };
     Equal("Could not parse the proposed plan.", AgentApprovalPreview.Describe(malformed, options), "a malformed plan payload should degrade to a clear message");
@@ -213,7 +213,7 @@ internal static class AgentTests
         await c.OpenAsync();
         await using var cmd = c.CreateCommand();
         cmd.CommandText = "SELECT version FROM hermaeus_schema_versions WHERE scope = 'agent_task_index'";
-        Equal(5L, (long)(await cmd.ExecuteScalarAsync() ?? 0L), "agent task index should record schema version");
+        Equal(6L, (long)(await cmd.ExecuteScalarAsync() ?? 0L), "agent task index should record schema version");
     }
 
     File.Delete(Path.Combine(store.GetTaskDirectory("indexed-task"), "task_state.json"));
@@ -2047,7 +2047,11 @@ internal static class AgentTests
     var store = new FileAgentTaskStateStore(settings);
     var tools = new AgentWorkspaceTools();
     var service = new AgentService(store, new FakeAgentContextBuilder(), new AgentSafetyGate(), new AgentToolExecutor(tools), llm, settings: settings);
-    var options = new AgentWorkspaceOptions(root, ModelId: "fake-sequenced-agent");
+    var availableModels = await llm.GetModelsAsync();
+    var modelId = availableModels.Any(model => string.Equals(model.Id, "fake-sequenced-agent", StringComparison.Ordinal))
+        ? "fake-sequenced-agent"
+        : availableModels.Single().Id;
+    var options = new AgentWorkspaceOptions(root, ModelId: modelId);
 
     var state = await service.CreateTaskAsync(goal, options);
     var proposed = await service.RunStepAsync(state.TaskId, options);

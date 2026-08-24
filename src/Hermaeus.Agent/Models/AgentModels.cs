@@ -211,6 +211,10 @@ public sealed class AgentTaskState
     /// task state files (JSON-additive).
     /// </summary>
     public string ProjectId { get; set; } = string.Empty;
+    /// <summary>The model frozen for this task at its first planner boundary.
+    /// Empty on legacy tasks until they next run.</summary>
+    public string ModelId { get; set; } = string.Empty;
+    public string ModelDisplayName { get; set; } = string.Empty;
     /// <summary>
     /// Populated only on a parent task, only by an approved <c>plan_subtasks</c>
     /// action. Empty for every ordinary task and for every child task.
@@ -265,6 +269,16 @@ public sealed class AgentSubTaskSpec
     /// <summary>Key into the fixed <see cref="Hermaeus.Agent.Services.AgentSpecialistProfiles"/> catalog.</summary>
     public string ProfileName { get; set; } = string.Empty;
     public string SuccessCriteria { get; set; } = string.Empty;
+    /// <summary>Explicit proposed/user-selected child model. Empty means inherit parent.</summary>
+    public string ModelId { get; set; } = string.Empty;
+    /// <summary>Actual model resolved when the plan is approved.</summary>
+    public string ResolvedModelId { get; set; } = string.Empty;
+    public string ModelDisplayName { get; set; } = string.Empty;
+    public string ModelLabel => string.IsNullOrWhiteSpace(ResolvedModelId)
+        ? "inherit parent (legacy unresolved)"
+        : string.IsNullOrWhiteSpace(ModelId)
+            ? $"inherit {(string.IsNullOrWhiteSpace(ModelDisplayName) ? ResolvedModelId : ModelDisplayName)} ({ResolvedModelId})"
+            : $"{(string.IsNullOrWhiteSpace(ModelDisplayName) ? ResolvedModelId : ModelDisplayName)} ({ResolvedModelId})";
     public AgentSubTaskStatus Status { get; set; } = AgentSubTaskStatus.Pending;
     /// <summary>Set when the child task is actually created (lazily, at execution time - not at plan-approval time).</summary>
     public string? TaskId { get; set; }
@@ -525,7 +539,9 @@ public sealed record AgentLedgerApprovalEntry(
 public sealed record AgentLedgerSubTaskEntry(
     string Goal,
     AgentSubTaskStatus Status,
-    string? TaskId);
+    string? TaskId,
+    string ModelId = "",
+    string ModelDisplayName = "");
 
 /// <summary>A run's total footprint: every file, command, and approval it produced (r23 1.1, the Run Ledger).</summary>
 public sealed record AgentRunLedger(
@@ -550,6 +566,10 @@ public sealed class AgentContextPack
     /// <summary>Accepted, bounded, user-owned Project State. Empty when the task
     /// is not project-bound or the project has no accepted state.</summary>
     public List<AgentRetrievedItem> ProjectState { get; set; } = [];
+    /// <summary>The frozen model producing this planner step.</summary>
+    public List<AgentRetrievedItem> ModelIdentity { get; set; } = [];
+    /// <summary>Bounded visible models a parent may name in a plan_subtasks proposal.</summary>
+    public List<AgentRetrievedItem> EligibleModels { get; set; } = [];
     public List<AgentToolResult> ToolResults { get; set; } = [];
     /// <summary>
     /// Budgeted replay of the task's persisted step transcript (assistant
@@ -735,7 +755,8 @@ public sealed record AgentTranscriptEntry(
     DateTime Timestamp,
     string? ArgumentsCanonical = null,
     bool? ReplaySafe = null,
-    NormalizedToolOutcome? NormalizedOutcome = null);
+    NormalizedToolOutcome? NormalizedOutcome = null,
+    string ModelId = "");
 
 public sealed record AgentStepResult(
     AgentTaskState State,
@@ -756,7 +777,9 @@ public sealed record AgentTaskListItem(
     /// <summary>r23 2.3: true when the task completed with a non-empty Reservations list, so the recent-tasks list can show "Completed with reservations" without loading the full state.</summary>
     bool HasReservations = false,
     /// <summary>r24 doc 01: the project this task was created under, if any.</summary>
-    string ProjectId = "");
+    string ProjectId = "",
+    string ModelId = "",
+    string ModelDisplayName = "");
 
 public sealed record AgentFileSearchResult(
     string RelativePath,

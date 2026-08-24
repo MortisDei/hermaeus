@@ -850,7 +850,11 @@ namespace Hermaeus.Tests
         public string ProviderName => "FakeSequencedAgent";
         public bool IsConfigured => true;
         public Task<List<LlmModel>> GetModelsAsync(CancellationToken ct = default) =>
-            Task.FromResult(new List<LlmModel> { new() { Id = "fake-sequenced-agent", Name = "Fake Sequenced Agent", Provider = "Test" } });
+            Task.FromResult(new List<LlmModel>
+            {
+                new() { Id = "fake-sequenced-agent", Name = "Fake Sequenced Agent", Provider = "Test" },
+                new() { Id = "test-model", Name = "Scenario Test Model", Provider = "Test" }
+            });
 
         public async IAsyncEnumerable<LlmStreamEvent> StreamChatAsync(
             string modelId,

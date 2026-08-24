@@ -496,6 +496,14 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
   sub-task is terminal, the parent synthesizes one consolidated report (with
   a deterministic fallback if synthesis itself fails) and writes it to
   `report.md` in the task directory, openable from the workbench.
+- Every proposed child has an explicit model choice in plan review: inherit the
+  parent's frozen model or select another configured visible model. The exact
+  choice is approval-fingerprinted and persisted on the plan, child task,
+  transcript, trace, report, and recent-task UI before execution. Siblings may
+  use different models, but synthesis returns to the parent's persisted model.
+  A hidden, removed, stopped, or otherwise unavailable selected model blocks
+  visibly and never falls back. A paused task model can only be changed through
+  the explicit audited **Use for task** action.
 - The agent's current response gets its own always-expanded panel (wraps,
   scrolls internally past ~320px) near the top of the workbench, above the
   Task State/Next Action detail and the reference panels (workspace profile,
@@ -1307,6 +1315,11 @@ edit-before-accept, rejection, and stale-revision refusal. Only accepted,
 bounded State reaches project-bound Chat or Agent context; the receipt names
 its revision and pending proposals never enter the prompt. See [docs/projects.md](projects.md)
 for the full model and switcher/editor behaviour.
+
+Approved Agent sub-task plans can assign a configured visible model to each
+child or explicitly inherit the parent's frozen model. The resolved identities
+survive restart and remain visible through execution and synthesis; picker drift
+does not retarget work, and an unavailable frozen model blocks without fallback.
 
 This absorbs and supersedes the per-workspace "root folder / preferred
 model / linked dataset" sketch this section used to describe as an Agent-only
