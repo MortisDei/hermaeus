@@ -4,6 +4,58 @@ Lab is Hermaeus's controlled measurement and empirical-evidence workspace. It
 is separate from Benchmarks, which measures reusable suites, and from Memories,
 which stores user/model knowledge.
 
+## Controlled experiments
+
+The Experiment tab freezes one immutable definition before it starts anything.
+The definition names the protocol, exact v2 runtime/model/hardware/configuration
+fingerprint, target Services server, baseline, bounded candidates, workload,
+sampling and repetition policy, required metrics, capabilities, timeout, stop
+conditions, and correctness rule. Existing extra arguments are represented by
+an opaque SHA256 in persisted evidence, not copied as raw command text. Editing
+the draft after a run creates a new
+definition and hash rather than changing the run already in progress.
+
+Start clones the selected Chat server into a dedicated `ServerProcessManager`,
+reserves a temporary port, and binds the process to `127.0.0.1`. Network and
+port overrides in extra arguments are refused. The active Chat server is not
+stopped or reconfigured, and `settings.json` is not saved. Each temporary
+process has a run ownership id, PID, start time, executable hash, and atomic
+local ownership record. Normal cancellation stops only that owned session.
+Startup recovery kills an abandoned process only after PID, start time, and
+executable content all match; otherwise cleanup remains `Unknown` and the
+process is not touched.
+
+Observations keep value and missing reason separate, so an absent counter never
+becomes zero. Every observation names unit, source, evidence origin, trust,
+timestamp, repetition/case, and all four v2 fingerprint components.
+Comparisons list uncontrolled fingerprint differences and refuse a headline
+delta when any remain. Timing metrics show median, observed range, repetition
+count, and source. There is no universal score or statistical-significance
+claim.
+
+Correctness compares token ids when both sides expose them and falls back to an
+exact UTF-8 output hash at a weaker declared level. It reports `Equivalent`,
+`Different`, or `Unknown`. A deterministic mismatch blocks an Apply
+recommendation even when performance improved. Speed-only protocols are
+explicit and can never recommend Apply.
+
+Start and completion are separate immutable `lab-run` experience records.
+Completion retains observations, failures, comparisons, output hashes, and
+provenance, but omits prompt/output bodies and token values from the exportable
+record. Cancellation preserves partial evidence and normalizes the result as
+`Cancelled` or `PartiallySucceeded`.
+
+**Apply to Services** is a separate review after a controlled, correctness-
+passing result. It shows every persisted field that would change and captures
+the current server configuration plus runtime/model identity. Confirmation
+rechecks all three, clones `AppSettings`, and uses the normal settings save
+flow. A stale review is refused, and applying never deletes prior configuration
+or experiment evidence.
+
+The first shell protocol proves definition, isolation, lifecycle, evidence,
+comparison, correctness, and Apply boundaries. Bounded engine, KV, speculation,
+prefix, and CPU-MoE recipes land in subsequent R31 batches on this same core.
+
 ## Evidence
 
 The Evidence surface reads `{DataRoot}/experience.db`. It indexes typed
@@ -62,5 +114,7 @@ participates in the existing data-root migration and backup file enumeration.
 Writes that add a record and all provenance links are transactional. There is
 no automatic retention deletion.
 
-The experiment runner and Apply workflow are added by later R31 batches. Until
-those land, Lab exposes Evidence and shared GPU Fit evidence only.
+Lab runtime ownership state is stored separately under Data Root only while an
+isolated process exists. It contains opaque ownership/run ids, PID/start time,
+port, and executable hash, not executable/model paths. The record is deleted
+when the owned process stops.

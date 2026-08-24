@@ -123,9 +123,28 @@ scope and proposed actions, and approve gated operations explicitly. Task state
 and patch queues remain inspectable. Workspace authority does not carry into
 another workspace or into ordinary Chat.
 
-## Lab evidence
+## Lab experiments and evidence
 
-Open **Lab** and use the **Evidence** surface to inspect structured Agent,
+Open **Lab > Experiment**, select a configured Chat server, name the run, and
+set the bounded candidate values shown by the editor. **Freeze and start**
+captures the exact definition and starts a separate runtime on a temporary
+loopback port. The Services configuration and active Chat server remain
+unchanged. **Complete baseline** preserves the shell observation and cleans up
+the temporary process; **Cancel** stops only the runtime owned by that run and
+records the cancelled or partial result.
+
+The run state names isolation and comparison refusals. Missing counters remain
+missing. A comparison cannot show a headline delta when runtime, model,
+hardware, or configuration fingerprints differ, and a deterministic output
+difference fails correctness regardless of speed.
+
+**Review candidate** lists the exact Services fields that would change. A
+speed-only, uncontrolled, missing-correctness, or stale result is refused.
+**Confirm reviewed changes** asks once more, rechecks the selected server plus
+runtime/model identity, and saves through the normal Settings path. Review is
+separate from running an experiment, and experiment evidence is retained.
+
+Use **Lab > Evidence** to inspect structured Agent,
 GPU Fit, and experiment evidence. Filters cover domain, project/workspace
 scope, model/runtime fingerprints, normalized outcome, evidence origin, status,
 and date. Select a record to inspect its canonical context and action plus the

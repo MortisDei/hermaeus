@@ -141,6 +141,17 @@ public partial class App : Application
                 sp.GetRequiredService<IEvalStore>().InitializeAsync());
             phases.Add(new StartupPhase("stores", phaseTimer.ElapsedMilliseconds));
 
+            phaseTimer.Restart();
+            foreach (var result in await sp.GetRequiredService<ILabRuntimeHost>().RecoverOwnedProcessesAsync())
+            {
+                logs.Add(new RuntimeLogEntry(
+                    DateTime.UtcNow,
+                    result.Contains("Unknown", StringComparison.Ordinal) ? RuntimeLogLevel.Warning : RuntimeLogLevel.Info,
+                    RuntimeLogCategory.Service,
+                    result));
+            }
+            phases.Add(new StartupPhase("lab-recovery", phaseTimer.ElapsedMilliseconds));
+
             // Probe active voice provider health at startup to detect externally-running services
             phaseTimer.Restart();
             try

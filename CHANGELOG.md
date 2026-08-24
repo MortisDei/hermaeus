@@ -31,6 +31,11 @@ limit.
   telemetry source records process-scoped RAM and honest Unknown GPU evidence,
   and fingerprint-matched observations can be stored and compared without
   modifying the analytical prediction.
+- Lab now freezes immutable experiment definitions, launches a dedicated
+  loopback runtime without mutating Chat or saved settings, preserves
+  source-labelled observations and correctness-gated comparisons, cleans up by
+  exact process ownership, and exposes a stale-identity-guarded Apply review
+  through the normal settings save flow.
 
 ### Changed
 

@@ -47,6 +47,15 @@ public partial class MainWindow : Window
                     $"Permanently remove experience {experience.Id}? Its stored context, action and provenance are hard-deleted. Raw source task or Lab evidence is not changed.");
                 return await dialog.ShowDialog<bool>(this);
             };
+            vm.Lab.ConfirmApply = async review =>
+            {
+                var changes = string.Join(Environment.NewLine,
+                    review.Changes.Select(change => $"{change.Field}: {change.CurrentValue} -> {change.ProposedValue}"));
+                var dialog = new ConfirmActionDialog(
+                    "Apply Lab result to Services",
+                    $"Save these reviewed fields through the normal Settings flow?\n\n{changes}\n\nThe experiment evidence is retained.");
+                return await dialog.ShowDialog<bool>(this);
+            };
             vm.RequestCopyToastDetails = async text =>
             {
                 if (Clipboard is { } clipboard)

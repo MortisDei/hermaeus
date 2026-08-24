@@ -440,7 +440,7 @@ Major systems currently implemented include:
 - Long-term memory
 - Voice providers
 - Benchmark suites
-- Controlled Lab evidence inspection
+- Controlled, isolated Lab experiments and evidence inspection
 - Local AI setup
 - Doctor diagnostics
 - Reasoning-aware local chat with capability evidence and preserved reasoning

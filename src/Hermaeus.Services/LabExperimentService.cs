@@ -1,0 +1,615 @@
+using System.Collections.Concurrent;
+using System.Globalization;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.Json;
+using Hermaeus.Core.Models;
+using Hermaeus.Core.Services;
+using Hermaeus.Services.ProcessManagement;
+
+namespace Hermaeus.Services;
+
+public static class LabDefinitionValidator
+{
+    public const int MaximumCandidates = 16;
+    public const int MaximumRepetitions = 20;
+
+    public static void Validate(LabExperimentDefinition definition)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        if (definition.SchemaVersion != 1 || definition.ProtocolVersion < 1 || definition.Revision < 1)
+            throw new InvalidOperationException("Lab definition versions must be positive and schema version must be 1.");
+        RequireId(definition.Id, "definition");
+        RequireId(definition.ProtocolId, "protocol");
+        RequireId(definition.TargetServerId, "target server");
+        if (string.IsNullOrWhiteSpace(definition.Name) || definition.Name.Length > 128)
+            throw new InvalidOperationException("Lab experiment name must contain 1 to 128 characters.");
+        if (definition.ProfileFingerprint is null)
+            throw new InvalidOperationException("An exact v2 profile fingerprint is required.");
+        if (definition.Candidates.Count is < 1 or > MaximumCandidates)
+            throw new InvalidOperationException($"Lab definitions require 1 to {MaximumCandidates} candidates.");
+        if (definition.Repetitions is < 1 or > MaximumRepetitions)
+            throw new InvalidOperationException($"Lab repetitions must be between 1 and {MaximumRepetitions}.");
+        if (definition.WarmupRepetitions is < 0 or > 5)
+            throw new InvalidOperationException("Lab warm-up repetitions must be between 0 and 5.");
+        if (definition.TimeoutSeconds is < 1 or > 3600)
+            throw new InvalidOperationException("Lab timeout must be between 1 and 3600 seconds.");
+        ValidateConfiguration(definition.Baseline);
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        if (!ids.Add(definition.Baseline.Id))
+            throw new InvalidOperationException("Lab configuration ids must be unique.");
+        foreach (var candidate in definition.Candidates)
+        {
+            ValidateConfiguration(candidate);
+            if (!ids.Add(candidate.Id))
+                throw new InvalidOperationException("Lab configuration ids must be unique.");
+        }
+        if (ids.Any(id => !definition.ConfigurationFingerprints.TryGetValue(id, out var fingerprint)
+            || string.IsNullOrWhiteSpace(fingerprint)))
+            throw new InvalidOperationException("Every Lab configuration requires a frozen v2 configuration fingerprint.");
+        if (definition.PromptHashes.Count > 64 || definition.RequiredMetrics.Count > 32
+            || definition.StopConditions.Count > 16 || definition.RequestedCapabilityIds.Count > 32)
+            throw new InvalidOperationException("Lab definition collections exceed their bounded limits.");
+    }
+
+    public static void ValidateConfiguration(LabConfiguration configuration)
+    {
+        RequireId(configuration.Id, "configuration");
+        if (string.IsNullOrWhiteSpace(configuration.Label) || configuration.Label.Length > 96)
+            throw new InvalidOperationException("Lab configuration labels must contain 1 to 96 characters.");
+        if (configuration.ContextSize is < 128 or > 2_097_152)
+            throw new InvalidOperationException("Lab context must be between 128 and 2,097,152 tokens.");
+        if (configuration.GpuLayers < -1 || configuration.Threads < 0 || configuration.PromptThreads < 0
+            || configuration.Slots is < 1 or > 64 || configuration.CpuMoeLayers < -1)
+            throw new InvalidOperationException("Lab configuration contains an out-of-range runtime value.");
+        if (!string.IsNullOrWhiteSpace(configuration.ExtraArgumentsSha256)
+            && (configuration.ExtraArgumentsSha256.Length != 64
+                || configuration.ExtraArgumentsSha256.Any(character => !Uri.IsHexDigit(character))))
+            throw new InvalidOperationException("Lab extra-argument identity must be an opaque SHA256 value.");
+    }
+
+    public static void ValidateIsolationArguments(string extraArguments)
+    {
+        if (extraArguments.Length > 4096)
+            throw new InvalidOperationException("Lab extra arguments exceed 4,096 characters.");
+        var tokens = ExtraArgsParser.Split(extraArguments);
+        if (tokens.Any(IsNetworkOverride))
+            throw new InvalidOperationException("Lab extra arguments cannot override the isolated loopback host or temporary port.");
+    }
+
+    private static bool IsNetworkOverride(string value) =>
+        value.Equals("--host", StringComparison.OrdinalIgnoreCase)
+        || value.StartsWith("--host=", StringComparison.OrdinalIgnoreCase)
+        || value.Equals("--port", StringComparison.OrdinalIgnoreCase)
+        || value.StartsWith("--port=", StringComparison.OrdinalIgnoreCase)
+        || value.Equals("--listen", StringComparison.OrdinalIgnoreCase)
+        || value.StartsWith("--listen=", StringComparison.OrdinalIgnoreCase);
+
+    private static void RequireId(string value, string label)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length > 128
+            || value.Any(character => !char.IsLetterOrDigit(character) && character is not '-' and not '_' and not '.'))
+            throw new InvalidOperationException($"The Lab {label} id must be a safe opaque identifier.");
+    }
+}
+
+public static class LabObservationValidator
+{
+    public static void Validate(LabObservation observation)
+    {
+        if (string.IsNullOrWhiteSpace(observation.Id) || string.IsNullOrWhiteSpace(observation.RunId)
+            || string.IsNullOrWhiteSpace(observation.ConfigurationId) || string.IsNullOrWhiteSpace(observation.CaseId)
+            || string.IsNullOrWhiteSpace(observation.MetricId) || string.IsNullOrWhiteSpace(observation.Unit)
+            || string.IsNullOrWhiteSpace(observation.Source))
+            throw new InvalidOperationException("Lab observations require ids, metric, unit, and source.");
+        if (observation.Repetition < 0)
+            throw new InvalidOperationException("Lab observation repetition cannot be negative.");
+        if (observation.Value is double value && (double.IsNaN(value) || double.IsInfinity(value)))
+            throw new InvalidOperationException("Lab observation values must be finite.");
+        if (observation.Value.HasValue && !string.IsNullOrWhiteSpace(observation.MissingReason))
+            throw new InvalidOperationException("A present Lab observation cannot also have a missing reason.");
+        if (!observation.Value.HasValue && string.IsNullOrWhiteSpace(observation.MissingReason))
+            throw new InvalidOperationException("A missing Lab observation requires a reason.");
+        if (string.IsNullOrWhiteSpace(observation.RuntimeFingerprint)
+            || string.IsNullOrWhiteSpace(observation.ModelFingerprint)
+            || string.IsNullOrWhiteSpace(observation.HardwareFingerprint)
+            || string.IsNullOrWhiteSpace(observation.ConfigurationFingerprint))
+            throw new InvalidOperationException("Lab observations require all v2 fingerprint components.");
+    }
+}
+
+public static class LabConfigurationMapper
+{
+    public static LabConfiguration FromServer(ServerConfig source, string id, string label) => new()
+    {
+        Id = id,
+        Label = label,
+        ContextSize = source.ContextSize,
+        GpuLayers = source.GpuLayers,
+        Threads = source.Threads,
+        PromptThreads = source.PromptThreads,
+        Slots = source.Slots,
+        KvCacheTypeK = EffectiveKv(source.KvCacheTypeK, source.KvCacheType),
+        KvCacheTypeV = EffectiveKv(source.KvCacheTypeV, source.KvCacheType),
+        FlashAttention = source.FlashAttention,
+        CpuMoeLayers = source.CpuMoeLayers,
+        ExtraArgumentsSha256 = string.IsNullOrWhiteSpace(source.ExtraArgs)
+            ? string.Empty : LabCanonicalJson.Hash(source.ExtraArgs)
+    };
+
+    public static ServerConfig Apply(ServerConfig source, LabConfiguration configuration, int port) => new()
+    {
+        Id = source.Id,
+        Name = $"Lab {source.Name}",
+        ExecutablePath = source.ExecutablePath,
+        ModelPath = source.ModelPath,
+        Port = port,
+        ContextSize = configuration.ContextSize,
+        GpuLayers = configuration.GpuLayers,
+        Threads = configuration.Threads,
+        PromptThreads = configuration.PromptThreads,
+        Slots = configuration.Slots,
+        EmbeddingsMode = source.EmbeddingsMode,
+        AutoStart = false,
+        ExtraArgs = source.ExtraArgs,
+        KvCacheType = configuration.KvCacheTypeK == configuration.KvCacheTypeV ? configuration.KvCacheTypeK : source.KvCacheType,
+        KvCacheTypeK = configuration.KvCacheTypeK,
+        KvCacheTypeV = configuration.KvCacheTypeV,
+        PreserveReasoning = source.PreserveReasoning,
+        FlashAttention = configuration.FlashAttention,
+        ContextShift = source.ContextShift,
+        MemoryLock = source.MemoryLock,
+        NoMemoryMap = source.NoMemoryMap,
+        CpuMoeLayers = configuration.CpuMoeLayers,
+        Speculative = CloneSpeculative(source.Speculative),
+        MmprojPath = source.MmprojPath
+    };
+
+    public static string Hash(ServerConfig source) =>
+        LabCanonicalJson.Hash(LabCanonicalJson.Serialize(FromServer(source, "current", "Current")));
+
+    public static IReadOnlyList<LabApplyChange> Differences(ServerConfig source, LabConfiguration proposed)
+    {
+        var current = FromServer(source, "current", "Current");
+        var changes = new List<LabApplyChange>();
+        Add(nameof(ServerConfig.ContextSize), current.ContextSize, proposed.ContextSize);
+        Add(nameof(ServerConfig.GpuLayers), current.GpuLayers, proposed.GpuLayers);
+        Add(nameof(ServerConfig.Threads), current.Threads, proposed.Threads);
+        Add(nameof(ServerConfig.PromptThreads), current.PromptThreads, proposed.PromptThreads);
+        Add(nameof(ServerConfig.Slots), current.Slots, proposed.Slots);
+        Add(nameof(ServerConfig.KvCacheTypeK), current.KvCacheTypeK, proposed.KvCacheTypeK);
+        Add(nameof(ServerConfig.KvCacheTypeV), current.KvCacheTypeV, proposed.KvCacheTypeV);
+        Add(nameof(ServerConfig.FlashAttention), current.FlashAttention, proposed.FlashAttention);
+        Add(nameof(ServerConfig.CpuMoeLayers), current.CpuMoeLayers, proposed.CpuMoeLayers);
+        return changes;
+
+        void Add<T>(string field, T before, T after)
+        {
+            if (EqualityComparer<T>.Default.Equals(before, after)) return;
+            changes.Add(new LabApplyChange(field, Convert.ToString(before, CultureInfo.InvariantCulture) ?? string.Empty,
+                Convert.ToString(after, CultureInfo.InvariantCulture) ?? string.Empty));
+        }
+    }
+
+    public static void ApplyTo(ServerConfig target, LabConfiguration proposed)
+    {
+        target.ContextSize = proposed.ContextSize;
+        target.GpuLayers = proposed.GpuLayers;
+        target.Threads = proposed.Threads;
+        target.PromptThreads = proposed.PromptThreads;
+        target.Slots = proposed.Slots;
+        target.KvCacheTypeK = proposed.KvCacheTypeK;
+        target.KvCacheTypeV = proposed.KvCacheTypeV;
+        if (proposed.KvCacheTypeK == proposed.KvCacheTypeV)
+            target.KvCacheType = proposed.KvCacheTypeK;
+        target.FlashAttention = proposed.FlashAttention;
+        target.CpuMoeLayers = proposed.CpuMoeLayers;
+    }
+
+    private static string EffectiveKv(string specific, string shared) =>
+        string.IsNullOrWhiteSpace(specific) ? shared : specific;
+
+    private static SpeculativeDecodingConfig CloneSpeculative(SpeculativeDecodingConfig? source) => new()
+    {
+        Types = source?.Types.ToList() ?? [],
+        DraftModelPath = source?.DraftModelPath ?? string.Empty,
+        DraftGpuLayers = source?.DraftGpuLayers,
+        NMax = source?.NMax,
+        NMin = source?.NMin,
+        PMin = source?.PMin
+    };
+}
+
+public static class LabCorrectnessEvaluator
+{
+    public static LabOutputEvidence Capture(
+        string configurationId,
+        string caseId,
+        int repetition,
+        string text,
+        IReadOnlyList<int>? tokenIds = null) =>
+        new(configurationId, caseId, repetition, tokenIds?.Take(4096).ToArray(),
+            LabCanonicalJson.Hash(text), text[..Math.Min(text.Length, 512)]);
+
+    public static LabEquivalenceResult Compare(LabOutputEvidence? baseline, LabOutputEvidence? candidate)
+    {
+        if (baseline is null || candidate is null)
+            return Unknown("Baseline or candidate output evidence is missing.");
+        if (baseline.TokenIds is not null && candidate.TokenIds is not null)
+        {
+            var equal = baseline.TokenIds.SequenceEqual(candidate.TokenIds);
+            return Result(equal, LabEquivalenceLevel.TokenIds, baseline, candidate,
+                equal ? string.Empty : FirstTokenDifference(baseline.TokenIds, candidate.TokenIds));
+        }
+        if (string.IsNullOrWhiteSpace(baseline.Utf8Sha256) || string.IsNullOrWhiteSpace(candidate.Utf8Sha256))
+            return Unknown("The runtime did not expose token ids and an output hash is missing.");
+        var same = string.Equals(baseline.Utf8Sha256, candidate.Utf8Sha256, StringComparison.Ordinal);
+        return Result(same, LabEquivalenceLevel.ExactUtf8, baseline, candidate,
+            same ? string.Empty : "Exact UTF-8 output hashes differ; private output text is omitted.");
+    }
+
+    private static LabEquivalenceResult Result(bool equal, LabEquivalenceLevel level, LabOutputEvidence baseline, LabOutputEvidence candidate, string diff) =>
+        new(equal ? LabEquivalenceState.Equivalent : LabEquivalenceState.Different, level,
+            baseline.Utf8Sha256, candidate.Utf8Sha256,
+            equal ? "Outputs are equivalent at the declared comparison level." : "Outputs differ at the declared comparison level.", diff);
+
+    private static LabEquivalenceResult Unknown(string reason) =>
+        new(LabEquivalenceState.Unknown, LabEquivalenceLevel.Unknown, string.Empty, string.Empty, reason, string.Empty);
+
+    private static string FirstTokenDifference(IReadOnlyList<int> baseline, IReadOnlyList<int> candidate)
+    {
+        var length = Math.Min(baseline.Count, candidate.Count);
+        for (var index = 0; index < length; index++)
+            if (baseline[index] != candidate[index])
+                return $"First token difference at index {index}; token values are omitted from export.";
+        return $"Token sequence lengths differ ({baseline.Count} versus {candidate.Count}).";
+    }
+}
+
+public static class LabComparisonEngine
+{
+    public static LabComparison Compare(
+        LabExperimentDefinition definition,
+        LabConfiguration candidate,
+        IReadOnlyList<LabObservation> observations,
+        IReadOnlyList<LabOutputEvidence> outputs)
+    {
+        var fingerprints = ValidateFingerprints(definition, observations);
+        var equivalence = CombineEquivalence(definition.Baseline.Id, candidate.Id, outputs);
+        var correctnessPassed = definition.CorrectnessRequirement switch
+        {
+            LabCorrectnessRequirement.ExactEquivalence => equivalence.State == LabEquivalenceState.Equivalent,
+            LabCorrectnessRequirement.Behavioral => equivalence.State == LabEquivalenceState.Equivalent,
+            _ => true
+        };
+        var controlled = fingerprints.Count == 0;
+        var canHeadline = controlled && correctnessPassed && definition.CorrectnessRequirement != LabCorrectnessRequirement.SpeedOnly;
+        return new LabComparison
+        {
+            BaselineConfigurationId = definition.Baseline.Id,
+            CandidateConfigurationId = candidate.Id,
+            IsControlled = controlled,
+            FingerprintDifferences = fingerprints,
+            BaselineMetrics = Summarize(observations.Where(item => item.ConfigurationId == definition.Baseline.Id)),
+            CandidateMetrics = Summarize(observations.Where(item => item.ConfigurationId == candidate.Id)),
+            Equivalence = equivalence,
+            CorrectnessPassed = correctnessPassed,
+            CanShowHeadlineDelta = canHeadline,
+            RefusalReason = controlled
+                ? correctnessPassed ? definition.CorrectnessRequirement == LabCorrectnessRequirement.SpeedOnly ? "Speed-only experiments cannot produce an Apply recommendation." : string.Empty : "The declared correctness requirement failed."
+                : "Uncontrolled fingerprint differences prevent a headline delta."
+        };
+    }
+
+    private static IReadOnlyList<string> ValidateFingerprints(LabExperimentDefinition definition, IReadOnlyList<LabObservation> observations)
+    {
+        var expected = definition.ProfileFingerprint;
+        var differences = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var observation in observations)
+        {
+            if (observation.RuntimeFingerprint != expected.Runtime.StableId) differences.Add("runtime");
+            if (observation.ModelFingerprint != expected.Model.StableId) differences.Add("model");
+            if (observation.HardwareFingerprint != expected.Hardware.StableId) differences.Add("hardware");
+            if (!definition.ConfigurationFingerprints.TryGetValue(observation.ConfigurationId, out var expectedConfiguration)
+                || observation.ConfigurationFingerprint != expectedConfiguration)
+                differences.Add($"configuration:{observation.ConfigurationId}");
+        }
+        return differences.OrderBy(value => value, StringComparer.Ordinal).ToArray();
+    }
+
+    private static IReadOnlyList<LabMetricSummary> Summarize(IEnumerable<LabObservation> source) =>
+        source.GroupBy(item => (item.MetricId, item.Unit, item.Source))
+            .Select(group =>
+            {
+                var values = group.Where(item => item.Value.HasValue).Select(item => item.Value!.Value).Order().ToArray();
+                return new LabMetricSummary(group.Key.MetricId, group.Key.Unit,
+                    values.Length == 0 ? null : values.Length % 2 == 1 ? values[values.Length / 2] : (values[values.Length / 2 - 1] + values[values.Length / 2]) / 2,
+                    values.Length == 0 ? null : values[0], values.Length == 0 ? null : values[^1], values.Length, group.Key.Source);
+            }).ToArray();
+
+    private static LabEquivalenceResult CombineEquivalence(string baselineId, string candidateId, IReadOnlyList<LabOutputEvidence> outputs)
+    {
+        var results = outputs.Where(item => item.ConfigurationId == baselineId)
+            .Select(item => LabCorrectnessEvaluator.Compare(item,
+                outputs.FirstOrDefault(candidate => candidate.ConfigurationId == candidateId
+                    && candidate.CaseId == item.CaseId && candidate.Repetition == item.Repetition)))
+            .ToArray();
+        if (results.Length == 0 || results.Any(item => item.State == LabEquivalenceState.Unknown))
+            return results.FirstOrDefault(item => item.State == LabEquivalenceState.Unknown)
+                ?? new LabEquivalenceResult(LabEquivalenceState.Unknown, LabEquivalenceLevel.Unknown, string.Empty, string.Empty, "No paired outputs were observed.", string.Empty);
+        return results.FirstOrDefault(item => item.State == LabEquivalenceState.Different)
+            ?? results[0];
+    }
+}
+
+public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposable
+{
+    private readonly ISettingsService _settings;
+    private readonly ISystemInfoService _systemInfo;
+    private readonly IEmpiricalExperienceStore _experience;
+    private readonly ILabRuntimeHost _runtimeHost;
+    private readonly ConcurrentDictionary<string, RunState> _runs = new(StringComparer.Ordinal);
+
+    public LabExperimentService(ISettingsService settings, ISystemInfoService systemInfo,
+        IEmpiricalExperienceStore experience, ILabRuntimeHost runtimeHost)
+    {
+        _settings = settings;
+        _systemInfo = systemInfo;
+        _experience = experience;
+        _runtimeHost = runtimeHost;
+    }
+
+    public async Task<LabExperimentDefinition> CreateDefinitionAsync(string name, string protocolId,
+        ServerConfig source, LabConfiguration baseline, IReadOnlyList<LabConfiguration> candidates,
+        int repetitions, LabCorrectnessRequirement correctness, CancellationToken ct = default)
+    {
+        var profile = await CreateFingerprintAsync(source, baseline, ct);
+        LabDefinitionValidator.ValidateIsolationArguments(source.ExtraArgs);
+        var configurationFingerprints = candidates.Append(baseline)
+            .ToDictionary(item => item.Id, item => CreateConfigurationIdentity(source, item).StableId, StringComparer.Ordinal);
+        var definition = new LabExperimentDefinition
+        {
+            Name = name.Trim(), ProtocolId = protocolId.Trim(), TargetServerId = source.Id,
+            ProfileFingerprint = profile, Baseline = baseline,
+            ConfigurationFingerprints = configurationFingerprints,
+            Candidates = candidates.ToArray(), WorkloadId = "lab-shell-baseline",
+            Repetitions = repetitions, RequiredMetrics = ["runtime.ready", "process.ram.current"],
+            CorrectnessRequirement = correctness
+        };
+        LabDefinitionValidator.Validate(definition);
+        return definition;
+    }
+
+    public async Task<LabRunSnapshot> StartAsync(LabExperimentDefinition definition, ServerConfig source, CancellationToken ct = default)
+    {
+        LabDefinitionValidator.Validate(definition);
+        definition = JsonSerializer.Deserialize<LabExperimentDefinition>(definition.CanonicalJson(),
+            new JsonSerializerOptions(JsonSerializerDefaults.Web))
+            ?? throw new InvalidOperationException("The Lab definition could not be frozen.");
+        LabDefinitionValidator.Validate(definition);
+        if (!string.Equals(definition.TargetServerId, source.Id, StringComparison.Ordinal))
+            throw new InvalidOperationException("The selected server no longer matches the frozen Lab definition.");
+        if (LabConfigurationMapper.Differences(source, definition.Baseline).Count != 0)
+            throw new InvalidOperationException("The saved Services configuration changed after the Lab definition was frozen.");
+        LabDefinitionValidator.ValidateIsolationArguments(source.ExtraArgs);
+        var current = await CreateFingerprintAsync(source, definition.Baseline, ct);
+        if (!definition.ProfileFingerprint.IsExactlyCompatibleWith(current))
+            throw new InvalidOperationException("The runtime, model, hardware, or baseline configuration changed after the Lab definition was frozen.");
+
+        var snapshot = new LabRunSnapshot
+        {
+            DefinitionHash = definition.DefinitionHash, Definition = definition,
+            Status = LabRunStatus.Starting, StartedAtUtc = DateTime.UtcNow
+        };
+        var startEvidence = await PersistAsync(snapshot, "lab-run-started", NormalizedOutcome.Unknown,
+            "The immutable Lab definition was frozen before temporary runtime launch.", [], ct);
+        snapshot = snapshot with { StartEvidenceId = startEvidence.Id };
+        var state = new RunState(snapshot);
+        if (!_runs.TryAdd(snapshot.Id, state))
+            throw new InvalidOperationException("The Lab run id is already active.");
+
+        try
+        {
+            state.Session = await _runtimeHost.StartAsync(snapshot.Id, source, definition.Baseline, ct);
+            state.Snapshot = snapshot with
+            {
+                Status = LabRunStatus.Running,
+                TemporaryPort = state.Session.Port,
+                RuntimeOwnershipId = state.Session.OwnershipId
+            };
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return await CancelAsync(snapshot.Id, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            state.Snapshot = snapshot with { Status = LabRunStatus.Failed, Failures = [ex.Message], CompletedAtUtc = DateTime.UtcNow };
+            await DisposeSessionAsync(state, CancellationToken.None);
+            var evidence = await PersistAsync(state.Snapshot, "lab-runtime-launch-failed", NormalizedOutcome.Failed,
+                "The isolated Lab runtime did not start.", [], CancellationToken.None);
+            state.Snapshot = state.Snapshot with { CompletionEvidenceId = evidence.Id };
+        }
+        return state.Snapshot;
+    }
+
+    public async Task<LabRunSnapshot> CompleteAsync(string runId, IReadOnlyList<LabObservation> observations,
+        IReadOnlyList<LabOutputEvidence> outputs, IReadOnlyList<string>? failures = null, CancellationToken ct = default)
+    {
+        var state = GetActive(runId);
+        var definition = state.Snapshot.Definition;
+        var validIds = definition.Candidates.Select(item => item.Id).Append(definition.Baseline.Id).ToHashSet(StringComparer.Ordinal);
+        foreach (var observation in observations)
+        {
+            LabObservationValidator.Validate(observation);
+            if (observation.RunId != runId || !validIds.Contains(observation.ConfigurationId))
+                throw new InvalidOperationException("A Lab observation does not belong to this frozen run.");
+        }
+        var safeOutputs = outputs.Select(item => item with { TokenIds = null, BoundedText = string.Empty }).ToArray();
+        var comparisons = definition.Candidates.Select(candidate => LabComparisonEngine.Compare(definition, candidate, observations, outputs)).ToArray();
+        var boundedFailures = (failures ?? []).Take(32).Select(value => value[..Math.Min(value.Length, 512)]).ToArray();
+        var status = boundedFailures.Length == 0 ? LabRunStatus.Succeeded
+            : observations.Count > 0 ? LabRunStatus.PartiallySucceeded : LabRunStatus.Failed;
+        state.Snapshot = state.Snapshot with
+        {
+            Status = status, CompletedAtUtc = DateTime.UtcNow,
+            Observations = observations.ToArray(), Outputs = safeOutputs,
+            Comparisons = comparisons, Failures = boundedFailures
+        };
+        await DisposeSessionAsync(state, ct);
+        var outcome = status == LabRunStatus.Succeeded ? NormalizedOutcome.Succeeded
+            : status == LabRunStatus.PartiallySucceeded ? NormalizedOutcome.PartiallySucceeded : NormalizedOutcome.Failed;
+        var evidence = await PersistAsync(state.Snapshot, "lab-run-completed", outcome,
+            $"Lab run completed as {status} with {observations.Count} observations.", [state.Snapshot.StartEvidenceId], ct);
+        state.Snapshot = state.Snapshot with { CompletionEvidenceId = evidence.Id };
+        return state.Snapshot;
+    }
+
+    public async Task<LabRunSnapshot> CancelAsync(string runId, CancellationToken ct = default)
+    {
+        var state = GetActive(runId);
+        if (state.Snapshot.Status is LabRunStatus.Succeeded or LabRunStatus.PartiallySucceeded or LabRunStatus.Cancelled or LabRunStatus.Failed)
+            return state.Snapshot;
+        await DisposeSessionAsync(state, ct);
+        var status = state.Snapshot.Observations.Count == 0 ? LabRunStatus.Cancelled : LabRunStatus.PartiallySucceeded;
+        state.Snapshot = state.Snapshot with { Status = status, CompletedAtUtc = DateTime.UtcNow };
+        var evidence = await PersistAsync(state.Snapshot, "lab-run-cancelled",
+            status == LabRunStatus.Cancelled ? NormalizedOutcome.Cancelled : NormalizedOutcome.PartiallySucceeded,
+            "The Lab run stopped at an owned runtime boundary and retained completed evidence.", [state.Snapshot.StartEvidenceId], ct);
+        state.Snapshot = state.Snapshot with { CompletionEvidenceId = evidence.Id };
+        return state.Snapshot;
+    }
+
+    public LabRunSnapshot? GetRun(string runId) => _runs.TryGetValue(runId, out var state) ? state.Snapshot : null;
+
+    public LabApplyReview CreateApplyReview(string runId, string candidateId)
+    {
+        var run = GetRun(runId) ?? throw new KeyNotFoundException("The Lab run is not available in this session.");
+        var candidate = run.Definition.Candidates.FirstOrDefault(item => item.Id == candidateId)
+            ?? throw new KeyNotFoundException("The Lab candidate does not exist.");
+        var server = _settings.Settings.ManagedServers.FirstOrDefault(item => item.Id == run.Definition.TargetServerId)
+            ?? throw new InvalidOperationException("The target Services configuration no longer exists.");
+        var comparison = run.Comparisons.FirstOrDefault(item => item.CandidateConfigurationId == candidateId);
+        var changes = LabConfigurationMapper.Differences(server, candidate);
+        var refusal = run.Status is not (LabRunStatus.Succeeded or LabRunStatus.PartiallySucceeded)
+            ? "Only a completed Lab run can produce an Apply review."
+            : comparison is null || !comparison.CanShowHeadlineDelta
+                ? comparison?.RefusalReason ?? "The candidate has no controlled comparison."
+                : changes.Count == 0 ? "The candidate does not change any persisted Services field." : string.Empty;
+        return new LabApplyReview
+        {
+            RunId = run.Id, DefinitionHash = run.DefinitionHash, TargetServerId = server.Id,
+            CandidateConfigurationId = candidateId, ExpectedCurrentConfigurationHash = LabConfigurationMapper.Hash(server),
+            ExpectedRuntimeFingerprint = run.Definition.ProfileFingerprint.Runtime.StableId,
+            ExpectedModelFingerprint = run.Definition.ProfileFingerprint.Model.StableId,
+            Changes = changes, CanApply = string.IsNullOrEmpty(refusal), RefusalReason = refusal
+        };
+    }
+
+    public async Task ApplyAsync(LabApplyReview review, CancellationToken ct = default)
+    {
+        if (!review.CanApply) throw new InvalidOperationException(review.RefusalReason);
+        var run = GetRun(review.RunId) ?? throw new InvalidOperationException("The reviewed Lab run is no longer available.");
+        if (review.DefinitionHash != run.DefinitionHash)
+            throw new InvalidOperationException("The Lab definition changed after review.");
+        var current = _settings.Settings.ManagedServers.FirstOrDefault(item => item.Id == review.TargetServerId)
+            ?? throw new InvalidOperationException("The reviewed Services configuration no longer exists.");
+        if (LabConfigurationMapper.Hash(current) != review.ExpectedCurrentConfigurationHash)
+            throw new InvalidOperationException("The Services configuration changed after Apply review. Review the changes again.");
+        var identity = await CreateFingerprintAsync(current, LabConfigurationMapper.FromServer(current, "current", "Current"), ct);
+        if (identity.Runtime.StableId != review.ExpectedRuntimeFingerprint || identity.Model.StableId != review.ExpectedModelFingerprint)
+            throw new InvalidOperationException("The runtime or model identity changed after the experiment.");
+
+        var clone = _settings.Settings.Clone();
+        var target = clone.ManagedServers.First(item => item.Id == review.TargetServerId);
+        var candidate = run.Definition.Candidates.First(item => item.Id == review.CandidateConfigurationId);
+        LabConfigurationMapper.ApplyTo(target, candidate);
+        await _settings.SaveAsync(clone);
+        await PersistAsync(run, "lab-apply-confirmed", NormalizedOutcome.Succeeded,
+            $"User applied {review.Changes.Count} reviewed Services field changes.", [run.CompletionEvidenceId], ct,
+            EvidenceOrigin.UserProvided);
+    }
+
+    private async Task<EmpiricalProfileFingerprintV2> CreateFingerprintAsync(ServerConfig source, LabConfiguration configuration, CancellationToken ct)
+    {
+        var runtime = await RuntimeIdentityFactory.CreateRuntimeIdentityAsync(source.ExecutablePath, null, ct);
+        var gguf = GgufMetadataReader.TryRead(source.ModelPath);
+        var model = RuntimeIdentityFactory.CreateModelIdentity(source.ModelPath, gguf);
+        var hardwareProfile = await _systemInfo.GetHardwareProfileAsync(ct);
+        var hardware = new HardwareIdentityV2(
+            RuntimeInformation.OSDescription, RuntimeInformation.OSArchitecture.ToString(), string.Empty,
+            hardwareProfile.GpuName ?? string.Empty,
+            hardwareProfile.MaxGpuVramBytes > 0 ? hardwareProfile.MaxGpuVramBytes : null,
+            hardwareProfile.TotalRamBytes > 0 ? hardwareProfile.TotalRamBytes : null,
+            string.Empty, "unknown", IdentityCompleteness.Incomplete);
+        var config = CreateConfigurationIdentity(source, configuration);
+        return new EmpiricalProfileFingerprintV2(runtime, model, hardware, config);
+    }
+
+    private static ConfigurationIdentityV2 CreateConfigurationIdentity(ServerConfig source, LabConfiguration configuration)
+    {
+        IReadOnlyDictionary<string, string> parsed = string.IsNullOrWhiteSpace(configuration.ExtraArgumentsSha256)
+            ? new Dictionary<string, string>(StringComparer.Ordinal)
+            : new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["extraArgumentsSha256"] = configuration.ExtraArgumentsSha256
+            };
+        return new ConfigurationIdentityV2(configuration.ContextSize, configuration.GpuLayers,
+            configuration.GpuLayers switch { 0 => "cpu", -1 => "gpu-all", _ => "gpu-partial" },
+            configuration.Threads, configuration.PromptThreads, configuration.Slots, null, null,
+            configuration.KvCacheTypeK, configuration.KvCacheTypeV, configuration.FlashAttention,
+            string.Join(',', source.Speculative?.Types ?? []), string.Empty, string.Empty,
+            configuration.CpuMoeLayers, parsed,
+            string.IsNullOrWhiteSpace(configuration.ExtraArgumentsSha256) ? IdentityCompleteness.Complete : IdentityCompleteness.Incomplete);
+    }
+
+    private async Task<EmpiricalExperience> PersistAsync(LabRunSnapshot run, string code, NormalizedOutcome outcome,
+        string detail, IReadOnlyList<string> priorEvidence, CancellationToken ct,
+        EvidenceOrigin origin = EvidenceOrigin.DirectObservation)
+    {
+        var provenance = priorEvidence.Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => new EmpiricalExperienceProvenance(value,
+                new SourceReference(ProvenanceKind.Lab, "Prior immutable Lab evidence", value, EvidenceOrigin: EvidenceOrigin.Extracted)))
+            .ToList();
+        provenance.Add(new EmpiricalExperienceProvenance($"lab:{run.Id}:{code}",
+            new SourceReference(ProvenanceKind.Lab, "Lab experiment protocol", run.Definition.ProtocolId,
+                EvidenceOrigin: origin)));
+        return await _experience.AddAsync(new EmpiricalExperienceDraft
+        {
+            Domain = EmpiricalExperienceDomains.LabRun,
+            ContextJson = run.Definition.CanonicalJson(),
+            ActionJson = LabCanonicalJson.Serialize(run),
+            RuntimeFingerprint = run.Definition.ProfileFingerprint.Runtime.StableId,
+            ModelFingerprint = run.Definition.ProfileFingerprint.Model.StableId,
+            Provenance = provenance,
+            Outcome = NormalizedToolOutcome.Create(outcome, code, detail)
+        }, ct);
+    }
+
+    private RunState GetActive(string runId) => _runs.TryGetValue(runId, out var state)
+        ? state : throw new KeyNotFoundException("The Lab run is not available in this session.");
+
+    private static async Task DisposeSessionAsync(RunState state, CancellationToken ct)
+    {
+        if (state.Session is null) return;
+        await state.Session.StopAsync(ct);
+        await state.Session.DisposeAsync();
+        state.Session = null;
+    }
+
+    private sealed class RunState(LabRunSnapshot snapshot)
+    {
+        public LabRunSnapshot Snapshot { get; set; } = snapshot;
+        public ILabRuntimeSession? Session { get; set; }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        foreach (var state in _runs.Values)
+        {
+            try { await DisposeSessionAsync(state, CancellationToken.None); }
+            catch { }
+        }
+        _runs.Clear();
+    }
+}

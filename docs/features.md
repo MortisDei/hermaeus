@@ -515,10 +515,26 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
   claiming blanket approval; the stated-lesson gate-claim filter must reject
   it, checked by a new forbid_active_lesson_matching scenario check).
 
-## Lab evidence
+## Lab experiments and evidence
 
 - A dedicated Lab panel keeps empirical operational evidence separate from
-  Memories and reusable benchmark suites. Its Evidence surface filters typed
+  Memories and reusable benchmark suites. The Experiment surface freezes an
+  immutable baseline/candidate definition with an exact v2 profile fingerprint,
+  then launches the baseline in a dedicated temporary loopback process. It does
+  not stop Chat, mutate a managed server, or save settings during a run.
+- Cancellation and restart recovery are ownership-scoped. Recovery stops a
+  process only after its PID, start time, and executable hash match the atomic
+  Lab ownership record; an unverifiable process remains `Unknown` and untouched.
+- Observations retain missing versus zero, source, trust, unit, repetition/case,
+  and fingerprints. Comparisons show median/range/count, refuse uncontrolled
+  fingerprint differences, and make correctness a gate rather than hiding it
+  behind throughput. Token-id equivalence is preferred, with exact UTF-8 hashes
+  as the labelled weaker fallback.
+- Apply is an explicit field-by-field review. It rejects stale server,
+  runtime, or model identity and routes confirmed changes through the single
+  settings save flow. Speed-only or correctness-failing runs cannot recommend
+  Apply.
+- The Evidence surface filters typed
   Agent, GPU Fit, and Lab-run records by scope, fingerprints, outcome, origin,
   status, and date.
 - `{DataRoot}/experience.db` stores bounded canonical context/action documents,
