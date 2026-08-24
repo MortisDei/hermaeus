@@ -203,6 +203,9 @@ public static class LocalApiEndpoints
             var embeddingsCapability = new CapabilityDto("embeddings", !string.IsNullOrWhiteSpace(embeddingModel),
                 string.IsNullOrWhiteSpace(embeddingModel) ? "No embedding model is configured." : string.Empty);
 
+            var agent = new CapabilityDto("agent", AgentApiContract.ExecutionRoutesAvailable,
+                AgentApiContract.ExecutionUnavailableReason);
+
             var response = new CapabilitiesResponse(
                 CurrentVersion(),
                 [
@@ -214,7 +217,7 @@ public static class LocalApiEndpoints
                     "POST /v1/embeddings",
                     "GET /v1/capabilities"
                 ],
-                [chat, ragCapability, datasets, memory, embeddingsCapability]);
+                [chat, ragCapability, datasets, memory, embeddingsCapability, agent]);
 
             await LogCallAsync(traces, client, selfReported, "capabilities", sw, string.Empty, ct);
             return Results.Ok(response);

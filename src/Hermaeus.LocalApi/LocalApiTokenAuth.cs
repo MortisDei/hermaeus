@@ -21,6 +21,7 @@ public static class LocalApiTokenAuth
 {
     public const string TokenHeaderName = "X-Hermaeus-Token";
     public const string VerifiedTokenNameItemKey = "LocalApi.VerifiedTokenName";
+    public const string VerifiedTokenIdItemKey = "LocalApi.VerifiedTokenId";
 
     public static IApplicationBuilder UseLocalApiTokenAuth(this IApplicationBuilder app)
     {
@@ -51,6 +52,7 @@ public static class LocalApiTokenAuth
                 : string.Empty;
 
             string? matchedName = null;
+            string? matchedId = null;
             foreach (var entry in tokens)
             {
                 var resolved = string.IsNullOrWhiteSpace(entry.SecretRef)
@@ -61,7 +63,10 @@ public static class LocalApiTokenAuth
                 // response time does not itself leak which entry (or how
                 // many) matched.
                 if (FixedTimeEquals(provided, resolved) && !string.IsNullOrWhiteSpace(resolved))
+                {
                     matchedName = entry.Name;
+                    matchedId = entry.Id;
+                }
             }
 
             if (matchedName is null)
@@ -72,6 +77,7 @@ public static class LocalApiTokenAuth
             }
 
             context.Items[VerifiedTokenNameItemKey] = matchedName;
+            context.Items[VerifiedTokenIdItemKey] = matchedId!;
             await next(context);
         });
 

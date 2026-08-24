@@ -356,6 +356,7 @@ See:
 
 - `docs/rag.md`
 - `docs/agent.md`
+- `docs/agent-api.md`
 - `docs/voice.md`
 - `docs/projects.md`
 - `docs/recall.md`

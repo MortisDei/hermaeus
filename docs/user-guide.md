@@ -150,6 +150,11 @@ model picker later does not retarget an existing task. If a task's frozen model
 is no longer available, the task pauses without fallback; select an available
 model and use **Use for task** to record an explicit change before continuing.
 
+The optional Local API does not expose Agent task execution in this release.
+Its capabilities response reports Agent unavailable because the Desktop and
+Local API processes do not yet share one safe task-mutation owner. Named API
+tokens cannot create, start, steer, continue, approve, or deny Agent work.
+
 ## Lab experiments and evidence
 
 Open **Lab > Experiment**, select a configured Chat server, name the run, and

@@ -1431,10 +1431,18 @@ Endpoints:
 - `GET /v1/memory/query`, `POST /v1/rag/query`, `GET /v1/models`.
 - `GET /v1/capabilities` - what this instance can currently serve: the routes
   it exposes, the app version, and per feature (chat, RAG, memory,
-  embeddings) whether it is usable right now with one sentence saying why not
+  embeddings, Agent) whether it is usable right now with one sentence saying why not
   when it is not. It reports rather than probes: no model load, no server
   start, no network call, no embedding pass. It names no paths, keys, tokens
   or dataset names, only counts.
+
+R31 includes a versioned Agent API DTO and per-token authorization policy, but
+does not map or advertise Agent execution routes. Desktop and the separate
+Local API process do not yet share one serialized owner for task mutation, so
+running two Agent services against the file-backed task store would be unsafe.
+Capabilities reports that exact reason. Agent scope defaults disabled for every
+existing token, no approval endpoint exists, and a token plus a fingerprint is
+not approval. See [docs/agent-api.md](agent-api.md).
 
 ## Mascot and branding
 

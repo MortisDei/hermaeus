@@ -63,6 +63,11 @@ limit.
   task state, transcripts, traces, reports, restart, and parent synthesis; a
   missing selected model pauses without silent fallback, and paused task model
   changes require the audited **Use for task** action.
+- Added the versioned Agent Local API DTO and deny-by-default per-token policy
+  contract for saved workspace, visible model, Project, ownership, operation,
+  and concurrency scope. Agent execution routes remain unmapped because Desktop
+  and the separate Local API process do not yet share one task-mutation owner;
+  capabilities reports that reason and no API approval operation exists.
 
 ### Changed
 

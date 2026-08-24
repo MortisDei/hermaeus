@@ -637,6 +637,21 @@ safety. The agent does not:
 Making these non-goals explicit helps users trust that the workbench will not
 perform unexpected actions.
 
+## Local API ownership boundary
+
+R31 defines the versioned Agent Local API requests, responses, per-token scope,
+ownership rules, and pure authorization policy. It does not expose the
+conditional Agent routes. Desktop and `Hermaeus.LocalApi` are separate processes
+and do not yet share one serialized task-mutation owner, so a second Agent
+service could race task runs, steering, cancellation, and approval state.
+
+The capabilities endpoint reports Agent execution unavailable with that reason.
+Existing tokens gain no authority: their additive Agent scope defaults disabled
+with an empty operation and saved-workspace allowlist. There is no approval or
+denial endpoint, and token possession plus a fingerprint is never approval. See
+[Agent Local API contract](agent-api.md) for the complete v1 surface and the gate
+that must be met before route handlers can ship.
+
 ## Agent Loop
 
 For each step the agent follows a simple, auditable lifecycle:
