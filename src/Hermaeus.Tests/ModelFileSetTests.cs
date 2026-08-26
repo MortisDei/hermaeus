@@ -39,7 +39,7 @@ public sealed class ModelFileSetTests
     }
 
     [Fact]
-    public void A_repository_with_a_projector_and_an_mtp_head_offers_both_on_by_default()
+    public void An_explicit_source_mapping_offers_projector_and_mtp_head_on_by_default()
     {
         var tree = new[]
         {
@@ -48,7 +48,12 @@ public sealed class ModelFileSetTests
             Entry("MTP/mtp-gemma-4-E4B-it.gguf", 59_000_000)
         };
 
-        var set = ModelFileSetResolver.Resolve("unsloth/gemma-4-E4B-it-qat-GGUF", tree, "gemma-4-E4B-it-Q4_K_M.gguf");
+        var mappings = new[]
+        {
+            new HfCompanionDeclaration("gemma-4-E4B-it-Q4_K_M.gguf", "mmproj-F16.gguf", ModelFileRole.Projector),
+            new HfCompanionDeclaration("gemma-4-E4B-it-Q4_K_M.gguf", "MTP/mtp-gemma-4-E4B-it.gguf", ModelFileRole.DraftHead)
+        };
+        var set = ModelFileSetResolver.Resolve("unsloth/gemma-4-E4B-it-qat-GGUF", tree, "gemma-4-E4B-it-Q4_K_M.gguf", mappings);
 
         Assert.Equal(3, set.Entries.Count);
         var projector = Assert.Single(set.Entries, e => e.Role == ModelFileRole.Projector);
@@ -61,20 +66,20 @@ public sealed class ModelFileSetTests
     }
 
     [Fact]
-    public void An_mtp_head_beside_the_model_is_resolved_as_well_as_one_in_an_mtp_subdirectory()
+    public void Filename_only_companions_are_not_inferred()
     {
         var flat = ModelFileSetResolver.Resolve("u/r",
             [Entry("model.gguf"), Entry("mtp-model.gguf")], "model.gguf");
-        Assert.Contains(flat.Entries, e => e.Role == ModelFileRole.DraftHead);
+        Assert.DoesNotContain(flat.Entries, e => e.Role == ModelFileRole.DraftHead);
 
         var nested = ModelFileSetResolver.Resolve("u/r",
             [Entry("model.gguf"), Entry("MTP/mtp-model.gguf")], "model.gguf");
-        Assert.Contains(nested.Entries, e => e.Role == ModelFileRole.DraftHead);
+        Assert.DoesNotContain(nested.Entries, e => e.Role == ModelFileRole.DraftHead);
 
-        // Not a companion of this model: a different directory entirely.
-        var elsewhere = ModelFileSetResolver.Resolve("u/r",
-            [Entry("model.gguf"), Entry("other/MTP/mtp-model.gguf")], "model.gguf");
-        Assert.DoesNotContain(elsewhere.Entries, e => e.Role == ModelFileRole.DraftHead);
+        var mapped = ModelFileSetResolver.Resolve("u/r",
+            [Entry("model.gguf"), Entry("other/mtp-model.gguf")], "model.gguf",
+            [new HfCompanionDeclaration("model.gguf", "other/mtp-model.gguf", ModelFileRole.DraftHead)]);
+        Assert.Contains(mapped.Entries, e => e.Role == ModelFileRole.DraftHead);
     }
 
     [Fact]

@@ -13,6 +13,9 @@ public sealed class RuntimeLogService : IRuntimeLogService
     private readonly ISettingsService _settings;
     private readonly RedactionService? _redactor;
     private readonly object _fileLock = new();
+    private readonly object _dedupeLock = new();
+    private RuntimeLogEntry? _lastPersistentFailure;
+    private int _suppressedFailureCount;
 
     public event Action<RuntimeLogEntry>? LogAdded;
 
@@ -29,6 +32,22 @@ public sealed class RuntimeLogService : IRuntimeLogService
         if (_redactor is not null)
             entry = entry with { Message = _redactor.Redact(entry.Message) };
 
+        lock (_dedupeLock)
+        {
+            if (IsRepeatedPersistentFailure(entry))
+            {
+                _suppressedFailureCount++;
+                return;
+            }
+
+            FlushSuppressedFailureSummary();
+            _lastPersistentFailure = IsPersistentFailure(entry) ? entry : null;
+            AppendEntry(entry);
+        }
+    }
+
+    private void AppendEntry(RuntimeLogEntry entry)
+    {
         _entries.Enqueue(entry);
         while (_entries.Count > MaxEntries && _entries.TryDequeue(out _)) { }
 
@@ -36,11 +55,40 @@ public sealed class RuntimeLogService : IRuntimeLogService
         LogAdded?.Invoke(entry);
     }
 
+    private bool IsRepeatedPersistentFailure(RuntimeLogEntry entry) =>
+        IsPersistentFailure(entry)
+        && _lastPersistentFailure is not null
+        && _lastPersistentFailure.Level == entry.Level
+        && _lastPersistentFailure.Category == entry.Category
+        && string.Equals(_lastPersistentFailure.Message, entry.Message, StringComparison.Ordinal);
+
+    private static bool IsPersistentFailure(RuntimeLogEntry entry) =>
+        entry.Level is RuntimeLogLevel.Warning or RuntimeLogLevel.Error;
+
+    private void FlushSuppressedFailureSummary()
+    {
+        if (_suppressedFailureCount == 0 || _lastPersistentFailure is null)
+            return;
+
+        var summary = new RuntimeLogEntry(
+            DateTime.UtcNow,
+            RuntimeLogLevel.Info,
+            _lastPersistentFailure.Category,
+            $"Suppressed {_suppressedFailureCount} repeated {_lastPersistentFailure.Level.ToString().ToLowerInvariant()} runtime log entr{(_suppressedFailureCount == 1 ? "y" : "ies")}; state changed.");
+        _suppressedFailureCount = 0;
+        AppendEntry(summary);
+    }
+
     public IReadOnlyList<RuntimeLogEntry> GetEntries() => _entries.ToList();
 
     public void ClearInMemory()
     {
         while (_entries.TryDequeue(out _)) { }
+        lock (_dedupeLock)
+        {
+            _lastPersistentFailure = null;
+            _suppressedFailureCount = 0;
+        }
     }
 
     public string GetLogDirectory()

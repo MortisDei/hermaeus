@@ -113,4 +113,10 @@ public class ServerConfig
 
     [System.Text.Json.Serialization.JsonIgnore]
     public bool RuntimeSupportsPromptThreads { get; set; }
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool RuntimeSupportsLoadMode { get; set; }
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool RuntimeSupportsCorsOrigins { get; set; }
 }

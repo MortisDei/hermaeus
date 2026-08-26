@@ -244,7 +244,8 @@ public partial class ChatView : UserControl
             scroll.Extent.Height,
             scroll.Viewport.Height,
             scroll.Offset.Y,
-            e.ExtentDelta.Y);
+            e.ExtentDelta.Y,
+            e.OffsetDelta.Y);
         _pinnedToBottom = transition.IsPinned;
         if (transition.ShouldSnap)
             SnapToBottomIfPinned(force: true);

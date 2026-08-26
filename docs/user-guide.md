@@ -61,6 +61,23 @@ and the selected model where relevant, advertised or demonstrated the feature.
 `Unknown`. In particular, finding NextN metadata and a generic `draft-mtp` flag
 does not prove that MTP engages for that model.
 
+Normal fields on Settings persist automatically after editing and show a small
+Saving, Saved, or Failed state. Reset still discards unpersisted edits. Model
+and runtime forms on Services keep explicit Save Config actions because those
+changes can launch or reconfigure a process. A missing primary model,
+projector, or draft companion is shown as missing and is never silently
+replaced by another file.
+
+For Hugging Face models, companion handling is based on an explicit,
+SHA256-verified `.hermaeus/companions.json` mapping from the repository. A
+`mmproj` or `mtp` filename alone is not enough. The initial download offers
+known projector and MTP files individually and shows their additional size.
+Each model's **Automatically manage known companions** setting controls later
+updates. Disabling it asks whether to Keep files, Remove files, or Cancel;
+removal is never implicit. If a mapped companion goes missing, use
+**Reacquire known companions** on the model card. Recovery refuses when the
+source mapping or hash evidence is unavailable.
+
 The server card's **GPU Fit** text is a prediction for the values currently in
 the editor, including unsaved changes. It lists weights, K/V cache, runtime
 overhead, companions, and headroom separately. `Unknown` means a material input
@@ -95,6 +112,10 @@ Choose a model at the top of **Chat**, type a message, and send. Stop cancels an
 active generation. Regenerate creates a branch rather than destroying the
 previous answer. Deleting the active conversation returns Chat to a fresh,
 focused input.
+
+While a response streams, scrolling upward pauses bottom-following. Scroll back
+to the bottom to intentionally re-pin. The telemetry flyout can start bounded
+sampling for the exact managed server process serving the selected model.
 
 Attach text, code, PDF, DOCX, or supported image files from the attachment
 control, drag and drop, or clipboard. Images are sent only when the selected

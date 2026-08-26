@@ -7,12 +7,14 @@ namespace Hermaeus.Tests;
 public sealed class AudioFeedbackServiceTests
 {
     [Fact]
-    public void Default_policy_enables_only_restrained_events()
+    public void Default_policy_keeps_task_notifications_off()
     {
         var settings = new AudioFeedbackSettings();
 
-        Assert.True(settings.IsEnabled(AudioFeedbackEventKind.TaskNeedsApproval));
-        Assert.True(settings.IsEnabled(AudioFeedbackEventKind.TaskFailed));
+        Assert.False(settings.IsEnabled(AudioFeedbackEventKind.TaskNeedsApproval));
+        Assert.False(settings.IsEnabled(AudioFeedbackEventKind.TaskCompleted));
+        Assert.False(settings.IsEnabled(AudioFeedbackEventKind.TaskFailed));
+        Assert.True(settings.IsEnabled(AudioFeedbackEventKind.ManagedRuntimeFailed));
         Assert.False(settings.IsEnabled(AudioFeedbackEventKind.ManagedRuntimeReady));
         Assert.False(settings.IsEnabled(AudioFeedbackEventKind.RecordingStarted));
     }
@@ -23,6 +25,8 @@ public sealed class AudioFeedbackServiceTests
         using var temp = new TempDir();
         var settings = Helpers.NewSettings(temp);
         settings.Settings.Tts.AudioFeedback.Volume = 25;
+        settings.Settings.Tts.AudioFeedback.EventEnabled[nameof(AudioFeedbackEventKind.TaskFailed)] = true;
+        settings.Settings.Tts.AudioFeedback.EventEnabled[nameof(AudioFeedbackEventKind.TaskCompleted)] = true;
         var voice = new FakeVoiceOrchestrator { IsSpeaking = true };
         var played = new List<string>();
         await using var service = new AudioFeedbackService(settings, voice,

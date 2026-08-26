@@ -47,7 +47,8 @@ public sealed partial class LiveModelTelemetryViewModel : ViewModelBase, IAsyncD
     /// </summary>
     public void RecordRequest(string modelId, string providerTag, ChatServerTimings? timing, ChatTokenUsage? usage, long firstTokenMs, long totalLatencyMs)
     {
-        RuntimeIdentity = $"{providerTag} (runtime identity not attached)";
+        if (_series is null)
+            RuntimeIdentity = $"{providerTag} (runtime identity not attached)";
         ModelIdentity = string.IsNullOrWhiteSpace(modelId) ? "Unknown" : modelId;
         TimeToFirstToken = firstTokenMs > 0 ? $"{firstTokenMs:N0} ms" : "Unknown";
         TokensServed = usage is null ? "Unknown" : $"{usage.CompletionTokens:N0}";

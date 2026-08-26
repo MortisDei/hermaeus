@@ -180,6 +180,29 @@ public sealed class ServicesViewModelTests
         Assert.Contains("32,768", vm.ContextFitNote);
     }
 
+    [Fact]
+    public void Missing_configured_draft_is_not_presented_as_a_detected_candidate()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var modelPath = WriteLlamaGgufFixture(temp);
+        var missingDraft = temp.PathFor("missing/mtp-draft.gguf");
+        var config = new ServerConfig
+        {
+            Name = "Chat",
+            ModelPath = modelPath,
+            Speculative = new SpeculativeDecodingConfig { DraftModelPath = missingDraft }
+        };
+        var server = new ServerProcessViewModel(config, settings, new RedactionService(), new TrustService(),
+            new FakeToasts(), new RuntimeLogService(settings));
+
+        Assert.True(server.HasMissingDraftModel);
+        Assert.DoesNotContain(missingDraft, server.DetectedDraftModelPaths);
+        Assert.Contains("missing", server.DraftModelHint, StringComparison.OrdinalIgnoreCase);
+        server.ClearDraftModelCommand.Execute(null);
+        Assert.Empty(server.DraftModelPath);
+    }
+
     private static ServicesViewModel NewServicesVm(TempDir temp, out ISettingsService settings)
     {
         settings = NewSettings(temp);

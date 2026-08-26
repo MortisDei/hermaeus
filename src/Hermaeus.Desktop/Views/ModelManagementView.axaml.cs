@@ -61,6 +61,14 @@ public partial class ModelManagementView : UserControl
             var dialog = new ConfirmActionDialog("Delete model", plan.Description);
             return await dialog.ShowDialog<bool>(owner);
         };
+
+        vm.RequestCompanionDisableConfirmation = async plan =>
+        {
+            if (TopLevel.GetTopLevel(this) is not Window owner)
+                return CompanionDisableChoice.Cancel;
+            var dialog = new CompanionDisableDialog(plan);
+            return await dialog.ShowDialog<CompanionDisableChoice>(owner);
+        };
     }
 
     /// <summary>

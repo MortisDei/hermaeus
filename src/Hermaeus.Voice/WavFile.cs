@@ -59,8 +59,12 @@ internal static class WavFile
             throw new InvalidDataException($"Unsupported WAV encoding (format code {audioFormat}); only uncompressed PCM is supported.");
         if (bitsPerSample != 16)
             throw new InvalidDataException($"Unsupported WAV bit depth ({bitsPerSample}-bit); only 16-bit PCM is supported.");
+        if (channels != 1 || sampleRate <= 0)
+            throw new InvalidDataException("Malformed WAV file: expected a positive-rate mono stream.");
         if (data is null)
             throw new InvalidDataException("Malformed WAV file: no data chunk found.");
+        if (data.Length == 0 || data.Length % 2 != 0)
+            throw new InvalidDataException("Malformed WAV file: audio data is empty or incomplete.");
 
         var sampleCount = data.Length / 2;
         var samples = new float[sampleCount];

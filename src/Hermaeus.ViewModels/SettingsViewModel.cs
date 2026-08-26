@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.Collections.Specialized;
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
 using Hermaeus.Services;
@@ -14,9 +16,13 @@ public partial class SettingsViewModel : ViewModelBase
     private readonly XttsProcessManager _xttsProcess;
     private readonly KokoroProcessManager _kokoroProcess;
     private readonly LocalApiProcessManager _localApiProcess;
+    private readonly SemaphoreSlim _saveGate = new(1, 1);
+    private CancellationTokenSource? _autoSaveCts;
+    private bool _isReloading;
 
     [ObservableProperty] private bool _isSaved;
     [ObservableProperty] private string _settingsError = string.Empty;
+    [ObservableProperty] private string _persistenceStatus = "Saved";
 
     public LlmDefaultsSettingsViewModel Llm { get; }
     public RagSettingsViewModel Rag { get; }
@@ -166,6 +172,17 @@ public partial class SettingsViewModel : ViewModelBase
         LocalAiSetup = new LocalAiSetupSettingsViewModel(_svc, localAiSetup, _toasts, Tts, Data, Rag, SaveAsync);
         Trust = new TrustSettingsViewModel(_svc, trust, _toasts, Tts, Data, Rag);
 
+        SubscribeToAutoSave(Llm);
+        SubscribeToAutoSave(Rag);
+        SubscribeToAutoSave(Ui);
+        SubscribeToAutoSave(Memory);
+        SubscribeToAutoSave(Mcp);
+        SubscribeToAutoSave(LocalApi);
+        SubscribeToAutoSave(Tts);
+        Tts.VoiceChannels.CollectionChanged += OnTtsCollectionChanged;
+        Tts.AudioFeedbackEvents.CollectionChanged += OnTtsCollectionChanged;
+        HookTtsChildren();
+
         Ui.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(UiSettingsViewModel.EnableGlobalHotkeys))
@@ -198,21 +215,31 @@ public partial class SettingsViewModel : ViewModelBase
 
     public void Reload()
     {
-        var settings = _svc.Settings;
-        Llm.ReloadFrom(settings);
-        Data.ReloadFrom(settings);
-        Rag.ReloadFrom(settings, Data.LocalAiAssetsRoot);
-        Tts.ReloadFrom(settings);
-        Ui.ReloadFrom(settings);
-        Memory.ReloadFrom(settings);
-        Mcp.ReloadFrom(settings);
-        LocalApi.ReloadFrom(settings);
-        SettingsError = string.Empty;
-        // r12 01-settings-lifecycle.md 1.7: Reset previously left stale
-        // Trust/LocalAiSetup error text behind since only Save cleared it.
-        Data.SettingsError = string.Empty;
-        LocalAiSetup.SettingsError = string.Empty;
-        Trust.SettingsError = string.Empty;
+        _autoSaveCts?.Cancel();
+        _isReloading = true;
+        try
+        {
+            var settings = _svc.Settings;
+            Llm.ReloadFrom(settings);
+            Data.ReloadFrom(settings);
+            Rag.ReloadFrom(settings, Data.LocalAiAssetsRoot);
+            Tts.ReloadFrom(settings);
+            Ui.ReloadFrom(settings);
+            Memory.ReloadFrom(settings);
+            Mcp.ReloadFrom(settings);
+            LocalApi.ReloadFrom(settings);
+            SettingsError = string.Empty;
+            // r12 01-settings-lifecycle.md 1.7: Reset previously left stale
+            // Trust/LocalAiSetup error text behind since only Save cleared it.
+            Data.SettingsError = string.Empty;
+            LocalAiSetup.SettingsError = string.Empty;
+            Trust.SettingsError = string.Empty;
+            PersistenceStatus = "Saved";
+        }
+        finally
+        {
+            _isReloading = false;
+        }
     }
 
     /// <summary>
@@ -226,7 +253,22 @@ public partial class SettingsViewModel : ViewModelBase
     /// a later, unrelated save.
     /// </summary>
     [RelayCommand]
-    public async Task SaveAsync()
+    public Task SaveAsync() => SaveCoreAsync(showToast: true, CancellationToken.None);
+
+    private async Task SaveCoreAsync(bool showToast, CancellationToken ct)
+    {
+        await _saveGate.WaitAsync(ct);
+        try
+        {
+            await SaveCoreLockedAsync(showToast, ct);
+        }
+        finally
+        {
+            _saveGate.Release();
+        }
+    }
+
+    private async Task SaveCoreLockedAsync(bool showToast, CancellationToken ct)
     {
         var candidate = _svc.Settings.Clone();
         var previousDataRoot = _svc.Settings.DataManagement.DataRootDirectory;
@@ -246,8 +288,9 @@ public partial class SettingsViewModel : ViewModelBase
 
         try
         {
+            PersistenceStatus = "Saving";
             var result = await _svc.SaveAsync(candidate, previousDataRoot);
-            if (result.DataMigrated)
+            if (result.DataMigrated && showToast)
             {
                 var message = $"Moved {result.FilesMoved} database file(s) to {result.CurrentDataRoot}. Backup: {result.BackupDirectory}";
                 _toasts.Show("Hermaeus data moved", message, ToastKind.Success, 7000);
@@ -259,16 +302,79 @@ public partial class SettingsViewModel : ViewModelBase
             // box just needs to match it again; nothing else to roll back.
             Data.DataRootDirectory = previousDataRoot;
             SettingsError = ex.Message;
-            _toasts.Show("Settings not saved", ex.Message, ToastKind.Error);
+            PersistenceStatus = "Failed";
+            if (showToast)
+                _toasts.Show("Settings not saved", ex.Message, ToastKind.Error);
             return;
         }
 
+        PersistenceStatus = "Saved";
         IsSaved = true;
-        _toasts.Show("Settings saved", "Hermaeus settings were updated.", ToastKind.Success);
+        if (showToast)
+            _toasts.Show("Settings saved", "Hermaeus settings were updated.", ToastKind.Success);
         await EnsureLocalApiRunningStateAsync();
         // r12 01-settings-lifecycle.md 1.7: reset the flag after a short
         // delay without keeping the async command "executing" for it.
         _ = ResetIsSavedAfterDelayAsync();
+    }
+
+    private void SubscribeToAutoSave(INotifyPropertyChanged source) =>
+        source.PropertyChanged += OnEditablePropertyChanged;
+
+    private void HookTtsChildren()
+    {
+        foreach (var channel in Tts.VoiceChannels)
+            SubscribeToAutoSave(channel);
+        foreach (var toggle in Tts.AudioFeedbackEvents)
+            SubscribeToAutoSave(toggle);
+    }
+
+    private void OnTtsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (e.NewItems is not null)
+        {
+            foreach (var item in e.NewItems.OfType<INotifyPropertyChanged>())
+                SubscribeToAutoSave(item);
+        }
+        if (!_isReloading)
+            ScheduleAutoSave();
+    }
+
+    private void OnEditablePropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (_isReloading)
+            return;
+        ScheduleAutoSave();
+    }
+
+    private void ScheduleAutoSave()
+    {
+        _autoSaveCts?.Cancel();
+        var cts = new CancellationTokenSource();
+        _autoSaveCts = cts;
+        PersistenceStatus = "Saving";
+        _ = AutoSaveAfterDelayAsync(cts);
+    }
+
+    private async Task AutoSaveAfterDelayAsync(CancellationTokenSource cts)
+    {
+        try
+        {
+            await Task.Delay(600, cts.Token);
+            await SaveCoreAsync(showToast: false, cts.Token);
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            PersistenceStatus = "Failed";
+            SettingsError = ex.Message;
+        }
+        finally
+        {
+            cts.Dispose();
+        }
     }
 
     private async Task ResetIsSavedAfterDelayAsync()

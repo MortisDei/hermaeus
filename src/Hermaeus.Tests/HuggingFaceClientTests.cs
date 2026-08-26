@@ -116,6 +116,42 @@ public sealed class HuggingFaceClientTests
     }
 
     [Fact]
+    public async Task GetCompanionMetadataAsync_accepts_only_a_hash_verified_explicit_mapping()
+    {
+        const string metadata = "{\"models\":[{\"model_path\":\"model.gguf\",\"companions\":[{\"path\":\"mmproj.gguf\",\"role\":\"projector\"},{\"path\":\"mtp.gguf\",\"role\":\"draft_head\"}]}]}";
+        var metadataBytes = System.Text.Encoding.UTF8.GetBytes(metadata);
+        var metadataHash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(metadataBytes));
+        var client = NewClient(url => url.Contains(".hermaeus/companions.json", StringComparison.Ordinal)
+            ? (HttpStatusCode.OK, metadata)
+            : (HttpStatusCode.OK, ""));
+        var tree = new[]
+        {
+            new HfTreeEntry(".hermaeus/companions.json", metadataBytes.Length, metadataHash),
+            new HfTreeEntry("model.gguf", 10, "model-hash"),
+            new HfTreeEntry("mmproj.gguf", 20, "projector-hash"),
+            new HfTreeEntry("mtp.gguf", 30, "draft-hash")
+        };
+
+        var mappings = await client.GetCompanionMetadataAsync("org/repo", tree);
+
+        Assert.Equal(2, mappings.Count);
+        Assert.Contains(mappings, m => m.Role == ModelFileRole.Projector && m.CompanionPath == "mmproj.gguf");
+        Assert.Contains(mappings, m => m.Role == ModelFileRole.DraftHead && m.CompanionPath == "mtp.gguf");
+    }
+
+    [Fact]
+    public async Task GetCompanionMetadataAsync_rejects_metadata_without_a_tree_hash()
+    {
+        const string metadata = "{\"models\":[]}";
+        var client = NewClient(_ => (HttpStatusCode.OK, metadata));
+        var tree = new[] { new HfTreeEntry(".hermaeus/companions.json", metadata.Length, null) };
+
+        var mappings = await client.GetCompanionMetadataAsync("org/repo", tree);
+
+        Assert.Empty(mappings);
+    }
+
+    [Fact]
     public async Task SearchAsync_extracts_repo_id_and_downloads()
     {
         var client = NewClient(_ => (HttpStatusCode.OK, SearchFixture));

@@ -24,6 +24,21 @@ limit.
   with their completion marker as one SQLite transaction.
 - GPU Fit keeps missing model and companion file sizes as `Unknown` instead of
   formatting them as zero. GGUF header reads now use exact bounded reads.
+- R31 Beta dogfood corrections now preserve chat scroll-up state during
+  streaming, show known GPU Fit subtotals beside unresolved components, attach
+  Chat telemetry to the exact managed server process, validate Kokoro preview
+  WAVs before owned playback, and mark missing companions instead of treating
+  dead paths as candidates.
+- Normal Settings preferences autosave with a visible persistence state. The
+  top-level Save button is removed, task audio notifications default off, and
+  managed llama.cpp uses newer load-mode and localhost-only CORS arguments only
+  after the selected runtime advertises them.
+- Hugging Face model cards now accept companions only from a hash-verified
+  `.hermaeus/companions.json` mapping. Initial downloads offer mapped projector
+  and MTP assets with known sizes, per-model automatic update policy is
+  persisted, updates and missing-asset recovery retain exact source/hash
+  identity, and disabling the policy prompts Keep files / Remove files /
+  Cancel before any removal.
 
 ## [0.38.0-alpha] - 2026-08-24
 

@@ -25,6 +25,15 @@ public sealed class LocalModelCapabilityServiceTests
     }
 
     [Fact]
+    public void ParseHelp_proves_new_load_mode_and_cors_options_from_help_text()
+    {
+        var facts = LocalModelCapabilityService.ParseHelp("--load-mode MODE --cors-origins ORIGINS");
+
+        Assert.True(facts.SupportsLoadMode);
+        Assert.True(facts.SupportsCorsOrigins);
+    }
+
+    [Fact]
     public void ParseHelp_discovers_only_kv_types_printed_near_cache_type_option()
     {
         var facts = LocalModelCapabilityService.ParseHelp("""

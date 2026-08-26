@@ -6,8 +6,8 @@ using static Hermaeus.Tests.Helpers;
 
 namespace Hermaeus.Tests;
 
-/// <summary>r19 5.3: the vision projector picker auto-suggests a sole mmproj-*.gguf file found
-/// beside the selected model, without ever overwriting an explicit user choice.</summary>
+/// <summary>The projector picker lists local candidates for explicit selection. A filename
+/// alone is not compatibility evidence, so it never auto-selects or substitutes one.</summary>
 public sealed class ServicesViewModelMmprojTests
 {
     private static (ServicesViewModel Vm, ServerProcessViewModel Server, string ModelPath, string ModelsDir) Build(TempDir temp)
@@ -28,7 +28,7 @@ public sealed class ServicesViewModelMmprojTests
     }
 
     [Fact]
-    public void A_sole_mmproj_file_beside_the_model_is_auto_suggested()
+    public void A_sole_mmproj_file_beside_the_model_is_listed_but_not_auto_selected()
     {
         using var temp = new TempDir();
         var (_, server, modelPath, dir) = Build(temp);
@@ -36,8 +36,8 @@ public sealed class ServicesViewModelMmprojTests
 
         server.ModelPath = modelPath;
 
-        Assert.Equal(Path.Combine(dir, "mmproj-model-a.gguf"), server.MmprojPath);
-        Assert.Contains(server.MmprojPath, server.DetectedMmprojPaths);
+        Assert.Empty(server.MmprojPath);
+        Assert.Contains(Path.Combine(dir, "mmproj-model-a.gguf"), server.DetectedMmprojPaths);
     }
 
     [Fact]
@@ -59,7 +59,7 @@ public sealed class ServicesViewModelMmprojTests
         var (_, server, modelPath, dir) = Build(temp);
         File.WriteAllText(Path.Combine(dir, "mmproj-model-a.gguf"), "fake");
         server.ModelPath = modelPath;
-        Assert.Equal(Path.Combine(dir, "mmproj-model-a.gguf"), server.MmprojPath);
+        Assert.Empty(server.MmprojPath);
 
         var manualChoice = temp.PathFor("elsewhere/mmproj-custom.gguf");
         Directory.CreateDirectory(Path.GetDirectoryName(manualChoice)!);
@@ -72,7 +72,7 @@ public sealed class ServicesViewModelMmprojTests
     }
 
     [Fact]
-    public void Switching_models_replaces_an_auto_selected_projector_with_the_new_models_projector()
+    public void Switching_models_does_not_substitute_a_projector()
     {
         using var temp = new TempDir();
         var (_, server, firstModel, dir) = Build(temp);
@@ -87,6 +87,7 @@ public sealed class ServicesViewModelMmprojTests
 
         server.ModelPath = secondModel;
 
-        Assert.Equal(secondProjector, server.MmprojPath);
+        Assert.Empty(server.MmprojPath);
+        Assert.Contains(secondProjector, server.DetectedMmprojPaths);
     }
 }

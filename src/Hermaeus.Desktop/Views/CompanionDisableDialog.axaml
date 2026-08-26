@@ -1,0 +1,23 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Hermaeus.Desktop.Views.CompanionDisableDialog"
+        Title="Disable companion handling"
+        Width="560"
+        Height="300"
+        WindowStartupLocation="CenterOwner"
+        CanResize="False">
+    <Border Padding="18">
+        <StackPanel Spacing="14">
+            <TextBlock x:Name="MessageText" TextWrapping="Wrap" />
+            <TextBlock Text="Choose what to do with the files already on disk. Nothing is removed without the explicit Remove files choice."
+                       TextWrapping="Wrap" Opacity="0.7" />
+            <StackPanel Orientation="Horizontal"
+                        HorizontalAlignment="Right"
+                        Spacing="8">
+                <Button Content="Cancel" MinWidth="90" Click="OnCancelClick" />
+                <Button Content="Keep files" MinWidth="100" Click="OnKeepClick" />
+                <Button Content="Remove files" MinWidth="110" Click="OnRemoveClick" />
+            </StackPanel>
+        </StackPanel>
+    </Border>
+</Window>

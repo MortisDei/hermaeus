@@ -147,6 +147,12 @@ added: no observed stable, build-scoped format justified adding diagnostic
 flags or a parser. Normal Chat launch arguments and Agent prompt construction
 are unchanged.
 
+The selected llama.cpp runtime may report that `cache_reuse` is unsupported for
+the active context while still exposing LCP similarity or graph reuse. Those
+are separate mechanisms. That warning gates only the direct `cache_reuse`
+capability claim; it does not invalidate a separately observed LCP graph event,
+and neither timing effect is converted into a reused-token count.
+
 ## Evidence
 
 The Evidence surface reads `{DataRoot}/experience.db`. It indexes typed

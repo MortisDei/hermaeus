@@ -466,13 +466,11 @@ public sealed class SpeculativeDecodingTests
     }
 
     /// <summary>
-    /// The app knows which model is selected, and an MTP head ships inside that
-    /// model's own repository, so it is already sitting next to it. Typing the
-    /// path by hand was busywork, exactly as it would be for the vision
-    /// projector one field above, which has scanned for its companion since r19.
+    /// The app lists local MTP candidates, but filename and directory placement
+    /// are not compatibility evidence. The user must select one explicitly.
     /// </summary>
     [Fact]
-    public void A_draft_head_beside_the_model_is_discovered_and_prefilled()
+    public void A_draft_head_beside_the_model_is_discovered_but_not_prefilled()
     {
         using var temp = new TempDir();
         var dir = temp.PathFor("snapshot");
@@ -485,7 +483,7 @@ public sealed class SpeculativeDecodingTests
         var vm = NewServerVm(temp, model);
 
         Assert.Contains(draft, vm.DetectedDraftModelPaths);
-        Assert.Equal(draft, vm.DraftModelPath);
+        Assert.Empty(vm.DraftModelPath);
         Assert.True(vm.HasDetectedDraftModel);
     }
 
@@ -505,11 +503,11 @@ public sealed class SpeculativeDecodingTests
 
         // unsloth ships the head in an MTP/ folder beside the model.
         Assert.Contains(draft, vm.DetectedDraftModelPaths);
-        Assert.Equal(draft, vm.DraftModelPath);
+        Assert.Empty(vm.DraftModelPath);
     }
 
     [Fact]
-    public void Switching_models_replaces_an_auto_selected_draft_head_with_the_new_models_head()
+    public void Switching_models_does_not_substitute_a_draft_head()
     {
         using var temp = new TempDir();
         var firstDir = temp.PathFor("first-snapshot");
@@ -528,13 +526,13 @@ public sealed class SpeculativeDecodingTests
 
         vm.ModelPath = secondModel;
 
-        Assert.Equal(secondDraft, vm.DraftModelPath);
+        Assert.Empty(vm.DraftModelPath);
+        Assert.Contains(secondDraft, vm.DetectedDraftModelPaths);
     }
 
     /// <summary>
-    /// This is what keeps discovery from becoming the auto-selection r27 doc 03
-    /// declined. Finding the file changes nothing about how the server launches;
-    /// only ticking the box does.
+    /// Finding the file changes nothing about how the server launches; only an
+    /// explicit path choice and the checkbox can enable drafting.
     /// </summary>
     [Fact]
     public void Discovering_a_draft_head_does_not_enable_speculative_decoding()

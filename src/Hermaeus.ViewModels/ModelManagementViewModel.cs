@@ -80,6 +80,7 @@ public partial class ModelManagementViewModel : ObservableObject
     /// directories in place (never deletes files, r13 02-model-library.md 2.6).</summary>
     public Func<int, Task<bool>>? RequestEmptyDirectoryCleanupConfirmation { get; set; }
     public Func<ModelDeletionPlan, Task<bool>>? RequestDeleteModelConfirmation { get; set; }
+    public Func<ModelDeletionPlan, Task<CompanionDisableChoice>>? RequestCompanionDisableConfirmation { get; set; }
 
     public ModelManagementViewModel(ILlmService llm, ModelProfileService profiles, IToastService toasts, ISettingsService settings, ISystemInfoService system, ServicesViewModel services,
         ModelManifestStore manifest, HuggingFaceClient hf, ModelDownloadService downloader, IActivityRecorder? activity = null)
@@ -180,6 +181,55 @@ public partial class ModelManagementViewModel : ObservableObject
     {
         if (item is null) return;
 
+        var wasAutoManagingCompanions = _profiles.Get(item.ModelId)?.AutoManageCompanionAssets ?? true;
+        if (wasAutoManagingCompanions && !item.AutoManageCompanionAssets)
+        {
+            var existing = await _manifest.FindAsync(item.ModelId);
+            var companionFiles = existing?.Companions
+                .Select(c => c.LocalFilePath)
+                .Where(File.Exists)
+                .ToList() ?? [];
+            ModelDeletionPlan? removalPlan = null;
+            var removalError = string.Empty;
+            var removalPlanValid = companionFiles.Count > 0
+                && ModelDeletionService.TryPlanFiles(
+                    item.ModelId,
+                    companionFiles,
+                    _settings.Settings.DataManagement.LocalAiAssetsRoot,
+                    $"Companion files for {item.EffectiveName}:\n{string.Join("\n", companionFiles)}",
+                    out removalPlan,
+                    out removalError);
+            if (removalPlanValid)
+            {
+                var choice = RequestCompanionDisableConfirmation is null
+                    ? CompanionDisableChoice.KeepFiles
+                    : await RequestCompanionDisableConfirmation(removalPlan!);
+                if (choice == CompanionDisableChoice.Cancel)
+                {
+                    item.AutoManageCompanionAssets = true;
+                    return;
+                }
+
+                if (choice == CompanionDisableChoice.RemoveFiles)
+                {
+                    var remaining = ModelDeletionService.DeleteExact(removalPlan!);
+                    if (remaining.Count > 0)
+                    {
+                        _toasts.Show("Companion removal incomplete", string.Join(", ", remaining), ToastKind.Warning, 7000);
+                        return;
+                    }
+
+                    foreach (var file in companionFiles)
+                        await _manifest.RemoveAsync(file);
+                }
+            }
+            else if (companionFiles.Count > 0 && !string.IsNullOrWhiteSpace(removalError))
+            {
+                _toasts.Show("Cannot change companion policy", removalError, ToastKind.Warning, 7000);
+                return;
+            }
+        }
+
         await _profiles.SaveAsync(item.ToProfile());
         item.ApplySavedState();
         lock (_modelCacheLock)
@@ -244,6 +294,8 @@ public partial class ModelManagementViewModel : ObservableObject
         {
             item.RepoId = string.Empty;
             item.UpdateStatus = ModelUpdateStatus.NotLinked;
+            item.HasMissingCompanions = false;
+            item.CompanionStatus = string.Empty;
             return;
         }
 
@@ -255,6 +307,15 @@ public partial class ModelManagementViewModel : ObservableObject
                 : entry.LastCheckedAtUtc is not null
                     ? ModelUpdateStatus.UpToDate
                     : ModelUpdateStatus.NotLinked; // linked but never checked yet
+
+        var missing = entry.Companions
+            .Where(c => !string.IsNullOrWhiteSpace(c.LocalFilePath) && !File.Exists(c.LocalFilePath))
+            .Select(c => Path.GetFileName(c.LocalFilePath))
+            .ToList();
+        item.HasMissingCompanions = missing.Count > 0;
+        item.CompanionStatus = missing.Count == 0
+            ? entry.Companions.Count > 0 ? "Known companions present" : string.Empty
+            : $"Missing known companions: {string.Join(", ", missing)}";
     }
 
     private void RefreshTuneSummary(ModelProfileItemViewModel item)
@@ -682,6 +743,168 @@ public partial class ModelManagementViewModel : ObservableObject
         return _services.Servers.Any(s => s.IsRunning && !string.IsNullOrWhiteSpace(s.ModelPath) && string.Equals(Path.GetFullPath(s.ModelPath), normalized, StringComparison.OrdinalIgnoreCase));
     }
 
+    private string ModelsDirectory()
+    {
+        var layout = LocalAiAssetLocator.Detect(_settings.Settings.DataManagement.LocalAiAssetsRoot);
+        return string.IsNullOrWhiteSpace(layout.ModelsDirectory)
+            ? Path.Combine(_settings.Settings.DataManagement.LocalAiAssetsRoot, "Models")
+            : layout.ModelsDirectory;
+    }
+
+    private static string CompanionRole(ModelFileRole role) => role switch
+    {
+        ModelFileRole.Projector => "projector",
+        ModelFileRole.DraftHead => "draft_head",
+        _ => string.Empty
+    };
+
+    private static List<ModelCompanionManifestEntry> BuildCompanionManifest(
+        ModelFileSet fileSet, string modelsDirectory, string repoId)
+    {
+        return fileSet.Entries
+            .Where(e => e.Role is ModelFileRole.Projector or ModelFileRole.DraftHead)
+            .Select(e => new ModelCompanionManifestEntry
+            {
+                LocalFilePath = HuggingFaceBrowserSupport.PlanDestination(modelsDirectory, e.RepoPath, repoId).DestinationPath,
+                RepoFile = e.RepoPath,
+                Role = CompanionRole(e.Role),
+                Sha256 = e.LfsSha256 ?? string.Empty,
+                SizeBytes = e.SizeBytes
+            })
+            .ToList();
+    }
+
+    private async Task<(bool Success, string Message)> DownloadOrUpdateCompanionAsync(
+        ModelFileSetEntry source, string destination, string repoId, bool replaceExisting, CancellationToken ct = default)
+    {
+        if (!ModelPathSafety.TryResolveFileUnderRoot(_settings.Settings.DataManagement.LocalAiAssetsRoot, destination, out var safeDestination, out var error))
+            return (false, error);
+
+        var exists = File.Exists(safeDestination);
+        if (exists && !replaceExisting)
+            return (false, $"{Path.GetFileName(safeDestination)} exists but its provenance is not known; it was left unchanged.");
+
+        var downloadPath = exists ? safeDestination + ".update.tmp" : safeDestination;
+        var installed = false;
+        try
+        {
+            var download = await _downloader.DownloadAsync(
+                HuggingFaceClient.ResolveDownloadUrl(repoId, source.RepoPath), downloadPath, ct: ct);
+            if (!download.Success)
+                return (false, download.Message);
+
+            if (!await _downloader.VerifyHashAsync(downloadPath, source.LfsSha256, ct: ct))
+                return (false, "The companion hash did not match the repository metadata; the replacement was discarded.");
+
+            if (exists)
+            {
+                var swap = ModelUpdateApplier.Swap(safeDestination, downloadPath);
+                installed = swap.Success;
+                return swap.Success
+                    ? (true, string.Empty)
+                    : (false, swap.Error ?? "The companion replacement could not be applied.");
+            }
+
+            installed = true;
+            return (true, string.Empty);
+        }
+        finally
+        {
+            if (!installed)
+            {
+                try { File.Delete(downloadPath); } catch { }
+                try { File.Delete(downloadPath + ".tmp"); } catch { }
+                if (!exists)
+                {
+                    try { File.Delete(safeDestination); } catch { }
+                }
+            }
+        }
+    }
+
+    private async Task<(int Updated, int Missing, string? Message)> SyncKnownCompanionsAsync(
+        ModelManifestEntry primary, bool allowReplaceExisting, bool onlyMissing, CancellationToken ct = default)
+    {
+        var tree = await _hf.GetTreeAsync(primary.RepoId, ct);
+        if (tree is null)
+            return (0, 0, "The linked repository could not be read, so known companions were not changed.");
+
+        var declarations = await _hf.GetCompanionMetadataAsync(primary.RepoId, tree, ct);
+        var fileSet = ModelFileSetResolver.Resolve(primary.RepoId, tree, primary.RepoFile, declarations);
+        var known = BuildCompanionManifest(fileSet, ModelsDirectory(), primary.RepoId);
+        if (known.Count == 0)
+            return (0, 0, "No hash-verified compatible companions were declared by the linked repository.");
+
+        primary.Companions = known;
+        await _manifest.UpsertAsync(primary, ct);
+
+        var updated = 0;
+        var missing = 0;
+        var messages = new List<string>();
+        foreach (var companion in known)
+        {
+            var exists = File.Exists(companion.LocalFilePath);
+            if (onlyMissing && exists)
+                continue;
+
+            var current = await _manifest.FindAsync(companion.LocalFilePath, ct);
+            var alreadyCurrent = exists && current is not null
+                && string.Equals(current.RepoId, primary.RepoId, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(current.RepoFile, companion.RepoFile, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(current.Sha256, companion.Sha256, StringComparison.OrdinalIgnoreCase);
+            if (alreadyCurrent)
+                continue;
+
+            var replace = exists && allowReplaceExisting && current is not null
+                && string.Equals(current.RepoId, primary.RepoId, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(current.RepoFile, companion.RepoFile, StringComparison.OrdinalIgnoreCase);
+            var source = fileSet.Entries.First(e => string.Equals(e.RepoPath, companion.RepoFile, StringComparison.OrdinalIgnoreCase));
+            var result = await DownloadOrUpdateCompanionAsync(source, companion.LocalFilePath, primary.RepoId, replace, ct);
+            if (!result.Success)
+            {
+                missing++;
+                messages.Add($"{Path.GetFileName(companion.LocalFilePath)}: {result.Message}");
+                continue;
+            }
+
+            await _manifest.UpsertAsync(new ModelManifestEntry
+            {
+                FilePath = companion.LocalFilePath,
+                RepoId = primary.RepoId,
+                RepoFile = companion.RepoFile,
+                Sha256 = companion.Sha256,
+                SizeBytes = companion.SizeBytes ?? new FileInfo(companion.LocalFilePath).Length,
+                Source = "hf-browser",
+                ParentModelPath = primary.FilePath,
+                CompanionRole = companion.Role
+            }, ct);
+            updated++;
+        }
+
+        return (updated, missing, messages.Count == 0 ? null : string.Join("; ", messages));
+    }
+
+    [RelayCommand]
+    private async Task ReacquireCompanionsAsync(ModelProfileItemViewModel? item)
+    {
+        if (item is null || !item.HasMissingCompanions)
+            return;
+
+        var primary = await _manifest.FindAsync(item.ModelId);
+        if (primary is null || string.IsNullOrWhiteSpace(primary.RepoId) || string.IsNullOrWhiteSpace(primary.RepoFile))
+        {
+            _toasts.Show("Cannot reacquire companions", "The model's trusted repository mapping is unavailable. Browse for a model or clear the stale path.", ToastKind.Warning, 7000);
+            return;
+        }
+
+        var result = await SyncKnownCompanionsAsync(primary, allowReplaceExisting: false, onlyMissing: true);
+        ForceRefresh = true;
+        await RefreshAsync();
+        _toasts.Show(result.Missing == 0 && result.Updated > 0 ? "Companions reacquired" : "Companion recovery incomplete",
+            result.Message ?? $"{result.Updated} known companion asset(s) restored.",
+            result.Missing == 0 ? ToastKind.Success : ToastKind.Warning, 8000);
+    }
+
     /// <summary>Per-card "Update": downloads to &lt;file&gt;.update.tmp, verifies against the
     /// tree's lfs.oid captured at check time, then atomically swaps
     /// (r13 03-hugging-face.md 3.3). Refuses while the model is running or while any managed
@@ -749,11 +972,24 @@ public partial class ModelManagementViewModel : ObservableObject
             entry.RecordedAtUtc = DateTime.UtcNow;
             await _manifest.UpsertAsync(entry);
 
+            (int Updated, int Missing, string? Message)? companionResult = null;
+            if (item.AutoManageCompanionAssets)
+                companionResult = await SyncKnownCompanionsAsync(entry, allowReplaceExisting: true, onlyMissing: false);
+
             item.UpdateStatus = ModelUpdateStatus.UpToDate;
             item.RetuneRecommended = true;
             _activity.RecordSafe("models.update", entry.RepoId, ActivityOutcome.Succeeded,
-                $"Updated {item.EffectiveName}", "Re-tune recommended; the file changed size and mtime.");
-            _toasts.Show("Model updated", $"{item.EffectiveName} was updated. Re-tune recommended (the file changed size/mtime).", ToastKind.Success, 7000);
+                $"Updated {item.EffectiveName}",
+                companionResult is { } c
+                    ? $"Re-tune recommended; {c.Updated} companion asset(s) updated or restored."
+                    : "Re-tune recommended; automatic companion handling is disabled.");
+            var companionText = companionResult is { } result && result.Message is not null
+                ? $" Companion status: {result.Message}"
+                : string.Empty;
+            _toasts.Show(
+                companionResult is { Missing: > 0 } ? "Model updated, companions incomplete" : "Model updated",
+                $"{item.EffectiveName} was updated. Re-tune recommended (the file changed size/mtime).{companionText}",
+                companionResult is { Missing: > 0 } ? ToastKind.Warning : ToastKind.Success, 7000);
         }
         catch (Exception ex)
         {
@@ -838,6 +1074,7 @@ public partial class ModelManagementViewModel : ObservableObject
                 ? Path.Combine(_settings.Settings.DataManagement.LocalAiAssetsRoot, "Models")
                 : layout.ModelsDirectory;
             var ggufEntries = tree.Where(e => e.Path.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase)).ToList();
+            var companionDeclarations = await _hf.GetCompanionMetadataAsync(repo.RepoId, tree);
 
             // r27 04 4.1: a sharded model is listed once, as its first shard,
             // and downloads as a set. It used to be hidden outright, because a
@@ -855,7 +1092,7 @@ public partial class ModelManagementViewModel : ObservableObject
                 if (listed.Contains(entry.Path))
                     continue;
 
-                var fileSet = ModelFileSetResolver.Resolve(repo.RepoId, tree, entry.Path);
+                var fileSet = ModelFileSetResolver.Resolve(repo.RepoId, tree, entry.Path, companionDeclarations);
                 foreach (var member in fileSet.Entries.Where(e => e.Role is ModelFileRole.Model or ModelFileRole.Shard))
                     listed.Add(member.RepoPath);
 
@@ -890,9 +1127,8 @@ public partial class ModelManagementViewModel : ObservableObject
             ? Path.Combine(_settings.Settings.DataManagement.LocalAiAssetsRoot, "Models")
             : layout.ModelsDirectory;
 
-        // r27 04-models-arrive-complete.md 4.1: the whole file set, not the one
-        // file that was clicked. A shard set is all-or-nothing; a projector and
-        // an MTP head are offered and on by default.
+        // The whole explicitly mapped file set, not only the file that was
+        // clicked. Shards are required; trusted companion mappings are optional.
         var entries = file.SelectedEntries();
         var planned = new List<(ModelFileSetEntry Entry, string Destination)>();
         foreach (var entry in entries)
@@ -926,6 +1162,7 @@ public partial class ModelManagementViewModel : ObservableObject
             long completedBytes = 0;
             var missing = new List<string>();
             var savedCount = 0;
+            var primaryDestination = planned.First(p => p.Entry.Role == ModelFileRole.Model).Destination;
 
             foreach (var (entry, destination) in planned)
             {
@@ -969,11 +1206,41 @@ public partial class ModelManagementViewModel : ObservableObject
                     RepoFile = entry.RepoPath,
                     Sha256 = entry.LfsSha256 ?? string.Empty,
                     SizeBytes = new FileInfo(destination).Length,
-                    Source = "hf-browser"
+                    Source = "hf-browser",
+                    ParentModelPath = entry.Role is ModelFileRole.Projector or ModelFileRole.DraftHead ? primaryDestination : string.Empty,
+                    CompanionRole = entry.Role switch
+                    {
+                        ModelFileRole.Projector => "projector",
+                        ModelFileRole.DraftHead => "draft_head",
+                        _ => string.Empty
+                    }
                 });
 
                 savedCount++;
                 completedBytes += entryBytes;
+            }
+
+            var primaryEntry = await _manifest.FindAsync(primaryDestination);
+            if (primaryEntry is not null)
+            {
+                primaryEntry.Companions = file.FileSet.Entries
+                    .Where(e => e.Role is ModelFileRole.Projector or ModelFileRole.DraftHead)
+                    .Select(e => new ModelCompanionManifestEntry
+                    {
+                        LocalFilePath = HuggingFaceBrowserSupport.PlanDestination(modelsDir, e.RepoPath, file.RepoId).DestinationPath,
+                        RepoFile = e.RepoPath,
+                        Role = e.Role == ModelFileRole.Projector ? "projector" : "draft_head",
+                        Sha256 = e.LfsSha256 ?? string.Empty,
+                        SizeBytes = e.SizeBytes
+                    })
+                    .ToList();
+                await _manifest.UpsertAsync(primaryEntry);
+
+                var profile = _profiles.GetOrCreate(primaryDestination, "local GGUF");
+                profile.AutoManageCompanionAssets = file.FileSet.Optional.Count == 0
+                    || file.SelectedEntries().Count(e => e.Role is ModelFileRole.Projector or ModelFileRole.DraftHead)
+                       == file.FileSet.Optional.Count;
+                await _profiles.SaveAsync(profile);
             }
 
             if (missing.Count > 0)
@@ -1068,6 +1335,24 @@ public sealed partial class HfFileResultViewModel : ObservableObject
     public bool HasDraftHead => FileSet.Entries.Any(e => e.Role == ModelFileRole.DraftHead);
     public bool HasCompanions => HasProjector || HasDraftHead;
 
+    public string CompanionSizeDisplay
+    {
+        get
+        {
+            var bytes = FileSet.Optional.Sum(e => e.SizeBytes ?? 0);
+            return bytes > 0 ? $"{SystemInfoService.FormatBytes(bytes)} additional" : "size unknown";
+        }
+    }
+
+    public string ProjectorSelectionLabel => $"Vision projector ({CompanionSize(ModelFileRole.Projector)})";
+    public string DraftHeadSelectionLabel => $"MTP draft head ({CompanionSize(ModelFileRole.DraftHead)})";
+
+    private string CompanionSize(ModelFileRole role)
+    {
+        var bytes = FileSet.Entries.Where(e => e.Role == role).Sum(e => e.SizeBytes ?? 0);
+        return bytes > 0 ? SystemInfoService.FormatBytes(bytes) : "size unknown";
+    }
+
     /// <summary>Offered, on by default. A multimodal model without its projector quietly cannot see.</summary>
     [ObservableProperty] private bool _includeProjector = true;
 
@@ -1086,7 +1371,9 @@ public sealed partial class HfFileResultViewModel : ObservableObject
                 parts.Add("projector");
             if (HasDraftHead)
                 parts.Add("MTP draft head");
-            return parts.Count == 0 ? string.Empty : $"Set: {string.Join(", ", parts)}, {SystemInfoService.FormatBytes(SelectedBytes)} total";
+            if (HasCompanions)
+                parts.Add($"companions {CompanionSizeDisplay}");
+            return parts.Count == 0 ? string.Empty : $"Set: {string.Join(", ", parts)}, {SystemInfoService.FormatBytes(SelectedBytes)} selected";
         }
     }
 
@@ -1146,6 +1433,7 @@ public partial class ModelProfileItemViewModel : ObservableObject
     private readonly double? _originalPresencePenalty;
     private readonly bool _originalIsVisible;
     private readonly string _originalAvatar;
+    private readonly bool _originalAutoManageCompanionAssets;
 
     public string ModelId { get; }
     public string RawName { get; }
@@ -1173,6 +1461,10 @@ public partial class ModelProfileItemViewModel : ObservableObject
     [ObservableProperty] private double? _defaultPresencePenalty;
     [ObservableProperty] private bool _isVisible;
     [ObservableProperty] private string _avatar;
+    [ObservableProperty] private bool _autoManageCompanionAssets;
+
+    [ObservableProperty] private bool _hasMissingCompanions;
+    [ObservableProperty] private string _companionStatus = string.Empty;
 
     /// <summary>Per-item UI expansion state, not persisted (r13 02-model-library.md 2.1).</summary>
     [ObservableProperty] private bool _isExpanded;
@@ -1312,6 +1604,7 @@ public partial class ModelProfileItemViewModel : ObservableObject
         _defaultPresencePenalty = profile.DefaultPresencePenalty;
         _isVisible = profile.IsVisible;
         _avatar = profile.Avatar;
+        _autoManageCompanionAssets = profile.AutoManageCompanionAssets;
 
         _originalDisplayName = DisplayName;
         _originalDescription = Description;
@@ -1329,6 +1622,7 @@ public partial class ModelProfileItemViewModel : ObservableObject
         _originalPresencePenalty = DefaultPresencePenalty;
         _originalIsVisible = IsVisible;
         _originalAvatar = Avatar;
+        _originalAutoManageCompanionAssets = AutoManageCompanionAssets;
     }
 
     public string EffectiveName => string.IsNullOrWhiteSpace(DisplayName) ? RawName : DisplayName.Trim();
@@ -1353,7 +1647,8 @@ public partial class ModelProfileItemViewModel : ObservableObject
         DefaultPresencePenalty = DefaultPresencePenalty,
         Backend = Provider,
         IsVisible = IsVisible,
-        Avatar = Avatar
+        Avatar = Avatar,
+        AutoManageCompanionAssets = AutoManageCompanionAssets
     };
 
     public void ApplySavedState()
@@ -1380,6 +1675,7 @@ public partial class ModelProfileItemViewModel : ObservableObject
         DefaultPresencePenalty = null;
         IsVisible = true;
         Avatar = string.Empty;
+        AutoManageCompanionAssets = true;
         ApplySavedState();
     }
 
@@ -1401,6 +1697,7 @@ public partial class ModelProfileItemViewModel : ObservableObject
         DefaultPresencePenalty = _originalPresencePenalty;
         IsVisible = _originalIsVisible;
         Avatar = _originalAvatar;
+        AutoManageCompanionAssets = _originalAutoManageCompanionAssets;
         ApplySavedState();
     }
 

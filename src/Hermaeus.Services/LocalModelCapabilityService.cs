@@ -28,7 +28,9 @@ public sealed record LlamaRuntimeCapabilityFacts(
     bool SupportsSpeculativeNMax = false,
     bool SupportsSpeculativeNMin = false,
     bool SupportsSpeculativePMin = false,
-    bool SupportsSpeculativeDraftGpuLayers = false);
+    bool SupportsSpeculativeDraftGpuLayers = false,
+    bool SupportsLoadMode = false,
+    bool SupportsCorsOrigins = false);
 
 /// <summary>A meaningful change between two capability snapshots, never a raw help-text diff.</summary>
 public sealed record CapabilityDrift(string Capability, string Detail, bool AffectsConfiguredCapability = false);
@@ -81,7 +83,9 @@ public sealed class LocalModelCapabilityService
             SupportsSpeculativePMin: help.Contains("--spec-draft-p-min", StringComparison.Ordinal),
             SupportsSpeculativeDraftGpuLayers: help.Contains("--spec-draft-ngl", StringComparison.Ordinal)
                 || help.Contains("--gpu-layers-draft", StringComparison.Ordinal)
-                || help.Contains("-ngld", StringComparison.Ordinal));
+                || help.Contains("-ngld", StringComparison.Ordinal),
+            SupportsLoadMode: help.Contains("--load-mode", StringComparison.Ordinal),
+            SupportsCorsOrigins: help.Contains("--cors-origins", StringComparison.Ordinal));
     }
 
     /// <summary>

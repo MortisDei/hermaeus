@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text.Json;
 
 namespace Hermaeus.Services;
@@ -5,6 +6,9 @@ namespace Hermaeus.Services;
 public sealed record HfModelCard(string Sha, DateTimeOffset? LastModified, string? License, long? Downloads);
 
 public sealed record HfTreeEntry(string Path, long? SizeBytes, string? LfsSha256);
+
+/// <summary>Explicit source mapping between a model file and a compatible companion.</summary>
+public sealed record HfCompanionDeclaration(string ModelPath, string CompanionPath, ModelFileRole Role);
 
 public sealed record HfSearchResult(string RepoId, long Downloads);
 
@@ -104,6 +108,88 @@ public sealed class HuggingFaceClient
         return entries;
     }
 
+    /// <summary>
+    /// Reads the optional, exact-path companion manifest from the same repository.
+    /// The manifest is accepted only when its own Hugging Face LFS SHA256 is present
+    /// and matches the downloaded bytes. A filename convention alone is never enough.
+    /// </summary>
+    public async Task<IReadOnlyList<HfCompanionDeclaration>> GetCompanionMetadataAsync(
+        string repoId, IReadOnlyList<HfTreeEntry> tree, CancellationToken ct = default)
+    {
+        const string manifestPath = ".hermaeus/companions.json";
+        var manifestEntry = tree.FirstOrDefault(e => string.Equals(e.Path.Replace('\\', '/'), manifestPath, StringComparison.OrdinalIgnoreCase));
+        if (manifestEntry is null || string.IsNullOrWhiteSpace(manifestEntry.LfsSha256))
+            return [];
+
+        try
+        {
+            using var response = await _http.GetAsync(ResolveDownloadUrl(repoId, manifestPath), ct);
+            if (!response.IsSuccessStatusCode || response.Content.Headers.ContentLength > 256 * 1024)
+                return [];
+
+            var bytes = await response.Content.ReadAsByteArrayAsync(ct);
+            if (bytes.Length > 256 * 1024)
+                return [];
+
+            var actual = Convert.ToHexStringLower(SHA256.HashData(bytes));
+            if (!string.Equals(actual, manifestEntry.LfsSha256.Trim(), StringComparison.OrdinalIgnoreCase))
+                return [];
+
+            using var document = JsonDocument.Parse(bytes);
+            if (!document.RootElement.TryGetProperty("models", out var models)
+                || models.ValueKind != JsonValueKind.Array)
+                return [];
+
+            var declarations = new List<HfCompanionDeclaration>();
+            foreach (var model in models.EnumerateArray())
+            {
+                if (!model.TryGetProperty("model_path", out var modelPathElement)
+                    || modelPathElement.ValueKind != JsonValueKind.String)
+                    continue;
+
+                var modelPath = NormalizeRepoPath(modelPathElement.GetString());
+                if (modelPath.Length == 0 || !tree.Any(e => string.Equals(NormalizeRepoPath(e.Path), modelPath, StringComparison.OrdinalIgnoreCase)))
+                    continue;
+
+                if (!model.TryGetProperty("companions", out var companions)
+                    || companions.ValueKind != JsonValueKind.Array)
+                    continue;
+
+                foreach (var companion in companions.EnumerateArray())
+                {
+                    if (!companion.TryGetProperty("path", out var pathElement)
+                        || pathElement.ValueKind != JsonValueKind.String
+                        || !companion.TryGetProperty("role", out var roleElement)
+                        || roleElement.ValueKind != JsonValueKind.String)
+                        continue;
+
+                    var companionPath = NormalizeRepoPath(pathElement.GetString());
+                    var role = roleElement.GetString()?.Trim().ToLowerInvariant() switch
+                    {
+                        "projector" => ModelFileRole.Projector,
+                        "draft_head" => ModelFileRole.DraftHead,
+                        _ => (ModelFileRole?)null
+                    };
+                    var companionEntry = tree.FirstOrDefault(e => string.Equals(NormalizeRepoPath(e.Path), companionPath, StringComparison.OrdinalIgnoreCase));
+                    if (role is null || companionPath.Length == 0 || companionEntry is null
+                        || string.IsNullOrWhiteSpace(companionEntry.LfsSha256)
+                        || string.Equals(modelPath, companionPath, StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    declarations.Add(new HfCompanionDeclaration(modelPath, companionPath, role.Value));
+                }
+            }
+
+            return declarations
+                .Distinct()
+                .ToList();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
     /// <summary>GET /api/models?search=...&amp;filter=gguf&amp;sort=downloads&amp;limit=25.
     /// Returns an empty list on any failure.</summary>
     public async Task<IReadOnlyList<HfSearchResult>> SearchAsync(string query, CancellationToken ct = default)
@@ -160,4 +246,6 @@ public sealed class HuggingFaceClient
         if (parts.Length != 2 || parts.Any(string.IsNullOrWhiteSpace) || repoId.Contains(".."))
             throw new ArgumentException("Repo id must look like 'org/repo'.", nameof(repoId));
     }
+
+    private static string NormalizeRepoPath(string? path) => (path ?? string.Empty).Replace('\\', '/').Trim('/');
 }

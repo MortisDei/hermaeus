@@ -51,4 +51,13 @@ public sealed class ChatScrollPinStateTests
         Assert.False(result.IsPinned);
         Assert.False(result.ShouldSnap);
     }
+
+    [Fact]
+    public void Upward_pointer_delta_wins_when_stream_growth_shares_the_event()
+    {
+        var result = ChatScrollPinState.Apply(true, 1220, 400, 800, 20, -80);
+
+        Assert.False(result.IsPinned);
+        Assert.False(result.ShouldSnap);
+    }
 }

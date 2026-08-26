@@ -25,7 +25,23 @@ public sealed class ModelManifestEntry
     public DateTime? LastCheckedAtUtc { get; set; }
     public bool NoLongerPublished { get; set; }
 
+    /// <summary>Known companions mapped by trusted source metadata for this primary model.</summary>
+    public List<ModelCompanionManifestEntry> Companions { get; set; } = [];
+
+    /// <summary>Set on a companion entry so recovery and safe removal can find its owner.</summary>
+    public string ParentModelPath { get; set; } = string.Empty;
+    public string CompanionRole { get; set; } = string.Empty;
+
     public bool HasPendingUpdate => !string.IsNullOrWhiteSpace(PendingSha256);
+}
+
+public sealed class ModelCompanionManifestEntry
+{
+    public string LocalFilePath { get; set; } = string.Empty;
+    public string RepoFile { get; set; } = string.Empty;
+    public string Role { get; set; } = string.Empty;
+    public string Sha256 { get; set; } = string.Empty;
+    public long? SizeBytes { get; set; }
 }
 
 /// <summary>

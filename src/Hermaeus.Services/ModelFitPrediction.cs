@@ -154,14 +154,18 @@ public static class ModelFitPredictor
     {
         var gpu = prediction.GpuRequiredBytes.HasValue ? FormatBytes(prediction.GpuRequiredBytes.Value) : "Unknown";
         var ram = prediction.SystemRamRequiredBytes.HasValue ? FormatBytes(prediction.SystemRamRequiredBytes.Value) : "Unknown";
-        var components = new[] { prediction.WeightPlacement }
+        var allComponents = new[] { prediction.WeightPlacement }
             .Concat(prediction.KvAllocation)
             .Concat([prediction.RuntimeAndComputeOverhead])
             .Concat(prediction.CompanionAllocations)
             .Concat(prediction.Headroom)
-            .Select(component => $"{component.Name}: {(component.Bytes.HasValue ? FormatBytes(component.Bytes.Value) : "Unknown")} ({component.Placement})");
+            .ToArray();
+        var knownGpu = allComponents.Where(component => component.GpuBytes.HasValue).Sum(component => component.GpuBytes!.Value);
+        var knownRam = allComponents.Where(component => component.SystemRamBytes.HasValue).Sum(component => component.SystemRamBytes!.Value);
+        var components = allComponents.Select(component =>
+            $"{component.Name}: {(component.Bytes.HasValue ? FormatBytes(component.Bytes.Value) : "Unknown")} ({component.Placement}) - {component.Explanation}");
         return $"GPU Fit {ModelFitEstimator.Label(prediction.Tier).DefaultIfEmpty("Unknown")} at {prediction.Inputs.ContextSize.ToString("N0", CultureInfo.InvariantCulture)} context, "
-            + $"{prediction.Inputs.Slots} slot(s), KV {prediction.Inputs.KvCacheTypeK}/{prediction.Inputs.KvCacheTypeV}: GPU {gpu}; RAM {ram}. "
+            + $"{prediction.Inputs.Slots} slot(s), KV {prediction.Inputs.KvCacheTypeK}/{prediction.Inputs.KvCacheTypeV}: GPU {gpu} (known subtotal {FormatBytes(knownGpu)}); RAM {ram} (known subtotal {FormatBytes(knownRam)}). "
             + $"{string.Join("; ", components)}. {prediction.Explanation}";
     }
 

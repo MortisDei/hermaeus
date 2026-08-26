@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Runtime.InteropServices;
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
 using Hermaeus.Services;
@@ -181,6 +182,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         ? "Template support is confirmed for this model."
         : "Waiting for a successful model capability probe.";
     public bool IsRunning  => Status == ServerStatus.Running;
+    public ManagedRuntimeProcessIdentity? CurrentProcessIdentity => _mgr.CurrentProcessIdentity;
     public bool IsStopped  => Status is ServerStatus.Stopped or ServerStatus.Error;
     public bool IsStarting => Status == ServerStatus.Starting;
     public bool IsError    => Status == ServerStatus.Error;
@@ -276,12 +278,27 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     public UiBoundCollection<string> DetectedModelPaths { get; } = [];
     public UiBoundCollection<string> DetectedMmprojPaths { get; } = [];
 
+    public bool HasMissingModel => !string.IsNullOrWhiteSpace(ModelPath) && !File.Exists(ModelPath);
+    public string ModelPathHint => HasMissingModel
+        ? $"Configured model is missing: {ModelPath}. Browse for it or choose a verified model; Hermaeus will not substitute another file."
+        : string.Empty;
+
+    public bool HasMissingMmproj => !string.IsNullOrWhiteSpace(MmprojPath) && !File.Exists(MmprojPath);
+    public string MmprojHint => HasMissingMmproj
+        ? $"Configured projector is missing: {MmprojPath}. Browse for it or clear it; image support stays unavailable until a compatible projector is selected."
+        : string.Empty;
+
+    [RelayCommand]
+    private void ClearMmproj()
+    {
+        MmprojPath = string.Empty;
+        _autoSelectedMmprojPath = null;
+    }
+
     /// <summary>
-    /// r27 follow-up: `mtp-*.gguf` draft heads found beside the selected model,
-    /// exactly as <see cref="DetectedMmprojPaths"/> finds projectors. An MTP
-    /// head ships inside its base model's repository, so if you have one, it is
-    /// already next to the model you just picked and you should not have to
-    /// type its path.
+    /// Local `mtp-*.gguf` files found beside the selected model are listed as
+    /// candidates, exactly as <see cref="DetectedMmprojPaths"/> lists projector
+    /// candidates. Their filenames do not establish compatibility.
     /// </summary>
     public UiBoundCollection<string> DetectedDraftModelPaths { get; } = [];
 
@@ -341,14 +358,12 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
             ModelPath = current;
     }
 
-    /// <summary>r19 5.3: rescans for `mmproj-*.gguf` files beside the selected model whenever
-    /// it changes, auto-filling the sole candidate when the field is still empty (never
-    /// overwrites an explicit choice, following the same repair-on-Clear() pattern as
-    /// <see cref="RefreshDetectedModels"/>).</summary>
+    /// <summary>Rescans for projector candidates beside the selected model. Candidates are
+    /// displayed for explicit user selection only; a filename is not compatibility evidence
+    /// and the sole candidate is never silently selected.</summary>
     private void RefreshDetectedMmprojPaths(string modelPath)
     {
         var current = MmprojPath;
-        var wasAutoSelected = string.Equals(current, _autoSelectedMmprojPath, StringComparison.OrdinalIgnoreCase);
         DetectedMmprojPaths.Clear();
 
         if (!string.IsNullOrWhiteSpace(modelPath))
@@ -363,22 +378,19 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
 
         var hasCurrentCandidate = !string.IsNullOrWhiteSpace(current)
             && DetectedMmprojPaths.Contains(current, StringComparer.OrdinalIgnoreCase);
-        var soleCandidate = DetectedMmprojPaths.Count == 1 ? DetectedMmprojPaths[0] : string.Empty;
         if (!string.IsNullOrWhiteSpace(current) && !hasCurrentCandidate)
             DetectedMmprojPaths.Insert(0, current);
 
-        var replacement = (string.IsNullOrWhiteSpace(current) || wasAutoSelected || !File.Exists(current))
-            && !string.IsNullOrWhiteSpace(soleCandidate)
-            ? soleCandidate
-            : current;
-        SetAutoMmprojPath(replacement, soleCandidate);
+        SetAutoMmprojPath(current, string.Empty);
+        OnPropertyChanged(nameof(HasMissingMmproj));
+        OnPropertyChanged(nameof(MmprojHint));
     }
 
     /// <summary>
-    /// r27 follow-up: rescans for `mtp-*.gguf` draft heads whenever the model
-    /// changes, mirroring <see cref="RefreshDetectedMmprojPaths"/>, including
-    /// its rule of auto-filling the sole candidate only when the field is still
-    /// empty and never overwriting an explicit choice.
+    /// Rescans for draft-head candidates whenever the model changes. Candidates
+    /// are displayed for explicit user selection only. Filename and directory
+    /// conventions are not compatibility evidence, so a sole candidate is not
+    /// silently selected.
     /// unsloth ships the head in an `MTP/` subdirectory beside the model, so
     /// both that and the model's own directory are scanned.
     /// Populating this path does NOT enable speculative decoding. No flag is
@@ -389,7 +401,6 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     private void RefreshDetectedDraftModelPaths(string modelPath)
     {
         var current = DraftModelPath;
-        var wasAutoSelected = string.Equals(current, _autoSelectedDraftModelPath, StringComparison.OrdinalIgnoreCase);
         DetectedDraftModelPaths.Clear();
 
         if (!string.IsNullOrWhiteSpace(modelPath))
@@ -411,15 +422,13 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
 
         var hasCurrentCandidate = !string.IsNullOrWhiteSpace(current)
             && DetectedDraftModelPaths.Contains(current, StringComparer.OrdinalIgnoreCase);
-        var soleCandidate = DetectedDraftModelPaths.Count == 1 ? DetectedDraftModelPaths[0] : string.Empty;
-        if (!string.IsNullOrWhiteSpace(current) && !hasCurrentCandidate)
-            DetectedDraftModelPaths.Insert(0, current);
+        // A missing persisted path is not a candidate. Keeping it in the
+        // dropdown made a deleted draft look like the only useful choice and
+        // encouraged a launch with a dead companion. Preserve the path in the
+        // editor so it can be explained and cleared, but list only files that
+        // exist now.
 
-        var replacement = (string.IsNullOrWhiteSpace(current) || wasAutoSelected || !File.Exists(current))
-            && !string.IsNullOrWhiteSpace(soleCandidate)
-            ? soleCandidate
-            : current;
-        SetAutoDraftModelPath(replacement, soleCandidate);
+        SetAutoDraftModelPath(current, string.Empty);
 
         OnPropertyChanged(nameof(HasDetectedDraftModel));
         OnPropertyChanged(nameof(DraftModelHint));
@@ -466,12 +475,23 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>True when a draft head was found beside the model, so the draft checkbox is worth offering.</summary>
-    public bool HasDetectedDraftModel => DetectedDraftModelPaths.Count > 0 || !string.IsNullOrWhiteSpace(DraftModelPath);
+    public bool HasDetectedDraftModel => DetectedDraftModelPaths.Count > 0;
+
+    public bool HasMissingDraftModel => !string.IsNullOrWhiteSpace(DraftModelPath) && !File.Exists(DraftModelPath);
 
     /// <summary>Says why the draft checkbox is unavailable, rather than leaving it inert and unexplained.</summary>
-    public string DraftModelHint => HasDetectedDraftModel
-        ? string.Empty
-        : "No mtp-*.gguf draft head was found beside this model. Download one from the model's repository, or pick a file.";
+    public string DraftModelHint => HasMissingDraftModel
+        ? $"Configured draft model is missing: {DraftModelPath}. Clear it or choose a candidate you have verified; Hermaeus will not substitute another model."
+        : HasDetectedDraftModel
+            ? string.Empty
+            : "No mtp-*.gguf draft head was found beside this model. Download one from the model's repository, or pick a file.";
+
+    [RelayCommand]
+    private void ClearDraftModel()
+    {
+        DraftModelPath = string.Empty;
+        _autoSelectedDraftModelPath = null;
+    }
 
     public ServerProcessViewModel(
         ServerConfig config,
@@ -1309,6 +1329,8 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     partial void OnModelPathChanged(string value)
     {
         OnPropertyChanged(nameof(HasUnsavedChanges));
+        OnPropertyChanged(nameof(HasMissingModel));
+        OnPropertyChanged(nameof(ModelPathHint));
         OnPropertyChanged(nameof(ReasoningPreserveAvailable));
         OnPropertyChanged(nameof(ReasoningPreserveStatus));
         ScheduleContextFitRefresh();
@@ -1401,6 +1423,8 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     partial void OnSlotsChanged(int value)
     {
         OnPropertyChanged(nameof(HasUnsavedChanges));
+        OnPropertyChanged(nameof(HasMissingMmproj));
+        OnPropertyChanged(nameof(MmprojHint));
         ApplyContextFitNote();
     }
     partial void OnEmbeddingsModeChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
@@ -1622,6 +1646,9 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         var level = lowered.Contains("error") || lowered.Contains("failed")
             ? RuntimeLogLevel.Error
             : lowered.Contains("warn") ? RuntimeLogLevel.Warning : RuntimeLogLevel.Info;
+        if (level == RuntimeLogLevel.Info &&
+            (lowered.Contains("slot", StringComparison.Ordinal) || lowered.Contains("kv cache", StringComparison.Ordinal)))
+            level = RuntimeLogLevel.Debug;
 
         var category = lowered.Contains("starting") || lowered.Contains("launched") || lowered.Contains("ready")
             ? RuntimeLogCategory.Startup
@@ -1780,6 +1807,69 @@ public partial class ServicesViewModel : ViewModelBase
             foreach (var server in Servers)
                 server.SetHardwareProfile(profile);
         });
+    }
+
+    /// <summary>
+    /// Builds live Chat telemetry from the managed server row that owns the
+    /// serving process. Process identity comes from the child process itself,
+    /// never from a port lookup. Incomplete configuration or hardware facts
+    /// remain incomplete rather than being guessed.
+    /// </summary>
+    public async Task<RuntimeTelemetryRequest?> CreateManagedTelemetryRequestAsync(
+        string modelId,
+        CancellationToken ct = default)
+    {
+        var server = Servers.FirstOrDefault(item =>
+            item.IsRunning
+            && !item.EmbeddingsMode
+            && (string.IsNullOrWhiteSpace(modelId)
+                || string.Equals(item.ModelPath, modelId, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(Path.GetFileName(item.ModelPath), modelId, StringComparison.OrdinalIgnoreCase)));
+        if (server is null || server.CurrentProcessIdentity is not { } process)
+            return null;
+
+        var config = server.BuildConfig();
+        var runtime = await RuntimeIdentityFactory.CreateRuntimeIdentityAsync(config.ExecutablePath, null, ct);
+        var gguf = File.Exists(config.ModelPath)
+            ? await Task.Run(() => GgufMetadataReader.TryRead(config.ModelPath), ct)
+            : null;
+        var model = RuntimeIdentityFactory.CreateModelIdentity(config.ModelPath, gguf);
+        var hardware = new HardwareIdentityV2(
+            Environment.OSVersion.Platform.ToString(),
+            RuntimeInformation.ProcessArchitecture.ToString(),
+            string.IsNullOrWhiteSpace(_hardwareProfile?.GpuName) ? string.Empty : "unknown",
+            _hardwareProfile?.GpuName ?? string.Empty,
+            _hardwareProfile is { MaxGpuVramBytes: > 0 } profile ? profile.MaxGpuVramBytes : null,
+            _hardwareProfile is { TotalRamBytes: > 0 } ram ? ram.TotalRamBytes : null,
+            string.Empty,
+            "single",
+            IdentityCompleteness.Incomplete);
+        var speculative = config.Speculative ?? new SpeculativeDecodingConfig();
+        var companionIdentity = string.IsNullOrWhiteSpace(speculative.DraftModelPath)
+            ? string.Empty
+            : RuntimeIdentityFactory.CreateModelIdentity(speculative.DraftModelPath, null).StableId;
+        var configuration = new ConfigurationIdentityV2(
+            config.ContextSize,
+            config.GpuLayers,
+            config.GpuLayers switch { 0 => "cpu", -1 => "gpu-all", > 0 => "gpu-partial", _ => string.Empty },
+            config.Threads,
+            config.PromptThreads,
+            config.Slots,
+            null,
+            null,
+            config.KvCacheTypeK,
+            config.KvCacheTypeV,
+            config.FlashAttention,
+            string.Join(",", speculative.Types),
+            companionIdentity,
+            $"nmax={speculative.NMax};nmin={speculative.NMin};pmin={speculative.PMin}",
+            config.CpuMoeLayers,
+            new Dictionary<string, string>(StringComparer.Ordinal),
+            IdentityCompleteness.Incomplete);
+        var fingerprint = new EmpiricalProfileFingerprintV2(runtime, model, hardware, configuration);
+        return new RuntimeTelemetryRequest(
+            $"chat-{server.Id}", process.ProcessId, process.StartedAtUtc,
+            runtime, fingerprint, IncludeDeviceTotals: true);
     }
 
     /// <summary>Re-checks every non-Running server's port for a leftover process (r9 02-server-lifecycle.md 2.3). Startup and Services-view-refresh entry point.</summary>

@@ -15,8 +15,13 @@ namespace Hermaeus.Voice;
 /// </summary>
 public static class AudioPlayback
 {
-    public static async Task PlayAsync(string wavFilePath, CancellationToken ct)
+    public static async Task PlayAsync(string wavFilePath, CancellationToken ct, Action<string>? onBackendSelected = null)
     {
+        if (string.IsNullOrWhiteSpace(wavFilePath) || !File.Exists(wavFilePath))
+            throw new InvalidDataException("Audio playback was not started because the generated WAV file is missing.");
+        await using (var stream = File.OpenRead(wavFilePath))
+            _ = WavFile.Read(stream);
+
         var players = new List<(string Command, IReadOnlyList<string> Arguments)>();
         if (OperatingSystem.IsWindows())
             players.Add(("powershell", BuildArguments("powershell", wavFilePath)));
@@ -26,19 +31,23 @@ public static class AudioPlayback
         players.Add(("afplay", [wavFilePath]));
         players.Add(("ffplay", ["-nodisp", "-autoexit", wavFilePath]));
 
-        await PlayCandidatesAsync(players, TryRunAsync, ct);
+        await PlayCandidatesAsync(players, TryRunAsync, ct, onBackendSelected);
     }
 
     internal static async Task PlayCandidatesAsync(
         IReadOnlyList<(string Command, IReadOnlyList<string> Arguments)> players,
         Func<string, IReadOnlyList<string>, CancellationToken, Task<bool>> tryRun,
-        CancellationToken ct)
+        CancellationToken ct,
+        Action<string>? onBackendSelected = null)
     {
         foreach (var player in players)
         {
             ct.ThrowIfCancellationRequested();
             if (await tryRun(player.Command, player.Arguments, ct))
+            {
+                onBackendSelected?.Invoke(player.Command);
                 return;
+            }
         }
 
         throw new InvalidOperationException("Could not find a system audio player for the generated WAV file.");

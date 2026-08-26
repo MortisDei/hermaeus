@@ -93,6 +93,8 @@ public sealed class ServerProcessManager : IDisposable
         cfg.RuntimeHelpProbed = runtime.HelpProbeSucceeded;
         cfg.RuntimeSpeculativeTypes = runtime.SpeculativeTypes;
         cfg.RuntimeSupportsPromptThreads = runtime.SupportsPromptThreads;
+        cfg.RuntimeSupportsLoadMode = runtime.SupportsLoadMode;
+        cfg.RuntimeSupportsCorsOrigins = runtime.SupportsCorsOrigins;
         var runtimeValidation = ValidateRuntimeOptions(cfg);
         if (runtimeValidation is not null)
         {
@@ -512,7 +514,7 @@ public sealed class ServerProcessManager : IDisposable
             WorkingDirectory       = GetWorkingDirectory(cfg.ExecutablePath)
         };
 
-        foreach (var arg in BuildLaunchArguments(cfg, cfg.ReasoningPreserveSupported))
+        foreach (var arg in BuildLaunchArguments(cfg, cfg.ReasoningPreserveSupported, cfg.RuntimeSupportsLoadMode, cfg.RuntimeSupportsCorsOrigins))
             startInfo.ArgumentList.Add(arg);
 
         return new Process
@@ -522,7 +524,8 @@ public sealed class ServerProcessManager : IDisposable
         };
     }
 
-    public static IReadOnlyList<string> BuildLaunchArguments(ServerConfig cfg, bool reasoningPreserveSupported = false)
+    public static IReadOnlyList<string> BuildLaunchArguments(ServerConfig cfg, bool reasoningPreserveSupported = false,
+        bool supportsLoadMode = false, bool supportsCorsOrigins = false)
     {
         var parts = new List<string>();
 
@@ -658,11 +661,37 @@ public sealed class ServerProcessManager : IDisposable
         if (cfg.ContextShift && !HasArg("--context-shift") && !HasArg("--no-context-shift"))
             parts.Add("--context-shift");
 
-        if (cfg.MemoryLock && !HasArg("--mlock"))
-            parts.Add("--mlock");
+        if (supportsLoadMode && !HasArg("--load-mode") && !HasArg("--mlock") && !HasArg("--mmap") && !HasArg("--no-mmap"))
+        {
+            if (cfg.MemoryLock)
+            {
+                parts.Add("--load-mode");
+                parts.Add("mlock");
+            }
+            else if (cfg.NoMemoryMap)
+            {
+                parts.Add("--load-mode");
+                parts.Add("none");
+            }
+        }
+        else
+        {
+            if (cfg.MemoryLock && !HasArg("--mlock"))
+                parts.Add("--mlock");
 
-        if (cfg.NoMemoryMap && !HasArg("--no-mmap") && !HasArg("--mmap"))
-            parts.Add("--no-mmap");
+            if (cfg.NoMemoryMap && !HasArg("--no-mmap") && !HasArg("--mmap"))
+                parts.Add("--no-mmap");
+        }
+
+        // Managed llama-server is loopback-bound, but its default wildcard CORS
+        // policy still permits arbitrary web origins to read that local HTTP
+        // service. Add the narrower policy only after the selected executable
+        // advertises the option. External/custom servers remain untouched.
+        if (supportsCorsOrigins && !HasArg("--cors-origins"))
+        {
+            parts.Add("--cors-origins");
+            parts.Add("http://localhost,http://127.0.0.1");
+        }
 
         // Mixture-of-Experts CPU offload. Flag names read from llama-server
         // b10215's own --help, per the r27 rule that only flags the installed
@@ -810,7 +839,9 @@ public sealed class ServerProcessManager : IDisposable
             },
             RuntimeHelpProbed = cfg.RuntimeHelpProbed,
             RuntimeSpeculativeTypes = cfg.RuntimeSpeculativeTypes,
-            RuntimeSupportsPromptThreads = cfg.RuntimeSupportsPromptThreads
+            RuntimeSupportsPromptThreads = cfg.RuntimeSupportsPromptThreads,
+            RuntimeSupportsLoadMode = cfg.RuntimeSupportsLoadMode,
+            RuntimeSupportsCorsOrigins = cfg.RuntimeSupportsCorsOrigins
         };
     }
 

@@ -26,7 +26,7 @@ public sealed class AudioFeedbackService : IAudioFeedbackService, IAsyncDisposab
         _settings = settings;
         _voice = voice;
         _logs = logs;
-        _playback = playback ?? AudioPlayback.PlayAsync;
+        _playback = playback ?? ((path, token) => AudioPlayback.PlayAsync(path, token));
         _worker = Task.Run(() => WorkerAsync(_lifetime.Token));
     }
 

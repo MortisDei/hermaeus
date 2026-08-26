@@ -11,8 +11,16 @@ public static class ChatScrollPinState
     public readonly record struct Transition(bool IsPinned, bool ShouldSnap);
 
     public static Transition Apply(bool wasPinned, double extentHeight, double viewportHeight,
-        double offsetY, double extentDeltaY)
+        double offsetY, double extentDeltaY, double offsetDeltaY = 0)
     {
+        // Avalonia can report the pointer-driven offset change in the same
+        // ScrollChanged event as streamed content growth. Honour the user's
+        // upward movement before considering an extent-growth snap, otherwise
+        // the old pinned state wins one event too long and the view jumps back
+        // to the bottom.
+        if (offsetDeltaY < 0)
+            return new(false, false);
+
         var distance = Math.Max(0, extentHeight - viewportHeight - offsetY);
         // A remeasure can grow the extent after a user has scrolled away. The
         // offset is authoritative for that event, otherwise streaming content

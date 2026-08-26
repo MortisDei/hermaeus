@@ -80,6 +80,10 @@ public sealed class ModelFitPredictionTests
 
         Assert.Null(prediction.GpuRequiredBytes);
         Assert.Contains("Partial GPU layer placement", prediction.UnknownComponents);
+        var text = ModelFitPredictor.FormatBreakdown(prediction);
+        Assert.Contains("GPU Unknown (known subtotal", text, StringComparison.Ordinal);
+        Assert.Contains("Model weights:", text, StringComparison.Ordinal);
+        Assert.Contains("KV key cache: Unknown", text, StringComparison.Ordinal);
     }
 
     [Fact]

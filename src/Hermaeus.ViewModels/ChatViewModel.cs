@@ -190,6 +190,7 @@ public partial class ChatViewModel : ViewModelBase
     private readonly Hermaeus.Services.Recall.RecallService? _recallSearch;
     private readonly IProjectStateStore? _projectState;
     public LiveModelTelemetryViewModel? Telemetry { get; }
+    public Func<string, CancellationToken, Task<RuntimeTelemetryRequest?>>? ManagedTelemetryRequestFactory { get; set; }
     private bool _suppressRagDatasetWrite;
     private CancellationTokenSource? _cts;
     private CancellationTokenSource? _ttsCts;
@@ -197,6 +198,33 @@ public partial class ChatViewModel : ViewModelBase
     private DateTime _modelsLoadedAtUtc = DateTime.MinValue;
     private Task? _loadModelsTask;
     private bool _suppressModelProfileDefaults;
+
+    [RelayCommand]
+    private async Task OpenTelemetryAsync()
+    {
+        if (Telemetry is null)
+            return;
+        if (ManagedTelemetryRequestFactory is null)
+        {
+            Telemetry.Status = "Telemetry is unavailable until a managed local server is running.";
+            return;
+        }
+
+        try
+        {
+            var request = await ManagedTelemetryRequestFactory(SelectedModel?.Id ?? string.Empty, CancellationToken.None);
+            if (request is null)
+            {
+                Telemetry.Status = "No matching managed local Chat process is running.";
+                return;
+            }
+            await Telemetry.OpenAsync(request);
+        }
+        catch (Exception ex)
+        {
+            Telemetry.Status = $"Telemetry unavailable: {ex.Message}";
+        }
+    }
 
     /// <summary>
     /// Every message across every branch, flat (r25 doc 01). The tree lives in

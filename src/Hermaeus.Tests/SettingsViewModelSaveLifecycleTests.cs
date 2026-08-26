@@ -122,6 +122,25 @@ public sealed class SettingsViewModelSaveLifecycleTests
     }
 
     [Fact]
+    public async Task Normal_preference_is_persisted_after_debounced_change_without_save_command()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        var vm = NewSettingsViewModel(settings, new FakeSecretStore());
+
+        vm.Llm.DefaultSystemPrompt = "persisted automatically";
+
+        await WaitForAsync(
+            () => settings.Settings.Llm.DefaultSystemPrompt == "persisted automatically",
+            "debounced settings save", timeoutMs: 5000);
+        var reloaded = new SettingsService(temp.PathFor("settings/settings.json"));
+        await reloaded.LoadAsync();
+
+        Assert.Equal("persisted automatically", reloaded.Settings.Llm.DefaultSystemPrompt);
+    }
+
+    [Fact]
     public void TtsPythonPath_round_trips_through_reload_without_the_dead_secret_reference_guard()
     {
         using var temp = new TempDir();

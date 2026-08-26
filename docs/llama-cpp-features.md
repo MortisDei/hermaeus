@@ -84,6 +84,13 @@ runtime proves no such schema, and Hermaeus does not infer token reuse from
 prompt milliseconds or throughput. No prompt-diff diagnostic flags are added
 to normal Chat launches.
 
+Managed launch arguments use the selected executable's successful `--help`
+probe for newer `--load-mode` and `--cors-origins` forms. `MemoryLock` maps to
+`--load-mode mlock`, `NoMemoryMap` maps to `--load-mode none`, and managed
+loopback servers receive an explicit localhost-only CORS origin list when the
+runtime proves that option. Older runtimes retain the legacy forms, and
+external/custom server profiles are not rewritten.
+
 The runtime identity includes the executable SHA256, size, modification time,
 parsed version/build/compiler/backend facts when available, and managed asset
 identity. Its portable stable id excludes the executable path. Model identity

@@ -161,4 +161,17 @@ public sealed class AudioPlaybackTests
 
         Assert.Equal(["first"], attempted);
     }
+
+    [Fact]
+    public async Task Successful_player_reports_the_selected_backend()
+    {
+        var selected = string.Empty;
+        await AudioPlayback.PlayCandidatesAsync(
+            [("first", (IReadOnlyList<string>)["tone.wav"])],
+            (_, _, _) => Task.FromResult(true),
+            CancellationToken.None,
+            value => selected = value);
+
+        Assert.Equal("first", selected);
+    }
 }

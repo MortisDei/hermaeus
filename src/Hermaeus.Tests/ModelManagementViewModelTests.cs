@@ -178,6 +178,28 @@ public sealed class ModelManagementViewModelTests
         }
     }
 
+    private sealed class RoutedBytesHandler(Func<string, byte[]> route) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var bytes = route(request.RequestUri!.ToString());
+            var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(bytes) };
+            response.Content.Headers.ContentLength = bytes.Length;
+            return Task.FromResult(response);
+        }
+    }
+
+    private static (string Metadata, string MetadataHash, string ModelHash, string CompanionHash) CompanionFixture(
+        byte[] modelBytes, byte[] companionBytes)
+    {
+        const string metadata = "{\"models\":[{\"model_path\":\"model.gguf\",\"companions\":[{\"path\":\"mmproj.gguf\",\"role\":\"projector\"}]}]}";
+        return (
+            metadata,
+            Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(metadata))),
+            Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(modelBytes)),
+            Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(companionBytes)));
+    }
+
     [Fact]
     public async Task CheckForUpdates_reports_nothing_when_no_models_are_linked()
     {
@@ -422,5 +444,189 @@ public sealed class ModelManagementViewModelTests
 
         Assert.Equal("already here", File.ReadAllText(Path.Combine(llmDir, "tiny.gguf")));
         Assert.Contains("already exists", toasts.LastShown?.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Initial_download_model_only_records_known_companion_without_downloading_it()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var assets = temp.PathFor("assets");
+        Directory.CreateDirectory(Path.Combine(assets, "Models"));
+        settings.Settings.DataManagement.LocalAiAssetsRoot = assets;
+        var modelBytes = System.Text.Encoding.UTF8.GetBytes("model");
+        var companionBytes = System.Text.Encoding.UTF8.GetBytes("projector");
+        var fixture = CompanionFixture(modelBytes, companionBytes);
+        var manifest = new ModelManifestStore(settings);
+        var vm = new ModelManagementViewModel(new ScriptedModelsLlm(() => []), new ModelProfileService(settings), new FakeToasts(), settings, new FakeSystemInfo(), NewServicesViewModel(settings), manifest, new HuggingFaceClient(), new ModelDownloadService(new HttpClient(new RoutedBytesHandler(_ => modelBytes))));
+        var file = new HfFileResultViewModel("org/repo", "model.gguf", modelBytes.Length, fixture.ModelHash, ModelFitTier.FitsGpu, "fits",
+            new ModelFileSet("org/repo", [
+                new ModelFileSetEntry("model.gguf", modelBytes.Length, fixture.ModelHash, ModelFileRole.Model, true, true),
+                new ModelFileSetEntry("mmproj.gguf", companionBytes.Length, fixture.CompanionHash, ModelFileRole.Projector, false, true)]));
+        file.IncludeProjector = false;
+
+        await vm.DownloadHfFileCommand.ExecuteAsync(file);
+
+        var modelPath = Path.Combine(assets, "Models", "llm", "org__repo", "model.gguf");
+        var primary = await manifest.FindAsync(modelPath);
+        Assert.True(File.Exists(modelPath));
+        Assert.False(File.Exists(Path.Combine(assets, "Models", "llm", "org__repo", "mmproj.gguf")));
+        Assert.Single(primary!.Companions);
+        Assert.False(settings.Settings.ModelProfiles.Single(p => p.ModelId == modelPath).AutoManageCompanionAssets);
+    }
+
+    [Fact]
+    public async Task Enabled_companion_policy_updates_an_explicitly_mapped_projector_with_the_model()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var assets = temp.PathFor("assets");
+        var modelDir = Path.Combine(assets, "Models", "llm", "org__repo");
+        Directory.CreateDirectory(modelDir);
+        settings.Settings.DataManagement.LocalAiAssetsRoot = assets;
+        var oldModel = System.Text.Encoding.UTF8.GetBytes("old-model");
+        var newModel = System.Text.Encoding.UTF8.GetBytes("new-model");
+        var oldCompanion = System.Text.Encoding.UTF8.GetBytes("old-projector");
+        var newCompanion = System.Text.Encoding.UTF8.GetBytes("new-projector");
+        var fixture = CompanionFixture(newModel, newCompanion);
+        var modelPath = Path.Combine(modelDir, "model.gguf");
+        var companionPath = Path.Combine(modelDir, "mmproj.gguf");
+        File.WriteAllBytes(modelPath, oldModel);
+        File.WriteAllBytes(companionPath, oldCompanion);
+        var settingsService = new ModelProfileService(settings);
+        settingsService.GetOrCreate(modelPath, "local GGUF").AutoManageCompanionAssets = true;
+        var manifest = new ModelManifestStore(settings);
+        await manifest.UpsertAsync(new ModelManifestEntry
+        {
+            FilePath = modelPath, RepoId = "org/repo", RepoFile = "model.gguf", Sha256 = "old-model-hash",
+            PendingSha256 = fixture.ModelHash, PendingSizeBytes = newModel.Length, Source = "hf-browser",
+            Companions = [new ModelCompanionManifestEntry { LocalFilePath = companionPath, RepoFile = "mmproj.gguf", Role = "projector", Sha256 = "old-companion-hash", SizeBytes = oldCompanion.Length }]
+        });
+        await manifest.UpsertAsync(new ModelManifestEntry
+        {
+            FilePath = companionPath, RepoId = "org/repo", RepoFile = "mmproj.gguf", Sha256 = "old-companion-hash",
+            SizeBytes = oldCompanion.Length, Source = "hf-browser", ParentModelPath = modelPath, CompanionRole = "projector"
+        });
+        var treeJson = $"[{{\"type\":\"file\",\"size\":{newModel.Length},\"lfs\":{{\"oid\":\"{fixture.ModelHash}\"}},\"path\":\"model.gguf\"}},{{\"type\":\"file\",\"size\":{newCompanion.Length},\"lfs\":{{\"oid\":\"{fixture.CompanionHash}\"}},\"path\":\"mmproj.gguf\"}},{{\"type\":\"file\",\"size\":{fixture.Metadata.Length},\"lfs\":{{\"oid\":\"{fixture.MetadataHash}\"}},\"path\":\".hermaeus/companions.json\"}}]";
+        var hf = new HuggingFaceClient(new HttpClient(new RoutedFakeHandler(url => url.Contains("/tree/", StringComparison.Ordinal) ? (HttpStatusCode.OK, treeJson) : (HttpStatusCode.OK, fixture.Metadata))));
+        var downloader = new ModelDownloadService(new HttpClient(new RoutedBytesHandler(url => url.Contains("mmproj.gguf", StringComparison.Ordinal) ? newCompanion : newModel)));
+        var vm = new ModelManagementViewModel(new ScriptedModelsLlm(() => []), settingsService, new FakeToasts(), settings, new FakeSystemInfo(), NewServicesViewModel(settings), manifest, hf, downloader);
+        var item = new ModelProfileItemViewModel(new LlmModel { Id = modelPath, Name = "model", Provider = "local GGUF" }, new ModelProfile { ModelId = modelPath, AutoManageCompanionAssets = true }) { UpdateStatus = ModelUpdateStatus.UpdateAvailable };
+
+        await vm.UpdateModelCommand.ExecuteAsync(item);
+
+        Assert.Equal("new-model", System.Text.Encoding.UTF8.GetString(File.ReadAllBytes(modelPath)));
+        Assert.Equal("new-projector", System.Text.Encoding.UTF8.GetString(File.ReadAllBytes(companionPath)));
+        Assert.Equal(fixture.CompanionHash, (await manifest.FindAsync(companionPath))!.Sha256);
+    }
+
+    [Fact]
+    public async Task Disabled_companion_policy_does_not_update_existing_companion()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var assets = temp.PathFor("assets");
+        var modelDir = Path.Combine(assets, "Models", "llm", "org__repo");
+        Directory.CreateDirectory(modelDir);
+        settings.Settings.DataManagement.LocalAiAssetsRoot = assets;
+        var modelPath = Path.Combine(modelDir, "model.gguf");
+        var companionPath = Path.Combine(modelDir, "mmproj.gguf");
+        File.WriteAllText(modelPath, "old");
+        File.WriteAllText(companionPath, "keep");
+        var newModel = System.Text.Encoding.UTF8.GetBytes("new");
+        var newModelHash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(newModel));
+        var profileService = new ModelProfileService(settings);
+        profileService.GetOrCreate(modelPath, "local GGUF").AutoManageCompanionAssets = false;
+        var manifest = new ModelManifestStore(settings);
+        await manifest.UpsertAsync(new ModelManifestEntry { FilePath = modelPath, RepoId = "org/repo", RepoFile = "model.gguf", Sha256 = "old", PendingSha256 = newModelHash, Source = "hf-browser", Companions = [new ModelCompanionManifestEntry { LocalFilePath = companionPath, RepoFile = "mmproj.gguf", Role = "projector", Sha256 = "old" }] });
+        await manifest.UpsertAsync(new ModelManifestEntry { FilePath = companionPath, RepoId = "org/repo", RepoFile = "mmproj.gguf", Sha256 = "old", Source = "hf-browser", ParentModelPath = modelPath, CompanionRole = "projector" });
+        var vm = new ModelManagementViewModel(new ScriptedModelsLlm(() => []), profileService, new FakeToasts(), settings, new FakeSystemInfo(), NewServicesViewModel(settings), manifest, new HuggingFaceClient(), new ModelDownloadService(new HttpClient(new RoutedBytesHandler(_ => newModel))));
+        var item = new ModelProfileItemViewModel(new LlmModel { Id = modelPath, Name = "model", Provider = "local GGUF" }, new ModelProfile { ModelId = modelPath, AutoManageCompanionAssets = false }) { UpdateStatus = ModelUpdateStatus.UpdateAvailable };
+
+        await vm.UpdateModelCommand.ExecuteAsync(item);
+
+        Assert.Equal("keep", File.ReadAllText(companionPath));
+    }
+
+    [Fact]
+    public async Task Missing_known_companion_can_be_reacquired_without_substitution()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var assets = temp.PathFor("assets");
+        var modelDir = Path.Combine(assets, "Models", "llm", "org__repo");
+        Directory.CreateDirectory(modelDir);
+        settings.Settings.DataManagement.LocalAiAssetsRoot = assets;
+        var modelPath = Path.Combine(modelDir, "model.gguf");
+        File.WriteAllText(modelPath, "model");
+        var companionBytes = System.Text.Encoding.UTF8.GetBytes("recovered-projector");
+        var fixture = CompanionFixture(System.Text.Encoding.UTF8.GetBytes("model"), companionBytes);
+        var companionPath = Path.Combine(modelDir, "mmproj.gguf");
+        var manifest = new ModelManifestStore(settings);
+        await manifest.UpsertAsync(new ModelManifestEntry { FilePath = modelPath, RepoId = "org/repo", RepoFile = "model.gguf", Sha256 = fixture.ModelHash, Source = "hf-browser", Companions = [new ModelCompanionManifestEntry { LocalFilePath = companionPath, RepoFile = "mmproj.gguf", Role = "projector", Sha256 = fixture.CompanionHash, SizeBytes = companionBytes.Length }] });
+        var treeJson = $"[{{\"type\":\"file\",\"size\":6,\"lfs\":{{\"oid\":\"{fixture.ModelHash}\"}},\"path\":\"model.gguf\"}},{{\"type\":\"file\",\"size\":{companionBytes.Length},\"lfs\":{{\"oid\":\"{fixture.CompanionHash}\"}},\"path\":\"mmproj.gguf\"}},{{\"type\":\"file\",\"size\":{fixture.Metadata.Length},\"lfs\":{{\"oid\":\"{fixture.MetadataHash}\"}},\"path\":\".hermaeus/companions.json\"}}]";
+        var hf = new HuggingFaceClient(new HttpClient(new RoutedFakeHandler(url => url.Contains("/tree/", StringComparison.Ordinal) ? (HttpStatusCode.OK, treeJson) : (HttpStatusCode.OK, fixture.Metadata))));
+        var vm = new ModelManagementViewModel(new ScriptedModelsLlm(() => []), new ModelProfileService(settings), new FakeToasts(), settings, new FakeSystemInfo(), NewServicesViewModel(settings), manifest, hf, new ModelDownloadService(new HttpClient(new RoutedBytesHandler(_ => companionBytes))));
+        var item = new ModelProfileItemViewModel(new LlmModel { Id = modelPath, Name = "model", Provider = "local GGUF" }, new ModelProfile { ModelId = modelPath }) { HasMissingCompanions = true };
+
+        await vm.ReacquireCompanionsCommand.ExecuteAsync(item);
+
+        Assert.Equal("recovered-projector", File.ReadAllText(companionPath));
+    }
+
+    [Fact]
+    public async Task Disabling_companion_policy_with_keep_choice_preserves_files()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var assets = temp.PathFor("assets");
+        var modelDir = Path.Combine(assets, "Models", "llm", "org__repo");
+        Directory.CreateDirectory(modelDir);
+        settings.Settings.DataManagement.LocalAiAssetsRoot = assets;
+        var modelPath = Path.Combine(modelDir, "model.gguf");
+        var companionPath = Path.Combine(modelDir, "mmproj.gguf");
+        File.WriteAllText(modelPath, "model");
+        File.WriteAllText(companionPath, "projector");
+        var profiles = new ModelProfileService(settings);
+        profiles.GetOrCreate(modelPath, "local GGUF").AutoManageCompanionAssets = true;
+        var manifest = new ModelManifestStore(settings);
+        await manifest.UpsertAsync(new ModelManifestEntry { FilePath = modelPath, RepoId = "org/repo", Companions = [new ModelCompanionManifestEntry { LocalFilePath = companionPath, RepoFile = "mmproj.gguf", Role = "projector" }] });
+        var vm = new ModelManagementViewModel(new ScriptedModelsLlm(() => []), profiles, new FakeToasts(), settings, new FakeSystemInfo(), NewServicesViewModel(settings), manifest, new HuggingFaceClient(), new ModelDownloadService());
+        vm.RequestCompanionDisableConfirmation = _ => Task.FromResult(CompanionDisableChoice.KeepFiles);
+        var item = new ModelProfileItemViewModel(new LlmModel { Id = modelPath, Name = "model", Provider = "local GGUF" }, new ModelProfile { ModelId = modelPath, AutoManageCompanionAssets = false });
+
+        await vm.SaveProfileCommand.ExecuteAsync(item);
+
+        Assert.True(File.Exists(companionPath));
+        Assert.False(settings.Settings.ModelProfiles.Single(p => p.ModelId == modelPath).AutoManageCompanionAssets);
+    }
+
+    [Fact]
+    public async Task Disabling_companion_policy_with_remove_choice_removes_only_manifested_files()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var assets = temp.PathFor("assets");
+        var modelDir = Path.Combine(assets, "Models", "llm", "org__repo");
+        Directory.CreateDirectory(modelDir);
+        settings.Settings.DataManagement.LocalAiAssetsRoot = assets;
+        var modelPath = Path.Combine(modelDir, "model.gguf");
+        var companionPath = Path.Combine(modelDir, "mmproj.gguf");
+        File.WriteAllText(modelPath, "model");
+        File.WriteAllText(companionPath, "projector");
+        var profiles = new ModelProfileService(settings);
+        profiles.GetOrCreate(modelPath, "local GGUF").AutoManageCompanionAssets = true;
+        var manifest = new ModelManifestStore(settings);
+        await manifest.UpsertAsync(new ModelManifestEntry { FilePath = modelPath, RepoId = "org/repo", Companions = [new ModelCompanionManifestEntry { LocalFilePath = companionPath, RepoFile = "mmproj.gguf", Role = "projector" }] });
+        await manifest.UpsertAsync(new ModelManifestEntry { FilePath = companionPath, RepoId = "org/repo", RepoFile = "mmproj.gguf", Source = "hf-browser", ParentModelPath = modelPath, CompanionRole = "projector" });
+        var vm = new ModelManagementViewModel(new ScriptedModelsLlm(() => []), profiles, new FakeToasts(), settings, new FakeSystemInfo(), NewServicesViewModel(settings), manifest, new HuggingFaceClient(), new ModelDownloadService());
+        vm.RequestCompanionDisableConfirmation = _ => Task.FromResult(CompanionDisableChoice.RemoveFiles);
+        var item = new ModelProfileItemViewModel(new LlmModel { Id = modelPath, Name = "model", Provider = "local GGUF" }, new ModelProfile { ModelId = modelPath, AutoManageCompanionAssets = false });
+
+        await vm.SaveProfileCommand.ExecuteAsync(item);
+
+        Assert.False(File.Exists(companionPath));
+        Assert.Null(await manifest.FindAsync(companionPath));
+        Assert.True(File.Exists(modelPath));
     }
 }

@@ -588,9 +588,10 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
 ## Live telemetry and audio feedback
 
 - Chat exposes a compact live-model telemetry flyout. Request timings remain
-  available during ordinary Chat without starting a polling loop; the shared
-  runtime session seam can add bounded process samples when an exact serving
-  process identity is attached. Missing counters remain `Unknown`.
+  available during ordinary Chat. The flyout can attach bounded sampling to
+  the exact managed llama-server PID serving the selected model. Process RAM
+  is process-scoped evidence; per-process VRAM remains `Unknown` when the
+  platform source cannot prove it.
 - Health policy is deterministic and restrained: low headroom, observed spill,
   comparable prediction discrepancies, context pressure, sustained compatible
   performance collapse, and known runtime failure can be actionable. High GPU
@@ -602,8 +603,15 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
 - Audio feedback has one semantic event service with explicit defaults,
   per-event toggles, volume, mute, visual equivalents, bounded queueing, and
   TTS suppression. It does not cue token arrival, navigation, ordinary clicks,
-  or high utilization. Windows playback passes the WAV path as an argument to
-  a fixed PowerShell script and never interpolates it into command text.
+  or high utilization. Task approval, completion, and failure cues are off by
+  default, while explicit persisted choices remain intact. Windows playback
+  validates the generated WAV and passes its path as an argument to a fixed
+  PowerShell script, never to the default file association.
+
+- Normal Settings preferences save automatically after a short debounce and
+  show Saving, Saved, or Failed state. Transactional model and runtime actions
+  retain their explicit Save Config controls. The Default system prompt editor
+  spans the full Settings content width.
 
 ## Model Management
 
@@ -700,7 +708,9 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
   headroom, placements, and named Unknown components. Context, cache type, GPU
   layers, slots, CPU-MoE, and companion selections recompute the preview but do
   not save settings. Low-bit KV byte maths is used only when the selected
-  runtime advertised that exact cache type.
+  runtime advertised that exact cache type. If one placement is Unknown, known
+  component values and subtotals remain visible and the unresolved reason is
+  named instead of being presented as zero.
 - Compare Models provides an in-chat practical comparison path for trying the
   same prompt across multiple visible models before choosing one for normal
   conversation.
@@ -792,11 +802,9 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
   repo-linked.
 - The local models list excludes companion files that ship alongside a real
   model in the same Hugging Face repo but are not themselves a loadable chat
-  model: `mmproj*.gguf` vision-projector files and `mtp-*.gguf`
-  multi-token-prediction draft-weight files. Neither has a first-class use in
-  Hermaeus today (multimodal and draft-model speculative decoding are both
-  out of scope), so they no longer clutter the list as unexplained
-  sub-500 MB "models".
+  model. Companions are managed only when the repository's hash-verified
+  `.hermaeus/companions.json` explicitly maps them to the model; `mmproj*` and
+  `mtp*` filenames alone are not compatibility evidence.
 - The Services card's server editor exposes first-class llama-server engine
   options next to Context Size/GPU Layers/Threads/Slots: KV cache type (K and
   V independently, f16/bf16/q8_0/q5_1/q5_0/q4_1/q4_0/iq4_nl), Flash Attention
@@ -818,10 +826,9 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
   so switching from f16 to q8_0/q4_0 visibly raises how much context fits the
   same VRAM.
 - The Services card's server editor also exposes an optional "Vision
-  projector" picker beside the model row: a `mmproj-*.gguf` file that sits
-  alone next to the selected model auto-fills and follows a later model
-  switch, otherwise it lists every `mmproj-*.gguf` found there for manual
-  choice. Setting one launches the
+  projector" picker beside the model row. It lists local candidates for
+  explicit choice, but never auto-fills or replaces one because a filename
+  alone is not compatibility evidence. Setting one launches the
   server with `--mmproj <path>`, enabling image attachments in chat for that
   server. A model path browsed or previously saved from outside the scanned
   assets root, and the models folder's own casing (`llm` vs `LLM`), are both
@@ -902,12 +909,11 @@ until Hermaeus has a complete drafter and compatibility workflow for them.
   model's own repository, so it shares the model's vocabulary by construction,
   and at tens of megabytes against a multi-gigabyte target it is the size ratio
   speculative decoding actually wants.
-- **The draft model itself** is found the same way the vision projector above
-  it is found: a scan for `mtp-*.gguf` beside the selected model and in its
-  `MTP/` subfolder. A sole candidate is filled in and follows a later model
-  switch; anything you chose explicitly is left alone. Finding the file does not turn
-  drafting on. Nothing reaches the launch command until you tick the box, so
-  discovery never silently changes how a server runs.
+- **The draft model itself** is offered only when the linked repository's
+  hash-verified companion manifest explicitly maps an MTP head to the selected
+  model. A filename or `MTP/` directory is not enough. Finding a mapped file
+  does not turn drafting on, and nothing reaches the launch command until the
+  user selects it.
 
 Both boxes write into one underlying `--spec-type` list, because the flag
 genuinely is a list and the two techniques compose. Each box only ever adds or
@@ -954,16 +960,17 @@ model-specific capability or direct drafting evidence.
 ### Complete downloads and per-model folders (r27)
 
 Selecting a GGUF in the Hugging Face browser resolves the model's whole **file
-set** from the repository tree that was already fetched:
+set** from the repository tree and any hash-verified explicit companion
+manifest:
 
 - **Shard siblings** are required. A partial shard set is a model that does not
   load, so shards are part of the download or the download is refused. A sharded
   model is listed once, as its first shard, rather than hidden.
-- **A vision projector** (`mmproj-*.gguf`) beside the model, offered and on by
-  default. Without it a multimodal model loads and quietly cannot see.
-- **An MTP draft head** (`mtp-*.gguf`) beside the model or in an `MTP/`
-  subdirectory, offered and on by default. This is the file speculative
-  decoding drafts from.
+- **A mapped vision projector** or **MTP draft head**, offered and on by
+  default only when the repository declares the exact model-to-companion
+  mapping and the companion has a verifiable hash. The additional size is
+  shown before download. Without mapping evidence the model-only choice is
+  the only honest choice.
 
 Each file keeps its own SHA256 verification, with deletion on mismatch, and its
 own manifest entry. Progress is reported across the set, so a three-shard
@@ -972,16 +979,27 @@ succeeded on disk and names what is missing: a 4 GB shard that downloaded
 correctly is not deleted because a 60 MB companion failed.
 
 Downloads land in `<models>/llm/<repo folder>/<filename>` rather than one flat
-folder. This is not tidiness. Projector discovery is a sibling-directory scan,
-so in a flat folder every model was offered every other model's projector, and
-companion filenames collide outright: a flat folder can hold exactly one file
-named `mmproj-F16.gguf`. Repository subdirectories are flattened into the model
-folder, so an `MTP/` head lands where that sibling scan already looks.
-**Organize folder** produces the same layout, moving companions with their
-model as one group. Files whose repository is known from the manifest go to
-that repository's folder; the rest go to a folder named from their own base
-name. A file that cannot be attributed is listed as skipped rather than moved
-somewhere wrong, and filenames are never changed.
+folder, and the model manifest records exact companion paths, roles, source
+paths, sizes, and hashes. **Organize folder** produces the same layout, moving
+companions with their model as one group. Files whose repository is known from
+the manifest go to that repository's folder; the rest go to a folder named
+from their own base name. A file that cannot be attributed is listed as skipped
+rather than moved somewhere wrong, and filenames are never changed.
+
+Each model exposes an **Automatically manage known companions** policy. Initial
+downloads offer mapped projector and MTP files individually, with known
+additional size. Model updates download or replace mapped companions only when
+the policy is enabled. Disabling it never deletes silently: if manifested
+companion files exist, Hermaeus asks to keep or remove them, or cancel. Missing
+mapped companions can be reacquired from the model card while the exact source
+mapping and hash remain available. A stale or untrusted path is left alone and
+must be cleared or repaired explicitly.
+
+The supported source manifest shape is an object containing `models`, each with
+an exact `model_path` and `companions` containing an exact `path` plus `role`
+(`projector` or `draft_head`). Hermaeus accepts only paths present in the same
+repository tree with LFS hashes, and verifies the manifest's own LFS hash before
+parsing it.
 
 ## RAG
 
