@@ -85,6 +85,7 @@ public static class HermaeusServiceRegistration
         s.AddSingleton<IVoiceProviderRegistry, VoiceProviderRegistry>();
         s.AddSingleton<ITtsService, VoiceRoutingTtsService>();
         s.AddSingleton<IVoiceOrchestrator, VoiceOrchestrator>();
+        s.AddSingleton<IAudioFeedbackService, AudioFeedbackService>();
         s.AddSingleton<VoiceNotificationBridge>();
         s.AddSingleton<NativeSpeechRecognitionProvider>();
         s.AddSingleton<OpenAiSpeechRecognitionProvider>();

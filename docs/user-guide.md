@@ -155,6 +155,21 @@ Its capabilities response reports Agent unavailable because the Desktop and
 Local API processes do not yet share one safe task-mutation owner. Named API
 tokens cannot create, start, steer, continue, approve, or deny Agent work.
 
+## Live telemetry and audio feedback
+
+Chat's bar includes a compact telemetry flyout for request-level timing and
+matching process counters when a local runtime sampling session is available.
+The flyout does not replace Chat with a dashboard. `Unknown` means the current
+runtime has not supplied trustworthy evidence, not zero. Health conditions are
+restrained and deduplicated; high GPU use by itself is normal and produces no
+warning.
+
+Settings > Voice contains supplementary audio feedback controls for the
+explicit task/runtime/recording event list. Volume is retained when muted,
+visual notifications remain authoritative, and cues are suppressed while TTS
+speaks by default. Playback failure does not fail the operation that raised the
+visual notification.
+
 ## Lab experiments and evidence
 
 Open **Lab > Experiment**, select a configured Chat server, name the run, and

@@ -168,7 +168,15 @@ each watch row with:
 Research is complete when the evidence and decision are recorded. It is not
 measured by code volume.
 
-## 6.9 Research acceptance and test budget
+## 6.9 R31 close-out measurement
+
+Checked 2026-08-26 on Windows 11. The refreshed coverage run passed 2,203 of
+2,203 sequential tests with 63.79% line coverage (`36,238 / 56,805`), above
+the 60% ratchet. The targeted Batch 12/13 additions and the full suite passed;
+Linux driver, audio, and COSMIC behavior remain live gates rather than inferred
+from this result.
+
+## 6.10 Research acceptance and test budget
 
 - Capability ids for reconfiguration, public speculative orchestration,
   DFlash, expert cache/prefetch/streaming, and reconstructable KV can be stored

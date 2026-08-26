@@ -585,6 +585,26 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
   GPU/RAM discrepancies where the source is genuinely comparable; mismatches
   and device-total-only GPU readings remain separate and display `Unknown`.
 
+## Live telemetry and audio feedback
+
+- Chat exposes a compact live-model telemetry flyout. Request timings remain
+  available during ordinary Chat without starting a polling loop; the shared
+  runtime session seam can add bounded process samples when an exact serving
+  process identity is attached. Missing counters remain `Unknown`.
+- Health policy is deterministic and restrained: low headroom, observed spill,
+  comparable prediction discrepancies, context pressure, sustained compatible
+  performance collapse, and known runtime failure can be actionable. High GPU
+  utilization alone never raises a condition. Notifications deduplicate by
+  runtime/model identity and recover before repeating.
+- Chat streaming keeps the existing bottom-pinned behavior. Extent growth only
+  follows while pinned, and an upward reader position is preserved through
+  generation and completion until the user returns to the bottom.
+- Audio feedback has one semantic event service with explicit defaults,
+  per-event toggles, volume, mute, visual equivalents, bounded queueing, and
+  TTS suppression. It does not cue token arrival, navigation, ordinary clicks,
+  or high utilization. Windows playback passes the WAV path as an argument to
+  a fixed PowerShell script and never interpolates it into command text.
+
 ## Model Management
 
 - The model list is a wrapping grid of cards rather than full-width rows. Each

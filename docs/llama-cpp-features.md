@@ -190,3 +190,29 @@ Hermaeus still had the old slug in three places: the release-download base URL,
 the Doctor update check's API URL, and the releases page link. GitHub redirects
 the old path, so this kept working, but a redirect is not a guarantee and an
 API call that silently depends on one is a latent break.
+
+## R31 Batch 15 upstream audit, checked 2026-08-26
+
+This is a dated watch result, not a claim about the installed Windows runtime.
+The current upstream release page observed `v0.3.0` as the latest release and
+`b10630` as a prerelease. Hermaeus still does not expose a Stable semantic
+channel because upstream's release/build distinction is not a product
+compatibility contract.
+
+| Area | Current upstream observation | Hermaeus decision |
+| --- | --- | --- |
+| GLM MTP | `v0.3.0` release notes mention MTP support for GLM-4.5-Air. | Keep model/runtime-pair evidence `Unknown` until the selected runtime and model produce direct positive engagement evidence. Generic `draft-mtp` help is insufficient. |
+| Runtime reconfiguration | Reconfiguration remains an upstream feedback discussion. Model, KV, projector, and speculative lifetimes are not a stable Hermaeus API contract. | Watch. No runtime mutation or restart replacement in R31. |
+| Public speculative API | A public `llama.h` speculative/MTP API remains an open upstream request. | Watch. Hermaeus continues to use managed `llama-server`; no native binding dependency. |
+| DFlash | Current upstream documentation describes `draft-dflash`, target-specific conversion, block-size limits, and target-state injection. | Registry representation remains conditional. No DFlash settings or production adapter without exact asset identity, correctness, counters, and measured benefit. |
+| MoE prefetch/streaming | Upstream discussion remains comparative and exploratory. Existing `--n-cpu-moe` is placement, not expert caching or NVMe streaming. | Watch. No hidden prefetch policy or user setting. |
+| Reconstructable KV | The residual-stream paper is research evidence, not an upstream runtime contract. | Watch. No Hermaeus KV reimplementation or capability claim. |
+
+Sources checked on 2026-08-26:
+
+- <https://github.com/ggml-org/llama.cpp/releases>
+- <https://github.com/ggml-org/llama.cpp/blob/master/docs/speculative.md>
+- <https://github.com/ggml-org/llama.cpp/issues/27469>
+- <https://github.com/ggml-org/llama.cpp/discussions/25674>
+- <https://github.com/ggml-org/llama.cpp/discussions/18758>
+- <https://arxiv.org/abs/2603.19664>

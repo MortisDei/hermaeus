@@ -277,6 +277,28 @@
                 <!-- r19 4.4: global stop for streamed auto-speech, which queues many
                      chunks - StopChannel clears the whole queue, not just what is
                      currently playing. -->
+                <Button Grid.Column="10" Classes="icon-btn"
+                        ToolTip.Tip="Live model telemetry">
+                    <PathIcon Data="M3 13h2v8H3v-8zm4-6h2v14H7V7zm4 3h2v11h-2V10zm4-7h2v18h-2V3z"
+                              Width="16" Height="16" />
+                    <Button.Flyout>
+                        <Flyout Placement="Bottom">
+                            <StackPanel Width="300" Spacing="7">
+                                <TextBlock Text="Live model telemetry" FontSize="14" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding Telemetry.RuntimeIdentity, StringFormat='Runtime: {0}'}" FontSize="11" TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding Telemetry.ModelIdentity, StringFormat='Model: {0}'}" FontSize="11" TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding Telemetry.DecodeRate, StringFormat='Decode: {0}'}" FontSize="11" />
+                                <TextBlock Text="{Binding Telemetry.PromptThroughput, StringFormat='Prompt: {0}'}" FontSize="11" />
+                                <TextBlock Text="{Binding Telemetry.TimeToFirstToken, StringFormat='Time to first token: {0}'}" FontSize="11" />
+                                <TextBlock Text="{Binding Telemetry.TokensServed, StringFormat='Tokens served: {0}'}" FontSize="11" />
+                                <TextBlock Text="{Binding Telemetry.ProcessRam, StringFormat='Process RAM: {0}'}" FontSize="11" />
+                                <TextBlock Text="{Binding Telemetry.ProcessGpuMemory, StringFormat='Process VRAM: {0}'}" FontSize="11" />
+                                <TextBlock Text="{Binding Telemetry.UnknownNote}" FontSize="10" Opacity="0.6" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Flyout>
+                    </Button.Flyout>
+                </Button>
+
                 <Button Grid.Column="11" Classes="icon-btn"
                         Command="{Binding StopSpeakingCommand}"
                         IsVisible="{Binding IsVoicePlaying}"

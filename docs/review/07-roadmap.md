@@ -51,11 +51,11 @@ and evidence origins are reliable.
 | 9 | Project State persistence/editor/proposals/context receipt | 1, 2 | mandatory independent | Yes (Linux/COSMIC live gate pending) |
 | 10 | Per-subtask model selection through approved plan, task/transcript/report/synthesis identity and no-fallback behavior | 1, 3 | mandatory independent | Yes (Linux/COSMIC two-model gate pending) |
 | 11 | Agent Local API policy/contracts and single-owner decision; implement safe scoped endpoints only if the ownership gate is satisfied | 1, 9, 10 | mandatory design, conditional execution | Yes (execution endpoints deferred: single-owner gate not satisfied) |
-| 12 | Live telemetry pop-out and deterministic deduplicated health conditions using the shared telemetry/experience foundations | 4 | mandatory independent | No |
-| 13 | Chat scroll regression seam/tests and audio-feedback service/settings/assets/safe playback arbitration | none for scroll; telemetry notification service may be reused for cue events | mandatory independent | No |
-| 14 | Targeted measured tests/hardening from the refreshed coverage report; docs/features/user guide/workflow docs/changelog synchronization | all changed batches | mandatory close-out | No |
-| 15 | Dated upstream/watch audit: update channels, GLM MTP, reconfiguration, public speculative API, DFlash, MoE prefetch/streaming, reconstructable KV | 3, 5 | mandatory research deliverable | No |
-| 16 | Full Windows/Linux automated gates, Linux/COSMIC batch verification, Windows audio/package-sensitive verification, public diff/security/PII audit | all | mandatory release gate | No |
+| 12 | Live telemetry pop-out and deterministic deduplicated health conditions using the shared telemetry/experience foundations | 4 | mandatory independent | Yes (automated; live telemetry/health gate pending) |
+| 13 | Chat scroll regression seam/tests and audio-feedback service/settings/assets/safe playback arbitration | none for scroll; telemetry notification service may be reused for cue events | mandatory independent | Yes (automated; Linux/COSMIC and Windows audio gates pending) |
+| 14 | Targeted measured tests/hardening from the refreshed coverage report; docs/features/user guide/workflow docs/changelog synchronization | all changed batches | mandatory close-out | Yes (`evidence/r31-batch-14.md`) |
+| 15 | Dated upstream/watch audit: update channels, GLM MTP, reconfiguration, public speculative API, DFlash, MoE prefetch/streaming, reconstructable KV | 3, 5 | mandatory research deliverable | Yes (`evidence/r31-batch-15.md`) |
+| 16 | Full Windows/Linux automated gates, Linux/COSMIC batch verification, Windows audio/package-sensitive verification, public diff/security/PII audit | all | mandatory release gate | Partial (`evidence/r31-batch-16.md`; live platform gates pending) |
 
 Batch 0 is not permission to redesign the pack casually. It resolves facts that
 can drift between this planning commit and implementation, especially installed

@@ -176,6 +176,15 @@ playback infrastructure. It owns one bounded queue and cancellation.
 
 ## 5.10 Acceptance criteria
 
+### R31 implementation status
+
+The current implementation provides the bounded shared sampler, request-level
+Chat metrics, identity-scoped projection, deterministic health policy and
+notification gate, Chat pin-state seam, audio event policy/settings, bounded
+cue queue, TTS suppression, and argument-only Windows playback invocation.
+Per-process VRAM, runtime launch identity attachment for ordinary Chat, and
+live platform behavior remain `Unknown` until their stated manual gates run.
+
 - Telemetry flyout follows the runtime actually serving Chat, shows source and
   Unknown states, and releases sampling when closed.
 - Metrics reset on runtime/model identity change and never mix histories.

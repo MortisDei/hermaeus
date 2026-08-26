@@ -33,4 +33,14 @@ public sealed class AudioPlaybackTests
         var selected = AudioPlayback.SelectPlayerCommand(_ => false, isWindowsOverride: true);
         Assert.Null(selected);
     }
+
+    [Fact]
+    public void Windows_arguments_keep_the_path_out_of_the_fixed_command_body()
+    {
+        var args = AudioPlayback.BuildArguments("powershell", "C:\\private\\tone's.wav");
+
+        Assert.Contains("param([string]$path)", args[3]);
+        Assert.Contains("C:\\private\\tone's.wav", args);
+        Assert.DoesNotContain("tone's.wav", args[3]);
+    }
 }

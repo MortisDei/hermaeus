@@ -189,6 +189,7 @@ public partial class ChatViewModel : ViewModelBase
     private readonly Hermaeus.Services.Recall.RecallIndexingService? _recallIndexing;
     private readonly Hermaeus.Services.Recall.RecallService? _recallSearch;
     private readonly IProjectStateStore? _projectState;
+    public LiveModelTelemetryViewModel? Telemetry { get; }
     private bool _suppressRagDatasetWrite;
     private CancellationTokenSource? _cts;
     private CancellationTokenSource? _ttsCts;
@@ -760,13 +761,15 @@ public partial class ChatViewModel : ViewModelBase
         Hermaeus.Services.Recall.RecallService? recallSearch = null,
         IAudioCapture? audioCapture = null,
         ISpeechRecognitionProviderRegistry? sttProviders = null,
-        IProjectStateStore? projectState = null)
+         IProjectStateStore? projectState = null,
+         LiveModelTelemetryViewModel? telemetry = null)
     {
         _artifacts = artifacts;
         _rag = rag;
         _recallIndexing = recallIndexing;
         _recallSearch = recallSearch;
         _projectState = projectState;
+        Telemetry = telemetry;
         ChatMic = new MicButtonViewModel(audioCapture, sttProviders, settings);
         SaveCodeBlockAction = (lang, code, markdown) => _ = SaveCodeBlockAsync(lang, code, markdown);
         _llm = llm; _store = store; _settings = settings; _tts = tts; _profiles = profiles; _toasts = toasts;
@@ -1368,6 +1371,7 @@ public partial class ChatViewModel : ViewModelBase
             }
 
             var timing = new ChatSendTiming(recallMs, selectMs, lessonMs, promptBuildMs, result.FirstTokenMs, result.TotalLatencyMs, result.ServerTimings, result.FirstEventMs, ragMs, recallInjectionMs);
+            Telemetry?.RecordRequest(selectedModelId, SelectedModel.ProviderTag, result.ServerTimings, result.Usage, result.FirstTokenMs, result.TotalLatencyMs);
             asst.DurationMs = result.TotalLatencyMs;
             PerformanceLog = result.Cancelled
                 ? $"cancelled after {result.TotalLatencyMs} ms"

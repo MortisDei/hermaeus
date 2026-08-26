@@ -16,6 +16,23 @@
                       Content="Experimental: speak replies sentence-by-sentence while generating" FontSize="13"
                       ToolTip.Tip="Speaks each sentence as soon as it streams in instead of waiting for the full reply; pacing between sentences can be uneven." />
 
+            <TextBlock Text="Audio feedback" FontSize="13" FontWeight="SemiBold" Opacity="0.8" Margin="0,4,0,0" />
+            <CheckBox IsChecked="{Binding AudioFeedbackEnabled}" Content="Enable supplementary audio feedback" FontSize="13" />
+            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+                <TextBlock Text="Volume" VerticalAlignment="Center" FontSize="12" />
+                <Slider Grid.Column="1" Minimum="0" Maximum="100" Value="{Binding AudioFeedbackVolume}" />
+                <TextBlock Grid.Column="2" Text="{Binding AudioFeedbackVolume, StringFormat={}{0}%}" VerticalAlignment="Center" FontSize="12" />
+            </Grid>
+            <CheckBox IsChecked="{Binding AudioFeedbackMuted}" Content="Mute feedback (keeps volume)" FontSize="13" />
+            <CheckBox IsChecked="{Binding SuppressAudioFeedbackWhileTts}" Content="Do not play cues while TTS is speaking" FontSize="13" />
+            <ItemsControl ItemsSource="{Binding AudioFeedbackEvents}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="vm:AudioFeedbackToggleViewModel">
+                        <CheckBox IsChecked="{Binding Enabled}" Content="{Binding DisplayName}" FontSize="12" />
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
             <TextBlock Text="Channels" FontSize="13" FontWeight="SemiBold" Opacity="0.8" Margin="0,4,0,0" />
             <ItemsControl ItemsSource="{Binding VoiceChannels}">
                 <ItemsControl.ItemTemplate>

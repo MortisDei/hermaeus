@@ -17,10 +17,7 @@ public static class AudioPlayback
 {
     public static async Task PlayAsync(string wavFilePath, CancellationToken ct)
     {
-        if (OperatingSystem.IsWindows() && await TryRunAsync("powershell", [
-                "-NoProfile", "-Command",
-                $"(New-Object Media.SoundPlayer '{wavFilePath}').PlaySync();"
-            ], ct))
+        if (OperatingSystem.IsWindows() && await TryRunAsync("powershell", BuildArguments("powershell", wavFilePath), ct))
             return;
 
         if (await TryRunAsync("paplay", [wavFilePath], ct)) return;
@@ -44,6 +41,18 @@ public static class AudioPlayback
         if (isOnPath("ffplay")) return "ffplay";
         return null;
     }
+
+    /// <summary>
+    /// Builds process arguments without embedding the user-controlled WAV path
+    /// in a shell command. PowerShell receives the path as an argument to a
+    /// fixed script body.
+    /// </summary>
+    public static IReadOnlyList<string> BuildArguments(string command, string wavFilePath) =>
+        command.Equals("powershell", StringComparison.OrdinalIgnoreCase)
+            ? ["-NoProfile", "-NonInteractive", "-Command",
+                "param([string]$path); (New-Object Media.SoundPlayer $path).PlaySync();",
+                wavFilePath]
+            : [wavFilePath];
 
     private static async Task<bool> TryRunAsync(string command, IReadOnlyList<string> args, CancellationToken ct)
     {

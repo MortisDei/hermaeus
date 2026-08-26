@@ -23,7 +23,6 @@ public partial class ChatView : UserControl
     // extent growth while pinned, and un-pins the instant the user scrolls
     // away, so their position is never fought mid-stream.
     private bool _pinnedToBottom = true;
-    private const double BottomPinThreshold = 40;
 
     public ChatView()
     {
@@ -240,13 +239,15 @@ public partial class ChatView : UserControl
     {
         if (sender is not ScrollViewer scroll) return;
 
-        if (e.ExtentDelta.Y != 0 && _pinnedToBottom)
-        {
+        var transition = ChatScrollPinState.Apply(
+            _pinnedToBottom,
+            scroll.Extent.Height,
+            scroll.Viewport.Height,
+            scroll.Offset.Y,
+            e.ExtentDelta.Y);
+        _pinnedToBottom = transition.IsPinned;
+        if (transition.ShouldSnap)
             SnapToBottomIfPinned(force: true);
-            return;
-        }
-
-        _pinnedToBottom = DistanceFromBottom(scroll) <= BottomPinThreshold;
     }
 
     private void SnapToBottomIfPinned(bool force = false)
@@ -256,9 +257,6 @@ public partial class ChatView : UserControl
         var maxOffsetY = Math.Max(0, scroll.Extent.Height - scroll.Viewport.Height);
         scroll.Offset = new Vector(scroll.Offset.X, maxOffsetY);
     }
-
-    private static double DistanceFromBottom(ScrollViewer scroll) =>
-        Math.Max(0, scroll.Extent.Height - scroll.Viewport.Height - scroll.Offset.Y);
 
     /// <summary>
     /// r29 doc 01 1.4: AcceptsReturn is true always and this handler owns both

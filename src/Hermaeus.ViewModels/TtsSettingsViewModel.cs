@@ -51,6 +51,19 @@ public partial class VoiceChannelSettingViewModel : ObservableObject
     partial void OnVoiceIdChanged(string value) => OnPropertyChanged(nameof(VoiceDisplay));
 }
 
+public partial class AudioFeedbackToggleViewModel : ObservableObject
+{
+    public AudioFeedbackEventKind Kind { get; }
+    public string DisplayName { get; }
+    [ObservableProperty] private bool _enabled;
+
+    public AudioFeedbackToggleViewModel(AudioFeedbackEventKind kind)
+    {
+        Kind = kind;
+        DisplayName = kind.ToString();
+    }
+}
+
 public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
 {
     private readonly ITtsService _tts;
@@ -64,6 +77,7 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
     private bool _isReloading;
 
     public UiBoundCollection<VoiceChannelSettingViewModel> VoiceChannels { get; } = [];
+    public UiBoundCollection<AudioFeedbackToggleViewModel> AudioFeedbackEvents { get; } = [];
 
     /// <summary>r24: the channel voice picker's suggestion list - the default-voice sentinel
     /// followed by the active provider's own voices, kept live as <see cref="TtsVoices"/> refreshes.</summary>
@@ -71,6 +85,10 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
 
     [ObservableProperty] private bool _autoSpeakChatReplies;
     [ObservableProperty] private bool _streamingChatSpeech;
+    [ObservableProperty] private bool _audioFeedbackEnabled = true;
+    [ObservableProperty] private int _audioFeedbackVolume = 50;
+    [ObservableProperty] private bool _audioFeedbackMuted;
+    [ObservableProperty] private bool _suppressAudioFeedbackWhileTts = true;
 
     public bool IsVoiceMuted
     {
@@ -196,6 +214,8 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
         _kokoroProcess = kokoroProcess;
         _settings = settings;
         _voice = voiceOrchestrator;
+        foreach (var kind in Enum.GetValues<AudioFeedbackEventKind>())
+            AudioFeedbackEvents.Add(new AudioFeedbackToggleViewModel(kind));
         _xttsProcess.StatusChanged += OnXttsStatusChanged;
         _kokoroProcess.StatusChanged += OnXttsStatusChanged;
         TtsVoices.CollectionChanged += (_, _) => RefreshChannelVoiceOptions();
@@ -242,6 +262,11 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
     {
         tts.AutoSpeakChatReplies = AutoSpeakChatReplies;
         tts.StreamingChatSpeech = StreamingChatSpeech;
+        tts.AudioFeedback.Enabled = AudioFeedbackEnabled;
+        tts.AudioFeedback.Volume = Math.Clamp(AudioFeedbackVolume, 0, 100);
+        tts.AudioFeedback.Muted = AudioFeedbackMuted;
+        tts.AudioFeedback.SuppressWhileTtsSpeaking = SuppressAudioFeedbackWhileTts;
+        tts.AudioFeedback.EventEnabled = AudioFeedbackEvents.ToDictionary(item => item.Kind.ToString(), item => item.Enabled);
         tts.Channels = VoiceChannels.ToDictionary(
             c => c.Channel.ToString(),
             c => new VoiceChannelConfig { Enabled = c.Enabled, VoiceId = c.VoiceId.Trim() });
@@ -274,6 +299,12 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
 
         AutoSpeakChatReplies = tts.AutoSpeakChatReplies;
         StreamingChatSpeech = tts.StreamingChatSpeech;
+        AudioFeedbackEnabled = tts.AudioFeedback.Enabled;
+        AudioFeedbackVolume = Math.Clamp(tts.AudioFeedback.Volume, 0, 100);
+        AudioFeedbackMuted = tts.AudioFeedback.Muted;
+        SuppressAudioFeedbackWhileTts = tts.AudioFeedback.SuppressWhileTtsSpeaking;
+        foreach (var item in AudioFeedbackEvents)
+            item.Enabled = tts.AudioFeedback.IsEnabled(item.Kind);
         OnPropertyChanged(nameof(IsVoiceMuted));
 
         var remote = IsSelectedProviderRemote;

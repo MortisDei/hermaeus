@@ -41,6 +41,13 @@ limit.
   GPU Fit prediction with shared process telemetry and greedy correctness
   evidence, stops on repeated failure or mismatch, and stores repeated evidence
   in bounded immutable configuration slices without auto-selecting a winner.
+- Added the compact Chat telemetry flyout and shared bounded sampler seam. Chat
+  request timings remain direct evidence, health policy is deterministic and
+  deduplicated, and missing process/resource counters remain `Unknown`.
+- Added explicit audio feedback settings and semantic cue service with bounded
+  queueing, TTS suppression, visual equivalents, generated short PCM cues, and
+  safe argument-only Windows playback. Chat scroll pin-state transitions now
+  have regression coverage without replacing the existing anchoring behavior.
 - Added conditional Lab adapters for general external drafting and EAGLE-3,
   plus bounded one-at-a-time draft maximum/minimum, probability, and GPU-layer
   recipes. Exact runtime flags, verified target/companion identities,

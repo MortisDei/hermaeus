@@ -288,6 +288,8 @@ public partial class App : Application
     {
         s.AddHermaeusCoreServices();
         s.AddSingleton<ChatViewModel>();
+        s.AddSingleton<LiveModelTelemetrySampler>();
+        s.AddSingleton<LiveModelTelemetryViewModel>();
         s.AddSingleton<AgentScenarioSuiteViewModel>();
         s.AddSingleton<AgentViewModel>();
         // Shared between SettingsViewModel (Voice orchestration/channels) and
