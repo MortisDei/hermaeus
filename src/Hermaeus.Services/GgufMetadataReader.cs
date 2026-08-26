@@ -232,6 +232,7 @@ public static class GgufMetadataReader
         catch (InvalidDataException) { return null; }
         catch (ArgumentException) { return null; }
         catch (NotSupportedException) { return null; }
+        catch (OverflowException) { return null; }
     }
 
     private static string FormatQuantization(long? fileType) =>
@@ -370,12 +371,17 @@ public static class GgufMetadataReader
 
     private static byte[] ReadExactBytes(BinaryReader r, long count)
     {
-        if (count < 0)
-            throw new InvalidDataException("GGUF declared a negative length.");
-        var buffer = new byte[count];
-        var read = r.Read(buffer, 0, buffer.Length);
-        if (read != buffer.Length)
-            throw new EndOfStreamException("GGUF file truncated.");
+        if (count < 0 || count > int.MaxValue)
+            throw new InvalidDataException("GGUF declared an unsupported length.");
+        var buffer = new byte[(int)count];
+        var offset = 0;
+        while (offset < buffer.Length)
+        {
+            var read = r.Read(buffer, offset, buffer.Length - offset);
+            if (read == 0)
+                throw new EndOfStreamException("GGUF file truncated.");
+            offset += read;
+        }
         return buffer;
     }
 }

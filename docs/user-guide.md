@@ -198,7 +198,9 @@ runtime has not supplied the exact evidence needed; it is not an invitation to
 force the flag. Select an Available recipe, enter a controlled prompt, and use
 **Run selected recipe**. Lab runs the baseline plus a small candidate set with
 three fixed greedy repetitions. **Cancel recipe** stops at the owned request or
-process boundary.
+process boundary. Results and retained evidence refresh automatically after a
+successful, failed, or cancelled recipe; the Evidence tab's **Refresh** button
+is still available for an explicit reload.
 
 The trade-off table reports decode speed, predicted and observed RAM/GPU,
 correctness, and any refusal together. Buffered llama-server replies do not
@@ -223,6 +225,16 @@ not show a reused-token estimate. `Reused tokens Unknown` means the selected
 runtime has no proven direct counter schema, even if the cached side is faster.
 Only prompt hashes, not the typed prefix, are stored in the experiment
 definition.
+
+Large runs are persisted as bounded immutable evidence slices linked from the
+completion summary. The slices remain the authoritative normalized evidence,
+and can still be inspected, corrected, removed, or exported through Lab >
+Evidence without putting the whole run into one oversized experience document.
+
+The configured Chat server is selected automatically when there is exactly one
+non-embedding server. With multiple servers, choose the intended server before
+freezing the definition. Lab recipe controls report their runtime gate and
+remain visible when a capability is unavailable or Unknown.
 
 Use **Lab > Evidence** to inspect structured Agent,
 GPU Fit, and experiment evidence. Filters cover domain, project/workspace

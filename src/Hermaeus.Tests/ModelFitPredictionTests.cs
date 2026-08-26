@@ -98,6 +98,8 @@ public sealed class ModelFitPredictionTests
 
         Assert.Null(prediction.GpuRequiredBytes);
         Assert.Contains("Model weight size", prediction.UnknownComponents);
+        Assert.Null(prediction.WeightPlacement.Bytes);
+        Assert.Contains("Model weights: Unknown", ModelFitPredictor.FormatBreakdown(prediction), StringComparison.Ordinal);
     }
 
     [Fact]

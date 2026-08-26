@@ -42,4 +42,13 @@ public sealed class ChatScrollPinStateTests
         Assert.False(result.IsPinned);
         Assert.False(result.ShouldSnap);
     }
+
+    [Fact]
+    public void Extent_growth_after_scroll_up_does_not_repin_the_view()
+    {
+        var result = ChatScrollPinState.Apply(true, 1220, 400, 700, 20);
+
+        Assert.False(result.IsPinned);
+        Assert.False(result.ShouldSnap);
+    }
 }

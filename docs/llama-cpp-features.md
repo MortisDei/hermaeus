@@ -216,3 +216,20 @@ Sources checked on 2026-08-26:
 - <https://github.com/ggml-org/llama.cpp/discussions/25674>
 - <https://github.com/ggml-org/llama.cpp/discussions/18758>
 - <https://arxiv.org/abs/2603.19664>
+
+## R31 Batch 17 upstream capability audit, checked 2026-08-26
+
+The requested b10590 to b10632 review does not produce a safe new Hermaeus
+integration. The b10632 release is a Metal-specific chunked SSD MMA prefill
+optimization for Mamba-2, including sequential rollback handling. It changes
+the Metal backend implementation, not a stable llama-server option,
+machine-readable telemetry field, or cross-backend capability contract.
+
+That makes it relevant to a future Metal runtime performance investigation, but
+not to the current Windows CUDA, Linux Vulkan, or Linux SYCL product surfaces.
+No NVIDIA-only control, generic Flash Attention tuning claim, GLM4-MoE claim,
+DeepSeek V4 KV claim, speculative DFlash adapter, runtime reconfiguration API,
+or server slot-save API was added from this audit. Existing runtime help probes,
+exact identity checks, and Unknown gates remain the correct integration point
+for those areas. The b10632 release notes are the upstream evidence for this
+decision: <https://github.com/ggml-org/llama.cpp/releases/tag/b10632>.

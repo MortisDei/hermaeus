@@ -678,29 +678,32 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
             .Prepend(run.Definition.Baseline.Id).ToArray();
         foreach (var configurationId in configurationIds)
         {
-            var slice = new LabRunEvidenceSlice(
-                run.Id, run.DefinitionHash, configurationId,
-                run.Observations.Where(item => item.ConfigurationId == configurationId).ToArray(),
-                run.Outputs.Where(item => item.ConfigurationId == configurationId).ToArray());
-            var saved = await _experience.AddAsync(new EmpiricalExperienceDraft
+            var observations = run.Observations.Where(item => item.ConfigurationId == configurationId).ToArray();
+            var outputs = run.Outputs.Where(item => item.ConfigurationId == configurationId).ToArray();
+            var chunkIndex = 0;
+            foreach (var slice in SplitEvidenceSlices(run.Id, run.DefinitionHash, configurationId, observations, outputs))
             {
-                Domain = EmpiricalExperienceDomains.LabRun,
-                ContextJson = LabCanonicalJson.Serialize(new { runId = run.Id, run.DefinitionHash, configurationId }),
-                ActionJson = LabCanonicalJson.Serialize(slice),
-                RuntimeFingerprint = run.Definition.ProfileFingerprint.Runtime.StableId,
-                ModelFingerprint = run.Definition.ProfileFingerprint.Model.StableId,
-                Provenance =
-                [
-                    new EmpiricalExperienceProvenance(run.StartEvidenceId,
-                        new SourceReference(ProvenanceKind.Lab, "Frozen Lab definition", run.StartEvidenceId,
-                            EvidenceOrigin: EvidenceOrigin.Extracted))
-                ],
-                Outcome = NormalizedToolOutcome.Create(
-                    slice.Observations.Count > 0 ? NormalizedOutcome.Succeeded : NormalizedOutcome.Unknown,
-                    "lab-run-evidence-slice",
-                    $"Immutable {configurationId} evidence contains {slice.Observations.Count} observations and {slice.Outputs.Count} output hashes.")
-            }, ct);
-            sliceIds.Add(saved.Id);
+                var chunk = slice with { ChunkIndex = chunkIndex++ };
+                var saved = await _experience.AddAsync(new EmpiricalExperienceDraft
+                {
+                    Domain = EmpiricalExperienceDomains.LabRun,
+                    ContextJson = LabCanonicalJson.Serialize(new { runId = run.Id, run.DefinitionHash, configurationId, chunk.ChunkIndex }),
+                    ActionJson = ExperienceJson.Canonicalize(chunk),
+                    RuntimeFingerprint = run.Definition.ProfileFingerprint.Runtime.StableId,
+                    ModelFingerprint = run.Definition.ProfileFingerprint.Model.StableId,
+                    Provenance =
+                    [
+                        new EmpiricalExperienceProvenance(run.StartEvidenceId,
+                            new SourceReference(ProvenanceKind.Lab, "Frozen Lab definition", run.StartEvidenceId,
+                                EvidenceOrigin: EvidenceOrigin.Extracted))
+                    ],
+                    Outcome = NormalizedToolOutcome.Create(
+                        chunk.Observations.Count > 0 ? NormalizedOutcome.Succeeded : NormalizedOutcome.Unknown,
+                        "lab-run-evidence-slice",
+                        $"Immutable {configurationId} evidence chunk {chunk.ChunkIndex} contains {chunk.Observations.Count} observations and {chunk.Outputs.Count} output hashes.")
+                }, ct);
+                sliceIds.Add(saved.Id);
+            }
         }
 
         var decisions = run.Comparisons.Select(comparison => new LabComparisonDecision(
@@ -722,6 +725,55 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
             Outcome = NormalizedToolOutcome.Create(outcome, "lab-run-completed",
                 $"Lab run completed as {run.Status} with {run.Observations.Count} observations across {sliceIds.Count} configuration slices.")
         }, ct);
+    }
+
+    private static IEnumerable<LabRunEvidenceSlice> SplitEvidenceSlices(
+        string runId,
+        string definitionHash,
+        string configurationId,
+        IReadOnlyList<LabObservation> observations,
+        IReadOnlyList<LabOutputEvidence> outputs)
+    {
+        if (observations.Count == 0)
+        {
+            yield return new LabRunEvidenceSlice(runId, definitionHash, configurationId, [], outputs);
+            yield break;
+        }
+
+        var current = new List<LabObservation>();
+        var pendingOutputs = outputs;
+        foreach (var observation in observations)
+        {
+            var candidate = new LabRunEvidenceSlice(runId, definitionHash, configurationId,
+                [.. current, observation], pendingOutputs);
+            if (current.Count > 0 && !FitsExperienceDocument(candidate))
+            {
+                yield return new LabRunEvidenceSlice(runId, definitionHash, configurationId, current.ToArray(), pendingOutputs);
+                current.Clear();
+                pendingOutputs = [];
+                candidate = new LabRunEvidenceSlice(runId, definitionHash, configurationId, [observation], pendingOutputs);
+            }
+
+            if (!FitsExperienceDocument(candidate))
+                throw new InvalidOperationException("A single Lab observation exceeds the evidence document limit.");
+            current.Add(observation);
+        }
+
+        if (current.Count > 0)
+            yield return new LabRunEvidenceSlice(runId, definitionHash, configurationId, current.ToArray(), pendingOutputs);
+    }
+
+    private static bool FitsExperienceDocument(LabRunEvidenceSlice slice)
+    {
+        try
+        {
+            _ = ExperienceJson.Canonicalize(slice);
+            return true;
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("exceeds", StringComparison.Ordinal))
+        {
+            return false;
+        }
     }
 
     private Task<EmpiricalExperience> PersistApplyAsync(LabRunSnapshot run, LabApplyReview review, CancellationToken ct) =>

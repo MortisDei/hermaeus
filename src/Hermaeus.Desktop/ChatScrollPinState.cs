@@ -13,10 +13,16 @@ public static class ChatScrollPinState
     public static Transition Apply(bool wasPinned, double extentHeight, double viewportHeight,
         double offsetY, double extentDeltaY)
     {
+        var distance = Math.Max(0, extentHeight - viewportHeight - offsetY);
+        // A remeasure can grow the extent after a user has scrolled away. The
+        // offset is authoritative for that event, otherwise streaming content
+        // silently steals the user's scroll position and repins the view.
+        if (distance > BottomThreshold)
+            return new(false, false);
+
         if (extentDeltaY != 0 && wasPinned)
             return new(true, true);
 
-        var distance = Math.Max(0, extentHeight - viewportHeight - offsetY);
         return new(distance <= BottomThreshold, false);
     }
 }

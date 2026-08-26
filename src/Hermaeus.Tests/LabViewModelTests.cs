@@ -90,4 +90,15 @@ public sealed class LabViewModelTests
         Assert.Contains(vm.Experiences[0].Id, vm.ExportJson, StringComparison.Ordinal);
         Assert.DoesNotContain(vm.Experiences[1].Id, vm.ExportJson, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task Unavailable_recipe_run_reports_visible_status()
+    {
+        using var temp = new TempDir();
+        var (_, vm) = Build(temp);
+
+        await vm.RunSelectedRecipeCommand.ExecuteAsync(null);
+
+        Assert.Equal("Lab recipes are unavailable in this session.", vm.StatusMessage);
+    }
 }

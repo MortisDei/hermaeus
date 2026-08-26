@@ -100,6 +100,7 @@ public partial class LabViewModel : ViewModelBase
 
     public bool HasSelection => SelectedExperience is not null;
     public IReadOnlyList<ServerConfig> ConfiguredServers => _settings?.Settings.ManagedServers.Where(server => !server.EmbeddingsMode).ToArray() ?? [];
+    public bool HasMultipleConfiguredServers => ConfiguredServers.Count > 1;
     public UiBoundCollection<LabRecipeRowViewModel> RecipeOptions { get; } = [];
     public Func<EmpiricalExperience, Task<bool>>? ConfirmRemoval { get; set; }
     public Func<LabApplyReview, Task<bool>>? ConfirmApply { get; set; }
@@ -108,6 +109,7 @@ public partial class LabViewModel : ViewModelBase
     {
         if (value is not null) CandidateContextSize = value.ContextSize;
         OnPropertyChanged(nameof(ConfiguredServers));
+        OnPropertyChanged(nameof(HasMultipleConfiguredServers));
     }
 
     partial void OnSelectedExperienceChanged(ExperienceRowViewModel? value)
@@ -121,23 +123,15 @@ public partial class LabViewModel : ViewModelBase
     [RelayCommand]
     public async Task RefreshAsync()
     {
-        if (IsBusy) return;
+        if (IsBusy)
+        {
+            StatusMessage = "Lab is busy; evidence will refresh when the current operation finishes.";
+            return;
+        }
         IsBusy = true;
         try
         {
-            var query = new EmpiricalExperienceQuery
-            {
-                Domain = Choice(DomainFilter), ProjectId = Text(ProjectFilter), WorkspaceFingerprint = Text(WorkspaceFilter),
-                ModelFingerprint = Text(ModelFilter), RuntimeFingerprint = Text(RuntimeFilter),
-                Outcome = ParseChoice<NormalizedOutcome>(OutcomeFilter), Origin = ParseChoice<EvidenceOrigin>(OriginFilter),
-                Status = ParseChoice<EmpiricalExperienceStatus>(StatusFilter),
-                CreatedFromUtc = CreatedFrom?.UtcDateTime, CreatedToUtc = CreatedTo?.UtcDateTime, Limit = 500
-            };
-            var rows = await _store.QueryAsync(query);
-            Experiences.Clear();
-            foreach (var row in rows) Experiences.Add(new ExperienceRowViewModel(row));
-            SelectedExperience = Experiences.FirstOrDefault();
-            StatusMessage = rows.Count == 0 ? "No evidence matches these filters." : $"{rows.Count} evidence record(s).";
+            await RefreshEvidenceCoreAsync();
         }
         catch (Exception ex) { _toasts.Show("Could not load evidence", ex.Message, ToastKind.Error, 5000); }
         finally { IsBusy = false; }
@@ -187,13 +181,28 @@ public partial class LabViewModel : ViewModelBase
     [RelayCommand]
     private async Task RefreshRecipesAsync()
     {
-        if (_recipes is null || SelectedServer is null || IsRecipeRunning) return;
+        if (_recipes is null)
+        {
+            StatusMessage = "Lab recipes are unavailable in this session.";
+            return;
+        }
+        if (SelectedServer is null)
+        {
+            StatusMessage = "Select a configured Chat server before inspecting recipes.";
+            return;
+        }
+        if (IsRecipeRunning)
+        {
+            StatusMessage = "A Lab recipe is already running.";
+            return;
+        }
         try
         {
             var plans = await _recipes.InspectAsync(SelectedServer);
             RecipeOptions.Clear();
             foreach (var plan in plans) RecipeOptions.Add(new LabRecipeRowViewModel(plan));
             SelectedRecipe = RecipeOptions.FirstOrDefault(row => row.CanRun) ?? RecipeOptions.FirstOrDefault();
+            StatusMessage = RecipeOptions.Count == 0 ? "No recipes are available for this runtime." : $"{RecipeOptions.Count} recipe(s) inspected.";
         }
         catch (Exception ex) { _toasts.Show("Could not inspect Lab recipes", ex.Message, ToastKind.Error, 5000); }
     }
@@ -201,7 +210,26 @@ public partial class LabViewModel : ViewModelBase
     [RelayCommand]
     private async Task RunSelectedRecipeAsync()
     {
-        if (_recipes is null || SelectedServer is null || SelectedRecipe?.CanRun != true || IsRecipeRunning) return;
+        if (_recipes is null)
+        {
+            StatusMessage = "Lab recipes are unavailable in this session.";
+            return;
+        }
+        if (SelectedServer is null)
+        {
+            StatusMessage = "Select a configured Chat server before running a recipe.";
+            return;
+        }
+        if (SelectedRecipe?.CanRun != true)
+        {
+            StatusMessage = "The selected recipe is unavailable for this exact runtime.";
+            return;
+        }
+        if (IsRecipeRunning)
+        {
+            StatusMessage = "A Lab recipe is already running.";
+            return;
+        }
         _recipeCts = new CancellationTokenSource();
         IsRecipeRunning = true;
         IsBusy = true;
@@ -210,11 +238,21 @@ public partial class LabViewModel : ViewModelBase
             _currentRun = await _recipes.RunAsync(SelectedRecipe.Plan, SelectedServer, RecipePrompt, _recipeCts.Token);
             ShowCompletedRun(_currentRun);
             TradeoffSummary = BuildTradeoffSummary(_currentRun);
-            await RefreshAsync();
+            await RefreshEvidenceCoreAsync();
+        }
+        catch (OperationCanceledException) when (_recipeCts?.IsCancellationRequested == true)
+        {
+            RunStatus = "Cancelled";
+            StatusMessage = "Lab recipe cancelled; any captured evidence was retained.";
+            await RefreshEvidenceCoreAsync();
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            RunStatus = "Failed";
+            StatusMessage = $"Lab recipe failed: {ex.Message}";
             _toasts.Show("Lab recipe failed", ex.Message, ToastKind.Error, 5000);
+            try { await RefreshEvidenceCoreAsync(); }
+            catch (Exception refreshEx) { _toasts.Show("Could not refresh Lab evidence", refreshEx.Message, ToastKind.Warning, 5000); }
         }
         finally
         {
@@ -226,12 +264,35 @@ public partial class LabViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private void CancelRecipe() => _recipeCts?.Cancel();
+    private void CancelRecipe()
+    {
+        if (_recipeCts is null)
+        {
+            StatusMessage = "No Lab recipe is running.";
+            return;
+        }
+        StatusMessage = "Cancelling Lab recipe...";
+        _recipeCts.Cancel();
+    }
 
     [RelayCommand]
     private async Task FreezeAndStartAsync()
     {
-        if (_experiments is null || SelectedServer is null || IsRunActive) return;
+        if (_experiments is null)
+        {
+            StatusMessage = "Lab experiments are unavailable in this session.";
+            return;
+        }
+        if (SelectedServer is null)
+        {
+            StatusMessage = "Select a configured Chat server before starting a Lab run.";
+            return;
+        }
+        if (IsRunActive)
+        {
+            StatusMessage = "A Lab run is already active.";
+            return;
+        }
         IsBusy = true;
         try
         {
@@ -247,13 +308,30 @@ public partial class LabViewModel : ViewModelBase
             RuntimeIsolation = _currentRun.TemporaryPort is int port
                 ? $"Dedicated loopback runtime on 127.0.0.1:{port}. Saved Services settings are unchanged."
                 : _currentRun.Failures.FirstOrDefault() ?? "The isolated runtime did not start.";
-            await RefreshAsync();
+            await RefreshEvidenceCoreAsync();
         }
         catch (Exception ex)
         {
             _toasts.Show("Could not start Lab run", ex.Message, ToastKind.Error, 5000);
         }
         finally { IsBusy = false; }
+    }
+
+    private async Task RefreshEvidenceCoreAsync()
+    {
+        var query = new EmpiricalExperienceQuery
+        {
+            Domain = Choice(DomainFilter), ProjectId = Text(ProjectFilter), WorkspaceFingerprint = Text(WorkspaceFilter),
+            ModelFingerprint = Text(ModelFilter), RuntimeFingerprint = Text(RuntimeFilter),
+            Outcome = ParseChoice<NormalizedOutcome>(OutcomeFilter), Origin = ParseChoice<EvidenceOrigin>(OriginFilter),
+            Status = ParseChoice<EmpiricalExperienceStatus>(StatusFilter),
+            CreatedFromUtc = CreatedFrom?.UtcDateTime, CreatedToUtc = CreatedTo?.UtcDateTime, Limit = 500
+        };
+        var rows = await _store.QueryAsync(query);
+        Experiences.Clear();
+        foreach (var row in rows) Experiences.Add(new ExperienceRowViewModel(row));
+        SelectedExperience = Experiences.FirstOrDefault();
+        StatusMessage = rows.Count == 0 ? "No evidence matches these filters." : $"{rows.Count} evidence record(s).";
     }
 
     [RelayCommand]

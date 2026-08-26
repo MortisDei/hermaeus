@@ -82,6 +82,12 @@ public sealed class LlamaCppService : IDisposable
                 .Select(m => new LlmModel { Id = m.Id, Name = Path.GetFileNameWithoutExtension(m.Id), Provider = "llama.cpp", ProviderTag = ProviderTagValue, SupportsOutputConstraints = true })
                 .ToList() ?? [];
 
+            // llama-server normally reports the model path as the OpenAI model
+            // id. Recover the file facts here while the identity is still tied
+            // to that response. A missing or non-path id remains Unknown.
+            foreach (var model in models)
+                PopulateLocalFileMetadata(model);
+
             // llama-server hosts exactly one model at a time, so the probed context
             // length from /props applies to whatever it returned above.
             if (models.Count > 0)
@@ -105,6 +111,24 @@ public sealed class LlamaCppService : IDisposable
                 _logs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Service, $"llama.cpp models unavailable at {baseUrl}: {ex.Message}"));
             return [];
         }
+    }
+
+    private static void PopulateLocalFileMetadata(LlmModel model)
+    {
+        if (!model.Id.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        try
+        {
+            var file = new FileInfo(model.Id);
+            if (!file.Exists || file.Length <= 0)
+                return;
+
+            model.SizeBytes = file.Length;
+            model.ModifiedAt = file.LastWriteTimeUtc;
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
     }
 
     /// <summary>

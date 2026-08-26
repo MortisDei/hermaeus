@@ -279,6 +279,39 @@ public sealed class LabExperimentTests
     }
 
     [Fact]
+    public async Task Completion_splits_large_evidence_into_bounded_recoverable_slices()
+    {
+        using var fixture = new Fixture();
+        var run = await fixture.Service.StartAsync(await fixture.DefinitionAsync(), fixture.Source);
+        var observations = Enumerable.Range(0, 400)
+            .Select(index => Observation(run.Definition, index % 2 == 0 ? "baseline" : "candidate", index, "", index)
+                with { RunId = run.Id })
+            .ToArray();
+        var outputs = new[]
+        {
+            LabCorrectnessEvaluator.Capture("baseline", "case", 0, "private baseline body"),
+            LabCorrectnessEvaluator.Capture("candidate", "case", 0, "private candidate body")
+        };
+
+        var completed = await fixture.Service.CompleteAsync(run.Id, observations, outputs);
+        var records = await fixture.Store.QueryAsync(new EmpiricalExperienceQuery
+        {
+            Domain = EmpiricalExperienceDomains.LabRun,
+            Limit = 500
+        });
+        var slices = records
+            .Where(record => record.ActionJson.Contains("\"observations\"", StringComparison.Ordinal))
+            .Select(record => ExperienceJson.Decode<LabRunEvidenceSlice>(record.ActionJson))
+            .ToArray();
+
+        Assert.True(slices.Length > 2, "the oversized run should be stored as multiple evidence slices");
+        Assert.Equal(observations.Length, slices.Sum(slice => slice.Observations.Count));
+        Assert.Equal(outputs.Length, slices.Sum(slice => slice.Outputs.Count));
+        Assert.Contains(records, record => record.Id == completed.CompletionEvidenceId);
+        Assert.All(slices, slice => Assert.True(ExperienceJson.Canonicalize(slice).Length <= ExperienceJson.MaxDocumentBytes));
+    }
+
+    [Fact]
     public async Task Speed_only_run_cannot_produce_apply_recommendation()
     {
         using var fixture = new Fixture();

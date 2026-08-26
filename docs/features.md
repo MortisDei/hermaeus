@@ -1273,6 +1273,8 @@ a group, no "likely cause" field, and no correlation claim.
   conversation, Ctrl+Shift+S opens Services, Escape closes quick chat. Quit
   is available via the tray menu and window close, not a hotkey - an
   instant, unconfirmed Ctrl+Q quit was removed.
+- Minimize-to-tray defaults off for new settings, leaving a taskbar button;
+  Close-to-tray remains a separate setting and persisted values are preserved.
 - Deleting a conversation asks for confirmation first, matching every other
   destructive action of similar weight (dataset delete, reindex, benchmark
   history clear, backup restore).

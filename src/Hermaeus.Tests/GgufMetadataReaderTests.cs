@@ -312,6 +312,22 @@ public sealed class GgufMetadataReaderTests
     }
 
     [Fact]
+    public void Declared_string_larger_than_supported_buffer_returns_null()
+    {
+        using var temp = new TempDir();
+        var path = temp.PathFor("oversized-value.gguf");
+        using var stream = File.Create(path);
+        using var writer = new BinaryWriter(stream);
+        writer.Write(Encoding.ASCII.GetBytes("GGUF"));
+        writer.Write(3u);
+        writer.Write(0UL);
+        writer.Write(1UL);
+        writer.Write(ulong.MaxValue);
+
+        Assert.Null(GgufMetadataReader.TryRead(path));
+    }
+
+    [Fact]
     public void Oversized_declared_string_length_returns_null()
     {
         using var temp = new TempDir();

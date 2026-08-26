@@ -218,7 +218,8 @@ public sealed record LabRunEvidenceSlice(
     string DefinitionHash,
     string ConfigurationId,
     IReadOnlyList<LabObservation> Observations,
-    IReadOnlyList<LabOutputEvidence> Outputs);
+    IReadOnlyList<LabOutputEvidence> Outputs,
+    int ChunkIndex = 0);
 
 public sealed record LabComparisonDecision(
     string BaselineConfigurationId,

@@ -37,9 +37,10 @@ public class UiSettings
     public bool EnableTrayIcon { get; set; } = true;
 
     /// <summary>
-    /// Minimizing the window hides it to the tray instead of the taskbar.
+    /// Minimizing the window leaves it on the taskbar by default. Existing
+    /// persisted values are still honoured, so this only affects new settings.
     /// </summary>
-    public bool MinimizeToTray { get; set; } = true;
+    public bool MinimizeToTray { get; set; } = false;
 
     /// <summary>
     /// Closing the window hides it to the tray instead of exiting.

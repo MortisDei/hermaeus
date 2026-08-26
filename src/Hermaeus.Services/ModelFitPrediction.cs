@@ -79,15 +79,19 @@ public static class ModelFitPredictor
             unknown.Add("Model weight size");
         var blockCount = info?.BlockCount;
         var fraction = ResolveOffloadFraction(request.GpuLayers, blockCount, unknown);
-        var allocatedWeights = (long)(Math.Max(0, request.ModelFileBytes) * WeightAllocationMultiplier);
-        var weights = Component(
-            "Model weights",
-            allocatedWeights,
-            fraction,
-            EvidenceOrigin.DeterministicCalculation,
-            info is null
-                ? "GGUF file size plus 5% allocation overhead fallback; tensor placement metadata is unavailable."
-                : "GGUF file size plus 5% allocation overhead, placed by the selected GPU-layer fraction.");
+        var weights = request.ModelFileBytes > 0
+            ? Component(
+                "Model weights",
+                (long)(request.ModelFileBytes * WeightAllocationMultiplier),
+                fraction,
+                EvidenceOrigin.DeterministicCalculation,
+                info is null
+                    ? "GGUF file size plus 5% allocation overhead fallback; tensor placement metadata is unavailable."
+                    : "GGUF file size plus 5% allocation overhead, placed by the selected GPU-layer fraction.")
+            : Unknown("Model weights") with
+            {
+                Explanation = "The selected GGUF file size is unavailable."
+            };
 
         if (request.CpuMoeLayers != 0)
             unknown.Add("MoE expert tensor placement");
@@ -106,7 +110,9 @@ public static class ModelFitPredictor
                 ? "Runtime-scoped observed allocation overhead."
                 : "512 MiB analytical fallback retained from the existing GPU Fit model.");
 
-        var companions = request.Companions.Select(input => input.Placement switch
+        var companions = request.Companions.Select(input => input.FileBytes <= 0
+            ? Unknown(input.Name) with { Explanation = input.Explanation }
+            : input.Placement switch
         {
             FitPlacement.Gpu => new FitComponent(input.Name, input.FileBytes, input.FileBytes, 0, input.Placement, input.Origin, input.Explanation),
             FitPlacement.SystemRam => new FitComponent(input.Name, input.FileBytes, 0, input.FileBytes, input.Placement, input.Origin, input.Explanation),

@@ -659,11 +659,26 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
 
         void AddCompanion(string name, string path, FitPlacement placement)
         {
-            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
+            if (string.IsNullOrWhiteSpace(path)) return;
+            try
+            {
+                var file = new FileInfo(path);
+                if (file.Exists && file.Length > 0)
+                {
+                    companions.Add(new FitCompanionInput(
+                        name, file.Length, placement,
+                        EvidenceOrigin.DeterministicCalculation,
+                        "Separate companion file allocation using its observed file size."));
+                    return;
+                }
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+
             companions.Add(new FitCompanionInput(
-                name, new FileInfo(path).Length, placement,
+                name, 0, FitPlacement.Unknown,
                 EvidenceOrigin.DeterministicCalculation,
-                "Separate companion file allocation using its observed file size."));
+                "The configured companion file size is unavailable."));
         }
     }
 
@@ -751,7 +766,8 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     {
         try
         {
-            return File.Exists(ModelPath) ? new FileInfo(ModelPath).Length : null;
+            var file = new FileInfo(ModelPath);
+            return file.Exists && file.Length > 0 ? file.Length : null;
         }
         catch
         {
@@ -1555,9 +1571,17 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         }
 
         var draftBytes = new FileInfo(draftPath).Length;
-        var targetBytes = TryGetModelFileSizeBytes() ?? 0;
+        var targetBytes = TryGetModelFileSizeBytes();
         var vram = _hardwareProfile?.MaxGpuVramBytes ?? 0;
-        var combined = targetBytes + draftBytes;
+        if (!targetBytes.HasValue || draftBytes <= 0)
+        {
+            DraftFitNote = !targetBytes.HasValue
+                ? "Target model size is Unknown; the combined draft fit cannot be estimated."
+                : "Draft model size is Unknown; the combined draft fit cannot be estimated.";
+            return;
+        }
+
+        var combined = targetBytes.Value + draftBytes;
 
         DraftFitNote = vram > 0
             ? $"Target plus draft is roughly {FormatGb(combined)} of weights against {FormatGb(vram)} of VRAM."

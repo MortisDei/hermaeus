@@ -18,6 +18,9 @@ public static class ModelFitEstimator
 
     public static ModelFitResult Estimate(long fileSizeBytes, HardwareProfile hw)
     {
+        if (fileSizeBytes <= 0)
+            return new ModelFitResult(ModelFitTier.Unknown, "Model file size is unavailable; fit cannot be estimated.");
+
         if (hw.TotalRamBytes <= 0 && hw.MaxGpuVramBytes <= 0)
             return new ModelFitResult(ModelFitTier.Unknown, string.Empty);
 
@@ -48,6 +51,9 @@ public static class ModelFitEstimator
     /// </summary>
     public static ModelFitResult Estimate(long fileSizeBytes, HardwareProfile hw, GgufModelInfo? info, int contextSize, string kvCacheType = "f16")
     {
+        if (fileSizeBytes <= 0)
+            return new ModelFitResult(ModelFitTier.Unknown, "Model file size is unavailable; fit cannot be estimated.");
+
         if (info is null)
             return Estimate(fileSizeBytes, hw);
 

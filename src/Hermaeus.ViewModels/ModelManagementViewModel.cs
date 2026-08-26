@@ -1199,8 +1199,11 @@ public partial class ModelProfileItemViewModel : ObservableObject
     [ObservableProperty] private bool _isTuning;
 
     /// <summary>Only rows discovered from disk (not reported live by a running provider) can
-    /// be probed by Auto tune (r13 02-model-library.md 2.3).</summary>
-    public bool IsLocalGguf => Provider == "local GGUF";
+    /// be probed by Auto tune (r13 02-model-library.md 2.3). A running
+    /// llama-server can report the local GGUF by its path while retaining the
+    /// llama.cpp provider tag, so the path is part of the identity check too.</summary>
+    public bool IsLocalGguf => Provider == "local GGUF"
+        || (ModelId.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase) && File.Exists(ModelId));
 
     [ObservableProperty] private ModelFitTier _fitTier = ModelFitTier.Unknown;
     [ObservableProperty] private string _fitReason = string.Empty;

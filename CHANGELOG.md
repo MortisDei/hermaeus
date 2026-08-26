@@ -16,6 +16,13 @@ limit.
 - R31 graduates Hermaeus's current product maturity from Alpha to Beta. The
   next release is prepared as `0.38.0-beta`; no release or tag is created by
   this close-out.
+- New settings keep a minimized window on the taskbar by default. The separate
+  Close to tray choice and existing persisted choices are unchanged.
+- Chat streaming now respects a user scroll-up during transcript remeasurement.
+  Lab evidence refreshes after successful, failed, and cancelled recipe runs,
+  and oversized evidence is split into bounded recoverable slices.
+- GPU Fit keeps missing model and companion file sizes as `Unknown` instead of
+  formatting them as zero. GGUF header reads now use exact bounded reads.
 
 ## [0.38.0-alpha] - 2026-08-24
 

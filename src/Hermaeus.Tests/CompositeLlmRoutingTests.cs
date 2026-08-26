@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
 using Hermaeus.Services;
@@ -106,6 +107,27 @@ public sealed class CompositeLlmRoutingTests
         Assert.Empty(first);
         Assert.Empty(second);
         Assert.Equal(1, llamaHandler.TotalRequests);
+    }
+
+    [Fact]
+    public async Task Llama_models_retain_local_gguf_size_and_mtime_evidence()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.Llm.LlamaCppBaseUrl = "http://127.0.0.1:19999";
+        var modelPath = temp.PathFor("model.gguf");
+        await File.WriteAllBytesAsync(modelPath, [1, 2, 3, 4]);
+
+        var handler = new QueueHandler();
+        handler.EnqueueJson(HttpStatusCode.OK, JsonSerializer.Serialize(new { data = new[] { new { id = modelPath } } }));
+        handler.EnqueueJson(HttpStatusCode.OK, "{}");
+        using var http = new HttpClient(handler);
+        using var service = new LlamaCppService(settings, new RuntimeLogService(settings), http);
+
+        var model = Assert.Single(await service.GetModelsAsync());
+
+        Assert.Equal(4, model.SizeBytes);
+        Assert.Equal(File.GetLastWriteTimeUtc(modelPath), model.ModifiedAt);
     }
 
     private sealed class PassthroughSecretStore : ISecretStore
