@@ -9,6 +9,14 @@ FIFO for changelog entries, 10 versions in this file max. Remove older entries
 and append them to `docs/changelog-archive.md` to maintain the 10 version
 limit.
 
+## [Unreleased]
+
+### Changed
+
+- R31 graduates Hermaeus's current product maturity from Alpha to Beta. The
+  next release is prepared as `0.38.0-beta`; no release or tag is created by
+  this close-out.
+
 ## [0.38.0-alpha] - 2026-08-24
 
 ### Added

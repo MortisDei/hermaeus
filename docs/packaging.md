@@ -212,7 +212,7 @@ GitHub Release automatically; nothing about local packaging above changes.
   publishes a GitHub Release with changelog-derived notes.
 - Patch versions (0.29.1) are tagged and released only when they carry an
   urgent fix users need; otherwise they ride until the next minor.
-- While `VersionSuffix` is `alpha` (or any prerelease suffix), releases are
+- While `VersionSuffix` is a prerelease suffix, releases are
   marked prerelease on GitHub.
 - Binaries are unsigned. Every release's notes say so plainly and include
   per-OS SHA256 verification commands (see Checksums above). Installer

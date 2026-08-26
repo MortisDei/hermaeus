@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-Hermaeus is pre-1.0 alpha software. Only the latest released version is
+Hermaeus is pre-1.0 beta software. Only the latest released version is
 supported with security fixes; there are no maintained older branches.
 
 ## Reporting a Vulnerability

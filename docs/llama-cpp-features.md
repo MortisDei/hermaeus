@@ -47,7 +47,7 @@ Every flag Hermaeus can emit still exists in b10215:
 `--n-cpu-moe`, `--cpu-moe`, `--reasoning-format`, `--reasoning-preserve`,
 `--no-reasoning-preserve`.
 
-## Adopted in 0.38.0-alpha
+## Adopted in 0.38.0-beta
 
 ### Extensible capability evidence and portable identity
 

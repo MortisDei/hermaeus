@@ -164,11 +164,16 @@ public sealed class DocsCoverageGuardTests
         Assert.True(match.Success, "Directory.Build.props should declare a <VersionPrefix>.");
 
         var version = match.Groups[1].Value;
+        var suffixMatch = System.Text.RegularExpressions.Regex.Match(props, @"<VersionSuffix>\s*([^<\s]+)\s*</VersionSuffix>");
+        Assert.True(suffixMatch.Success, "Directory.Build.props should declare a <VersionSuffix>.");
+
+        var fullVersion = $"{version}-{suffixMatch.Groups[1].Value}";
         var readme = File.ReadAllText(Path.Combine(RepoRoot, "README.md"));
 
-        Assert.True(readme.Contains(version, StringComparison.Ordinal),
-            $"README.md does not mention version {version}. Directory.Build.props says <VersionPrefix>{version}</VersionPrefix>; " +
-            $"update the version line under \"Current Status\" in README.md to **{version}-alpha** as part of this version bump.");
+        Assert.True(readme.Contains(fullVersion, StringComparison.Ordinal),
+            $"README.md does not mention version {fullVersion}. Directory.Build.props says " +
+            $"<VersionPrefix>{version}</VersionPrefix> and <VersionSuffix>{suffixMatch.Groups[1].Value}</VersionSuffix>; " +
+            $"update the version line under \"Current Status\" in README.md to **{fullVersion}** as part of this version bump.");
     }
 
     [Fact]

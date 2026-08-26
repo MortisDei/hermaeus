@@ -329,9 +329,9 @@ treated as build errors.
 
 ---
 
-# Known Issues / Alpha Status
+# Known Issues / Beta Status
 
-Hermaeus is alpha software, developed and tested primarily on Windows. Linux (Pop!_OS, Wayland) has been run and works, but is less exercised than Windows and more likely to surface rough edges. Prebuilt binaries are not code-signed; Windows SmartScreen will warn on first run (verify the published SHA256 instead of dismissing it blindly). See `CHANGELOG.md` for the pace of fixes and new features.
+Hermaeus is beta software, developed and tested primarily on Windows. Linux (Pop!_OS, Wayland) has been run and works, but is less exercised than Windows and more likely to surface rough edges. Prebuilt binaries are not code-signed; Windows SmartScreen will warn on first run (verify the published SHA256 instead of dismissing it blindly). See `CHANGELOG.md` for the pace of fixes and new features.
 
 Hermaeus has one maintainer. Issues get a best-effort response; pull requests must follow `CONTRIBUTING.md`.
 
@@ -430,7 +430,7 @@ For commercial licensing requests, see the Contact section of COMMERCIAL.md.
 
 Current version:
 
-**0.38.0-alpha**
+**0.38.0-beta**
 
 Major systems currently implemented include:
 
@@ -449,4 +449,4 @@ Major systems currently implemented include:
 - Safe model adoption, progress, and deletion workflows
 - Security review and threat model
 
-Hermaeus is alpha software. See [Known Issues](#known-issues--alpha-status) below and `CHANGELOG.md` for the current state and improvement cadence. Public release hardening continues in the areas of installer signing, OCR support, additional security tightening, and Linux global hotkeys.
+Hermaeus is beta software. See [Known Issues](#known-issues--beta-status) below and `CHANGELOG.md` for the current state and improvement cadence. Public release hardening continues in the areas of installer signing, OCR support, additional security tightening, and Linux global hotkeys.
