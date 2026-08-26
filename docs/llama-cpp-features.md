@@ -219,11 +219,22 @@ Sources checked on 2026-08-26:
 
 ## R31 Batch 17 upstream capability audit, checked 2026-08-26
 
-The requested b10590 to b10632 review does not produce a safe new Hermaeus
+The exact tag diff is 423 files: b10590 is commit `6657ded`, while b10632 is
+commit `11cd988`. The requested review does not produce a safe new Hermaeus
 integration. The b10632 release is a Metal-specific chunked SSD MMA prefill
 optimization for Mamba-2, including sequential rollback handling. It changes
 the Metal backend implementation, not a stable llama-server option,
 machine-readable telemetry field, or cross-backend capability contract.
+
+The potentially useful `tools/tuning` addition comes from the intervening
+Metal FA-vec tuning work. It is an offline, Metal-only executable that sweeps
+`(Q, NE)` kernel configurations on the machine running it and emits pasteable
+static rows for `ggml-metal-tuning.cpp`. Its timing log is diagnostic output,
+not a versioned measurement API or Lab result. It has no Hermaeus runtime
+identity, frozen configuration fingerprint, server endpoint, provenance
+record, or correctness gate, so feeding its output into Lab would mix an
+offline kernel sweep with controlled end-to-end runtime measurements and could
+turn a local tuning result into an unsupported cross-device claim.
 
 That makes it relevant to a future Metal runtime performance investigation, but
 not to the current Windows CUDA, Linux Vulkan, or Linux SYCL product surfaces.

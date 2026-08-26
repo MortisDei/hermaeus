@@ -673,6 +673,7 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
     private async Task<EmpiricalExperience> PersistCompletionAsync(
         LabRunSnapshot run, NormalizedOutcome outcome, CancellationToken ct)
     {
+        var drafts = new List<EmpiricalExperienceDraft>();
         var sliceIds = new List<string>();
         var configurationIds = run.Definition.Candidates.Select(item => item.Id)
             .Prepend(run.Definition.Baseline.Id).ToArray();
@@ -684,8 +685,10 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
             foreach (var slice in SplitEvidenceSlices(run.Id, run.DefinitionHash, configurationId, observations, outputs))
             {
                 var chunk = slice with { ChunkIndex = chunkIndex++ };
-                var saved = await _experience.AddAsync(new EmpiricalExperienceDraft
+                var sliceId = Guid.NewGuid().ToString("N");
+                drafts.Add(new EmpiricalExperienceDraft
                 {
+                    Id = sliceId,
                     Domain = EmpiricalExperienceDomains.LabRun,
                     ContextJson = LabCanonicalJson.Serialize(new { runId = run.Id, run.DefinitionHash, configurationId, chunk.ChunkIndex }),
                     ActionJson = ExperienceJson.Canonicalize(chunk),
@@ -701,8 +704,8 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
                         chunk.Observations.Count > 0 ? NormalizedOutcome.Succeeded : NormalizedOutcome.Unknown,
                         "lab-run-evidence-slice",
                         $"Immutable {configurationId} evidence chunk {chunk.ChunkIndex} contains {chunk.Observations.Count} observations and {chunk.Outputs.Count} output hashes.")
-                }, ct);
-                sliceIds.Add(saved.Id);
+                });
+                sliceIds.Add(sliceId);
             }
         }
 
@@ -712,8 +715,9 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
             comparison.CorrectnessPassed, comparison.CanShowHeadlineDelta, comparison.RefusalReason)).ToArray();
         var summary = new LabRunCompletionSummary(run.Id, run.DefinitionHash, run.Status,
             run.StartedAtUtc, run.CompletedAtUtc, run.Failures, decisions, sliceIds);
-        return await _experience.AddAsync(new EmpiricalExperienceDraft
+        drafts.Add(new EmpiricalExperienceDraft
         {
+            Id = Guid.NewGuid().ToString("N"),
             Domain = EmpiricalExperienceDomains.LabRun,
             ContextJson = LabCanonicalJson.Serialize(new { runId = run.Id, run.DefinitionHash }),
             ActionJson = LabCanonicalJson.Serialize(summary),
@@ -724,7 +728,9 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
                     EvidenceOrigin: EvidenceOrigin.Extracted))).ToArray(),
             Outcome = NormalizedToolOutcome.Create(outcome, "lab-run-completed",
                 $"Lab run completed as {run.Status} with {run.Observations.Count} observations across {sliceIds.Count} configuration slices.")
-        }, ct);
+        });
+        var saved = await _experience.AddBatchAsync(drafts, ct);
+        return saved[^1];
     }
 
     private static IEnumerable<LabRunEvidenceSlice> SplitEvidenceSlices(

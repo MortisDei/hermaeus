@@ -43,6 +43,7 @@ public sealed record EmpiricalExperience
 
 public sealed record EmpiricalExperienceDraft
 {
+    public string? Id { get; init; }
     public int SchemaVersion { get; init; } = 1;
     public string Domain { get; init; } = string.Empty;
     public string? ProjectId { get; init; }

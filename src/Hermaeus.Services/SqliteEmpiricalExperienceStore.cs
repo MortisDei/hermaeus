@@ -41,6 +41,23 @@ public sealed class SqliteEmpiricalExperienceStore : IEmpiricalExperienceStore
         return prepared;
     }
 
+    public async Task<IReadOnlyList<EmpiricalExperience>> AddBatchAsync(
+        IReadOnlyList<EmpiricalExperienceDraft> drafts, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(drafts);
+        if (drafts.Count == 0)
+            return [];
+
+        var prepared = drafts.Select(draft => Prepare(draft, correctsId: null)).ToArray();
+        await EnsureInitializedAsync(ct);
+        await using var connection = await OpenAsync(ct);
+        await using var transaction = await connection.BeginTransactionAsync(ct);
+        foreach (var row in prepared)
+            await InsertAsync(connection, (SqliteTransaction)transaction, row, ct);
+        await transaction.CommitAsync(ct);
+        return prepared;
+    }
+
     public async Task<EmpiricalExperience?> GetAsync(string id, CancellationToken ct = default)
     {
         ValidateId(id, nameof(id));
@@ -246,9 +263,11 @@ public sealed class SqliteEmpiricalExperienceStore : IEmpiricalExperienceStore
         var context = ExperienceJson.CanonicalizeJson(_redaction.Redact(draft.ContextJson));
         var action = ExperienceJson.CanonicalizeJson(_redaction.Redact(draft.ActionJson));
         var provenance = draft.Provenance.Select(PrepareProvenance).ToArray();
+        var id = string.IsNullOrWhiteSpace(draft.Id) ? Guid.NewGuid().ToString("N") : draft.Id!.Trim();
+        ValidateId(id, nameof(draft.Id));
         return new EmpiricalExperience
         {
-            Id = Guid.NewGuid().ToString("N"),
+            Id = id,
             SchemaVersion = 1,
             Domain = draft.Domain,
             ProjectId = Bound(draft.ProjectId, 128),

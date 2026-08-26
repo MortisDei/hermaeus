@@ -71,17 +71,7 @@ public static class AudioPlayback
 
     private static async Task<bool> TryRunAsync(string command, IReadOnlyList<string> args, CancellationToken ct)
     {
-        var psi = new ProcessStartInfo
-        {
-            FileName = command,
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true
-        };
-        foreach (var arg in args)
-            psi.ArgumentList.Add(arg);
-
+        var psi = BuildStartInfo(command, args);
         try
         {
             using var process = new Process { StartInfo = psi };
@@ -105,6 +95,21 @@ public static class AudioPlayback
         {
             return false;
         }
+    }
+
+    internal static ProcessStartInfo BuildStartInfo(string command, IReadOnlyList<string> args)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = command,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        foreach (var arg in args)
+            psi.ArgumentList.Add(arg);
+        return psi;
     }
 
     internal static async Task<bool> RunProcessLifecycleAsync(

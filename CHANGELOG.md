@@ -20,7 +20,8 @@ limit.
   Close to tray choice and existing persisted choices are unchanged.
 - Chat streaming now respects a user scroll-up during transcript remeasurement.
   Lab evidence refreshes after successful, failed, and cancelled recipe runs,
-  and oversized evidence is split into bounded recoverable slices.
+  and oversized evidence is split into bounded recoverable slices committed
+  with their completion marker as one SQLite transaction.
 - GPU Fit keeps missing model and companion file sizes as `Unknown` instead of
   formatting them as zero. GGUF header reads now use exact bounded reads.
 

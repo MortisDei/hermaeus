@@ -227,9 +227,11 @@ Only prompt hashes, not the typed prefix, are stored in the experiment
 definition.
 
 Large runs are persisted as bounded immutable evidence slices linked from the
-completion summary. The slices remain the authoritative normalized evidence,
-and can still be inspected, corrected, removed, or exported through Lab >
-Evidence without putting the whole run into one oversized experience document.
+completion summary. All slices and that completion marker are committed as one
+SQLite transaction, so a process death before commit leaves no authoritative
+partial set. The slices remain the authoritative normalized evidence, and can
+still be inspected, corrected, removed, or exported through Lab > Evidence
+without putting the whole run into one oversized experience document.
 
 The configured Chat server is selected automatically when there is exactly one
 non-embedding server. With multiple servers, choose the intended server before

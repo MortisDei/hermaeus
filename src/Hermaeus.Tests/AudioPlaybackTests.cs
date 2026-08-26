@@ -45,6 +45,17 @@ public sealed class AudioPlaybackTests
     }
 
     [Fact]
+    public void Windows_playback_uses_owned_process_instead_of_default_file_association()
+    {
+        var args = AudioPlayback.BuildArguments("powershell", "C:\\private\\preview.wav");
+        var psi = AudioPlayback.BuildStartInfo("powershell", args);
+
+        Assert.False(psi.UseShellExecute);
+        Assert.Equal("powershell", psi.FileName);
+        Assert.DoesNotContain("wmplayer", string.Join(" ", psi.ArgumentList), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task Cancellation_stops_fallback_sequence_without_audio_playback()
     {
         using var cts = new CancellationTokenSource();

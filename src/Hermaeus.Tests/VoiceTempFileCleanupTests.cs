@@ -79,6 +79,29 @@ public sealed class VoiceTempFileCleanupTests
         Assert.False(File.Exists(result.OutputPath));
     }
 
+    [Fact]
+    public async Task OpenAi_preview_uses_the_shared_non_associating_playback_path()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.Llm.OpenAiApiKey = "plain-key";
+        var handler = new FakeSpeechHandler();
+        using var http = new HttpClient(handler);
+        string? playedPath = null;
+        using var provider = new OpenAiVoiceProvider(settings, new PassthroughSecretStore(), http,
+            (path, _) =>
+            {
+                playedPath = path;
+                return Task.CompletedTask;
+            });
+
+        await provider.PreviewVoiceAsync("alloy", "preview");
+
+        Assert.NotNull(playedPath);
+        Assert.Contains("hermaeus-openai-", playedPath, StringComparison.Ordinal);
+        Assert.False(File.Exists(playedPath));
+    }
+
     private sealed class PassthroughSecretStore : ISecretStore
     {
         public bool IsReference(string value) => false;

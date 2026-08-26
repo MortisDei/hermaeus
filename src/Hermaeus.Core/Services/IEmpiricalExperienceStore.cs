@@ -6,6 +6,7 @@ public interface IEmpiricalExperienceStore
 {
     Task InitializeAsync(CancellationToken ct = default);
     Task<EmpiricalExperience> AddAsync(EmpiricalExperienceDraft draft, CancellationToken ct = default);
+    Task<IReadOnlyList<EmpiricalExperience>> AddBatchAsync(IReadOnlyList<EmpiricalExperienceDraft> drafts, CancellationToken ct = default);
     Task<EmpiricalExperience?> GetAsync(string id, CancellationToken ct = default);
     Task<IReadOnlyList<EmpiricalExperience>> QueryAsync(EmpiricalExperienceQuery query, CancellationToken ct = default);
     Task<EmpiricalExperience> CorrectAsync(string priorId, EmpiricalExperienceDraft replacement, CancellationToken ct = default);

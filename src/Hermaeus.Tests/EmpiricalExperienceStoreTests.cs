@@ -56,6 +56,19 @@ public sealed class EmpiricalExperienceStoreTests
     }
 
     [Fact]
+    public async Task Batch_add_rolls_back_the_entire_set_on_insert_failure()
+    {
+        using var temp = new TempDir();
+        var store = NewStore(temp, out _);
+        var first = Draft() with { Id = "batch:one" };
+        var duplicate = Draft() with { Id = "batch:one" };
+
+        await Assert.ThrowsAsync<SqliteException>(() => store.AddBatchAsync([first, duplicate]));
+
+        Assert.Null(await store.GetAsync("batch:one"));
+    }
+
+    [Fact]
     public void Typed_codecs_round_trip_only_their_domain_shapes()
     {
         var agent = new AgentToolExperienceCodec();
