@@ -69,6 +69,12 @@ limit.
   and the separate Local API process do not yet share one task-mutation owner;
   capabilities reports that reason and no API approval operation exists.
 
+### Fixed
+
+- Lab runtime ownership now preserves malformed, truncated, or unreadable
+  manifests as `Unknown` and refuses recovery or ownership mutation until the
+  evidence can be read safely. Read failure is no longer treated as no owners.
+
 ### Changed
 
 - Embedded MTP is now `Available` only after model-specific capability or

@@ -288,7 +288,11 @@ settings merely to close the row.
 - Experiment exports omit local paths, host/user identity, tokens, raw headers,
   environment variables, and prompt/output bodies by default.
 - Temporary processes, files, ports, and samples are owned by one run and
-  cleaned on success, failure, cancellation, and restart recovery.
+  cleaned on success, failure, cancellation, and restart recovery. A missing
+  ownership manifest is known empty; a present manifest that is malformed,
+  truncated, unreadable, or otherwise indeterminate is `Unknown`, remains
+  untouched, and blocks ownership mutation or process cleanup until it can be
+  read safely. Failure to read evidence is never treated as absence.
 - Apply revalidates identity and uses normal settings persistence. It never
   writes `settings.json` directly.
 
@@ -308,6 +312,9 @@ settings merely to close the row.
 - DFlash is representable and remains Research/Watch until its listed gate is
   met.
 - Apply is explicit, stale-identity guarded, and auditable.
+- Restart recovery and ownership add/remove operations fail closed when the
+  existing ownership evidence is `Unknown`; they do not rewrite the manifest
+  or terminate a process on that basis.
 
 ## 3.16 Test and live-verification budget
 

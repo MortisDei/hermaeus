@@ -533,6 +533,10 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
 - Cancellation and restart recovery are ownership-scoped. Recovery stops a
   process only after its PID, start time, and executable hash match the atomic
   Lab ownership record; an unverifiable process remains `Unknown` and untouched.
+  A missing manifest is known empty, while malformed, truncated, unreadable,
+  or otherwise indeterminate ownership evidence is preserved and blocks add,
+  remove, and recovery mutation. Failure to read evidence is never treated as
+  evidence that no owner exists.
 - Observations retain missing versus zero, source, trust, unit, repetition/case,
   and fingerprints. Comparisons show median/range/count, refuse uncontrolled
   fingerprint differences, and make correctness a gate rather than hiding it

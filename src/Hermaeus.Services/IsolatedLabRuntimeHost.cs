@@ -14,12 +14,13 @@ public sealed class IsolatedLabRuntimeHost : ILabRuntimeHost
     private readonly ISettingsService _settings;
     private readonly RedactionService _redaction;
     private readonly SemaphoreSlim _manifestGate = new(1, 1);
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
+    private readonly IRuntimeLogService? _runtimeLogs;
 
-    public IsolatedLabRuntimeHost(ISettingsService settings, RedactionService redaction)
+    public IsolatedLabRuntimeHost(ISettingsService settings, RedactionService redaction, IRuntimeLogService? runtimeLogs = null)
     {
         _settings = settings;
         _redaction = redaction;
+        _runtimeLogs = runtimeLogs;
     }
 
     private string ManifestPath => Path.Combine(SettingsService.ResolveDataRoot(_settings.Settings), "lab", "runtime-ownership.json");
@@ -63,7 +64,14 @@ public sealed class IsolatedLabRuntimeHost : ILabRuntimeHost
         await _manifestGate.WaitAsync(ct);
         try
         {
-            var owners = await ReadOwnersAsync(ct);
+            var store = CreateOwnershipStore();
+            var read = await store.ReadAsync(ct);
+            if (read.State == RuntimeOwnershipState.Unknown)
+            {
+                return ["Lab runtime ownership evidence could not be read; recovery was skipped and the existing manifest was preserved."];
+            }
+
+            var owners = read.Owners.ToList();
             var unresolved = new List<RuntimeOwner>();
             var results = new List<string>();
             foreach (var owner in owners)
@@ -96,7 +104,7 @@ public sealed class IsolatedLabRuntimeHost : ILabRuntimeHost
                     }
                 }
             }
-            await WriteOwnersAsync(unresolved, ct);
+            await store.WriteAsync(unresolved, ct);
             return results;
         }
         finally
@@ -110,10 +118,7 @@ public sealed class IsolatedLabRuntimeHost : ILabRuntimeHost
         await _manifestGate.WaitAsync(ct);
         try
         {
-            var owners = await ReadOwnersAsync(ct);
-            owners.RemoveAll(item => item.OwnershipId == owner.OwnershipId);
-            owners.Add(owner);
-            await WriteOwnersAsync(owners.TakeLast(32).ToArray(), ct);
+            await CreateOwnershipStore().AddAsync(owner, ct);
         }
         finally
         {
@@ -126,9 +131,7 @@ public sealed class IsolatedLabRuntimeHost : ILabRuntimeHost
         await _manifestGate.WaitAsync(ct);
         try
         {
-            var owners = await ReadOwnersAsync(ct);
-            owners.RemoveAll(item => item.OwnershipId == ownershipId);
-            await WriteOwnersAsync(owners, ct);
+            await CreateOwnershipStore().RemoveAsync(ownershipId, ct);
         }
         finally
         {
@@ -136,31 +139,12 @@ public sealed class IsolatedLabRuntimeHost : ILabRuntimeHost
         }
     }
 
-    private async Task<List<RuntimeOwner>> ReadOwnersAsync(CancellationToken ct)
-    {
-        if (!File.Exists(ManifestPath)) return [];
-        try
-        {
-            await using var stream = new FileStream(ManifestPath, FileMode.Open, FileAccess.Read, FileShare.Read,
-                4096, FileOptions.Asynchronous | FileOptions.SequentialScan);
-            return await JsonSerializer.DeserializeAsync<List<RuntimeOwner>>(stream, JsonOptions, ct) ?? [];
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
-        {
-            return [];
-        }
-    }
-
-    private async Task WriteOwnersAsync(IReadOnlyCollection<RuntimeOwner> owners, CancellationToken ct)
-    {
-        if (owners.Count == 0)
-        {
-            try { File.Delete(ManifestPath); }
-            catch (DirectoryNotFoundException) { }
-            return;
-        }
-        await AtomicFile.WriteAllTextAsync(ManifestPath, JsonSerializer.Serialize(owners, JsonOptions), ct);
-    }
+    private RuntimeOwnershipManifestStore CreateOwnershipStore() =>
+        new(ManifestPath, () => _runtimeLogs?.Add(new RuntimeLogEntry(
+            DateTime.UtcNow,
+            RuntimeLogLevel.Warning,
+            RuntimeLogCategory.Service,
+            "Lab runtime ownership evidence is unreadable; ownership mutations are blocked until it can be read.")));
 
     private static int ReserveLoopbackPort()
     {
@@ -226,8 +210,8 @@ public sealed class IsolatedLabRuntimeHost : ILabRuntimeHost
         public async Task StopAsync(CancellationToken ct = default)
         {
             if (Interlocked.Exchange(ref _stopped, 1) != 0) return;
-            manager.Stop();
             await owner.RemoveOwnerAsync(record.OwnershipId, ct);
+            manager.Stop();
         }
 
         public async ValueTask DisposeAsync()
@@ -237,6 +221,4 @@ public sealed class IsolatedLabRuntimeHost : ILabRuntimeHost
         }
     }
 
-    private sealed record RuntimeOwner(string OwnershipId, string RunId, int ProcessId,
-        DateTime StartedAtUtc, string ExecutableSha256, int Port, DateTime RecordedAtUtc);
 }
