@@ -49,7 +49,8 @@ public sealed class IsolatedLabRuntimeHost : ILabRuntimeHost
         try
         {
             await AddOwnerAsync(owner, ct);
-            return new Session(this, manager, owner);
+            return new Session(this, owner, manager.Stop, manager.Dispose,
+                () => manager.Status, () => manager.CurrentProcessIdentity);
         }
         catch
         {
@@ -198,26 +199,41 @@ public sealed class IsolatedLabRuntimeHost : ILabRuntimeHost
         }
     }
 
-    private sealed class Session(IsolatedLabRuntimeHost owner, ServerProcessManager manager, RuntimeOwner record) : ILabRuntimeSession
+    internal sealed class Session(
+        IsolatedLabRuntimeHost owner,
+        RuntimeOwner record,
+        Action stopManager,
+        Action disposeManager,
+        Func<ServerStatus> getStatus,
+        Func<ManagedRuntimeProcessIdentity?> getProcess) : ILabRuntimeSession
     {
         private int _stopped;
         public string OwnershipId => record.OwnershipId;
         public int Port => record.Port;
-        public bool IsRunning => manager.Status == ServerStatus.Running;
-        public ManagedProcessReference? Process => manager.CurrentProcessIdentity is { } process
+        public bool IsRunning => getStatus() == ServerStatus.Running;
+        public ManagedProcessReference? Process => getProcess() is { } process
             ? new ManagedProcessReference(process.ProcessId, process.StartedAtUtc) : null;
 
         public async Task StopAsync(CancellationToken ct = default)
         {
             if (Interlocked.Exchange(ref _stopped, 1) != 0) return;
-            await owner.RemoveOwnerAsync(record.OwnershipId, ct);
-            manager.Stop();
+            try
+            {
+                await owner.RemoveOwnerAsync(record.OwnershipId, ct);
+            }
+            catch (RuntimeOwnershipUnknownException)
+            {
+                // Recovery must remain fail-closed, but this session directly
+                // owns the manager it created. Stop that known child while
+                // preserving the unreadable manifest for later reconciliation.
+            }
+            stopManager();
         }
 
         public async ValueTask DisposeAsync()
         {
             await StopAsync();
-            manager.Dispose();
+            disposeManager();
         }
     }
 

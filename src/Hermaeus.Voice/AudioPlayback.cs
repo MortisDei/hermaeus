@@ -17,14 +17,29 @@ public static class AudioPlayback
 {
     public static async Task PlayAsync(string wavFilePath, CancellationToken ct)
     {
-        if (OperatingSystem.IsWindows() && await TryRunAsync("powershell", BuildArguments("powershell", wavFilePath), ct))
-            return;
+        var players = new List<(string Command, IReadOnlyList<string> Arguments)>();
+        if (OperatingSystem.IsWindows())
+            players.Add(("powershell", BuildArguments("powershell", wavFilePath)));
+        players.Add(("paplay", [wavFilePath]));
+        players.Add(("pw-play", [wavFilePath]));
+        players.Add(("aplay", ["-q", wavFilePath]));
+        players.Add(("afplay", [wavFilePath]));
+        players.Add(("ffplay", ["-nodisp", "-autoexit", wavFilePath]));
 
-        if (await TryRunAsync("paplay", [wavFilePath], ct)) return;
-        if (await TryRunAsync("pw-play", [wavFilePath], ct)) return;
-        if (await TryRunAsync("aplay", ["-q", wavFilePath], ct)) return;
-        if (await TryRunAsync("afplay", [wavFilePath], ct)) return;
-        if (await TryRunAsync("ffplay", ["-nodisp", "-autoexit", wavFilePath], ct)) return;
+        await PlayCandidatesAsync(players, TryRunAsync, ct);
+    }
+
+    internal static async Task PlayCandidatesAsync(
+        IReadOnlyList<(string Command, IReadOnlyList<string> Arguments)> players,
+        Func<string, IReadOnlyList<string>, CancellationToken, Task<bool>> tryRun,
+        CancellationToken ct)
+    {
+        foreach (var player in players)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (await tryRun(player.Command, player.Arguments, ct))
+                return;
+        }
 
         throw new InvalidOperationException("Could not find a system audio player for the generated WAV file.");
     }
@@ -73,12 +88,53 @@ public static class AudioPlayback
             if (!process.Start())
                 return false;
 
-            await process.WaitForExitAsync(ct);
+            try
+            {
+                await process.WaitForExitAsync(ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                await TerminateOwnedProcessAsync(process);
+                throw;
+            }
+
             return process.ExitCode == 0;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch
         {
             return false;
+        }
+    }
+
+    private static async Task TerminateOwnedProcessAsync(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+                process.Kill(entireProcessTree: true);
+        }
+        catch (InvalidOperationException) when (process.HasExited)
+        {
+        }
+        catch (System.ComponentModel.Win32Exception) when (process.HasExited)
+        {
+        }
+        catch (NotSupportedException)
+        {
+            if (!process.HasExited)
+                process.Kill();
+        }
+
+        try
+        {
+            await process.WaitForExitAsync(CancellationToken.None);
+        }
+        catch (InvalidOperationException) when (process.HasExited)
+        {
         }
     }
 }

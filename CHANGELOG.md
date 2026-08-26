@@ -81,6 +81,11 @@ limit.
 - Lab runtime ownership now preserves malformed, truncated, or unreadable
   manifests as `Unknown` and refuses recovery or ownership mutation until the
   evidence can be read safely. Read failure is no longer treated as no owners.
+- A directly owned Lab session now stops its child runtime even if persisted
+  ownership evidence becomes `Unknown`; the unreadable manifest remains intact
+  for later reconciliation.
+- Audio playback cancellation now terminates the player process Hermaeus
+  spawned, propagates cancellation, and does not fall through to later players.
 
 ### Changed
 

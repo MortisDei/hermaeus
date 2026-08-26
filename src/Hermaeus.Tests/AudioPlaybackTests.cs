@@ -43,4 +43,57 @@ public sealed class AudioPlaybackTests
         Assert.Contains("C:\\private\\tone's.wav", args);
         Assert.DoesNotContain("tone's.wav", args[3]);
     }
+
+    [Fact]
+    public async Task Cancellation_stops_fallback_sequence_without_audio_playback()
+    {
+        using var cts = new CancellationTokenSource();
+        var attempted = new List<string>();
+        var first = true;
+        var players = new[]
+        {
+            ("first", (IReadOnlyList<string>)["tone.wav"]),
+            ("fallback", (IReadOnlyList<string>)["tone.wav"])
+        };
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => AudioPlayback.PlayCandidatesAsync(
+            players,
+            async (command, _, ct) =>
+            {
+                attempted.Add(command);
+                if (first)
+                {
+                    first = false;
+                    cts.Cancel();
+                    await Task.Yield();
+                    ct.ThrowIfCancellationRequested();
+                }
+                return false;
+            },
+            cts.Token));
+
+        Assert.Equal(["first"], attempted);
+    }
+
+    [Fact]
+    public async Task Ordinary_player_failure_still_tries_the_next_fallback()
+    {
+        var attempted = new List<string>();
+        var players = new[]
+        {
+            ("first", (IReadOnlyList<string>)["tone.wav"]),
+            ("fallback", (IReadOnlyList<string>)["tone.wav"])
+        };
+
+        await AudioPlayback.PlayCandidatesAsync(
+            players,
+            (command, _, _) =>
+            {
+                attempted.Add(command);
+                return Task.FromResult(command == "fallback");
+            },
+            CancellationToken.None);
+
+        Assert.Equal(["first", "fallback"], attempted);
+    }
 }

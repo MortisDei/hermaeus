@@ -26,6 +26,14 @@ internal sealed record RuntimeOwnershipReadResult(
     public static RuntimeOwnershipReadResult Missing { get; } = new(RuntimeOwnershipState.Missing, []);
 }
 
+internal sealed class RuntimeOwnershipUnknownException : InvalidOperationException
+{
+    public RuntimeOwnershipUnknownException()
+        : base("Lab runtime ownership evidence is unreadable; ownership mutation was refused.")
+    {
+    }
+}
+
 /// <summary>
 /// Reads and mutates the isolated Lab runtime ownership manifest without
 /// collapsing unreadable evidence into an empty owner list.
@@ -107,6 +115,6 @@ internal sealed class RuntimeOwnershipManifestStore
     private static void EnsureMutable(RuntimeOwnershipReadResult result)
     {
         if (result.State == RuntimeOwnershipState.Unknown)
-            throw new InvalidOperationException("Lab runtime ownership evidence is unreadable; ownership mutation was refused.");
+            throw new RuntimeOwnershipUnknownException();
     }
 }

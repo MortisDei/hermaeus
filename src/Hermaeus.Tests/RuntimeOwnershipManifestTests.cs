@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using Hermaeus.Core.Models;
 using Hermaeus.Services;
 using Xunit;
 
@@ -81,8 +82,8 @@ public sealed class RuntimeOwnershipManifestTests
         await File.WriteAllTextAsync(path, original);
         var store = new RuntimeOwnershipManifestStore(path);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => store.AddAsync(Owner()));
-        await Assert.ThrowsAsync<InvalidOperationException>(() => store.RemoveAsync("owner-1"));
+        await Assert.ThrowsAsync<RuntimeOwnershipUnknownException>(() => store.AddAsync(Owner()));
+        await Assert.ThrowsAsync<RuntimeOwnershipUnknownException>(() => store.RemoveAsync("owner-1"));
 
         Assert.Equal(original, await File.ReadAllTextAsync(path));
     }
@@ -121,6 +122,63 @@ public sealed class RuntimeOwnershipManifestTests
         var results = await host.RecoverOwnedProcessesAsync();
 
         Assert.Contains(results, message => message.Contains("already stopped", StringComparison.Ordinal));
+        Assert.False(File.Exists(path));
+    }
+
+    [Fact]
+    public async Task Direct_session_stops_owned_manager_when_manifest_becomes_unknown()
+    {
+        using var temp = new TempDir();
+        var settings = Helpers.NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        var path = Path.Combine(settings.Settings.DataManagement.DataRootDirectory, "lab", "runtime-ownership.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var host = new IsolatedLabRuntimeHost(settings, new RedactionService());
+        var owner = Owner(processId: Environment.ProcessId);
+        await WriteJsonAsync(path, new[] { owner });
+        var stopped = false;
+        var disposed = false;
+        var session = new IsolatedLabRuntimeHost.Session(
+            host,
+            owner,
+            () => stopped = true,
+            () => disposed = true,
+            () => ServerStatus.Running,
+            () => null);
+
+        const string original = "{\"ownershipId\":";
+        await File.WriteAllTextAsync(path, original);
+        await session.DisposeAsync();
+
+        Assert.True(stopped);
+        Assert.True(disposed);
+        Assert.Equal(original, await File.ReadAllTextAsync(path));
+    }
+
+    [Fact]
+    public async Task Direct_session_removes_known_ownership_after_stopping_manager()
+    {
+        using var temp = new TempDir();
+        var settings = Helpers.NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        var path = Path.Combine(settings.Settings.DataManagement.DataRootDirectory, "lab", "runtime-ownership.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var owner = Owner(processId: Environment.ProcessId);
+        await WriteJsonAsync(path, new[] { owner });
+
+        var host = new IsolatedLabRuntimeHost(settings, new RedactionService());
+        var stopped = false;
+        var session = new IsolatedLabRuntimeHost.Session(
+            host,
+            owner,
+            () => stopped = true,
+            () => { },
+            () => ServerStatus.Running,
+            () => null);
+
+        await session.StopAsync();
+
+        Assert.True(stopped);
         Assert.False(File.Exists(path));
     }
 
