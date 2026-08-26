@@ -88,20 +88,38 @@ public static class AudioPlayback
             if (!process.Start())
                 return false;
 
-            try
-            {
-                await process.WaitForExitAsync(ct);
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                await TerminateOwnedProcessAsync(process);
-                throw;
-            }
-
-            return process.ExitCode == 0;
+            return await RunProcessLifecycleAsync(
+                async token =>
+                {
+                    await process.WaitForExitAsync(token);
+                    return process.ExitCode;
+                },
+                () => TerminateOwnedProcessAsync(process),
+                ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
+            throw;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    internal static async Task<bool> RunProcessLifecycleAsync(
+        Func<CancellationToken, Task<int>> waitForExit,
+        Func<Task> terminateOwnedProcess,
+        CancellationToken ct)
+    {
+        try
+        {
+            return await waitForExit(ct) == 0;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            try { await terminateOwnedProcess(); }
+            catch { }
             throw;
         }
         catch

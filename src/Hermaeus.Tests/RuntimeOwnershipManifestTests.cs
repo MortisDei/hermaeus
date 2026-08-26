@@ -182,6 +182,107 @@ public sealed class RuntimeOwnershipManifestTests
         Assert.False(File.Exists(path));
     }
 
+    [Fact]
+    public async Task Direct_session_stops_manager_when_known_cleanup_fails()
+    {
+        using var temp = new TempDir();
+        var settings = Helpers.NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        var host = new IsolatedLabRuntimeHost(settings, new RedactionService());
+        var owner = Owner(processId: Environment.ProcessId);
+        var stopped = false;
+        var session = new IsolatedLabRuntimeHost.Session(
+            host,
+            owner,
+            () => stopped = true,
+            () => { },
+            () => ServerStatus.Running,
+            () => null,
+            _ => Task.FromException(new IOException("manifest write failed")));
+
+        await Assert.ThrowsAsync<IOException>(() => session.StopAsync());
+
+        Assert.True(stopped);
+    }
+
+    [Fact]
+    public async Task Direct_session_stops_manager_when_cleanup_is_cancelled()
+    {
+        using var temp = new TempDir();
+        var settings = Helpers.NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        var host = new IsolatedLabRuntimeHost(settings, new RedactionService());
+        var owner = Owner(processId: Environment.ProcessId);
+        var stopped = false;
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var session = new IsolatedLabRuntimeHost.Session(
+            host,
+            owner,
+            () => stopped = true,
+            () => { },
+            () => ServerStatus.Running,
+            () => null,
+            ct => Task.FromCanceled(ct));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => session.StopAsync(cts.Token));
+
+        Assert.True(stopped);
+    }
+
+    [Fact]
+    public async Task Dispose_disposes_manager_when_ownership_cleanup_fails()
+    {
+        using var temp = new TempDir();
+        var settings = Helpers.NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        var host = new IsolatedLabRuntimeHost(settings, new RedactionService());
+        var owner = Owner(processId: Environment.ProcessId);
+        var stopped = false;
+        var disposed = false;
+        var session = new IsolatedLabRuntimeHost.Session(
+            host,
+            owner,
+            () => stopped = true,
+            () => disposed = true,
+            () => ServerStatus.Running,
+            () => null,
+            _ => Task.FromException(new IOException("manifest write failed")));
+
+        await Assert.ThrowsAsync<IOException>(() => session.DisposeAsync().AsTask());
+
+        Assert.True(stopped);
+        Assert.True(disposed);
+    }
+
+    [Fact]
+    public async Task Repeated_stop_and_dispose_are_idempotent()
+    {
+        using var temp = new TempDir();
+        var settings = Helpers.NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        var host = new IsolatedLabRuntimeHost(settings, new RedactionService());
+        var owner = Owner(processId: Environment.ProcessId);
+        var stopCount = 0;
+        var disposeCount = 0;
+        var session = new IsolatedLabRuntimeHost.Session(
+            host,
+            owner,
+            () => stopCount++,
+            () => disposeCount++,
+            () => ServerStatus.Running,
+            () => null,
+            _ => Task.CompletedTask);
+
+        await session.StopAsync();
+        await session.StopAsync();
+        await session.DisposeAsync();
+        await session.DisposeAsync();
+
+        Assert.Equal(1, stopCount);
+        Assert.Equal(1, disposeCount);
+    }
+
     private static RuntimeOwner Owner(int processId = int.MaxValue) => new(
         "owner-1", "run-1", processId, DateTime.UtcNow.AddMinutes(-1),
         new string('a', 64), 39201, DateTime.UtcNow);

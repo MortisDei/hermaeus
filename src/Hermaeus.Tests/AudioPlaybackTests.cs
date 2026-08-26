@@ -96,4 +96,58 @@ public sealed class AudioPlaybackTests
 
         Assert.Equal(["first", "fallback"], attempted);
     }
+
+    [Fact]
+    public async Task Cancellation_stays_cancellation_when_owned_process_termination_fails()
+    {
+        using var cts = new CancellationTokenSource();
+        var attempted = new List<string>();
+        var players = new[]
+        {
+            ("first", (IReadOnlyList<string>)["tone.wav"]),
+            ("fallback", (IReadOnlyList<string>)["tone.wav"])
+        };
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => AudioPlayback.PlayCandidatesAsync(
+            players,
+            async (command, _, ct) =>
+            {
+                attempted.Add(command);
+                return await AudioPlayback.RunProcessLifecycleAsync(
+                    async token =>
+                    {
+                        cts.Cancel();
+                        await Task.Yield();
+                        token.ThrowIfCancellationRequested();
+                        return 0;
+                    },
+                    () => Task.FromException(new InvalidOperationException("termination test failure")),
+                    ct);
+            },
+            cts.Token));
+
+        Assert.Equal(["first"], attempted);
+    }
+
+    [Fact]
+    public async Task Successful_first_player_stops_candidate_traversal()
+    {
+        var attempted = new List<string>();
+        var players = new[]
+        {
+            ("first", (IReadOnlyList<string>)["tone.wav"]),
+            ("fallback", (IReadOnlyList<string>)["tone.wav"])
+        };
+
+        await AudioPlayback.PlayCandidatesAsync(
+            players,
+            (command, _, _) =>
+            {
+                attempted.Add(command);
+                return Task.FromResult(true);
+            },
+            CancellationToken.None);
+
+        Assert.Equal(["first"], attempted);
+    }
 }

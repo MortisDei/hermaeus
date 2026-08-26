@@ -13,18 +13,24 @@ public sealed class OpenAiVoiceProvider : ITtsService, IVoiceProvider, IDisposab
     private readonly ISecretStore _secrets;
     private readonly HttpClient _http;
     private readonly bool _ownsHttp;
+    private readonly Func<string, CancellationToken, Task> _playback;
 
     public VoiceProvider Id => VoiceProvider.OpenAi;
     public string DisplayName => "OpenAI";
     public VoiceCapability Capabilities => VoiceCapability.TextToSpeech | VoiceCapability.Remote | VoiceCapability.RequiresApiKey;
     public (int Major, int Minor)? RequiredPythonVersion => null; // Remote API, no Python required
 
-    public OpenAiVoiceProvider(ISettingsService settings, ISecretStore secrets, HttpClient? http = null)
+    public OpenAiVoiceProvider(
+        ISettingsService settings,
+        ISecretStore secrets,
+        HttpClient? http = null,
+        Func<string, CancellationToken, Task>? playback = null)
     {
         _settings = settings;
         _secrets = secrets;
         _http = http ?? DefaultHttp;
         _ownsHttp = http is not null;
+        _playback = playback ?? VoiceProviderProcessRunner.PlayWavFileAsync;
     }
 
     public bool IsInstalled => !string.IsNullOrWhiteSpace(_settings.Settings.Llm.OpenAiApiKey);
@@ -78,38 +84,50 @@ public sealed class OpenAiVoiceProvider : ITtsService, IVoiceProvider, IDisposab
         {
             outputPath = await RenderToFileAsync(request.Text, request.Voice, request.OutputPath, ct);
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             return new VoiceSynthesisResult(false, ex.Message);
         }
 
         var message = "OpenAI synthesis complete.";
-        if (request.PlayAudio)
+        try
         {
-            try
+            if (request.PlayAudio)
             {
-                await VoiceProviderProcessRunner.PlayWavFileAsync(outputPath, ct);
+                try
+                {
+                    await _playback(outputPath, ct);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    // r18 01-finish-the-open-work.md 1.5: synthesis already succeeded by this point
+                    // (the file above was written); a playback-only failure (missing/broken OS audio
+                    // player, malformed audio) is reported without discarding the output path.
+                    message = $"OpenAI synthesis complete; playback failed: {ex.Message}";
+                }
             }
-            catch (Exception ex)
+
+            return new VoiceSynthesisResult(true, message, outputPath);
+        }
+        finally
+        {
+            // r11 4.3: when the caller did not request a persisted OutputPath, this
+            // synthesized to a temp file that must not outlive playback, failure, or
+            // cancellation.
+            if (request.OutputPath is null && request.PlayAudio && !string.IsNullOrWhiteSpace(outputPath))
             {
-                // r18 01-finish-the-open-work.md 1.5: synthesis already succeeded by this point
-                // (the file above was written); a playback-only failure (missing/broken OS audio
-                // player, malformed audio) used to be reported as a synthesis failure that also
-                // discarded OutputPath, so a caller had no way to know the file existed - and it
-                // never reached the cleanup below either.
-                message = $"OpenAI synthesis complete; playback failed: {ex.Message}";
+                try { File.Delete(outputPath); }
+                catch { }
             }
         }
-
-        // r11 4.3: when the caller did not request a persisted OutputPath, this synthesized to
-        // a %TEMP% file that must not outlive playback.
-        if (request.OutputPath is null && request.PlayAudio && !string.IsNullOrWhiteSpace(outputPath))
-        {
-            try { File.Delete(outputPath); }
-            catch { }
-        }
-
-        return new VoiceSynthesisResult(true, message, outputPath);
     }
 
     public async Task SpeakAsync(string text, CancellationToken ct = default)
@@ -121,7 +139,7 @@ public sealed class OpenAiVoiceProvider : ITtsService, IVoiceProvider, IDisposab
             return;
 
         var outputPath = await RenderToFileAsync(text, _settings.Settings.Tts.Speaker, null, ct);
-        await VoiceProviderProcessRunner.PlayWavFileAsync(outputPath, ct);
+        await _playback(outputPath, ct);
         try { File.Delete(outputPath); }
         catch { }
     }
@@ -135,7 +153,7 @@ public sealed class OpenAiVoiceProvider : ITtsService, IVoiceProvider, IDisposab
             return;
 
         var outputPath = await RenderToFileAsync(text, speaker, null, ct);
-        await VoiceProviderProcessRunner.PlayWavFileAsync(outputPath, ct);
+        await _playback(outputPath, ct);
         try { File.Delete(outputPath); }
         catch { }
     }

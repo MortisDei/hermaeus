@@ -205,9 +205,13 @@ public sealed class IsolatedLabRuntimeHost : ILabRuntimeHost
         Action stopManager,
         Action disposeManager,
         Func<ServerStatus> getStatus,
-        Func<ManagedRuntimeProcessIdentity?> getProcess) : ILabRuntimeSession
+        Func<ManagedRuntimeProcessIdentity?> getProcess,
+        Func<CancellationToken, Task>? removeOwnership = null) : ILabRuntimeSession
     {
         private int _stopped;
+        private int _disposed;
+        private readonly Func<CancellationToken, Task> _removeOwnership =
+            removeOwnership ?? (ct => owner.RemoveOwnerAsync(record.OwnershipId, ct));
         public string OwnershipId => record.OwnershipId;
         public int Port => record.Port;
         public bool IsRunning => getStatus() == ServerStatus.Running;
@@ -219,7 +223,7 @@ public sealed class IsolatedLabRuntimeHost : ILabRuntimeHost
             if (Interlocked.Exchange(ref _stopped, 1) != 0) return;
             try
             {
-                await owner.RemoveOwnerAsync(record.OwnershipId, ct);
+                await _removeOwnership(ct);
             }
             catch (RuntimeOwnershipUnknownException)
             {
@@ -227,13 +231,23 @@ public sealed class IsolatedLabRuntimeHost : ILabRuntimeHost
                 // owns the manager it created. Stop that known child while
                 // preserving the unreadable manifest for later reconciliation.
             }
-            stopManager();
+            finally
+            {
+                stopManager();
+            }
         }
 
         public async ValueTask DisposeAsync()
         {
-            await StopAsync();
-            disposeManager();
+            if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+            try
+            {
+                await StopAsync();
+            }
+            finally
+            {
+                disposeManager();
+            }
         }
     }
 
