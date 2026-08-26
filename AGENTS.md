@@ -81,4 +81,11 @@ Git rules:
 - Never add AI co-author trailers (e.g. `Co-Authored-By: Claude`) to commits.
 - Never push version tags or create releases; never change repository settings or visibility. Owner-only.
 
+Commit-message contract for non-trivial work:
+- Use a Conventional Commit-style subject such as `fix: preserve chat scroll anchoring`.
+- Include a meaningful body describing what changed and why. Subject-only commits are acceptable only for genuinely trivial changes.
+- The body must record important correctness, security, privacy, or evidence semantics affected by the change.
+- The body must identify relevant verification performed, including focused tests or known verification limits.
+- Record deliberate limitations and remaining live gates when they exist. Do not omit this detail for concision.
+
 Final response format: what changed; build/test result; risks or follow-ups.
