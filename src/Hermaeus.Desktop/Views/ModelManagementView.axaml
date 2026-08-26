@@ -146,13 +146,18 @@
                                                   IsVisible="{Binding HasProjector}"
                                                   Content="{Binding ProjectorSelectionLabel}"
                                                   FontSize="11"
-                                                  ToolTip.Tip="A source-mapped vision projector. It is offered only when the repository declares the exact compatible file and supplies a verifiable hash." />
+                                                  ToolTip.Tip="A vision projector candidate. Explicit mappings or verified GGUF metadata may select it automatically; layout-only candidates require this checkbox as your confirmation." />
                                         <CheckBox IsChecked="{Binding IncludeDraftHead}"
                                                   IsVisible="{Binding HasDraftHead}"
                                                   Content="{Binding DraftHeadSelectionLabel}"
                                                   FontSize="11"
-                                                  ToolTip.Tip="A source-mapped MTP draft head. It is offered only when the repository declares the exact compatible file and supplies a verifiable hash." />
+                                                  ToolTip.Tip="An MTP draft-head candidate. Explicit mappings or matching GGUF metadata may select it automatically; layout-only candidates require this checkbox as your confirmation." />
                                     </StackPanel>
+                                    <TextBlock Text="{Binding CompanionReviewLabel}"
+                                               IsVisible="{Binding HasReviewRequiredCompanions}"
+                                               FontSize="11"
+                                               Opacity="0.7"
+                                               TextWrapping="Wrap" />
                                   </StackPanel>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>

@@ -33,12 +33,14 @@ limit.
   top-level Save button is removed, task audio notifications default off, and
   managed llama.cpp uses newer load-mode and localhost-only CORS arguments only
   after the selected runtime advertises them.
-- Hugging Face model cards now accept companions only from a hash-verified
-  `.hermaeus/companions.json` mapping. Initial downloads offer mapped projector
-  and MTP assets with known sizes, per-model automatic update policy is
-  persisted, updates and missing-asset recovery retain exact source/hash
-  identity, and disabling the policy prompts Keep files / Remove files /
-  Cancel before any removal.
+- Hugging Face model cards prefer a hash-verified `.hermaeus/companions.json`
+  mapping but also resolve ordinary sibling `mmproj*.gguf` and
+  `MTP/mtp*.gguf` layouts when same-revision LFS hashes and bounded GGUF
+  metadata prove the role and model relationship. Ambiguous candidates require
+  review. Initial downloads show known sizes, per-model automatic update policy
+  is persisted, updates and missing-asset recovery retain exact
+  revision/source/hash identity, and disabling the policy prompts Keep files /
+  Remove files / Cancel before any removal.
 
 ## [0.38.0-alpha] - 2026-08-24
 

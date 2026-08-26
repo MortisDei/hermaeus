@@ -102,18 +102,27 @@ penetration-test report.
 
 ### Companion lifecycle (R31)
 
-Companion handling requires the exact `.hermaeus/companions.json` path in the
+Companion handling prefers the exact `.hermaeus/companions.json` path in the
 linked Hugging Face repository, a matching tree LFS SHA256 for that metadata,
 explicit model-to-companion role/path mapping, and a companion tree LFS
-SHA256. The model manifest records exact local and source identities. Automatic
-updates replace only an existing companion with matching manifest provenance;
-an existing unproven file is left untouched. Disabling the per-model policy
-uses root, reparse-point, explicit-confirmation, and exact-file deletion checks.
-Missing mapped files can be reacquired without filename substitution.
+SHA256. For ordinary repositories without that file, the fallback considers
+only same-revision tree entries with full LFS hashes in established sibling
+`mmproj*.gguf` or `MTP/mtp*.gguf` layouts. It probes at most 8 MiB of each
+candidate GGUF header and requires role metadata plus deterministic model
+metadata compatibility before auto-selection. Ambiguous candidates remain
+review-required and are never silently selected. The model manifest records
+exact local, revision, and source identities. Automatic updates replace only
+an existing companion with matching manifest provenance and prior user
+confirmation; an existing unproven file is left untouched. Disabling the
+per-model policy uses root, reparse-point, explicit-confirmation, and
+exact-file deletion checks. Missing known files can be reacquired without
+filename substitution.
 
 Metadata integrity is checked against the publisher's own tree hash, not an
 independent signature. Ordinary entries without LFS hashes remain eligible for
 explicit model download as before, but never for automatic companion handling.
+The bounded header probe is not a substitute for full-file verification:
+installation still verifies the complete download against the tree LFS hash.
 
 R31 normalized Agent outcomes are descriptive evidence only. The normalizer and
 stored outcomes are not inputs to `AgentSafetyGate`, workspace policy, approval

@@ -25,7 +25,8 @@ public sealed record ModelFileSetEntry(
     string? LfsSha256,
     ModelFileRole Role,
     bool Required,
-    bool SelectedByDefault)
+    bool SelectedByDefault,
+    string EvidenceDetail = "")
 {
     public string FileName => Path.GetFileName(RepoPath);
 }
@@ -76,11 +77,11 @@ public static class ModelFileSetResolver
         var selectedBase = Path.GetFileNameWithoutExtension(selected);
         var shardMatch = ShardRegex.Match(selectedBase);
 
-        void Add(HfTreeEntry entry, ModelFileRole role, bool required, bool byDefault)
+        void Add(HfTreeEntry entry, ModelFileRole role, bool required, bool byDefault, string evidenceDetail = "")
         {
             if (!seen.Add(entry.Path))
                 return;
-            entries.Add(new ModelFileSetEntry(entry.Path, entry.SizeBytes, entry.LfsSha256, role, required, byDefault));
+            entries.Add(new ModelFileSetEntry(entry.Path, entry.SizeBytes, entry.LfsSha256, role, required, byDefault, evidenceDetail));
         }
 
         var selectedEntry = tree.FirstOrDefault(e => string.Equals(Normalize(e.Path), selected, StringComparison.OrdinalIgnoreCase))
@@ -106,8 +107,8 @@ public static class ModelFileSetResolver
             Add(selectedEntry, ModelFileRole.Model, required: true, byDefault: true);
         }
 
-        // Companions are offered only from an explicit, hash-verified source
-        // mapping. A mmproj-/mtp- filename or directory is not compatibility evidence.
+        // Companions are offered only from an explicit or classified source mapping.
+        // A mmproj-/mtp- filename or directory is candidate discovery only.
         foreach (var declaration in companionDeclarations ?? [])
         {
             if (!string.Equals(Normalize(declaration.ModelPath), selected, StringComparison.OrdinalIgnoreCase))
@@ -117,7 +118,7 @@ public static class ModelFileSetResolver
             if (entry is null || string.IsNullOrWhiteSpace(entry.LfsSha256))
                 continue;
 
-            Add(entry, declaration.Role, required: false, byDefault: true);
+            Add(entry, declaration.Role, required: false, byDefault: declaration.AutoSelect, declaration.EvidenceDetail);
         }
 
         return new ModelFileSet(repoId, entries);

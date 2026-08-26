@@ -802,9 +802,11 @@ and in addition to Memory/RAG injection. See [docs/recall.md](recall.md).
   repo-linked.
 - The local models list excludes companion files that ship alongside a real
   model in the same Hugging Face repo but are not themselves a loadable chat
-  model. Companions are managed only when the repository's hash-verified
-  `.hermaeus/companions.json` explicitly maps them to the model; `mmproj*` and
-  `mtp*` filenames alone are not compatibility evidence.
+  model. An explicit, hash-verified `.hermaeus/companions.json` mapping is the
+  highest-confidence source. Existing repositories without that file may also
+  expose `mmproj*.gguf` siblings or `MTP/mtp*.gguf` candidates when the same
+  revision has valid LFS hashes and bounded GGUF metadata supports the role.
+  Filename or directory shape alone never proves compatibility.
 - The Services card's server editor exposes first-class llama-server engine
   options next to Context Size/GPU Layers/Threads/Slots: KV cache type (K and
   V independently, f16/bf16/q8_0/q5_1/q5_0/q4_1/q4_0/iq4_nl), Flash Attention
@@ -960,17 +962,22 @@ model-specific capability or direct drafting evidence.
 ### Complete downloads and per-model folders (r27)
 
 Selecting a GGUF in the Hugging Face browser resolves the model's whole **file
-set** from the repository tree and any hash-verified explicit companion
-manifest:
+set** from the repository tree, hash-verified explicit companion mappings, and
+the bounded metadata fallback for ordinary existing repositories:
 
 - **Shard siblings** are required. A partial shard set is a model that does not
   load, so shards are part of the download or the download is refused. A sharded
   model is listed once, as its first shard, rather than hidden.
 - **A mapped vision projector** or **MTP draft head**, offered and on by
-  default only when the repository declares the exact model-to-companion
-  mapping and the companion has a verifiable hash. The additional size is
-  shown before download. Without mapping evidence the model-only choice is
-  the only honest choice.
+  default when the repository declares the exact model-to-companion mapping
+  and the companion has a verifiable hash.
+- **Existing-layout candidates**, including sibling `mmproj*.gguf` and
+  `MTP/mtp*.gguf`, are also shown when their tree LFS hash and GGUF header can
+  be read. A unique `general.type=clip` projector or a unique MTP head with
+  matching architecture, vocabulary, tokenizer, and `nextn` metadata can be
+  selected automatically. Ambiguous or incomplete candidates remain
+  unchecked and require the user to confirm the role checkbox. The additional
+  size is shown when known.
 
 Each file keeps its own SHA256 verification, with deletion on mismatch, and its
 own manifest entry. Progress is reported across the set, so a three-shard
@@ -987,19 +994,23 @@ from their own base name. A file that cannot be attributed is listed as skipped
 rather than moved somewhere wrong, and filenames are never changed.
 
 Each model exposes an **Automatically manage known companions** policy. Initial
-downloads offer mapped projector and MTP files individually, with known
-additional size. Model updates download or replace mapped companions only when
-the policy is enabled. Disabling it never deletes silently: if manifested
-companion files exist, Hermaeus asks to keep or remove them, or cancel. Missing
-mapped companions can be reacquired from the model card while the exact source
-mapping and hash remain available. A stale or untrusted path is left alone and
-must be cleared or repaired explicitly.
+downloads offer mapped or deterministically classified projector and MTP files
+individually, with known additional size. A layout candidate that needs review
+is only managed automatically after the user confirms it. Model updates
+download or replace compatible, confirmed companions only when the policy is
+enabled. Disabling it never deletes silently: if manifested companion files
+exist, Hermaeus asks to keep or remove them, or cancel. Missing known
+companions can be reacquired from the model card while the exact source
+mapping, revision, and hash remain available. A stale or untrusted path is
+left alone and must be cleared or repaired explicitly.
 
 The supported source manifest shape is an object containing `models`, each with
 an exact `model_path` and `companions` containing an exact `path` plus `role`
 (`projector` or `draft_head`). Hermaeus accepts only paths present in the same
-repository tree with LFS hashes, and verifies the manifest's own LFS hash before
-parsing it.
+repository revision with LFS hashes, and verifies the manifest's own LFS hash
+before parsing it. The fallback never changes the third-party repository: it
+uses the repository tree and bounded GGUF header reads already available from
+the download source.
 
 ## RAG
 

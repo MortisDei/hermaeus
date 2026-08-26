@@ -68,15 +68,21 @@ changes can launch or reconfigure a process. A missing primary model,
 projector, or draft companion is shown as missing and is never silently
 replaced by another file.
 
-For Hugging Face models, companion handling is based on an explicit,
-SHA256-verified `.hermaeus/companions.json` mapping from the repository. A
-`mmproj` or `mtp` filename alone is not enough. The initial download offers
-known projector and MTP files individually and shows their additional size.
-Each model's **Automatically manage known companions** setting controls later
-updates. Disabling it asks whether to Keep files, Remove files, or Cancel;
-removal is never implicit. If a mapped companion goes missing, use
-**Reacquire known companions** on the model card. Recovery refuses when the
-source mapping or hash evidence is unavailable.
+For Hugging Face models, companion handling prefers a SHA256-verified
+`.hermaeus/companions.json` mapping, but does not require third-party
+repositories to add one. Existing `mmproj*.gguf` siblings and
+`MTP/mtp*.gguf` files are examined using same-revision tree/LFS data and
+bounded GGUF metadata. Only a unique candidate with deterministic role and
+model compatibility evidence is selected automatically. Ambiguous or
+incomplete candidates are shown unchecked for explicit review; a filename
+alone is never enough.
+
+The initial download offers known projector and MTP files individually and
+shows their additional size. Each model's **Automatically manage known
+companions** setting controls later updates. Disabling it asks whether to Keep
+files, Remove files, or Cancel; removal is never implicit. If a known
+companion goes missing, use **Reacquire known companions** on the model card.
+Recovery uses only the recorded repository revision, path, and verified hash.
 
 The server card's **GPU Fit** text is a prediction for the values currently in
 the editor, including unsaved changes. It lists weights, K/V cache, runtime

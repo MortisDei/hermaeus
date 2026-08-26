@@ -35,7 +35,8 @@ public sealed record GgufModelInfo(
     string BaseModelName = "",
     string BaseModelRepositoryUrl = "",
     string TokenizerModel = "",
-    string TokenizerPre = "")
+    string TokenizerPre = "",
+    string GeneralType = "")
 {
     public string TokenizerIdentity =>
         string.IsNullOrWhiteSpace(TokenizerModel) || string.IsNullOrWhiteSpace(TokenizerPre)
@@ -98,12 +99,35 @@ public static class GgufMetadataReader
         }
     }
 
+    /// <summary>Reads a bounded GGUF header supplied by a trusted transport probe. The
+    /// caller must cap the input before calling this method; tensor data is not required.</summary>
+    public static GgufModelInfo? TryRead(ReadOnlyMemory<byte> bytes)
+    {
+        try
+        {
+            using var stream = new MemoryStream(bytes.ToArray(), writable: false);
+            return TryReadCore(stream);
+        }
+        catch (ArgumentException) { return null; }
+        catch (NotSupportedException) { return null; }
+    }
+
     private static GgufModelInfo? TryReadCore(string path)
     {
         try
         {
             using var stream = File.OpenRead(path);
-            using var reader = new BinaryReader(stream);
+            return TryReadCore(stream);
+        }
+        catch (IOException) { return null; }
+        catch (UnauthorizedAccessException) { return null; }
+    }
+
+    private static GgufModelInfo? TryReadCore(Stream stream)
+    {
+        try
+        {
+            using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
 
             var magic = ReadExactBytes(reader, 4);
             if (magic[0] != (byte)'G' || magic[1] != (byte)'G' || magic[2] != (byte)'U' || magic[3] != (byte)'F')
@@ -119,6 +143,7 @@ public static class GgufMetadataReader
                 return null;
 
             string architecture = string.Empty;
+            var generalType = string.Empty;
             long? fileType = null;
             long? blockCount = null;
             long? contextLength = null;
@@ -150,6 +175,8 @@ public static class GgufMetadataReader
                 // shape keys never matters.
                 if (key == "general.architecture")
                     architecture = ReadValue(reader, valueType, 0) as string ?? string.Empty;
+                else if (key == "general.type")
+                    generalType = ReadValue(reader, valueType, 0) as string ?? string.Empty;
                 else if (key == "general.name")
                     name = ReadValue(reader, valueType, 0) as string ?? string.Empty;
                 else if (key == "general.repo_url")
@@ -225,7 +252,8 @@ public static class GgufMetadataReader
                 BaseModelName: baseModelName,
                 BaseModelRepositoryUrl: baseModelRepositoryUrl,
                 TokenizerModel: tokenizerModel,
-                TokenizerPre: tokenizerPre);
+                TokenizerPre: tokenizerPre,
+                GeneralType: generalType);
         }
         catch (EndOfStreamException) { return null; }
         catch (IOException) { return null; }

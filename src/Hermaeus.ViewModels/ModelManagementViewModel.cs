@@ -687,10 +687,13 @@ public partial class ModelManagementViewModel : ObservableObject
                 }
 
                 IReadOnlyList<HfTreeEntry>? tree;
+                var revision = "main";
                 try
                 {
                     using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-                    tree = await _hf.GetTreeAsync(group.Key, cts.Token);
+                    var card = await _hf.GetModelCardAsync(group.Key, cts.Token);
+                    revision = !string.IsNullOrWhiteSpace(card?.Sha) ? card.Sha : "main";
+                    tree = await _hf.GetTreeAsync(group.Key, revision, cts.Token);
                 }
                 catch
                 {
@@ -707,10 +710,12 @@ public partial class ModelManagementViewModel : ObservableObject
                     {
                         entry.PendingSha256 = result.MatchedEntry.LfsSha256;
                         entry.PendingSizeBytes = result.MatchedEntry.SizeBytes;
+                        entry.PendingRevisionSha = revision;
                     }
                     else
                     {
                         entry.PendingSha256 = null;
+                        entry.PendingRevisionSha = null;
                         entry.PendingSizeBytes = null;
                     }
                     await _manifest.UpsertAsync(entry);
@@ -759,7 +764,11 @@ public partial class ModelManagementViewModel : ObservableObject
     };
 
     private static List<ModelCompanionManifestEntry> BuildCompanionManifest(
-        ModelFileSet fileSet, string modelsDirectory, string repoId)
+        ModelFileSet fileSet,
+        string modelsDirectory,
+        string repoId,
+        string revision,
+        IReadOnlyList<ModelCompanionManifestEntry>? previous = null)
     {
         return fileSet.Entries
             .Where(e => e.Role is ModelFileRole.Projector or ModelFileRole.DraftHead)
@@ -767,15 +776,24 @@ public partial class ModelManagementViewModel : ObservableObject
             {
                 LocalFilePath = HuggingFaceBrowserSupport.PlanDestination(modelsDirectory, e.RepoPath, repoId).DestinationPath,
                 RepoFile = e.RepoPath,
+                RevisionSha = revision,
                 Role = CompanionRole(e.Role),
                 Sha256 = e.LfsSha256 ?? string.Empty,
-                SizeBytes = e.SizeBytes
+                SizeBytes = e.SizeBytes,
+                RequiresUserConfirmation = !e.SelectedByDefault
+                    && (previous?.FirstOrDefault(old => string.Equals(old.RepoFile, e.RepoPath, StringComparison.OrdinalIgnoreCase))
+                        ?.RequiresUserConfirmation ?? true)
             })
             .ToList();
     }
 
     private async Task<(bool Success, string Message)> DownloadOrUpdateCompanionAsync(
-        ModelFileSetEntry source, string destination, string repoId, bool replaceExisting, CancellationToken ct = default)
+        ModelFileSetEntry source,
+        string destination,
+        string repoId,
+        string revision,
+        bool replaceExisting,
+        CancellationToken ct = default)
     {
         if (!ModelPathSafety.TryResolveFileUnderRoot(_settings.Settings.DataManagement.LocalAiAssetsRoot, destination, out var safeDestination, out var error))
             return (false, error);
@@ -789,7 +807,7 @@ public partial class ModelManagementViewModel : ObservableObject
         try
         {
             var download = await _downloader.DownloadAsync(
-                HuggingFaceClient.ResolveDownloadUrl(repoId, source.RepoPath), downloadPath, ct: ct);
+                HuggingFaceClient.ResolveDownloadUrl(repoId, source.RepoPath, revision), downloadPath, ct: ct);
             if (!download.Success)
                 return (false, download.Message);
 
@@ -825,17 +843,24 @@ public partial class ModelManagementViewModel : ObservableObject
     private async Task<(int Updated, int Missing, string? Message)> SyncKnownCompanionsAsync(
         ModelManifestEntry primary, bool allowReplaceExisting, bool onlyMissing, CancellationToken ct = default)
     {
-        var tree = await _hf.GetTreeAsync(primary.RepoId, ct);
+        var card = await _hf.GetModelCardAsync(primary.RepoId, ct);
+        var revision = !string.IsNullOrWhiteSpace(card?.Sha) ? card.Sha
+            : !string.IsNullOrWhiteSpace(primary.RevisionSha) ? primary.RevisionSha
+            : "main";
+        var tree = await _hf.GetTreeAsync(primary.RepoId, revision, ct);
         if (tree is null)
             return (0, 0, "The linked repository could not be read, so known companions were not changed.");
 
-        var declarations = await _hf.GetCompanionMetadataAsync(primary.RepoId, tree, ct);
+        var modelMetadata = await Task.Run(() => GgufMetadataReader.TryRead(primary.FilePath), ct);
+        var declarations = await _hf.ResolveCompanionDeclarationsAsync(
+            primary.RepoId, tree, primary.RepoFile, modelMetadata, revision, ct);
         var fileSet = ModelFileSetResolver.Resolve(primary.RepoId, tree, primary.RepoFile, declarations);
-        var known = BuildCompanionManifest(fileSet, ModelsDirectory(), primary.RepoId);
+        var known = BuildCompanionManifest(fileSet, ModelsDirectory(), primary.RepoId, revision, primary.Companions);
         if (known.Count == 0)
-            return (0, 0, "No hash-verified compatible companions were declared by the linked repository.");
+            return (0, 0, "No hash-verified compatible companions were found in the linked repository.");
 
         primary.Companions = known;
+        primary.RevisionSha = revision;
         await _manifest.UpsertAsync(primary, ct);
 
         var updated = 0;
@@ -846,6 +871,12 @@ public partial class ModelManagementViewModel : ObservableObject
             var exists = File.Exists(companion.LocalFilePath);
             if (onlyMissing && exists)
                 continue;
+            if (companion.RequiresUserConfirmation && !onlyMissing)
+            {
+                missing++;
+                messages.Add($"{Path.GetFileName(companion.LocalFilePath)} requires compatibility review before automatic updates.");
+                continue;
+            }
 
             var current = await _manifest.FindAsync(companion.LocalFilePath, ct);
             var alreadyCurrent = exists && current is not null
@@ -859,7 +890,7 @@ public partial class ModelManagementViewModel : ObservableObject
                 && string.Equals(current.RepoId, primary.RepoId, StringComparison.OrdinalIgnoreCase)
                 && string.Equals(current.RepoFile, companion.RepoFile, StringComparison.OrdinalIgnoreCase);
             var source = fileSet.Entries.First(e => string.Equals(e.RepoPath, companion.RepoFile, StringComparison.OrdinalIgnoreCase));
-            var result = await DownloadOrUpdateCompanionAsync(source, companion.LocalFilePath, primary.RepoId, replace, ct);
+            var result = await DownloadOrUpdateCompanionAsync(source, companion.LocalFilePath, primary.RepoId, revision, replace, ct);
             if (!result.Success)
             {
                 missing++;
@@ -872,6 +903,7 @@ public partial class ModelManagementViewModel : ObservableObject
                 FilePath = companion.LocalFilePath,
                 RepoId = primary.RepoId,
                 RepoFile = companion.RepoFile,
+                RevisionSha = revision,
                 Sha256 = companion.Sha256,
                 SizeBytes = companion.SizeBytes ?? new FileInfo(companion.LocalFilePath).Length,
                 Source = "hf-browser",
@@ -932,7 +964,10 @@ public partial class ModelManagementViewModel : ObservableObject
         var tmpPath = item.ModelId + ".update.tmp";
         try
         {
-            var url = HuggingFaceClient.ResolveDownloadUrl(entry.RepoId, entry.RepoFile);
+            var revision = !string.IsNullOrWhiteSpace(entry.PendingRevisionSha) ? entry.PendingRevisionSha
+                : !string.IsNullOrWhiteSpace(entry.RevisionSha) ? entry.RevisionSha
+                : "main";
+            var url = HuggingFaceClient.ResolveDownloadUrl(entry.RepoId, entry.RepoFile, revision);
             var progress = new Progress<DownloadProgress>(p => UpdateCheckStatus = $"Downloading {item.EffectiveName}: {p.PercentComplete:0}%");
             var download = await _downloader.DownloadAsync(url, tmpPath, progress);
             if (!download.Success)
@@ -966,8 +1001,10 @@ public partial class ModelManagementViewModel : ObservableObject
 
             var file = new FileInfo(item.ModelId);
             entry.Sha256 = entry.PendingSha256!;
+            entry.RevisionSha = revision;
             entry.SizeBytes = entry.PendingSizeBytes ?? file.Length;
             entry.PendingSha256 = null;
+            entry.PendingRevisionSha = null;
             entry.PendingSizeBytes = null;
             entry.RecordedAtUtc = DateTime.UtcNow;
             await _manifest.UpsertAsync(entry);
@@ -1057,9 +1094,10 @@ public partial class ModelManagementViewModel : ObservableObject
         IsLoadingHfFiles = true;
         try
         {
-            var cardTask = _hf.GetModelCardAsync(repo.RepoId);
-            var tree = await _hf.GetTreeAsync(repo.RepoId);
-            var card = await cardTask;
+            var card = await _hf.GetModelCardAsync(repo.RepoId);
+            repo.RevisionSha = card?.Sha ?? string.Empty;
+            var revision = string.IsNullOrWhiteSpace(repo.RevisionSha) ? "main" : repo.RevisionSha;
+            var tree = await _hf.GetTreeAsync(repo.RepoId, revision);
             repo.License = card?.License ?? "unknown";
 
             if (tree is null)
@@ -1074,7 +1112,6 @@ public partial class ModelManagementViewModel : ObservableObject
                 ? Path.Combine(_settings.Settings.DataManagement.LocalAiAssetsRoot, "Models")
                 : layout.ModelsDirectory;
             var ggufEntries = tree.Where(e => e.Path.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase)).ToList();
-            var companionDeclarations = await _hf.GetCompanionMetadataAsync(repo.RepoId, tree);
 
             // r27 04 4.1: a sharded model is listed once, as its first shard,
             // and downloads as a set. It used to be hidden outright, because a
@@ -1092,6 +1129,9 @@ public partial class ModelManagementViewModel : ObservableObject
                 if (listed.Contains(entry.Path))
                     continue;
 
+                var modelMetadata = await _hf.GetGgufMetadataAsync(repo.RepoId, entry.Path, entry.LfsSha256, revision);
+                var companionDeclarations = await _hf.ResolveCompanionDeclarationsAsync(
+                    repo.RepoId, tree, entry.Path, modelMetadata, revision);
                 var fileSet = ModelFileSetResolver.Resolve(repo.RepoId, tree, entry.Path, companionDeclarations);
                 foreach (var member in fileSet.Entries.Where(e => e.Role is ModelFileRole.Model or ModelFileRole.Shard))
                     listed.Add(member.RepoPath);
@@ -1101,7 +1141,7 @@ public partial class ModelManagementViewModel : ObservableObject
 
                 var setBytes = fileSet.Entries.Where(e => e.Role is ModelFileRole.Model or ModelFileRole.Shard).Sum(e => e.SizeBytes ?? 0);
                 var fit = ModelFitEstimator.Estimate(setBytes, hardware);
-                var fileVm = new HfFileResultViewModel(repo.RepoId, entry.Path, entry.SizeBytes, entry.LfsSha256, fit.Tier, fit.Reason, fileSet);
+                var fileVm = new HfFileResultViewModel(repo.RepoId, entry.Path, entry.SizeBytes, entry.LfsSha256, fit.Tier, fit.Reason, fileSet, revision);
                 fileVm.UpdateDownloadState(modelsDir, manifestEntries);
                 HfFiles.Add(fileVm);
             }
@@ -1163,13 +1203,14 @@ public partial class ModelManagementViewModel : ObservableObject
             var missing = new List<string>();
             var savedCount = 0;
             var primaryDestination = planned.First(p => p.Entry.Role == ModelFileRole.Model).Destination;
+            var downloadRevision = string.IsNullOrWhiteSpace(file.RevisionSha) ? "main" : file.RevisionSha;
 
             foreach (var (entry, destination) in planned)
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
                 var entryBytes = entry.SizeBytes ?? 0;
                 var carried = completedBytes;
-                var url = HuggingFaceClient.ResolveDownloadUrl(file.RepoId, entry.RepoPath);
+                var url = HuggingFaceClient.ResolveDownloadUrl(file.RepoId, entry.RepoPath, downloadRevision);
                 var progress = new Progress<DownloadProgress>(p =>
                     file.DownloadPercent = totalBytes > 0
                         ? Math.Clamp((carried + (entryBytes * p.PercentComplete / 100d)) / totalBytes * 100d, 0, 100)
@@ -1204,6 +1245,7 @@ public partial class ModelManagementViewModel : ObservableObject
                     FilePath = destination,
                     RepoId = file.RepoId,
                     RepoFile = entry.RepoPath,
+                    RevisionSha = downloadRevision,
                     Sha256 = entry.LfsSha256 ?? string.Empty,
                     SizeBytes = new FileInfo(destination).Length,
                     Source = "hf-browser",
@@ -1229,9 +1271,12 @@ public partial class ModelManagementViewModel : ObservableObject
                     {
                         LocalFilePath = HuggingFaceBrowserSupport.PlanDestination(modelsDir, e.RepoPath, file.RepoId).DestinationPath,
                         RepoFile = e.RepoPath,
+                        RevisionSha = downloadRevision,
                         Role = e.Role == ModelFileRole.Projector ? "projector" : "draft_head",
                         Sha256 = e.LfsSha256 ?? string.Empty,
-                        SizeBytes = e.SizeBytes
+                        SizeBytes = e.SizeBytes,
+                        RequiresUserConfirmation = !file.SelectedEntries().Any(selected =>
+                            string.Equals(selected.RepoPath, e.RepoPath, StringComparison.OrdinalIgnoreCase))
                     })
                     .ToList();
                 await _manifest.UpsertAsync(primaryEntry);
@@ -1287,6 +1332,7 @@ public sealed partial class HfRepoResultViewModel : ObservableObject
 {
     public string RepoId { get; }
     public long Downloads { get; }
+    [ObservableProperty] private string _revisionSha = string.Empty;
     [ObservableProperty] private string _license = string.Empty;
 
     public HfRepoResultViewModel(string repoId, long downloads)
@@ -1302,6 +1348,7 @@ public sealed partial class HfFileResultViewModel : ObservableObject
 {
     public string RepoId { get; }
     public string Path { get; }
+    public string RevisionSha { get; }
     public string FileName => System.IO.Path.GetFileName(Path);
     public long? SizeBytes { get; }
     public string? LfsSha256 { get; }
@@ -1344,8 +1391,24 @@ public sealed partial class HfFileResultViewModel : ObservableObject
         }
     }
 
+    public bool HasReviewRequiredCompanions => FileSet.Entries.Any(e =>
+        (e.Role is ModelFileRole.Projector or ModelFileRole.DraftHead) && !e.SelectedByDefault);
     public string ProjectorSelectionLabel => $"Vision projector ({CompanionSize(ModelFileRole.Projector)})";
     public string DraftHeadSelectionLabel => $"MTP draft head ({CompanionSize(ModelFileRole.DraftHead)})";
+    public string CompanionReviewLabel
+    {
+        get
+        {
+            if (!HasReviewRequiredCompanions)
+                return string.Empty;
+
+            var names = FileSet.Entries
+                .Where(e => (e.Role is ModelFileRole.Projector or ModelFileRole.DraftHead) && !e.SelectedByDefault)
+                .Select(e => e.FileName)
+                .Distinct(StringComparer.OrdinalIgnoreCase);
+            return $"Review required before selecting: {string.Join(", ", names)}";
+        }
+    }
 
     private string CompanionSize(ModelFileRole role)
     {
@@ -1401,15 +1464,28 @@ public sealed partial class HfFileResultViewModel : ObservableObject
     partial void OnIncludeProjectorChanged(bool value) => OnPropertyChanged(nameof(SetSummary));
     partial void OnIncludeDraftHeadChanged(bool value) => OnPropertyChanged(nameof(SetSummary));
 
-    public HfFileResultViewModel(string repoId, string path, long? sizeBytes, string? lfsSha256, ModelFitTier fitTier, string fitReason, ModelFileSet? fileSet = null)
+    public HfFileResultViewModel(
+        string repoId,
+        string path,
+        long? sizeBytes,
+        string? lfsSha256,
+        ModelFitTier fitTier,
+        string fitReason,
+        ModelFileSet? fileSet = null,
+        string revisionSha = "")
     {
         RepoId = repoId;
         Path = path;
+        RevisionSha = revisionSha;
         SizeBytes = sizeBytes;
         LfsSha256 = lfsSha256;
         FitTier = fitTier;
         FitReason = fitReason;
         FileSet = fileSet ?? new ModelFileSet(repoId, [new ModelFileSetEntry(path, sizeBytes, lfsSha256, ModelFileRole.Model, true, true)]);
+        _includeProjector = FileSet.Entries.Any(e => e.Role == ModelFileRole.Projector)
+            && FileSet.Entries.Where(e => e.Role == ModelFileRole.Projector).All(e => e.SelectedByDefault);
+        _includeDraftHead = FileSet.Entries.Any(e => e.Role == ModelFileRole.DraftHead)
+            && FileSet.Entries.Where(e => e.Role == ModelFileRole.DraftHead).All(e => e.SelectedByDefault);
     }
 }
 

@@ -39,9 +39,11 @@ public sealed class ModelCompanionManifestEntry
 {
     public string LocalFilePath { get; set; } = string.Empty;
     public string RepoFile { get; set; } = string.Empty;
+    public string RevisionSha { get; set; } = string.Empty;
     public string Role { get; set; } = string.Empty;
     public string Sha256 { get; set; } = string.Empty;
     public long? SizeBytes { get; set; }
+    public bool RequiresUserConfirmation { get; set; }
 }
 
 /// <summary>

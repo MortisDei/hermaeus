@@ -41,13 +41,15 @@ or a live long-stream scroll session without an owner-run dogfood check.
   emits a state-change summary, retains bounded in-memory history, rotates at
   10 MiB, and keeps the newest ten archives. Locked-file failures remain
   best-effort and do not discard in-memory evidence.
-- Companion lifecycle is bounded by an explicit `.hermaeus/companions.json`
-  mapping in the linked Hugging Face repository. The mapping itself and every
-  mapped companion require tree LFS SHA256 evidence. Initial download choices,
+- Companion lifecycle prefers an explicit `.hermaeus/companions.json` mapping
+  in the linked Hugging Face repository, but also supports ordinary sibling
+  `mmproj*.gguf` and `MTP/mtp*.gguf` layouts. The fallback requires
+  same-revision tree entries, full LFS hashes, bounded GGUF role metadata, and
+  deterministic model compatibility facts for automatic selection; ambiguous
+  candidates remain unchecked for user review. Initial download choices,
   per-model automatic update policy, update/recovery sync, known sizes, and
   Keep files / Remove files / Cancel deletion confirmation are implemented.
-  Filename-only `mmproj` or `mtp` discovery is no longer treated as
-  compatibility evidence.
+  Third-party repositories need no Hermaeus-specific file.
 
 ## Verification
 
