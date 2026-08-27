@@ -117,6 +117,7 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private string _ttsCloneDisplayName = string.Empty;
     [ObservableProperty] private string _ttsStatus = "Stopped";
     [ObservableProperty] private string _selectedVoiceProvider = "Kokoro (native)";
+    [ObservableProperty] private bool _isRefreshingVoices;
 
     public Func<Task>? RequestTtsVoiceSamplePicker { get; set; }
     public Action? RequestTtsPythonPicker { get; set; }
@@ -218,7 +219,11 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
             AudioFeedbackEvents.Add(new AudioFeedbackToggleViewModel(kind));
         _xttsProcess.StatusChanged += OnXttsStatusChanged;
         _kokoroProcess.StatusChanged += OnXttsStatusChanged;
-        TtsVoices.CollectionChanged += (_, _) => RefreshChannelVoiceOptions();
+        TtsVoices.CollectionChanged += (_, _) =>
+        {
+            RefreshChannelVoiceOptions();
+            OnPropertyChanged(nameof(ChannelVoiceDiscoveryStatus));
+        };
         RefreshChannelVoiceOptions();
     }
 
@@ -231,6 +236,7 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
         foreach (var voice in TtsVoices)
             ChannelVoiceOptions.Add(voice);
         OnPropertyChanged(nameof(ChannelVoiceOptionsAreProviderSupplied));
+        OnPropertyChanged(nameof(ChannelVoiceDiscoveryStatus));
     }
 
     /// <summary>
@@ -245,6 +251,12 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
         ChannelVoiceOptions.Any(o =>
             o != VoiceChannelSettingViewModel.DefaultVoiceLabel &&
             !string.Equals(o, "default", StringComparison.OrdinalIgnoreCase));
+
+    public string ChannelVoiceDiscoveryStatus => IsRefreshingVoices
+        ? $"Loading voices from {SelectedVoiceProvider}..."
+        : ChannelVoiceOptionsAreProviderSupplied
+            ? $"{ChannelVoiceOptions.Count(o => o != VoiceChannelSettingViewModel.DefaultVoiceLabel && !string.Equals(o, "default", StringComparison.OrdinalIgnoreCase))} named voice(s) reported by {SelectedVoiceProvider}."
+            : $"{SelectedVoiceProvider} has not reported named voices yet. Retrying is safe; you can also enter a verified voice id.";
 
     private static readonly VoiceChannel[] AllChannels =
     [
@@ -459,6 +471,8 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
     [RelayCommand]
     private async Task RefreshTtsVoicesAsync()
     {
+        if (IsRefreshingVoices) return;
+        IsRefreshingVoices = true;
         try
         {
             var voices = await _tts.GetVoicesAsync();
@@ -474,6 +488,11 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
         catch (Exception ex)
         {
             _toasts.Show("Voice list unavailable", ex.Message, ToastKind.Warning);
+        }
+        finally
+        {
+            IsRefreshingVoices = false;
+            OnPropertyChanged(nameof(ChannelVoiceDiscoveryStatus));
         }
     }
 
@@ -547,6 +566,7 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
 
     partial void OnSelectedVoiceProviderChanged(string value)
     {
+        OnPropertyChanged(nameof(ChannelVoiceDiscoveryStatus));
         NotifyProviderDependentProperties();
         ApplyXttsStatus();
         if (_isReloading)

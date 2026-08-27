@@ -36,9 +36,10 @@
             <Grid ColumnDefinitions="*,Auto" Margin="0,4,0,0">
                 <TextBlock Text="Channels" FontSize="13" FontWeight="SemiBold" Opacity="0.8" VerticalAlignment="Center" />
                 <Button Grid.Column="1" Content="Refresh known voices" Command="{Binding RefreshTtsVoicesCommand}"
-                        Padding="8,3" FontSize="11"
+                        Padding="8,3" FontSize="11" IsEnabled="{Binding !IsRefreshingVoices}"
                         ToolTip.Tip="Refreshes the active provider's authoritative voice list for these channel selectors." />
             </Grid>
+            <TextBlock Text="{Binding ChannelVoiceDiscoveryStatus}" FontSize="11" Opacity="0.6" TextWrapping="Wrap" />
             <ItemsControl ItemsSource="{Binding VoiceChannels}">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate DataType="vm:VoiceChannelSettingViewModel">
@@ -87,7 +88,7 @@
             <!-- r29 doc 01 1.2: factual state, not personality (docs/mascot.md).
                  The picker's usual content is the sentinel plus the placeholder
                  "default", which looks like a populated list and is not. -->
-            <TextBlock Text="The voice service has not listed its voices, so these pickers only offer the default. Use Refresh on Services &gt; Voice to list them, or type a voice id the provider knows."
+            <TextBlock Text="The selected provider has not listed named voices yet, so these pickers only offer the default. It will retry when the voice settings load or the provider changes; you can also refresh now or type a verified voice id."
                        FontSize="11" Opacity="0.55" TextWrapping="Wrap"
                        IsVisible="{Binding !ChannelVoiceOptionsAreProviderSupplied}" />
         </StackPanel>

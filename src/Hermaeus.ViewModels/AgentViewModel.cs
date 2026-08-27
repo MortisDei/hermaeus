@@ -960,6 +960,20 @@ public partial class AgentViewModel : ViewModelBase
     /// </summary>
     public bool HasDecisionWaiting => HasReviewQueue || IsWaitingForReply || ShowContinueBox;
 
+    /// <summary>Plain-language next step for the normal workbench flow, not an internal state label.</summary>
+    public string NextUserActionLabel => CurrentTask switch
+    {
+        null => "Describe a goal, choose a workspace and model, then start the agent.",
+        { Status: AgentTaskStatus.Running } => "Agent is working. You can follow progress above or stop the task.",
+        { Status: AgentTaskStatus.WaitingForUser, PendingToolAction: not null } => "Review the requested action above, then approve or reject it.",
+        { Status: AgentTaskStatus.WaitingForUser } => "Agent needs your answer. Reply in the panel above.",
+        { Status: AgentTaskStatus.Blocked } => "Agent is blocked. Read the reason above, then provide an instruction or change the workspace policy.",
+        { Status: AgentTaskStatus.Complete } => "Review the outcome below, then inspect Changes or start a follow-up task.",
+        { Status: AgentTaskStatus.Failed } => "Review the failure and transcript, then provide a new instruction or start again.",
+        { Status: AgentTaskStatus.Cancelled } => "This task was stopped. Review its outcome or start a new task.",
+        _ => "Review the task details, then run or continue it when ready."
+    };
+
     public bool HasNewLessons => NewLessons.Count > 0;
     public bool HasWorkspaceMemory => WorkspaceMemoryCount > 0;
     public bool HasWorkspaceFiles => WorkspaceFileCount > 0;
@@ -2438,6 +2452,7 @@ public partial class AgentViewModel : ViewModelBase
     private void RefreshTaskPreview()
     {
         OnPropertyChanged(nameof(CurrentTaskStatusLabel));
+        OnPropertyChanged(nameof(NextUserActionLabel));
         OnPropertyChanged(nameof(HasReservations));
         OnPropertyChanged(nameof(CurrentStepCountLabel));
         OnPropertyChanged(nameof(CurrentTaskGoalLabel));

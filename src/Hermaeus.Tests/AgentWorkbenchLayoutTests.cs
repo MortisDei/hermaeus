@@ -75,6 +75,16 @@ public sealed class AgentWorkbenchLayoutTests
         Assert.Equal(0, AgentViewModel.RunTabIndex);
     }
 
+    [Fact]
+    public void The_run_tab_explains_the_approval_gated_workflow_and_current_next_action()
+    {
+        var source = File.ReadAllText(AgentViewPath());
+
+        Assert.Contains("How Agent work proceeds", source, StringComparison.Ordinal);
+        Assert.Contains("review the plan and each requested approval", source, StringComparison.Ordinal);
+        Assert.Contains("{Binding NextUserActionLabel}", source, StringComparison.Ordinal);
+    }
+
     private static AgentTaskState Task(AgentTaskStatus status) =>
         new() { TaskId = "t", Goal = "goal", Status = status };
 

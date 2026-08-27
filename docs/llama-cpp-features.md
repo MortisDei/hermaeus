@@ -251,3 +251,26 @@ or server slot-save API was added from this audit. Existing runtime help probes,
 exact identity checks, and Unknown gates remain the correct integration point
 for those areas. The b10632 release notes are the upstream evidence for this
 decision: <https://github.com/ggml-org/llama.cpp/releases/tag/b10632>.
+
+## R31 Batch 18 upstream capability audit, checked 2026-08-27
+
+The exact `b10635...b10642` range is six commits, from `fc35562` to
+`925e117`. It contains llama KV-cell token-ID tracking, asynchronous RPC event
+and backend APIs, Vulkan cross-entropy kernels, and upstream UI/CI work. The
+only public header change is the KV-cell token-ID addition. It does not add a
+llama-server command-line option, documented HTTP endpoint, machine-readable
+runtime metric, or stable capability contract that Hermaeus can safely expose.
+
+| Area | Classification | R31 decision |
+| --- | --- | --- |
+| KV-cell token IDs | Defer | Internal llama API and cache bookkeeping, with no supported managed-server contract. Do not infer context-shift or cache-reuse support from it. |
+| RPC async events/backend APIs | No impact | Hermaeus uses its local managed llama-server HTTP path, not llama.cpp RPC. |
+| Vulkan cross-entropy kernels | No impact | Backend training/loss kernels, not inference configuration or telemetry. |
+| Upstream UI and release/CI changes | Already handled | They do not alter Hermaeus's managed binary identity, help probes, or local-server launch policy. |
+
+The owner-observed b10642 update/load route remains a live dogfood observation:
+Gemma plus its mmproj load, 98k context and embeddings are normal. Unsupported
+multimodal cache reuse and KV shift must continue to self-disable, and the
+experimental audio warning and 1.08 GB prune are expected state, not defects.
+No source change follows from this audit. The direct upstream comparison is
+<https://github.com/ggml-org/llama.cpp/compare/b10635...b10642>.

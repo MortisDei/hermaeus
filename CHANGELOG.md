@@ -46,6 +46,11 @@ limit.
   server controls compact by placing GPU Fit diagnostics below the configuration
   grid. A missing draft path is called stale, remains non-runnable, and directs
   the user to review trusted current companions before choosing a replacement.
+- Settings -> Voice now refreshes the active provider's authoritative voice
+  list during its normal load and provider-change lifecycle, names the provider
+  while loading or unavailable, and keeps Refresh as an honest retry. Agent's
+  Run tab now makes the goal -> plan/review -> approval -> progress -> outcome
+  path and the current next action visible without changing any approval gate.
 
 ## [0.38.0-alpha] - 2026-08-24
 

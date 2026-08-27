@@ -40,6 +40,16 @@ public sealed class VoiceChannelPickerTests
         vm.TtsVoices.Add("af_heart");
 
         Assert.True(vm.ChannelVoiceOptionsAreProviderSupplied);
+        Assert.Equal("1 named voice(s) reported by Kokoro (native).", vm.ChannelVoiceDiscoveryStatus);
+    }
+
+    [Fact]
+    public void Discovery_status_names_the_selected_provider_when_voices_are_unavailable()
+    {
+        using var temp = new TempDir();
+        var vm = NewTtsSettingsViewModel(NewSettings(temp));
+
+        Assert.Equal("Kokoro (native) has not reported named voices yet. Retrying is safe; you can also enter a verified voice id.", vm.ChannelVoiceDiscoveryStatus);
     }
 
     [Fact]

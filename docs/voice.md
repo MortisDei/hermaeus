@@ -301,11 +301,13 @@ provider's own voices, with a chevron that opens the list and a
 "(Default voice)" sentinel meaning "use the global voice". It also accepts
 free text, for a provider that cannot enumerate its voices.
 
-Providers only list their voices when the voice service is running and
-`Refresh` has been pressed on **Services -> Voice**. Until then the picker
-holds nothing but the sentinel and a placeholder, which looks like a populated
-list and is not, so the section says so in plain text and names the fix. Typing
-a voice id the provider knows works either way.
+The shared voice settings refresh this authoritative list when voice settings
+load and whenever the active provider changes. The channel section names that
+provider while it is loading, reports the number of named voices when it
+succeeds, and keeps Refresh as an explicit retry. If a provider cannot report
+names, the picker holds only the sentinel and placeholder and says so plainly.
+Typing a verified voice id remains available in that state; Hermaeus does not
+silently choose a different voice.
 
 Speech recognition follows the identical split: provider/device/model/install
 on **Services -> Voice** (`SttSettingsViewModel`, its own DI-shared

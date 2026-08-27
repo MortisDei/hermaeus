@@ -58,6 +58,8 @@
                     <TextBlock Text="{Binding StatusMessage}" FontSize="11" Opacity="0.6"
                                IsVisible="{Binding !HasActivityStatus}"
                                TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding NextUserActionLabel}" FontSize="11" Opacity="0.8"
+                               TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
                 </StackPanel>
                 <!-- r19 3.2: once a task is loaded the workbench reads as owned by it;
                      this makes "you can just type a new goal" explicit instead of implied. -->
@@ -295,6 +297,14 @@
             <TabItem Header="Run">
                 <ScrollViewer Padding="24,16" VerticalScrollBarVisibility="Auto">
                     <StackPanel Spacing="16" MaxWidth="980" HorizontalAlignment="Stretch">
+                        <Border Background="{DynamicResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="12">
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="How Agent work proceeds" FontSize="13" FontWeight="SemiBold" />
+                                <TextBlock Text="Describe a goal, then review the plan and each requested approval. Follow progress here; when it finishes, review the outcome and the Changes tab."
+                                           FontSize="12" Opacity="0.8" TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding NextUserActionLabel}" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
                         <Grid ColumnDefinitions="110,*,Auto" RowDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="12" RowSpacing="8"
                               HorizontalAlignment="Stretch">
                             <TextBlock Grid.Row="0" Grid.Column="0"

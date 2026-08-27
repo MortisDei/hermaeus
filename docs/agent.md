@@ -126,6 +126,12 @@ The panel opens on Run every time and never switches tabs on its own. A
 finished run lights the Changes badge and says so in the run outcome; it does
 not move the page under you.
 
+The Run tab also keeps the normal path visible: describe the goal, review the
+plan and each requested approval, follow progress, then review the outcome and
+Changes. Its current-action line is derived from task state, so a blocked,
+waiting, complete, failed, or cancelled task states the next reviewable action
+without granting authority or moving the user to another screen.
+
 ### What the agent can do here
 
 The Workspace tab's capability list is derived, not written down: it is built
