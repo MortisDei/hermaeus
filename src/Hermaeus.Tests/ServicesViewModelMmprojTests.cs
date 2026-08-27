@@ -1,5 +1,6 @@
 using Hermaeus.Core.Models;
 using Hermaeus.Services;
+using Hermaeus.Services.ProcessManagement;
 using Hermaeus.ViewModels;
 using Xunit;
 using static Hermaeus.Tests.Helpers;
@@ -89,5 +90,31 @@ public sealed class ServicesViewModelMmprojTests
 
         Assert.Empty(server.MmprojPath);
         Assert.Contains(secondProjector, server.DetectedMmprojPaths);
+    }
+
+    [Fact]
+    public void Projector_use_preference_preserves_the_configured_path_and_round_trips_through_server_config()
+    {
+        using var temp = new TempDir();
+        var (_, server, _, _) = Build(temp);
+        var projectorPath = temp.PathFor("projector/mmproj-verified.gguf");
+        Directory.CreateDirectory(Path.GetDirectoryName(projectorPath)!);
+        File.WriteAllText(projectorPath, "projector");
+
+        server.MmprojPath = projectorPath;
+        server.UseProjector = false;
+        var disabled = server.BuildConfig();
+
+        Assert.False(disabled.UseProjector);
+        Assert.Equal(projectorPath, disabled.MmprojPath);
+        Assert.DoesNotContain("--mmproj", ServerProcessManager.BuildLaunchArguments(disabled));
+
+        server.UseProjector = true;
+        var enabled = server.BuildConfig();
+        var args = ServerProcessManager.BuildLaunchArguments(enabled).ToList();
+        var index = args.IndexOf("--mmproj");
+
+        Assert.True(index >= 0);
+        Assert.Equal(projectorPath, args[index + 1]);
     }
 }

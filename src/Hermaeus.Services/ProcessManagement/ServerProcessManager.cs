@@ -561,6 +561,13 @@ public sealed class ServerProcessManager : IDisposable
             ? []
             : ExtraArgsParser.Split(cfg.ExtraArgs).ToList();
 
+        // UseProjector is the authoritative launch gate for the configured
+        // projector. ExtraArgs is an escape hatch for other runtime flags, but
+        // it must not bypass an explicit projector-off choice with a second
+        // --mmproj value.
+        if (!cfg.UseProjector)
+            RemoveProjectorArguments(extraArgs);
+
         bool HasArg(string flag) => extraArgs.Any(a => string.Equals(a, flag, StringComparison.OrdinalIgnoreCase));
 
         if (cfg.PromptThreads > 0 && cfg.RuntimeSupportsPromptThreads && !HasArg("--threads-batch"))
@@ -771,7 +778,7 @@ public sealed class ServerProcessManager : IDisposable
         }
 
         // r19 5.3: enables llama-server's multimodal chat mode (image content parts).
-        if (!string.IsNullOrWhiteSpace(cfg.MmprojPath) && !HasArg("--mmproj"))
+        if (cfg.UseProjector && !string.IsNullOrWhiteSpace(cfg.MmprojPath) && !HasArg("--mmproj"))
         {
             parts.Add("--mmproj");
             parts.Add(cfg.MmprojPath);
@@ -781,6 +788,26 @@ public sealed class ServerProcessManager : IDisposable
             parts.AddRange(extraArgs);
 
         return parts;
+    }
+
+    private static void RemoveProjectorArguments(List<string> args)
+    {
+        for (var i = args.Count - 1; i >= 0; i--)
+        {
+            var argument = args[i];
+            if (argument.StartsWith("--mmproj=", StringComparison.OrdinalIgnoreCase))
+            {
+                args.RemoveAt(i);
+                continue;
+            }
+
+            if (!string.Equals(argument, "--mmproj", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            args.RemoveAt(i);
+            if (i < args.Count && !args[i].StartsWith("-", StringComparison.Ordinal))
+                args.RemoveAt(i);
+        }
     }
 
     private static string EffectiveKvCacheType(ServerConfig cfg) =>
@@ -817,6 +844,7 @@ public sealed class ServerProcessManager : IDisposable
             AutoStart      = cfg.AutoStart,
             ExtraArgs      = cfg.ExtraArgs,
             MmprojPath = cfg.MmprojPath,
+            UseProjector = cfg.UseProjector,
             KvCacheType = cfg.KvCacheType,
             KvCacheTypeK = cfg.KvCacheTypeK,
             KvCacheTypeV = cfg.KvCacheTypeV,

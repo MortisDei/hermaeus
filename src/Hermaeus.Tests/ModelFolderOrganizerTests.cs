@@ -329,6 +329,29 @@ public sealed class ModelFolderOrganizerTests
     }
 
     [Fact]
+    public void RewriteReferences_follows_ServerConfig_projector_without_changing_use_preference()
+    {
+        var settings = new AppSettings();
+        settings.ManagedServers.Clear();
+        settings.ManagedServers.Add(new ServerConfig
+        {
+            ModelPath = @"C:\old\model.gguf",
+            MmprojPath = @"C:\old\mmproj.gguf",
+            UseProjector = false
+        });
+
+        ModelFolderOrganizer.RewriteReferences(settings, new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            [Path.GetFullPath(@"C:\old\model.gguf")] = @"C:\new\LLM\model.gguf",
+            [Path.GetFullPath(@"C:\old\mmproj.gguf")] = @"C:\new\vision\mmproj.gguf"
+        });
+
+        Assert.Equal(@"C:\new\LLM\model.gguf", settings.ManagedServers[0].ModelPath);
+        Assert.Equal(@"C:\new\vision\mmproj.gguf", settings.ManagedServers[0].MmprojPath);
+        Assert.False(settings.ManagedServers[0].UseProjector);
+    }
+
+    [Fact]
     public void RewriteReferences_follows_LlamaTuneProfile_ModelPath()
     {
         var settings = new AppSettings();

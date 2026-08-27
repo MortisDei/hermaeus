@@ -190,7 +190,8 @@ public static class LabConfigurationMapper
             NMin = configuration.SpeculativeNMin,
             PMin = configuration.SpeculativePMin
         },
-        MmprojPath = source.MmprojPath
+        MmprojPath = source.MmprojPath,
+        UseProjector = source.UseProjector
     };
 
     public static string Hash(ServerConfig source) =>

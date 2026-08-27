@@ -1633,7 +1633,7 @@ public partial class ChatViewModel : ViewModelBase
 
         var chatServer = _settings.Settings.ManagedServers.FirstOrDefault(s => !s.EmbeddingsMode)
             ?? _settings.Settings.ManagedServers.FirstOrDefault();
-        return !string.IsNullOrWhiteSpace(chatServer?.MmprojPath);
+        return chatServer?.UseProjector == true && !string.IsNullOrWhiteSpace(chatServer.MmprojPath);
     }
 
     [RelayCommand]

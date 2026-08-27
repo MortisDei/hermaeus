@@ -288,22 +288,37 @@
                                     <TextBlock Grid.Row="2" Grid.Column="0"
                                                Text="Vision projector" VerticalAlignment="Center"
                                                Opacity="0.6" FontSize="13" />
-                                    <ComboBox Grid.Row="2" Grid.Column="1"
-                                              ItemsSource="{Binding DetectedMmprojPaths}"
-                                              SelectedItem="{Binding MmprojPath}"
-                                              PlaceholderText="None (text-only)"
-                                              HorizontalAlignment="Stretch"
-                                              FontSize="13" CornerRadius="6"
-                                              IsEnabled="{Binding CanEdit}"
-                                              ToolTip.Tip="mmproj-*.gguf projector file. Enables image attachments in chat for this server via --mmproj.">
-                                        <ComboBox.ItemTemplate>
-                                            <DataTemplate>
-                                                <TextBlock Text="{Binding}" FontSize="13"
-                                                           TextTrimming="CharacterEllipsis"
-                                                           ToolTip.Tip="{Binding}" />
-                                            </DataTemplate>
-                                        </ComboBox.ItemTemplate>
-                                    </ComboBox>
+                                    <StackPanel Grid.Row="2" Grid.Column="1" Spacing="6">
+                                        <ComboBox ItemsSource="{Binding DetectedMmprojPaths}"
+                                                  SelectedItem="{Binding MmprojPath}"
+                                                  PlaceholderText="None (text-only)"
+                                                  HorizontalAlignment="Stretch"
+                                                  FontSize="13" CornerRadius="6"
+                                                  IsEnabled="{Binding CanEdit}"
+                                                  ToolTip.Tip="mmproj-*.gguf projector file. Its path is retained independently from whether this server uses it.">
+                                            <ComboBox.ItemTemplate>
+                                                <DataTemplate>
+                                                    <TextBlock Text="{Binding}" FontSize="13"
+                                                               TextTrimming="CharacterEllipsis"
+                                                               ToolTip.Tip="{Binding}" />
+                                                </DataTemplate>
+                                            </ComboBox.ItemTemplate>
+                                        </ComboBox>
+                                        <CheckBox Content="Use projector"
+                                                  IsChecked="{Binding UseProjector}"
+                                                  IsEnabled="{Binding CanEdit}"
+                                                  FontSize="12"
+                                                  ToolTip.Tip="When off, the configured projector path and provenance stay saved, but --mmproj is omitted from this server launch."
+                                                  />
+                                        <TextBlock Text="{Binding MmprojHint}"
+                                                   IsVisible="{Binding HasMissingMmproj}"
+                                                   FontSize="11" Opacity="0.7" TextWrapping="Wrap" />
+                                        <Button Content="Clear projector"
+                                                Command="{Binding ClearMmprojCommand}"
+                                                IsVisible="{Binding HasMissingMmproj}"
+                                                HorizontalAlignment="Left"
+                                                Padding="8,4" FontSize="11" />
+                                    </StackPanel>
                                     <Button Grid.Row="2" Grid.Column="2"
                                             Classes="icon-btn"
                                             VerticalAlignment="Top"
@@ -313,16 +328,6 @@
                                         <PathIcon Data="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z"
                                                   Width="15" Height="15" />
                                     </Button>
-                                    <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding MmprojHint}"
-                                               IsVisible="{Binding HasMissingMmproj}"
-                                               Grid.ColumnSpan="2" Margin="0,34,0,0"
-                                               FontSize="11" Opacity="0.7" TextWrapping="Wrap" />
-                                    <Button Grid.Row="2" Grid.Column="1" Content="Clear projector"
-                                            Command="{Binding ClearMmprojCommand}"
-                                            IsVisible="{Binding HasMissingMmproj}"
-                                            HorizontalAlignment="Left" Margin="0,58,0,0"
-                                            Padding="8,4" FontSize="11" />
-
                                     <!-- Numeric params -->
                                     <TextBlock Grid.Row="3" Grid.Column="0"
                                                Text="Port / Ctx / GPU" VerticalAlignment="Center"

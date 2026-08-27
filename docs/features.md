@@ -42,6 +42,10 @@ for Knowledge behavior in Chat.
   capability-gated speculative decoding. Unsupported or unproven runtime
   features stay `Unknown` or `Unavailable`; Hermaeus does not guess from a
   filename or a generic flag.
+- Services keeps a managed server's configured projector path separate from
+  its `Use projector` choice. Turning projector use off retains the path and
+  linked provenance for repair, while omitting `--mmproj` from the launch;
+  turning it back on restores the verified configured path.
 - Model downloads retain source and hash identity. Shards, verified vision
   projectors, and MTP companions are handled as a model file set when their
   relationship is proven. Ambiguous companions require review, and removing

@@ -74,6 +74,12 @@ the current hash-verified candidates and explicitly reacquire one before
 selecting it in Services. If no trusted candidate exists, clear the stale path
 or choose a companion you have independently verified.
 
+Services keeps the configured projector path and the **Use projector** choice
+separate. Turn the choice off to stop passing `--mmproj` to `llama-server`
+without deleting the saved path or its companion provenance. Turn it on again
+to use that configured path, subject to the same verification and missing-file
+checks.
+
 For Hugging Face models, companion handling prefers a SHA256-verified
 `.hermaeus/companions.json` mapping, but does not require third-party
 repositories to add one. Existing `mmproj*.gguf` siblings and
@@ -87,9 +93,12 @@ The initial download offers known projector and MTP files individually and
 shows their additional size. Each model's **Automatically manage known
 companions** setting controls later updates. Disabling it asks whether to Keep
 files, Remove files, or Cancel; removal is never implicit. If a known
-companion goes missing, use **Reacquire known companions** on the model card.
-Recovery resolves the current repository revision and hash-verified compatible
-candidates, but it never changes a server's configured draft path. Selecting a
+companion goes missing or stale, the model card reports whether a verified
+compatible replacement can be reacquired. Use **Reacquire known companions**
+when it can. If no verified replacement exists, the card says so and offers
+only the Services path for **Browse** or **Clear projector**. Recovery resolves
+the current repository revision and hash-verified compatible candidates, but it
+never changes a server's configured projector or draft path. Selecting a
 replacement in Services remains an explicit user action.
 
 The server card's **GPU Fit** text is a prediction for the values currently in

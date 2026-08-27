@@ -81,6 +81,10 @@ public partial class ModelManagementViewModel : ObservableObject
     public Func<int, Task<bool>>? RequestEmptyDirectoryCleanupConfirmation { get; set; }
     public Func<ModelDeletionPlan, Task<bool>>? RequestDeleteModelConfirmation { get; set; }
     public Func<ModelDeletionPlan, Task<CompanionDisableChoice>>? RequestCompanionDisableConfirmation { get; set; }
+    public Action<string>? RequestNavigate { get; set; }
+
+    [RelayCommand]
+    private void OpenServices() => RequestNavigate?.Invoke("services");
 
     public ModelManagementViewModel(ILlmService llm, ModelProfileService profiles, IToastService toasts, ISettingsService settings, ISystemInfoService system, ServicesViewModel services,
         ModelManifestStore manifest, HuggingFaceClient hf, ModelDownloadService downloader, IActivityRecorder? activity = null)
@@ -295,6 +299,8 @@ public partial class ModelManagementViewModel : ObservableObject
             item.RepoId = string.Empty;
             item.UpdateStatus = ModelUpdateStatus.NotLinked;
             item.HasMissingCompanions = false;
+            item.HasStaleCompanions = false;
+            item.HasVerifiedCompanionReplacement = false;
             item.CompanionStatus = string.Empty;
             return;
         }
@@ -308,15 +314,78 @@ public partial class ModelManagementViewModel : ObservableObject
                     ? ModelUpdateStatus.UpToDate
                     : ModelUpdateStatus.NotLinked; // linked but never checked yet
 
-        var missing = entry.Companions
-            .Where(c => !string.IsNullOrWhiteSpace(c.LocalFilePath) && !File.Exists(c.LocalFilePath))
-            .Select(c => Path.GetFileName(c.LocalFilePath))
-            .ToList();
-        item.HasMissingCompanions = missing.Count > 0;
-        item.CompanionStatus = missing.Count == 0
-            ? entry.Companions.Count > 0 ? "Known companions present" : string.Empty
-            : $"Missing known companions: {string.Join(", ", missing)}";
+        ApplyCompanionState(item, entry);
     }
+
+    private static void ApplyCompanionState(ModelProfileItemViewModel item, ModelManifestEntry entry)
+    {
+        var missing = new List<string>();
+        var stale = new List<string>();
+        var repairable = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var companion in entry.Companions.Where(c => !string.IsNullOrWhiteSpace(c.LocalFilePath)))
+        {
+            var localPath = companion.LocalFilePath;
+            if (!File.Exists(localPath))
+            {
+                missing.Add(Path.GetFileName(localPath));
+            }
+            else if (companion.SizeBytes is > 0)
+            {
+                try
+                {
+                    if (new FileInfo(localPath).Length != companion.SizeBytes.Value)
+                        stale.Add(Path.GetFileName(localPath));
+                }
+                catch (IOException)
+                {
+                    stale.Add(Path.GetFileName(localPath));
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    stale.Add(Path.GetFileName(localPath));
+                }
+            }
+
+            if (missing.Contains(Path.GetFileName(localPath), StringComparer.OrdinalIgnoreCase)
+                || stale.Contains(Path.GetFileName(localPath), StringComparer.OrdinalIgnoreCase))
+            {
+                if (HasVerifiedCompanionMetadata(entry, companion))
+                    repairable.Add(companion.LocalFilePath);
+            }
+        }
+
+        item.HasMissingCompanions = missing.Count > 0;
+        item.HasStaleCompanions = stale.Count > 0;
+        item.HasVerifiedCompanionReplacement = repairable.Count > 0;
+
+        var repairDetails = missing
+            .Select(name => $"{name} (missing)")
+            .Concat(stale.Select(name => $"{name} (changed)"))
+            .ToList();
+        if (repairDetails.Count == 0)
+        {
+            item.CompanionStatus = entry.Companions.Count > 0 ? "Known companions present" : string.Empty;
+        }
+        else if (item.HasVerifiedCompanionReplacement)
+        {
+            item.CompanionStatus = $"Companion repair needed: {string.Join(", ", repairDetails)}. Verified compatible replacement available; choose Reacquire known companions.";
+        }
+        else
+        {
+            item.CompanionStatus = $"Companion repair needed: {string.Join(", ", repairDetails)}. No verified replacement is available; browse or clear the projector in Services.";
+        }
+    }
+
+    private static bool HasVerifiedCompanionMetadata(ModelManifestEntry primary, ModelCompanionManifestEntry companion) =>
+        !companion.RequiresUserConfirmation
+        && !string.IsNullOrWhiteSpace(primary.RepoId)
+        && !string.IsNullOrWhiteSpace(companion.RepoFile)
+        && IsSha256(companion.Sha256)
+        && (!string.IsNullOrWhiteSpace(companion.RevisionSha) || !string.IsNullOrWhiteSpace(primary.RevisionSha));
+
+    private static bool IsSha256(string? value) =>
+        value is { Length: 64 } && value.All(Uri.IsHexDigit);
 
     private void RefreshTuneSummary(ModelProfileItemViewModel item)
     {
@@ -718,6 +787,7 @@ public partial class ModelManagementViewModel : ObservableObject
                         entry.PendingRevisionSha = null;
                         entry.PendingSizeBytes = null;
                     }
+                    ApplyCompanionState(item, entry);
                     await _manifest.UpsertAsync(entry);
                     item.IsCheckingUpdate = false;
                 }
@@ -727,9 +797,11 @@ public partial class ModelManagementViewModel : ObservableObject
             var available = candidates.Count(c => c.Item.UpdateStatus == ModelUpdateStatus.UpdateAvailable);
             var gone = candidates.Count(c => c.Item.UpdateStatus == ModelUpdateStatus.NoLongerPublished);
             var failed = candidates.Count(c => c.Item.UpdateStatus == ModelUpdateStatus.CheckFailed);
-            var missingCompanions = candidates.Count(c => c.Item.HasMissingCompanions);
+            var repairableCompanions = candidates.Count(c => c.Item.CanReacquireCompanions);
+            var manualCompanions = candidates.Count(c => c.Item.RequiresManualCompanionRepair);
             UpdateCheckStatus = $"{upToDate} up to date, {available} update(s) available, {gone} no longer published on the repo, {failed} check(s) failed."
-                + (missingCompanions == 0 ? string.Empty : $" {missingCompanions} model(s) have missing known companions: open Configure and choose Reacquire known companions to review recovery.");
+                + (repairableCompanions == 0 ? string.Empty : $" {repairableCompanions} model(s) have a verified companion repair available: open Configure and choose Reacquire known companions.")
+                + (manualCompanions == 0 ? string.Empty : $" {manualCompanions} model(s) need manual companion repair: no verified replacement is available, so browse or clear the projector in Services.");
         }
         finally
         {
@@ -873,10 +945,10 @@ public partial class ModelManagementViewModel : ObservableObject
             var exists = File.Exists(companion.LocalFilePath);
             if (onlyMissing && exists)
                 continue;
-            if (companion.RequiresUserConfirmation && !onlyMissing)
+            if (companion.RequiresUserConfirmation)
             {
                 missing++;
-                messages.Add($"{Path.GetFileName(companion.LocalFilePath)} requires compatibility review before automatic updates.");
+                messages.Add($"{Path.GetFileName(companion.LocalFilePath)} has no verified compatibility evidence; browse or clear the projector in Services.");
                 continue;
             }
 
@@ -921,8 +993,14 @@ public partial class ModelManagementViewModel : ObservableObject
     [RelayCommand]
     private async Task ReacquireCompanionsAsync(ModelProfileItemViewModel? item)
     {
-        if (item is null || !item.HasMissingCompanions)
+        if (item is null || !item.HasCompanionRepair)
             return;
+
+        if (!item.CanReacquireCompanions)
+        {
+            _toasts.Show("Cannot reacquire companions", "No verified compatible replacement is available. Browse or clear the projector in Services.", ToastKind.Warning, 8000);
+            return;
+        }
 
         var primary = await _manifest.FindAsync(item.ModelId);
         if (primary is null || string.IsNullOrWhiteSpace(primary.RepoId) || string.IsNullOrWhiteSpace(primary.RepoFile))
@@ -1542,7 +1620,24 @@ public partial class ModelProfileItemViewModel : ObservableObject
     [ObservableProperty] private bool _autoManageCompanionAssets;
 
     [ObservableProperty] private bool _hasMissingCompanions;
+    [ObservableProperty] private bool _hasStaleCompanions;
+    [ObservableProperty] private bool _hasVerifiedCompanionReplacement;
     [ObservableProperty] private string _companionStatus = string.Empty;
+
+    public bool HasCompanionRepair => HasMissingCompanions || HasStaleCompanions;
+    public bool CanReacquireCompanions => HasCompanionRepair && HasVerifiedCompanionReplacement;
+    public bool RequiresManualCompanionRepair => HasCompanionRepair && !HasVerifiedCompanionReplacement;
+
+    partial void OnHasMissingCompanionsChanged(bool value) => NotifyCompanionRepairState();
+    partial void OnHasStaleCompanionsChanged(bool value) => NotifyCompanionRepairState();
+    partial void OnHasVerifiedCompanionReplacementChanged(bool value) => NotifyCompanionRepairState();
+
+    private void NotifyCompanionRepairState()
+    {
+        OnPropertyChanged(nameof(HasCompanionRepair));
+        OnPropertyChanged(nameof(CanReacquireCompanions));
+        OnPropertyChanged(nameof(RequiresManualCompanionRepair));
+    }
 
     /// <summary>Per-item UI expansion state, not persisted (r13 02-model-library.md 2.1).</summary>
     [ObservableProperty] private bool _isExpanded;

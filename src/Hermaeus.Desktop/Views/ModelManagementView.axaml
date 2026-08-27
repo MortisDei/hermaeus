@@ -467,9 +467,14 @@
                                                                     <Button Content="Reacquire known companions"
                                                                             Command="{Binding $parent[ItemsControl].DataContext.ReacquireCompanionsCommand}"
                                                                             CommandParameter="{Binding}"
-                                                                            IsVisible="{Binding HasMissingCompanions}"
+                                                                            IsVisible="{Binding CanReacquireCompanions}"
                                                                             FontSize="11" Padding="8,3" CornerRadius="6"
                                                                             ToolTip.Tip="Reviews and reacquires only hash-verified compatible companions from the linked repository's current revision. It never changes a server's selected draft model; choose any replacement explicitly in Services." />
+                                                                    <Button Content="Open Services to browse or clear projector"
+                                                                            Command="{Binding $parent[ItemsControl].DataContext.OpenServicesCommand}"
+                                                                            IsVisible="{Binding RequiresManualCompanionRepair}"
+                                                                            FontSize="11" Padding="8,3" CornerRadius="6"
+                                                                            ToolTip.Tip="No verified replacement is available. Open the server configuration to Browse or Clear the saved projector explicitly." />
                                                                 </StackPanel>
 
                                                                 <StackPanel Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="3"

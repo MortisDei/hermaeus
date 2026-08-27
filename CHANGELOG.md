@@ -29,6 +29,10 @@ limit.
   Chat telemetry to the exact managed server process, validate Kokoro preview
   WAVs before owned playback, and mark missing companions instead of treating
   dead paths as candidates.
+- R31 Beta dogfood now separates managed projector use from the retained
+  projector path, omits disabled projectors from llama-server launches, and
+  exposes verified companion repair or explicit Browse/Clear paths when a
+  companion is missing or stale.
 - Normal Settings preferences autosave with a visible persistence state. The
   top-level Save button is removed, task audio notifications default off, and
   managed llama.cpp uses newer load-mode and localhost-only CORS arguments only

@@ -33,6 +33,8 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private string       _modelPath;
     /// <summary>r19 5.3: optional vision projector (--mmproj); empty means text-only.</summary>
     [ObservableProperty] private string       _mmprojPath = string.Empty;
+    /// <summary>Retains the configured projector path while controlling whether this server uses it.</summary>
+    [ObservableProperty] private bool         _useProjector = true;
     [ObservableProperty] private int          _port;
     [ObservableProperty] private int          _contextSize;
     [ObservableProperty] private int          _gpuLayers;
@@ -199,6 +201,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _config.ExecutablePath != ExecutablePath ||
         _config.ModelPath != ModelPath ||
         _config.MmprojPath != MmprojPath ||
+        _config.UseProjector != UseProjector ||
         _config.Port != Port ||
         _config.ContextSize != ContextSize ||
         _config.GpuLayers != GpuLayers ||
@@ -285,7 +288,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
 
     public bool HasMissingMmproj => !string.IsNullOrWhiteSpace(MmprojPath) && !File.Exists(MmprojPath);
     public string MmprojHint => HasMissingMmproj
-        ? $"Configured projector is missing: {MmprojPath}. Browse for it or clear it; image support stays unavailable until a compatible projector is selected."
+        ? $"Configured projector is missing: {MmprojPath}. It is {(UseProjector ? "enabled" : "disabled")} for this server. Browse for it or clear it; the saved path and provenance stay visible until you repair or explicitly clear it."
         : string.Empty;
 
     [RelayCommand]
@@ -524,6 +527,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _executablePath = config.ExecutablePath;
         _modelPath      = config.ModelPath;
         _mmprojPath     = config.MmprojPath;
+        _useProjector   = config.UseProjector;
         _lastModelPathForDefaults = string.IsNullOrWhiteSpace(config.ModelPath) ? null : config.ModelPath;
         _port           = config.Port;
         _contextSize    = config.ContextSize;
@@ -659,7 +663,8 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
             return string.Empty;
 
         var companions = new List<FitCompanionInput>();
-        AddCompanion("Vision projector", MmprojPath, FitPlacement.Unknown);
+        if (UseProjector)
+            AddCompanion("Vision projector", MmprojPath, FitPlacement.Unknown);
         if (UseDraftModelDecoding)
             AddCompanion("Speculative draft model", DraftModelPath, FitPlacement.Unknown);
 
@@ -1175,6 +1180,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _config.ExecutablePath = ExecutablePath;
         _config.ModelPath      = ModelPath;
         _config.MmprojPath     = MmprojPath;
+        _config.UseProjector   = UseProjector;
         _config.Port           = Port;
         _config.ContextSize    = ContextSize;
         _config.GpuLayers      = GpuLayers;
@@ -1242,6 +1248,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         ExecutablePath = ExecutablePath,
         ModelPath      = ModelPath,
         MmprojPath     = MmprojPath,
+        UseProjector   = UseProjector,
         Port           = Port,
         ContextSize    = ContextSize,
         GpuLayers      = GpuLayers,
@@ -1352,6 +1359,14 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         if (!_settingAutoMmproj)
             _autoSelectedMmprojPath = null;
         OnPropertyChanged(nameof(HasUnsavedChanges));
+        OnPropertyChanged(nameof(HasMissingMmproj));
+        OnPropertyChanged(nameof(MmprojHint));
+    }
+    partial void OnUseProjectorChanged(bool value)
+    {
+        OnPropertyChanged(nameof(HasUnsavedChanges));
+        OnPropertyChanged(nameof(MmprojHint));
+        ApplyContextFitNote();
     }
     partial void OnPreserveReasoningChanged(bool value) => OnPropertyChanged(nameof(HasUnsavedChanges));
 

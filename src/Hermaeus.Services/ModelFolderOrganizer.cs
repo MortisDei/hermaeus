@@ -250,8 +250,12 @@ public static class ModelFolderOrganizer
             return;
 
         foreach (var server in settings.ManagedServers)
+        {
             if (pathRewrites.TryGetValue(NormalizeKey(server.ModelPath), out var newPath))
                 server.ModelPath = newPath;
+            if (pathRewrites.TryGetValue(NormalizeKey(server.MmprojPath), out var newMmprojPath))
+                server.MmprojPath = newMmprojPath;
+        }
 
         foreach (var profile in settings.LlamaTuneProfiles)
             if (pathRewrites.TryGetValue(NormalizeKey(profile.ModelPath), out var newPath))
