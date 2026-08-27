@@ -17,8 +17,12 @@ public partial class SettingsViewModel : ViewModelBase
     private readonly KokoroProcessManager _kokoroProcess;
     private readonly LocalApiProcessManager _localApiProcess;
     private readonly SemaphoreSlim _saveGate = new(1, 1);
+    private readonly object _autoSaveGate = new();
+    private readonly Func<TimeSpan, CancellationToken, Task> _autoSaveDelay;
+    private readonly Action? _autoSaveLifecycleCompleted;
     private CancellationTokenSource? _autoSaveCts;
     private bool _isReloading;
+    private bool _isShuttingDown;
 
     [ObservableProperty] private bool _isSaved;
     [ObservableProperty] private string _settingsError = string.Empty;
@@ -148,13 +152,17 @@ public partial class SettingsViewModel : ViewModelBase
         LocalAiSetupService localAiSetup,
         TrustService trust,
         Hermaeus.Services.Recall.RecallIndexingService? recallIndexing = null,
-        IActivityRecorder? activity = null)
+        IActivityRecorder? activity = null,
+        Func<TimeSpan, CancellationToken, Task>? autoSaveDelay = null,
+        Action? autoSaveLifecycleCompleted = null)
     {
         _svc = svc;
         _toasts = toasts;
         _xttsProcess = xttsProcess;
         _kokoroProcess = kokoroProcess;
         _localApiProcess = localApiProcess;
+        _autoSaveDelay = autoSaveDelay ?? Task.Delay;
+        _autoSaveLifecycleCompleted = autoSaveLifecycleCompleted;
 
         Llm = new LlmDefaultsSettingsViewModel(secrets);
         Rag = new RagSettingsViewModel(ResolveDataRoot);
@@ -215,7 +223,7 @@ public partial class SettingsViewModel : ViewModelBase
 
     public void Reload()
     {
-        _autoSaveCts?.Cancel();
+        CancelAutoSave();
         _isReloading = true;
         try
         {
@@ -349,31 +357,47 @@ public partial class SettingsViewModel : ViewModelBase
 
     private void ScheduleAutoSave()
     {
-        _autoSaveCts?.Cancel();
-        var cts = new CancellationTokenSource();
-        _autoSaveCts = cts;
+        CancellationTokenSource? previous;
+        CancellationTokenSource cts;
+        CancellationToken token;
+        lock (_autoSaveGate)
+        {
+            if (_isShuttingDown)
+                return;
+
+            previous = _autoSaveCts;
+            cts = new CancellationTokenSource();
+            token = cts.Token;
+            _autoSaveCts = cts;
+        }
+
+        CancelAndDispose(previous);
         PersistenceStatus = "Saving";
-        _ = AutoSaveAfterDelayAsync(cts);
+        _ = AutoSaveAfterDelayAsync(cts, token);
     }
 
-    private async Task AutoSaveAfterDelayAsync(CancellationTokenSource cts)
+    private async Task AutoSaveAfterDelayAsync(CancellationTokenSource cts, CancellationToken token)
     {
         try
         {
-            await Task.Delay(600, cts.Token);
-            await SaveCoreAsync(showToast: false, cts.Token);
+            await _autoSaveDelay(TimeSpan.FromMilliseconds(600), token);
+            await SaveCoreAsync(showToast: false, token);
         }
-        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
         }
         catch (Exception ex)
         {
-            PersistenceStatus = "Failed";
-            SettingsError = ex.Message;
+            if (IsCurrentAutoSave(cts))
+            {
+                PersistenceStatus = "Failed";
+                SettingsError = ex.Message;
+            }
         }
         finally
         {
-            cts.Dispose();
+            CompleteAutoSave(cts);
+            _autoSaveLifecycleCompleted?.Invoke();
         }
     }
 
@@ -388,10 +412,56 @@ public partial class SettingsViewModel : ViewModelBase
 
     public void Shutdown()
     {
+        lock (_autoSaveGate)
+            _isShuttingDown = true;
+        CancelAutoSave();
         Tts.Dispose();
         _xttsProcess.Stop();
         _kokoroProcess.Stop();
         _localApiProcess.Stop();
+    }
+
+    private void CancelAutoSave()
+    {
+        CancellationTokenSource? current;
+        lock (_autoSaveGate)
+        {
+            current = _autoSaveCts;
+            _autoSaveCts = null;
+        }
+
+        CancelAndDispose(current);
+    }
+
+    private void CompleteAutoSave(CancellationTokenSource completed)
+    {
+        var ownsSource = false;
+        lock (_autoSaveGate)
+        {
+            if (ReferenceEquals(_autoSaveCts, completed))
+            {
+                _autoSaveCts = null;
+                ownsSource = true;
+            }
+        }
+
+        if (ownsSource)
+            completed.Dispose();
+    }
+
+    private bool IsCurrentAutoSave(CancellationTokenSource candidate)
+    {
+        lock (_autoSaveGate)
+            return ReferenceEquals(_autoSaveCts, candidate);
+    }
+
+    private static void CancelAndDispose(CancellationTokenSource? cts)
+    {
+        if (cts is null)
+            return;
+
+        cts.Cancel();
+        cts.Dispose();
     }
 
     /// <summary>

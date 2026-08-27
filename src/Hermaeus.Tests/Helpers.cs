@@ -26,8 +26,13 @@ namespace Hermaeus.Tests
         public static TtsSettingsViewModel NewTtsSettingsViewModel(ISettingsService settings) =>
             new(new FakeTts(), new FakeVoiceProviderRegistry(settings), new FakeToasts(), new XttsProcessManager(), new KokoroProcessManager(), new FakeSecretStore(), settings);
 
-        public static SettingsViewModel NewSettingsViewModel(ISettingsService settings, ISecretStore secrets, TtsSettingsViewModel? tts = null) =>
-            new(settings, tts ?? NewTtsSettingsViewModel(settings), new FakeToasts(), new BackupService(settings), secrets, new XttsProcessManager(), new KokoroProcessManager(), new LocalApiProcessManager(), new LocalAiSetupService(new PythonHealthValidator()), new TrustService());
+        public static SettingsViewModel NewSettingsViewModel(
+            ISettingsService settings,
+            ISecretStore secrets,
+            TtsSettingsViewModel? tts = null,
+            Func<TimeSpan, CancellationToken, Task>? autoSaveDelay = null,
+            Action? autoSaveLifecycleCompleted = null) =>
+            new(settings, tts ?? NewTtsSettingsViewModel(settings), new FakeToasts(), new BackupService(settings), secrets, new XttsProcessManager(), new KokoroProcessManager(), new LocalApiProcessManager(), new LocalAiSetupService(new PythonHealthValidator()), new TrustService(), autoSaveDelay: autoSaveDelay, autoSaveLifecycleCompleted: autoSaveLifecycleCompleted);
 
         public static ServicesViewModel NewServicesViewModel(ISettingsService settings, TtsSettingsViewModel? tts = null) =>
             new(settings, new RuntimeProfileService(settings), new FakeToasts(), new RedactionService(), new TrustService(), new RuntimeLogService(settings), tts ?? NewTtsSettingsViewModel(settings));

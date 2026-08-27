@@ -1,4 +1,7 @@
+using Hermaeus.Core.Models;
+using Hermaeus.Core.Services;
 using Hermaeus.Services;
+using Hermaeus.ViewModels;
 using Xunit;
 using static Hermaeus.Tests.Helpers;
 
@@ -141,6 +144,111 @@ public sealed class SettingsViewModelSaveLifecycleTests
     }
 
     [Fact]
+    public async Task Completed_autosave_can_be_followed_by_reload()
+    {
+        using var temp = new TempDir();
+        var fixture = NewControlledFixture(temp);
+
+        fixture.Vm.Llm.DefaultSystemPrompt = "completed";
+        var pending = await fixture.Delay.WaitForCallAsync(0);
+        fixture.Delay.Complete(pending);
+        await fixture.Completed.WaitForCountAsync(1);
+
+        fixture.Vm.Reload();
+
+        Assert.Equal("Saved", fixture.Vm.PersistenceStatus);
+        Assert.Equal(1, fixture.Settings.SaveCount);
+        fixture.Vm.Shutdown();
+    }
+
+    [Fact]
+    public async Task Replacing_an_autosave_cancels_the_older_delay_and_saves_only_the_latest_edit()
+    {
+        using var temp = new TempDir();
+        var fixture = NewControlledFixture(temp);
+
+        fixture.Vm.Llm.DefaultSystemPrompt = "first";
+        var first = await fixture.Delay.WaitForCallAsync(0);
+        fixture.Vm.Llm.DefaultSystemPrompt = "second";
+        var second = await fixture.Delay.WaitForCallAsync(1);
+
+        await first.CancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        fixture.Delay.Complete(first);
+        await fixture.Completed.WaitForCountAsync(1);
+        fixture.Delay.Complete(second);
+        await fixture.Completed.WaitForCountAsync(2);
+
+        Assert.Equal(1, fixture.Settings.SaveCount);
+        Assert.Equal("second", fixture.Settings.Settings.Llm.DefaultSystemPrompt);
+        fixture.Vm.Shutdown();
+    }
+
+    [Fact]
+    public async Task Reload_cancels_a_pending_autosave_without_saving_it()
+    {
+        using var temp = new TempDir();
+        var fixture = NewControlledFixture(temp);
+
+        fixture.Vm.Llm.DefaultSystemPrompt = "cancelled";
+        var pending = await fixture.Delay.WaitForCallAsync(0);
+        fixture.Vm.Reload();
+        await pending.CancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        fixture.Delay.Complete(pending);
+        await fixture.Completed.WaitForCountAsync(1);
+
+        Assert.Equal(0, fixture.Settings.SaveCount);
+        Assert.Equal(string.Empty, fixture.Settings.Settings.Llm.DefaultSystemPrompt);
+        fixture.Vm.Shutdown();
+    }
+
+    [Fact]
+    public async Task Shutdown_cancels_a_pending_autosave_without_leaking_or_saving_it()
+    {
+        using var temp = new TempDir();
+        var fixture = NewControlledFixture(temp);
+
+        fixture.Vm.Llm.DefaultSystemPrompt = "shutdown";
+        var pending = await fixture.Delay.WaitForCallAsync(0);
+        fixture.Vm.Shutdown();
+        await pending.CancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        fixture.Delay.Complete(pending);
+        await fixture.Completed.WaitForCountAsync(1);
+
+        Assert.Equal(0, fixture.Settings.SaveCount);
+        Assert.Equal(string.Empty, fixture.Settings.Settings.Llm.DefaultSystemPrompt);
+    }
+
+    [Fact]
+    public async Task A_stale_completion_cannot_clear_or_dispose_the_newer_autosave_source()
+    {
+        using var temp = new TempDir();
+        var fixture = NewControlledFixture(temp);
+
+        fixture.Vm.Llm.DefaultSystemPrompt = "first";
+        var first = await fixture.Delay.WaitForCallAsync(0);
+        fixture.Vm.Llm.DefaultSystemPrompt = "second";
+        var second = await fixture.Delay.WaitForCallAsync(1);
+        await first.CancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(3));
+
+        fixture.Delay.Complete(first);
+        await fixture.Completed.WaitForCountAsync(1);
+
+        // This edit must be able to cancel the still-owned second source. A
+        // stale completion that clears or disposes it makes this setter throw.
+        fixture.Vm.Llm.DefaultSystemPrompt = "third";
+        var third = await fixture.Delay.WaitForCallAsync(2);
+        await second.CancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        fixture.Delay.Complete(second);
+        await fixture.Completed.WaitForCountAsync(2);
+        fixture.Delay.Complete(third);
+        await fixture.Completed.WaitForCountAsync(3);
+
+        Assert.Equal(1, fixture.Settings.SaveCount);
+        Assert.Equal("third", fixture.Settings.Settings.Llm.DefaultSystemPrompt);
+        fixture.Vm.Shutdown();
+    }
+
+    [Fact]
     public void TtsPythonPath_round_trips_through_reload_without_the_dead_secret_reference_guard()
     {
         using var temp = new TempDir();
@@ -150,5 +258,143 @@ public sealed class SettingsViewModelSaveLifecycleTests
         var vm = NewSettingsViewModel(settings, new FakeSecretStore());
 
         Assert.Equal("secret:some-reference-shaped-value", vm.Tts.TtsPythonPath);
+    }
+
+    private static ControlledFixture NewControlledFixture(TempDir temp)
+    {
+        var rawSettings = NewSettings(temp);
+        rawSettings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        var settings = new CountingSettingsService(rawSettings);
+        var delay = new ControlledDelay();
+        var completed = new CompletionTracker();
+        var vm = NewSettingsViewModel(
+            settings,
+            new FakeSecretStore(),
+            autoSaveDelay: delay.DelayAsync,
+            autoSaveLifecycleCompleted: completed.Record);
+        return new ControlledFixture(vm, settings, delay, completed);
+    }
+
+    private sealed record ControlledFixture(
+        SettingsViewModel Vm,
+        CountingSettingsService Settings,
+        ControlledDelay Delay,
+        CompletionTracker Completed);
+
+    private sealed class ControlledDelay
+    {
+        private readonly object _gate = new();
+        private readonly List<PendingDelay> _pending = [];
+        private TaskCompletionSource<bool> _callAdded = NewSignal();
+
+        public Task DelayAsync(TimeSpan _, CancellationToken token)
+        {
+            var pending = new PendingDelay();
+            token.Register(static state =>
+            {
+                var item = (PendingDelay)state!;
+                item.CancellationObserved.TrySetResult(true);
+            }, pending);
+            lock (_gate)
+            {
+                _pending.Add(pending);
+                _callAdded.TrySetResult(true);
+                _callAdded = NewSignal();
+            }
+            return pending.Completion.Task;
+        }
+
+        public async Task<PendingDelay> WaitForCallAsync(int index)
+        {
+            while (true)
+            {
+                Task signal;
+                lock (_gate)
+                {
+                    if (_pending.Count > index)
+                        return _pending[index];
+                    signal = _callAdded.Task;
+                }
+                await signal;
+            }
+        }
+
+        public void Complete(PendingDelay pending) => pending.Completion.TrySetResult(true);
+
+        private static TaskCompletionSource<bool> NewSignal() =>
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
+
+    private sealed class PendingDelay
+    {
+        public TaskCompletionSource<bool> Completion { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource<bool> CancellationObserved { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
+
+    private sealed class CompletionTracker
+    {
+        private readonly object _gate = new();
+        private int _count;
+        private TaskCompletionSource<bool>? _waiter;
+        private int _waiterTarget;
+
+        public void Record()
+        {
+            lock (_gate)
+            {
+                _count++;
+                if (_waiter is not null && _count >= _waiterTarget)
+                {
+                    _waiter.TrySetResult(true);
+                    _waiter = null;
+                }
+            }
+        }
+
+        public Task WaitForCountAsync(int target)
+        {
+            lock (_gate)
+            {
+                if (_count >= target)
+                    return Task.CompletedTask;
+
+                _waiterTarget = target;
+                _waiter = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                return _waiter.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            }
+        }
+    }
+
+    private sealed class CountingSettingsService(ISettingsService inner) : ISettingsService
+    {
+        private int _saveCount;
+
+        public AppSettings Settings => inner.Settings;
+        public int SaveCount => Volatile.Read(ref _saveCount);
+        public event EventHandler? SettingsChanged
+        {
+            add => inner.SettingsChanged += value;
+            remove => inner.SettingsChanged -= value;
+        }
+
+        public Task LoadAsync() => inner.LoadAsync();
+
+        public Task<SettingsSaveResult> SaveAsync(string? previousDataRootDirectory = null)
+        {
+            Interlocked.Increment(ref _saveCount);
+            return inner.SaveAsync(previousDataRootDirectory);
+        }
+
+        public Task<SettingsSaveResult> SaveAsync(AppSettings settings, string? previousDataRootDirectory = null)
+        {
+            Interlocked.Increment(ref _saveCount);
+            return inner.SaveAsync(settings, previousDataRootDirectory);
+        }
+
+        public DataMigrationPlan PreviewDataRootMigration(string? previousDataRootDirectory, string? nextDataRootDirectory) =>
+            inner.PreviewDataRootMigration(previousDataRootDirectory, nextDataRootDirectory);
     }
 }
