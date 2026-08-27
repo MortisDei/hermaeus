@@ -6,6 +6,13 @@ which stores user/model knowledge.
 
 ## Controlled experiments
 
+The Experiment tab leads with the normal path: select the Chat server, name
+the comparison, configure the candidate value that matters, then start the
+isolated run. Its run-state card reports what is active, what just happened,
+and the current evidence refresh result. Frozen JSON, capability recipes,
+trade-off detail, and evidence filters remain available without being required
+to start a useful experiment.
+
 The Experiment tab freezes one immutable definition before it starts anything.
 The definition names the protocol, exact v2 runtime/model/hardware/configuration
 fingerprint, target Services server, baseline, bounded candidates, workload,

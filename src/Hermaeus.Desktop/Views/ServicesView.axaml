@@ -328,7 +328,7 @@
                                                Text="Port / Ctx / GPU" VerticalAlignment="Center"
                                                Opacity="0.6" FontSize="13" />
                                     <Grid Grid.Row="3" Grid.Column="1"
-                                          ColumnDefinitions="116,116,108,*"
+                                          ColumnDefinitions="116,116,108"
                                           ColumnSpacing="8">
                                         <NumericUpDown Value="{Binding Port}"
                                                        Minimum="1024" Maximum="65535"
@@ -353,21 +353,6 @@
                                                        FontSize="13"
                                                        IsEnabled="{Binding CanEdit}"
                                                        ToolTip.Tip="GPU offload layers. -1 offloads all layers (rendered as --n-gpu-layers 999); 0 keeps inference on the CPU; a positive N offloads exactly N layers." />
-                                        <StackPanel Grid.Column="3" VerticalAlignment="Center">
-                                            <TextBlock Text="{Binding ContextSourceLabel}"
-                                                       IsVisible="{Binding HasContextSourceLabel}"
-                                                       TextWrapping="Wrap"
-                                                       Opacity="0.5" FontSize="11" />
-                                            <TextBlock Text="{Binding ContextFitNote}"
-                                                       IsVisible="{Binding HasContextFitWarning}"
-                                                       TextWrapping="Wrap"
-                                                       Opacity="0.7" FontSize="12" />
-                                            <TextBlock Text="{Binding GpuFitBreakdown}"
-                                                       IsVisible="{Binding HasGpuFitBreakdown}"
-                                                       TextWrapping="Wrap"
-                                                       Opacity="0.62" FontSize="11"
-                                                       ToolTip.Tip="Analytical GPU Fit breakdown. Prediction only; runtime observations remain separate." />
-                                        </StackPanel>
                                     </Grid>
 
                                     <!-- Threads -->
@@ -456,6 +441,25 @@
                                     </StackPanel>
 
                                 </Grid>
+
+                                <!-- Diagnostics intentionally live below the configuration grid.
+                                     A long Auto Tune/Fit explanation must never determine the height of
+                                     Port, Context, or GPU Layers. -->
+                                <StackPanel Margin="110,0,0,0" Spacing="3" MaxWidth="760">
+                                    <TextBlock Text="{Binding ContextSourceLabel}"
+                                               IsVisible="{Binding HasContextSourceLabel}"
+                                               TextWrapping="Wrap"
+                                               Opacity="0.5" FontSize="11" />
+                                    <TextBlock Text="{Binding ContextFitNote}"
+                                               IsVisible="{Binding HasContextFitWarning}"
+                                               TextWrapping="Wrap"
+                                               Opacity="0.7" FontSize="12" />
+                                    <TextBlock Text="{Binding GpuFitBreakdown}"
+                                               IsVisible="{Binding HasGpuFitBreakdown}"
+                                               TextWrapping="Wrap"
+                                               Opacity="0.62" FontSize="11"
+                                               ToolTip.Tip="Analytical GPU Fit breakdown. Prediction only; runtime observations remain separate." />
+                                </StackPanel>
 
                                 <!-- ── Advanced engine options ───────────── -->
                                 <Expander Header="Advanced engine options" IsExpanded="False">

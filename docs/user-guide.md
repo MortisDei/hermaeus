@@ -68,6 +68,12 @@ changes can launch or reconfigure a process. A missing primary model,
 projector, or draft companion is shown as missing and is never silently
 replaced by another file.
 
+A stale configured draft path is not a candidate. If the primary model still
+has a trusted repository mapping, use its model-card companion review to see
+the current hash-verified candidates and explicitly reacquire one before
+selecting it in Services. If no trusted candidate exists, clear the stale path
+or choose a companion you have independently verified.
+
 For Hugging Face models, companion handling prefers a SHA256-verified
 `.hermaeus/companions.json` mapping, but does not require third-party
 repositories to add one. Existing `mmproj*.gguf` siblings and
@@ -82,7 +88,9 @@ shows their additional size. Each model's **Automatically manage known
 companions** setting controls later updates. Disabling it asks whether to Keep
 files, Remove files, or Cancel; removal is never implicit. If a known
 companion goes missing, use **Reacquire known companions** on the model card.
-Recovery uses only the recorded repository revision, path, and verified hash.
+Recovery resolves the current repository revision and hash-verified compatible
+candidates, but it never changes a server's configured draft path. Selecting a
+replacement in Services remains an explicit user action.
 
 The server card's **GPU Fit** text is a prediction for the values currently in
 the editor, including unsaved changes. It lists weights, K/V cache, runtime

@@ -467,7 +467,7 @@
                                                                             CommandParameter="{Binding}"
                                                                             IsVisible="{Binding HasMissingCompanions}"
                                                                             FontSize="11" Padding="8,3" CornerRadius="6"
-                                                                            ToolTip.Tip="Re-downloads missing companions only when the linked repository still provides an explicit mapping and SHA256 hash. It never substitutes a different file." />
+                                                                            ToolTip.Tip="Reviews and reacquires only hash-verified compatible companions from the linked repository's current revision. It never changes a server's selected draft model; choose any replacement explicitly in Services." />
                                                                 </StackPanel>
 
                                                                 <StackPanel Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="3"

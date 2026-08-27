@@ -481,7 +481,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
 
     /// <summary>Says why the draft checkbox is unavailable, rather than leaving it inert and unexplained.</summary>
     public string DraftModelHint => HasMissingDraftModel
-        ? $"Configured draft model is missing: {DraftModelPath}. Clear it or choose a candidate you have verified; Hermaeus will not substitute another model."
+        ? $"The saved draft-model path is stale: {DraftModelPath}. It is not a usable candidate. If this model has a trusted repository mapping, review its current known companions first; otherwise clear it or choose a manually verified companion. Hermaeus will not substitute another model."
         : HasDetectedDraftModel
             ? string.Empty
             : "No mtp-*.gguf draft head was found beside this model. Download one from the model's repository, or pick a file.";

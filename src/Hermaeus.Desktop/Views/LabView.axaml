@@ -14,8 +14,8 @@
       <TabItem Header="Experiment">
         <ScrollViewer>
           <StackPanel Margin="8" Spacing="14" MaxWidth="920" HorizontalAlignment="Left">
-            <TextBlock Text="Definition" FontSize="18" FontWeight="SemiBold" />
-            <TextBlock Text="Freeze an exact baseline and bounded candidate before launch. Lab uses a dedicated loopback process and does not edit saved Services settings." TextWrapping="Wrap" />
+            <TextBlock Text="1. Set up an experiment" FontSize="18" FontWeight="SemiBold" />
+            <TextBlock Text="Choose the Chat server, name the comparison, then start it. Lab freezes the exact baseline and candidate, runs on a dedicated loopback process, and never edits saved Services settings." TextWrapping="Wrap" />
             <Grid ColumnDefinitions="180,260" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="10" RowSpacing="8">
               <TextBlock Grid.Row="0" Text="Configured Chat server" VerticalAlignment="Center" />
               <ComboBox Grid.Row="0" Grid.Column="1" ItemsSource="{Binding ConfiguredServers}" SelectedItem="{Binding SelectedServer}"
@@ -30,7 +30,7 @@
                              ToolTip.Tip="Candidate context size. The baseline remains the selected server's current context size." />
             </Grid>
             <StackPanel Orientation="Horizontal" Spacing="8">
-              <Button Content="Freeze and start" Command="{Binding FreezeAndStartCommand}" IsEnabled="{Binding !IsRunActive}"
+              <Button Content="Start isolated run" Command="{Binding FreezeAndStartCommand}" IsEnabled="{Binding !IsRunActive}"
                       ToolTip.Tip="Freeze the selected server identity and start an isolated loopback runtime." />
               <Button Content="Complete baseline" Command="{Binding CompleteRunCommand}" IsEnabled="{Binding IsRunActive}"
                       ToolTip.Tip="Capture the current baseline health evidence and stop the isolated runtime." />
@@ -41,6 +41,7 @@
               <StackPanel Spacing="5">
                 <TextBlock Text="Run state" FontWeight="SemiBold" />
                 <TextBlock Text="{Binding RunStatus}" />
+                <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" Opacity="0.7" />
                 <TextBlock Text="{Binding RuntimeIsolation}" TextWrapping="Wrap" />
                 <TextBlock Text="{Binding ComparisonSummary}" TextWrapping="Wrap" />
               </StackPanel>
@@ -48,7 +49,7 @@
             <Expander Header="Frozen definition JSON">
               <TextBox Text="{Binding DefinitionPreview}" IsReadOnly="True" AcceptsReturn="True" MinHeight="140" FontFamily="Consolas" TextWrapping="Wrap" />
             </Expander>
-            <TextBlock Text="Bounded recipes" FontSize="18" FontWeight="SemiBold" />
+            <TextBlock Text="2. Or run a guided recipe" FontSize="18" FontWeight="SemiBold" />
             <TextBlock Text="Recipes always keep the baseline, change one declared dimension, check GPU Fit before launch, and preserve failures. Conditional controls remain Unknown until this exact runtime advertises them." TextWrapping="Wrap" />
             <StackPanel Orientation="Horizontal" Spacing="8">
               <Button Content="Inspect runtime recipes" Command="{Binding RefreshRecipesCommand}"

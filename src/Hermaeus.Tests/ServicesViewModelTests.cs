@@ -198,7 +198,9 @@ public sealed class ServicesViewModelTests
 
         Assert.True(server.HasMissingDraftModel);
         Assert.DoesNotContain(missingDraft, server.DetectedDraftModelPaths);
-        Assert.Contains("missing", server.DraftModelHint, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("stale", server.DraftModelHint, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("trusted repository mapping", server.DraftModelHint, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("will not substitute", server.DraftModelHint, StringComparison.OrdinalIgnoreCase);
         server.ClearDraftModelCommand.Execute(null);
         Assert.Empty(server.DraftModelPath);
     }

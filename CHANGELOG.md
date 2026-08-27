@@ -41,6 +41,11 @@ limit.
   is persisted, updates and missing-asset recovery retain exact
   revision/source/hash identity, and disabling the policy prompts Keep files /
   Remove files / Cancel before any removal.
+- Lab now leads with the normal setup-and-run path and keeps live run state and
+  evidence refresh feedback beside the primary action. Services keeps managed
+  server controls compact by placing GPU Fit diagnostics below the configuration
+  grid. A missing draft path is called stale, remains non-runnable, and directs
+  the user to review trusted current companions before choosing a replacement.
 
 ## [0.38.0-alpha] - 2026-08-24
 
