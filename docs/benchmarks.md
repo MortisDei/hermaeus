@@ -1,5 +1,9 @@
 # Benchmarks & System Overview
 
+This is the current reference for the Benchmarks and System Overview panels.
+The historical Speed Check record near the end is retained as a labelled
+measurement appendix; it is not a current performance claim or release note.
+
 ## Benchmarks
 
 The **Benchmarks** workspace runs local prompt suites against selected models and
@@ -231,10 +235,9 @@ The Insights tab's **Best overall** card ranks models only on the cases every
 ranked model has actually run, keyed on both case id and case version, and says
 what that basis was ("across 24 case(s) run by all 3 ranked model(s)").
 
-This matters because a per-model average is not a comparison. Before r25 each
-model was averaged over whatever cases it happened to have run, gated only by a
-volume floor of 2 runs and 10 cases, so a model that ran one short easy suite
-could outrank a model that ran everything.
+This matters because a per-model average is not a comparison. A model that ran
+one short, easy suite must not outrank a model that ran the complete comparable
+case set merely because the averages used different inputs.
 
 Consequences worth knowing:
 
@@ -458,7 +461,7 @@ rate together. A higher tokens-per-second result with no drafted tokens, poor
 acceptance, or worse TTFT is a trade-off to inspect, not a "best" verdict.
 Hermaeus deliberately does not collapse those facts into a magic score.
 
-### First recorded result (r27, 0.34.0-alpha)
+### Historical record: first recorded Speed Check
 
 `gemma-4-E4B-it-qat-UD-Q4_K_XL` at 64512 context, 999 GPU layers, q8_0 KV
 cache, one cold iteration per case, on the maintainer's desktop under ordinary
@@ -492,13 +495,13 @@ different as these is consistent with decode being memory-bandwidth-bound, and
 equally consistent with drafting never having engaged at all, in which case
 both columns measured the same configuration.
 
-### What r28 changed about repeating it
+### Historical note: repeating the Speed Check
 
 The entry above stands as written; it is an honest record of what was known
 when it was taken. What has changed is that the ambiguity it ends on is now
 answerable without reading a server log.
 
-- **Draft acceptance is recorded** (r28 doc 02 2.1 and 2.4). llama-server
+- **Draft acceptance is recorded.** llama-server
 	reports `draft_n` and `draft_n_accepted` in its timings whenever
 	speculative decoding is active, and a run's results now carry both. A
 	result showing `0 drafted` means drafting never engaged and the two columns
@@ -506,7 +509,7 @@ answerable without reading a server log.
 	beside a flat tok/s means the bottleneck is somewhere else. A run where the
 	server reported no counters at all shows nothing rather than a zero, because
 	a missing measurement is not a measured zero.
-- **The Speed Check runs five iterations per case** (r28 doc 02 2.2), and a
+- **The Speed Check runs five iterations per case**, and a
 	comparison reports the median with the range observed across them, in the
 	form `70.2 tok/s (66.8 to 71.9 over 5 runs)`. That is a description of what
 	was seen. It is not a confidence interval and no significance is claimed.

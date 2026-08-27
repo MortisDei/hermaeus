@@ -1,8 +1,7 @@
 # Voice
 
-Text-to-speech (output) and, as of r24, speech-to-text (input). Both are
-off-by-default, local-first by default, and never persist audio beyond the
-moment they need it.
+Text-to-speech (output) and speech-to-text (input) are optional, local-first by
+default, and never persist audio beyond the moment they need it.
 
 ## Voice Architecture and Providers
 
@@ -198,16 +197,6 @@ duration.
   Audio is processed in fixed 30-second windows, so memory does not grow with
   recording length: a forty-minute file costs the same per window as a
   five-second one, and progress is reported per window.
-
-  r25 replaced the `facebook/wav2vec2-base-960h` CTC model r24 shipped here.
-  The in-process design was right and is unchanged; the model was not. Its
-  vocabulary held 26 uppercase letters and an apostrophe, with no lowercase
-  and no punctuation anywhere in it, so every transcript read
-  `HELLO CAN YOU CHECK THE BUILD` and no post-processing could restore what
-  was never produced. Whisper's own decoder turned out to be tractable
-  in-process because an exported ONNX graph carries its key/value cache as
-  named tensors rather than requiring the attention arithmetic to be written
-  by hand.
 
   Same asset posture as native Kokoro: nothing downloads until the explicit
   install action in **Services -> Voice**, and inference then runs fully

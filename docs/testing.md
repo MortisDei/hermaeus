@@ -1,7 +1,8 @@
 # The test suite
 
-What the suite is, how to run it, and what is known about its cost. Written at
-r29 (v0.36.0-alpha) after the first whole-suite audit this project has had.
+This is the current test execution, coverage, and guard-test contract. Dated
+timing and coverage measurements are retained as evidence, not as permanent
+test-count or performance promises.
 
 ## Shape
 

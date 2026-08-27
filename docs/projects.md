@@ -8,8 +8,8 @@ default system prompt, and a color from the brand palette. Switching the
 active project sets that context everywhere at once instead of re-picking a
 model, dataset, and folder separately in each panel.
 
-Projects are additive: a Hermaeus with no projects created behaves exactly as
-before this existed. Conversations, RAG datasets, and agent tasks each carry
+Projects are optional: an installation with no projects behaves like an
+unscoped workspace. Conversations, RAG datasets, and agent tasks each carry
 an optional project id (added via an additive SQLite migration on each
 store), so they can be scoped and filtered without disturbing anything that
 predates Projects.

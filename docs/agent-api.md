@@ -1,11 +1,11 @@
 # Agent Local API contract
 
-R31 ships the versioned Agent Local API contract and pure authorization policy,
-but not Agent execution routes. `Hermaeus.LocalApi` is a separate process with
-its own dependency-injection root, while Desktop owns the active `AgentService`
-and file-backed task state. Running another independent Agent service against
-the same `task_state.json` files would not serialize runs, approvals, steering,
-or cancellation. Atomic file replacement does not solve that ownership race.
+Status: design contract and authorization policy only. Agent execution routes
+are not exposed. `Hermaeus.LocalApi` is a separate process with its own
+dependency-injection root, while Desktop owns the active `AgentService` and
+file-backed task state. Running another independent Agent service against the
+same `task_state.json` files would not serialize runs, approvals, steering, or
+cancellation. Atomic file replacement does not solve that ownership race.
 
 `GET /v1/capabilities` therefore reports `agent` as unusable with the reason:
 
@@ -85,6 +85,6 @@ through the existing named-token and secret-store flow. Revocation must affect
 the next request. The current scope object is inert and has no UI editor because
 the corresponding execution surface is unavailable.
 
-The Linux/COSMIC live Agent-client gate does not apply in R31 because no
-execution endpoint shipped. Automated tests pin the policy, DTO version, absence
-of approval authority, absence of mapped Agent routes, and capability reason.
+There is no live Agent-client verification path because no execution endpoint
+is exposed. Automated tests pin the policy, DTO version, absence of approval
+authority, absence of mapped Agent routes, and capability reason.

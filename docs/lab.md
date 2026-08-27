@@ -126,10 +126,10 @@ Hermaeus never substitutes or assumes the runtime's current default. Candidate
 ranges are reviewed and bounded, and stale capability, asset, or baseline state
 is re-inspected immediately before launch.
 
-The Windows asset inventory used during R31 implementation contained no general
-external-draft or EAGLE-3 pair. The adapters and refusal gates are automated;
-actual engagement, performance benefit, memory behavior, and equivalence remain
-unverified until a known pair is run on the published revision.
+The current Windows asset inventory contains no general external-draft or
+EAGLE-3 pair. The adapters and refusal gates are automated; actual engagement,
+performance benefit, memory behavior, and equivalence remain unverified until a
+known pair is run on the published revision.
 
 ## Prompt/shared-prefix evidence
 
@@ -148,7 +148,7 @@ consumed only when an Available capability record names one of Hermaeus's
 reviewed response fields for that exact runtime identity; the field's absence
 from a response remains Missing rather than zero.
 
-The selected R31 runtime exposes no stable direct reused-token counter, so the
+The selected runtime exposes no stable direct reused-token counter, so the
 direct-counter level remains Unknown. Optional prompt-diff log parsing was not
 added: no observed stable, build-scoped format justified adding diagnostic
 flags or a parser. Normal Chat launch arguments and Agent prompt construction

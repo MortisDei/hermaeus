@@ -28,7 +28,7 @@ pinned to the same exact version in `src/Hermaeus.Desktop/Hermaeus.Desktop.cspro
    the same new version in one commit. Never let them drift apart.
 2. `dotnet build Hermaeus.sln -v q --nologo` clean, zero warnings
    (`TreatWarningsAsErrors` is on solution-wide).
-3. `dotnet test tests/Hermaeus.Tests/Hermaeus.Tests.csproj -v q --nologo` green.
+3. `dotnet test src/Hermaeus.Tests/Hermaeus.Tests.csproj -v q --nologo` green.
 4. Manually exercise, on both Windows and Linux if possible: chat rendering
    (virtualized long conversations, fenced code blocks via AvaloniaEdit),
    theme switching (Fluent light/dark), the tray icon and hotkeys (Windows;

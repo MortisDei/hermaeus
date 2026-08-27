@@ -339,32 +339,22 @@ Hermaeus has one maintainer. Issues get a best-effort response; pull requests mu
 
 # Documentation
 
-## User Features
+Start with the [documentation map](docs/index.md). It explains which document
+is authoritative for current product behavior, where subsystem references live,
+how the active R31 material differs from historical review records, and where
+deferred work is tracked.
 
+- [Current feature catalogue](docs/features.md), including Chat, Agent, RAG,
+  Models, Services, Benchmarks, Lab, System, Doctor, Memories, Logs, Activity,
+  and Settings
 - [User guide](docs/user-guide.md)
 - [Packaging and installation](docs/packaging.md)
-- Chat & Context
-- Model Management
-- Local AI Setup
-- System Integration
+- [Current security review](docs/security-review.md)
+- [Active deferred ledger](docs/review/deferred.md)
+- [Development and contribution guidance](CONTRIBUTING.md)
 
-See:
-
-`docs/features.md`
-
-## Core Components
-
-- `docs/rag.md`
-- `docs/agent.md`
-- `docs/agent-api.md`
-- `docs/voice.md`
-- `docs/projects.md`
-- `docs/recall.md`
-- `docs/benchmarks.md`
-- `docs/security-review.md` (current controls and threat model)
-- `docs/security-history.md` (per-round security history)
-- `docs/security-roadmap.md` (open security hardening work)
-- `docs/review/deferred.md` (work a review round postponed, and why)
+Detailed subsystem references, the security roadmap, historical security
+records, and the immutable review archive are linked from the documentation map.
 
 ---
 

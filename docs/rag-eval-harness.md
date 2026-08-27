@@ -1,5 +1,10 @@
 # RAG Eval Harness Plan
 
+Status: proposed expansion, not a shipped-feature reference. The current native
+evaluation surface is documented in [RAG Workflow](rag.md#eval-harness). This
+file records a possible future harness shape so it does not get mistaken for
+an available UI or artifact contract.
+
 Hermaeus should inherit Oghma Infinium's habit of proving retrieval quality with
 repeatable question sets, then make that native and visible in the app.
 
