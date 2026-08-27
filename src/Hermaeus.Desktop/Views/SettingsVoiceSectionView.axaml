@@ -33,7 +33,12 @@
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
 
-            <TextBlock Text="Channels" FontSize="13" FontWeight="SemiBold" Opacity="0.8" Margin="0,4,0,0" />
+            <Grid ColumnDefinitions="*,Auto" Margin="0,4,0,0">
+                <TextBlock Text="Channels" FontSize="13" FontWeight="SemiBold" Opacity="0.8" VerticalAlignment="Center" />
+                <Button Grid.Column="1" Content="Refresh known voices" Command="{Binding RefreshTtsVoicesCommand}"
+                        Padding="8,3" FontSize="11"
+                        ToolTip.Tip="Refreshes the active provider's authoritative voice list for these channel selectors." />
+            </Grid>
             <ItemsControl ItemsSource="{Binding VoiceChannels}">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate DataType="vm:VoiceChannelSettingViewModel">

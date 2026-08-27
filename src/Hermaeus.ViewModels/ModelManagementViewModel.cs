@@ -727,7 +727,9 @@ public partial class ModelManagementViewModel : ObservableObject
             var available = candidates.Count(c => c.Item.UpdateStatus == ModelUpdateStatus.UpdateAvailable);
             var gone = candidates.Count(c => c.Item.UpdateStatus == ModelUpdateStatus.NoLongerPublished);
             var failed = candidates.Count(c => c.Item.UpdateStatus == ModelUpdateStatus.CheckFailed);
-            UpdateCheckStatus = $"{upToDate} up to date, {available} update(s) available, {gone} no longer published on the repo, {failed} check(s) failed.";
+            var missingCompanions = candidates.Count(c => c.Item.HasMissingCompanions);
+            UpdateCheckStatus = $"{upToDate} up to date, {available} update(s) available, {gone} no longer published on the repo, {failed} check(s) failed."
+                + (missingCompanions == 0 ? string.Empty : $" {missingCompanions} model(s) have missing known companions: open Configure and choose Reacquire known companions to review recovery.");
         }
         finally
         {

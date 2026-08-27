@@ -521,26 +521,24 @@
                                                       ToolTip.Tip="Adds draft-mtp to --spec-type and launches the draft model below. Costs a second, small VRAM allocation." />
                                             <TextBlock Text="{Binding RuntimeCapabilityStatus}"
                                                        FontSize="11" Opacity="0.55" TextWrapping="Wrap" />
-                                            <ComboBox ItemsSource="{Binding DetectedDraftModelPaths}"
-                                                      SelectedItem="{Binding DraftModelPath}"
-                                                      PlaceholderText="No draft model"
-                                                      HorizontalAlignment="Stretch"
-                                                      FontSize="12" CornerRadius="6"
-                                                      IsEnabled="{Binding CanEdit}"
-                                                      ToolTip.Tip="mtp-*.gguf draft head, found beside the selected model or in its MTP folder. An MTP head is trained as part of its base model and shares that model's vocabulary by construction." />
-                                            <Button Content="Clear draft" Command="{Binding ClearDraftModelCommand}"
-                                                    IsVisible="{Binding HasMissingDraftModel}"
-                                                    HorizontalAlignment="Left" Padding="8,4" FontSize="11" />
+                                            <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="6">
+                                                <ComboBox ItemsSource="{Binding DetectedDraftModelPaths}"
+                                                          SelectedItem="{Binding DraftModelPath}"
+                                                          PlaceholderText="No draft model"
+                                                          HorizontalAlignment="Stretch"
+                                                          FontSize="12" CornerRadius="6"
+                                                          IsEnabled="{Binding CanEdit}"
+                                                          ToolTip.Tip="Known MTP draft heads found beside the selected model or in its MTP folder." />
+                                                <Button Grid.Column="1" Content="Browse" Command="{Binding BrowseDraftModelCommand}"
+                                                        Padding="8,4" FontSize="11" IsEnabled="{Binding CanEdit}"
+                                                        ToolTip.Tip="Choose a draft model file yourself. Hermaeus does not treat a filename as compatibility proof." />
+                                                <Button Grid.Column="2" Content="Clear" Command="{Binding ClearDraftModelCommand}"
+                                                        IsVisible="{Binding HasMissingDraftModel}"
+                                                        Padding="8,4" FontSize="11" />
+                                            </Grid>
                                             <TextBlock Text="{Binding DraftModelHint}"
-                                                       IsVisible="{Binding !HasDetectedDraftModel}"
-                                                       TextWrapping="Wrap"
-                                                       FontSize="11"
-                                                       Opacity="0.55" />
-                                            <TextBlock Text="{Binding DraftModelHint}"
-                                                       IsVisible="{Binding HasMissingDraftModel}"
-                                                       TextWrapping="Wrap"
-                                                       FontSize="11"
-                                                       Opacity="0.7" />
+                                                       IsVisible="{Binding HasDraftModelHint}"
+                                                       TextWrapping="Wrap" FontSize="11" Opacity="0.7" />
                                             <Grid ColumnDefinitions="*,*,*,*" ColumnSpacing="6">
                                                 <TextBox Grid.Column="0"
                                                          Text="{Binding SpeculativeNMaxText}"

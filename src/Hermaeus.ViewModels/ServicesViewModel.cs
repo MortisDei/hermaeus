@@ -479,6 +479,8 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
 
     public bool HasMissingDraftModel => !string.IsNullOrWhiteSpace(DraftModelPath) && !File.Exists(DraftModelPath);
 
+    public bool HasDraftModelHint => HasMissingDraftModel || !HasDetectedDraftModel;
+
     /// <summary>Says why the draft checkbox is unavailable, rather than leaving it inert and unexplained.</summary>
     public string DraftModelHint => HasMissingDraftModel
         ? $"The saved draft-model path is stale: {DraftModelPath}. It is not a usable candidate. If this model has a trusted repository mapping, review its current known companions first; otherwise clear it or choose a manually verified companion. Hermaeus will not substitute another model."
@@ -931,6 +933,12 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     private void BrowseMmproj()
     {
         RequestFilePicker?.Invoke(nameof(MmprojPath));
+    }
+
+    [RelayCommand]
+    private void BrowseDraftModel()
+    {
+        RequestFilePicker?.Invoke(nameof(DraftModelPath));
     }
 
     [RelayCommand]
@@ -1501,7 +1509,9 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
             _autoSelectedDraftModelPath = null;
         OnPropertyChanged(nameof(HasUnsavedChanges));
         OnPropertyChanged(nameof(HasDetectedDraftModel));
+        OnPropertyChanged(nameof(HasMissingDraftModel));
         OnPropertyChanged(nameof(DraftModelHint));
+        OnPropertyChanged(nameof(HasDraftModelHint));
         ApplyDraftFitNote();
     }
     partial void OnDraftGpuLayersTextChanged(string value) => OnPropertyChanged(nameof(HasUnsavedChanges));

@@ -316,8 +316,10 @@
                                                  which had no other consumer once the Expander went. -->
                                             <ToggleButton.Flyout>
                                                 <Flyout Placement="Bottom">
-                                                    <ScrollViewer MaxHeight="520" VerticalScrollBarVisibility="Auto">
-                                                        <StackPanel MinWidth="620" MaxWidth="1100" Spacing="6">
+                                                    <ScrollViewer MaxHeight="520" MaxWidth="720"
+                                                                  VerticalScrollBarVisibility="Auto"
+                                                                  HorizontalScrollBarVisibility="Visible">
+                                                        <StackPanel MaxWidth="720" Spacing="6">
                                                             <TextBlock Text="{Binding EffectiveName}"
                                                                        FontSize="14" FontWeight="SemiBold" />
                                                             <Grid ColumnDefinitions="1.1*,1.2*,0.9*"
