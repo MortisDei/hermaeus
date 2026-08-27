@@ -12,12 +12,19 @@ $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $project = Join-Path $root "src/Hermaeus.Tests/Hermaeus.Tests.csproj"
 $resultsDir = Join-Path ([System.IO.Path]::GetTempPath()) "hermaeus-coverage-$([Guid]::NewGuid().ToString('N'))"
 
-New-Item -ItemType Directory -Force $resultsDir | Out-Null
+try {
+    New-Item -ItemType Directory -Force $resultsDir | Out-Null
 
-dotnet test $project --no-restore --collect:"XPlat Code Coverage" --results-directory $resultsDir `
-    "-p:CoverletOutputFormat=cobertura" "-p:Threshold=$Threshold" "-p:ThresholdType=line" "-p:ThresholdStat=total"
+    dotnet test $project --no-restore --collect:"XPlat Code Coverage" --results-directory $resultsDir `
+        "-p:CoverletOutputFormat=cobertura" "-p:Threshold=$Threshold" "-p:ThresholdType=line" "-p:ThresholdStat=total"
 
-$reportFile = Get-ChildItem -Path $resultsDir -Filter "coverage.cobertura.xml" -Recurse | Select-Object -First 1
-if ($reportFile) {
-    Write-Host "Coverage report: $($reportFile.FullName)"
+    $reportFile = Get-ChildItem -Path $resultsDir -Filter "coverage.cobertura.xml" -Recurse | Select-Object -First 1
+    if ($reportFile) {
+        Write-Host "Coverage report: $($reportFile.FullName)"
+    }
+}
+finally {
+    if (Test-Path -LiteralPath $resultsDir) {
+        Remove-Item -LiteralPath $resultsDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
