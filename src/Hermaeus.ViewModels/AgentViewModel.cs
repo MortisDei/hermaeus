@@ -961,7 +961,9 @@ public partial class AgentViewModel : ViewModelBase
     public bool HasDecisionWaiting => HasReviewQueue || IsWaitingForReply || ShowContinueBox;
 
     /// <summary>Plain-language next step for the normal workbench flow, not an internal state label.</summary>
-    public string NextUserActionLabel => CurrentTask switch
+    public string NextUserActionLabel => DescribeNextUserAction(CurrentTask);
+
+    public static string DescribeNextUserAction(AgentTaskState? task) => task switch
     {
         null => "Describe a goal, choose a workspace and model, then start the agent.",
         { Status: AgentTaskStatus.Running } => "Agent is working. You can follow progress above or stop the task.",

@@ -78,11 +78,27 @@ public sealed class AgentWorkbenchLayoutTests
     [Fact]
     public void The_run_tab_explains_the_approval_gated_workflow_and_current_next_action()
     {
-        var source = File.ReadAllText(AgentViewPath());
+        var source = System.IO.File.ReadAllText(AgentViewPath());
 
         Assert.Contains("How Agent work proceeds", source, StringComparison.Ordinal);
         Assert.Contains("review the plan and each requested approval", source, StringComparison.Ordinal);
         Assert.Contains("{Binding NextUserActionLabel}", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Next_user_action_labels_cover_the_visible_task_states()
+    {
+        Assert.Equal("Describe a goal, choose a workspace and model, then start the agent.", AgentViewModel.DescribeNextUserAction(null));
+        Assert.Equal("Agent is working. You can follow progress above or stop the task.", AgentViewModel.DescribeNextUserAction(Task(AgentTaskStatus.Running)));
+        Assert.Equal("Review the requested action above, then approve or reject it.", AgentViewModel.DescribeNextUserAction(new AgentTaskState
+        {
+            Status = AgentTaskStatus.WaitingForUser,
+            PendingToolAction = new AgentPendingToolAction()
+        }));
+        Assert.Equal("Agent needs your answer. Reply in the panel above.", AgentViewModel.DescribeNextUserAction(Task(AgentTaskStatus.WaitingForUser)));
+        Assert.Equal("Review the outcome below, then inspect Changes or start a follow-up task.", AgentViewModel.DescribeNextUserAction(Task(AgentTaskStatus.Complete)));
+        Assert.Equal("Review the failure and transcript, then provide a new instruction or start again.", AgentViewModel.DescribeNextUserAction(Task(AgentTaskStatus.Failed)));
+        Assert.Equal("This task was stopped. Review its outcome or start a new task.", AgentViewModel.DescribeNextUserAction(Task(AgentTaskStatus.Cancelled)));
     }
 
     private static AgentTaskState Task(AgentTaskStatus status) =>

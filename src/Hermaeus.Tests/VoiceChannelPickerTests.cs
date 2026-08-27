@@ -1,3 +1,4 @@
+using Hermaeus.Core.Services;
 using Hermaeus.ViewModels;
 using Xunit;
 using static Hermaeus.Tests.Helpers;
@@ -53,6 +54,31 @@ public sealed class VoiceChannelPickerTests
     }
 
     [Fact]
+    public async Task A_late_superseded_provider_refresh_cannot_replace_the_current_provider_catalogue()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var voices = new DelayedVoiceService();
+        var vm = NewTtsSettingsViewModel(settings, voices);
+
+        vm.ReloadFrom(settings.Settings);
+        await voices.WaitForCallAsync(0);
+
+        vm.SelectedVoiceProvider = "F5-TTS";
+        await voices.WaitForCallAsync(1);
+
+        voices.Complete(1, ["b_voice"]);
+        await WaitForAsync(() => vm.TtsVoices.Contains("b_voice"), "provider B voice catalogue");
+
+        voices.Complete(0, ["a_voice"]);
+        await Task.Yield();
+
+        Assert.Equal(["b_voice"], vm.TtsVoices);
+        Assert.Equal([VoiceChannelSettingViewModel.DefaultVoiceLabel, "b_voice"], vm.ChannelVoiceOptions);
+        Assert.Equal("1 named voice(s) reported by F5-TTS.", vm.ChannelVoiceDiscoveryStatus);
+    }
+
+    [Fact]
     public void The_sentinel_still_round_trips_to_an_empty_voice_id()
     {
         var channel = new VoiceChannelSettingViewModel(Hermaeus.Core.Models.VoiceChannel.Chat, "Chat");
@@ -64,5 +90,26 @@ public sealed class VoiceChannelPickerTests
 
         channel.VoiceDisplay = VoiceChannelSettingViewModel.DefaultVoiceLabel;
         Assert.Equal(string.Empty, channel.VoiceId);
+    }
+
+    private sealed class DelayedVoiceService : ITtsService
+    {
+        private readonly List<TaskCompletionSource<IReadOnlyList<string>>> _requests = [];
+
+        public Task SpeakAsync(string text, CancellationToken ct = default) => Task.CompletedTask;
+        public Task PreviewVoiceAsync(string speaker, string text, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<string> ImportVoiceSampleAsync(string sourcePath, string displayName, CancellationToken ct = default) => Task.FromResult(displayName);
+
+        public Task<IReadOnlyList<string>> GetVoicesAsync(CancellationToken ct = default)
+        {
+            var request = new TaskCompletionSource<IReadOnlyList<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _requests.Add(request);
+            return request.Task;
+        }
+
+        public async Task WaitForCallAsync(int index) =>
+            await WaitForAsync(() => _requests.Count > index, $"voice refresh {index}");
+
+        public void Complete(int index, IReadOnlyList<string> voices) => _requests[index].SetResult(voices);
     }
 }

@@ -309,6 +309,11 @@ names, the picker holds only the sentinel and placeholder and says so plainly.
 Typing a verified voice id remains available in that state; Hermaeus does not
 silently choose a different voice.
 
+Each refresh is owned by the provider selection that started it. A later
+selection cancels the older request when possible and otherwise discards its
+late result, so a stale provider can never populate the current provider's
+catalogue.
+
 Speech recognition follows the identical split: provider/device/model/install
 on **Services -> Voice** (`SttSettingsViewModel`, its own DI-shared
 instance); push-to-talk key, insert-at-cursor behavior, hands-free enable,

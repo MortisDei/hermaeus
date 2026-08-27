@@ -75,6 +75,8 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
     private readonly IVoiceOrchestrator? _voice;
     private bool _externalServiceRunning;
     private bool _isReloading;
+    private long _voiceRefreshGeneration;
+    private CancellationTokenSource? _voiceRefreshCancellation;
 
     public UiBoundCollection<VoiceChannelSettingViewModel> VoiceChannels { get; } = [];
     public UiBoundCollection<AudioFeedbackToggleViewModel> AudioFeedbackEvents { get; } = [];
@@ -341,6 +343,7 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
 
     public void Dispose()
     {
+        SupersedeVoiceRefresh();
         _xttsProcess.StatusChanged -= OnXttsStatusChanged;
         _kokoroProcess.StatusChanged -= OnXttsStatusChanged;
     }
@@ -471,11 +474,18 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
     [RelayCommand]
     private async Task RefreshTtsVoicesAsync()
     {
-        if (IsRefreshingVoices) return;
+        var providerName = SelectedVoiceProvider;
+        var generation = Interlocked.Increment(ref _voiceRefreshGeneration);
+        var cancellation = new CancellationTokenSource();
+        var prior = Interlocked.Exchange(ref _voiceRefreshCancellation, cancellation);
+        CancelVoiceRefresh(prior);
         IsRefreshingVoices = true;
         try
         {
-            var voices = await _tts.GetVoicesAsync();
+            var voices = await _tts.GetVoicesAsync(cancellation.Token);
+            if (!OwnsVoiceRefresh(providerName, generation, cancellation))
+                return;
+
             TtsVoices.Clear();
             foreach (var voice in voices)
                 TtsVoices.Add(voice);
@@ -485,15 +495,47 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
             else if (!string.IsNullOrWhiteSpace(TtsSpeaker) && !TtsVoices.Contains(TtsSpeaker))
                 TtsVoices.Add(TtsSpeaker);
         }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            // A newer provider selection or explicit retry owns the catalogue now.
+        }
         catch (Exception ex)
         {
-            _toasts.Show("Voice list unavailable", ex.Message, ToastKind.Warning);
+            if (OwnsVoiceRefresh(providerName, generation, cancellation))
+                _toasts.Show("Voice list unavailable", ex.Message, ToastKind.Warning);
         }
         finally
         {
-            IsRefreshingVoices = false;
-            OnPropertyChanged(nameof(ChannelVoiceDiscoveryStatus));
+            if (OwnsVoiceRefresh(providerName, generation, cancellation))
+            {
+                IsRefreshingVoices = false;
+                Interlocked.CompareExchange(ref _voiceRefreshCancellation, null, cancellation);
+                OnPropertyChanged(nameof(ChannelVoiceDiscoveryStatus));
+            }
+
+            cancellation.Dispose();
         }
+    }
+
+    private bool OwnsVoiceRefresh(string providerName, long generation, CancellationTokenSource cancellation) =>
+        generation == Volatile.Read(ref _voiceRefreshGeneration)
+        && ReferenceEquals(cancellation, Volatile.Read(ref _voiceRefreshCancellation))
+        && string.Equals(providerName, SelectedVoiceProvider, StringComparison.Ordinal);
+
+    private void SupersedeVoiceRefresh()
+    {
+        Interlocked.Increment(ref _voiceRefreshGeneration);
+        CancelVoiceRefresh(Interlocked.Exchange(ref _voiceRefreshCancellation, null));
+        IsRefreshingVoices = false;
+        OnPropertyChanged(nameof(ChannelVoiceDiscoveryStatus));
+    }
+
+    private static void CancelVoiceRefresh(CancellationTokenSource? cancellation)
+    {
+        if (cancellation is null)
+            return;
+
+        cancellation.Cancel();
     }
 
     [RelayCommand]
@@ -566,6 +608,7 @@ public partial class TtsSettingsViewModel : ViewModelBase, IDisposable
 
     partial void OnSelectedVoiceProviderChanged(string value)
     {
+        SupersedeVoiceRefresh();
         OnPropertyChanged(nameof(ChannelVoiceDiscoveryStatus));
         NotifyProviderDependentProperties();
         ApplyXttsStatus();

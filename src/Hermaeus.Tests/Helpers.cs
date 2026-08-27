@@ -26,6 +26,9 @@ namespace Hermaeus.Tests
         public static TtsSettingsViewModel NewTtsSettingsViewModel(ISettingsService settings) =>
             new(new FakeTts(), new FakeVoiceProviderRegistry(settings), new FakeToasts(), new XttsProcessManager(), new KokoroProcessManager(), new FakeSecretStore(), settings);
 
+        public static TtsSettingsViewModel NewTtsSettingsViewModel(ISettingsService settings, ITtsService tts) =>
+            new(tts, new FakeVoiceProviderRegistry(settings), new FakeToasts(), new XttsProcessManager(), new KokoroProcessManager(), new FakeSecretStore(), settings);
+
         public static SettingsViewModel NewSettingsViewModel(
             ISettingsService settings,
             ISecretStore secrets,
