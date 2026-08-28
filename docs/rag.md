@@ -90,6 +90,12 @@ traces, versioned SQLite schema migrations, and native eval support.
   model than the one currently configured is blocked with a message naming
   both models. Use **Reindex** (below) first.
 
+Long ingest progress remains stage- and batch-based rather than ETA-based:
+failure messages and cancellation state are shown directly, and the pipeline
+flushes bounded batches before loading more input. This keeps a slow large
+ingest observable without claiming a completion time that the system cannot
+derive honestly.
+
 ### Dataset Manager
 
 Each dataset card in the manager shows chunk/source counts, missing and stale

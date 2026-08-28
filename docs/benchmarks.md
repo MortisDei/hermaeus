@@ -14,6 +14,12 @@ not need to paste each local model path by hand.
 Benchmarks are intended for practical local model comparison, not lab-grade
 hardware benchmarking.
 
+Entering the Benchmarks workspace loads Insights automatically when the service
+is available. After Insights has been opened once, completed runs, reruns,
+deletions, history clears, and normal reloads refresh the report. While a run
+is active, the page header shows an explicit activity indicator and the status
+line reports the current suite, case, phase, and iteration when known.
+
 ### Benchmark Runs
 
 Runs record the following metrics and metadata:

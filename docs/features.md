@@ -105,7 +105,8 @@ See the [RAG reference](rag.md).
 Recall is one local search index over conversations, Agent tasks, Memories, and
 RAG chunks. Its command-palette search is distinct from RAG retrieval and
 Memory injection. Recall indexing is visible and clearable, and optional Chat
-injection is off by default. See the [Recall reference](recall.md).
+injection is off by default. Chat traces label keyword-only Recall as degraded
+retrieval even when lexical hits are usable. See the [Recall reference](recall.md).
 
 ## Agent Workbench
 

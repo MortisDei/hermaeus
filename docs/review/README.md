@@ -3,6 +3,10 @@
 Audience: the implementing agent. Read this file, then the numbered documents
 in order. Doc 07 is the sequencing and release contract.
 
+The final dogfood finding matrix is recorded in
+[`r31-final-dogfood-closure.md`](r31-final-dogfood-closure.md). It is a current
+close-out record and does not replace the numbered or archived review files.
+
 ## Why this round exists
 
 R30 made Hermaeus public and established evidence-backed capability discovery,

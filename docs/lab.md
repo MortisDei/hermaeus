@@ -174,6 +174,10 @@ canonical context, action/configuration, normalized outcome, provenance links,
 fingerprints and correction status. Missing values remain visibly absent or
 `Unknown`; the UI does not substitute a guessed result.
 
+The empty detail pane distinguishes a fresh evidence store from an active filter
+that excludes existing records. The former directs the user to run an isolated
+experiment or recipe; the latter directs the user to clear or broaden filters.
+
 Correction is a typed outcome/detail operation, not a raw JSON editor. It
 creates a new current record, links it to the prior record and marks the prior
 record superseded in one transaction. Remove is a confirmed hard delete. It is

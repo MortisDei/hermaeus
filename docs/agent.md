@@ -52,6 +52,10 @@ explicit user approval before it executes.
   explanation when the task is a sub-task (continue the parent instead), is
   already running, or has a tool approval pending. A "New Task" button next
   to Start always starts an actual fresh task.
+- Reaching `Agent.MaxAutoSteps` is persisted as a truthful blocked budget pause,
+  not as a semantic question from the user. The Run tab offers Continue/Add
+  steps or Stop, keeps the model response separate from the pause explanation,
+  and records the budget decision in task state and transcript.
 
 ### Context & Retrieval
 

@@ -33,6 +33,11 @@ limit.
   projector path, omits disabled projectors from llama-server launches, and
   exposes verified companion repair or explicit Browse/Clear paths when a
   companion is missing or stale.
+- Final R31 dogfood closure fixes normalized-path model duplicates, stale
+  projector selection, role-aware companion repair, managed llama-server
+  resolution, model Search keyboard activation, Lab server discovery and
+  evidence empty states, truthful Agent budget pauses, benchmark activity and
+  Insights refresh, Recall degradation labels, and popup edge constraints.
 - Normal Settings preferences autosave with a visible persistence state. The
   top-level Save button is removed, task audio notifications default off, and
   managed llama.cpp uses newer load-mode and localhost-only CORS arguments only

@@ -214,6 +214,11 @@ visual notifications remain authoritative, and cues are suppressed while TTS
 speaks by default. Playback failure does not fail the operation that raised the
 visual notification.
 
+When Recall injection is enabled, the Chat trace identifies keyword-only
+fallback retrieval separately from embedding-backed retrieval. Lexical hits
+remain usable, but their presence does not claim that semantic retrieval is
+healthy.
+
 ## Lab experiments and evidence
 
 Open **Lab > Experiment**, select a configured Chat server, name the run, and
@@ -228,6 +233,9 @@ The run state names isolation and comparison refusals. Missing counters remain
 missing. A comparison cannot show a headline delta when runtime, model,
 hardware, or configuration fingerprints differ, and a deterministic output
 difference fails correctness regardless of speed.
+
+On **Lab > Evidence**, an empty pane says whether no evidence has been captured
+yet or whether the current filters exclude existing records.
 
 **Review candidate** lists the exact Services fields that would change. A
 speed-only, uncontrolled, missing-correctness, or stale result is refused.
