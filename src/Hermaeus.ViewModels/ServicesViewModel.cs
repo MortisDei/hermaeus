@@ -27,6 +27,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     private ServerConfig                   _config;
     private OrphanServerInfo? _orphanInfo;
     private string? _lastModelPathForDefaults;
+    private string? _modelPathForMmproj;
 
     [ObservableProperty] private string       _name;
     [ObservableProperty] private string       _executablePath;
@@ -366,7 +367,15 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     /// and the sole candidate is never silently selected.</summary>
     private void RefreshDetectedMmprojPaths(string modelPath)
     {
-        var current = MmprojPath;
+        var modelChanged = !string.Equals(_modelPathForMmproj, modelPath, StringComparison.OrdinalIgnoreCase);
+        var current = modelChanged ? string.Empty : MmprojPath;
+        if (modelChanged && !string.IsNullOrWhiteSpace(MmprojPath))
+        {
+            _settingAutoMmproj = true;
+            try { MmprojPath = string.Empty; }
+            finally { _settingAutoMmproj = false; }
+        }
+
         DetectedMmprojPaths.Clear();
 
         if (!string.IsNullOrWhiteSpace(modelPath))
@@ -385,6 +394,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
             DetectedMmprojPaths.Insert(0, current);
 
         SetAutoMmprojPath(current, string.Empty);
+        _modelPathForMmproj = string.IsNullOrWhiteSpace(modelPath) ? null : modelPath;
         OnPropertyChanged(nameof(HasMissingMmproj));
         OnPropertyChanged(nameof(MmprojHint));
     }
@@ -529,6 +539,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _mmprojPath     = config.MmprojPath;
         _useProjector   = config.UseProjector;
         _lastModelPathForDefaults = string.IsNullOrWhiteSpace(config.ModelPath) ? null : config.ModelPath;
+        _modelPathForMmproj = string.IsNullOrWhiteSpace(config.ModelPath) ? null : config.ModelPath;
         _port           = config.Port;
         _contextSize    = config.ContextSize;
         _gpuLayers      = config.GpuLayers;
@@ -1244,6 +1255,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     /// </summary>
     public ServerConfig BuildConfig() => new()
     {
+        Id             = Id,
         Name           = Name,
         ExecutablePath = ExecutablePath,
         ModelPath      = ModelPath,
@@ -1942,6 +1954,8 @@ public partial class ServicesViewModel : ViewModelBase
                 EmbeddingsMode = configs.Count == 1
             });
 
+        ResolveInstalledManagedExecutables(configs);
+
         var configIds = new HashSet<string>(configs.Select(c => c.Id));
         var existing = Servers.ToDictionary(s => s.Id);
 
@@ -1991,6 +2005,60 @@ public partial class ServicesViewModel : ViewModelBase
 
     private static string BuildAvailabilityFingerprint(IEnumerable<ServerConfig> configs) =>
         string.Join("|", configs.Select(c => $"{c.Id}:{c.Port}:{c.ExecutablePath}:{c.ModelPath}"));
+
+    private void ResolveInstalledManagedExecutables(IEnumerable<ServerConfig> configs)
+    {
+        var assetsRoot = _settings.Settings.DataManagement.LocalAiAssetsRoot?.Trim();
+        if (string.IsNullOrWhiteSpace(assetsRoot))
+            return;
+
+        string installPath;
+        try
+        {
+            installPath = Path.Combine(Path.GetFullPath(assetsRoot), "llama-server");
+        }
+        catch (ArgumentException)
+        {
+            return;
+        }
+
+        var resolved = LlamaServerSetupService.ResolveInstalledExecutable(installPath);
+        if (string.IsNullOrWhiteSpace(resolved))
+            return;
+
+        foreach (var config in configs)
+        {
+            var configured = config.ExecutablePath?.Trim() ?? string.Empty;
+            if (IsDefaultLlamaServerPath(configured) || IsMissingPathUnderInstall(configured, installPath))
+                config.ExecutablePath = resolved;
+        }
+    }
+
+    private static bool IsDefaultLlamaServerPath(string path)
+    {
+        var fileName = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        return string.Equals(fileName, "llama-server", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(fileName, "llama-server.exe", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsMissingPathUnderInstall(string path, string installPath)
+    {
+        if (string.IsNullOrWhiteSpace(path) || File.Exists(path))
+            return false;
+
+        try
+        {
+            var fullPath = Path.GetFullPath(path);
+            var fullRoot = Path.GetFullPath(installPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                + Path.DirectorySeparatorChar;
+            return fullPath.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase)
+                && Path.GetFileName(fullPath).StartsWith("llama-server", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
 
     /// <summary>
     /// r19 2.2: stops every currently-Running managed server whose executable

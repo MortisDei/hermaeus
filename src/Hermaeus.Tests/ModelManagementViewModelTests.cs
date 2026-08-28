@@ -11,6 +11,29 @@ namespace Hermaeus.Tests;
 public sealed class ModelManagementViewModelTests
 {
     [Fact]
+    public async Task Refresh_does_not_duplicate_a_local_model_reported_with_a_normalized_path()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var assets = temp.PathFor("assets");
+        var models = Path.Combine(assets, "Models");
+        Directory.CreateDirectory(models);
+        var localPath = Path.Combine(models, "model.gguf");
+        File.WriteAllText(localPath, "fake model");
+        settings.Settings.DataManagement.LocalAiAssetsRoot = assets;
+        var reportedPath = Path.Combine(models, "nested", "..", "model.gguf");
+        var llm = new ScriptedModelsLlm(() =>
+        [new LlmModel { Id = reportedPath, Name = "model", Provider = "llama.cpp" }]);
+        var vm = new ModelManagementViewModel(llm, new ModelProfileService(settings), new FakeToasts(), settings,
+            new FakeSystemInfo(), NewServicesViewModel(settings), new ModelManifestStore(settings), new HuggingFaceClient(), new ModelDownloadService());
+
+        await vm.RefreshAsync();
+
+        Assert.Single(vm.Models);
+        Assert.Equal(reportedPath, vm.Models[0].ModelId);
+    }
+
+    [Fact]
     public async Task FilterText_narrows_list_by_name_case_insensitively()
     {
         using var temp = new TempDir();
@@ -360,6 +383,45 @@ public sealed class ModelManagementViewModelTests
         Assert.False(item.CanReacquireCompanions);
         Assert.True(item.RequiresManualCompanionRepair);
         Assert.Contains("No verified replacement is available", item.CompanionStatus, StringComparison.Ordinal);
+        Assert.Contains("projector", item.ManualCompanionRepairLabel, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Mixed_companion_repair_state_exposes_verified_and_manual_roles()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var assets = temp.PathFor("assets");
+        var modelDir = Path.Combine(assets, "Models", "llm", "org__repo");
+        Directory.CreateDirectory(modelDir);
+        settings.Settings.DataManagement.LocalAiAssetsRoot = assets;
+        var modelPath = Path.Combine(modelDir, "model.gguf");
+        File.WriteAllText(modelPath, "model");
+        var hash = new string('a', 64);
+        var manifest = new ModelManifestStore(settings);
+        await manifest.UpsertAsync(new ModelManifestEntry
+        {
+            FilePath = modelPath,
+            RepoId = "org/repo",
+            RepoFile = "model.gguf",
+            RevisionSha = "0123456789abcdef0123456789abcdef01234567",
+            Sha256 = hash,
+            Companions =
+            [
+                new ModelCompanionManifestEntry { LocalFilePath = Path.Combine(modelDir, "mmproj.gguf"), RepoFile = "mmproj.gguf", Role = "projector", Sha256 = hash },
+                new ModelCompanionManifestEntry { LocalFilePath = Path.Combine(modelDir, "mtp.gguf"), RepoFile = "mtp.gguf", Role = "draft_head", Sha256 = hash, RequiresUserConfirmation = true }
+            ]
+        });
+        var vm = new ModelManagementViewModel(new ScriptedModelsLlm(() => []), new ModelProfileService(settings), new FakeToasts(), settings,
+            new FakeSystemInfo(), NewServicesViewModel(settings), manifest, new HuggingFaceClient(), new ModelDownloadService());
+
+        await vm.RefreshAsync();
+
+        var item = Assert.Single(vm.Models);
+        Assert.True(item.CanReacquireCompanions);
+        Assert.True(item.RequiresManualCompanionRepair);
+        Assert.Contains("MTP draft head", item.ManualCompanionRepairLabel, StringComparison.Ordinal);
+        Assert.Contains("Remaining manual repair", item.CompanionStatus, StringComparison.Ordinal);
     }
 
     // ── 3.3 Apply update ───────────────────────────────────────────────────────────────────

@@ -19,6 +19,16 @@ public partial class ModelManagementView : UserControl
         DataContextChanged += OnDataContextChanged;
     }
 
+    private void OnHfSearchKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter || DataContext is not ModelManagementViewModel vm
+            || !vm.SearchHuggingFaceCommand.CanExecute(null))
+            return;
+
+        vm.SearchHuggingFaceCommand.Execute(null);
+        e.Handled = true;
+    }
+
     private void OnDataContextChanged(object? sender, EventArgs e)
     {
         if (DataContext is not ModelManagementViewModel vm)

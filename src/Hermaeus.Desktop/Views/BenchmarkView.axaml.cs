@@ -21,11 +21,10 @@ public partial class BenchmarkView : UserControl
         if (_loadRequested || DataContext is not BenchmarkViewModel vm)
             return;
 
-        if (vm.Suites.Count > 0 || vm.Models.Count > 0 || vm.Runs.Count > 0)
-            return;
-
         _loadRequested = true;
-        await vm.LoadAsync();
+        if (vm.Suites.Count == 0 && vm.Models.Count == 0 && vm.Runs.Count == 0)
+            await vm.LoadAsync();
+        await vm.LoadInsightsCommand.ExecuteAsync(null);
     }
 
     private void OnDataContextChanged(object? sender, EventArgs e)

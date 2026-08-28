@@ -1151,7 +1151,8 @@ internal static class AgentTests
     var state = await service.CreateTaskAsync("Review docs", options);
     var result = await service.RunAsync(state.TaskId, options);
 
-    Equal(AgentTaskStatus.WaitingForUser, result.State.Status, "hitting the step cap must hand the task back to the user, not leave it looking silently active");
+    Equal(AgentTaskStatus.Blocked, result.State.Status, "hitting the step cap must pause the task without presenting a fake reply question");
+    True(result.State.StepBudgetExhausted, "the persisted task must identify the step-budget pause");
     Equal(1, result.State.StepCount, "the loop should have executed exactly the capped number of steps");
     var transcript = await store.LoadTranscriptAsync(state.TaskId);
     True(transcript.Any(e => e.Content.Contains("step budget exhausted", StringComparison.Ordinal)), "the budget-exhausted note should be visible in the transcript");

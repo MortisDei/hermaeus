@@ -896,11 +896,17 @@ public sealed class AgentService : IAgentService
             // active task to the workbench; hand it back to the user
             // explicitly instead of leaving it silently stalled.
             var note = $"step budget exhausted after {steps} step(s)";
-            result.State.Status = AgentTaskStatus.WaitingForUser;
+            result.State.Status = AgentTaskStatus.Blocked;
+            result.State.StepBudgetExhausted = true;
             // This pause has its own reason, and it is not whatever the model
             // last asked. Saying so here stops a stale question standing in for
             // it in the workbench.
-            result.State.LastUserMessage = note;
+            result.State.LastUserMessage = string.Empty;
+            result.State.ActiveStep = note;
+            result.State.Decisions.Add(new AgentDecision(
+                "Step budget exhausted",
+                $"MaxAutoSteps ({maxSteps}) reached after {steps} step(s).",
+                DateTime.UtcNow));
             await _store.AppendLogAsync(taskId, note, ct);
             await _store.AppendTranscriptEntryAsync(taskId, new AgentTranscriptEntry(
                 result.State.StepCount, "assistant", null, note, DateTime.UtcNow, ModelId: result.State.ModelId), ct);
@@ -1613,6 +1619,7 @@ public sealed class AgentService : IAgentService
 
         state.Status = AgentTaskStatus.Running;
         state.ConsecutiveStepErrors = 0;
+        state.StepBudgetExhausted = false;
         state.PlanApprovalPending = false;
         // Reopening the task settles whatever it was last asking; the
         // instruction just given is the answer.

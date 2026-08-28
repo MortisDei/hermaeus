@@ -22,8 +22,8 @@ public sealed class ChatRecallInjectionTests
             Task.FromResult(_hits);
     }
 
-    private static RecallService NewRecallService(IReadOnlyList<RecallHit> hits) =>
-        new([new FakeRecallSourceOnly(hits)], new FakeEmbeddingService());
+    private static RecallService NewRecallService(IReadOnlyList<RecallHit> hits, bool withEmbeddings = true) =>
+        new([new FakeRecallSourceOnly(hits)], withEmbeddings ? new FakeEmbeddingService() : null);
 
     private static ChatViewModel BuildChatViewModel(ISettingsService settings, CapturingLlm llm, RecallService recall) =>
         new(
@@ -96,6 +96,28 @@ public sealed class ChatRecallInjectionTests
             "no hits means nothing should be injected");
         var trace = Assert.Single(vm.ChatTraces);
         Equal(0, trace.RecallContextItems, "no recall items should have been injected");
+    }
+
+    [Fact]
+    public async Task Keyword_only_recall_is_labelled_as_degraded_in_the_trace()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.Memory.RecallInjectionEnabled = true;
+        var hit = new RecallHit(RecallKind.Message, "Keyword match", "a lexical result",
+            DateTime.UtcNow, "", 0.02, new RecallTarget(ConversationId: "c-old", MessageIndex: 1));
+        var recall = NewRecallService([hit], withEmbeddings: false);
+        var llm = new CapturingLlm();
+        var vm = BuildChatViewModel(settings, llm, recall);
+        await vm.LoadModelsAsync(force: true);
+        vm.SelectedModel = new LlmModel { Id = "capture", Name = "Capture", ProviderTag = "test" };
+
+        vm.InputText = "Find the lexical result";
+        await vm.SendCommand.ExecuteAsync(null);
+
+        var trace = Assert.Single(vm.ChatTraces);
+        Assert.Equal("keyword-only (no embedding model)", trace.RecallNote);
+        Assert.True(trace.RecallContextItems > 0);
     }
 
     [Fact]

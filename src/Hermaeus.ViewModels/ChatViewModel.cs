@@ -106,6 +106,7 @@ public sealed class ChatTraceViewModel
     public int RecallContextItems { get; init; }
     public long RecallInjectionMs { get; init; }
     public string RecallNote { get; init; } = string.Empty;
+    public bool HasRecallNote => !string.IsNullOrWhiteSpace(RecallNote);
     public bool HasRecallContext => RecallContextItems > 0;
     public int EstimatedTokens { get; init; }
     public ChatTokenUsage? ProviderUsage { get; init; }
@@ -1372,7 +1373,6 @@ public partial class ChatViewModel : ViewModelBase
                     if (accumulator.TryAppend(token, force: false, out var flushed))
                     {
                         asst.Content += flushed;
-                        ScrollToBottom?.Invoke(this, EventArgs.Empty);
                     }
 
                     if (chunker is not null)
@@ -1385,7 +1385,6 @@ public partial class ChatViewModel : ViewModelBase
                 {
                     asst.ReasoningContent += reasoning;
                     asst.IsReasoningStreaming = true;
-                    ScrollToBottom?.Invoke(this, EventArgs.Empty);
                 });
 
             phaseCts.Cancel();
@@ -1395,7 +1394,6 @@ public partial class ChatViewModel : ViewModelBase
             if (accumulator.TryAppend(string.Empty, force: true, out var remainder))
             {
                 asst.Content += remainder;
-                ScrollToBottom?.Invoke(this, EventArgs.Empty);
             }
 
             var timing = new ChatSendTiming(recallMs, selectMs, lessonMs, promptBuildMs, result.FirstTokenMs, result.TotalLatencyMs, result.ServerTimings, result.FirstEventMs, ragMs, recallInjectionMs);
@@ -2258,7 +2256,12 @@ public partial class ChatViewModel : ViewModelBase
         {
             var result = await _recallSearch.SearchAsync(question, _currentProjectId, ct);
             if (result.Hits.Count == 0)
-                return (string.Empty, [], sw.ElapsedMilliseconds, 0, "no relevant recall hits");
+            {
+                var emptyNote = result.KeywordOnly
+                    ? "keyword-only (no embedding model); no relevant recall hits"
+                    : "no relevant recall hits";
+                return (string.Empty, [], sw.ElapsedMilliseconds, 0, emptyNote);
+            }
 
             var budget = _settings.Settings.Memory.RecallInjectionTokenBudget;
             var used = 0;

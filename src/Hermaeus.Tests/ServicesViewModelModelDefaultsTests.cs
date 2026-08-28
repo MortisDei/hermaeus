@@ -99,4 +99,23 @@ public sealed class ServicesViewModelModelDefaultsTests
         Assert.Equal(outsidePath, server.ModelPath);
         Assert.Contains(outsidePath, server.DetectedModelPaths);
     }
+
+    [Fact]
+    public void Rebuild_resolves_an_existing_managed_llama_server_for_default_slots()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var assets = temp.PathFor("assets");
+        var install = Path.Combine(assets, "llama-server", "b123");
+        Directory.CreateDirectory(install);
+        var executable = Path.Combine(install, OperatingSystem.IsWindows() ? "llama-server.exe" : "llama-server");
+        File.WriteAllText(executable, "fake executable");
+        settings.Settings.DataManagement.LocalAiAssetsRoot = assets;
+        settings.Settings.ManagedServers.Clear();
+
+        var services = NewServicesViewModel(settings);
+
+        Assert.Equal(executable, services.Servers[0].ExecutablePath);
+        Assert.Equal(executable, services.Servers[1].ExecutablePath);
+    }
 }

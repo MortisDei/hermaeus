@@ -49,7 +49,7 @@ public sealed class BenchmarkViewModelInsightsTests
         await vm.LoadInsightsCommand.ExecuteAsync(null);
 
         Assert.True(vm.InsightsHasData);
-        Assert.Contains("5 benchmark(s)", vm.InsightsHeader);
+        Assert.Contains("5 benchmark run(s)", vm.InsightsHeader);
         Assert.NotNull(vm.InsightsBestOverall);
         Assert.Equal("Model A (Q4)", vm.InsightsBestOverall!.DisplayName);
         Assert.Single(vm.InsightsLeaderboards);

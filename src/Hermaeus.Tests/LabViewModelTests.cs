@@ -43,6 +43,26 @@ public sealed class LabViewModelTests
     }
 
     [Fact]
+    public async Task Evidence_empty_state_distinguishes_no_records_from_filtered_records()
+    {
+        using var temp = new TempDir();
+        var (store, vm) = Build(temp);
+
+        await vm.RefreshAsync();
+
+        Assert.False(vm.HasAnyEvidence);
+        Assert.Equal("No evidence has been captured yet.", vm.EvidenceEmptyState);
+
+        await store.AddAsync(Draft(EmpiricalExperienceDomains.LabRun, NormalizedOutcome.Succeeded, EvidenceOrigin.DirectObservation));
+        vm.DomainFilter = EmpiricalExperienceDomains.AgentToolOutcome;
+        await vm.RefreshAsync();
+
+        Assert.True(vm.HasAnyEvidence);
+        Assert.Equal("No evidence matches these filters.", vm.EvidenceEmptyState);
+        Assert.Contains("Clear or broaden", vm.EvidenceEmptyHint, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Typed_correction_supersedes_selected_record()
     {
         using var temp = new TempDir();
@@ -100,5 +120,23 @@ public sealed class LabViewModelTests
         await vm.RunSelectedRecipeCommand.ExecuteAsync(null);
 
         Assert.Equal("Lab recipes are unavailable in this session.", vm.StatusMessage);
+    }
+
+    [Fact]
+    public void Configured_chat_server_comes_from_live_services_cards()
+    {
+        using var temp = new TempDir();
+        var settings = Helpers.NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        settings.Settings.ManagedServers.Clear();
+        var services = Helpers.NewServicesViewModel(settings);
+        var store = new SqliteEmpiricalExperienceStore(settings, new RedactionService());
+
+        var vm = new LabViewModel(store, new FakeToasts(), null, settings, null, services);
+
+        var server = Assert.Single(vm.ConfiguredServers);
+        Assert.Equal(services.Servers.Single(s => !s.EmbeddingsMode).Id, server.Id);
+        Assert.Equal(server.Id, vm.SelectedServer!.Id);
+        Assert.Contains("only configured Chat server", vm.ConfiguredServerHint, StringComparison.Ordinal);
     }
 }

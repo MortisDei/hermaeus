@@ -101,10 +101,10 @@ public partial class ModelManagementViewModel : ObservableObject
         _downloader = downloader;
     }
 
-    private List<LlmModel> DiscoverLocalGgufModels(ISet<string> existingIds)
+    private List<LlmModel> DiscoverLocalGgufModels(IReadOnlyList<LlmModel> existingModels)
     {
         return LocalAiAssetLocator.FindGgufModels(_settings.Settings.DataManagement.LocalAiAssetsRoot)
-            .Where(path => !existingIds.Contains(path))
+            .Where(path => !existingModels.Any(model => SameLocalModelIdentity(model.Id, path)))
             .Select(path => new LlmModel
             {
                 Id = path,
@@ -150,7 +150,7 @@ public partial class ModelManagementViewModel : ObservableObject
 
             var runningIds = new HashSet<string>(reportedModels.Select(m => m.Id), StringComparer.OrdinalIgnoreCase);
             var models = new List<LlmModel>(reportedModels);
-            models.AddRange(DiscoverLocalGgufModels(runningIds));
+            models.AddRange(DiscoverLocalGgufModels(models));
 
             _profiles.ApplyProfiles(models);
             var hardware = await _system.GetHardwareProfileAsync();
@@ -287,6 +287,24 @@ public partial class ModelManagementViewModel : ObservableObject
         item.FitReason = fit.Reason;
     }
 
+    private static bool SameLocalModelIdentity(string reportedId, string localPath)
+    {
+        if (string.Equals(reportedId, localPath, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (!reportedId.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        try
+        {
+            return string.Equals(Path.GetFullPath(reportedId), Path.GetFullPath(localPath), StringComparison.OrdinalIgnoreCase);
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
+
     /// <summary>Restores the update chip's last-known state from the manifest across a
     /// refresh; only models with a manifest entry carrying a RepoId participate at all -
     /// everything else shows nothing (r13 03-hugging-face.md 3.2).</summary>
@@ -302,6 +320,7 @@ public partial class ModelManagementViewModel : ObservableObject
             item.HasStaleCompanions = false;
             item.HasVerifiedCompanionReplacement = false;
             item.CompanionStatus = string.Empty;
+            item.ManualCompanionRepairLabel = string.Empty;
             return;
         }
 
@@ -322,6 +341,7 @@ public partial class ModelManagementViewModel : ObservableObject
         var missing = new List<string>();
         var stale = new List<string>();
         var repairable = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var manualRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var companion in entry.Companions.Where(c => !string.IsNullOrWhiteSpace(c.LocalFilePath)))
         {
@@ -352,12 +372,17 @@ public partial class ModelManagementViewModel : ObservableObject
             {
                 if (HasVerifiedCompanionMetadata(entry, companion))
                     repairable.Add(companion.LocalFilePath);
+                else
+                    manualRoles.Add(CompanionRoleLabel(companion.Role));
             }
         }
 
         item.HasMissingCompanions = missing.Count > 0;
         item.HasStaleCompanions = stale.Count > 0;
         item.HasVerifiedCompanionReplacement = repairable.Count > 0;
+        item.ManualCompanionRepairLabel = manualRoles.Count == 0
+            ? string.Empty
+            : $"Open Services to browse or clear {string.Join(" and ", manualRoles)}";
 
         var repairDetails = missing
             .Select(name => $"{name} (missing)")
@@ -369,13 +394,21 @@ public partial class ModelManagementViewModel : ObservableObject
         }
         else if (item.HasVerifiedCompanionReplacement)
         {
-            item.CompanionStatus = $"Companion repair needed: {string.Join(", ", repairDetails)}. Verified compatible replacement available; choose Reacquire known companions.";
+            item.CompanionStatus = $"Companion repair needed: {string.Join(", ", repairDetails)}. Verified compatible replacement available; choose Reacquire known companions."
+                + (manualRoles.Count == 0 ? string.Empty : $" Remaining manual repair: browse or clear {string.Join(" and ", manualRoles)} in Services.");
         }
         else
         {
-            item.CompanionStatus = $"Companion repair needed: {string.Join(", ", repairDetails)}. No verified replacement is available; browse or clear the projector in Services.";
+            item.CompanionStatus = $"Companion repair needed: {string.Join(", ", repairDetails)}. No verified replacement is available for {string.Join(" and ", manualRoles)}; browse or clear it in Services.";
         }
     }
+
+    private static string CompanionRoleLabel(string role) => role.Trim().ToLowerInvariant() switch
+    {
+        "projector" => "projector",
+        "draft_head" => "MTP draft head",
+        _ => string.IsNullOrWhiteSpace(role) ? "companion" : role.Trim()
+    };
 
     private static bool HasVerifiedCompanionMetadata(ModelManifestEntry primary, ModelCompanionManifestEntry companion) =>
         !companion.RequiresUserConfirmation
@@ -801,7 +834,7 @@ public partial class ModelManagementViewModel : ObservableObject
             var manualCompanions = candidates.Count(c => c.Item.RequiresManualCompanionRepair);
             UpdateCheckStatus = $"{upToDate} up to date, {available} update(s) available, {gone} no longer published on the repo, {failed} check(s) failed."
                 + (repairableCompanions == 0 ? string.Empty : $" {repairableCompanions} model(s) have a verified companion repair available: open Configure and choose Reacquire known companions.")
-                + (manualCompanions == 0 ? string.Empty : $" {manualCompanions} model(s) need manual companion repair: no verified replacement is available, so browse or clear the projector in Services.");
+                + (manualCompanions == 0 ? string.Empty : $" {manualCompanions} model(s) need manual companion repair: no verified replacement is available, so browse or clear the affected companion in Services.");
         }
         finally
         {
@@ -948,7 +981,7 @@ public partial class ModelManagementViewModel : ObservableObject
             if (companion.RequiresUserConfirmation)
             {
                 missing++;
-                messages.Add($"{Path.GetFileName(companion.LocalFilePath)} has no verified compatibility evidence; browse or clear the projector in Services.");
+                messages.Add($"{Path.GetFileName(companion.LocalFilePath)} has no verified compatibility evidence; browse or clear the {CompanionRoleLabel(companion.Role)} in Services.");
                 continue;
             }
 
@@ -998,7 +1031,10 @@ public partial class ModelManagementViewModel : ObservableObject
 
         if (!item.CanReacquireCompanions)
         {
-            _toasts.Show("Cannot reacquire companions", "No verified compatible replacement is available. Browse or clear the projector in Services.", ToastKind.Warning, 8000);
+            var action = string.IsNullOrWhiteSpace(item.ManualCompanionRepairLabel)
+                ? "Review the companion paths in Services."
+                : item.ManualCompanionRepairLabel + ".";
+            _toasts.Show("Cannot reacquire companions", "No verified compatible replacement is available. " + action, ToastKind.Warning, 8000);
             return;
         }
 
@@ -1172,6 +1208,7 @@ public partial class ModelManagementViewModel : ObservableObject
         SelectedHfRepo = repo;
         HfFiles.Clear();
         IsLoadingHfFiles = true;
+        HfBrowserStatus = $"Checking {repo.RepoId} and calculating fit...";
         try
         {
             var card = await _hf.GetModelCardAsync(repo.RepoId);
@@ -1623,14 +1660,16 @@ public partial class ModelProfileItemViewModel : ObservableObject
     [ObservableProperty] private bool _hasStaleCompanions;
     [ObservableProperty] private bool _hasVerifiedCompanionReplacement;
     [ObservableProperty] private string _companionStatus = string.Empty;
+    [ObservableProperty] private string _manualCompanionRepairLabel = string.Empty;
 
     public bool HasCompanionRepair => HasMissingCompanions || HasStaleCompanions;
     public bool CanReacquireCompanions => HasCompanionRepair && HasVerifiedCompanionReplacement;
-    public bool RequiresManualCompanionRepair => HasCompanionRepair && !HasVerifiedCompanionReplacement;
+    public bool RequiresManualCompanionRepair => HasCompanionRepair && !string.IsNullOrWhiteSpace(ManualCompanionRepairLabel);
 
     partial void OnHasMissingCompanionsChanged(bool value) => NotifyCompanionRepairState();
     partial void OnHasStaleCompanionsChanged(bool value) => NotifyCompanionRepairState();
     partial void OnHasVerifiedCompanionReplacementChanged(bool value) => NotifyCompanionRepairState();
+    partial void OnManualCompanionRepairLabelChanged(string value) => NotifyCompanionRepairState();
 
     private void NotifyCompanionRepairState()
     {

@@ -414,6 +414,8 @@
                                        IsVisible="{Binding SelectedChatTrace.HasRagContext}" />
                             <TextBlock Text="{Binding SelectedChatTrace.RagNote}" FontSize="11" Opacity="0.65" TextWrapping="Wrap"
                                        IsVisible="{Binding SelectedChatTrace.HasRagNote}" />
+                            <TextBlock Text="{Binding SelectedChatTrace.RecallNote, StringFormat='Recall: {0}'}" FontSize="11" Opacity="0.65" TextWrapping="Wrap"
+                                       IsVisible="{Binding SelectedChatTrace.HasRecallNote}" />
                             <SelectableTextBlock Text="{Binding SelectedChatTrace.ErrorDetails, FallbackValue='No errors'}" FontSize="11" TextWrapping="Wrap" />
                     </StackPanel>
                 </Grid>

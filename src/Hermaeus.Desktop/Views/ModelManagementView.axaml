@@ -51,17 +51,17 @@
         <TextBlock DockPanel.Dock="Top"
                    Text="{Binding OrganizeStatus}"
                    IsVisible="{Binding OrganizeStatus, Converter={x:Static views:NotEmptyConverter.Instance}}"
-                   FontSize="12" Opacity="0.65" Margin="0,0,0,6" />
+                   FontSize="12" Opacity="0.65" TextWrapping="Wrap" Margin="0,0,0,6" />
 
         <TextBlock DockPanel.Dock="Top"
                    Text="{Binding UpdateCheckStatus}"
                    IsVisible="{Binding UpdateCheckStatus, Converter={x:Static views:NotEmptyConverter.Instance}}"
-                   FontSize="12" Opacity="0.65" Margin="0,0,0,6" />
+                   FontSize="12" Opacity="0.65" TextWrapping="Wrap" Margin="0,0,0,6" />
 
         <TextBlock DockPanel.Dock="Top"
                    Text="{Binding AutoTuneAllStatus}"
                    IsVisible="{Binding AutoTuneAllStatus, Converter={x:Static views:NotEmptyConverter.Instance}}"
-                   FontSize="12" Opacity="0.65" Margin="0,0,0,10" />
+                   FontSize="12" Opacity="0.65" TextWrapping="Wrap" Margin="0,0,0,10" />
 
         <Expander DockPanel.Dock="Top"
                   Header="Get models from Hugging Face"
@@ -73,7 +73,8 @@
                              Text="{Binding HfSearchQuery}"
                              Watermark="Search GGUF repos, e.g. 'llama 3 instruct'"
                              CornerRadius="6"
-                             Padding="10,6" />
+                             Padding="10,6"
+                             KeyDown="OnHfSearchKeyDown" />
                     <Button Grid.Column="1"
                             Content="Search"
                             Command="{Binding SearchHuggingFaceCommand}"
@@ -84,7 +85,10 @@
 
                 <TextBlock Text="{Binding HfBrowserStatus}"
                            IsVisible="{Binding HfBrowserStatus, Converter={x:Static views:NotEmptyConverter.Instance}}"
-                           FontSize="12" Opacity="0.65" />
+                           FontSize="12" Opacity="0.65" TextWrapping="Wrap" />
+
+                <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsLoadingHfFiles}"
+                             Height="4" ToolTip.Tip="Reading repository metadata and calculating local hardware fit." />
 
                 <ScrollViewer MaxHeight="280" VerticalScrollBarVisibility="Auto">
                     <ItemsControl ItemsSource="{Binding HfSearchResults}">
@@ -452,29 +456,30 @@
                                                                 </StackPanel>
 
                                                                 <StackPanel Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="3"
-                                                                            Orientation="Horizontal"
-                                                                            Spacing="10"
+                                                                            Spacing="6"
                                                                             IsVisible="{Binding HasRepoLink}">
-                                                                    <CheckBox Content="Automatically manage known companions"
-                                                                              IsChecked="{Binding AutoManageCompanionAssets}"
-                                                                              FontSize="12"
-                                                                              ToolTip.Tip="When enabled, model updates may download or replace only explicitly source-mapped, SHA256-verified projector and MTP files for this model. Disabling prompts before removing existing companion files." />
+                                                                    <WrapPanel Orientation="Horizontal" ItemSpacing="10" LineSpacing="6">
+                                                                        <CheckBox Content="Automatically manage known companions"
+                                                                                  IsChecked="{Binding AutoManageCompanionAssets}"
+                                                                                  FontSize="12"
+                                                                                  ToolTip.Tip="When enabled, model updates may download or replace only explicitly source-mapped, SHA256-verified projector and MTP files for this model. Disabling prompts before removing existing companion files." />
+                                                                        <Button Content="Reacquire known companions"
+                                                                                Command="{Binding $parent[ItemsControl].DataContext.ReacquireCompanionsCommand}"
+                                                                                CommandParameter="{Binding}"
+                                                                                IsVisible="{Binding CanReacquireCompanions}"
+                                                                                FontSize="11" Padding="8,3" CornerRadius="6"
+                                                                                ToolTip.Tip="Reviews and reacquires only hash-verified compatible companions from the linked repository's current revision. It never changes a server's selected draft model; choose any replacement explicitly in Services." />
+                                                                        <Button Content="{Binding ManualCompanionRepairLabel}"
+                                                                                Command="{Binding $parent[ItemsControl].DataContext.OpenServicesCommand}"
+                                                                                IsVisible="{Binding RequiresManualCompanionRepair}"
+                                                                                FontSize="11" Padding="8,3" CornerRadius="6"
+                                                                                ToolTip.Tip="No verified replacement is available. Open Services to browse or clear the affected companion explicitly." />
+                                                                    </WrapPanel>
                                                                     <TextBlock Text="{Binding CompanionStatus}"
                                                                                FontSize="11"
                                                                                Opacity="0.7"
                                                                                VerticalAlignment="Center"
                                                                                TextWrapping="Wrap" />
-                                                                    <Button Content="Reacquire known companions"
-                                                                            Command="{Binding $parent[ItemsControl].DataContext.ReacquireCompanionsCommand}"
-                                                                            CommandParameter="{Binding}"
-                                                                            IsVisible="{Binding CanReacquireCompanions}"
-                                                                            FontSize="11" Padding="8,3" CornerRadius="6"
-                                                                            ToolTip.Tip="Reviews and reacquires only hash-verified compatible companions from the linked repository's current revision. It never changes a server's selected draft model; choose any replacement explicitly in Services." />
-                                                                    <Button Content="Open Services to browse or clear projector"
-                                                                            Command="{Binding $parent[ItemsControl].DataContext.OpenServicesCommand}"
-                                                                            IsVisible="{Binding RequiresManualCompanionRepair}"
-                                                                            FontSize="11" Padding="8,3" CornerRadius="6"
-                                                                            ToolTip.Tip="No verified replacement is available. Open the server configuration to Browse or Clear the saved projector explicitly." />
                                                                 </StackPanel>
 
                                                                 <StackPanel Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="3"

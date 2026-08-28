@@ -71,11 +71,13 @@
                         CornerRadius="6" />
                 <Button Grid.Column="4"
                         Command="{Binding RunStepCommand}"
+                        IsVisible="{Binding ShowRunStep}"
                         Content="Run Step"
                         Padding="12,6"
                         CornerRadius="6" />
                 <Button Grid.Column="5"
                         Command="{Binding StopCommand}"
+                        IsVisible="{Binding IsRunning}"
                         Content="Stop"
                         Padding="12,6"
                         CornerRadius="6" />
@@ -264,9 +266,14 @@
                      r23 2.1: the same box also resumes past the opt-in plan-approval
                      checkpoint - ContinueTaskAsync either way. -->
                 <StackPanel Spacing="8" IsVisible="{Binding ShowContinueBox}">
-                    <TextBlock Text="Continue task"
+                    <TextBlock Text="{Binding ContinueBoxTitle}"
                                FontWeight="SemiBold"
                                FontSize="12" />
+                    <TextBlock Text="Step budget exhausted. Add steps or leave the instruction empty to continue the remaining plan."
+                               FontSize="11"
+                               Opacity="0.75"
+                               TextWrapping="Wrap"
+                               IsVisible="{Binding IsStepBudgetExhausted}" />
                     <TextBlock Text="Plan is ready for review. Continue when you are ready to let the run proceed, or leave it paused here."
                                FontSize="11"
                                Opacity="0.75"
@@ -275,7 +282,7 @@
                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
                         <TextBox Grid.Column="0"
                                  Text="{Binding ContinueInstructionText}"
-                                 Watermark="What should it do next? Leave empty for: finish the remaining planned steps"
+                                 Watermark="{Binding ContinueInstructionWatermark}"
                                  AcceptsReturn="True"
                                  MinHeight="56"
                                  TextWrapping="Wrap" />

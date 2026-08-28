@@ -82,7 +82,6 @@ public sealed class ServicesViewModelMmprojTests
         var secondProjector = Path.Combine(dir, "mmproj-model-b.gguf");
         File.WriteAllText(firstProjector, "fake");
         server.ModelPath = firstModel;
-        File.Delete(firstProjector);
         File.WriteAllText(secondModel, "fake");
         File.WriteAllText(secondProjector, "fake");
 

@@ -39,6 +39,7 @@ public partial class LabViewModel : ViewModelBase
     private readonly ILabExperimentService? _experiments;
     private readonly ILabRecipeService? _recipes;
     private readonly ISettingsService? _settings;
+    private readonly ServicesViewModel? _services;
 
     public LabViewModel(IEmpiricalExperienceStore store, IToastService toasts)
         : this(store, toasts, null, null, null)
@@ -46,14 +47,19 @@ public partial class LabViewModel : ViewModelBase
     }
 
     public LabViewModel(IEmpiricalExperienceStore store, IToastService toasts,
-        ILabExperimentService? experiments, ISettingsService? settings, ILabRecipeService? recipes)
+        ILabExperimentService? experiments, ISettingsService? settings, ILabRecipeService? recipes,
+        ServicesViewModel? services = null)
     {
         _store = store;
         _toasts = toasts;
         _experiments = experiments;
         _settings = settings;
         _recipes = recipes;
-        SelectedServer = settings?.Settings.ManagedServers.FirstOrDefault(server => !server.EmbeddingsMode);
+        _services = services;
+        if (_services is not null)
+            _services.ServerAvailabilityChanged += OnServicesAvailabilityChanged;
+
+        RefreshConfiguredServers();
         if (SelectedServer is not null)
             CandidateContextSize = SelectedServer.ContextSize;
     }
@@ -99,7 +105,21 @@ public partial class LabViewModel : ViewModelBase
     private CancellationTokenSource? _recipeCts;
 
     public bool HasSelection => SelectedExperience is not null;
-    public IReadOnlyList<ServerConfig> ConfiguredServers => _settings?.Settings.ManagedServers.Where(server => !server.EmbeddingsMode).ToArray() ?? [];
+    [ObservableProperty] private bool _hasAnyEvidence;
+    public string EvidenceEmptyState => HasAnyEvidence
+        ? "No evidence matches these filters."
+        : "No evidence has been captured yet.";
+    public string EvidenceEmptyHint => HasAnyEvidence
+        ? "Clear or broaden the filters to inspect the evidence already captured."
+        : "Run an isolated experiment or guided recipe to capture the first evidence record.";
+    private readonly UiBoundCollection<ServerConfig> _configuredServers = [];
+    public IReadOnlyList<ServerConfig> ConfiguredServers => _configuredServers;
+    public string ConfiguredServerHint => ConfiguredServers.Count switch
+    {
+        0 => "No configured Chat server is available. Save a non-embedding managed server on Services first.",
+        1 => "Using the only configured Chat server.",
+        _ => "Choose the configured Chat server used as the Lab source."
+    };
     public bool HasMultipleConfiguredServers => ConfiguredServers.Count > 1;
     public UiBoundCollection<LabRecipeRowViewModel> RecipeOptions { get; } = [];
     public Func<EmpiricalExperience, Task<bool>>? ConfirmRemoval { get; set; }
@@ -108,7 +128,28 @@ public partial class LabViewModel : ViewModelBase
     partial void OnSelectedServerChanged(ServerConfig? value)
     {
         if (value is not null) CandidateContextSize = value.ContextSize;
-        OnPropertyChanged(nameof(ConfiguredServers));
+        OnPropertyChanged(nameof(HasMultipleConfiguredServers));
+    }
+
+    private void OnServicesAvailabilityChanged(object? sender, EventArgs e) => RunOnUi(RefreshConfiguredServers);
+
+    private void RefreshConfiguredServers()
+    {
+        var selectedId = SelectedServer?.Id;
+        var servers = _services is null
+            ? _settings?.Settings.ManagedServers.Where(server => !server.EmbeddingsMode)
+            : _services.Servers.Where(server => !server.EmbeddingsMode).Select(server => server.BuildConfig());
+
+        _configuredServers.Clear();
+        if (servers is not null)
+        {
+            foreach (var server in servers)
+                _configuredServers.Add(server);
+        }
+
+        SelectedServer = _configuredServers.FirstOrDefault(server => string.Equals(server.Id, selectedId, StringComparison.Ordinal))
+            ?? _configuredServers.FirstOrDefault();
+        OnPropertyChanged(nameof(ConfiguredServerHint));
         OnPropertyChanged(nameof(HasMultipleConfiguredServers));
     }
 
@@ -328,9 +369,12 @@ public partial class LabViewModel : ViewModelBase
             CreatedFromUtc = CreatedFrom?.UtcDateTime, CreatedToUtc = CreatedTo?.UtcDateTime, Limit = 500
         };
         var rows = await _store.QueryAsync(query);
+        HasAnyEvidence = rows.Count > 0 || (await _store.QueryAsync(new EmpiricalExperienceQuery { Limit = 1 })).Count > 0;
         Experiences.Clear();
         foreach (var row in rows) Experiences.Add(new ExperienceRowViewModel(row));
         SelectedExperience = Experiences.FirstOrDefault();
+        OnPropertyChanged(nameof(EvidenceEmptyState));
+        OnPropertyChanged(nameof(EvidenceEmptyHint));
         StatusMessage = rows.Count == 0 ? "No evidence matches these filters." : $"{rows.Count} evidence record(s).";
     }
 

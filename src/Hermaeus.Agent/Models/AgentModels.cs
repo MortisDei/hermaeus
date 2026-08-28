@@ -134,6 +134,14 @@ public sealed class AgentTaskState
     /// </summary>
     public string LastUserMessage { get; set; } = string.Empty;
 
+    /// <summary>
+    /// True when an autonomous run stopped because it reached MaxAutoSteps.
+    /// This is distinct from an ask_user wait, so the workbench cannot render
+    /// a reply box for a pause that has no question. JSON-additive for older
+    /// task files.
+    /// </summary>
+    public bool StepBudgetExhausted { get; set; }
+
     public int StepCount { get; set; }
     /// <summary>
     /// Consecutive steps in a row whose model response could not be parsed

@@ -99,6 +99,19 @@ public sealed class AgentWorkbenchLayoutTests
         Assert.Equal("Review the outcome below, then inspect Changes or start a follow-up task.", AgentViewModel.DescribeNextUserAction(Task(AgentTaskStatus.Complete)));
         Assert.Equal("Review the failure and transcript, then provide a new instruction or start again.", AgentViewModel.DescribeNextUserAction(Task(AgentTaskStatus.Failed)));
         Assert.Equal("This task was stopped. Review its outcome or start a new task.", AgentViewModel.DescribeNextUserAction(Task(AgentTaskStatus.Cancelled)));
+
+        var budget = Task(AgentTaskStatus.Blocked);
+        budget.StepBudgetExhausted = true;
+        Assert.Equal("Step budget exhausted. Add steps or continue the remaining plan, or stop the task.", AgentViewModel.DescribeNextUserAction(budget));
+    }
+
+    [Fact]
+    public void Run_step_and_stop_controls_are_state_scoped()
+    {
+        var source = System.IO.File.ReadAllText(AgentViewPath());
+
+        Assert.Contains("IsVisible=\"{Binding ShowRunStep}\"", source, StringComparison.Ordinal);
+        Assert.Contains("IsVisible=\"{Binding IsRunning}\"", source, StringComparison.Ordinal);
     }
 
     private static AgentTaskState Task(AgentTaskStatus status) =>

@@ -333,12 +333,12 @@
                                                Text="Port / Ctx / GPU" VerticalAlignment="Center"
                                                Opacity="0.6" FontSize="13" />
                                     <Grid Grid.Row="3" Grid.Column="1"
-                                          ColumnDefinitions="116,116,108"
+                                          ColumnDefinitions="140,140,132"
                                           ColumnSpacing="8">
                                         <NumericUpDown Value="{Binding Port}"
                                                        Minimum="1024" Maximum="65535"
                                                        Increment="1"
-                                                       Width="108" HorizontalAlignment="Left"
+                                                       Width="132" HorizontalAlignment="Left"
                                                        FontSize="13"
                                                        IsEnabled="{Binding CanEdit}"
                                                        ToolTip.Tip="Port" />
@@ -346,7 +346,7 @@
                                                        Value="{Binding ContextSize}"
                                                        Minimum="512" Maximum="131072"
                                                        Increment="512"
-                                                       Width="108" HorizontalAlignment="Left"
+                                                       Width="132" HorizontalAlignment="Left"
                                                        FontSize="13"
                                                        IsEnabled="{Binding CanEdit}"
                                                        ToolTip.Tip="Context size (tokens)" />
@@ -354,7 +354,7 @@
                                                        Value="{Binding GpuLayers}"
                                                        Minimum="-1" Maximum="999"
                                                        Increment="1"
-                                                       Width="100" HorizontalAlignment="Left"
+                                                       Width="124" HorizontalAlignment="Left"
                                                        FontSize="13"
                                                        IsEnabled="{Binding CanEdit}"
                                                        ToolTip.Tip="GPU offload layers. -1 offloads all layers (rendered as --n-gpu-layers 999); 0 keeps inference on the CPU; a positive N offloads exactly N layers." />

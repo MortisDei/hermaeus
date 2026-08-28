@@ -719,6 +719,7 @@ public partial class AgentViewModel : ViewModelBase
     public string CurrentTaskStatusLabel => CurrentTask switch
     {
         null => "No active task",
+        { StepBudgetExhausted: true } => "Paused at step budget",
         { Status: AgentTaskStatus.Complete, Reservations.Count: > 0 } => "Completed with reservations",
         _ => CurrentTask.Status.ToString()
     };
@@ -759,7 +760,20 @@ public partial class AgentViewModel : ViewModelBase
     public string CurrentTaskModelLabel => CurrentTask is null || string.IsNullOrWhiteSpace(CurrentTask.ModelId)
         ? string.Empty
         : $"{(string.IsNullOrWhiteSpace(CurrentTask.ModelDisplayName) ? CurrentTask.ModelId : CurrentTask.ModelDisplayName)} ({CurrentTask.ModelId})";
-    public string CurrentTaskSummaryLabel => CurrentTask is null || string.IsNullOrWhiteSpace(CurrentTask.Summary) ? "No summary yet" : CurrentTask.Summary;
+    public string CurrentTaskSummaryLabel
+    {
+        get
+        {
+            if (CurrentTask is null)
+                return "No summary yet";
+            if (CurrentTask.StepBudgetExhausted)
+                return "The automatic run paused after reaching its step budget. Continue to resume the remaining work.";
+            if (CurrentTask.Status is (AgentTaskStatus.Complete or AgentTaskStatus.Failed or AgentTaskStatus.Cancelled)
+                && !string.IsNullOrWhiteSpace(CurrentTask.LastUserMessage))
+                return CurrentTask.LastUserMessage;
+            return string.IsNullOrWhiteSpace(CurrentTask.Summary) ? "No summary yet" : CurrentTask.Summary;
+        }
+    }
 
     /// <summary>r19 3.1/3.3: a task that will not resume its own loop without user action - the
     /// Continue affordance and New task button both key off this.</summary>
@@ -769,7 +783,9 @@ public partial class AgentViewModel : ViewModelBase
     /// <summary>r19 3.3: presentation only - a terminal task whose own plan still lists pending
     /// steps declared victory prematurely; pairs with the Continue box (3.1) to answer
     /// "it stopped halfway, now what".</summary>
-    public string PrematureCompleteNote => CurrentTask is { } t && IsTaskTerminal && t.PendingSteps.Count > 0
+    public string PrematureCompleteNote => CurrentTask?.StepBudgetExhausted == true
+        ? "Paused after reaching the automatic step budget."
+        : CurrentTask is { } t && IsTaskTerminal && t.PendingSteps.Count > 0
         ? $"Finished with {t.PendingSteps.Count} planned step{(t.PendingSteps.Count == 1 ? "" : "s")} not run."
         : string.Empty;
     public bool HasPrematureCompleteNote => !string.IsNullOrEmpty(PrematureCompleteNote);
@@ -782,7 +798,15 @@ public partial class AgentViewModel : ViewModelBase
     public string PlanRevisedLabel => CurrentTask?.PlanRevisedAtStep is { } step ? $"revised at step {step}" : string.Empty;
     public bool HasPlanRevision => PlanRevisedLabel.Length > 0;
     /// <summary>True when the task is asking a question, not waiting on a tool approval; only then does the reply box apply.</summary>
-    public bool IsWaitingForReply => CurrentTask is { Status: AgentTaskStatus.WaitingForUser, PendingToolAction: null };
+    public bool IsWaitingForReply => CurrentTask is { Status: AgentTaskStatus.WaitingForUser, PendingToolAction: null, StepBudgetExhausted: false };
+
+    public bool IsStepBudgetExhausted => CurrentTask?.StepBudgetExhausted == true;
+    public string ContinueBoxTitle => IsStepBudgetExhausted ? "Continue after step budget" : "Continue task";
+    public string ContinueInstructionWatermark => IsStepBudgetExhausted
+        ? "Add steps or leave empty to continue the remaining plan"
+        : "What should it do next? Leave empty to finish the remaining planned steps";
+    public bool ShowRunStep => !IsRunning && CurrentTask is { Status: AgentTaskStatus.New or AgentTaskStatus.Running }
+        && (SelectedModel is not null || !string.IsNullOrWhiteSpace(CurrentTask.ModelId));
 
     /// <summary>
     /// What the agent actually asked, shown with the reply box. The question
@@ -968,6 +992,7 @@ public partial class AgentViewModel : ViewModelBase
         null => "Describe a goal, choose a workspace and model, then start the agent.",
         { Status: AgentTaskStatus.Running } => "Agent is working. You can follow progress above or stop the task.",
         { Status: AgentTaskStatus.WaitingForUser, PendingToolAction: not null } => "Review the requested action above, then approve or reject it.",
+        { StepBudgetExhausted: true } => "Step budget exhausted. Add steps or continue the remaining plan, or stop the task.",
         { Status: AgentTaskStatus.WaitingForUser } => "Agent needs your answer. Reply in the panel above.",
         { Status: AgentTaskStatus.Blocked } => "Agent is blocked. Read the reason above, then provide an instruction or change the workspace policy.",
         { Status: AgentTaskStatus.Complete } => "Review the outcome below, then inspect Changes or start a follow-up task.",
@@ -2414,8 +2439,7 @@ public partial class AgentViewModel : ViewModelBase
         && !string.IsNullOrWhiteSpace(WorkspaceRoot)
         && SelectedModel is not null;
 
-    private bool CanRunStep() => !IsRunning && CurrentTask is not null
-        && (SelectedModel is not null || !string.IsNullOrWhiteSpace(CurrentTask.ModelId));
+    private bool CanRunStep() => ShowRunStep;
 
     [RelayCommand(CanExecute = nameof(CanChangeTaskModel))]
     private async Task ChangeTaskModelAsync()
@@ -2556,8 +2580,14 @@ public partial class AgentViewModel : ViewModelBase
         OnPropertyChanged(nameof(ReplyWatermark));
         OnPropertyChanged(nameof(ReplyButtonLabel));
         OnPropertyChanged(nameof(ShowReplyBox));
+        OnPropertyChanged(nameof(IsStepBudgetExhausted));
+        OnPropertyChanged(nameof(ContinueBoxTitle));
+        OnPropertyChanged(nameof(ContinueInstructionWatermark));
         OnPropertyChanged(nameof(CurrentQuestion));
         OnPropertyChanged(nameof(HasCurrentQuestion));
+        OnPropertyChanged(nameof(CurrentTaskStatusLabel));
+        OnPropertyChanged(nameof(CurrentTaskSummaryLabel));
+        OnPropertyChanged(nameof(ShowRunStep));
         OnPropertyChanged(nameof(CanShowNewTaskButton));
         OnPropertyChanged(nameof(IsTaskTerminal));
         OnPropertyChanged(nameof(PrematureCompleteNote));
@@ -2636,6 +2666,7 @@ public partial class AgentViewModel : ViewModelBase
         OnPropertyChanged(nameof(HasDecisionWaiting));
 
         OnPropertyChanged(nameof(CurrentStepCountLabel));
+        OnPropertyChanged(nameof(ShowRunStep));
 
         if (value)
             StartActivityTicker();

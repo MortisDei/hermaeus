@@ -253,9 +253,10 @@ public sealed class AgentUnreadableResponseTests
         var created = await agent.CreateTaskAsync("Do the thing", options);
         var result = await agent.RunAsync(created.TaskId, options);
 
-        Assert.Equal(AgentTaskStatus.WaitingForUser, result.State.Status);
-        Assert.Contains("step budget", result.State.LastUserMessage, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("earlier question", result.State.LastUserMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(AgentTaskStatus.Blocked, result.State.Status);
+        Assert.True(result.State.StepBudgetExhausted);
+        Assert.Empty(result.State.LastUserMessage);
+        Assert.Contains(result.State.Decisions, decision => decision.Decision == "Step budget exhausted");
     }
 
     private static async Task<WorkspaceMemoryStore> BuildMemoryStoreAsync(ISettingsService settings)
