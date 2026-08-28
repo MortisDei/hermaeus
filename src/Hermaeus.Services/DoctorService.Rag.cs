@@ -342,7 +342,7 @@ public sealed partial class DoctorService
         }
 
         var existing = FindInstalledEmbeddingModel(_embeddingDownload.ModelName);
-        if (existing.Found && !string.Equals(Path.GetFullPath(existing.Path), Path.GetFullPath(destinationPath), StringComparison.OrdinalIgnoreCase))
+        if (existing.Found && !ModelPathSafety.AreSameLocalPath(existing.Path, destinationPath))
         {
             progress?.Report($"Verifying existing embedding model at {existing.Path}...");
             if (await _downloads.VerifyHashAsync(existing.Path, _embeddingDownload.Sha256, progress, ct))

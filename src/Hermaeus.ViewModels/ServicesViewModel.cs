@@ -347,7 +347,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         // the scanned assets root never appears in `found`; without the
         // manual free-text fallback box this round removed, the ComboBox
         // would otherwise render blank for it after every rescan.
-        if (!string.IsNullOrWhiteSpace(current) && !DetectedModelPaths.Contains(current, StringComparer.OrdinalIgnoreCase))
+        if (!string.IsNullOrWhiteSpace(current) && !DetectedModelPaths.Any(path => ModelPathSafety.AreSameLocalPath(path, current)))
             DetectedModelPaths.Insert(0, current);
         // DetectedModelPaths.Clear() fires a CollectionChanged Reset, which the
         // ComboBox bound to it (SelectedItem="{Binding ModelPath}", TwoWay by
@@ -367,7 +367,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     /// and the sole candidate is never silently selected.</summary>
     private void RefreshDetectedMmprojPaths(string modelPath)
     {
-        var modelChanged = !string.Equals(_modelPathForMmproj, modelPath, StringComparison.OrdinalIgnoreCase);
+        var modelChanged = !ModelPathSafety.AreSameLocalPath(_modelPathForMmproj, modelPath);
         var current = modelChanged ? string.Empty : MmprojPath;
         if (modelChanged && !string.IsNullOrWhiteSpace(MmprojPath))
         {
@@ -389,7 +389,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         }
 
         var hasCurrentCandidate = !string.IsNullOrWhiteSpace(current)
-            && DetectedMmprojPaths.Contains(current, StringComparer.OrdinalIgnoreCase);
+            && DetectedMmprojPaths.Any(path => ModelPathSafety.AreSameLocalPath(path, current));
         if (!string.IsNullOrWhiteSpace(current) && !hasCurrentCandidate)
             DetectedMmprojPaths.Insert(0, current);
 
@@ -434,7 +434,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         }
 
         var hasCurrentCandidate = !string.IsNullOrWhiteSpace(current)
-            && DetectedDraftModelPaths.Contains(current, StringComparer.OrdinalIgnoreCase);
+            && DetectedDraftModelPaths.Any(path => ModelPathSafety.AreSameLocalPath(path, current));
         // A missing persisted path is not a candidate. Keeping it in the
         // dropdown made a deleted draft look like the only useful choice and
         // encouraged a launch with a dead companion. Preserve the path in the
@@ -452,9 +452,9 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _settingAutoMmproj = true;
         try
         {
-            if (!string.Equals(MmprojPath, path, StringComparison.OrdinalIgnoreCase))
+            if (!ModelPathSafety.AreSameLocalPath(MmprojPath, path))
                 MmprojPath = path;
-            _autoSelectedMmprojPath = string.Equals(path, soleCandidate, StringComparison.OrdinalIgnoreCase) ? path : null;
+            _autoSelectedMmprojPath = ModelPathSafety.AreSameLocalPath(path, soleCandidate) ? path : null;
         }
         finally { _settingAutoMmproj = false; }
     }
@@ -464,9 +464,9 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
         _settingAutoDraftModel = true;
         try
         {
-            if (!string.Equals(DraftModelPath, path, StringComparison.OrdinalIgnoreCase))
+            if (!ModelPathSafety.AreSameLocalPath(DraftModelPath, path))
                 DraftModelPath = path;
-            _autoSelectedDraftModelPath = string.Equals(path, soleCandidate, StringComparison.OrdinalIgnoreCase) ? path : null;
+            _autoSelectedDraftModelPath = ModelPathSafety.AreSameLocalPath(path, soleCandidate) ? path : null;
         }
         finally { _settingAutoDraftModel = false; }
     }
@@ -1116,7 +1116,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
 
         var normalized = Path.GetFullPath(modelPath);
         var current = string.IsNullOrWhiteSpace(ModelPath) ? string.Empty : Path.GetFullPath(ModelPath);
-        var modelChanged = !string.Equals(current, normalized, StringComparison.OrdinalIgnoreCase);
+        var modelChanged = !ModelPathSafety.AreSameLocalPath(current, normalized);
 
         if (Status is ServerStatus.Running or ServerStatus.Starting && modelChanged)
             StopIfRunning();
@@ -1391,7 +1391,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     private void RepairDetectedModelPathsIfBrowsedOutsideRoot(string value)
     {
         if (string.IsNullOrWhiteSpace(value)) return;
-        if (!DetectedModelPaths.Contains(value, StringComparer.OrdinalIgnoreCase))
+        if (!DetectedModelPaths.Any(path => ModelPathSafety.AreSameLocalPath(path, value)))
             DetectedModelPaths.Insert(0, value);
     }
 
@@ -1410,7 +1410,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
             _lastModelPathForDefaults = value;
             return;
         }
-        if (string.Equals(value, _lastModelPathForDefaults, StringComparison.OrdinalIgnoreCase))
+        if (ModelPathSafety.AreSameLocalPath(value, _lastModelPathForDefaults))
             return;
         _lastModelPathForDefaults = value;
 

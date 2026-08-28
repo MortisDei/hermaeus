@@ -836,7 +836,7 @@ public sealed partial class DoctorService
         var normalized = Path.GetFullPath(modelPath);
         var file = new FileInfo(normalized);
         return _settings.Settings.LlamaTuneProfiles.FirstOrDefault(profile =>
-            string.Equals(Path.GetFullPath(profile.ModelPath), normalized, StringComparison.OrdinalIgnoreCase)
+            ModelPathSafety.AreSameLocalPath(profile.ModelPath, normalized)
             && profile.ModelSizeBytes == file.Length
             && profile.ModelModifiedAtUtc == file.LastWriteTimeUtc);
     }

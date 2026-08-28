@@ -257,7 +257,7 @@ public partial class ModelManagementViewModel : ObservableObject
     private async Task DeleteModelAsync(ModelProfileItemViewModel? item)
     {
         if (item is null || !item.IsLocalGguf) return;
-        var running = _services.Servers.Any(s => s.IsRunning && string.Equals(Path.GetFullPath(s.ModelPath), Path.GetFullPath(item.ModelId), StringComparison.OrdinalIgnoreCase));
+        var running = _services.Servers.Any(s => s.IsRunning && ModelPathSafety.AreSameLocalPath(s.ModelPath, item.ModelId));
         if (!ModelDeletionService.TryPlan(item.ModelId, _settings.Settings.DataManagement.LocalAiAssetsRoot, running, out var plan, out var error))
         {
             _toasts.Show("Cannot delete model", error, ToastKind.Warning, 7000);
@@ -271,8 +271,8 @@ public partial class ModelManagementViewModel : ObservableObject
             return;
         }
         await _manifest.RemoveAsync(item.ModelId);
-        _settings.Settings.ModelProfiles.RemoveAll(p => string.Equals(Path.GetFullPath(p.ModelId), Path.GetFullPath(item.ModelId), StringComparison.OrdinalIgnoreCase));
-        foreach (var server in _settings.Settings.ManagedServers.Where(s => string.Equals(Path.GetFullPath(s.ModelPath), Path.GetFullPath(item.ModelId), StringComparison.OrdinalIgnoreCase)))
+        _settings.Settings.ModelProfiles.RemoveAll(p => ModelPathSafety.AreSameLocalPath(p.ModelId, item.ModelId));
+        foreach (var server in _settings.Settings.ManagedServers.Where(s => ModelPathSafety.AreSameLocalPath(s.ModelPath, item.ModelId)))
             server.ModelPath = string.Empty;
         await _settings.SaveAsync();
         ForceRefresh = true;
@@ -289,20 +289,13 @@ public partial class ModelManagementViewModel : ObservableObject
 
     private static bool SameLocalModelIdentity(string reportedId, string localPath)
     {
-        if (string.Equals(reportedId, localPath, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(reportedId, localPath, ModelPathSafety.LocalPathComparison))
             return true;
 
         if (!reportedId.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase))
             return false;
 
-        try
-        {
-            return string.Equals(Path.GetFullPath(reportedId), Path.GetFullPath(localPath), StringComparison.OrdinalIgnoreCase);
-        }
-        catch (ArgumentException)
-        {
-            return false;
-        }
+        return ModelPathSafety.AreSameLocalPath(reportedId, localPath);
     }
 
     /// <summary>Restores the update chip's last-known state from the manifest across a
@@ -311,7 +304,7 @@ public partial class ModelManagementViewModel : ObservableObject
     private static void ApplyManifestState(ModelProfileItemViewModel item, IReadOnlyList<ModelManifestEntry> manifestEntries)
     {
         var normalized = Path.GetFullPath(item.ModelId);
-        var entry = manifestEntries.FirstOrDefault(e => string.Equals(Path.GetFullPath(e.FilePath), normalized, StringComparison.OrdinalIgnoreCase));
+        var entry = manifestEntries.FirstOrDefault(e => ModelPathSafety.AreSameLocalPath(e.FilePath, normalized));
         if (entry is null || string.IsNullOrWhiteSpace(entry.RepoId))
         {
             item.RepoId = string.Empty;
@@ -658,8 +651,8 @@ public partial class ModelManagementViewModel : ObservableObject
         // back to their own base name, which is at least stable.
         var provenance = (await _manifest.LoadAsync())
             .Where(e => !string.IsNullOrWhiteSpace(e.FilePath) && !string.IsNullOrWhiteSpace(e.RepoId))
-            .GroupBy(e => Path.GetFullPath(e.FilePath), StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(g => g.Key, g => g.First().RepoId, StringComparer.OrdinalIgnoreCase);
+            .GroupBy(e => Path.GetFullPath(e.FilePath), ModelPathSafety.LocalPathComparer)
+            .ToDictionary(g => g.Key, g => g.First().RepoId, ModelPathSafety.LocalPathComparer);
         var plan = ModelFolderOrganizer.Plan(layout.ModelsDirectory, ggufPaths, repoIdsByPath: provenance);
         if (plan.Moves.Count == 0)
         {
@@ -753,7 +746,7 @@ public partial class ModelManagementViewModel : ObservableObject
         foreach (var item in _allModels.Where(m => m.IsLocalGguf))
         {
             var normalized = Path.GetFullPath(item.ModelId);
-            var entry = manifestEntries.FirstOrDefault(e => string.Equals(Path.GetFullPath(e.FilePath), normalized, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(e.RepoId));
+            var entry = manifestEntries.FirstOrDefault(e => ModelPathSafety.AreSameLocalPath(e.FilePath, normalized) && !string.IsNullOrWhiteSpace(e.RepoId));
             if (entry is not null)
                 candidates.Add((item, entry));
         }
@@ -852,7 +845,7 @@ public partial class ModelManagementViewModel : ObservableObject
     private bool IsModelInUseByRunningServer(string modelPath)
     {
         var normalized = Path.GetFullPath(modelPath);
-        return _services.Servers.Any(s => s.IsRunning && !string.IsNullOrWhiteSpace(s.ModelPath) && string.Equals(Path.GetFullPath(s.ModelPath), normalized, StringComparison.OrdinalIgnoreCase));
+        return _services.Servers.Any(s => s.IsRunning && ModelPathSafety.AreSameLocalPath(s.ModelPath, normalized));
     }
 
     private string ModelsDirectory()

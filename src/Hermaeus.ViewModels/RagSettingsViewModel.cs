@@ -65,7 +65,7 @@ public partial class RagSettingsViewModel : ObservableObject
             return;
 
         path = Path.GetFullPath(path.Trim());
-        if (RerankerModelPathOptions.Any(existing => string.Equals(existing, path, StringComparison.OrdinalIgnoreCase)))
+        if (RerankerModelPathOptions.Any(existing => ModelPathSafety.AreSameLocalPath(existing, path)))
             return;
 
         RerankerModelPathOptions.Add(path);

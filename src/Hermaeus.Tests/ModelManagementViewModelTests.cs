@@ -34,6 +34,23 @@ public sealed class ModelManagementViewModelTests
     }
 
     [Fact]
+    public void Local_model_path_comparison_policy_matches_the_current_platform()
+    {
+        // Pure policy coverage: this does not claim that the test filesystem
+        // supports both case-sensitive and case-insensitive files. The Linux
+        // leg must keep these identities distinct; Windows must treat them as
+        // aliases under its normal filesystem semantics.
+        var lower = Path.Combine("Models", "gemma.gguf");
+        var upper = Path.Combine("Models", "GEMMA.gguf");
+        var expected = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+
+        Assert.Equal(expected, ModelPathSafety.LocalPathComparison);
+        Assert.Equal(OperatingSystem.IsWindows(), ModelPathSafety.AreSameLocalPath(lower, upper));
+    }
+
+    [Fact]
     public async Task FilterText_narrows_list_by_name_case_insensitively()
     {
         using var temp = new TempDir();

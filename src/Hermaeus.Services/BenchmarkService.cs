@@ -913,7 +913,7 @@ public sealed class BenchmarkService
         var managedServer = isLocalGguf
             ? _settings.Settings.ManagedServers.FirstOrDefault(s =>
                 !string.IsNullOrWhiteSpace(s.ModelPath)
-                && string.Equals(Path.GetFullPath(s.ModelPath), Path.GetFullPath(model.Id), StringComparison.OrdinalIgnoreCase))
+                && ModelPathSafety.AreSameLocalPath(s.ModelPath, model.Id))
             : null;
         var ggufInfo = isLocalGguf ? GgufMetadataReader.TryRead(model.Id) : null;
 
@@ -971,7 +971,7 @@ public sealed class BenchmarkService
         var managedServer = isLocalGguf
             ? _settings.Settings.ManagedServers.FirstOrDefault(server =>
                 !string.IsNullOrWhiteSpace(server.ModelPath)
-                && string.Equals(Path.GetFullPath(server.ModelPath), Path.GetFullPath(model.Id), StringComparison.OrdinalIgnoreCase))
+                && ModelPathSafety.AreSameLocalPath(server.ModelPath, model.Id))
             : null;
 
         var runtime = managedServer is null

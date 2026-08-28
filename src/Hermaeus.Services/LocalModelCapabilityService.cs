@@ -300,10 +300,10 @@ public sealed class LocalModelCapabilityService
                 e.RuntimeIdentity is not null && e.ModelIdentity is not null
                     ? e.RuntimeIdentity.IdentifiesSameRuntime(runtimeIdentity)
                         && string.Equals(e.ModelIdentity.StableId, modelIdentity.StableId, StringComparison.Ordinal)
-                    : string.Equals(e.ModelPath, identity.ModelPath, StringComparison.Ordinal)
+                    : ModelPathSafety.AreSameLocalPath(e.ModelPath, identity.ModelPath)
                         && e.ModelSize == identity.ModelSize
                         && e.ModelMtime == identity.ModelMtime
-                        && string.Equals(e.ExecutablePath, identity.ExecutablePath, StringComparison.Ordinal)
+                        && ModelPathSafety.AreSameLocalPath(e.ExecutablePath, identity.ExecutablePath)
                         && e.ExecutableSize == identity.ExecutableSize
                         && e.ExecutableMtime == identity.ExecutableMtime)?.Capabilities;
         }
@@ -321,9 +321,8 @@ public sealed class LocalModelCapabilityService
         {
             await using var stream = File.OpenRead(cachePath);
             var entries = await JsonSerializer.DeserializeAsync<List<CapabilityCacheEntry>>(stream, JsonOptions, ct) ?? [];
-            var model = Path.GetFullPath(modelPath);
             return entries
-                .Where(entry => string.Equals(entry.ModelPath, model, StringComparison.Ordinal))
+                .Where(entry => ModelPathSafety.AreSameLocalPath(entry.ModelPath, modelPath))
                 .OrderByDescending(entry => entry.Capabilities.ProbedAtUtc)
                 .Select(entry => entry.Capabilities)
                 .FirstOrDefault();
@@ -406,8 +405,8 @@ public sealed class LocalModelCapabilityService
         entries.RemoveAll(e => e.RuntimeIdentity is not null && e.ModelIdentity is not null
             ? e.RuntimeIdentity.IdentifiesSameRuntime(runtimeIdentity)
                 && string.Equals(e.ModelIdentity.StableId, modelIdentity.StableId, StringComparison.Ordinal)
-            : e.ModelPath.Equals(identity.ModelPath, StringComparison.Ordinal)
-                && e.ExecutablePath.Equals(identity.ExecutablePath, StringComparison.Ordinal));
+            : ModelPathSafety.AreSameLocalPath(e.ModelPath, identity.ModelPath)
+                && ModelPathSafety.AreSameLocalPath(e.ExecutablePath, identity.ExecutablePath));
         entries.Add(new CapabilityCacheEntry(
             identity.ModelPath, identity.ModelSize, identity.ModelMtime,
             identity.ExecutablePath, identity.ExecutableSize, identity.ExecutableMtime,

@@ -139,4 +139,62 @@ public sealed class LabViewModelTests
         Assert.Equal(server.Id, vm.SelectedServer!.Id);
         Assert.Contains("only configured Chat server", vm.ConfiguredServerHint, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task Lab_refreshes_when_services_later_rebuilds_the_eventual_canonical_chat_card()
+    {
+        using var temp = new TempDir();
+        var settings = Helpers.NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        settings.Settings.ManagedServers.Clear();
+        settings.Settings.ManagedServers.Add(new ServerConfig
+        {
+            Id = "legacy-chat",
+            Name = "Legacy Chat",
+            Port = GetFreePort(),
+            ModelPath = "legacy.gguf"
+        });
+        settings.Settings.ManagedServers.Add(new ServerConfig
+        {
+            Id = "embeddings",
+            Name = "Embeddings",
+            Port = GetFreePort(),
+            EmbeddingsMode = true,
+            ModelPath = "embedding.gguf"
+        });
+
+        var services = Helpers.NewServicesViewModel(settings);
+        var store = new SqliteEmpiricalExperienceStore(settings, new RedactionService());
+        var vm = new LabViewModel(store, new FakeToasts(), null, settings, null, services);
+
+        Assert.Equal("legacy-chat", vm.SelectedServer!.Id);
+        Assert.Equal("legacy-chat", Assert.Single(vm.ConfiguredServers).Id);
+
+        settings.Settings.ManagedServers[0] = new ServerConfig
+        {
+            Id = "canonical-chat",
+            Name = "Chat",
+            Port = GetFreePort(),
+            ModelPath = "chat.gguf"
+        };
+        await settings.SaveAsync();
+        await Helpers.WaitForAsync(
+            () => vm.ConfiguredServers.Count == 1 && vm.ConfiguredServers[0].Id == "canonical-chat",
+            "Lab to receive the rebuilt canonical Chat server");
+
+        var selected = Assert.Single(vm.ConfiguredServers);
+        Assert.Equal("canonical-chat", selected.Id);
+        Assert.Equal("canonical-chat", vm.SelectedServer!.Id);
+        Assert.Equal("Chat", selected.Name);
+        Assert.False(selected.EmbeddingsMode);
+        Assert.DoesNotContain(vm.ConfiguredServers, server => server.EmbeddingsMode);
+        Assert.Equal("canonical-chat", services.Servers.Single(server => !server.EmbeddingsMode).BuildConfig().Id);
+    }
+
+    private static int GetFreePort()
+    {
+        using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        return ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+    }
 }

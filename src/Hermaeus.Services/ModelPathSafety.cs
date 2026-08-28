@@ -3,6 +3,39 @@ namespace Hermaeus.Services;
 /// <summary>Validates exact model files before download or destructive operations.</summary>
 public static class ModelPathSafety
 {
+    /// <summary>
+    /// Comparison for local filesystem paths. Windows paths are normally
+    /// case-insensitive; Unix-like paths are kept case-sensitive so two files
+    /// whose names differ only by case are not silently treated as one model.
+    /// Other supported non-Windows platforms deliberately use the conservative
+    /// case-sensitive rule rather than assuming a case-insensitive volume.
+    /// </summary>
+    public static StringComparison LocalPathComparison => OperatingSystem.IsWindows()
+        ? StringComparison.OrdinalIgnoreCase
+        : StringComparison.Ordinal;
+
+    public static StringComparer LocalPathComparer => OperatingSystem.IsWindows()
+        ? StringComparer.OrdinalIgnoreCase
+        : StringComparer.Ordinal;
+
+    public static bool AreSameLocalPath(string? left, string? right)
+    {
+        if (string.IsNullOrWhiteSpace(left) || string.IsNullOrWhiteSpace(right))
+            return false;
+
+        try
+        {
+            return string.Equals(
+                Path.GetFullPath(left.Trim()),
+                Path.GetFullPath(right.Trim()),
+                LocalPathComparison);
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or NotSupportedException)
+        {
+            return false;
+        }
+    }
+
     public static bool TryResolveFileUnderRoot(string root, string filePath, out string normalized, out string error)
     {
         normalized = string.Empty;
@@ -17,7 +50,7 @@ public static class ModelPathSafety
         {
             var fullRoot = Path.GetFullPath(root.Trim()).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
             var fullPath = Path.GetFullPath(filePath.Trim());
-            var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            var comparison = LocalPathComparison;
             var prefix = fullRoot + Path.DirectorySeparatorChar;
             if (!fullPath.StartsWith(prefix, comparison))
             {
