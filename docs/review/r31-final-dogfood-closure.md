@@ -23,8 +23,11 @@ review records.
 | A10 mlock compatibility | Already correct and conservative. `MemoryLock` defaults off; `--mlock` or `--load-mode mlock` is emitted only for explicit configuration and runtime capability. The LFM2.5 observation is not encoded as model incompatibility. | `ServerLaunchArgumentTests.ContextShift_memory_lock_and_no_memory_map_are_opt_in_flags` and load-mode tests. | Retest LFM2.5 with the managed b10588/current runtime inventory on Linux, with mlock off and as an explicit expert override. |
 | A11 Model Search Enter | Fixed. Enter invokes the existing Hugging Face search command through view input routing and preserves the same command guard as the Search button. | Build-time XAML/code-behind coverage and existing search tests. | Retest keyboard activation and recovery after a failed search. |
 | A12 Auto Tune thread count | Already correct. The observed value of 4 follows `max(ProcessorCount - 1, 1)` capped at 16 on the observed host; an explicit configured value remains authoritative. | Existing `ChooseThreadCount` coverage. | Confirm the selected value against System Overview on each target if further tuning is desired. |
+| A13 llama-server executable path paste | Requires owner live retest. Services exposes the executable as an ordinary editable TextBox with keyboard and context-menu handling supplied by Avalonia; source inspection found no field-specific paste suppression or browse-only replacement. Desktop control was unavailable in this pass, so no functional clipboard claim is made and no speculative workaround was added. | Static source trace retained in this closure review; no deterministic clipboard event test is available without a desktop session. | Required on Windows and Linux: paste an absolute executable path into Services with keyboard paste and the native context menu, verify the full value remains in the field, save, and confirm the same path is used by the server card. |
+| A14 local model path identity by host OS | Fixed. Canonical full paths now compare case-insensitively on Windows and case-sensitively on non-Windows platforms. Nearby model identity consumers use the shared policy, while repository and filename-role comparisons remain deliberately separate. | `ModelManagementViewModelTests.Local_model_path_comparison_policy_matches_the_current_platform` plus existing alias and model-management coverage. | Retest one Windows path alias and two case-distinct Linux model paths in the packaged builds if the owner wants filesystem-backed confirmation beyond the policy test. |
 | B1 Lab Chat server selector | Fixed. Lab consumes the live non-embedding server cards from `ServicesViewModel`, preserves selection by server id, and explains the zero and single-server prerequisites. The isolated experiment and Apply boundary are unchanged. | `LabViewModelTests.Configured_chat_server_comes_from_live_services_cards`. | Required: enter Lab in a release build, select the configured Chat server, start and complete a real isolated experiment, then inspect evidence and Apply review. |
 | B2 evidence empty state | Fixed. The Evidence pane distinguishes no captured records from records excluded by the current filters and uses `MossEmptyState`. | `LabViewModelTests.Evidence_empty_state_distinguishes_no_records_from_filtered_records`. | Retest with a new install and with a filter that excludes known evidence. |
+| B3 Lab late Services lifecycle | Fixed. Lab can exist before the eventual canonical Chat card appears in the Services snapshot; a production settings save causes Services to rebuild that card, raises its availability event, and Lab selects the resulting `BuildConfig` by its preserved server id while excluding the embedding card. | `LabViewModelTests.Lab_refreshes_when_services_later_rebuilds_the_eventual_canonical_chat_card`. | Covered by the existing required real Lab workflow in B1; also confirm the selector after Services cards are created or repaired in the packaged UI. |
 | C1 budget pause presented as a fake question | Fixed. Step budget exhaustion is persisted as `Blocked` with an additive `StepBudgetExhausted` flag, no fake user question, a decision record, and a Continue/Add steps path. | `AgentUnreadableResponseTests` and the registered harness budget case. | Required: exercise a budget pause in the workbench and confirm the visible action is Continue/Add steps or Stop, not Reply. |
 | C2 continuation obscure | Fixed. Continue title and watermark become budget-specific, while Run Step appears only for runnable New/Running tasks and Stop only while running. | `AgentWorkbenchLayoutTests` and state-derived property coverage. | Required: use WaitingForUser, approval, runnable, running, budget-paused, and terminal states in the desktop UI. |
 | C3 structured response parsing | Already correct / no reproducible bypass found. Existing fenced, surrounding-prose, escaping, truncation, schema, retry, and strict protocol tests cover the parser without making it permissive. | Existing Agent parser and unreadable-response tests. | Retest the observed Granite/Gemma response shape against the packaged runtime if it recurs. |
@@ -67,6 +70,7 @@ Automation cannot establish the following release behavior:
 - Chat deliberate-scroll behavior during a long stream.
 - Agent blocking and continuation usability.
 - Clipboard code-point fidelity on Windows and Linux.
+- Services executable-path paste by keyboard and native context menu on Windows and Linux.
 - Managed runtime identity and process metrics in the live telemetry flyout.
 - Any model/runtime behavior requiring the owner's installed runtime, including
   LFM2.5 and companion recovery.
@@ -74,11 +78,12 @@ Automation cannot establish the following release behavior:
 ## Automated verification
 
 - `dotnet build Hermaeus.sln --no-restore`: passed with 0 warnings and 0 errors.
-- Focused final regressions: 25 passed, 0 failed, 0 skipped.
-- `dotnet test src/Hermaeus.Tests/Hermaeus.Tests.csproj --no-build`: 2,266
-  passed, 0 failed, 0 skipped in 3m36s with normal host access.
-- `pwsh ./scripts/coverage.ps1`: passed the 60% line-coverage ratchet; 2,266
-  instrumented tests passed, 0 failed, 0 skipped in 5m41s. The report was
+- Focused follow-up regressions: 87 passed, 0 failed, 0 skipped in 2s with
+  normal host access.
+- `dotnet test src/Hermaeus.Tests/Hermaeus.Tests.csproj --no-build`: 2,268
+  passed, 0 failed, 0 skipped in 3m58s with normal host access.
+- `pwsh ./scripts/coverage.ps1`: passed the 60% line-coverage ratchet; 2,268
+  instrumented tests passed, 0 failed, 0 skipped in 5m33s. The report was
   written and removed beneath the operating-system temp directory.
 - `git diff --check`: passed. The initial restricted-runner baseline is not
   treated as product evidence because its app-data and SQLite access failures
