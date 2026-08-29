@@ -1,7 +1,7 @@
 # Hermaeus
 
 [![CI](https://github.com/MortisDei/hermaeus/actions/workflows/ci.yml/badge.svg)](https://github.com/MortisDei/hermaeus/actions/workflows/ci.yml)
-[![Latest version](https://img.shields.io/github/v/tag/MortisDei/hermaeus?include_prereleases=true)](https://github.com/MortisDei/hermaeus/releases)
+[![Latest version](https://img.shields.io/github/v/tag/MortisDei/hermaeus)](https://github.com/MortisDei/hermaeus/releases)
 [![License: PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm%20Noncommercial-6f42c1)](LICENSE.md)
 [![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/download/dotnet/10.0)
 [![Platforms: Windows and Linux](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-0078D4)](docs/packaging.md)
