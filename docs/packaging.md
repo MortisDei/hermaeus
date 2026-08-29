@@ -181,7 +181,7 @@ Each script writes a SHA256 file next to the archive. Verify archives before
 redistribution:
 
 ```bash
-sha256sum -c dist/hermaeus-<version>-linux-x64.tar.gz.sha256
+(cd dist && sha256sum -c hermaeus-<version>-linux-x64.tar.gz.sha256)
 ```
 
 ```powershell

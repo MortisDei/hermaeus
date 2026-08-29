@@ -88,3 +88,40 @@ Automation cannot establish the following release behavior:
 - `git diff --check`: passed. The initial restricted-runner baseline is not
   treated as product evidence because its app-data and SQLite access failures
   disappeared in the documented normal-host rerun.
+
+## R31 beta repair closure addendum
+
+Date: 2026-08-29
+
+This addendum records the verification performed after the bounded repair
+commit `a7060c0`. It is chronological evidence and does not replace the
+earlier automated-verification snapshot above or any historical review file.
+
+The three repair blockers and the related Lab cleanup finding are closed by
+the repaired behavior and regression coverage:
+
+- Local API token and port changes restart the owned child, wait for health,
+  and leave no duplicate child. The separate-process regression covers token
+  addition, revocation, and port change behavior.
+- Data-root identity comparisons use the host-appropriate path rule for
+  Windows and non-Windows filesystems.
+- Data-root migration rolls back completed moves when a later move or settings
+  write fails, restoring the previous authoritative root.
+- Ordinary Lab workload exceptions complete the run as failed and dispose the
+  owned runtime while preserving the original failure.
+
+## Closure-sequence verification
+
+- `./scripts/coverage.sh`: passed. VSTest reported 2,279 passed, 16 skipped,
+  0 failed, 2,295 total. Cobertura reported 37,468 of 59,007 valid lines,
+  `line-rate="0.6349"`, or 63.49% line coverage. The 60% threshold passed.
+- `./build.sh`: passed for the documented Release `linux-x64` framework-
+  dependent package. Launcher links, executable targets, required layout and
+  documents, archive contents, and PDB exclusion checks passed.
+- `(cd dist && sha256sum -c
+  hermaeus-0.38.0-beta-linux-x64.tar.gz.sha256)`: passed with `OK`.
+- `git diff --check`: passed.
+
+The owner-only desktop and installed-runtime retests listed above remain live
+release gates. No release, tag, or push authorization is implied by this
+addendum.
