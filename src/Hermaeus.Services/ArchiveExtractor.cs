@@ -13,26 +13,40 @@ namespace Hermaeus.Services;
 public static class ArchiveExtractor
 {
     public static async Task ExtractAsync(string archivePath, string destinationDirectory, CancellationToken ct = default)
+        => await ExtractAsync(archivePath, destinationDirectory, stripTopLevelDirectory: null, ct: ct);
+
+    /// <summary>
+    /// Extracts an archive, optionally removing one known upstream wrapper
+    /// directory. The wrapper is accepted only when every archive entry is
+    /// beneath that exact directory, so an unexpected archive shape fails
+    /// closed instead of being partially flattened.
+    /// </summary>
+    public static async Task ExtractAsync(
+        string archivePath,
+        string destinationDirectory,
+        string? stripTopLevelDirectory,
+        CancellationToken ct = default)
     {
         Directory.CreateDirectory(destinationDirectory);
         var destinationRoot = EnsureTrailingSeparator(Path.GetFullPath(destinationDirectory));
+        var wrapper = NormalizeWrapper(stripTopLevelDirectory);
 
         if (IsTarGz(archivePath))
-            await ExtractTarGzAsync(archivePath, destinationRoot, ct);
+            await ExtractTarGzAsync(archivePath, destinationRoot, wrapper, ct);
         else
-            ExtractZip(archivePath, destinationRoot);
+            ExtractZip(archivePath, destinationRoot, wrapper);
     }
 
     public static bool IsTarGz(string archivePath) =>
         archivePath.EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase) ||
         archivePath.EndsWith(".tgz", StringComparison.OrdinalIgnoreCase);
 
-    private static void ExtractZip(string archivePath, string destinationRoot)
+    private static void ExtractZip(string archivePath, string destinationRoot, string? wrapper)
     {
         using var archive = ZipFile.OpenRead(archivePath);
         foreach (var entry in archive.Entries)
         {
-            var destPath = ResolveEntryPath(destinationRoot, entry.FullName);
+            var destPath = ResolveEntryPath(destinationRoot, StripWrapper(entry.FullName, wrapper));
 
             // A directory entry has an empty file name (trailing '/' in FullName).
             if (string.IsNullOrEmpty(entry.Name))
@@ -46,7 +60,7 @@ public static class ArchiveExtractor
         }
     }
 
-    private static async Task ExtractTarGzAsync(string archivePath, string destinationRoot, CancellationToken ct)
+    private static async Task ExtractTarGzAsync(string archivePath, string destinationRoot, string? wrapper, CancellationToken ct)
     {
         var deferredLinks = new List<(string LinkPath, string TargetPath)>();
         await using var fileStream = File.OpenRead(archivePath);
@@ -60,16 +74,16 @@ public static class ArchiveExtractor
                 if (string.IsNullOrWhiteSpace(entry.LinkName) || Path.IsPathFullyQualified(entry.LinkName))
                     throw new InvalidOperationException($"Archive link '{entry.Name}' has an invalid target.");
 
-                var linkPath = ResolveEntryPath(destinationRoot, entry.Name);
+                var linkPath = ResolveEntryPath(destinationRoot, StripWrapper(entry.Name, wrapper));
                 var targetRelativePath = entry.EntryType == TarEntryType.SymbolicLink
                     ? Path.Combine(Path.GetDirectoryName(entry.Name) ?? string.Empty, entry.LinkName)
                     : entry.LinkName;
-                var targetPath = ResolveEntryPath(destinationRoot, targetRelativePath);
+                var targetPath = ResolveEntryPath(destinationRoot, StripWrapper(targetRelativePath, wrapper));
                 deferredLinks.Add((linkPath, targetPath));
                 continue;
             }
 
-            var destPath = ResolveEntryPath(destinationRoot, entry.Name);
+            var destPath = ResolveEntryPath(destinationRoot, StripWrapper(entry.Name, wrapper));
 
             if (entry.EntryType is TarEntryType.Directory)
             {
@@ -130,4 +144,31 @@ public static class ArchiveExtractor
 
     private static string EnsureTrailingSeparator(string path) =>
         path.EndsWith(Path.DirectorySeparatorChar) ? path : path + Path.DirectorySeparatorChar;
+
+    private static string? NormalizeWrapper(string? wrapper)
+    {
+        if (string.IsNullOrWhiteSpace(wrapper))
+            return null;
+
+        var normalized = wrapper.Replace('\\', '/').Trim('/');
+        if (normalized.Length == 0 || normalized.Contains('/'))
+            throw new ArgumentException("The archive wrapper must be one directory name.", nameof(wrapper));
+        return normalized;
+    }
+
+    private static string StripWrapper(string entryName, string? wrapper)
+    {
+        if (wrapper is null)
+            return entryName;
+
+        var normalized = entryName.Replace('\\', '/').TrimStart('/');
+        if (string.Equals(normalized, wrapper, StringComparison.Ordinal))
+            return string.Empty;
+
+        var prefix = wrapper + "/";
+        if (normalized.StartsWith(prefix, StringComparison.Ordinal))
+            return normalized[prefix.Length..];
+
+        throw new InvalidOperationException($"Archive entry '{entryName}' is outside the expected '{wrapper}' directory.");
+    }
 }

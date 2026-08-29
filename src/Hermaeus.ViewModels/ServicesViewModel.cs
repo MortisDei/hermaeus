@@ -1802,7 +1802,24 @@ public partial class ServicesViewModel : ViewModelBase
         return Servers.Any(server =>
             !server.EmbeddingsMode &&
             server.Port == endpoint.Port &&
-            server.IsStopped);
+            server.Status == ServerStatus.Stopped);
+    }
+
+    /// <summary>
+    /// Identifies a loopback llama.cpp endpoint whose unavailable model list is
+    /// expected because the managed server is stopped or is still in its
+    /// health-wait startup phase. Error is deliberately excluded so a genuine
+    /// startup failure remains visible.
+    /// </summary>
+    public bool IsManagedServerExpectedUnavailable(string baseUrl)
+    {
+        if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var endpoint) || !endpoint.IsLoopback)
+            return false;
+
+        return Servers.Any(server =>
+            !server.EmbeddingsMode &&
+            server.Port == endpoint.Port &&
+            server.Status is ServerStatus.Stopped or ServerStatus.Starting);
     }
 
     public RuntimeKind[] RuntimeKinds { get; } =

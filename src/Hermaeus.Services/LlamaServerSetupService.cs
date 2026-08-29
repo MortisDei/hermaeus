@@ -118,9 +118,9 @@ public sealed class LlamaServerSetupService
 
     /// <summary>
     /// Gets the expected path to the llama-server executable directly inside
-    /// installPath. The archive may actually extract it into a nested
-    /// subdirectory; use <see cref="ResolveInstalledExecutable"/> after install
-    /// to get the real, possibly-nested, location.
+    /// installPath. Managed release extraction strips the archive's known
+    /// top-level directory, while <see cref="ResolveInstalledExecutable"/>
+    /// remains compatible with older nested installs.
     /// </summary>
     public string GetExecutablePath(string installPath)
     {
@@ -330,7 +330,11 @@ public sealed class LlamaServerSetupService
         try
         {
             progress?.Report("Extracting archive...");
-            await ArchiveExtractor.ExtractAsync(archivePath, installPath, ct);
+            await ArchiveExtractor.ExtractAsync(
+                archivePath,
+                installPath,
+                stripTopLevelDirectory: TopLevelDirectoryFor(assetName),
+                ct: ct);
         }
         finally
         {
@@ -605,15 +609,9 @@ public sealed class LlamaServerSetupService
         {
             var assets = release.Release.Assets ?? [];
             var asset = SelectDownloadAsset(assets, platform, variant);
-            var effectiveVariant = variant;
-            if (asset is null && variant != LlamaRuntimeVariant.Cpu)
-            {
-                asset = SelectDownloadAsset(assets, platform, LlamaRuntimeVariant.Cpu);
-                effectiveVariant = LlamaRuntimeVariant.Cpu;
-            }
 
             if (asset is not null)
-                return new LlamaReleaseSelection(release.Release, asset, effectiveVariant, release.Build!.Value);
+                return new LlamaReleaseSelection(release.Release, asset, variant, release.Build!.Value);
         }
 
         return null;
@@ -670,6 +668,25 @@ public sealed class LlamaServerSetupService
         return ClassifyGpuVendor(profile?.GpuName) == GpuVendor.Nvidia
             ? LlamaRuntimeVariant.Cuda
             : LlamaRuntimeVariant.Vulkan;
+    }
+
+    /// <summary>
+    /// Resolves the backend for an update. An explicit user choice wins. With
+    /// Auto, the persisted class of the last managed install wins when known;
+    /// only a first install or legacy settings fall back to hardware
+    /// detection. This keeps updates from changing a working backend merely
+    /// because the hardware probe is different on a later run.
+    /// </summary>
+    public static LlamaRuntimeVariant ResolveUpdateVariant(
+        LlamaRuntimeVariant configured,
+        LlamaRuntimeVariant installed,
+        HardwareProfile? profile)
+    {
+        if (configured != LlamaRuntimeVariant.Auto)
+            return configured;
+        if (installed != LlamaRuntimeVariant.Auto)
+            return installed;
+        return ResolveVariant(configured, profile);
     }
 
     /// <summary>
@@ -735,12 +752,11 @@ public sealed class LlamaServerSetupService
 
     /// <summary>
     /// Selects the download asset for a platform and build variant (r14 1.1).
-    /// Non-Windows platforms keep the r11 default-build selection untouched
-    /// (exact os/arch suffix, no accelerator token). Windows matches by
-    /// os/arch plus the variant token ("-cpu-", "-cuda-", "-vulkan-"); when a
-    /// release ships more than one CUDA build (e.g. 12.4 and 13.3) the lowest
-    /// version is chosen for the broadest driver compatibility. Returns null
-    /// when no asset matches, letting the caller fall back to Cpu.
+    /// CPU matches the exact platform suffix. Accelerator variants match their
+    /// platform-specific upstream asset names. When a release ships more than
+    /// one CUDA build (e.g. 12.4 and 13.3) the lowest version is chosen for the
+    /// broadest driver compatibility. Returns null when the requested backend
+    /// is absent. Callers must not turn that into an implicit CPU downgrade.
     /// </summary>
     public static GitHubReleaseAsset? SelectDownloadAsset(
         IReadOnlyList<GitHubReleaseAsset> assets,
@@ -752,7 +768,7 @@ public sealed class LlamaServerSetupService
             return null;
 
         var p = resolvedPlatform.Value;
-        if (!IsWindows(p) || variant is LlamaRuntimeVariant.Auto or LlamaRuntimeVariant.Cpu)
+        if (variant is LlamaRuntimeVariant.Auto or LlamaRuntimeVariant.Cpu)
         {
             var suffix = SuffixFor(p);
             return assets.FirstOrDefault(asset =>
@@ -760,21 +776,11 @@ public sealed class LlamaServerSetupService
                 asset.Name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase));
         }
 
-        var arch = ArchToken(p);
-        var token = variant switch
-        {
-            LlamaRuntimeVariant.Cuda => "-cuda-",
-            LlamaRuntimeVariant.Vulkan => "-vulkan-",
-            _ => "-cpu-"
-        };
-
         var matches = assets.Where(asset =>
         {
             var name = asset.Name.ToLowerInvariant();
             return name.StartsWith("llama-", StringComparison.Ordinal)
-                && name.EndsWith($"-{arch}.zip", StringComparison.Ordinal)
-                && name.Contains("-bin-win-", StringComparison.Ordinal)
-                && name.Contains(token, StringComparison.Ordinal);
+                && IsVariantAsset(name, p, variant);
         }).ToList();
 
         if (matches.Count == 0)
@@ -782,6 +788,25 @@ public sealed class LlamaServerSetupService
         if (variant == LlamaRuntimeVariant.Cuda && matches.Count > 1)
             return matches.OrderBy(a => ParseCudaVersion(a.Name)).First();
         return matches[0];
+    }
+
+    private static bool IsVariantAsset(string name, LlamaPlatform platform, LlamaRuntimeVariant variant)
+    {
+        var arch = ArchToken(platform);
+        if (IsWindows(platform))
+        {
+            var token = variant == LlamaRuntimeVariant.Cuda ? "-cuda-" : "-vulkan-";
+            return name.Contains("-bin-win-", StringComparison.Ordinal)
+                && name.Contains(token, StringComparison.Ordinal)
+                && name.EndsWith($"-{arch}.zip", StringComparison.Ordinal);
+        }
+
+        if (platform is not (LlamaPlatform.LinuxX64 or LlamaPlatform.LinuxArm64))
+            return false;
+
+        var linuxToken = variant == LlamaRuntimeVariant.Cuda ? "-bin-ubuntu-cuda-" : "-bin-ubuntu-vulkan-";
+        return name.Contains(linuxToken, StringComparison.Ordinal)
+            && name.EndsWith($"-{arch}.tar.gz", StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -822,6 +847,12 @@ public sealed class LlamaServerSetupService
     }
 
     private static string AssetNameFor(LlamaPlatform platform, string tag) => $"llama-{tag}{SuffixFor(platform)}";
+
+    private static string? TopLevelDirectoryFor(string assetName)
+    {
+        var match = Regex.Match(assetName, @"^(?<root>llama-b\d+)-bin-", RegexOptions.IgnoreCase);
+        return match.Success ? match.Groups["root"].Value : null;
+    }
 
     internal static string PinnedSha256For(LlamaPlatform platform) => platform switch
     {

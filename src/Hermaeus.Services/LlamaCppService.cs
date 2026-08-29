@@ -19,11 +19,12 @@ public sealed class LlamaCppService : IDisposable
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> _modelsFetchDown = new();
 
     /// <summary>
-    /// Optional gate (r14 4.3): returns true when the managed server for a base
-    /// URL is known Stopped, letting GetModelsAsync skip the HTTP attempt and
-    /// the error entirely. Unset means always probe.
+    /// Optional state gate: returns true when a managed server for a base URL is
+    /// intentionally Stopped or is Starting while its health wait owns startup.
+    /// In either case an unavailable model list is expected. Unset means always
+    /// probe and report failures.
     /// </summary>
-    public Func<string, bool>? IsBaseUrlKnownStopped { get; set; }
+    public Func<string, bool>? IsBaseUrlExpectedUnavailable { get; set; }
     private readonly HttpClient _http;
     private readonly ISettingsService _settings;
     private readonly IRuntimeLogService _logs;
@@ -61,10 +62,9 @@ public sealed class LlamaCppService : IDisposable
     {
         var baseUrl = Base;
 
-        // r14 4.3: a connection-refused probe against our own stopped managed
-        // server is the expected state, not an error. Skip the attempt (and any
-        // log) entirely when the caller knows the server is Stopped.
-        if (IsBaseUrlKnownStopped?.Invoke(baseUrl) == true)
+        // A connection-refused probe against our own stopped server, or a
+        // server still in its health-wait startup phase, is expected state.
+        if (IsBaseUrlExpectedUnavailable?.Invoke(baseUrl) == true)
             return [];
 
         try

@@ -40,6 +40,24 @@ public sealed class ArchiveExtractorTests
     }
 
     [Fact]
+    public async Task ExtractAsync_zip_can_strip_one_known_upstream_wrapper_directory()
+    {
+        using var temp = new TempDir();
+        var archivePath = temp.PathFor("wrapped.zip");
+        BuildZip(archivePath, archive =>
+        {
+            AddZipEntry(archive, "llama-b10679/llama-server", "stub-binary");
+            AddZipEntry(archive, "llama-b10679/libggml.so", "sibling-library");
+        });
+
+        var destination = temp.PathFor("out");
+        await ArchiveExtractor.ExtractAsync(archivePath, destination, "llama-b10679");
+
+        Assert.True(File.Exists(Path.Combine(destination, "llama-server")));
+        Assert.False(Directory.Exists(Path.Combine(destination, "llama-b10679")));
+    }
+
+    [Fact]
     public async Task ExtractAsync_targz_places_nested_entries_under_the_destination()
     {
         using var temp = new TempDir();

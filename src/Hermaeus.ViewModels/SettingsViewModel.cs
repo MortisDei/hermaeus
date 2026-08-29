@@ -188,6 +188,7 @@ public partial class SettingsViewModel : ViewModelBase
         SubscribeToAutoSave(Mcp);
         SubscribeToAutoSave(LocalApi);
         SubscribeToAutoSave(Tts);
+        SubscribeToAutoSave(Data);
         Tts.VoiceChannels.CollectionChanged += OnTtsCollectionChanged;
         Tts.AudioFeedbackEvents.CollectionChanged += OnTtsCollectionChanged;
         HookTtsChildren();

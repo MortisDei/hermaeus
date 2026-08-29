@@ -286,6 +286,23 @@ public sealed class ServicesViewModelTests
     }
 
     [Fact]
+    public void Managed_expected_unavailable_gate_includes_starting_but_not_error_or_running()
+    {
+        using var temp = new TempDir();
+        var vm = NewServicesVm(temp, out _);
+        var server = vm.Servers.First(s => !s.EmbeddingsMode);
+        var endpoint = $"http://127.0.0.1:{server.Port}";
+
+        Assert.True(vm.IsManagedServerExpectedUnavailable(endpoint));
+        server.Status = ServerStatus.Starting;
+        Assert.True(vm.IsManagedServerExpectedUnavailable(endpoint));
+        server.Status = ServerStatus.Error;
+        Assert.False(vm.IsManagedServerExpectedUnavailable(endpoint));
+        server.Status = ServerStatus.Running;
+        Assert.False(vm.IsManagedServerExpectedUnavailable(endpoint));
+    }
+
+    [Fact]
     public async Task Rebuild_reuses_the_existing_row_instead_of_replacing_it()
     {
         using var temp = new TempDir();

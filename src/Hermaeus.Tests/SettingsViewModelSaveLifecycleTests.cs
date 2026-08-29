@@ -262,6 +262,27 @@ public sealed class SettingsViewModelSaveLifecycleTests
     }
 
     [Fact]
+    public async Task Local_ai_assets_root_is_persisted_after_debounced_change_without_save_command()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        var vm = NewSettingsViewModel(settings, new FakeSecretStore());
+        var aiRoot = temp.PathFor("ai-assets");
+
+        vm.Data.LocalAiAssetsRoot = aiRoot;
+
+        await WaitForAsync(
+            () => settings.Settings.DataManagement.LocalAiAssetsRoot == aiRoot,
+            "debounced AI assets root save", timeoutMs: 5000);
+        var reloaded = new SettingsService(temp.PathFor("settings/settings.json"));
+        await reloaded.LoadAsync();
+
+        Assert.Equal(aiRoot, reloaded.Settings.DataManagement.LocalAiAssetsRoot);
+        vm.Shutdown();
+    }
+
+    [Fact]
     public async Task Completed_autosave_can_be_followed_by_reload()
     {
         using var temp = new TempDir();

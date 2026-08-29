@@ -41,6 +41,14 @@ limit.
   **Move data...** now confirms the current and destination roots before using
   the existing safe migration path, while ordinary autosave cannot migrate an
   unconfirmed workspace.
+- Fixed AI Assets root edits not reaching the normal autosave path. Managed
+  llama.cpp updates now match Linux GPU asset names, preserve the configured or
+  previously installed backend, refuse missing or unlaunchable GPU backends
+  instead of silently downgrading to CPU, and flatten the known upstream
+  `llama-bNNNNN/` archive wrapper inside Hermaeus's owned build directory.
+- Fixed model-list probes so connection refusal is quiet while a managed
+  server is intentionally stopped or still starting under its health wait;
+  startup errors and running-server failures remain visible.
 - Final R31 dogfood closure fixes normalized-path model duplicates, stale
   projector selection, role-aware companion repair, managed llama-server
   resolution, model Search keyboard activation, Lab server discovery and

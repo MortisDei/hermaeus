@@ -94,8 +94,8 @@ public sealed class LlamaServerInstallTests
         {
             return BuildZipBytes(archive =>
             {
-                AddZipEntry(archive, "llama-server.exe", "stub-binary-content");
-                AddZipEntry(archive, "ggml.dll", "sibling-dll-content");
+                AddZipEntry(archive, "llama-b10034/llama-server.exe", "stub-binary-content");
+                AddZipEntry(archive, "llama-b10034/ggml.dll", "sibling-dll-content");
             });
         }
 
@@ -103,8 +103,8 @@ public sealed class LlamaServerInstallTests
         using (var gzip = new GZipStream(output, CompressionLevel.SmallestSize, leaveOpen: true))
         using (var archive = new TarWriter(gzip, leaveOpen: true))
         {
-            AddTarEntry(archive, "llama-server", "stub-binary-content");
-            AddTarEntry(archive, "libggml.so", "sibling-library-content");
+            AddTarEntry(archive, "llama-b10034/llama-server", "stub-binary-content");
+            AddTarEntry(archive, "llama-b10034/libggml.so", "sibling-library-content");
         }
         return output.ToArray();
     }

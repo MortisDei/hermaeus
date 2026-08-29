@@ -591,8 +591,8 @@ public sealed partial class DoctorService
 
     /// <summary>
     /// Installs the latest llama.cpp build, honouring the configured runtime
-    /// variant (r14 1.1/3.4), verifying the new binary actually launches and
-    /// falling back to the CPU build if it does not (r14 1.2). Returns the
+    /// variant and the last installed backend, verifying the new binary
+    /// actually launches without silently changing backend. Returns the
     /// details the update flow needs to offer a prune of superseded versions
     /// (r14 3.2) and a restart-to-apply (r14 3.3).
     /// </summary>
@@ -604,24 +604,26 @@ public sealed partial class DoctorService
                 ?? _settings.Settings.ManagedServers.FirstOrDefault())?.ExecutablePath ?? string.Empty);
 
         var profile = await _systemInfo.GetHardwareProfileAsync(ct);
-        var resolvedVariant = LlamaServerSetupService.ResolveVariant(_settings.Settings.DataManagement.LlamaRuntimeVariant, profile);
+        var resolvedVariant = LlamaServerSetupService.ResolveUpdateVariant(
+            _settings.Settings.DataManagement.LlamaRuntimeVariant,
+            _settings.Settings.DataManagement.InstalledLlamaRuntimeVariant,
+            profile);
 
         var result = await _llamaSetup.InstallLatestAsync(installPath, resolvedVariant, progress, ct);
         if (result.Success && !string.IsNullOrWhiteSpace(result.UpdatedPath) && resolvedVariant != LlamaRuntimeVariant.Cpu)
         {
-            // r14 1.2: a GPU build that cannot execute (missing driver/DLL)
-            // reports no version. Fall back to the CPU build once (Cpu is
-            // terminal, so no retry loop) rather than leaving a broken path.
+            // A GPU build that cannot execute (missing driver/DLL) is not safe
+            // to replace with CPU: that would report success while materially
+            // changing the selected backend. Leave the new path unconfigured
+            // and require an explicit backend choice instead.
             var probe = await ReadLlamaServerVersionAsync(result.UpdatedPath, ct);
-            if (ShouldFallbackToCpu(resolvedVariant, probe.BuildNumber is not null))
+            if (ShouldRejectGpuRuntime(resolvedVariant, probe.BuildNumber is not null))
             {
-                _runtimeLogs?.Add(new RuntimeLogEntry(
-                    DateTime.UtcNow,
-                    RuntimeLogLevel.Warning,
-                    RuntimeLogCategory.Service,
-                    $"llama.cpp {LlamaServerSetupService.VariantLabel(resolvedVariant)} build did not launch (missing driver or runtime); falling back to the CPU build."));
-                resolvedVariant = LlamaRuntimeVariant.Cpu;
-                result = await _llamaSetup.InstallLatestAsync(installPath, LlamaRuntimeVariant.Cpu, progress, ct);
+                result = new LocalAiSetupResult(
+                    false,
+                    $"llama.cpp {LlamaServerSetupService.VariantLabel(resolvedVariant)} build was downloaded but failed its launch probe. "
+                    + "The update was refused so a working GPU backend cannot be silently replaced with CPU. "
+                    + "Check the backend's driver/runtime requirements or explicitly choose CPU.");
             }
         }
 
@@ -638,6 +640,7 @@ public sealed partial class DoctorService
 
         foreach (var server in _settings.Settings.ManagedServers)
             server.ExecutablePath = result.UpdatedPath;
+        _settings.Settings.DataManagement.InstalledLlamaRuntimeVariant = resolvedVariant;
 
         await _settings.SaveAsync();
         progress?.Report(result.Log);
@@ -653,10 +656,10 @@ public sealed partial class DoctorService
 
     /// <summary>
     /// A non-CPU variant whose installed binary did not report a version failed
-    /// to launch and must fall back to CPU (r14 1.2). CPU never falls back.
-    /// Pure decision for tests.
+    /// its launch probe. The update must be refused rather than silently
+    /// changing to CPU. Pure decision for tests.
     /// </summary>
-    public static bool ShouldFallbackToCpu(LlamaRuntimeVariant installedVariant, bool versionProbeSucceeded)
+    public static bool ShouldRejectGpuRuntime(LlamaRuntimeVariant installedVariant, bool versionProbeSucceeded)
         => installedVariant != LlamaRuntimeVariant.Cpu && !versionProbeSucceeded;
 
     public long PruneLlamaServerVersions(IReadOnlyList<string> versionDirectories)

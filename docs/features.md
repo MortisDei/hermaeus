@@ -41,6 +41,11 @@ for Knowledge behavior in Chat.
   migration boundary. Ordinary Settings autosave does not move an existing
   workspace, and llama.cpp pruning only deletes validated owned superseded
   version directories while protecting the selected runtime.
+- Managed llama.cpp update and recovery preserve the configured or previously
+  installed backend class, match platform-specific upstream assets, and refuse
+  a missing or unlaunchable GPU backend instead of silently installing CPU.
+  Known upstream archive wrapper directories are removed at the owned version
+  boundary; legacy nested installations remain discoverable and protected.
 - Managed llama.cpp supports GPU-layer placement, K/V cache choices, Flash
   Attention, context shift, CPU-MoE placement, vision projectors, and
   capability-gated speculative decoding. Unsupported or unproven runtime
