@@ -88,11 +88,7 @@ public sealed class LocalApiProcessManagerBoundaryTests
 
     private static string FindLocalApiDll()
     {
-        var current = new DirectoryInfo(AppContext.BaseDirectory);
-        while (current is not null && !File.Exists(Path.Combine(current.FullName, "Hermaeus.sln")))
-            current = current.Parent;
-        Assert.NotNull(current);
-        var dll = Path.Combine(current!.FullName, "src", "Hermaeus.LocalApi", "bin", "Debug", "net10.0", "Hermaeus.LocalApi.dll");
+        var dll = Path.Combine(AppContext.BaseDirectory, "Hermaeus.LocalApi.dll");
         Assert.True(File.Exists(dll), $"Local API test child was not built: {dll}");
         return dll;
     }
