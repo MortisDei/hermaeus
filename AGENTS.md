@@ -87,5 +87,6 @@ Commit-message contract for non-trivial work:
 - The body must record important correctness, security, privacy, or evidence semantics affected by the change.
 - The body must identify relevant verification performed, including focused tests or known verification limits.
 - Record deliberate limitations and remaining live gates when they exist. Do not omit this detail for concision.
+- Commit messages describe repository changes and durable engineering rationale only. Never include temporary agent workflow or control state such as push instructions, branch or worktree status, model or session information, quota information, or similar execution commentary. Put that status in the final report instead.
 
 Final response format: what changed; build/test result; risks or follow-ups.
