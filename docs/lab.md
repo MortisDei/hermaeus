@@ -62,6 +62,11 @@ rechecks all three, clones `AppSettings`, and uses the normal settings save
 flow. A stale review is refused, and applying never deletes prior configuration
 or experiment evidence.
 
+Guided recipes persist valid evidence automatically. Review selects the eligible
+candidate produced by that recipe, so saving each evidence slice manually is not
+part of the workflow. Failed, invalid, and `Unknown` results remain evidence but
+cannot become an Apply recommendation.
+
 ## Bounded engine recipes
 
 **Inspect runtime recipes** builds a fixed catalogue for the selected Chat
@@ -86,14 +91,20 @@ candidates while preserving completed and failed evidence.
 
 GPU Fit is evaluated for every configuration before launch and remains labelled
 as deterministic prediction. After each repetition the shared telemetry source
-captures process RAM and honest per-process GPU `Unknown` where no trustworthy
-counter exists. Runtime response counters provide prompt/decode throughput and
-token counts. The current buffered protocol cannot establish TTFT, so TTFT is
-stored and displayed as missing rather than inferred from request duration.
+captures process RAM and, when the operating system exposes a trustworthy
+per-process counter, process GPU memory. On Linux/NVIDIA this uses the existing
+`nvidia-smi` process query scoped to the owned PID; otherwise the value remains
+`Unknown`, never zero. Runtime response counters provide prompt/decode
+throughput and token counts. The current buffered protocol cannot establish
+TTFT, so TTFT is stored and displayed as missing rather than inferred from
+request duration.
 
-The trade-off table shows speed, predicted RAM/GPU, observed memory peak,
-correctness, and comparison refusal together. Low-bit KV requires a referenced
-quality score; without one the missing `quality.score` evidence blocks Apply.
+The trade-off table shows the declared candidate name, baseline-to-candidate
+speed and percentage delta when valid, predicted RAM/GPU, observed memory peak,
+correctness, and comparison refusal together. It calls out excluded results and
+does not invent a best result for tied measurements or Unknown metrics. Low-bit
+KV requires a referenced quality score; without one the missing `quality.score`
+evidence blocks Apply.
 Loading success never becomes a quality claim. CPU-MoE analytical totals remain
 Unknown when GGUF/runtime evidence cannot identify expert tensor placement,
 while observed memory and throughput are still retained. No recipe chooses or

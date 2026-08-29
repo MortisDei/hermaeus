@@ -184,6 +184,22 @@ public sealed class LabRecipeTests
     }
 
     [Fact]
+    public async Task Successful_recipe_materializes_the_candidate_for_review()
+    {
+        using var fixture = new RecipeFixture();
+        var plan = LabRecipeCatalog.Build(LabRecipeKind.Context, fixture.Source, []);
+
+        var run = await fixture.Runner.RunAsync(plan, fixture.Source, fixture.Capabilities([]), "controlled prompt");
+
+        var candidate = plan.Candidates[0];
+        var review = fixture.Experiments.CreateApplyReview(run.Id, candidate.Id);
+
+        Assert.True(review.CanApply);
+        Assert.Equal(candidate.Id, review.CandidateConfigurationId);
+        Assert.NotEmpty(review.Changes);
+    }
+
+    [Fact]
     public async Task Runner_preserves_prediction_and_observation_as_separate_metrics()
     {
         using var fixture = new RecipeFixture();

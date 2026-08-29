@@ -18,7 +18,7 @@ public sealed class ChatSendTimingTests
         Assert.Contains("lesson 1 ms", formatted);
         Assert.Contains("rag 0 ms", formatted);
         Assert.Contains("prompt build 2 ms", formatted);
-        Assert.Contains("first token 950 ms", formatted);
+        Assert.Contains("first content 950 ms", formatted);
         Assert.Contains("total 1400 ms", formatted);
     }
 
@@ -29,7 +29,7 @@ public sealed class ChatSendTimingTests
 
         var formatted = timing.Format();
 
-        Assert.Equal("recall 0 ms, select 0 ms, lesson 0 ms, rag 0 ms, recall-inject 0 ms, prompt build 0 ms, first token 0 ms, total 0 ms", formatted);
+        Assert.Equal("recall 0 ms, select 0 ms, lesson 0 ms, rag 0 ms, recall-inject 0 ms, prompt build 0 ms, first content 0 ms, total 0 ms", formatted);
     }
 
     [Fact]

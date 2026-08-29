@@ -7,6 +7,35 @@ namespace Hermaeus.Tests;
 
 public sealed class LabExperimentTests
 {
+    [Fact]
+    public void Canonical_baseline_matches_an_unchanged_services_server()
+    {
+        var source = new ServerConfig
+        {
+            Id = "chat",
+            ContextSize = 8192,
+            GpuLayers = -1,
+            Threads = 8,
+            PromptThreads = 2,
+            Slots = 1,
+            KvCacheType = "q8_0",
+            KvCacheTypeK = "q8_0",
+            KvCacheTypeV = "q8_0",
+            FlashAttention = "on",
+            CpuMoeLayers = 0,
+            Speculative = new SpeculativeDecodingConfig
+            {
+                Types = ["draft-simple"], DraftModelPath = "draft.gguf", DraftGpuLayers = 4,
+                NMax = 8, NMin = 1, PMin = 0.2
+            },
+            ExtraArgs = "--parallel 1"
+        };
+
+        var baseline = LabConfigurationMapper.FromServer(source, "baseline", "Baseline");
+
+        Assert.Empty(LabConfigurationMapper.Differences(source, baseline));
+    }
+
     private static LabConfiguration Config(string id = "baseline", int context = 4096, string extraHash = "") => new()
     {
         Id = id, Label = id, ContextSize = context, GpuLayers = 0, Threads = 4,

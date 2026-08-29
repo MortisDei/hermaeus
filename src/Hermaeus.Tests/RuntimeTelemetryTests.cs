@@ -7,6 +7,17 @@ namespace Hermaeus.Tests;
 
 public sealed class RuntimeTelemetryTests
 {
+    [Theory]
+    [InlineData("123, 512\n456, 1024", 123, 512L * 1024 * 1024)]
+    [InlineData("123, [N/A]", 123, null)]
+    public void Nvidia_process_memory_parser_is_pid_scoped(string output, int pid, long? expected)
+    {
+        var parsed = ProcessGpuMemoryParser.TryGetBytes(output, pid, out var bytes);
+
+        Assert.Equal(expected.HasValue, parsed);
+        if (expected.HasValue) Assert.Equal(expected.Value, bytes);
+    }
+
     [Fact]
     public void Series_rejects_samples_from_restarted_process()
     {

@@ -1788,6 +1788,23 @@ public partial class ServicesViewModel : ViewModelBase
     /// </summary>
     public bool AnyServerRunning => Servers.Any(s => s.Status == ServerStatus.Running);
 
+    /// <summary>
+    /// Identifies a loopback llama.cpp endpoint that belongs to a managed
+    /// server currently known to be stopped. Remote endpoints and servers in
+    /// Starting remain probeable because this view model cannot establish that
+    /// they are intentionally unavailable.
+    /// </summary>
+    public bool IsManagedServerStopped(string baseUrl)
+    {
+        if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var endpoint) || !endpoint.IsLoopback)
+            return false;
+
+        return Servers.Any(server =>
+            !server.EmbeddingsMode &&
+            server.Port == endpoint.Port &&
+            server.IsStopped);
+    }
+
     public RuntimeKind[] RuntimeKinds { get; } =
     [
         RuntimeKind.LlamaCpp,

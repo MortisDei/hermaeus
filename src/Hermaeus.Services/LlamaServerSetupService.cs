@@ -241,6 +241,13 @@ public sealed class LlamaServerSetupService
             var versionedInstallPath = Path.Combine(installPath, release.TagName);
             Directory.CreateDirectory(versionedInstallPath);
 
+            var existing = ResolveInstalledExecutable(versionedInstallPath);
+            if (existing is not null)
+            {
+                progress?.Report($"llama-server {release.TagName} is already installed at {existing}");
+                return new LocalAiSetupResult(true, $"llama-server {release.TagName} is already installed at {existing}", existing);
+            }
+
             // CUDA builds link against the toolkit runtime shipped separately
             // (r14 1.2): extract it into the same versioned directory first so
             // the DLLs sit beside llama-server.exe before it is located/started.
@@ -582,11 +589,11 @@ public sealed class LlamaServerSetupService
     {
         if (string.IsNullOrWhiteSpace(tag))
             return null;
-        var match = Regex.Match(tag, @"^b(?<build>\d{3,7})$", RegexOptions.IgnoreCase);
+        var match = Regex.Match(tag, @"^(?:llama-)?b(?<build>\d{3,7})$", RegexOptions.IgnoreCase);
         return match.Success && int.TryParse(match.Groups["build"].Value, out var build) ? build : null;
     }
 
-    private static readonly Regex TagDirectoryPattern = new(@"^b\d+$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex TagDirectoryPattern = new(@"^(?:llama-)?b\d+$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     private static readonly Regex CudaVersionPattern = new(@"-cuda-(?<ver>\d+(?:\.\d+)?)-", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     /// <summary>

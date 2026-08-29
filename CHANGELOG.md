@@ -38,6 +38,12 @@ limit.
   resolution, model Search keyboard activation, Lab server discovery and
   evidence empty states, truthful Agent budget pauses, benchmark activity and
   Insights refresh, Recall degradation labels, and popup edge constraints.
+- R31 Beta repair pass fixes the no-edit Lab freeze identity mismatch, selects
+  guided-recipe candidates during Review, presents human-readable Lab deltas
+  and exclusions, reads NVIDIA per-process VRAM through the existing
+  `nvidia-smi` path when available, avoids duplicate same-build llama.cpp
+  installs, handles legacy nested managed runtime directories, and rescans
+  Doctor after stopped servers have restarted.
 - Normal Settings preferences autosave with a visible persistence state. The
   top-level Save button is removed, task audio notifications default off, and
   managed llama.cpp uses newer load-mode and localhost-only CORS arguments only

@@ -116,7 +116,8 @@ public partial class MainWindowViewModel : ViewModelBase
         IToastService toasts,
         IRuntimeLogService runtimeLogs,
         ConversationExportService exports,
-        Hermaeus.Services.Recall.RecallIndexingService? recallIndexing = null)
+        Hermaeus.Services.Recall.RecallIndexingService? recallIndexing = null,
+        LlamaCppService? llamaCpp = null)
     {
         _recallIndexing = recallIndexing;
         Palette = palette;
@@ -213,6 +214,12 @@ public partial class MainWindowViewModel : ViewModelBase
         // them to disk, so every edit made there was lost on restart. Route its
         // Save through the one existing save flow rather than adding a second.
         Services.SaveAllSettings = Settings.SaveAsync;
+        // A stopped managed server is an expected local state. Give the
+        // provider the live Services status gate so model refreshes do not
+        // turn that state into repeated connection warnings. Unmanaged and
+        // Starting endpoints remain probeable.
+        if (llamaCpp is not null)
+            llamaCpp.IsBaseUrlKnownStopped = Services.IsManagedServerStopped;
         Chat.PropertyChanged += (s, e) => { if (e.PropertyName == "ConversationTitle") OnPropertyChanged(nameof(WindowTitle)); };
         Chat.ConversationSaved += OnConversationSaved;
         // r27 01 1.3: Chat asks Services what it is waiting on, through a

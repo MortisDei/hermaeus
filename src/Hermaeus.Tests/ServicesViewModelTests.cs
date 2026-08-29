@@ -271,6 +271,21 @@ public sealed class ServicesViewModelTests
     }
 
     [Fact]
+    public void Managed_stopped_endpoint_gate_is_loopback_and_status_scoped()
+    {
+        using var temp = new TempDir();
+        var vm = NewServicesVm(temp, out _);
+        var server = vm.Servers.First(s => !s.EmbeddingsMode);
+
+        Assert.True(vm.IsManagedServerStopped($"http://127.0.0.1:{server.Port}"));
+        Assert.False(vm.IsManagedServerStopped($"http://127.0.0.1:{server.Port + 1}"));
+        Assert.False(vm.IsManagedServerStopped($"https://example.invalid:{server.Port}"));
+
+        server.Status = ServerStatus.Starting;
+        Assert.False(vm.IsManagedServerStopped($"http://127.0.0.1:{server.Port}"));
+    }
+
+    [Fact]
     public async Task Rebuild_reuses_the_existing_row_instead_of_replacing_it()
     {
         using var temp = new TempDir();

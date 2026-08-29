@@ -26,6 +26,7 @@ public partial class ModelManagementViewModel : ObservableObject
     private readonly List<LlmModel> _modelCache = [];
     private readonly object _modelCacheLock = new();
     private readonly List<ModelProfileItemViewModel> _allModels = [];
+    private CancellationTokenSource? _hfSelectionCts;
 
     /// <summary>The (possibly filtered) rows shown in the list. Filtering narrows this
     /// from <see cref="_allModels"/> without a refetch (r13 02-model-library.md 2.1).</summary>
@@ -1170,6 +1171,7 @@ public partial class ModelManagementViewModel : ObservableObject
         if (string.IsNullOrWhiteSpace(HfSearchQuery))
             return;
 
+        CancelHfSelection();
         IsSearchingHf = true;
         HfBrowserStatus = string.Empty;
         HfFiles.Clear();
@@ -1198,16 +1200,43 @@ public partial class ModelManagementViewModel : ObservableObject
         if (repo is null)
             return;
 
+        var selectionCts = new CancellationTokenSource();
+        var previousCts = Interlocked.Exchange(ref _hfSelectionCts, selectionCts);
+        try { previousCts?.Cancel(); }
+        catch (ObjectDisposedException) { }
+        previousCts?.Dispose();
+        try
+        {
+            await SelectHfRepoCoreAsync(repo, selectionCts.Token);
+        }
+        finally
+        {
+            if (ReferenceEquals(Interlocked.CompareExchange(ref _hfSelectionCts, null, selectionCts), selectionCts))
+                selectionCts.Dispose();
+        }
+    }
+
+    private void CancelHfSelection()
+    {
+        try { _hfSelectionCts?.Cancel(); }
+        catch (ObjectDisposedException) { }
+    }
+
+    private async Task SelectHfRepoCoreAsync(HfRepoResultViewModel repo, CancellationToken ct)
+    {
         SelectedHfRepo = repo;
         HfFiles.Clear();
         IsLoadingHfFiles = true;
         HfBrowserStatus = $"Checking {repo.RepoId} and calculating fit...";
         try
         {
-            var card = await _hf.GetModelCardAsync(repo.RepoId);
+            ct.ThrowIfCancellationRequested();
+            var card = await _hf.GetModelCardAsync(repo.RepoId, ct);
+            ct.ThrowIfCancellationRequested();
             repo.RevisionSha = card?.Sha ?? string.Empty;
             var revision = string.IsNullOrWhiteSpace(repo.RevisionSha) ? "main" : repo.RevisionSha;
-            var tree = await _hf.GetTreeAsync(repo.RepoId, revision);
+            var tree = await _hf.GetTreeAsync(repo.RepoId, revision, ct);
+            ct.ThrowIfCancellationRequested();
             repo.License = card?.License ?? "unknown";
 
             if (tree is null)
@@ -1217,6 +1246,7 @@ public partial class ModelManagementViewModel : ObservableObject
             }
 
             var hardware = await _system.GetHardwareProfileAsync();
+            ct.ThrowIfCancellationRequested();
             var layout = LocalAiAssetLocator.Detect(_settings.Settings.DataManagement.LocalAiAssetsRoot);
             var modelsDir = string.IsNullOrWhiteSpace(layout.ModelsDirectory)
                 ? Path.Combine(_settings.Settings.DataManagement.LocalAiAssetsRoot, "Models")
@@ -1229,31 +1259,94 @@ public partial class ModelManagementViewModel : ObservableObject
             var listed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var shardedSets = 0;
             var manifestEntries = await _manifest.LoadAsync();
-            foreach (var entry in ggufEntries)
+            ct.ThrowIfCancellationRequested();
+            var modelEntries = ggufEntries
+                .Where(entry =>
+                {
+                    var name = System.IO.Path.GetFileName(entry.Path);
+                    return !name.StartsWith("mmproj-", StringComparison.OrdinalIgnoreCase)
+                        && !name.StartsWith("mtp-", StringComparison.OrdinalIgnoreCase);
+                })
+                .ToList();
+
+            // Show every known model variant immediately. Metadata and
+            // companion checks are independent network work, so one slow or
+            // unavailable variant must not hold the rest of the repo hostage.
+            var rows = new Dictionary<string, HfFileResultViewModel>(StringComparer.OrdinalIgnoreCase);
+            foreach (var entry in modelEntries)
             {
-                // Companions belong to their model's set, not to a row of their own.
-                var name = System.IO.Path.GetFileName(entry.Path);
-                if (name.StartsWith("mmproj-", StringComparison.OrdinalIgnoreCase) || name.StartsWith("mtp-", StringComparison.OrdinalIgnoreCase))
+                var row = new HfFileResultViewModel(
+                    repo.RepoId,
+                    entry.Path,
+                    entry.SizeBytes,
+                    entry.LfsSha256,
+                    ModelFitTier.Unknown,
+                    "Compatibility check pending.",
+                    revisionSha: revision)
+                {
+                    IsChecking = true
+                };
+                rows[entry.Path] = row;
+                HfFiles.Add(row);
+            }
+
+            var enrichments = modelEntries.Select(async entry =>
+            {
+                try
+                {
+                    var modelMetadata = await _hf.GetGgufMetadataAsync(repo.RepoId, entry.Path, entry.LfsSha256, revision, ct);
+                    ct.ThrowIfCancellationRequested();
+                    var companionDeclarations = await _hf.ResolveCompanionDeclarationsAsync(
+                        repo.RepoId, tree, entry.Path, modelMetadata, revision, ct);
+                    ct.ThrowIfCancellationRequested();
+                    var fileSet = ModelFileSetResolver.Resolve(repo.RepoId, tree, entry.Path, companionDeclarations);
+                    var setBytes = fileSet.Entries
+                        .Where(e => e.Role is ModelFileRole.Model or ModelFileRole.Shard)
+                        .Sum(e => e.SizeBytes ?? 0);
+                    var fit = ModelFitEstimator.Estimate(setBytes, hardware);
+                    return (entry.Path, FileSet: (ModelFileSet?)fileSet, Fit: (ModelFitResult?)fit, Error: (string?)null);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    return (entry.Path, FileSet: (ModelFileSet?)null, Fit: (ModelFitResult?)null, Error: ex.Message);
+                }
+            }).ToList();
+
+            while (enrichments.Count > 0)
+            {
+                ct.ThrowIfCancellationRequested();
+                var completed = await Task.WhenAny(enrichments);
+                enrichments.Remove(completed);
+                var result = await completed;
+                var row = rows[result.Path];
+                if (result.FileSet is { } fileSet && result.Fit is { } fit)
+                    row.ApplyResolvedDetails(fileSet, fit.Tier, fit.Reason, revision, modelsDir, manifestEntries);
+                else
+                    row.MarkCheckUnavailable(result.Error);
+            }
+
+            foreach (var entry in modelEntries)
+            {
+                ct.ThrowIfCancellationRequested();
+                var row = rows[entry.Path];
+                var modelMembers = row.FileSet.Entries
+                    .Where(e => e.Role is ModelFileRole.Model or ModelFileRole.Shard)
+                    .Select(e => e.RepoPath)
+                    .ToList();
+                if (modelMembers.Any(listed.Contains))
+                {
+                    HfFiles.Remove(row);
                     continue;
+                }
 
-                if (listed.Contains(entry.Path))
-                    continue;
-
-                var modelMetadata = await _hf.GetGgufMetadataAsync(repo.RepoId, entry.Path, entry.LfsSha256, revision);
-                var companionDeclarations = await _hf.ResolveCompanionDeclarationsAsync(
-                    repo.RepoId, tree, entry.Path, modelMetadata, revision);
-                var fileSet = ModelFileSetResolver.Resolve(repo.RepoId, tree, entry.Path, companionDeclarations);
-                foreach (var member in fileSet.Entries.Where(e => e.Role is ModelFileRole.Model or ModelFileRole.Shard))
-                    listed.Add(member.RepoPath);
-
-                if (fileSet.IsSharded)
+                foreach (var member in modelMembers)
+                    listed.Add(member);
+                if (row.IsSharded)
                     shardedSets++;
-
-                var setBytes = fileSet.Entries.Where(e => e.Role is ModelFileRole.Model or ModelFileRole.Shard).Sum(e => e.SizeBytes ?? 0);
-                var fit = ModelFitEstimator.Estimate(setBytes, hardware);
-                var fileVm = new HfFileResultViewModel(repo.RepoId, entry.Path, entry.SizeBytes, entry.LfsSha256, fit.Tier, fit.Reason, fileSet, revision);
-                fileVm.UpdateDownloadState(modelsDir, manifestEntries);
-                HfFiles.Add(fileVm);
             }
 
             HfBrowserStatus = shardedSets > 0
@@ -1458,14 +1551,18 @@ public sealed partial class HfFileResultViewModel : ObservableObject
 {
     public string RepoId { get; }
     public string Path { get; }
-    public string RevisionSha { get; }
+    public string RevisionSha { get; private set; }
     public string FileName => System.IO.Path.GetFileName(Path);
     public long? SizeBytes { get; }
     public string? LfsSha256 { get; }
     public string SizeDisplay => SizeBytes is { } s ? SystemInfoService.FormatBytes(s) : string.Empty;
-    public ModelFitTier FitTier { get; }
-    public string FitReason { get; }
+    [ObservableProperty] private ModelFitTier _fitTier;
+    [ObservableProperty] private string _fitReason;
     public string FitLabel => ModelFitEstimator.Label(FitTier);
+
+    [ObservableProperty] private bool _isChecking;
+    public string CheckingLabel => IsChecking ? "Checking compatibility…" : string.Empty;
+    public bool CanDownload => !IsChecking && DownloadState == HfDownloadState.NotDownloaded;
 
     [ObservableProperty] private bool _isDownloading;
     [ObservableProperty] private double _downloadPercent;
@@ -1477,13 +1574,22 @@ public sealed partial class HfFileResultViewModel : ObservableObject
         HfDownloadState.Downloading => $"Downloading {DownloadPercent:F0}%",
         _ => "Download"
     };
-    partial void OnDownloadStateChanged(HfDownloadState value) => OnPropertyChanged(nameof(DownloadStateLabel));
+    partial void OnDownloadStateChanged(HfDownloadState value)
+    {
+        OnPropertyChanged(nameof(DownloadStateLabel));
+        OnPropertyChanged(nameof(CanDownload));
+    }
     partial void OnDownloadPercentChanged(double value) => OnPropertyChanged(nameof(DownloadStateLabel));
+    partial void OnIsCheckingChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CheckingLabel));
+        OnPropertyChanged(nameof(CanDownload));
+    }
 
     // ── r27 04-models-arrive-complete.md 4.1: a model is a file set ─────────
 
     /// <summary>Every file this download will fetch, resolved from the repository tree.</summary>
-    public ModelFileSet FileSet { get; }
+    public ModelFileSet FileSet { get; private set; }
 
     /// <summary>Shards are not a checkbox: a partial shard set is a model that does not load.</summary>
     public bool IsSharded => FileSet.IsSharded;
@@ -1592,10 +1698,57 @@ public sealed partial class HfFileResultViewModel : ObservableObject
         FitTier = fitTier;
         FitReason = fitReason;
         FileSet = fileSet ?? new ModelFileSet(repoId, [new ModelFileSetEntry(path, sizeBytes, lfsSha256, ModelFileRole.Model, true, true)]);
-        _includeProjector = FileSet.Entries.Any(e => e.Role == ModelFileRole.Projector)
+        IncludeProjector = FileSet.Entries.Any(e => e.Role == ModelFileRole.Projector)
             && FileSet.Entries.Where(e => e.Role == ModelFileRole.Projector).All(e => e.SelectedByDefault);
-        _includeDraftHead = FileSet.Entries.Any(e => e.Role == ModelFileRole.DraftHead)
+        IncludeDraftHead = FileSet.Entries.Any(e => e.Role == ModelFileRole.DraftHead)
             && FileSet.Entries.Where(e => e.Role == ModelFileRole.DraftHead).All(e => e.SelectedByDefault);
+    }
+
+    public void ApplyResolvedDetails(
+        ModelFileSet fileSet,
+        ModelFitTier fitTier,
+        string fitReason,
+        string revisionSha,
+        string modelsDirectory,
+        IReadOnlyList<ModelManifestEntry> manifest)
+    {
+        FileSet = fileSet;
+        FitTier = fitTier;
+        FitReason = fitReason;
+        RevisionSha = revisionSha;
+        IncludeProjector = FileSet.Entries.Any(e => e.Role == ModelFileRole.Projector)
+            && FileSet.Entries.Where(e => e.Role == ModelFileRole.Projector).All(e => e.SelectedByDefault);
+        IncludeDraftHead = FileSet.Entries.Any(e => e.Role == ModelFileRole.DraftHead)
+            && FileSet.Entries.Where(e => e.Role == ModelFileRole.DraftHead).All(e => e.SelectedByDefault);
+        IsChecking = false;
+        OnPropertyChanged(nameof(FitLabel));
+        NotifyResolvedSetChanged();
+        UpdateDownloadState(modelsDirectory, manifest);
+    }
+
+    public void MarkCheckUnavailable(string? error)
+    {
+        FitTier = ModelFitTier.Unknown;
+        FitReason = string.IsNullOrWhiteSpace(error)
+            ? "Compatibility check unavailable."
+            : $"Compatibility check unavailable: {error}";
+        IsChecking = false;
+        OnPropertyChanged(nameof(FitLabel));
+    }
+
+    private void NotifyResolvedSetChanged()
+    {
+        OnPropertyChanged(nameof(IsSharded));
+        OnPropertyChanged(nameof(HasProjector));
+        OnPropertyChanged(nameof(HasDraftHead));
+        OnPropertyChanged(nameof(HasCompanions));
+        OnPropertyChanged(nameof(CompanionSizeDisplay));
+        OnPropertyChanged(nameof(HasReviewRequiredCompanions));
+        OnPropertyChanged(nameof(ProjectorSelectionLabel));
+        OnPropertyChanged(nameof(DraftHeadSelectionLabel));
+        OnPropertyChanged(nameof(CompanionReviewLabel));
+        OnPropertyChanged(nameof(SetSummary));
+        OnPropertyChanged(nameof(SelectedBytes));
     }
 }
 

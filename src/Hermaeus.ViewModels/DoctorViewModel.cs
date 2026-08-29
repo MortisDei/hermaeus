@@ -331,7 +331,6 @@ public partial class DoctorViewModel : ObservableObject
                 ok ? successBody : "See diagnostics for details.",
                 ok ? ToastKind.Success : ToastKind.Error,
                 7000);
-            await ScanAsync();
         }
         catch (Exception ex)
         {
@@ -424,6 +423,7 @@ public partial class DoctorViewModel : ObservableObject
                     _toasts.Show("Could not restart a server", ex.Message, ToastKind.Warning, 7000);
                 }
             }
+            await ScanAsync();
             LlamaServerProgress = string.Empty;
             IsInstallingLlamaServer = false;
             _installCts?.Dispose();

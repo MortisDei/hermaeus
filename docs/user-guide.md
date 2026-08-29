@@ -101,6 +101,10 @@ the current repository revision and hash-verified compatible candidates, but it
 never changes a server's configured projector or draft path. Selecting a
 replacement in Services remains an explicit user action.
 
+When a repository is selected, known GGUF variants appear immediately while
+fit and companion checks complete independently per row. A row remains
+download-disabled while its compatibility check is still running.
+
 The server card's **GPU Fit** text is a prediction for the values currently in
 the editor, including unsaved changes. It lists weights, K/V cache, runtime
 overhead, companions, and headroom separately. `Unknown` means a material input
@@ -207,6 +211,9 @@ The flyout does not replace Chat with a dashboard. `Unknown` means the current
 runtime has not supplied trustworthy evidence, not zero. Health conditions are
 restrained and deduplicated; high GPU use by itself is normal and produces no
 warning.
+Request timing labels use first content, meaning the first non-empty content
+delta received from the runtime, rather than a provider reasoning or tool
+event.
 
 Settings > Voice contains supplementary audio feedback controls for the
 explicit task/runtime/recording event list. Volume is retained when muted,
@@ -239,6 +246,9 @@ yet or whether the current filters exclude existing records.
 
 **Review candidate** lists the exact Services fields that would change. A
 speed-only, uncontrolled, missing-correctness, or stale result is refused.
+Guided recipes select the eligible candidate from the completed result
+automatically; individual evidence slices do not need manual saving before
+review.
 **Confirm reviewed changes** asks once more, rechecks the selected server plus
 runtime/model identity, and saves through the normal Settings path. Review is
 separate from running an experiment, and experiment evidence is retained.
@@ -254,8 +264,10 @@ process boundary. Results and retained evidence refresh automatically after a
 successful, failed, or cancelled recipe; the Evidence tab's **Refresh** button
 is still available for an explicit reload.
 
-The trade-off table reports decode speed, predicted and observed RAM/GPU,
-correctness, and any refusal together. Buffered llama-server replies do not
+The trade-off table reports the candidate name, decode speed and valid absolute
+and percentage deltas, predicted and observed RAM/GPU, correctness, and any
+exclusion reason together. Ties and Unknown measurements do not produce a
+manufactured ranking. Buffered llama-server replies do not
 provide trustworthy TTFT, so it remains Unknown. Low-bit KV results without a
 referenced quality score cannot be applied. CPU-MoE may likewise show an
 Unknown analytical total while retaining measured memory and throughput. Lab

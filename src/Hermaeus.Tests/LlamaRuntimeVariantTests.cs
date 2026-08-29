@@ -168,6 +168,18 @@ public sealed class LlamaRuntimeVariantTests
             NormPath(LlamaServerSetupService.ResolveInstallRoot(NormPath(@"C:\AI\llama.cpp\b10064\b10066"))));
 
     [Fact]
+    public void ResolveInstallRoot_walks_up_legacy_llama_tag_directories()
+        => Assert.Equal(
+            NormPath(@"/opt/hermaeus/llama-server"),
+            NormPath(LlamaServerSetupService.ResolveInstallRoot(NormPath(@"/opt/hermaeus/llama-server/llama-b10669/b10679/llama-b10679"))));
+
+    [Theory]
+    [InlineData("b10679", 10679)]
+    [InlineData("llama-b10679", 10679)]
+    public void TryParseBuildTag_accepts_managed_directory_names(string tag, int expected)
+        => Assert.Equal(expected, LlamaServerSetupService.TryParseBuildTag(tag));
+
+    [Fact]
     public void ResolveInstallRoot_keeps_unversioned_layout()
         => Assert.Equal(
             NormPath(@"C:\AI\llama.cpp"),

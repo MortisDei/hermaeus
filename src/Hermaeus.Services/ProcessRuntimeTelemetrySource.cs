@@ -1,6 +1,8 @@
 using System.Diagnostics;
+using System.Globalization;
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
+using Hermaeus.Services.ProcessManagement;
 
 namespace Hermaeus.Services;
 
@@ -29,10 +31,15 @@ public sealed class ProcessRuntimeTelemetrySource : IRuntimeTelemetrySource
                 process.WorkingSet64, RuntimeTelemetrySourceKind.ProcessCounter,
                 RuntimeTelemetryTrustState.ProcessScoped, observedAt,
                 "process-working-set", "Operating-system working set for the matching runtime process."));
+            var gpuMemory = await TryCaptureNvidiaProcessMemoryAsync(request.ProcessId, ct);
             samples.Add(Sample(
                 request, processInstance, RuntimeTelemetryMetric.ProcessGpuMemoryBytes,
-                null, RuntimeTelemetrySourceKind.Unknown, RuntimeTelemetryTrustState.Unknown,
-                observedAt, "process-gpu-unavailable", "No trustworthy per-process GPU memory counter is available from this source."));
+                gpuMemory, gpuMemory.HasValue ? RuntimeTelemetrySourceKind.ProcessCounter : RuntimeTelemetrySourceKind.Unknown,
+                gpuMemory.HasValue ? RuntimeTelemetryTrustState.ProcessScoped : RuntimeTelemetryTrustState.Unknown,
+                observedAt, gpuMemory.HasValue ? "nvidia-smi-process-gpu-memory" : "process-gpu-unavailable",
+                gpuMemory.HasValue
+                    ? "NVIDIA nvidia-smi process memory for the matching runtime PID."
+                    : "No trustworthy per-process GPU memory counter is available from this source."));
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception or UnauthorizedAccessException)
         {
@@ -56,6 +63,45 @@ public sealed class ProcessRuntimeTelemetrySource : IRuntimeTelemetrySource
         }
 
         return samples;
+    }
+
+    private static async Task<long?> TryCaptureNvidiaProcessMemoryAsync(int processId, CancellationToken ct)
+    {
+        if (ExecutableResolver.FindOnPath("nvidia-smi") is null)
+            return null;
+
+        using var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = "nvidia-smi",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            }
+        };
+        process.StartInfo.ArgumentList.Add("--query-compute-apps=pid,used_memory");
+        process.StartInfo.ArgumentList.Add("--format=csv,noheader,nounits");
+        try
+        {
+            if (!process.Start()) return null;
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(TimeSpan.FromSeconds(2));
+            var output = await process.StandardOutput.ReadToEndAsync(timeout.Token);
+            await process.WaitForExitAsync(timeout.Token);
+            return process.ExitCode == 0 && ProcessGpuMemoryParser.TryGetBytes(output, processId, out var bytes) ? bytes : null;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+            catch { }
+            return null;
+        }
     }
 
     private static IReadOnlyList<RuntimeTelemetrySample> UnknownProcessSamples(
@@ -83,4 +129,24 @@ public sealed class ProcessRuntimeTelemetrySource : IRuntimeTelemetrySource
         string detail) => new(
             request.SeriesId, processInstance, metric, value, source, trust,
             observedAt, request.RuntimeIdentity.StableId, code, detail);
+}
+
+public static class ProcessGpuMemoryParser
+{
+    public static bool TryGetBytes(string output, int processId, out long bytes)
+    {
+        bytes = 0;
+        foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var parts = line.Split(',', StringSplitOptions.TrimEntries);
+            if (parts.Length < 2 || !int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var pid)
+                || pid != processId || !long.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var mib)
+                || mib < 0)
+                continue;
+
+            bytes = checked(mib * 1024L * 1024L);
+            return true;
+        }
+        return false;
+    }
 }

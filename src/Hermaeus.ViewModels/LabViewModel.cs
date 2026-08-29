@@ -2,6 +2,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
+using Hermaeus.Services;
 
 namespace Hermaeus.ViewModels;
 
@@ -420,7 +421,16 @@ public partial class LabViewModel : ViewModelBase
         if (_experiments is null || _currentRun is null) return;
         try
         {
-            _applyReview = _experiments.CreateApplyReview(_currentRun.Id, "candidate-1");
+            var candidateId = _currentRun.Comparisons
+                .FirstOrDefault(comparison => comparison.CanShowHeadlineDelta)?.CandidateConfigurationId
+                ?? _currentRun.Definition.Candidates.FirstOrDefault()?.Id;
+            if (candidateId is null)
+            {
+                ApplyReviewSummary = "The completed Lab run has no candidate to review.";
+                return;
+            }
+
+            _applyReview = _experiments.CreateApplyReview(_currentRun.Id, candidateId);
             ApplyReviewSummary = _applyReview.CanApply
                 ? string.Join(Environment.NewLine, _applyReview.Changes.Select(change => $"{change.Field}: {change.CurrentValue} -> {change.ProposedValue}"))
                 : _applyReview.RefusalReason;
@@ -456,25 +466,40 @@ public partial class LabViewModel : ViewModelBase
     private static string BuildTradeoffSummary(LabRunSnapshot run)
     {
         if (run.Comparisons.Count == 0) return "No candidate comparison completed.";
-        return string.Join(Environment.NewLine, run.Comparisons.Select(comparison =>
+        var summaries = run.Comparisons.Select(comparison =>
         {
             var baseline = comparison.BaselineMetrics.FirstOrDefault(metric => metric.MetricId == "decode.tokens_per_second");
             var candidate = comparison.CandidateMetrics.FirstOrDefault(metric => metric.MetricId == "decode.tokens_per_second");
             var speed = baseline?.Median is double before && candidate?.Median is double after
-                ? $"decode {before:0.0} -> {after:0.0} tokens/s"
-                : "decode Unknown";
+                ? $"decode {before:0.0} -> {after:0.0} tokens/s ({after - before:+0.0;-0.0;0.0}, {Percent(before, after)})"
+                : "decode Unknown (a performance delta cannot be calculated)";
             var predictedRam = comparison.CandidateMetrics.FirstOrDefault(metric => metric.MetricId == "memory.ram.predicted")?.Median;
             var observedRam = comparison.CandidateMetrics.FirstOrDefault(metric => metric.MetricId == "memory.ram.observed")?.Maximum;
             var predictedGpu = comparison.CandidateMetrics.FirstOrDefault(metric => metric.MetricId == "memory.gpu.predicted")?.Median;
             var observedGpu = comparison.CandidateMetrics.FirstOrDefault(metric => metric.MetricId == "memory.gpu.observed")?.Maximum;
-            var prefix = run.Definition.ProtocolId == "prompt-prefix-reuse-v1"
-                ? PrefixSummary(comparison) : string.Empty;
-            return $"{comparison.CandidateConfigurationId}: {speed}; {prefix}RAM {Bytes(predictedRam)} predicted/{Bytes(observedRam)} observed peak; "
-                + $"GPU {Bytes(predictedGpu)} predicted/{Bytes(observedGpu)} observed peak; correctness {comparison.Equivalence.State}; "
-                + (comparison.CanShowHeadlineDelta ? "controlled" : comparison.RefusalReason);
-        }));
+            var candidateLabel = run.Definition.Candidates.FirstOrDefault(candidate => candidate.Id == comparison.CandidateConfigurationId)?.Label
+                ?? comparison.CandidateConfigurationId;
+            var prefix = run.Definition.ProtocolId == "prompt-prefix-reuse-v1" ? PrefixSummary(comparison) : string.Empty;
+            var eligibility = comparison.CanShowHeadlineDelta
+                ? comparison.Equivalence.State == LabEquivalenceState.Equivalent
+                    ? "eligible: controlled and equivalent"
+                    : "eligible: controlled"
+                : $"excluded: {comparison.RefusalReason}";
+            return $"{candidateLabel}: {speed}; {prefix}RAM {Bytes(predictedRam)} predicted, {Bytes(observedRam)} observed peak; "
+                + $"GPU {Bytes(predictedGpu)} predicted, {Bytes(observedGpu)} observed peak; correctness {comparison.Equivalence.State}; {eligibility}";
+        }).ToList();
+
+        var measured = run.Comparisons
+            .Select(comparison => (Comparison: comparison, Value: comparison.CandidateMetrics.FirstOrDefault(metric => metric.MetricId == "decode.tokens_per_second")?.Median))
+            .Where(value => value.Value.HasValue && value.Comparison.CanShowHeadlineDelta)
+            .ToArray();
+        if (measured.Length > 1 && measured.Select(value => value.Value!.Value).Max() - measured.Select(value => value.Value!.Value).Min() < 0.05)
+            summaries.Add("Measured decode performance is effectively tied across the eligible candidates; no best result is established.");
+
+        return string.Join(Environment.NewLine, summaries);
 
         static string Bytes(double? value) => value.HasValue ? $"{value.Value / 1024 / 1024 / 1024:0.00} GiB" : "Unknown";
+        static string Percent(double before, double after) => before > 0 ? $"{(after - before) / before:+0.0%;-0.0%;0.0%}" : "percentage Unknown";
         static string PrefixSummary(LabComparison comparison)
         {
             var before = comparison.BaselineMetrics.FirstOrDefault(metric => metric.MetricId == "prompt.milliseconds")?.Median;
@@ -486,15 +511,8 @@ public partial class LabViewModel : ViewModelBase
         }
     }
 
-    private static LabConfiguration ConfigurationFrom(ServerConfig source, string id, string label) => new()
-    {
-        Id = id, Label = label, ContextSize = source.ContextSize, GpuLayers = source.GpuLayers,
-        Threads = source.Threads, PromptThreads = source.PromptThreads, Slots = source.Slots,
-        KvCacheTypeK = source.KvCacheTypeK, KvCacheTypeV = source.KvCacheTypeV,
-        FlashAttention = source.FlashAttention, CpuMoeLayers = source.CpuMoeLayers,
-        ExtraArgumentsSha256 = string.IsNullOrWhiteSpace(source.ExtraArgs)
-            ? string.Empty : LabCanonicalJson.Hash(source.ExtraArgs)
-    };
+    private static LabConfiguration ConfigurationFrom(ServerConfig source, string id, string label)
+        => LabConfigurationMapper.FromServer(source, id, label);
 
     private static string? Choice(string value) => string.Equals(value, "All", StringComparison.Ordinal) ? null : value;
     private static string? Text(string value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();

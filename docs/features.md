@@ -143,8 +143,9 @@ See the [Projects reference](projects.md).
 
 Lab runs controlled measurements in an isolated loopback runtime without
 stopping Chat, changing saved settings, or selecting a winner automatically.
-Definitions are frozen, candidates are bounded, missing measurements remain
-missing, and output correctness gates comparisons and Apply review.
+Definitions are frozen, candidates are bounded, valid recipe evidence flows
+directly into candidate review, missing measurements remain missing, and output
+correctness gates comparisons and Apply review.
 
 The Evidence surface stores typed Agent, GPU Fit, and Lab records with source
 links, fingerprints, corrections, redacted export, and confirmed removal.

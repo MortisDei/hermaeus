@@ -31,13 +31,13 @@ public readonly record struct ChatSendTiming(
     /// </summary>
     public const double CpuSpeedPromptThreshold = 200;
 
-    /// <summary>Everything the user experienced as "silence" before the first token: recall through first token.</summary>
+    /// <summary>Everything the user experienced as "silence" before the first received content delta: recall through content.</summary>
     public long PreFirstTokenMs => RecallMs + SelectMs + LessonMs + RagMs + RecallInjectionMs + PromptBuildMs + FirstTokenMs;
 
     /// <summary>
-    /// Time between the first streamed event of any kind and the first visible
-    /// content token (r14 4.1): a non-content stream prefix (reasoning or tool
-    /// deltas, buffering) the user saw as a blank bubble.
+    /// Time between the first streamed event of any kind and the first
+    /// non-empty content delta (r14 4.1): a non-content stream prefix
+    /// (reasoning or tool deltas, buffering) before content reached the client.
     /// </summary>
     public long NonContentStreamMs => FirstEventMs > 0 && FirstTokenMs > FirstEventMs ? FirstTokenMs - FirstEventMs : 0;
 
@@ -53,7 +53,7 @@ public readonly record struct ChatSendTiming(
     {
         var s = $"recall {RecallMs} ms, select {SelectMs} ms, lesson {LessonMs} ms, rag {RagMs} ms, " +
                 $"recall-inject {RecallInjectionMs} ms, " +
-                $"prompt build {PromptBuildMs} ms, first token {FirstTokenMs} ms, total {TotalMs} ms";
+                $"prompt build {PromptBuildMs} ms, first content {FirstTokenMs} ms, total {TotalMs} ms";
 
         if (NonContentStreamMs > 0)
             s += $", non-content stream {NonContentStreamMs} ms";

@@ -1410,7 +1410,7 @@ public partial class ChatViewModel : ViewModelBase
                 var hint = ChatSendTiming.SlowSendBottleneckHint(
                     timing.PromptTokensPerSecond,
                     await IsGpuPresentButCpuInferenceAsync(_cts.Token));
-                var warning = $"Slow chat send ({timing.PreFirstTokenMs} ms before first token): {timing.Format()}";
+                var warning = $"Slow chat send ({timing.PreFirstTokenMs} ms before first content): {timing.Format()}";
                 if (hint is not null)
                     warning += $" - {hint}";
                 _runtimeLogs.Add(new RuntimeLogEntry(DateTime.UtcNow, RuntimeLogLevel.Warning, RuntimeLogCategory.Service, warning));

@@ -127,11 +127,15 @@
                                                 ToolTip.Tip="{Binding FitReason}">
                                             <TextBlock Text="{Binding FitLabel}" FontSize="10" FontWeight="SemiBold" />
                                         </Border>
+                                        <TextBlock Grid.Column="2" Text="{Binding CheckingLabel}"
+                                                   IsVisible="{Binding IsChecking}"
+                                                   FontSize="10" Opacity="0.65"
+                                                   VerticalAlignment="Center" />
                                         <Button Grid.Column="3"
                                                 Content="{Binding DownloadStateLabel}"
                                                 Command="{Binding $parent[ItemsControl].DataContext.DownloadHfFileCommand}"
                                                 CommandParameter="{Binding}"
-                                                IsEnabled="{Binding DownloadState, Converter={x:Static views:NotDownloadedConverter.Instance}}"
+                                                IsEnabled="{Binding CanDownload}"
                                                 FontSize="12" Padding="10,4" CornerRadius="6"
                                                 ToolTip.Tip="Downloads the whole file set into its own folder under Models\LLM\, each file SHA256-verified against the repo before use." />
                                     </Grid>
