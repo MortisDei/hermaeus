@@ -37,13 +37,24 @@ public sealed class LocalApiProcessManagerBoundaryTests
         await settings.SaveAsync();
 
         var apiDll = FindLocalApiDll();
+        var launchCount = 0;
+
+        (string? FileName, IReadOnlyList<string> Args) ResolveTarget()
+        {
+            launchCount++;
+            return ("dotnet", [apiDll]);
+        }
+
         using var manager = new LocalApiProcessManager(
-            launchTargetResolver: () => ("dotnet", [apiDll]),
+            launchTargetResolver: ResolveTarget,
             settingsPathResolver: () => settingsPath);
         await manager.EnsureRunningStateAsync(settings.Settings);
 
         using var client = new HttpClient();
         Assert.Equal(HttpStatusCode.OK, await GetModelsAsync(client, firstPort, oldToken));
+
+        await manager.EnsureRunningStateAsync(settings.Settings);
+        Assert.Equal(1, launchCount);
 
         var tokenVm = new LocalApiSettingsViewModel(new BoundarySecretStore(), settings,
             () => manager.EnsureRunningStateAsync(settings.Settings));
@@ -52,11 +63,13 @@ public sealed class LocalApiProcessManagerBoundaryTests
         tokenVm.NewTokenValue = newToken;
         await tokenVm.AddTokenCommand.ExecuteAsync(null);
 
+        Assert.Equal(2, launchCount);
         Assert.Equal(HttpStatusCode.OK, await GetModelsAsync(client, firstPort, newToken));
 
         tokenVm.ReloadFrom(settings.Settings);
         await tokenVm.RevokeTokenCommand.ExecuteAsync(tokenVm.Tokens.Single(row => row.Id == oldEntry.Id));
 
+        Assert.Equal(3, launchCount);
         Assert.Equal(HttpStatusCode.Unauthorized, await GetModelsAsync(client, firstPort, oldToken));
         Assert.Equal(HttpStatusCode.OK, await GetModelsAsync(client, firstPort, newToken));
 
@@ -65,6 +78,7 @@ public sealed class LocalApiProcessManagerBoundaryTests
         await settings.SaveAsync();
         await manager.EnsureRunningStateAsync(settings.Settings);
 
+        Assert.Equal(4, launchCount);
         Assert.Equal(HttpStatusCode.OK, await GetModelsAsync(client, secondPort, newToken));
         await Assert.ThrowsAsync<HttpRequestException>(() => GetModelsAsync(client, firstPort, newToken));
     }

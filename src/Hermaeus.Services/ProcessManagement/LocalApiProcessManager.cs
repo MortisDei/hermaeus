@@ -65,7 +65,7 @@ public sealed class LocalApiProcessManager : IDisposable
             }
 
             var requested = GetRuntimeConfiguration(settings);
-            if (IsRunning && Equals(_activeConfiguration, requested))
+            if (IsRunning && RuntimeConfigurationEquals(_activeConfiguration, requested))
                 return;
 
             if (IsRunning)
@@ -214,7 +214,18 @@ public sealed class LocalApiProcessManager : IDisposable
 
     private static LocalApiRuntimeConfiguration GetRuntimeConfiguration(AppSettings settings) =>
         new(settings.LocalApi.Port is > 0 and <= 65535 ? settings.LocalApi.Port : 39300,
-            settings.LocalApi.Tokens.Select(token => (token.Id, token.SecretRef)).ToArray());
+            settings.LocalApi.Tokens
+                .Select(token => (token.Id, token.SecretRef))
+                .OrderBy(token => token.Id, StringComparer.Ordinal)
+                .ThenBy(token => token.SecretRef, StringComparer.Ordinal)
+                .ToArray());
+
+    private static bool RuntimeConfigurationEquals(
+        LocalApiRuntimeConfiguration? active,
+        LocalApiRuntimeConfiguration requested) =>
+        active is not null
+        && active.Port == requested.Port
+        && active.Tokens.SequenceEqual(requested.Tokens);
 
     private void SetStatus(string label)
     {
