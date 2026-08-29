@@ -531,11 +531,11 @@ public sealed class LabRecipeRunner
         var run = await _experiments.StartAsync(definition, source, ct);
         if (run.Status != LabRunStatus.Running) return run;
 
+        var observations = new List<LabObservation>();
+        var outputs = new List<LabOutputEvidence>();
+        var failures = new List<string>();
         try
         {
-            var observations = new List<LabObservation>();
-            var outputs = new List<LabOutputEvidence>();
-            var failures = new List<string>();
             var consecutiveFailures = 0;
             var reusedCounterField = PromptReuseEvidenceAdapter.ProvenCounterField(capabilities.Observations ?? []);
             var configurations = plan.Candidates.Prepend(plan.Baseline).ToArray();
@@ -598,6 +598,18 @@ public sealed class LabRecipeRunner
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             return await _experiments.CancelAsync(run.Id, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            failures.Add($"run failed: {ex.Message}");
+            try
+            {
+                return await _experiments.CompleteAsync(run.Id, observations, outputs, failures, CancellationToken.None);
+            }
+            catch (Exception cleanupException)
+            {
+                throw new AggregateException("The Lab run failed and cleanup also failed.", ex, cleanupException);
+            }
         }
     }
 

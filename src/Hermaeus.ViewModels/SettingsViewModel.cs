@@ -171,7 +171,7 @@ public partial class SettingsViewModel : ViewModelBase
         Ui = new UiSettingsViewModel();
         Memory = new MemorySettingsViewModel(recallIndexing, _toasts);
         Mcp = new McpSettingsViewModel();
-        LocalApi = new LocalApiSettingsViewModel(secrets, _svc);
+        LocalApi = new LocalApiSettingsViewModel(secrets, _svc, EnsureLocalApiRunningStateAsync);
         LocalApi.ProcessStatusLabel = _localApiProcess.StatusLabel;
         _localApiProcess.StatusChanged += () => RunOnUi(() => LocalApi.ProcessStatusLabel = _localApiProcess.StatusLabel);
         // Voice providers/process management now live on the Services page; this VM
@@ -304,7 +304,7 @@ public partial class SettingsViewModel : ViewModelBase
             && !string.Equals(
                 SettingsService.ResolveDataRoot(candidate),
                 SettingsService.ResolveDataRoot(_svc.Settings),
-                StringComparison.OrdinalIgnoreCase))
+                ModelPathSafety.LocalPathComparison))
         {
             candidate.DataManagement.DataRootDirectory = previousDataRoot;
         }
@@ -488,19 +488,11 @@ public partial class SettingsViewModel : ViewModelBase
     {
         try
         {
-            if (_svc.Settings.LocalApi.Enabled)
-            {
-                if (!_localApiProcess.IsRunning)
-                    await _localApiProcess.StartAsync(_svc.Settings);
-            }
-            else
-            {
-                _localApiProcess.Stop();
-            }
+            await _localApiProcess.EnsureRunningStateAsync(_svc.Settings);
         }
         catch (Exception ex)
         {
-            _toasts.Show("Local API did not start", ex.Message, ToastKind.Warning);
+            _toasts.Show("Local API settings did not apply", ex.Message, ToastKind.Warning);
         }
     }
 

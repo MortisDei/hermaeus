@@ -34,10 +34,10 @@ public static class DataRootManifest
             var isRootFile = string.Equals(
                 Path.GetDirectoryName(path),
                 root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
-                StringComparison.OrdinalIgnoreCase);
+                ModelPathSafety.LocalPathComparison);
             if (isRootFile
-                && (string.Equals(Path.GetFileName(path), SettingsFileName, StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(Path.GetFileName(path), ProcessLockFileName, StringComparison.OrdinalIgnoreCase)))
+                && (string.Equals(Path.GetFileName(path), SettingsFileName, ModelPathSafety.LocalPathComparison)
+                    || string.Equals(Path.GetFileName(path), ProcessLockFileName, ModelPathSafety.LocalPathComparison)))
                 continue;
 
             yield return (path, Path.GetRelativePath(root, path));

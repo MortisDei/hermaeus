@@ -60,6 +60,13 @@ limit.
   `nvidia-smi` path when available, avoids duplicate same-build llama.cpp
   installs, handles legacy nested managed runtime directories, and rescans
   Doctor after stopped servers have restarted.
+- Fixed Local API token and port changes remaining stale in an already-running
+  child. Settings now serialize the change, restart the owned child, wait for
+  health, and keep the process stopped if the new configuration cannot start.
+- Fixed Linux data-root identity treating case-distinct directories as one,
+  and made data-root migration roll back completed moves when a later transfer
+  or settings write fails. Lab isolated runs now clean up owned runtimes after
+  ordinary workload or telemetry exceptions as well as cancellation.
 - Normal Settings preferences autosave with a visible persistence state. The
   top-level Save button is removed, task audio notifications default off, and
   managed llama.cpp uses newer load-mode and localhost-only CORS arguments only

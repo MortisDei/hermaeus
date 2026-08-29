@@ -215,7 +215,8 @@ See [First launch and troubleshooting](user-guide.md) and [Packaging](packaging.
   user preferences, while Services holds process and file configuration.
 - The local API is an off-by-default, loopback-only surface for selected Chat,
   embedding, Memory, RAG, model, and capability operations. It uses named
-  tokens and does not expose Agent execution in this beta.
+  tokens, applies token and port changes by restarting its owned child, and
+  does not expose Agent execution in this beta.
 - Privacy Audit shows which configured features can send content to remote
   providers and the status of local protections.
 

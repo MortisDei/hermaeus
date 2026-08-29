@@ -15,9 +15,14 @@ namespace Hermaeus.Services.ProcessManagement;
 public sealed class LocalApiProcessManager : IDisposable
 {
     private Process? _process;
+    private LocalApiRuntimeConfiguration? _activeConfiguration;
+    private readonly SemaphoreSlim _operationGate = new(1, 1);
     private readonly IProcessJobObject _jobObject;
     private readonly IRuntimeLogService? _runtimeLogs;
     private readonly Func<(string? FileName, IReadOnlyList<string> Args)> _resolveLaunchTarget;
+    private readonly Func<string?> _settingsPathResolver;
+
+    private sealed record LocalApiRuntimeConfiguration(int Port, IReadOnlyList<(string Id, string SecretRef)> Tokens);
 
     public bool IsRunning => _process is { HasExited: false };
     public string StatusLabel { get; private set; } = "Stopped";
@@ -26,16 +31,75 @@ public sealed class LocalApiProcessManager : IDisposable
     public LocalApiProcessManager(
         IProcessJobObject? jobObject = null,
         IRuntimeLogService? runtimeLogs = null,
-        Func<(string? FileName, IReadOnlyList<string> Args)>? launchTargetResolver = null)
+        Func<(string? FileName, IReadOnlyList<string> Args)>? launchTargetResolver = null,
+        Func<string?>? settingsPathResolver = null)
     {
         _jobObject = jobObject ?? ProcessJobObject.Default;
         _runtimeLogs = runtimeLogs;
         _resolveLaunchTarget = launchTargetResolver ?? (() => ResolveLaunchTarget());
+        _settingsPathResolver = settingsPathResolver ?? (() => null);
     }
 
     public async Task StartAsync(AppSettings settings, CancellationToken ct = default)
     {
+        await _operationGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await StartCoreAsync(settings, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            _operationGate.Release();
+        }
+    }
+
+    public async Task EnsureRunningStateAsync(AppSettings settings, CancellationToken ct = default)
+    {
+        await _operationGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            if (!settings.LocalApi.Enabled)
+            {
+                await StopCoreAsync().ConfigureAwait(false);
+                return;
+            }
+
+            var requested = GetRuntimeConfiguration(settings);
+            if (IsRunning && Equals(_activeConfiguration, requested))
+                return;
+
+            if (IsRunning)
+                await StopCoreAsync().ConfigureAwait(false);
+            await StartCoreAsync(settings, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            _operationGate.Release();
+        }
+    }
+
+    public async Task StopAsync(CancellationToken ct = default)
+    {
+        await _operationGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await StopCoreAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            _operationGate.Release();
+        }
+    }
+
+    private async Task StartCoreAsync(AppSettings settings, CancellationToken ct)
+    {
         if (IsRunning) return;
+        if (_process is not null)
+        {
+            _process.Dispose();
+            _process = null;
+            _activeConfiguration = null;
+        }
         if (!settings.LocalApi.Enabled) return;
 
         if (settings.LocalApi.Tokens.Count == 0)
@@ -63,6 +127,12 @@ public sealed class LocalApiProcessManager : IDisposable
         };
         foreach (var arg in args)
             psi.ArgumentList.Add(arg);
+        var settingsPath = _settingsPathResolver();
+        if (!string.IsNullOrWhiteSpace(settingsPath))
+        {
+            psi.ArgumentList.Add("--settings-path");
+            psi.ArgumentList.Add(Path.GetFullPath(settingsPath));
+        }
 
         _process = new Process { StartInfo = psi, EnableRaisingEvents = true };
         _process.OutputDataReceived += (_, _) => { };
@@ -86,12 +156,20 @@ public sealed class LocalApiProcessManager : IDisposable
             _process.BeginErrorReadLine();
 
             var port = settings.LocalApi.Port is > 0 and <= 65535 ? settings.LocalApi.Port : 39300;
-            await WaitForHealthAsync(port, ct);
+            await WaitForHealthAsync(port, ct).ConfigureAwait(false);
+            _activeConfiguration = GetRuntimeConfiguration(settings);
             SetStatus("Running");
         }
-        catch
+        catch (Exception ex)
         {
-            Stop();
+            try
+            {
+                await StopCoreAsync().ConfigureAwait(false);
+            }
+            catch (Exception stopException)
+            {
+                throw new AggregateException(ex, stopException);
+            }
             throw;
         }
     }
@@ -100,15 +178,43 @@ public sealed class LocalApiProcessManager : IDisposable
     {
         try
         {
-            if (_process is { HasExited: false })
-                _process.Kill(entireProcessTree: true);
+            StopAsync().GetAwaiter().GetResult();
         }
         catch { }
-
-        _process?.Dispose();
-        _process = null;
-        SetStatus("Stopped");
     }
+
+    private async Task StopCoreAsync()
+    {
+        var process = _process;
+        if (process is null)
+        {
+            _activeConfiguration = null;
+            SetStatus("Stopped");
+            return;
+        }
+
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync().ConfigureAwait(false);
+            }
+            _process = null;
+            _activeConfiguration = null;
+            process.Dispose();
+            SetStatus("Stopped");
+        }
+        catch
+        {
+            SetStatus("Stop failed");
+            throw;
+        }
+    }
+
+    private static LocalApiRuntimeConfiguration GetRuntimeConfiguration(AppSettings settings) =>
+        new(settings.LocalApi.Port is > 0 and <= 65535 ? settings.LocalApi.Port : 39300,
+            settings.LocalApi.Tokens.Select(token => (token.Id, token.SecretRef)).ToArray());
 
     private void SetStatus(string label)
     {

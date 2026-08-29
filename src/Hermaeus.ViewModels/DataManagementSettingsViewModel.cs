@@ -157,7 +157,7 @@ public partial class DataManagementSettingsViewModel : ObservableObject
     public void UpdateMigrationPreview()
     {
         var plan = _settings.PreviewDataRootMigration(_settings.Settings.DataManagement.DataRootDirectory, DataRootDirectory);
-        var rootsDiffer = !string.Equals(plan.PreviousDataRoot, plan.CurrentDataRoot, StringComparison.OrdinalIgnoreCase);
+        var rootsDiffer = !ModelPathSafety.AreSameLocalPath(plan.PreviousDataRoot, plan.CurrentDataRoot);
         DataRootMigrationPending = rootsDiffer && plan.Conflicts.Count == 0;
         DataMigrationPreview = plan.Conflicts.Count > 0
             ? $"Move blocked: {plan.Conflicts.Count} existing database file(s) in target."
@@ -197,7 +197,7 @@ public partial class DataManagementSettingsViewModel : ObservableObject
 
             await CommitDataRootMigration();
             var committedRoot = SettingsService.ResolveDataRoot(_settings.Settings);
-            if (!string.Equals(committedRoot, plan.CurrentDataRoot, StringComparison.OrdinalIgnoreCase))
+            if (!ModelPathSafety.AreSameLocalPath(committedRoot, plan.CurrentDataRoot))
                 RevertDataRootEdit();
             else
                 UpdateMigrationPreview();

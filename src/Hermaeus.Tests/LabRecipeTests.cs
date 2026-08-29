@@ -184,6 +184,21 @@ public sealed class LabRecipeTests
     }
 
     [Fact]
+    public async Task Runner_cleans_owned_runtime_after_ordinary_workload_exception()
+    {
+        using var fixture = new RecipeFixture();
+        fixture.Workload.ThrowOnCall = 1;
+        var plan = LabRecipeCatalog.Build(LabRecipeKind.Context, fixture.Source, []);
+
+        var run = await fixture.Runner.RunAsync(plan, fixture.Source, fixture.Capabilities([]), "controlled prompt");
+
+        Assert.Equal(LabRunStatus.PartiallySucceeded, run.Status);
+        Assert.Contains(run.Failures, failure => failure.Contains("injected workload failure", StringComparison.Ordinal));
+        Assert.NotEmpty(fixture.Host.Sessions);
+        Assert.All(fixture.Host.Sessions, session => Assert.Equal(1, session.StopCount));
+    }
+
+    [Fact]
     public async Task Successful_recipe_materializes_the_candidate_for_review()
     {
         using var fixture = new RecipeFixture();
@@ -388,11 +403,14 @@ public sealed class LabRecipeTests
     private sealed class FakeWorkload : ILabWorkloadExecutor
     {
         public int CallCount { get; private set; }
+        public int? ThrowOnCall { get; set; }
         public List<LabWorkloadRequest> Requests { get; } = [];
         public bool DifferentCandidateOutput { get; set; }
         public Task<LabWorkloadResult> ExecuteAsync(LabWorkloadRequest request, CancellationToken ct = default)
         {
             CallCount++;
+            if (CallCount == ThrowOnCall)
+                throw new InvalidOperationException("injected workload failure");
             Requests.Add(request);
             var value = request.Configuration.Id == "baseline" ? 10d : 12d;
             var observation = new LabObservation

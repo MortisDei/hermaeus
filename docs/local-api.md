@@ -12,7 +12,9 @@ serve when the setting is off or no token exists. It binds to `127.0.0.1` and
 does not bind to `0.0.0.0`.
 
 Each caller has a named token stored through the secret store. Tokens can be
-revoked individually. Every route except `GET /health` requires the matching
+revoked individually. Saving a token or port change persists the settings,
+restarts the owned child, waits for its health check, and only then reports the
+new runtime state. Every route except `GET /health` requires the matching
 `X-Hermaeus-Token` header. `X-Hermaeus-Client` is an optional display hint and
 is not an authentication or authorization signal.
 
