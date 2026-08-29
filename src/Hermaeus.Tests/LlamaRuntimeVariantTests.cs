@@ -218,6 +218,73 @@ public sealed class LlamaRuntimeVariantTests
     }
 
     [Fact]
+    public void Nested_archive_layout_keeps_current_build_and_ignores_unowned_tag_directories()
+    {
+        using var temp = new TempDir();
+        var root = temp.PathFor("llama-server");
+        var oldPath = CreateNestedRuntime(root, "b10660");
+        CreateNestedRuntime(root, "b10650");
+        var currentPath = CreateNestedRuntime(root, "llama-b10679");
+        var sameBuildLegacyPath = Path.Combine(root, "llama-b10679", "llama-b10679", OperatingSystem.IsWindows() ? "llama-server.exe" : "llama-server");
+        Directory.CreateDirectory(Path.GetDirectoryName(sameBuildLegacyPath)!);
+        File.WriteAllText(sameBuildLegacyPath, "same-build legacy layout");
+        Directory.CreateDirectory(Path.Combine(root, "b99999"));
+
+        var candidates = LlamaServerSetupService.SelectPrunableVersionDirectories(root, currentPath, oldPath);
+
+        Assert.Contains(Path.Combine(root, "b10650"), candidates);
+        Assert.DoesNotContain(Path.Combine(root, "b10660"), candidates);
+        Assert.DoesNotContain(Path.Combine(root, "b10679"), candidates);
+        Assert.DoesNotContain(Path.Combine(root, "llama-b10679"), candidates);
+        Assert.DoesNotContain(Path.Combine(root, "b99999"), candidates);
+
+        var reclaimed = LlamaServerSetupService.PruneVersionDirectories(
+            root, candidates.Append(Path.Combine(root, "b10679")), currentPath, oldPath);
+
+        Assert.True(reclaimed > 0);
+        Assert.True(File.Exists(currentPath));
+        Assert.True(File.Exists(sameBuildLegacyPath));
+        Assert.True(File.Exists(oldPath));
+        Assert.False(Directory.Exists(Path.Combine(root, "b10650")));
+        Assert.True(Directory.Exists(Path.Combine(root, "b99999")));
+    }
+
+    [Fact]
+    public void Recovery_install_with_no_previous_runtime_survives_prune()
+    {
+        using var temp = new TempDir();
+        var root = temp.PathFor("llama-server");
+        var recoveredPath = CreateNestedRuntime(root, "b10679");
+
+        var candidates = LlamaServerSetupService.SelectPrunableVersionDirectories(root, recoveredPath, null);
+
+        Assert.Empty(candidates);
+        LlamaServerSetupService.PruneVersionDirectories(root, candidates, recoveredPath);
+        Assert.True(File.Exists(recoveredPath));
+    }
+
+    [Fact]
+    public void Sequential_updates_keep_C_remove_only_genuinely_superseded_A()
+    {
+        using var temp = new TempDir();
+        var root = temp.PathFor("llama-server");
+        var a = CreateNestedRuntime(root, "b10650");
+        var b = CreateNestedRuntime(root, "b10660");
+
+        var afterB = LlamaServerSetupService.SelectPrunableVersionDirectories(root, b, a);
+        LlamaServerSetupService.PruneVersionDirectories(root, afterB, b, a);
+        Assert.True(File.Exists(b));
+
+        var c = CreateNestedRuntime(root, "b10679");
+        var afterC = LlamaServerSetupService.SelectPrunableVersionDirectories(root, c, b);
+        LlamaServerSetupService.PruneVersionDirectories(root, afterC, c, b);
+
+        Assert.True(File.Exists(c));
+        Assert.True(File.Exists(b));
+        Assert.False(Directory.Exists(Path.Combine(root, "b10650")));
+    }
+
+    [Fact]
     public void NearestTagDirectoryName_finds_the_version_dir()
     {
         Assert.Equal("b10066", LlamaServerSetupService.NearestTagDirectoryName(NormPath(@"C:\AI\llama.cpp\b10064\b10066\llama-server.exe")));
@@ -241,6 +308,16 @@ public sealed class LlamaRuntimeVariantTests
 
     private static string? Select(LlamaPlatform platform, LlamaRuntimeVariant variant)
         => LlamaServerSetupService.SelectDownloadAsset(B10066Assets, platform, variant)?.BrowserDownloadUrl;
+
+    private static string CreateNestedRuntime(string root, string tag)
+    {
+        var versionTag = tag.StartsWith("llama-", StringComparison.OrdinalIgnoreCase) ? tag[6..] : tag;
+        var versionDirectory = Path.Combine(root, versionTag);
+        var executable = Path.Combine(versionDirectory, $"llama-{versionTag}", OperatingSystem.IsWindows() ? "llama-server.exe" : "llama-server");
+        Directory.CreateDirectory(Path.GetDirectoryName(executable)!);
+        File.WriteAllText(executable, tag);
+        return executable;
+    }
 
     private static string NormPath(string p) => p.Replace('\\', '/').TrimEnd('/');
 }

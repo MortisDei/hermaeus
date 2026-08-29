@@ -661,7 +661,13 @@ public sealed partial class DoctorService
 
     public long PruneLlamaServerVersions(IReadOnlyList<string> versionDirectories)
     {
-        var reclaimed = LlamaServerSetupService.PruneVersionDirectories(versionDirectories);
+        var installRoot = ResolveLlamaServerInstallDirectory();
+        var protectedExecutables = _settings.Settings.ManagedServers
+            .Select(server => ResolveExecutable(server.ExecutablePath))
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .ToArray();
+        var reclaimed = LlamaServerSetupService.PruneVersionDirectories(
+            installRoot, versionDirectories, protectedExecutables);
         if (reclaimed > 0)
             _runtimeLogs?.Add(new RuntimeLogEntry(
                 DateTime.UtcNow,

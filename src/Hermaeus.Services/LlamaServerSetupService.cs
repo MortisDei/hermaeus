@@ -391,20 +391,26 @@ public sealed class LlamaServerSetupService
 
     /// <summary>
     /// From a set of sibling directory paths, selects the tag-pattern
-    /// directories that are safe to prune: everything named "bNNNNN" except the
-    /// tags to keep (the newly installed and the previously configured
-    /// versions). Non-tag directories are always ignored (r14 3.2). Pure.
+    /// directories that are safe to prune: everything named "bNNNNN" except
+    /// the build identities to keep (the newly installed and the previously
+    /// configured versions). The archive can add another tag-named directory
+    /// below the version directory, so raw tag strings are deliberately not
+    /// compared (for example, b10679 and llama-b10679 are one identity).
+    /// Non-tag directories are always ignored (r14 3.2). Pure.
     /// </summary>
     public static IReadOnlyList<string> SelectPrunableVersionDirectories(IEnumerable<string> siblingDirectoryPaths, params string?[] keepTags)
     {
-        var keep = new HashSet<string>(
-            keepTags.Where(t => !string.IsNullOrWhiteSpace(t))!,
-            StringComparer.OrdinalIgnoreCase);
+        var keep = keepTags
+            .Select(TryParseBuildTag)
+            .Where(build => build is not null)
+            .Select(build => build!.Value)
+            .ToHashSet();
         return siblingDirectoryPaths
             .Where(dir =>
             {
                 var leaf = Path.GetFileName(Path.TrimEndingDirectorySeparator(dir));
-                return TagDirectoryPattern.IsMatch(leaf) && !keep.Contains(leaf);
+                var build = TryParseBuildTag(leaf);
+                return build is not null && !keep.Contains(build.Value);
             })
             .ToList();
     }
@@ -418,27 +424,55 @@ public sealed class LlamaServerSetupService
     {
         if (string.IsNullOrWhiteSpace(installRoot) || !Directory.Exists(installRoot))
             return [];
-        var siblings = Directory.EnumerateDirectories(installRoot);
-        return SelectPrunableVersionDirectories(
-            siblings,
-            NearestTagDirectoryName(newExecutablePath),
-            NearestTagDirectoryName(previousExecutablePath));
+        var keepBuilds = new[] { newExecutablePath, previousExecutablePath }
+            .Select(NearestTagDirectoryName)
+            .Select(TryParseBuildTag)
+            .Where(build => build is not null)
+            .Select(build => build!.Value)
+            .ToHashSet();
+
+        // Only direct, non-symlink children of the managed root that contain a
+        // llama-server whose nearest tag has the same build identity are owned
+        // version directories. A tag-looking user directory without that
+        // proof is not a deletion candidate.
+        return Directory.EnumerateDirectories(installRoot)
+            .Where(dir => IsOwnedVersionDirectory(installRoot, dir, out var build)
+                          && !keepBuilds.Contains(build))
+            .ToList();
     }
 
     /// <summary>
     /// Deletes the given version directories, returning bytes reclaimed. A
     /// directory whose files are still held open by a running server aborts
     /// only its own deletion (r14 3.2); it is offered again next time. Only
-    /// ever call with paths from <see cref="SelectPrunableVersionDirectories"/>.
+    /// direct, owned children of <paramref name="managedInstallRoot"/> are
+    /// accepted, and protected executable paths are checked again immediately
+    /// before deletion. This makes the deletion set inspectable and safe even
+    /// if settings or the filesystem changed after candidate computation.
     /// </summary>
-    public static long PruneVersionDirectories(IEnumerable<string> directories)
+    public static long PruneVersionDirectories(
+        string managedInstallRoot,
+        IEnumerable<string> directories,
+        params string?[] protectedExecutablePaths)
     {
+        if (string.IsNullOrWhiteSpace(managedInstallRoot) || !Directory.Exists(managedInstallRoot))
+            return 0;
+
+        var protectedBuilds = protectedExecutablePaths
+            .Select(NearestTagDirectoryName)
+            .Select(TryParseBuildTag)
+            .Where(build => build is not null)
+            .Select(build => build!.Value)
+            .ToHashSet();
+        var root = Path.GetFullPath(Path.TrimEndingDirectorySeparator(managedInstallRoot));
         long reclaimed = 0;
         foreach (var dir in directories)
         {
             try
             {
-                if (!Directory.Exists(dir))
+                if (!Directory.Exists(dir)
+                    || !IsOwnedVersionDirectory(root, dir, out var build)
+                    || protectedBuilds.Contains(build))
                     continue;
                 var size = DirectorySizeBytes(dir);
                 Directory.Delete(dir, recursive: true);
@@ -667,6 +701,36 @@ public sealed class LlamaServerSetupService
         }
 
         return current;
+    }
+
+    private static bool IsOwnedVersionDirectory(string managedInstallRoot, string directory, out int build)
+    {
+        build = 0;
+        try
+        {
+            var root = Path.GetFullPath(Path.TrimEndingDirectorySeparator(managedInstallRoot));
+            var candidate = Path.GetFullPath(Path.TrimEndingDirectorySeparator(directory));
+            if (!string.Equals(Path.GetDirectoryName(candidate), root, StringComparison.OrdinalIgnoreCase)
+                || File.GetAttributes(candidate).HasFlag(FileAttributes.ReparsePoint))
+                return false;
+
+            var directoryBuild = TryParseBuildTag(Path.GetFileName(candidate));
+            if (directoryBuild is null)
+                return false;
+
+            var executable = ResolveInstalledExecutable(candidate);
+            if (executable is null
+                || File.GetAttributes(executable).HasFlag(FileAttributes.ReparsePoint)
+                || TryParseBuildTag(NearestTagDirectoryName(executable)) != directoryBuild)
+                return false;
+
+            build = directoryBuild.Value;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     /// <summary>
