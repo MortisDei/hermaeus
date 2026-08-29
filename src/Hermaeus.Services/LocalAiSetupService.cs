@@ -348,7 +348,8 @@ public sealed class LocalAiSetupService
         progress?.Report("Installing llama-server binary...");
         try
         {
-            var variant = settings.DataManagement.LlamaRuntimeVariant;
+            var configuredVariant = settings.DataManagement.LlamaRuntimeVariant;
+            var variant = configuredVariant;
             if (variant == LlamaRuntimeVariant.Auto)
             {
                 variant = settings.DataManagement.InstalledLlamaRuntimeVariant;
@@ -366,9 +367,14 @@ public sealed class LocalAiSetupService
                 }
             }
 
-            var result = await _llamaServerSetup.InstallLatestAsync(action.TargetPath, variant, progress, ct);
+            var result = await _llamaServerSetup.InstallLatestAsync(
+                action.TargetPath,
+                variant,
+                progress,
+                ct,
+                allowAutoAcceleratedFallback: configuredVariant == LlamaRuntimeVariant.Auto);
             if (result.Success)
-                settings.DataManagement.InstalledLlamaRuntimeVariant = variant;
+                settings.DataManagement.InstalledLlamaRuntimeVariant = result.SelectedVariant ?? variant;
             return result;
         }
         catch (OperationCanceledException)

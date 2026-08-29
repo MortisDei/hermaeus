@@ -604,24 +604,31 @@ public sealed partial class DoctorService
                 ?? _settings.Settings.ManagedServers.FirstOrDefault())?.ExecutablePath ?? string.Empty);
 
         var profile = await _systemInfo.GetHardwareProfileAsync(ct);
+        var configuredVariant = _settings.Settings.DataManagement.LlamaRuntimeVariant;
         var resolvedVariant = LlamaServerSetupService.ResolveUpdateVariant(
-            _settings.Settings.DataManagement.LlamaRuntimeVariant,
+            configuredVariant,
             _settings.Settings.DataManagement.InstalledLlamaRuntimeVariant,
             profile);
 
-        var result = await _llamaSetup.InstallLatestAsync(installPath, resolvedVariant, progress, ct);
-        if (result.Success && !string.IsNullOrWhiteSpace(result.UpdatedPath) && resolvedVariant != LlamaRuntimeVariant.Cpu)
+        var result = await _llamaSetup.InstallLatestAsync(
+            installPath,
+            resolvedVariant,
+            progress,
+            ct,
+            allowAutoAcceleratedFallback: configuredVariant == LlamaRuntimeVariant.Auto);
+        var installedVariant = result.SelectedVariant ?? resolvedVariant;
+        if (result.Success && !string.IsNullOrWhiteSpace(result.UpdatedPath) && installedVariant != LlamaRuntimeVariant.Cpu)
         {
             // A GPU build that cannot execute (missing driver/DLL) is not safe
             // to replace with CPU: that would report success while materially
             // changing the selected backend. Leave the new path unconfigured
             // and require an explicit backend choice instead.
             var probe = await ReadLlamaServerVersionAsync(result.UpdatedPath, ct);
-            if (ShouldRejectGpuRuntime(resolvedVariant, probe.BuildNumber is not null))
+            if (ShouldRejectGpuRuntime(installedVariant, probe.BuildNumber is not null))
             {
                 result = new LocalAiSetupResult(
                     false,
-                    $"llama.cpp {LlamaServerSetupService.VariantLabel(resolvedVariant)} build was downloaded but failed its launch probe. "
+                    $"llama.cpp {LlamaServerSetupService.VariantLabel(installedVariant)} build was downloaded but failed its launch probe. "
                     + "The update was refused so a working GPU backend cannot be silently replaced with CPU. "
                     + "Check the backend's driver/runtime requirements or explicitly choose CPU.");
             }
@@ -640,7 +647,7 @@ public sealed partial class DoctorService
 
         foreach (var server in _settings.Settings.ManagedServers)
             server.ExecutablePath = result.UpdatedPath;
-        _settings.Settings.DataManagement.InstalledLlamaRuntimeVariant = resolvedVariant;
+        _settings.Settings.DataManagement.InstalledLlamaRuntimeVariant = installedVariant;
 
         await _settings.SaveAsync();
         progress?.Report(result.Log);

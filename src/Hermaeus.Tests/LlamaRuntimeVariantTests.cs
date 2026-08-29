@@ -202,6 +202,58 @@ public sealed class LlamaRuntimeVariantTests
     }
 
     [Fact]
+    public void Auto_nvidia_selection_uses_vulkan_when_linux_cuda_asset_is_unavailable()
+    {
+        var nvidia = new HardwareProfile(0, 8L * 1024 * 1024 * 1024, "NVIDIA GeForce GTX 1660");
+        var preferred = LlamaServerSetupService.ResolveVariant(LlamaRuntimeVariant.Auto, nvidia);
+        var releases = new[]
+        {
+            new GitHubRelease("b10679",
+            [
+                new GitHubReleaseAsset("llama-b10679-bin-ubuntu-x64.tar.gz", "u/ubuntu-cpu"),
+                new GitHubReleaseAsset("llama-b10679-bin-ubuntu-vulkan-x64.tar.gz", "u/ubuntu-vulkan")
+            ])
+        };
+
+        var selected = LlamaServerSetupService.SelectLatestCompatibleRelease(
+            releases,
+            LlamaPlatform.LinuxX64,
+            preferred,
+            allowAutoAcceleratedFallback: true);
+
+        Assert.Equal(LlamaRuntimeVariant.Cuda, preferred);
+        Assert.NotNull(selected);
+        Assert.Equal(LlamaRuntimeVariant.Vulkan, selected.Variant);
+        Assert.Equal("u/ubuntu-vulkan", selected.Asset.BrowserDownloadUrl);
+    }
+
+    [Fact]
+    public void Auto_amd_selection_keeps_vulkan_as_the_accelerated_backend()
+    {
+        var amd = new HardwareProfile(0, 8L * 1024 * 1024 * 1024, "AMD Radeon RX 7900");
+        var preferred = LlamaServerSetupService.ResolveVariant(LlamaRuntimeVariant.Auto, amd);
+        var releases = new[]
+        {
+            new GitHubRelease("b10679",
+            [
+                new GitHubReleaseAsset("llama-b10679-bin-ubuntu-x64.tar.gz", "u/ubuntu-cpu"),
+                new GitHubReleaseAsset("llama-b10679-bin-ubuntu-vulkan-x64.tar.gz", "u/ubuntu-vulkan")
+            ])
+        };
+
+        var selected = LlamaServerSetupService.SelectLatestCompatibleRelease(
+            releases,
+            LlamaPlatform.LinuxX64,
+            preferred,
+            allowAutoAcceleratedFallback: true);
+
+        Assert.Equal(LlamaRuntimeVariant.Vulkan, preferred);
+        Assert.NotNull(selected);
+        Assert.Equal(LlamaRuntimeVariant.Vulkan, selected.Variant);
+        Assert.Equal("u/ubuntu-vulkan", selected.Asset.BrowserDownloadUrl);
+    }
+
+    [Fact]
     public void Managed_discovery_selects_the_highest_installed_b_build()
     {
         using var temp = new TempDir();

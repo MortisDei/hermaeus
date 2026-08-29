@@ -59,10 +59,13 @@ launch settings. Start it there, then select its model in Chat. Runtime Logs
 show the exact startup stage and sanitized process output.
 
 Managed llama.cpp updates preserve the configured backend, or the last
-installed backend when the setting is **Auto**. If the matching upstream GPU
-asset is unavailable or fails its launch probe, Hermaeus refuses the update
-with an explanation rather than silently replacing it with a CPU build. CPU is
-still available when selected explicitly. Fresh managed archives are stored
+installed backend when the setting is **Auto**. Auto prefers the hardware's
+primary accelerated backend and may select another compatible accelerated
+asset when upstream does not publish that preferred package. If no compatible
+GPU asset is available or the selected build fails its launch probe, Hermaeus
+refuses the update with an explanation rather than silently replacing it with
+a CPU build. CPU is still available when selected explicitly. Fresh managed
+archives are stored
 under one Hermaeus build directory; older nested archive layouts remain
 discoverable for repair and pruning.
 

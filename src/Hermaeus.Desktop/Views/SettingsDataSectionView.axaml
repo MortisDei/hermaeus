@@ -50,7 +50,7 @@
                           FontSize="13"
                           ItemsSource="{Binding LlamaRuntimeVariantOptions}"
                           SelectedItem="{Binding LlamaRuntimeVariant}"
-                          ToolTip.Tip="Which llama.cpp build to download for install and update. Auto picks CUDA on NVIDIA, Vulkan on any other GPU, and CPU when no GPU is detected. An explicit choice always wins." />
+                          ToolTip.Tip="Which llama.cpp build to download for install and update. Auto prefers CUDA on NVIDIA and Vulkan on other GPUs, uses another compatible accelerated backend when needed, and uses CPU when no GPU is detected. An explicit choice always wins." />
             </Grid>
             <Grid ColumnDefinitions="110,*,Auto" ColumnSpacing="8">
                 <TextBlock Grid.Column="0" Text="Backup to" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />

@@ -232,12 +232,13 @@ public sealed class LlamaServerSetupService
         string installPath,
         LlamaRuntimeVariant variant,
         IProgress<string>? progress = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        bool allowAutoAcceleratedFallback = false)
     {
         try
         {
             progress?.Report("Checking latest llama.cpp release...");
-            var release = await GetLatestDownloadInfoAsync(variant, ct);
+            var release = await GetLatestDownloadInfoAsync(variant, ct, allowAutoAcceleratedFallback);
             var versionedInstallPath = Path.Combine(installPath, release.TagName);
             Directory.CreateDirectory(versionedInstallPath);
 
@@ -245,7 +246,11 @@ public sealed class LlamaServerSetupService
             if (existing is not null)
             {
                 progress?.Report($"llama-server {release.TagName} is already installed at {existing}");
-                return new LocalAiSetupResult(true, $"llama-server {release.TagName} is already installed at {existing}", existing);
+                return new LocalAiSetupResult(
+                    true,
+                    $"llama-server {release.TagName} is already installed at {existing}",
+                    existing,
+                    release.Variant);
             }
 
             // CUDA builds link against the toolkit runtime shipped separately
@@ -277,9 +282,10 @@ public sealed class LlamaServerSetupService
                 }
             }
 
-            return await DownloadExtractAndLocateAsync(
+            var result = await DownloadExtractAndLocateAsync(
                 versionedInstallPath, release.Url, release.AssetName, release.Sha256,
                 $"llama-server {release.TagName} ({release.DisplayName})", progress, ct);
+            return result with { SelectedVariant = release.Variant };
         }
         catch (OperationCanceledException)
         {
@@ -526,6 +532,12 @@ public sealed class LlamaServerSetupService
         => GetLatestDownloadInfoAsync(LlamaRuntimeVariant.Cpu, ct);
 
     public async Task<LlamaServerLatestDownload> GetLatestDownloadInfoAsync(LlamaRuntimeVariant variant, CancellationToken ct = default)
+        => await GetLatestDownloadInfoAsync(variant, ct, allowAutoAcceleratedFallback: false);
+
+    private async Task<LlamaServerLatestDownload> GetLatestDownloadInfoAsync(
+        LlamaRuntimeVariant variant,
+        CancellationToken ct,
+        bool allowAutoAcceleratedFallback)
     {
         List<GitHubRelease>? releases;
         try
@@ -542,7 +554,7 @@ public sealed class LlamaServerSetupService
         if (releases is null)
             throw new InvalidOperationException("GitHub did not return llama.cpp release metadata.");
         var platform = CurrentPlatform();
-        var selection = SelectLatestCompatibleRelease(releases, platform, variant)
+        var selection = SelectLatestCompatibleRelease(releases, platform, variant, allowAutoAcceleratedFallback)
             ?? throw new InvalidOperationException("No b-numbered llama.cpp release contained a supported llama-server asset for this platform.");
         var release = selection.Release;
         var asset = selection.Asset;
@@ -572,7 +584,8 @@ public sealed class LlamaServerSetupService
             companionName,
             companionUrl,
             release.PublishedAt,
-            companionSha256);
+            companionSha256,
+            effectiveVariant);
     }
 
     internal static string RequireSha256Digest(GitHubReleaseAsset asset)
@@ -600,7 +613,8 @@ public sealed class LlamaServerSetupService
     public static LlamaReleaseSelection? SelectLatestCompatibleRelease(
         IReadOnlyList<GitHubRelease> releases,
         LlamaPlatform? platform,
-        LlamaRuntimeVariant variant)
+        LlamaRuntimeVariant variant,
+        bool allowAutoAcceleratedFallback = false)
     {
         foreach (var release in releases
                      .Select(release => (Release: release, Build: TryParseBuildTag(release.TagName)))
@@ -608,13 +622,35 @@ public sealed class LlamaServerSetupService
                      .OrderByDescending(candidate => candidate.Build))
         {
             var assets = release.Release.Assets ?? [];
-            var asset = SelectDownloadAsset(assets, platform, variant);
+            IReadOnlyList<LlamaRuntimeVariant> candidates = allowAutoAcceleratedFallback
+                ? AutoAcceleratedCandidates(variant)
+                : [variant];
+            foreach (var candidate in candidates)
+            {
+                var asset = SelectDownloadAsset(assets, platform, candidate);
+                if (asset is not null)
+                    return new LlamaReleaseSelection(release.Release, asset, candidate, release.Build!.Value);
+            }
 
-            if (asset is not null)
-                return new LlamaReleaseSelection(release.Release, asset, variant, release.Build!.Value);
         }
 
         return null;
+    }
+
+    private static IReadOnlyList<LlamaRuntimeVariant> AutoAcceleratedCandidates(LlamaRuntimeVariant preferred)
+    {
+        // These are the accelerated llama.cpp variants Hermaeus currently
+        // models. Vulkan is the cross-vendor alternative; CPU is deliberately
+        // excluded so an unavailable accelerated asset cannot become a silent
+        // downgrade. Future supported accelerated variants belong in this
+        // ordered capability list rather than in backend-specific exceptions.
+        return preferred switch
+        {
+            LlamaRuntimeVariant.Cpu => [LlamaRuntimeVariant.Cpu],
+            LlamaRuntimeVariant.Cuda => [LlamaRuntimeVariant.Cuda, LlamaRuntimeVariant.Vulkan],
+            LlamaRuntimeVariant.Vulkan => [LlamaRuntimeVariant.Vulkan],
+            _ => []
+        };
     }
 
     public static int? TryParseBuildTag(string? tag)
@@ -756,7 +792,9 @@ public sealed class LlamaServerSetupService
     /// platform-specific upstream asset names. When a release ships more than
     /// one CUDA build (e.g. 12.4 and 13.3) the lowest version is chosen for the
     /// broadest driver compatibility. Returns null when the requested backend
-    /// is absent. Callers must not turn that into an implicit CPU downgrade.
+    /// is absent. When the caller has resolved an Auto request, the optional
+    /// fallback policy tries the ordered accelerated candidates for that
+    /// request; CPU is never added to that fallback chain.
     /// </summary>
     public static GitHubReleaseAsset? SelectDownloadAsset(
         IReadOnlyList<GitHubReleaseAsset> assets,
@@ -943,7 +981,8 @@ public sealed record LlamaServerLatestDownload(
     string? CompanionAssetName = null,
     string? CompanionUrl = null,
     DateTimeOffset? PublishedAt = null,
-    string? CompanionSha256 = null);
+    string? CompanionSha256 = null,
+    LlamaRuntimeVariant Variant = LlamaRuntimeVariant.Cpu);
 public sealed record GitHubRelease(
     [property: JsonPropertyName("tag_name")] string TagName,
     [property: JsonPropertyName("assets")] List<GitHubReleaseAsset>? Assets,

@@ -27,8 +27,10 @@ public class DataManagementSettings
 
     /// <summary>
     /// Preferred llama.cpp build variant to download for install and update
-    /// (r14 1.1). Auto picks CUDA on NVIDIA, Vulkan on any other real GPU, and
-    /// CPU when no GPU is detected. An explicit choice always wins.
+    /// (r14 1.1). Auto prefers CUDA on NVIDIA and Vulkan on any other real GPU,
+    /// falls back to another compatible accelerated asset when upstream lacks
+    /// the preferred one, and uses CPU when no GPU is detected. An explicit
+    /// choice always wins.
     /// </summary>
     public LlamaRuntimeVariant LlamaRuntimeVariant { get; set; } = LlamaRuntimeVariant.Auto;
 

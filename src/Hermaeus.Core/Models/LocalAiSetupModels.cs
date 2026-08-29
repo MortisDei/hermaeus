@@ -77,4 +77,5 @@ public sealed record LocalAiReadinessReport(
 public sealed record LocalAiSetupResult(
     bool Success,
     string Log,
-    string? UpdatedPath = null);
+    string? UpdatedPath = null,
+    LlamaRuntimeVariant? SelectedVariant = null);
