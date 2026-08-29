@@ -36,7 +36,10 @@ Onboarding asks for two locations:
 
 Keep Data Root on reliable storage. AI Assets can live on a larger drive. If
 you change Data Root later, use the in-app migration flow rather than moving
-live database files by hand.
+live database files by hand. After entering or choosing a different root,
+review the current and destination paths and choose **Move data...**. Hermaeus
+asks for confirmation before moving an existing workspace; ordinary Settings
+autosave never performs that migration implicitly.
 
 Choose a chat backend next. For managed llama.cpp, use **Install managed
 llama.cpp** before reaching Doctor. You can then choose an existing GGUF or
@@ -131,7 +134,10 @@ Runtime Logs.
 
 If managed llama.cpp is missing, use onboarding's install action or Doctor's
 download action. Hermaeus selects the newest compatible b-numbered upstream
-build and links a successful installation back to Services.
+build and links a successful installation back to Services. When an update is
+complete, **Remove old llama.cpp versions?** only offers owned, genuinely
+superseded builds. The selected build remains protected, including archives
+whose executable is nested below the b-numbered directory.
 
 ## Chat and context
 

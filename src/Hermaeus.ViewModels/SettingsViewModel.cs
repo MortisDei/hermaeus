@@ -167,6 +167,7 @@ public partial class SettingsViewModel : ViewModelBase
         Llm = new LlmDefaultsSettingsViewModel(secrets);
         Rag = new RagSettingsViewModel(ResolveDataRoot);
         Data = new DataManagementSettingsViewModel(_svc, backups, _toasts, ResolveDataRoot, activity);
+        Data.CommitDataRootMigration = CommitDataRootMigrationAsync;
         Ui = new UiSettingsViewModel();
         Memory = new MemorySettingsViewModel(recallIndexing, _toasts);
         Mcp = new McpSettingsViewModel();
@@ -261,14 +262,14 @@ public partial class SettingsViewModel : ViewModelBase
     /// a later, unrelated save.
     /// </summary>
     [RelayCommand]
-    public Task SaveAsync() => SaveCoreAsync(showToast: true, CancellationToken.None);
+    public Task SaveAsync() => SaveCoreAsync(showToast: true, CancellationToken.None, allowDataRootMigration: false);
 
-    private async Task SaveCoreAsync(bool showToast, CancellationToken ct)
+    private async Task SaveCoreAsync(bool showToast, CancellationToken ct, bool allowDataRootMigration)
     {
         await _saveGate.WaitAsync(ct);
         try
         {
-            await SaveCoreLockedAsync(showToast, ct);
+            await SaveCoreLockedAsync(showToast, ct, allowDataRootMigration);
         }
         finally
         {
@@ -276,7 +277,7 @@ public partial class SettingsViewModel : ViewModelBase
         }
     }
 
-    private async Task SaveCoreLockedAsync(bool showToast, CancellationToken ct)
+    private async Task SaveCoreLockedAsync(bool showToast, CancellationToken ct, bool allowDataRootMigration)
     {
         var candidate = _svc.Settings.Clone();
         var previousDataRoot = _svc.Settings.DataManagement.DataRootDirectory;
@@ -293,6 +294,19 @@ public partial class SettingsViewModel : ViewModelBase
         Mcp.ApplyTo(candidate);
         await LocalApi.ApplyToAsync(candidate);
         ApplyTtsTo(candidate);
+
+        // A data-root edit is a migration request, not an ordinary preference
+        // edit. Autosaves may persist other harmless changes while leaving the
+        // unconfirmed root in the editor, but they must never move workspace
+        // files as a side effect.
+        if (!allowDataRootMigration
+            && !string.Equals(
+                SettingsService.ResolveDataRoot(candidate),
+                SettingsService.ResolveDataRoot(_svc.Settings),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            candidate.DataManagement.DataRootDirectory = previousDataRoot;
+        }
 
         try
         {
@@ -381,7 +395,7 @@ public partial class SettingsViewModel : ViewModelBase
         try
         {
             await _autoSaveDelay(TimeSpan.FromMilliseconds(600), token);
-            await SaveCoreAsync(showToast: false, token);
+            await SaveCoreAsync(showToast: false, token, allowDataRootMigration: false);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
@@ -506,6 +520,9 @@ public partial class SettingsViewModel : ViewModelBase
         settings.Tts.VoiceProvider = Tts.SelectedVoiceProvider;
         Tts.ApplyVoiceOrchestrationTo(settings.Tts);
     }
+
+    private Task CommitDataRootMigrationAsync() =>
+        SaveCoreAsync(showToast: true, CancellationToken.None, allowDataRootMigration: true);
 
     private string ResolveDataRoot()
     {

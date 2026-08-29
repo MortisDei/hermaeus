@@ -34,14 +34,12 @@ public sealed class SettingsViewModelSaveLifecycleTests
 
         var settings = NewSettings(temp);
         settings.Settings.DataManagement.DataRootDirectory = oldRoot;
-        var vm = NewSettingsViewModel(settings, new FakeSecretStore());
 
-        vm.Data.DataRootDirectory = newRoot;
-        vm.Llm.DefaultSystemPrompt = "should not persist";
+        var candidate = settings.Settings.Clone();
+        candidate.DataManagement.DataRootDirectory = newRoot;
+        candidate.Llm.DefaultSystemPrompt = "should not persist";
+        await ThrowsAsync<IOException>(() => settings.SaveAsync(candidate, previousDataRootDirectory: oldRoot));
 
-        await vm.SaveAsync();
-
-        Assert.NotEqual(string.Empty, vm.SettingsError);
         Assert.Equal(oldRoot, settings.Settings.DataManagement.DataRootDirectory);
         Assert.Equal(string.Empty, settings.Settings.Llm.DefaultSystemPrompt);
 
@@ -68,12 +66,132 @@ public sealed class SettingsViewModelSaveLifecycleTests
         settings.Settings.DataManagement.DataRootDirectory = oldRoot;
         var vm = NewSettingsViewModel(settings, new FakeSecretStore());
         vm.Data.DataRootDirectory = newRoot;
+        vm.Data.RequestDataRootMigrationConfirmation = _ => Task.FromResult(true);
 
-        await vm.SaveAsync();
+        await vm.Data.ConfirmDataRootMigrationCommand.ExecuteAsync(null);
 
         Assert.Equal(string.Empty, vm.SettingsError);
         Assert.Equal(newRoot, settings.Settings.DataManagement.DataRootDirectory);
         Assert.True(File.Exists(Path.Combine(newRoot, "conversations.db")));
+    }
+
+    [Fact]
+    public async Task Unchanged_data_root_does_not_request_migration_confirmation()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        var vm = NewSettingsViewModel(settings, new FakeSecretStore());
+        var confirmations = 0;
+        vm.Data.RequestDataRootMigrationConfirmation = _ =>
+        {
+            confirmations++;
+            return Task.FromResult(true);
+        };
+
+        await vm.Data.ConfirmDataRootMigrationCommand.ExecuteAsync(null);
+
+        Assert.Equal(0, confirmations);
+    }
+
+    [Fact]
+    public async Task Changed_data_root_requires_confirmation_and_cancel_restores_the_old_root()
+    {
+        using var temp = new TempDir();
+        var oldRoot = temp.PathFor("old-root");
+        Directory.CreateDirectory(oldRoot);
+        await File.WriteAllTextAsync(Path.Combine(oldRoot, "conversations.db"), "data");
+        var newRoot = temp.PathFor("new-root");
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = oldRoot;
+        var vm = NewSettingsViewModel(settings, new FakeSecretStore());
+        var confirmations = 0;
+        vm.Data.RequestDataRootMigrationConfirmation = plan =>
+        {
+            confirmations++;
+            Assert.Equal(Path.GetFullPath(oldRoot), plan.PreviousDataRoot);
+            Assert.Equal(Path.GetFullPath(newRoot), plan.CurrentDataRoot);
+            return Task.FromResult(false);
+        };
+
+        vm.Data.DataRootDirectory = newRoot;
+        await vm.Data.ConfirmDataRootMigrationCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, confirmations);
+        Assert.Equal(oldRoot, settings.Settings.DataManagement.DataRootDirectory);
+        Assert.Equal(oldRoot, vm.Data.DataRootDirectory);
+        Assert.False(vm.Data.DataRootMigrationPending);
+        Assert.True(File.Exists(Path.Combine(oldRoot, "conversations.db")));
+    }
+
+    [Fact]
+    public async Task Confirmed_data_root_change_uses_existing_migration_and_persists_at_commit_boundary()
+    {
+        using var temp = new TempDir();
+        var oldRoot = temp.PathFor("old-root");
+        Directory.CreateDirectory(oldRoot);
+        await File.WriteAllTextAsync(Path.Combine(oldRoot, "conversations.db"), "data");
+        var newRoot = temp.PathFor("new-root");
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = oldRoot;
+        var vm = NewSettingsViewModel(settings, new FakeSecretStore());
+        vm.Data.RequestDataRootMigrationConfirmation = _ => Task.FromResult(true);
+
+        vm.Data.DataRootDirectory = newRoot;
+        await vm.Data.ConfirmDataRootMigrationCommand.ExecuteAsync(null);
+
+        Assert.Equal(newRoot, settings.Settings.DataManagement.DataRootDirectory);
+        Assert.Equal(newRoot, vm.Data.DataRootDirectory);
+        Assert.True(File.Exists(Path.Combine(newRoot, "conversations.db")));
+        Assert.False(File.Exists(Path.Combine(oldRoot, "conversations.db")));
+        Assert.False(vm.Data.DataRootMigrationPending);
+    }
+
+    [Fact]
+    public async Task Ordinary_autosave_does_not_migrate_an_unconfirmed_data_root()
+    {
+        using var temp = new TempDir();
+        var oldRoot = temp.PathFor("old-root");
+        Directory.CreateDirectory(oldRoot);
+        await File.WriteAllTextAsync(Path.Combine(oldRoot, "conversations.db"), "data");
+        var newRoot = temp.PathFor("new-root");
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = oldRoot;
+        var vm = NewSettingsViewModel(settings, new FakeSecretStore());
+
+        vm.Data.DataRootDirectory = newRoot;
+        vm.Llm.DefaultSystemPrompt = "ordinary edit";
+        await WaitForAsync(
+            () => settings.Settings.Llm.DefaultSystemPrompt == "ordinary edit",
+            "ordinary settings autosave");
+
+        Assert.Equal(oldRoot, settings.Settings.DataManagement.DataRootDirectory);
+        Assert.Equal("ordinary edit", settings.Settings.Llm.DefaultSystemPrompt);
+        Assert.True(File.Exists(Path.Combine(oldRoot, "conversations.db")));
+        Assert.False(File.Exists(Path.Combine(newRoot, "conversations.db")));
+        Assert.Contains("after confirmation", vm.Data.DataMigrationPreview);
+    }
+
+    [Fact]
+    public void Reload_clears_a_pending_data_root_change_and_stale_save_wording()
+    {
+        using var temp = new TempDir();
+        var oldRoot = temp.PathFor("old-root");
+        Directory.CreateDirectory(oldRoot);
+        var newRoot = temp.PathFor("new-root");
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = oldRoot;
+        var vm = NewSettingsViewModel(settings, new FakeSecretStore());
+
+        vm.Data.DataRootDirectory = newRoot;
+        Assert.True(vm.Data.DataRootMigrationPending);
+        Assert.DoesNotContain("Save will move", vm.Data.DataMigrationPreview);
+
+        vm.Reload();
+
+        Assert.Equal(oldRoot, vm.Data.DataRootDirectory);
+        Assert.False(vm.Data.DataRootMigrationPending);
+        Assert.Equal("The current data folder is active.", vm.Data.DataMigrationPreview);
     }
 
     [Fact]

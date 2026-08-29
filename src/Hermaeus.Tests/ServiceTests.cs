@@ -2238,8 +2238,9 @@ namespace Hermaeus.Tests
             vm.Ui.EnableGlobalHotkeys = true;
             vm.Memory.MemoryFeatureEnabled = true;
             vm.Memory.MemoryInjectionTokenBudget = 700;
+            vm.Data.RequestDataRootMigrationConfirmation = _ => Task.FromResult(true);
 
-            await vm.SaveCommand.ExecuteAsync(null);
+            await vm.Data.ConfirmDataRootMigrationCommand.ExecuteAsync(null);
 
             Equal("http://127.0.0.1:9000", settings.Settings.Llm.LlamaCppBaseUrl, "llm section should apply base URL");
             Equal(true, settings.Settings.Llm.OpenAiEnabled, "llm section should apply remote toggle");

@@ -29,12 +29,18 @@ public partial class DataManagementSettingsViewModel : ObservableObject
     [ObservableProperty] private string _backupDirectory = string.Empty;
     [ObservableProperty] private string _restoreBackupPath = string.Empty;
     [ObservableProperty] private string _settingsError = string.Empty;
+    [ObservableProperty] private bool _dataRootMigrationPending;
+
+    private readonly SemaphoreSlim _dataRootMigrationGate = new(1, 1);
+    private int _dataRootEditVersion;
 
     public Action? RequestDataRootPicker { get; set; }
     public Action? RequestLocalAiAssetsRootPicker { get; set; }
     public Action? RequestBackupDirectoryPicker { get; set; }
     public Action? RequestRestoreBackupPicker { get; set; }
     public Func<Task<bool>>? RequestRestoreBackupConfirmation { get; set; }
+    public Func<DataMigrationPlan, Task<bool>>? RequestDataRootMigrationConfirmation { get; set; }
+    public Func<Task>? CommitDataRootMigration { get; set; }
     public event Action? LocalAiAssetsRootChanged;
 
     public DataManagementSettingsViewModel(
@@ -53,6 +59,7 @@ public partial class DataManagementSettingsViewModel : ObservableObject
 
     public void ReloadFrom(AppSettings settings)
     {
+        _dataRootEditVersion++;
         DataRootDirectory = settings.DataManagement.DataRootDirectory;
         LocalAiAssetsRoot = settings.DataManagement.LocalAiAssetsRoot;
         LlamaRuntimeVariant = settings.DataManagement.LlamaRuntimeVariant;
@@ -150,11 +157,62 @@ public partial class DataManagementSettingsViewModel : ObservableObject
     public void UpdateMigrationPreview()
     {
         var plan = _settings.PreviewDataRootMigration(_settings.Settings.DataManagement.DataRootDirectory, DataRootDirectory);
+        var rootsDiffer = !string.Equals(plan.PreviousDataRoot, plan.CurrentDataRoot, StringComparison.OrdinalIgnoreCase);
+        DataRootMigrationPending = rootsDiffer && plan.Conflicts.Count == 0;
         DataMigrationPreview = plan.Conflicts.Count > 0
             ? $"Move blocked: {plan.Conflicts.Count} existing database file(s) in target."
-            : plan.WillMove
-                ? $"Save will move {plan.FilesToMove} database file(s) to {plan.CurrentDataRoot}."
-                : "No data move needed.";
+            : !rootsDiffer
+                ? "The current data folder is active."
+                : plan.FilesToMove > 0
+                    ? $"Move {plan.FilesToMove} workspace file(s) to {plan.CurrentDataRoot} after confirmation."
+                    : $"Use {plan.CurrentDataRoot} as the data folder after confirmation.";
+    }
+
+    [RelayCommand]
+    private async Task ConfirmDataRootMigrationAsync()
+    {
+        var plan = _settings.PreviewDataRootMigration(_settings.Settings.DataManagement.DataRootDirectory, DataRootDirectory);
+        if (!DataRootMigrationPending)
+            return;
+
+        var version = _dataRootEditVersion;
+        await _dataRootMigrationGate.WaitAsync();
+        try
+        {
+            if (version != _dataRootEditVersion)
+                return;
+
+            if (RequestDataRootMigrationConfirmation is null
+                || !await RequestDataRootMigrationConfirmation(plan))
+            {
+                RevertDataRootEdit();
+                return;
+            }
+
+            if (version != _dataRootEditVersion || CommitDataRootMigration is null)
+            {
+                RevertDataRootEdit();
+                return;
+            }
+
+            await CommitDataRootMigration();
+            var committedRoot = SettingsService.ResolveDataRoot(_settings.Settings);
+            if (!string.Equals(committedRoot, plan.CurrentDataRoot, StringComparison.OrdinalIgnoreCase))
+                RevertDataRootEdit();
+            else
+                UpdateMigrationPreview();
+        }
+        finally
+        {
+            _dataRootMigrationGate.Release();
+        }
+    }
+
+    private void RevertDataRootEdit()
+    {
+        _dataRootEditVersion++;
+        DataRootDirectory = _settings.Settings.DataManagement.DataRootDirectory;
+        UpdateMigrationPreview();
     }
 
     public void UpdateLocalAiAssetsStatus()
@@ -163,6 +221,10 @@ public partial class DataManagementSettingsViewModel : ObservableObject
         LocalAiAssetsRootChanged?.Invoke();
     }
 
-    partial void OnDataRootDirectoryChanged(string value) => UpdateMigrationPreview();
+    partial void OnDataRootDirectoryChanged(string value)
+    {
+        _dataRootEditVersion++;
+        UpdateMigrationPreview();
+    }
     partial void OnLocalAiAssetsRootChanged(string value) => UpdateLocalAiAssetsStatus();
 }

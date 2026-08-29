@@ -37,6 +37,10 @@ for Knowledge behavior in Chat.
 - Services manages local runtime processes and files. Managed `llama.cpp`,
   Ollama, and OpenAI-compatible profiles are supported, with explicit
   localhost, model, port, and launch configuration.
+- Data-root changes use an explicit confirmation and the existing safe
+  migration boundary. Ordinary Settings autosave does not move an existing
+  workspace, and llama.cpp pruning only deletes validated owned superseded
+  version directories while protecting the selected runtime.
 - Managed llama.cpp supports GPU-layer placement, K/V cache choices, Flash
   Attention, context shift, CPU-MoE placement, vision projectors, and
   capability-gated speculative decoding. Unsupported or unproven runtime

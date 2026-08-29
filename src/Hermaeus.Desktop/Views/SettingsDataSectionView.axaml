@@ -22,6 +22,13 @@
                 </Button>
             </Grid>
             <TextBlock Text="{Binding DataMigrationPreview}" FontSize="11" Opacity="0.45" TextWrapping="Wrap" />
+            <Button Command="{Binding ConfirmDataRootMigrationCommand}"
+                    Content="Move data..."
+                    IsVisible="{Binding DataRootMigrationPending}"
+                    HorizontalAlignment="Left"
+                    FontSize="12"
+                    Padding="12,5"
+                    CornerRadius="6" />
             <Grid ColumnDefinitions="110,*,Auto,Auto" ColumnSpacing="8">
                 <TextBlock Grid.Column="0" Text="AI assets" VerticalAlignment="Center" Opacity="0.6" FontSize="13" />
                 <TextBox Grid.Column="1" Text="{Binding LocalAiAssetsRoot, UpdateSourceTrigger=PropertyChanged}"

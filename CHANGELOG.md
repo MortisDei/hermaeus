@@ -33,6 +33,14 @@ limit.
   projector path, omits disabled projectors from llama-server launches, and
   exposes verified companion repair or explicit Browse/Clear paths when a
   companion is missing or stale.
+- Fixed managed llama.cpp pruning for nested archive layouts such as
+  `b10679/llama-b10679/llama-server`: canonical build identities now protect
+  the selected runtime, and deletion revalidates owned direct children of the
+  managed root.
+- Fixed Settings data-root changes after removal of the general Save action:
+  **Move data...** now confirms the current and destination roots before using
+  the existing safe migration path, while ordinary autosave cannot migrate an
+  unconfirmed workspace.
 - Final R31 dogfood closure fixes normalized-path model duplicates, stale
   projector selection, role-aware companion repair, managed llama-server
   resolution, model Search keyboard activation, Lab server discovery and
