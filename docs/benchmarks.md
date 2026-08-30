@@ -313,7 +313,13 @@ GPU Fit and Lab use one shared runtime telemetry contract. A sample records its
 metric, value or `Unknown`, source, trust state, timestamp, runtime identity,
 and process-instance boundary. The current platform source provides the
 matching runtime process working set. Per-process GPU memory remains `Unknown`
-unless a trustworthy runtime or platform counter is available. Optional
+unless a trustworthy runtime or platform counter is available. On Windows WDDM,
+`nvidia-smi` may report `[N/A]` for the PID-scoped process field even while a
+device total is available; that total is never attributed to the model.
+Windows also exposes a PID-named `GPU Process Memory\...\Dedicated Usage`
+counter, but its documented incorrect-value failure mode means R31 does not use
+it as trustworthy process VRAM.
+Optional
 whole-device GPU readings are labelled `DeviceTotal` and are never subtracted
 or attributed to the model.
 

@@ -77,6 +77,36 @@ public sealed class LabExperimentTests
         Assert.Throws<InvalidOperationException>(() => LabDefinitionValidator.Validate(Definition() with { SchemaVersion = 2 }));
 
     [Theory]
+    [InlineData("auto")]
+    [InlineData("off")]
+    public void Definition_rejects_quantized_value_cache_without_explicit_flash_attention(string flashAttention)
+    {
+        var configuration = Config("candidate") with
+        {
+            KvCacheTypeK = "q8_0", KvCacheTypeV = "q8_0", FlashAttention = flashAttention
+        };
+
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => LabDefinitionValidator.ValidateConfiguration(configuration));
+
+        Assert.Contains("Flash Attention", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Definition_rejects_a_conflicting_flash_attention_extra_argument()
+    {
+        var configuration = Config("candidate") with
+        {
+            KvCacheTypeK = "q8_0", KvCacheTypeV = "q8_0", FlashAttention = "on"
+        };
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            LabDefinitionValidator.ValidateConfiguration(configuration, "--flash-attn off"));
+
+        Assert.Contains("Flash Attention", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
     [InlineData(0)]
     [InlineData(21)]
     public void Definition_bounds_repetitions(int repetitions) =>

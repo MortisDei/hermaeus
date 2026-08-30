@@ -13,6 +13,14 @@ limit.
 
 ### Changed
 
+- Managed llama.cpp installs now accept either the known `llama-bNNNNN/`
+  wrapper or a flat upstream package while rejecting mixed layouts before
+  extraction. KV Lab recipes now exclude the baseline representation, require
+  explicit Flash Attention for quantized V-cache configurations, and refuse
+  launches that would reproduce llama.cpp's quantized-V initialization failure.
+- Windows WDDM GPU Process Memory counters are documented as an unsupported
+  source for trustworthy process VRAM on R31; unavailable per-process values
+  remain `Unknown` and whole-device totals are never attributed to llama-server.
 - R31 release-blocker repairs preserve cross-group Settings autosave state,
   persist MCP collection edits, wait for isolated Lab runtimes to exit before
   switching candidates, classify Hermaeus update-check failures by cause, and

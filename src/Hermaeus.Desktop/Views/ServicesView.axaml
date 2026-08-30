@@ -427,7 +427,7 @@
                                                       FontSize="12"
                                                       ToolTip.Tip="--flash-attn. Auto emits no override, so llama-server selects its supported default; on/off are explicit overrides." />
                                         </Grid>
-                                        <TextBlock Text="Quantized V cache needs flash attention on or auto - this launches with exactly what you chose, but prompt processing may fail to start."
+                                        <TextBlock Text="Quantized V cache may fail unless Flash Attention is explicitly on. Auto is not a controlled guarantee for this runtime."
                                                    IsVisible="{Binding NeedsFlashAttentionForQuantizedV}"
                                                    FontSize="11" TextWrapping="Wrap"
                                                    Foreground="{DynamicResource SystemFillColorCautionBrush}" />

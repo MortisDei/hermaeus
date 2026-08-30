@@ -42,6 +42,30 @@ public sealed class LlamaServerInstallTests
                 || path.EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase));
     }
 
+    [WindowsOnlyFact]
+    public async Task InstallAsync_accepts_a_flat_windows_archive_when_a_wrapper_is_expected()
+    {
+        using var temp = new TempDir();
+        var installDir = temp.PathFor("install");
+        var archiveBytes = BuildZipBytes(archive =>
+        {
+            AddZipEntry(archive, "llama-server.exe", "stub-binary-content");
+            AddZipEntry(archive, "ggml.dll", "sibling-dll-content");
+            AddZipEntry(archive, "ggml-cuda.dll", "cuda-dll-content");
+        });
+        var expectedSha256 = Convert.ToHexString(SHA256.HashData(archiveBytes)).ToLowerInvariant();
+
+        using var http = new HttpClient(new FixedContentHandler(archiveBytes));
+        var service = new LlamaServerSetupService(new ModelDownloadService(http), http, _ => expectedSha256);
+
+        var result = await service.InstallAsync(installDir);
+
+        Assert.True(result.Success, result.Log);
+        Assert.NotNull(result.UpdatedPath);
+        Assert.Equal("stub-binary-content", await File.ReadAllTextAsync(result.UpdatedPath!));
+        Assert.Equal("cuda-dll-content", await File.ReadAllTextAsync(Path.Combine(installDir, "ggml-cuda.dll")));
+    }
+
     [Fact]
     public async Task InstallAsync_refuses_an_archive_that_fails_SHA256_verification()
     {

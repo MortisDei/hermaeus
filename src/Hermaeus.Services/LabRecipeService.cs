@@ -23,7 +23,7 @@ public static class LabRecipeCatalog
         {
             LabRecipeKind.EngineProfile => EngineProfile(baseline, gguf),
             LabRecipeKind.Context => Context(baseline),
-            LabRecipeKind.KvCache => Kv(baseline, capabilities),
+            LabRecipeKind.KvCache => Kv(baseline, source, capabilities),
             LabRecipeKind.FlashAttention => Flash(baseline, capabilities),
             LabRecipeKind.CpuMoePlacement => CpuMoe(baseline, capabilities, gguf),
             LabRecipeKind.ExternalDraft => ExternalDraft(source, baseline, capabilities, gguf, draftGguf, targetIdentity, draftIdentity),
@@ -84,28 +84,42 @@ public static class LabRecipeCatalog
             "Context candidates come from the reviewed bounded ladder.", baseline, candidates, []);
     }
 
-    private static LabRecipePlan Kv(LabConfiguration baseline, IReadOnlyCollection<RuntimeCapabilityObservation> capabilities)
+    private static LabRecipePlan Kv(LabConfiguration baseline, ServerConfig source,
+        IReadOnlyCollection<RuntimeCapabilityObservation> capabilities)
     {
         var available = ReviewedKvTypes.Where(type => HasAvailable(capabilities, $"runtime.kv.type.{type}"))
             .ToArray();
         var baselineAvailable = HasAvailable(capabilities, $"runtime.kv.type.{baseline.KvCacheTypeK.ToLowerInvariant()}")
             && HasAvailable(capabilities, $"runtime.kv.type.{baseline.KvCacheTypeV.ToLowerInvariant()}");
-        var candidates = available.Where(type => type != baseline.KvCacheTypeK || type != baseline.KvCacheTypeV)
+        var candidates = available.Where(type => type != baseline.KvCacheTypeK && type != baseline.KvCacheTypeV)
             .Select((type, index) => baseline with
             {
                 Id = $"kv-{index + 1}", Label = $"KV {type}", KvCacheTypeK = type, KvCacheTypeV = type
             }).Take(3).ToArray();
-        var state = baselineAvailable && candidates.Length > 0 ? CapabilityState.Available : CapabilityState.Unknown;
+        var hasQuantizedValue = KvCacheMath.RequiresRuntimeAdvertisement(baseline.KvCacheTypeV)
+            || candidates.Any(candidate => KvCacheMath.RequiresRuntimeAdvertisement(candidate.KvCacheTypeV));
+        var flashAttentionAvailable = HasAvailable(capabilities, "runtime.flash-attention");
+        var flashAttentionExplicit = LabDefinitionValidator.IsExplicitFlashAttentionOn(baseline.FlashAttention, source.ExtraArgs);
+        var state = baselineAvailable && candidates.Length > 0
+            && (!hasQuantizedValue || (flashAttentionAvailable && flashAttentionExplicit))
+            ? CapabilityState.Available : CapabilityState.Unknown;
         var detail = state == CapabilityState.Available
             ? "Every offered KV representation was advertised by this exact runtime."
-            : "The exact runtime has not advertised both the baseline and an alternate reviewed KV representation.";
+            : hasQuantizedValue && !flashAttentionExplicit
+                ? "Quantized V-cache configurations require Flash Attention to be explicitly on; auto is not treated as a runnable Lab baseline."
+                : hasQuantizedValue && !flashAttentionAvailable
+                    ? "The exact runtime has not advertised Flash Attention, which is required by the quantized V-cache configurations."
+                    : "The exact runtime has not advertised both the baseline and an alternate reviewed KV representation.";
+        var requiredCapabilities = available.Select(type => $"runtime.kv.type.{type}").ToList();
+        if (hasQuantizedValue)
+            requiredCapabilities.Add("runtime.flash-attention");
         return Plan("kv-cache-v1", "KV cache representation", LabRecipeKind.KvCache, state, detail,
             baseline, candidates.Length == 0 ? [baseline with
             {
                 Id = "kv-unavailable", Label = "Unavailable placeholder",
                 KvCacheTypeK = "unknown", KvCacheTypeV = "unknown"
             }] : candidates,
-            available.Select(type => $"runtime.kv.type.{type}").ToArray(), lowBitQuality: true);
+            requiredCapabilities, lowBitQuality: true);
     }
 
     private static LabRecipePlan Flash(LabConfiguration baseline, IReadOnlyCollection<RuntimeCapabilityObservation> capabilities)

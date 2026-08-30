@@ -23,6 +23,7 @@ public sealed class RuntimeTelemetryTests
     [Theory]
     [InlineData("123, 512\n456, 1024", 123, 512L * 1024 * 1024)]
     [InlineData("123, [N/A]", 123, null)]
+    [InlineData("[Insufficient Permissions], [N/A]", 123, null)]
     public void Nvidia_process_memory_parser_is_pid_scoped(string output, int pid, long? expected)
     {
         var parsed = ProcessGpuMemoryParser.TryGetBytes(output, pid, out var bytes);

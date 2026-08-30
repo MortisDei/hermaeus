@@ -1657,14 +1657,13 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// r18 04-llama-server-engine-options.md 4.0: llama.cpp historically requires flash
-    /// attention enabled to use a quantized V cache. Inform-only - never auto-changes either
-    /// field; the user can launch with exactly what they chose regardless.
+    /// llama.cpp may leave Flash Attention disabled when auto is selected for a quantized
+    /// V cache. Inform-only - never auto-changes either field; the user can launch with
+    /// exactly what they chose regardless.
     /// </summary>
     public bool NeedsFlashAttentionForQuantizedV =>
-        !string.Equals(KvCacheType, "f16", StringComparison.OrdinalIgnoreCase)
-        && !string.Equals(KvCacheType, "bf16", StringComparison.OrdinalIgnoreCase)
-        && string.Equals(FlashAttention, "off", StringComparison.OrdinalIgnoreCase);
+        KvCacheMath.RequiresRuntimeAdvertisement(KvCacheTypeV)
+        && !string.Equals(FlashAttention, "on", StringComparison.OrdinalIgnoreCase);
 
     private static string EffectiveKvCacheType(ServerConfig config)
     {

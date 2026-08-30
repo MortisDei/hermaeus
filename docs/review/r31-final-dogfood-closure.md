@@ -125,3 +125,36 @@ the repaired behavior and regression coverage:
 The owner-only desktop and installed-runtime retests listed above remain live
 release gates. No release, tag, or push authorization is implied by this
 addendum.
+
+## Windows smoke follow-up
+
+Date: 2026-08-30
+
+The supplied runtime log and live Windows host were correlated against the
+current source. The repository did not contain the referenced smoke report, so
+the explicit log path was treated as evidence only.
+
+- The managed llama.cpp update failure was a real archive-shape defect. The
+  b10690 main package exposed `ggml-cuda.dll` at archive root while the setup
+  path required `llama-b10690/`. The extractor now accepts either the exact
+  known wrapper or a flat package, preflights paths, rejects mixed layouts, and
+  retains the zip-slip and safe-link guards.
+- The Lab failure was a real launch-contract defect. The logged runtime
+  rejected quantized V cache without Flash Attention. KV recipes now exclude
+  the baseline representation, require exact runtime Flash Attention evidence
+  plus an explicit `on` setting for any quantized-V configuration, and reject
+  conflicting Flash Attention extra arguments before launch.
+- Process VRAM on Windows WDDM host remains intentionally
+  `Unknown`. `nvidia-smi` reports `[N/A]` for PID-scoped `used_memory`, while
+  Windows `GPU Process Memory\...\Dedicated Usage` is PID-named but Microsoft
+  documents incorrect-value/leak behavior for that counter. Its per-process
+  totals can also exceed device-used memory because shared allocations are
+  counted per process. No `llama-server.exe` was present under `C:\AI` during
+  this inspection, so there was no exact managed PID to correlate; the
+  conclusion is about the counter's reliability, not a claimed observation of
+  this application's counter. No whole-device fallback, PDH/D3DKMT
+  accounting, or other native GPU accounting was added.
+
+The installer update retry and one real Available KV Lab run with the repaired
+managed runtime remain owner live gates. Low-bit Apply still requires the
+existing quality evidence rule.

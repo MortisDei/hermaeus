@@ -1,17 +1,19 @@
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
 using Hermaeus.Services;
+using Hermaeus.Services.ProcessManagement;
 using Xunit;
 
 namespace Hermaeus.Tests;
 
 public sealed class LabRecipeTests
 {
-    private static ServerConfig Server() => new()
+    private static ServerConfig Server(string flashAttention = "auto") => new()
     {
         Id = "server-1", Name = "Chat", ExecutablePath = "missing-server",
         ModelPath = "missing-model.gguf", ContextSize = 8192, GpuLayers = 0,
-        Threads = 4, Slots = 1, KvCacheTypeK = "f16", KvCacheTypeV = "f16"
+        Threads = 4, Slots = 1, KvCacheTypeK = "f16", KvCacheTypeV = "f16",
+        FlashAttention = flashAttention
     };
 
     private static RuntimeIdentityV2 Runtime() => RuntimeIdentityFactory.Unknown("llama.cpp");
@@ -22,6 +24,12 @@ public sealed class LabRecipeTests
             new Dictionary<string, string>(), IdentityCompleteness.Complete));
     private static RuntimeCapabilityObservation Capability(string id, CapabilityState state = CapabilityState.Available) =>
         RuntimeCapabilityObservation.Create(id, state, "test", "test evidence", Runtime(), null, null, DateTime.UtcNow);
+
+    private static string? ArgValue(IReadOnlyList<string> args, string name)
+    {
+        var index = args.ToList().IndexOf(name);
+        return index >= 0 && index + 1 < args.Count ? args[index + 1] : null;
+    }
 
     [Fact]
     public void Runtime_help_observes_flash_and_cpu_moe_capabilities()
@@ -96,9 +104,9 @@ public sealed class LabRecipeTests
         var capabilities = new[]
         {
             Capability("runtime.kv.type.f16"), Capability("runtime.kv.type.q8_0"),
-            Capability("runtime.kv.type.future_2bit")
+            Capability("runtime.kv.type.future_2bit"), Capability("runtime.flash-attention")
         };
-        var plan = LabRecipeCatalog.Build(LabRecipeKind.KvCache, Server(), capabilities);
+        var plan = LabRecipeCatalog.Build(LabRecipeKind.KvCache, Server("on"), capabilities);
         Assert.Equal(CapabilityState.Available, plan.Availability);
         var candidate = Assert.Single(plan.Candidates);
         Assert.Equal("q8_0", candidate.KvCacheTypeK);
@@ -108,9 +116,79 @@ public sealed class LabRecipeTests
     [Fact]
     public void Low_bit_kv_recipe_requires_quality_metric()
     {
-        var plan = LabRecipeCatalog.Build(LabRecipeKind.KvCache, Server(),
-            [Capability("runtime.kv.type.f16"), Capability("runtime.kv.type.q4_0")]);
+        var plan = LabRecipeCatalog.Build(LabRecipeKind.KvCache, Server("on"),
+            [Capability("runtime.kv.type.f16"), Capability("runtime.kv.type.q4_0"),
+                Capability("runtime.flash-attention")]);
         Assert.Contains("quality.score", plan.RequiredMetrics);
+    }
+
+    [Fact]
+    public void Kv_recipe_excludes_the_baseline_representation()
+    {
+        var source = Server("on");
+        source.KvCacheType = "q8_0";
+        source.KvCacheTypeK = "q8_0";
+        source.KvCacheTypeV = "q8_0";
+        var plan = LabRecipeCatalog.Build(LabRecipeKind.KvCache, source,
+            [Capability("runtime.kv.type.f16"), Capability("runtime.kv.type.q8_0"),
+                Capability("runtime.kv.type.q4_0"), Capability("runtime.flash-attention")]);
+
+        Assert.DoesNotContain(plan.Candidates, candidate => candidate.KvCacheTypeK == "q8_0");
+        Assert.All(plan.Candidates, candidate => Assert.NotEqual(plan.Baseline.KvCacheTypeK, candidate.KvCacheTypeK));
+    }
+
+    [Fact]
+    public void Kv_recipe_requires_explicit_flash_attention_for_quantized_values()
+    {
+        var plan = LabRecipeCatalog.Build(LabRecipeKind.KvCache, Server(),
+            [Capability("runtime.kv.type.f16"), Capability("runtime.kv.type.q8_0"),
+                Capability("runtime.flash-attention")]);
+
+        Assert.Equal(CapabilityState.Unknown, plan.Availability);
+        Assert.Contains("explicitly on", plan.AvailabilityDetail, StringComparison.Ordinal);
+        Assert.Contains("runtime.flash-attention", plan.RequiredCapabilityIds);
+    }
+
+    [Fact]
+    public void Kv_recipe_requires_explicit_flash_attention_for_a_quantized_baseline()
+    {
+        var source = Server();
+        source.KvCacheType = "q8_0";
+        source.KvCacheTypeK = "q8_0";
+        source.KvCacheTypeV = "q8_0";
+        var plan = LabRecipeCatalog.Build(LabRecipeKind.KvCache, source,
+            [Capability("runtime.kv.type.q8_0"), Capability("runtime.flash-attention")]);
+
+        Assert.Equal(CapabilityState.Unknown, plan.Availability);
+        Assert.Contains("explicitly on", plan.AvailabilityDetail, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Kv_recipe_rejects_a_conflicting_flash_attention_extra_argument()
+    {
+        var source = Server("on");
+        source.ExtraArgs = "--flash-attn off";
+        var plan = LabRecipeCatalog.Build(LabRecipeKind.KvCache, source,
+            [Capability("runtime.kv.type.f16"), Capability("runtime.kv.type.q8_0"),
+                Capability("runtime.flash-attention")]);
+
+        Assert.Equal(CapabilityState.Unknown, plan.Availability);
+        Assert.Contains("explicitly on", plan.AvailabilityDetail, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Kv_recipe_mapping_emits_the_explicit_flash_attention_override()
+    {
+        var source = Server("on");
+        var plan = LabRecipeCatalog.Build(LabRecipeKind.KvCache, source,
+            [Capability("runtime.kv.type.f16"), Capability("runtime.kv.type.q8_0"),
+                Capability("runtime.flash-attention")]);
+        var candidate = Assert.Single(plan.Candidates);
+        var isolated = LabConfigurationMapper.Apply(source, candidate, 39202);
+        var args = ServerProcessManager.BuildLaunchArguments(isolated);
+
+        Assert.Equal("q8_0", ArgValue(args, "--cache-type-v"));
+        Assert.Equal("on", ArgValue(args, "--flash-attn"));
     }
 
     [Theory]
@@ -262,7 +340,11 @@ public sealed class LabRecipeTests
     public async Task Low_bit_apply_is_blocked_when_quality_evidence_is_missing()
     {
         using var fixture = new RecipeFixture();
-        var observations = new[] { Capability("runtime.kv.type.f16"), Capability("runtime.kv.type.q4_0") };
+        var observations = new[]
+        {
+            Capability("runtime.kv.type.f16"), Capability("runtime.kv.type.q4_0"),
+            Capability("runtime.flash-attention")
+        };
         var plan = LabRecipeCatalog.Build(LabRecipeKind.KvCache, fixture.Source, observations);
         var run = await fixture.Runner.RunAsync(plan, fixture.Source, fixture.Capabilities(observations), "controlled prompt");
         var comparison = Assert.Single(run.Comparisons);
@@ -378,7 +460,7 @@ public sealed class LabRecipeTests
         {
             Settings = new TrackingSettings(Helpers.NewSettings(_temp));
             Settings.Settings.DataManagement.DataRootDirectory = _temp.PathFor("data");
-            Settings.Settings.ManagedServers = [Server()];
+            Settings.Settings.ManagedServers = [Server("on")];
             Store = new SqliteEmpiricalExperienceStore(Settings, new RedactionService());
             Experiments = new LabExperimentService(Settings, new FakeSystemInfo(), Store, Host);
             Runner = new LabRecipeRunner(Experiments, Workload, new FakeTelemetry(), new FakeSystemInfo());

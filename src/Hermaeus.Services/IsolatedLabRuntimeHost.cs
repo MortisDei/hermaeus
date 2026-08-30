@@ -28,7 +28,7 @@ public sealed class IsolatedLabRuntimeHost : ILabRuntimeHost
     public async Task<ILabRuntimeSession> StartAsync(string runId, ServerConfig source,
         LabConfiguration configuration, CancellationToken ct = default)
     {
-        LabDefinitionValidator.ValidateConfiguration(configuration);
+        LabDefinitionValidator.ValidateConfiguration(configuration, source.ExtraArgs);
         LabDefinitionValidator.ValidateIsolationArguments(source.ExtraArgs);
         var port = ReserveLoopbackPort();
         var manager = new ServerProcessManager(_redaction);

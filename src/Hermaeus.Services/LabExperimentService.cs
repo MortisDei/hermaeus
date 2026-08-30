@@ -55,7 +55,7 @@ public static class LabDefinitionValidator
             throw new InvalidOperationException("Lab definition collections exceed their bounded limits.");
     }
 
-    public static void ValidateConfiguration(LabConfiguration configuration)
+    public static void ValidateConfiguration(LabConfiguration configuration, string? extraArguments = null)
     {
         RequireId(configuration.Id, "configuration");
         if (string.IsNullOrWhiteSpace(configuration.Label) || configuration.Label.Length > 96)
@@ -74,10 +74,45 @@ public static class LabDefinitionValidator
             throw new InvalidOperationException("Lab speculative configuration is outside the reviewed bounds.");
         if (configuration.PromptCacheMode is not ("default" or "enabled" or "disabled"))
             throw new InvalidOperationException("Lab prompt-cache mode must be default, enabled, or disabled.");
+        var effectiveFlashAttention = EffectiveFlashAttention(configuration.FlashAttention, extraArguments);
+        if (KvCacheMath.RequiresRuntimeAdvertisement(configuration.KvCacheTypeV)
+            && !string.Equals(effectiveFlashAttention, "on", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                "Lab configurations with a quantized V cache require Flash Attention to be explicitly on.");
         if (!string.IsNullOrWhiteSpace(configuration.ExtraArgumentsSha256)
             && (configuration.ExtraArgumentsSha256.Length != 64
                 || configuration.ExtraArgumentsSha256.Any(character => !Uri.IsHexDigit(character))))
             throw new InvalidOperationException("Lab extra-argument identity must be an opaque SHA256 value.");
+    }
+
+    public static bool IsExplicitFlashAttentionOn(string configuredFlashAttention, string extraArguments)
+    {
+        var overrideValue = FlashAttentionOverride(extraArguments);
+        return string.Equals(configuredFlashAttention, "on", StringComparison.OrdinalIgnoreCase)
+            && (overrideValue is null || string.Equals(overrideValue, "on", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string EffectiveFlashAttention(string configuredFlashAttention, string? extraArguments) =>
+        FlashAttentionOverride(extraArguments ?? string.Empty) ?? configuredFlashAttention;
+
+    private static string? FlashAttentionOverride(string extraArguments)
+    {
+        var tokens = ExtraArgsParser.Split(extraArguments).ToArray();
+        string? value = null;
+        for (var index = 0; index < tokens.Length; index++)
+        {
+            var token = tokens[index];
+            if (token.StartsWith("--flash-attn=", StringComparison.OrdinalIgnoreCase))
+                value = token["--flash-attn=".Length..];
+            else if (token.StartsWith("-fa=", StringComparison.OrdinalIgnoreCase))
+                value = token["-fa=".Length..];
+            else if (token.Equals("--flash-attn", StringComparison.OrdinalIgnoreCase)
+                || token.Equals("-fa", StringComparison.OrdinalIgnoreCase))
+                value = index + 1 < tokens.Length && !tokens[index + 1].StartsWith("-", StringComparison.Ordinal)
+                    ? tokens[++index] : string.Empty;
+        }
+
+        return value;
     }
 
     public static void ValidateIsolationArguments(string extraArguments)
@@ -416,6 +451,9 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
     {
         var profile = await CreateFingerprintAsync(source, baseline, ct);
         LabDefinitionValidator.ValidateIsolationArguments(source.ExtraArgs);
+        LabDefinitionValidator.ValidateConfiguration(baseline, source.ExtraArgs);
+        foreach (var candidate in candidates)
+            LabDefinitionValidator.ValidateConfiguration(candidate, source.ExtraArgs);
         var configurationIdentities = candidates.Append(baseline)
             .ToDictionary(item => item.Id, item => CreateConfigurationIdentity(source, item), StringComparer.Ordinal);
         var configurationFingerprints = configurationIdentities
@@ -446,6 +484,9 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
         if (LabConfigurationMapper.Differences(source, definition.Baseline).Count != 0)
             throw new InvalidOperationException("The saved Services configuration changed after the Lab definition was frozen.");
         LabDefinitionValidator.ValidateIsolationArguments(source.ExtraArgs);
+        LabDefinitionValidator.ValidateConfiguration(definition.Baseline, source.ExtraArgs);
+        foreach (var candidate in definition.Candidates)
+            LabDefinitionValidator.ValidateConfiguration(candidate, source.ExtraArgs);
         var current = await CreateFingerprintAsync(source, definition.Baseline, ct);
         if (!definition.ProfileFingerprint.IsExactlyCompatibleWith(current))
             throw new InvalidOperationException("The runtime, model, hardware, or baseline configuration changed after the Lab definition was frozen.");

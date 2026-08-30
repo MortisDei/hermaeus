@@ -89,7 +89,10 @@ changes one declared dimension:
   all-GPU candidates;
 - context uses adjacent values from Hermaeus's reviewed 2K to 128K ladder;
 - KV offers only `f16`, `q8_0`, or `q4_0` when the exact runtime advertised
-  both the baseline and candidate representation;
+  both the baseline and candidate representation. Any configuration with a
+  quantized V cache also requires an explicit Flash Attention `on` baseline and
+  `runtime.flash-attention` evidence; `auto` remains Unknown because it is not
+  a controlled guarantee for this runtime;
 - Flash Attention appears only from `runtime.flash-attention` evidence;
 - CPU-MoE placement appears only from `runtime.moe.cpu-placement` evidence and
   stays distinct from the still-Unknown expert-cache mechanism.
@@ -104,9 +107,14 @@ candidates while preserving completed and failed evidence.
 GPU Fit is evaluated for every configuration before launch and remains labelled
 as deterministic prediction. After each repetition the shared telemetry source
 captures process RAM and, when the operating system exposes a trustworthy
-per-process counter, process GPU memory. On Linux/NVIDIA this uses the existing
-`nvidia-smi` process query scoped to the owned PID; otherwise the value remains
-`Unknown`, never zero. Runtime response counters provide prompt/decode
+per-process counter, process GPU memory. On NVIDIA this uses the existing
+`nvidia-smi` process query scoped to the owned PID when the host exposes a
+numeric process value. Windows WDDM commonly returns `[N/A]` for that process
+field, so Process VRAM remains `Unknown`, never zero; a numeric whole-device
+total is not attributed to the process. Windows also exposes a
+`GPU Process Memory\...\Dedicated Usage` counter, but Microsoft documents
+incorrect values for that counter on supported Windows clients, so R31 does not
+promote it to trustworthy process VRAM. Runtime response counters provide prompt/decode
 throughput and token counts. The current buffered protocol cannot establish
 TTFT, so TTFT is stored and displayed as missing rather than inferred from
 request duration.
@@ -238,9 +246,12 @@ requires runtime advertisement of that exact format.
 Runtime observation uses the shared telemetry source. Each sample carries a
 source and trust state and belongs to one runtime process instance. A restart
 starts a new series. Process working set is process-scoped RAM evidence. GPU
-memory is `Unknown` when no trustworthy per-process source exists; a
-whole-device total is retained only as a device total and is not called model
-VRAM.
+memory is `Unknown` when no trustworthy per-process source exists. In
+particular, Windows WDDM `nvidia-smi` output can expose device totals while
+leaving the PID-scoped field unavailable. A whole-device total is retained only
+as a device total and is not called model VRAM. The available Windows GPU
+process-memory counter is not used as a correctness source because its
+documented failure mode can over-report per-process dedicated usage.
 
 GPU Fit experience persists the immutable prediction with a bounded observation
 summary and retained exact samples. Discrepancy is shown only for an exact v2

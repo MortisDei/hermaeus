@@ -180,6 +180,21 @@ public sealed class ServicesViewModelTests
         Assert.Contains("32,768", vm.ContextFitNote);
     }
 
+    [Theory]
+    [InlineData("auto", true)]
+    [InlineData("off", true)]
+    [InlineData("on", false)]
+    public void Quantized_value_cache_warns_until_flash_attention_is_explicit(string flashAttention, bool expected)
+    {
+        using var temp = new TempDir();
+        var server = NewServerVm(temp, 8192);
+
+        server.KvCacheType = "q8_0";
+        server.FlashAttention = flashAttention;
+
+        Assert.Equal(expected, server.NeedsFlashAttentionForQuantizedV);
+    }
+
     [Fact]
     public void Missing_configured_draft_is_not_presented_as_a_detected_candidate()
     {
