@@ -9,7 +9,7 @@ FIFO for changelog entries, 10 versions in this file max. Remove older entries
 and append them to `docs/changelog-archive.md` to maintain the 10 version
 limit.
 
-## [Unreleased]
+## [0.38.0-beta] - 2026-08-30
 
 ### Changed
 
