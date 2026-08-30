@@ -141,6 +141,7 @@ public sealed class KokoroProcessManager : IDisposable
                 if (response.IsSuccessStatusCode) return;
             }
             catch (Exception ex) when (ex is not OperationCanceledException) { }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested) { }
 
             await Task.Delay(400, ct);
         }

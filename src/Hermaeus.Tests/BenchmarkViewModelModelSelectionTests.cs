@@ -2,8 +2,6 @@ using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
 using Hermaeus.Services;
 using Hermaeus.ViewModels;
-using System.Net;
-using System.Net.Sockets;
 using Xunit;
 using static Hermaeus.Tests.Helpers;
 
@@ -19,13 +17,6 @@ namespace Hermaeus.Tests;
 /// </summary>
 public sealed class BenchmarkViewModelModelSelectionTests
 {
-    private static int GetFreePort()
-    {
-        using var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        return ((IPEndPoint)listener.LocalEndpoint).Port;
-    }
-
     [Fact]
     public async Task Selecting_a_model_triggers_no_restart_and_running_triggers_exactly_one()
     {
@@ -34,11 +25,14 @@ public sealed class BenchmarkViewModelModelSelectionTests
         settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
         var modelPath = temp.PathFor("model.gguf");
         File.WriteAllText(modelPath, "fake");
-        var chatPort = GetFreePort();
-        var embeddingsPort = GetFreePort();
+        // This test only observes the attempted start. Keep it out of the
+        // real network: an occupied hosted-runner port would be rejected by
+        // port preflight before the intended Starting transition.
+        const int chatPort = 0;
+        const int embeddingsPort = 0;
         settings.Settings.ManagedServers.Clear();
-        settings.Settings.ManagedServers.Add(new ServerConfig { Name = "Chat", Port = chatPort });
-        settings.Settings.ManagedServers.Add(new ServerConfig { Name = "Embeddings", Port = embeddingsPort, EmbeddingsMode = true });
+        settings.Settings.ManagedServers.Add(new ServerConfig { Name = "Chat", ExecutablePath = string.Empty, Port = chatPort });
+        settings.Settings.ManagedServers.Add(new ServerConfig { Name = "Embeddings", ExecutablePath = string.Empty, Port = embeddingsPort, EmbeddingsMode = true });
 
         var services = NewServicesViewModel(settings);
         Assert.Equal(chatPort, services.Servers[0].Port);

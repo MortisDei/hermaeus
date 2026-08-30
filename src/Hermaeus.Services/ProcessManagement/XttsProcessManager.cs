@@ -138,6 +138,7 @@ public sealed class XttsProcessManager : IDisposable
                 if (response.IsSuccessStatusCode) return;
             }
             catch (Exception ex) when (ex is not OperationCanceledException) { }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested) { }
 
             await Task.Delay(500, ct);
         }

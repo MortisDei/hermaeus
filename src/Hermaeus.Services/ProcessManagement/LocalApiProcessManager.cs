@@ -21,6 +21,7 @@ public sealed class LocalApiProcessManager : IDisposable
     private readonly IRuntimeLogService? _runtimeLogs;
     private readonly Func<(string? FileName, IReadOnlyList<string> Args)> _resolveLaunchTarget;
     private readonly Func<string?> _settingsPathResolver;
+    private readonly Func<HttpClient> _healthClientFactory;
     private bool _stopRequested;
 
     private sealed record LocalApiRuntimeConfiguration(int Port, IReadOnlyList<(string Id, string SecretRef)> Tokens);
@@ -33,12 +34,14 @@ public sealed class LocalApiProcessManager : IDisposable
         IProcessJobObject? jobObject = null,
         IRuntimeLogService? runtimeLogs = null,
         Func<(string? FileName, IReadOnlyList<string> Args)>? launchTargetResolver = null,
-        Func<string?>? settingsPathResolver = null)
+        Func<string?>? settingsPathResolver = null,
+        Func<HttpClient>? healthClientFactory = null)
     {
         _jobObject = jobObject ?? ProcessJobObject.Default;
         _runtimeLogs = runtimeLogs;
         _resolveLaunchTarget = launchTargetResolver ?? (() => ResolveLaunchTarget());
         _settingsPathResolver = settingsPathResolver ?? (() => null);
+        _healthClientFactory = healthClientFactory ?? CreateHealthClient;
     }
 
     public async Task StartAsync(AppSettings settings, CancellationToken ct = default)
@@ -237,9 +240,11 @@ public sealed class LocalApiProcessManager : IDisposable
         StatusChanged?.Invoke();
     }
 
-    private static async Task WaitForHealthAsync(Process process, int port, CancellationToken ct)
+    private static HttpClient CreateHealthClient() => new() { Timeout = TimeSpan.FromSeconds(2) };
+
+    private async Task WaitForHealthAsync(Process process, int port, CancellationToken ct)
     {
-        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+        using var http = _healthClientFactory();
         var url = $"http://127.0.0.1:{port}/health";
         var deadline = DateTime.UtcNow.AddSeconds(30);
         while (DateTime.UtcNow < deadline)
@@ -253,6 +258,7 @@ public sealed class LocalApiProcessManager : IDisposable
                 if (response.IsSuccessStatusCode) return;
             }
             catch (Exception ex) when (ex is not OperationCanceledException) { }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested) { }
 
             await Task.Delay(300, ct);
         }

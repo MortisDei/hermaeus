@@ -92,6 +92,44 @@ public sealed class LocalApiProcessManagerBoundaryTests
         await Assert.ThrowsAsync<HttpRequestException>(() => GetModelsAsync(client, firstPort, newToken));
     }
 
+    [Fact]
+    public async Task Health_probe_timeout_is_retried_when_the_caller_was_not_cancelled()
+    {
+        using var temp = new TempDir();
+        var settingsPath = temp.PathFor("settings/settings.json");
+        var settings = NewSettings(temp);
+        settings.Settings.LocalApi.Enabled = true;
+        settings.Settings.LocalApi.Port = ReservePort();
+        settings.Settings.LocalApi.Tokens.Add(new LocalApiTokenEntry { Name = "Default", SecretRef = "secret:local-api" });
+        await settings.SaveAsync();
+
+        var handler = new TimeoutOnceHandler();
+        var apiDll = FindLocalApiDll();
+        using var manager = new LocalApiProcessManager(
+            launchTargetResolver: () => ("dotnet", [apiDll]),
+            settingsPathResolver: () => settingsPath,
+            healthClientFactory: () => new HttpClient(handler) { Timeout = TimeSpan.FromMilliseconds(50) });
+
+        await manager.StartAsync(settings.Settings);
+
+        Assert.Equal("Running", manager.StatusLabel);
+        Assert.Equal(2, handler.RequestCount);
+    }
+
+    private sealed class TimeoutOnceHandler : HttpMessageHandler
+    {
+        private int _requestCount;
+        public int RequestCount => Volatile.Read(ref _requestCount);
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (Interlocked.Increment(ref _requestCount) == 1)
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        }
+    }
+
     private static async Task<HttpStatusCode> GetModelsAsync(HttpClient client, int port, string token)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, $"http://127.0.0.1:{port}/v1/models");
