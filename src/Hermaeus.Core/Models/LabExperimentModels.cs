@@ -239,7 +239,11 @@ public sealed record LabRunCompletionSummary(
     DateTime? CompletedAtUtc,
     IReadOnlyList<string> Failures,
     IReadOnlyList<LabComparisonDecision> Comparisons,
-    IReadOnlyList<string> EvidenceSliceIds);
+    IReadOnlyList<string> EvidenceSliceIds,
+    IReadOnlyList<LabConfiguration>? Configurations = null,
+    IReadOnlyList<LabComparison>? DetailedComparisons = null,
+    string? ExperimentName = null,
+    string? ModelIdentityLabel = null);
 
 public sealed record LabApplyEvidence(
     string RunId,

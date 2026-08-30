@@ -63,6 +63,27 @@ public sealed class LabRecipeTests
     }
 
     [Fact]
+    public void Isolated_lab_mapping_preserves_launch_capability_facts()
+    {
+        var source = Server();
+        source.PreserveReasoning = true;
+        source.ReasoningPreserveSupported = true;
+        source.NoMemoryMap = true;
+        source.MemoryLock = false;
+        source.ContextShift = true;
+        source.ExtraArgs = "--some-runtime-option value";
+        var configuration = LabConfigurationMapper.FromServer(source, "baseline", "Baseline");
+
+        var isolated = LabConfigurationMapper.Apply(source, configuration, 39202);
+
+        Assert.True(isolated.PreserveReasoning);
+        Assert.True(isolated.ReasoningPreserveSupported);
+        Assert.True(isolated.NoMemoryMap);
+        Assert.True(isolated.ContextShift);
+        Assert.Equal(source.ExtraArgs, isolated.ExtraArgs);
+    }
+
+    [Fact]
     public void Kv_recipe_is_unknown_without_exact_advertisement()
     {
         var plan = LabRecipeCatalog.Build(LabRecipeKind.KvCache, Server(), []);

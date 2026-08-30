@@ -36,6 +36,15 @@ public sealed class MarkdownViewer : ContentControl, IDisposable
     public static readonly StyledProperty<bool> IsErrorProperty =
         AvaloniaProperty.Register<MarkdownViewer, bool>(nameof(IsError));
 
+    public static readonly StyledProperty<Func<string, Task<bool>>?> RequestCopyToClipboardProperty =
+        AvaloniaProperty.Register<MarkdownViewer, Func<string, Task<bool>>?>(nameof(RequestCopyToClipboard));
+
+    public Func<string, Task<bool>>? RequestCopyToClipboard
+    {
+        get => GetValue(RequestCopyToClipboardProperty);
+        set => SetValue(RequestCopyToClipboardProperty, value);
+    }
+
     /// <summary>
     /// r19 5.4: lets a fenced code block's Save button reach the owning
     /// ChatViewModel. MarkdownViewer stays a dumb, reusable renderer -
@@ -134,14 +143,32 @@ public sealed class MarkdownViewer : ContentControl, IDisposable
 
     private async Task CopyFullMarkdownAsync()
     {
+        var copied = false;
         try
         {
-            if (TopLevel.GetTopLevel(this)?.Clipboard is { } clipboard)
+            if (RequestCopyToClipboard is { } requestCopy)
+                copied = await requestCopy(Markdown ?? string.Empty);
+            else if (TopLevel.GetTopLevel(this)?.Clipboard is { } clipboard)
+            {
                 await clipboard.SetTextAsync(Markdown ?? string.Empty);
+                copied = true;
+            }
         }
         catch
         {
-            // Best-effort: no clipboard available on this platform/session.
+            copied = false;
+        }
+
+        try
+        {
+            Ioc.Default.GetService<IToastService>()?.Show(
+                copied ? "Markdown copied" : "Could not copy markdown",
+                copied ? "The rendered message markdown was copied to the clipboard." : "The clipboard was unavailable.",
+                copied ? ToastKind.Success : ToastKind.Warning, 3000);
+        }
+        catch
+        {
+            // Feedback is best effort; the copy result itself has already been determined.
         }
     }
 

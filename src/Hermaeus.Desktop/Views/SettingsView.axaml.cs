@@ -112,8 +112,10 @@ public partial class SettingsView : UserControl
         vm.LocalAiSetup.RequestCopyToClipboard = async text =>
         {
             var top = TopLevel.GetTopLevel(this);
-            if (top?.Clipboard is not null)
-                await top.Clipboard.SetTextAsync(text);
+            if (top?.Clipboard is not { } clipboard)
+                return false;
+            try { await clipboard.SetTextAsync(text); return true; }
+            catch { return false; }
         };
     }
 

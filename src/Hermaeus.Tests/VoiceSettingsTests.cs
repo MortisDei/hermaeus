@@ -17,9 +17,13 @@ public sealed class VoiceSettingsTests
         using var temp = new TempDir();
         var path = temp.PathFor("settings/settings.json");
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        await File.WriteAllTextAsync(path, """{"Tts":{"Enabled":true,"VoiceProvider":"KokoroNative","Speaker":"af_heart"}}""");
+        var dataRoot = temp.PathFor("data");
+        var legacyJson = "{\"DataManagement\":{\"DataRootDirectory\":"
+            + System.Text.Json.JsonSerializer.Serialize(dataRoot)
+            + "},\"Tts\":{\"Enabled\":true,\"VoiceProvider\":\"KokoroNative\",\"Speaker\":\"af_heart\"}}";
+        await File.WriteAllTextAsync(path, legacyJson);
 
-        var service = new SettingsService(path);
+        var service = NewSettings(temp);
         await service.LoadAsync();
 
         Assert.True(service.Settings.Tts.Enabled);
@@ -170,6 +174,25 @@ public sealed class VoiceSettingsTests
         Assert.Equal(
             [VoiceChannelSettingViewModel.DefaultVoiceLabel, "voice-a", "voice-b", "voice-c"],
             vm.ChannelVoiceOptions);
+    }
+
+    [Fact]
+    public async Task Reload_keeps_a_persisted_channel_voice_represented_after_provider_discovery()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.Tts.Channels["Agent"] = new VoiceChannelConfig { Enabled = true, VoiceId = "provider-voice-2" };
+        var vm = new TtsSettingsViewModel(
+            new ScriptedTts(["provider-voice-1", "provider-voice-2", "provider-voice-3"]),
+            new FakeVoiceProviderRegistry(settings), new FakeToasts(),
+            new XttsProcessManager(), new KokoroProcessManager(), new FakeSecretStore(), settings);
+
+        vm.ReloadFrom(settings.Settings);
+        await WaitForAsync(() => vm.ChannelVoiceOptions.Contains("provider-voice-2"), "provider voice discovery");
+
+        var channel = vm.VoiceChannels.Single(item => item.Channel == VoiceChannel.Agent);
+        Assert.Equal("provider-voice-2", channel.VoiceDisplay);
+        Assert.Contains("provider-voice-2", vm.ChannelVoiceOptions);
     }
 
     /// <summary>Avalonia's ComboBox has no free-text entry mode; the channel voice picker

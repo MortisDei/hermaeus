@@ -225,6 +225,29 @@ public sealed class MainWindowViewModelStartupTests
         Assert.True(harness.Llm.GetModelsCallCount > 0, "chat models must load once the wizard finishes on a first run, not stay empty until a restart");
     }
 
+    [Fact]
+    public async Task Shutdown_waits_for_a_server_triggered_model_refresh_before_teardown()
+    {
+        using var temp = new TempDir();
+        var harness = await NewHarnessAsync(temp, initializeRagStore: true);
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        harness.Llm.DelayGate = gate;
+
+        var server = harness.Main.Services.Servers.First(s => !s.EmbeddingsMode);
+        server.Port += 100;
+        await server.SaveConfigCommand.ExecuteAsync(null);
+        await WaitForAsync(() => harness.Llm.GetModelsCallCount > 0, "server-triggered model refresh");
+
+        var shutdown = harness.Main.ShutdownAsync();
+        Assert.False(shutdown.IsCompleted, "shutdown must wait for the in-flight refresh before services are disposed");
+
+        gate.TrySetResult();
+        await shutdown;
+
+        Assert.DoesNotContain(harness.Logs.GetEntries(), entry =>
+            entry.Message.Contains("Model refresh failed", StringComparison.Ordinal));
+    }
+
     /// <summary>r16 03-workbench-and-desktop.md 3.3: every other destructive action of this weight is confirm-gated; a raw context-menu click was the one exception.</summary>
     [Fact]
     public async Task DeleteConversation_does_nothing_when_confirmation_returns_false()

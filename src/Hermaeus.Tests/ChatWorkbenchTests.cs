@@ -12,6 +12,34 @@ namespace Hermaeus.Tests;
 public sealed class ChatWorkbenchTests
 {
     [Fact]
+    public async Task Copy_message_awaits_clipboard_and_reports_both_outcomes()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var toasts = new FakeToasts();
+        var vm = new ChatViewModel(
+            new UsageLlm(), new InMemoryConversationStore(), new EmptyMemoryStore(), settings,
+            new FakeTts(), new ModelProfileService(settings), toasts,
+            new NoOpConversationMemoryService(), new RuntimeLogService(settings), new ConversationExportService());
+        var message = new MessageViewModel { Role = "assistant", Content = "copy this after the clipboard completes" };
+        var gate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        vm.RequestCopyToClipboard = _ => gate.Task;
+
+        var pending = vm.CopyMessageCommand.ExecuteAsync(message);
+        Assert.False(pending.IsCompleted);
+        gate.SetResult(true);
+        await pending;
+        Assert.Equal("Message copied", toasts.LastShown?.Title);
+
+        gate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var failed = vm.CopyMessageCommand.ExecuteAsync(message);
+        Assert.False(failed.IsCompleted);
+        gate.SetResult(false);
+        await failed;
+        Assert.Equal("Could not copy message", toasts.LastShown?.Title);
+    }
+
+    [Fact]
     public void TruncateHistoryKeepsNewestMessages()
     {
         var messages = Enumerable.Range(1, 20)

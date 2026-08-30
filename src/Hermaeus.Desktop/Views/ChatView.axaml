@@ -278,6 +278,7 @@
                      chunks - StopChannel clears the whole queue, not just what is
                      currently playing. -->
                 <Button Grid.Column="10" Classes="icon-btn"
+                        Command="{Binding OpenTelemetryCommand}"
                         ToolTip.Tip="Live model telemetry">
                     <PathIcon Data="M3 13h2v8H3v-8zm4-6h2v14H7V7zm4 3h2v11h-2V10zm4-7h2v18h-2V3z"
                               Width="16" Height="16" />

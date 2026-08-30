@@ -33,7 +33,11 @@ for Knowledge behavior in Chat.
 
 - Models manages local GGUF files, provider-discovered models, model profiles,
   sampling defaults, visibility, tags, source provenance, updates, deletion,
-  and hardware-fit information.
+  and hardware-fit information. A saved auto-tune profile is shown directly on
+  the model card with its GPU layers, threads, and context. Opening the model
+  configuration also hydrates the editable saved tune values from that shared
+  profile; saving them remains separate from the runtime Save Config action on
+  Services.
 - Services manages local runtime processes and files. Managed `llama.cpp`,
   Ollama, and OpenAI-compatible profiles are supported, with explicit
   localhost, model, port, and launch configuration.
@@ -41,9 +45,11 @@ for Knowledge behavior in Chat.
   migration boundary. Ordinary Settings autosave does not move an existing
   workspace, and llama.cpp pruning only deletes validated owned superseded
   version directories while protecting the selected runtime.
-- Managed llama.cpp update and recovery preserve the configured or previously
-  installed backend class, match platform-specific upstream assets, and refuse
-  a missing or unlaunchable GPU backend instead of silently installing CPU.
+- Managed llama.cpp update and recovery honor explicit backend choices. Auto is
+  re-evaluated from current hardware when installation is required, may use a
+  compatible accelerated fallback, and records the selected backend separately
+  from the still-Auto preference. Missing or unlaunchable GPU backends are
+  refused instead of silently becoming CPU.
   Known upstream archive wrapper directories are removed at the owned version
   boundary; legacy nested installations remain discoverable and protected.
 - Managed llama.cpp supports GPU-layer placement, K/V cache choices, Flash
@@ -51,6 +57,9 @@ for Knowledge behavior in Chat.
   capability-gated speculative decoding. Unsupported or unproven runtime
   features stay `Unknown` or `Unavailable`; Hermaeus does not guess from a
   filename or a generic flag.
+- Nested scroll surfaces give the wheel to the content under the pointer and
+  bubble to a page only when that content reaches its edge. Horizontal wheel
+  input is retained where a pane provides horizontal overflow.
 - Services keeps a managed server's configured projector path separate from
   its `Use projector` choice. Turning projector use off retains the path and
   linked provenance for repair, while omitting `--mmproj` from the launch;
@@ -63,9 +72,9 @@ for Knowledge behavior in Chat.
   names weights, K/V cache, runtime overhead, companions, placement, and
   headroom while keeping missing inputs as `Unknown`. Runtime observations are
   separate and comparable only under a compatible fingerprint.
-- Settings preferences save automatically. Process, model, and runtime changes
-  retain explicit save/apply actions because they can affect files or running
-  services.
+- Settings preferences save automatically, including a pending edit flushed by
+  clean shutdown. Process, model, and runtime changes retain explicit
+  save/apply actions because they can affect files or running services.
 
 Read [Models and Services in the user guide](user-guide.md#models-and-services)
 and the [llama.cpp reference](llama-cpp-features.md) for operational details.
@@ -96,7 +105,8 @@ See the [RAG reference](rag.md).
 
 - Memories are a local, reviewable store of durable facts with categories,
   tags, scopes, importance, recall statistics, pinning, archive, expiry, and
-  confirmed deletion.
+  confirmed deletion. Pinned rows show a persistent Pinned state and an Unpin
+  action instead of relying on a transient notification.
 - Search blends full-text and embedding similarity when an embedding model is
   available, with a bounded keyword fallback when it is not. Archived and
   expired memories are excluded from search and injection.
@@ -150,11 +160,22 @@ See the [Projects reference](projects.md).
 
 ## Lab and Evidence
 
-Lab runs controlled measurements in an isolated loopback runtime without
-stopping Chat, changing saved settings, or selecting a winner automatically.
-Definitions are frozen, candidates are bounded, valid recipe evidence flows
-directly into candidate review, missing measurements remain missing, and output
-correctness gates comparisons and Apply review.
+Lab runs controlled measurements in an isolated loopback runtime. Only one
+manual or guided run may be active at a time. A running
+selected Chat source is fully stopped and awaited before the isolated process
+starts, then restored only if its complete configuration is unchanged. Lab does
+not change saved settings or select a winner automatically. Definitions are
+frozen, candidates are bounded, valid recipe evidence flows directly into
+candidate review, missing measurements remain missing, and output correctness
+gates comparisons and Apply review. Failures retain their useful operation
+detail. One Lab execution is one top-level Evidence entry keyed by its durable
+run id. Its drill-down retains the completion result, configuration slices,
+provenance, and raw detail. Completion summaries name the eligible candidate or
+state why no recommendation is available, while Apply remains an explicit
+review and confirmation owned by the Hermaeus window. The result card leads
+with the experiment, recorded model identity when available, status,
+timestamps, tested configurations, recommendation state, correctness, and
+measured or predicted resource deltas. Missing measurements remain `Unknown`.
 
 The Evidence surface stores typed Agent, GPU Fit, and Lab records with source
 links, fingerprints, corrections, redacted export, and confirmed removal.
@@ -181,9 +202,11 @@ See the [Benchmarks reference](benchmarks.md).
 
 Voice is optional and off by default. Native Kokoro, managed local providers,
 and remote OpenAI voice are supported, with provider-specific setup and
-configuration. Local speech recognition uses an in-process Whisper model when
-installed; remote transcription is explicit. Captured and uploaded audio is
-transient and is not persisted or attached to conversations.
+configuration. Per-channel pickers use the active provider's discovered voice
+names without hardcoding a provider catalogue. Local speech recognition uses
+an in-process Whisper model when installed; remote transcription is explicit.
+Captured and uploaded audio is transient and is not persisted or attached to
+conversations.
 
 Audio feedback is a separate semantic cue service with explicit events,
 volume, mute, visual equivalents, bounded queueing, and suppression while TTS
@@ -208,10 +231,15 @@ See [First launch and troubleshooting](user-guide.md) and [Packaging](packaging.
 
 - System shows app, operating-system, CPU, RAM, storage, database, managed
   component, and best-effort GPU information.
+- Chat telemetry can sample the currently active managed server process. Its
+  process RAM and per-process GPU readings are tied to that process identity;
+  missing counters remain Unknown.
 - Activity records observed outcomes for operations such as model downloads,
   server lifecycle, ingest, backups, restores, memory sweeps, and voice.
   Artifact-specific rows open their artifact; rows without one stay inert.
-- Runtime Logs apply redaction before display and persistence. Settings holds
+- Runtime Logs apply redaction before display and persistence, omit repetitive
+  low-level llama slot scheduler chatter from the normal persistent sink, and
+  rotate with bounded file-count, age, and total-size retention. Settings holds
   user preferences, while Services holds process and file configuration.
 - The local API is an off-by-default, loopback-only surface for selected Chat,
   embedding, Memory, RAG, model, and capability operations. It uses named

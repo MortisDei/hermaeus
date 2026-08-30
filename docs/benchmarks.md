@@ -551,7 +551,13 @@ keeps the highest candidate that starts and reaches `/health`, with CPU fallback
 as the final candidate. Successful tune results are saved per GGUF model file
 with model size and modified-time metadata. When that model is selected again,
 Hermaeus reapplies the saved GPU layer, thread, context, and extra-argument
-profile before starting the managed server.
+profile before starting the managed server. The Models card shows the current
+profile directly, while the model configuration editor hydrates the same saved
+GPU layer, thread, and context values for intentional review or editing.
+**Save model profile** remains separate from Services **Save Config**, and
+extra arguments remain a Services concern. Auto-tune probes are temporary owned
+processes and require the target managed server to be stopped; they do not
+silently stop and replace a running Chat process.
 
 Doctor alerts when local GGUF models do not have matching tuned profiles. It
 also checks the configured `llama-server` binary version and, when GitHub

@@ -352,19 +352,15 @@ public sealed class LocalAiSetupService
             var variant = configuredVariant;
             if (variant == LlamaRuntimeVariant.Auto)
             {
-                variant = settings.DataManagement.InstalledLlamaRuntimeVariant;
-                if (variant == LlamaRuntimeVariant.Auto)
+                if (_systemInfo is null)
                 {
-                    if (_systemInfo is null)
-                    {
-                        return new LocalAiSetupResult(
-                            false,
-                            "Cannot choose a managed llama.cpp backend because hardware detection is unavailable. Select CPU, CUDA, or Vulkan explicitly.");
-                    }
-
-                    var profile = await _systemInfo.GetHardwareProfileAsync(ct);
-                    variant = LlamaServerSetupService.ResolveVariant(LlamaRuntimeVariant.Auto, profile);
+                    return new LocalAiSetupResult(
+                        false,
+                        "Cannot choose a managed llama.cpp backend because hardware detection is unavailable. Select CPU, CUDA, or Vulkan explicitly.");
                 }
+
+                var profile = await _systemInfo.GetHardwareProfileAsync(ct);
+                variant = LlamaServerSetupService.ResolveVariant(LlamaRuntimeVariant.Auto, profile);
             }
 
             var result = await _llamaServerSetup.InstallLatestAsync(

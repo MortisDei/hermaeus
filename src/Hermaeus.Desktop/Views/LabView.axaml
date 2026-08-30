@@ -16,7 +16,7 @@
         <ScrollViewer>
           <StackPanel Margin="8" Spacing="14" MaxWidth="920" HorizontalAlignment="Left">
             <TextBlock Text="1. Set up an experiment" FontSize="18" FontWeight="SemiBold" />
-            <TextBlock Text="Choose the Chat server, name the comparison, then start it. Lab freezes the exact baseline and candidate, runs on a dedicated loopback process, and never edits saved Services settings." TextWrapping="Wrap" />
+            <TextBlock Text="Choose the Chat server, name the comparison, then start it. Lab freezes the exact baseline and candidate, stops a running source until its resources are released, runs on a dedicated loopback process, restores the source when safe, and never edits saved Services settings. Manual runs stay active for inspection until you finish or cancel; guided recipes complete automatically." TextWrapping="Wrap" />
             <Grid ColumnDefinitions="180,260" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="10" RowSpacing="8">
               <TextBlock Grid.Row="0" Text="Configured Chat server" VerticalAlignment="Center" />
               <StackPanel Grid.Row="0" Grid.Column="1" Spacing="4">
@@ -35,10 +35,10 @@
                              ToolTip.Tip="Candidate context size. The baseline remains the selected server's current context size." />
             </Grid>
             <StackPanel Orientation="Horizontal" Spacing="8">
-              <Button Content="Start isolated run" Command="{Binding FreezeAndStartCommand}" IsEnabled="{Binding !IsRunActive}"
+              <Button Content="Start isolated run" Command="{Binding FreezeAndStartCommand}" IsEnabled="{Binding CanStartRun}"
                       ToolTip.Tip="Freeze the selected server identity and start an isolated loopback runtime." />
-              <Button Content="Complete baseline" Command="{Binding CompleteRunCommand}" IsEnabled="{Binding IsRunActive}"
-                      ToolTip.Tip="Capture the current baseline health evidence and stop the isolated runtime." />
+              <Button Content="Finish run and save baseline" Command="{Binding CompleteRunCommand}" IsEnabled="{Binding IsRunActive}"
+                      ToolTip.Tip="Capture the current baseline health evidence, stop the isolated runtime, and finalize this manual run. Lab does not invent a workload or candidate result." />
               <Button Content="Cancel" Command="{Binding CancelRunCommand}" IsEnabled="{Binding IsRunActive}"
                       ToolTip.Tip="Stop the active isolated Lab runtime without changing saved Services settings." />
             </StackPanel>
@@ -59,7 +59,7 @@
             <StackPanel Orientation="Horizontal" Spacing="8">
               <Button Content="Inspect runtime recipes" Command="{Binding RefreshRecipesCommand}"
                       ToolTip.Tip="Read capabilities from the selected runtime and rebuild the bounded recipe list." />
-              <Button Content="Run selected recipe" Command="{Binding RunSelectedRecipeCommand}" IsEnabled="{Binding !IsRecipeRunning}"
+              <Button Content="Run selected recipe" Command="{Binding RunSelectedRecipeCommand}" IsEnabled="{Binding CanRunRecipe}"
                       ToolTip.Tip="Run the selected available recipe. Unavailable capabilities remain Unknown." />
               <Button Content="Cancel recipe" Command="{Binding CancelRecipeCommand}" IsEnabled="{Binding IsRecipeRunning}"
                       ToolTip.Tip="Request cancellation of the active recipe and retain captured evidence." />
@@ -85,8 +85,10 @@
             <TextBlock Text="Apply to Services" FontSize="18" FontWeight="SemiBold" />
             <TextBlock Text="Apply is a separate review. It lists exact persisted fields, rejects stale runtime/model/config identity, and saves only after explicit confirmation." TextWrapping="Wrap" />
             <StackPanel Orientation="Horizontal" Spacing="8">
-              <Button Content="Review candidate" Command="{Binding ReviewApplyCommand}" />
-              <Button Content="Confirm reviewed changes" Command="{Binding ConfirmApplyCommand}" />
+              <Button Content="Review eligible candidate" Command="{Binding ReviewApplyCommand}" IsEnabled="{Binding CanReviewCurrentRun}"
+                      ToolTip.Tip="Show the exact Services fields for the current correctness-eligible Lab candidate. Nothing is saved by review." />
+              <Button Content="Confirm reviewed changes" Command="{Binding ConfirmApplyCommand}"
+                      ToolTip.Tip="Save only the fields shown by the reviewed candidate after explicit confirmation and identity rechecks." />
             </StackPanel>
             <TextBlock Text="{Binding ApplyReviewSummary}" TextWrapping="Wrap" FontFamily="Consolas" />
           </StackPanel>
@@ -115,7 +117,9 @@
                   <Grid ColumnDefinitions="Auto,*,Auto" Margin="4" ColumnSpacing="8">
                     <CheckBox Grid.Column="0" IsChecked="{Binding IsExportSelected}" ToolTip.Tip="Include this record in the next evidence export" />
                     <StackPanel Grid.Column="1">
-                      <TextBlock Text="{Binding Domain}" FontWeight="SemiBold" />
+                      <TextBlock Text="{Binding DisplayDomain}" FontWeight="SemiBold" />
+                      <TextBlock Text="{Binding RecordKindLabel}" Opacity="0.65" />
+                      <TextBlock Text="{Binding RunIdentityLabel}" Opacity="0.65" FontFamily="Consolas" />
                       <TextBlock Text="{Binding ScopeLabel}" Opacity="0.65" TextTrimming="CharacterEllipsis" />
                       <TextBlock Text="{Binding OriginLabel}" Opacity="0.65" />
                     </StackPanel>
@@ -136,13 +140,96 @@
                                          Margin="12" />
               <StackPanel Spacing="8" IsVisible="{Binding HasSelection}">
                 <TextBlock Text="Evidence detail" FontSize="18" FontWeight="SemiBold" />
+                <TextBlock Text="{Binding SelectedExperience.EvidenceRecordLabel}" FontWeight="SemiBold" />
                 <TextBlock Text="{Binding SelectedExperience.Experience.Id}" FontFamily="Consolas" TextWrapping="Wrap" />
                 <TextBlock Text="Normalized outcome" FontWeight="SemiBold" />
                 <TextBlock Text="{Binding SelectedExperience.Experience.Outcome.Detail}" TextWrapping="Wrap" />
+                <Border Classes="card" Padding="10" IsVisible="{Binding SelectedExperience.IsLabCompletionSummary}">
+                  <StackPanel Spacing="7">
+                    <TextBlock Text="{Binding SelectedExperience.ResultDetails.ExperimentLabel}" FontSize="16" FontWeight="SemiBold" />
+                    <WrapPanel Orientation="Horizontal" ItemSpacing="14" LineSpacing="4">
+                      <TextBlock Text="{Binding SelectedExperience.ResultDetails.ModelLabel, StringFormat='Model: {0}'}" />
+                      <TextBlock Text="{Binding SelectedExperience.ResultDetails.ResultStatus, StringFormat='Result: {0}'}" />
+                      <TextBlock Text="{Binding SelectedExperience.ResultDetails.StartedLabel, StringFormat='Started: {0}'}" />
+                      <TextBlock Text="{Binding SelectedExperience.ResultDetails.CompletedLabel, StringFormat='Completed: {0}'}" />
+                    </WrapPanel>
+                    <TextBlock Text="{Binding SelectedExperience.ResultDetails.RunIdentityLabel}" FontFamily="Consolas" Opacity="0.7" />
+                    <TextBlock Text="{Binding SelectedExperience.ResultDetails.TestedConfigurations, StringFormat='Configurations: {0}'}" TextWrapping="Wrap" />
+                    <Border Padding="8" Background="{DynamicResource SubtleFillColorSecondaryBrush}">
+                      <TextBlock Text="{Binding SelectedExperience.ResultDetails.RecommendationLabel}" TextWrapping="Wrap" FontWeight="SemiBold" />
+                    </Border>
+                    <TextBlock Text="{Binding SelectedExperience.ResultDetails.FailuresLabel, StringFormat='Failures: {0}'}"
+                               IsVisible="{Binding SelectedExperience.ResultDetails.HasFailures}" TextWrapping="Wrap" Foreground="{DynamicResource SystemFillColorCriticalBrush}" />
+                    <TextBlock Text="{Binding SelectedExperience.ResultDetails.EvidenceLabel}" Opacity="0.7" />
+                    <TextBlock Text="Configuration comparison (baseline -&gt; candidate)" FontWeight="SemiBold" />
+                    <ItemsControl ItemsSource="{Binding SelectedExperience.ResultDetails.Comparisons}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:LabResultComparisonViewModel">
+                          <Border Padding="8" Margin="0,2" BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="5">
+                            <Grid ColumnDefinitions="110,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8" RowSpacing="3">
+                              <TextBlock Text="Configuration" FontWeight="SemiBold" />
+                              <TextBlock Grid.Column="1" Text="{Binding ConfigurationLabel}" TextWrapping="Wrap" />
+                              <TextBlock Grid.Row="1" Text="Throughput" Opacity="0.7" />
+                              <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding ThroughputLabel}" TextWrapping="Wrap" />
+                              <TextBlock Grid.Row="2" Text="RAM" Opacity="0.7" />
+                              <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding RamLabel}" TextWrapping="Wrap" />
+                              <TextBlock Grid.Row="3" Text="VRAM" Opacity="0.7" />
+                              <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding VramLabel}" TextWrapping="Wrap" />
+                              <TextBlock Grid.Row="4" Text="Correctness" Opacity="0.7" />
+                              <StackPanel Grid.Row="4" Grid.Column="1" Spacing="2">
+                                <TextBlock Text="{Binding CorrectnessLabel}" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding CorrectnessDetail}" TextWrapping="Wrap" Opacity="0.7" />
+                              </StackPanel>
+                            </Grid>
+                          </Border>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+                </Border>
+                <StackPanel Spacing="4" IsVisible="{Binding SelectedExperience.IsLabCompletionSummary}">
+                  <TextBlock Text="Apply review" FontWeight="SemiBold" />
+                  <TextBlock Text="Review the current in-memory run here. Historical evidence remains read-only and never applies settings by itself." TextWrapping="Wrap" Opacity="0.7" />
+                  <Button Content="Review eligible candidate" Command="{Binding ReviewApplyCommand}" IsEnabled="{Binding CanReviewCurrentRun}"
+                          ToolTip.Tip="Show the exact Services fields for the current Lab result. Review does not save anything." />
+                  <Button Content="Confirm reviewed changes" Command="{Binding ConfirmApplyCommand}" IsEnabled="{Binding CanConfirmApply}"
+                          ToolTip.Tip="Save only the fields shown by the reviewed candidate after explicit confirmation and identity rechecks." />
+                  <TextBlock Text="{Binding ApplyReviewSummary}" TextWrapping="Wrap" FontFamily="Consolas" />
+                </StackPanel>
+                <Expander Header="Execution evidence details">
+                  <ItemsControl ItemsSource="{Binding SelectedExperience.EvidenceRecords}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <Expander Header="{Binding Id}" Margin="0,2">
+                          <StackPanel Spacing="4" Margin="8,4">
+                            <TextBlock Text="{Binding Domain}" Opacity="0.7" />
+                            <TextBlock Text="{Binding CreatedAtUtc, StringFormat='Created: {0:yyyy-MM-dd HH:mm:ss} UTC'}" Opacity="0.7" />
+                            <TextBlock Text="{Binding Outcome.Detail}" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding ContextJson}" FontFamily="Consolas" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding ActionJson}" FontFamily="Consolas" TextWrapping="Wrap" />
+                            <ItemsControl ItemsSource="{Binding Provenance}">
+                              <ItemsControl.ItemTemplate>
+                                <DataTemplate><TextBlock Text="{Binding Source.Title}" TextWrapping="Wrap" Opacity="0.7" /></DataTemplate>
+                              </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                          </StackPanel>
+                        </Expander>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </Expander>
                 <TextBlock Text="Context" FontWeight="SemiBold" />
-                <TextBlock Text="{Binding SelectedExperience.Experience.ContextJson}" FontFamily="Consolas" TextWrapping="Wrap" />
+                <TextBlock Text="{Binding SelectedExperience.ContextSummary}" TextWrapping="Wrap" />
+                <Expander Header="Raw context JSON">
+                  <TextBox Text="{Binding SelectedExperience.Experience.ContextJson}" IsReadOnly="True"
+                           AcceptsReturn="True" MinHeight="80" FontFamily="Consolas" TextWrapping="Wrap" />
+                </Expander>
                 <TextBlock Text="Action or configuration" FontWeight="SemiBold" />
-                <TextBlock Text="{Binding SelectedExperience.Experience.ActionJson}" FontFamily="Consolas" TextWrapping="Wrap" />
+                <TextBlock Text="{Binding SelectedExperience.ActionSummary}" TextWrapping="Wrap" />
+                <Expander Header="Raw action or configuration JSON">
+                  <TextBox Text="{Binding SelectedExperience.Experience.ActionJson}" IsReadOnly="True"
+                           AcceptsReturn="True" MinHeight="80" FontFamily="Consolas" TextWrapping="Wrap" />
+                </Expander>
                 <TextBlock Text="Raw evidence links" FontWeight="SemiBold" />
                 <ItemsControl ItemsSource="{Binding SelectedExperience.Experience.Provenance}">
                   <ItemsControl.ItemTemplate><DataTemplate><TextBlock Text="{Binding Source.Title}" TextWrapping="Wrap" /></DataTemplate></ItemsControl.ItemTemplate>

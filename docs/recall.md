@@ -33,7 +33,9 @@ size reporting. See [Settings > Memory](features.md) for the Recall card.
   additive only).
 - **Sources**: four federated sources - conversations, agent tasks,
   memories, and RAG document chunks - each queried independently and then
-  fused.
+  fused. Conversation recall includes eligible user and assistant messages;
+  each hit retains an exact conversation/message locator, so a recalled answer
+  is still identified as past message text rather than a durable Memory fact.
 - **Fusion**: reciprocal rank fusion (RRF, k=60 - the same constant
   `HybridRetriever` already uses for RAG's semantic/keyword fusion) merges
   the four ranked lists. No deduplication pass is needed since the four

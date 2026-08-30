@@ -21,6 +21,11 @@ public partial class MainWindowViewModel : ViewModelBase
     private CancellationTokenSource? _watchedRefreshCts;
     private readonly Dictionary<string, CancellationTokenSource> _pendingMetadataSaves = new();
     private static readonly TimeSpan MetadataSaveDebounce = TimeSpan.FromMilliseconds(500);
+    private readonly object _backgroundTaskGate = new();
+    private readonly List<Task> _backgroundTasks = [];
+    private readonly object _shutdownGate = new();
+    private Task? _shutdownTask;
+    private bool _isShuttingDown;
 
     public ChatViewModel            Chat     { get; }
     public AgentViewModel           Agent    { get; }
@@ -43,7 +48,7 @@ public partial class MainWindowViewModel : ViewModelBase
     public UiBoundCollection<ToastViewModel> Toasts { get; } = [];
     public UiBoundCollection<ToastViewModel> ToastHistory { get; } = [];
     public UiBoundCollection<string> FolderFilters { get; } = ["All"];
-    public Action<string>? RequestCopyToastDetails { get; set; }
+    public Func<string, Task<bool>>? RequestCopyToastDetails { get; set; }
 
     [ObservableProperty] private bool   _isSidebarOpen = true;
     [ObservableProperty] private string _searchQuery   = string.Empty;
@@ -463,16 +468,70 @@ public partial class MainWindowViewModel : ViewModelBase
         }
     }
 
-    public void Shutdown()
+    public void Shutdown() => _ = ShutdownAsync();
+
+    public Task ShutdownAsync()
     {
+        lock (_shutdownGate)
+            return _shutdownTask ??= ShutdownCoreAsync();
+    }
+
+    private async Task ShutdownCoreAsync()
+    {
+        lock (_backgroundTaskGate)
+            _isShuttingDown = true;
+
         _searchCts?.Cancel();
         _searchCts?.Dispose();
         _searchCts = null;
         _watchedRefreshCts?.Cancel();
         _watchedRefreshCts?.Dispose();
         _watchedRefreshCts = null;
-        Services.StopAll();
-        Settings.Shutdown();
+        await Lab.ShutdownAsync();
+        await Services.StopAllAsync();
+        await AwaitBackgroundTasksAsync();
+        await Settings.ShutdownAsync();
+    }
+
+    private void RunBackgroundTaskAsync(string operation, Func<Task> action)
+    {
+        Task task;
+        lock (_backgroundTaskGate)
+        {
+            if (_isShuttingDown)
+                return;
+
+            task = RunBackgroundTaskCoreAsync(operation, action);
+            _backgroundTasks.Add(task);
+        }
+
+        _ = RemoveBackgroundTaskWhenCompleteAsync(task);
+    }
+
+    private async Task RemoveBackgroundTaskWhenCompleteAsync(Task task)
+    {
+        try { await task; }
+        finally
+        {
+            lock (_backgroundTaskGate)
+                _backgroundTasks.Remove(task);
+        }
+    }
+
+    private async Task AwaitBackgroundTasksAsync()
+    {
+        while (true)
+        {
+            Task[] tasks;
+            lock (_backgroundTaskGate)
+            {
+                if (_backgroundTasks.Count == 0)
+                    return;
+                tasks = _backgroundTasks.ToArray();
+            }
+
+            await Task.WhenAll(tasks);
+        }
     }
 
     private async Task LoadConversationsAsync()
@@ -1053,10 +1112,21 @@ public partial class MainWindowViewModel : ViewModelBase
     private async Task ClearToastHistoryAsync() => await MutateAndSaveHistoryAsync(() => ToastHistory.Clear());
 
     [RelayCommand]
-    private void CopyToastDetails(ToastViewModel? item)
+    private async Task CopyToastDetails(ToastViewModel? item)
     {
         if (item is { CanCopyDetails: true })
-            RequestCopyToastDetails?.Invoke(item.Message);
+        {
+            var copied = false;
+            try
+            {
+                if (RequestCopyToastDetails is not null)
+                    copied = await RequestCopyToastDetails(item.Message);
+            }
+            catch { }
+            _toasts.Show(copied ? "Details copied" : "Could not copy details",
+                copied ? "The diagnostic detail was copied to the clipboard." : "The clipboard was unavailable.",
+                copied ? ToastKind.Success : ToastKind.Warning, 3000);
+        }
     }
 
     private sealed class ToastHistoryEntry
@@ -1077,9 +1147,24 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private async Task RefreshModelsAfterServerChangeAsync()
     {
+        lock (_backgroundTaskGate)
+        {
+            if (_isShuttingDown)
+                return;
+        }
+
         try
         {
-            await RunOnUiAsync(() => Chat.LoadModelsAsync(force: true));
+            await RunOnUiAsync(() =>
+            {
+                lock (_backgroundTaskGate)
+                {
+                    if (_isShuttingDown)
+                        return Task.CompletedTask;
+                }
+
+                return Chat.LoadModelsAsync(force: true);
+            });
         }
         catch (Exception ex)
         {
@@ -1100,11 +1185,6 @@ public partial class MainWindowViewModel : ViewModelBase
         var elapsed = sw.ElapsedMilliseconds;
         lock (into)
             into.Add(new StartupPhase(name, elapsed));
-    }
-
-    private void RunBackgroundTaskAsync(string operation, Func<Task> action)
-    {
-        _ = RunBackgroundTaskCoreAsync(operation, action);
     }
 
     private async Task RunBackgroundTaskCoreAsync(string operation, Func<Task> action)

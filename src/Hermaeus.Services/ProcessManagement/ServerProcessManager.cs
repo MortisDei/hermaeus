@@ -24,6 +24,7 @@ public sealed class ServerProcessManager : IDisposable
     private readonly RedactionService? _redactor;
     private readonly IProcessJobObject _jobObject;
     private readonly IPortOwnerLookup _portOwnerLookup;
+    private volatile bool _stopRequested;
     private const int MaxLogLines = 300;
 
     public ServerStatus Status { get; private set; } = ServerStatus.Stopped;
@@ -120,6 +121,7 @@ public sealed class ServerProcessManager : IDisposable
 
         ErrorMessage = string.Empty;
         ClearLog();
+        _stopRequested = false;
         SetStatus(ServerStatus.Starting);
         if (speculative.HasMessage)
             Emit($"[hermaeus] Warning: {speculative.Message}");
@@ -155,6 +157,7 @@ public sealed class ServerProcessManager : IDisposable
         }
         catch (OperationCanceledException)
         {
+            _stopRequested = true;
             KillProcess();
             Emit("[hermaeus] Start cancelled.");
             SetStatus(ServerStatus.Stopped);
@@ -177,9 +180,44 @@ public sealed class ServerProcessManager : IDisposable
         if (Status == ServerStatus.Stopped && _process is null)
             return;
 
+        _stopRequested = true;
         Emit("[hermaeus] Stopping...");
         KillProcess();
         SetStatus(ServerStatus.Stopped);
+    }
+
+    /// <summary>
+    /// Stops the managed process and waits for the operating system to reap it.
+    /// Lab configuration changes use this boundary before starting another
+    /// model so the previous process cannot still hold model memory while the
+    /// next context is being created.
+    /// </summary>
+    public async Task StopAsync()
+    {
+        if (Status == ServerStatus.Stopped && _process is null)
+            return;
+
+        _stopRequested = true;
+        Emit("[hermaeus] Stopping...");
+        _monitorCts?.Cancel();
+        var process = _process;
+        try
+        {
+            if (process is { HasExited: false })
+            {
+                try { process.Kill(entireProcessTree: true); }
+                catch (InvalidOperationException) { }
+                catch (System.ComponentModel.Win32Exception) { }
+                await process.WaitForExitAsync();
+            }
+        }
+        finally
+        {
+            if (ReferenceEquals(_process, process))
+                _process = null;
+            process?.Dispose();
+            SetStatus(ServerStatus.Stopped);
+        }
     }
 
     public string GetLog() => string.Join('\n', _logRing);
@@ -210,6 +248,7 @@ public sealed class ServerProcessManager : IDisposable
 
     public void Dispose()
     {
+        _stopRequested = true;
         _monitorCts?.Cancel();
         _monitorCts?.Dispose();
         KillProcess();
@@ -1039,11 +1078,19 @@ public sealed class ServerProcessManager : IDisposable
         // on another thread (process-crash class); ExitCode access on an
         // already-disposed Process is swallowed rather than left to throw
         // ObjectDisposedException on a threadpool thread.
+        if (sender is Process exited && !ReferenceEquals(_process, exited))
+            return;
+
         var code = TryGetExitCode(sender as Process);
         Emit($"[hermaeus] Process exited with code {code}.");
+        if (_stopRequested)
+        {
+            SetStatus(ServerStatus.Stopped);
+            return;
+        }
         if (Status == ServerStatus.Running)
         {
-            SetStatus(code == 0 ? ServerStatus.Stopped : ServerStatus.Error);
+            SetStatus(GetProcessExitStatus(stopRequested: false, code));
         }
         else if (Status == ServerStatus.Starting)
         {
@@ -1076,6 +1123,9 @@ public sealed class ServerProcessManager : IDisposable
         catch (ObjectDisposedException) { return -1; }
         catch (InvalidOperationException) { return -1; }
     }
+
+    public static ServerStatus GetProcessExitStatus(bool stopRequested, int code) =>
+        stopRequested || code == 0 ? ServerStatus.Stopped : ServerStatus.Error;
 
     private void SetStatus(ServerStatus s)
     {

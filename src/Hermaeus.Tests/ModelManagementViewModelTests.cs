@@ -34,6 +34,49 @@ public sealed class ModelManagementViewModelTests
     }
 
     [Fact]
+    public async Task Refresh_hydrates_the_model_editor_from_the_shared_tune_profile_and_save_persists_edits()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        var modelPath = temp.PathFor("model.gguf");
+        File.WriteAllText(modelPath, "fake model");
+        var file = new FileInfo(modelPath);
+        settings.Settings.LlamaTuneProfiles.Add(new LlamaTuneProfile
+        {
+            ModelPath = modelPath,
+            ModelSizeBytes = file.Length,
+            ModelModifiedAtUtc = file.LastWriteTimeUtc,
+            GpuLayers = 24,
+            TotalLayers = 32,
+            Threads = 8,
+            ContextSize = 8192,
+            TunedAtUtc = DateTime.UtcNow
+        });
+        var llm = new ScriptedModelsLlm(() =>
+        [new LlmModel { Id = modelPath, Name = "model", Provider = "local GGUF" }]);
+        var vm = new ModelManagementViewModel(llm, new ModelProfileService(settings), new FakeToasts(), settings,
+            new FakeSystemInfo(), NewServicesViewModel(settings), new ModelManifestStore(settings), new HuggingFaceClient(), new ModelDownloadService());
+
+        await vm.RefreshAsync();
+
+        var item = Assert.Single(vm.Models);
+        Assert.True(item.HasTuneProfile);
+        Assert.Equal(24, item.TunedGpuLayers);
+        Assert.Equal(8, item.TunedThreads);
+        Assert.Equal(8192, item.TunedContextSize);
+
+        item.TunedGpuLayers = 20;
+        item.TunedThreads = 6;
+        item.TunedContextSize = 4096;
+        await vm.SaveProfileCommand.ExecuteAsync(item);
+
+        var saved = Assert.Single(settings.Settings.LlamaTuneProfiles);
+        Assert.Equal(20, saved.GpuLayers);
+        Assert.Equal(6, saved.Threads);
+        Assert.Equal(4096, saved.ContextSize);
+    }
+
+    [Fact]
     public void Local_model_path_comparison_policy_matches_the_current_platform()
     {
         // Pure policy coverage: this does not claim that the test filesystem

@@ -81,7 +81,7 @@ public partial class App : Application
                 {
                     sp.GetRequiredService<AppLifecycleJournalService>().RecordCleanExit();
                     _desktopIntegration?.Dispose();
-                    vm.Shutdown();
+                    vm.ShutdownAsync().GetAwaiter().GetResult();
                 }
                 catch (Exception ex)
                 {

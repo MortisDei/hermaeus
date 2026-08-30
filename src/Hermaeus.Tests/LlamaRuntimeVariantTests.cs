@@ -84,7 +84,7 @@ public sealed class LlamaRuntimeVariantTests
     }
 
     [Fact]
-    public void ResolveUpdateVariant_preserves_persisted_backend_before_hardware_auto_detection()
+    public void ResolveUpdateVariant_re_evaluates_auto_without_pinning_to_installed_backend()
     {
         var nvidia = new HardwareProfile(0, 8L * 1024 * 1024 * 1024, "NVIDIA GeForce GTX 1660");
 
@@ -92,7 +92,7 @@ public sealed class LlamaRuntimeVariantTests
             LlamaRuntimeVariant.Cuda,
             LlamaServerSetupService.ResolveUpdateVariant(LlamaRuntimeVariant.Auto, LlamaRuntimeVariant.Cuda, nvidia));
         Assert.Equal(
-            LlamaRuntimeVariant.Cpu,
+            LlamaRuntimeVariant.Cuda,
             LlamaServerSetupService.ResolveUpdateVariant(LlamaRuntimeVariant.Auto, LlamaRuntimeVariant.Cpu, nvidia));
         Assert.Equal(
             LlamaRuntimeVariant.Cuda,
@@ -100,16 +100,18 @@ public sealed class LlamaRuntimeVariantTests
     }
 
     [Fact]
-    public async Task Installed_backend_variant_round_trips_through_settings()
+    public async Task Configured_and_installed_variants_round_trip_independently_through_settings()
     {
         using var temp = new TempDir();
-        var writer = new SettingsService(temp.PathFor("settings/settings.json"));
+        var writer = Helpers.NewSettings(temp);
+        writer.Settings.DataManagement.LlamaRuntimeVariant = LlamaRuntimeVariant.Auto;
         writer.Settings.DataManagement.InstalledLlamaRuntimeVariant = LlamaRuntimeVariant.Vulkan;
         await writer.SaveAsync();
 
-        var reader = new SettingsService(temp.PathFor("settings/settings.json"));
+        var reader = Helpers.NewSettings(temp);
         await reader.LoadAsync();
 
+        Assert.Equal(LlamaRuntimeVariant.Auto, reader.Settings.DataManagement.LlamaRuntimeVariant);
         Assert.Equal(LlamaRuntimeVariant.Vulkan, reader.Settings.DataManagement.InstalledLlamaRuntimeVariant);
     }
 
@@ -269,6 +271,17 @@ public sealed class LlamaRuntimeVariantTests
         var resolved = LlamaServerSetupService.ResolveInstalledExecutable(installPath);
 
         Assert.Equal(currentPath, resolved);
+    }
+
+    [Fact]
+    public void Managed_llama_install_path_is_derived_from_the_configured_AI_assets_root()
+    {
+        var setup = new LlamaServerSetupService();
+
+        Assert.Equal(
+            Path.Combine("/mnt/Gaming/AI", "llama-server"),
+            setup.GetDefaultInstallPath("/mnt/Gaming/AI"));
+        Assert.DoesNotContain("Data", setup.GetDefaultInstallPath("/mnt/Gaming/AI"), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

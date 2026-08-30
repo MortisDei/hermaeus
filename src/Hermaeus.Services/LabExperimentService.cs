@@ -171,6 +171,7 @@ public static class LabConfigurationMapper
         EmbeddingsMode = source.EmbeddingsMode,
         AutoStart = false,
         ExtraArgs = source.ExtraArgs,
+        ReasoningPreserveSupported = source.ReasoningPreserveSupported,
         KvCacheType = configuration.KvCacheTypeK == configuration.KvCacheTypeV ? configuration.KvCacheTypeK : source.KvCacheType,
         KvCacheTypeK = configuration.KvCacheTypeK,
         KvCacheTypeV = configuration.KvCacheTypeV,
@@ -397,6 +398,7 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
     private readonly ILabRuntimeHost _runtimeHost;
     private readonly ModelManifestStore? _manifest;
     private readonly ConcurrentDictionary<string, RunState> _runs = new(StringComparer.Ordinal);
+    private string? _activeRunId;
 
     public LabExperimentService(ISettingsService settings, ISystemInfoService systemInfo,
         IEmpiricalExperienceStore experience, ILabRuntimeHost runtimeHost, ModelManifestStore? manifest = null)
@@ -453,16 +455,26 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
             DefinitionHash = definition.DefinitionHash, Definition = definition,
             Status = LabRunStatus.Starting, StartedAtUtc = DateTime.UtcNow
         };
-        var startEvidence = await PersistAsync(snapshot, "lab-run-started", NormalizedOutcome.Unknown,
-            "The immutable Lab definition was frozen before temporary runtime launch.", [], ct);
-        snapshot = snapshot with { StartEvidenceId = startEvidence.Id };
-        var state = new RunState(snapshot);
-        if (!_runs.TryAdd(snapshot.Id, state))
-            throw new InvalidOperationException("The Lab run id is already active.");
+        ClaimActiveRun(snapshot.Id);
+        RunState? state = null;
+        try
+        {
+            var startEvidence = await PersistAsync(snapshot, "lab-run-started", NormalizedOutcome.Unknown,
+                "The immutable Lab definition was frozen before temporary runtime launch.", [], ct);
+            snapshot = snapshot with { StartEvidenceId = startEvidence.Id };
+            state = new RunState(snapshot);
+            if (!_runs.TryAdd(snapshot.Id, state))
+                throw new InvalidOperationException("The Lab run id is already active.");
+        }
+        catch
+        {
+            ReleaseActiveRun(snapshot.Id);
+            throw;
+        }
 
         try
         {
-            state.Session = await _runtimeHost.StartAsync(snapshot.Id, source, definition.Baseline, ct);
+            state!.Session = await _runtimeHost.StartAsync(snapshot.Id, source, definition.Baseline, ct);
             state.Snapshot = snapshot with
             {
                 Status = LabRunStatus.Running,
@@ -478,13 +490,20 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
         }
         catch (Exception ex)
         {
-            state.Snapshot = snapshot with { Status = LabRunStatus.Failed, Failures = [ex.Message], CompletedAtUtc = DateTime.UtcNow };
-            await DisposeSessionAsync(state, CancellationToken.None);
-            var evidence = await PersistAsync(state.Snapshot, "lab-runtime-launch-failed", NormalizedOutcome.Failed,
-                "The isolated Lab runtime did not start.", [], CancellationToken.None);
-            state.Snapshot = state.Snapshot with { CompletionEvidenceId = evidence.Id };
+            state!.Snapshot = snapshot with { Status = LabRunStatus.Failed, Failures = [ex.Message], CompletedAtUtc = DateTime.UtcNow };
+            try
+            {
+                await DisposeSessionAsync(state, CancellationToken.None);
+                var evidence = await PersistAsync(state.Snapshot, "lab-runtime-launch-failed", NormalizedOutcome.Failed,
+                    "The isolated Lab runtime did not start.", [], CancellationToken.None);
+                state.Snapshot = state.Snapshot with { CompletionEvidenceId = evidence.Id };
+            }
+            finally
+            {
+                ReleaseActiveRun(snapshot.Id);
+            }
         }
-        return state.Snapshot;
+        return state!.Snapshot;
     }
 
     public async Task<LabRunSnapshot> SwitchConfigurationAsync(string runId, ServerConfig source,
@@ -501,7 +520,26 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
             ?? throw new KeyNotFoundException("The requested Lab configuration does not exist.");
         LabDefinitionValidator.ValidateIsolationArguments(source.ExtraArgs);
         await DisposeSessionAsync(state, ct);
-        state.Session = await _runtimeHost.StartAsync(runId, source, configuration, ct);
+        try
+        {
+            state.Session = await _runtimeHost.StartAsync(runId, source, configuration, ct);
+        }
+        catch (Exception ex)
+        {
+            var failure = $"{configuration.Id}: isolated runtime launch failed: {ex.Message}";
+            state.Snapshot = state.Snapshot with
+            {
+                Status = LabRunStatus.Failed,
+                CompletedAtUtc = DateTime.UtcNow,
+                Failures = state.Snapshot.Failures.Append(failure).Take(32).ToArray(),
+                TemporaryPort = null,
+                RuntimeOwnershipId = string.Empty,
+                RuntimeProcessId = null,
+                RuntimeProcessStartedAtUtc = null
+            };
+            ReleaseActiveRun(runId);
+            throw;
+        }
         state.Snapshot = state.Snapshot with
         {
             TemporaryPort = state.Session.Port,
@@ -538,9 +576,16 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
         await DisposeSessionAsync(state, ct);
         var outcome = status == LabRunStatus.Succeeded ? NormalizedOutcome.Succeeded
             : status == LabRunStatus.PartiallySucceeded ? NormalizedOutcome.PartiallySucceeded : NormalizedOutcome.Failed;
-        var evidence = await PersistCompletionAsync(state.Snapshot, outcome, ct);
-        state.Snapshot = state.Snapshot with { CompletionEvidenceId = evidence.Id };
-        return state.Snapshot;
+        try
+        {
+            var evidence = await PersistCompletionAsync(state.Snapshot, outcome, ct);
+            state.Snapshot = state.Snapshot with { CompletionEvidenceId = evidence.Id };
+            return state.Snapshot;
+        }
+        finally
+        {
+            ReleaseActiveRun(runId);
+        }
     }
 
     public async Task<LabRunSnapshot> CancelAsync(string runId, CancellationToken ct = default)
@@ -551,11 +596,18 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
         await DisposeSessionAsync(state, ct);
         var status = state.Snapshot.Observations.Count == 0 ? LabRunStatus.Cancelled : LabRunStatus.PartiallySucceeded;
         state.Snapshot = state.Snapshot with { Status = status, CompletedAtUtc = DateTime.UtcNow };
-        var evidence = await PersistAsync(state.Snapshot, "lab-run-cancelled",
-            status == LabRunStatus.Cancelled ? NormalizedOutcome.Cancelled : NormalizedOutcome.PartiallySucceeded,
-            "The Lab run stopped at an owned runtime boundary and retained completed evidence.", [state.Snapshot.StartEvidenceId], ct);
-        state.Snapshot = state.Snapshot with { CompletionEvidenceId = evidence.Id };
-        return state.Snapshot;
+        try
+        {
+            var evidence = await PersistAsync(state.Snapshot, "lab-run-cancelled",
+                status == LabRunStatus.Cancelled ? NormalizedOutcome.Cancelled : NormalizedOutcome.PartiallySucceeded,
+                "The Lab run stopped at an owned runtime boundary and retained completed evidence.", [state.Snapshot.StartEvidenceId], ct);
+            state.Snapshot = state.Snapshot with { CompletionEvidenceId = evidence.Id };
+            return state.Snapshot;
+        }
+        finally
+        {
+            ReleaseActiveRun(runId);
+        }
     }
 
     public LabRunSnapshot? GetRun(string runId) => _runs.TryGetValue(runId, out var state) ? state.Snapshot : null;
@@ -715,7 +767,9 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
             comparison.IsControlled, comparison.FingerprintDifferences, comparison.Equivalence,
             comparison.CorrectnessPassed, comparison.CanShowHeadlineDelta, comparison.RefusalReason)).ToArray();
         var summary = new LabRunCompletionSummary(run.Id, run.DefinitionHash, run.Status,
-            run.StartedAtUtc, run.CompletedAtUtc, run.Failures, decisions, sliceIds);
+            run.StartedAtUtc, run.CompletedAtUtc, run.Failures, decisions, sliceIds,
+            run.Definition.Candidates.Prepend(run.Definition.Baseline).ToArray(), run.Comparisons,
+            run.Definition.Name, DescribeModelIdentity(run.Definition.ProfileFingerprint.Model));
         drafts.Add(new EmpiricalExperienceDraft
         {
             Id = Guid.NewGuid().ToString("N"),
@@ -732,6 +786,16 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
         });
         var saved = await _experience.AddBatchAsync(drafts, ct);
         return saved[^1];
+    }
+
+    private static string? DescribeModelIdentity(ModelIdentityV2 model)
+    {
+        if (!string.IsNullOrWhiteSpace(model.ManifestIdentity))
+            return model.ManifestIdentity;
+
+        var descriptor = string.Join(" · ", new[] { model.Architecture, model.Quantization }
+            .Where(value => !string.IsNullOrWhiteSpace(value)));
+        return string.IsNullOrWhiteSpace(descriptor) ? null : descriptor;
     }
 
     private static IEnumerable<LabRunEvidenceSlice> SplitEvidenceSlices(
@@ -806,6 +870,15 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
     private RunState GetActive(string runId) => _runs.TryGetValue(runId, out var state)
         ? state : throw new KeyNotFoundException("The Lab run is not available in this session.");
 
+    private void ClaimActiveRun(string runId)
+    {
+        if (Interlocked.CompareExchange(ref _activeRunId, runId, null) is not null)
+            throw new InvalidOperationException("Another Lab run is already active. Complete or cancel it before starting another.");
+    }
+
+    private void ReleaseActiveRun(string runId) =>
+        Interlocked.CompareExchange(ref _activeRunId, null, runId);
+
     private static async Task DisposeSessionAsync(RunState state, CancellationToken ct)
     {
         if (state.Session is null) return;
@@ -826,6 +899,7 @@ public sealed class LabExperimentService : ILabExperimentService, IAsyncDisposab
         {
             try { await DisposeSessionAsync(state, CancellationToken.None); }
             catch { }
+            finally { ReleaseActiveRun(state.Snapshot.Id); }
         }
         _runs.Clear();
     }

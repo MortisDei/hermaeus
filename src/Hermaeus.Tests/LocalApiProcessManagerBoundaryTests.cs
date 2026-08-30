@@ -6,6 +6,7 @@ using Hermaeus.Services;
 using Hermaeus.Services.ProcessManagement;
 using Hermaeus.ViewModels;
 using Xunit;
+using static Hermaeus.Tests.Helpers;
 
 namespace Hermaeus.Tests;
 
@@ -28,7 +29,7 @@ public sealed class LocalApiProcessManagerBoundaryTests
         var oldToken = "old-local-api-token-0123456789";
         var newToken = "new-local-api-token-0123456789";
         var firstPort = ReservePort();
-        var settings = new SettingsService(settingsPath);
+        var settings = NewSettings(temp);
         settings.Settings.DataManagement.DataRootDirectory = dataRoot;
         settings.Settings.LocalApi.Enabled = true;
         settings.Settings.LocalApi.Port = firstPort;

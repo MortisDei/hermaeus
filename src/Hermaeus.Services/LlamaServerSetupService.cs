@@ -707,11 +707,10 @@ public sealed class LlamaServerSetupService
     }
 
     /// <summary>
-    /// Resolves the backend for an update. An explicit user choice wins. With
-    /// Auto, the persisted class of the last managed install wins when known;
-    /// only a first install or legacy settings fall back to hardware
-    /// detection. This keeps updates from changing a working backend merely
-    /// because the hardware probe is different on a later run.
+    /// Resolves the backend for an install or update. An explicit user choice
+    /// wins. Auto is resolved from the current hardware every time an install
+    /// is required; the installed variant is history and must not turn Auto
+    /// into an implicit backend pin across machines or hardware changes.
     /// </summary>
     public static LlamaRuntimeVariant ResolveUpdateVariant(
         LlamaRuntimeVariant configured,
@@ -720,8 +719,10 @@ public sealed class LlamaServerSetupService
     {
         if (configured != LlamaRuntimeVariant.Auto)
             return configured;
-        if (installed != LlamaRuntimeVariant.Auto)
-            return installed;
+
+        // Keep the parameter for compatibility with the existing update
+        // boundary. It records the last selected backend, but it is not a
+        // user preference and must not override Auto's current resolution.
         return ResolveVariant(configured, profile);
     }
 

@@ -11,6 +11,14 @@ namespace Hermaeus.Tests;
 /// </summary>
 public sealed class ServerProcessStopLoggingTests
 {
+    [Theory]
+    [InlineData(true, 137, ServerStatus.Stopped)]
+    [InlineData(false, 137, ServerStatus.Error)]
+    [InlineData(false, 0, ServerStatus.Stopped)]
+    public void Process_exit_status_distinguishes_intentional_stop_from_crash(
+        bool stopRequested, int code, ServerStatus expected) =>
+        Assert.Equal(expected, ServerProcessManager.GetProcessExitStatus(stopRequested, code));
+
     [Fact]
     public async Task Stop_logs_once_then_stays_silent_when_already_stopped()
     {

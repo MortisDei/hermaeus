@@ -547,6 +547,9 @@ public sealed class LabRecipeRunner
                     catch (Exception ex) when (ex is not OperationCanceledException)
                     {
                         failures.Add($"{configuration.Id}: launch failed: {ex.Message}");
+                        run = _experiments.GetRun(run.Id) ?? run;
+                        if (run.Status != LabRunStatus.Running)
+                            break;
                         if (++consecutiveFailures >= 2) break;
                         continue;
                     }

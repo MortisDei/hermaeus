@@ -9,6 +9,24 @@ namespace Hermaeus.Tests;
 
 public sealed class MemoriesViewModelTests
 {
+    [Fact]
+    public void Memory_item_exposes_live_pinned_state_and_action_label()
+    {
+        var item = new MemoryItemViewModel
+        {
+            Id = "memory-1", Category = "facts", Content = "Pinned fact",
+            CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow, ImportanceScore = 0.8
+        };
+
+        Assert.Equal("Not pinned", item.PinStateLabel);
+        Assert.Equal("Pin", item.PinButtonLabel);
+
+        item.IsPinned = true;
+
+        Assert.Equal("Pinned", item.PinStateLabel);
+        Assert.Equal("Unpin", item.PinButtonLabel);
+    }
+
     private static (MemoriesViewModel vm, ConversationStore conversations, MemoryStore memories, ISettingsService settings) NewViewModel(TempDir temp)
     {
         var settings = NewSettings(temp);

@@ -45,6 +45,8 @@ public sealed partial class DoctorService : IDoctorService
     private readonly ISpeechRecognitionProviderRegistry? _sttProviders;
     private readonly IAudioCapture? _audioCapture;
     private readonly ITrayIntegrationState? _trayIntegration;
+    private static readonly HttpClient DefaultUpdateHttp = new();
+    private readonly HttpClient _updateHttp;
 
     /// <summary>
     /// Caches GitHub API release lookups (llama.cpp's update check, Hermaeus's
@@ -78,7 +80,8 @@ public sealed partial class DoctorService : IDoctorService
         IBenchmarkInsightsService? benchmarkInsights = null,
         ISpeechRecognitionProviderRegistry? sttProviders = null,
         IAudioCapture? audioCapture = null,
-        ITrayIntegrationState? trayIntegration = null)
+        ITrayIntegrationState? trayIntegration = null,
+        HttpClient? updateHttp = null)
     {
         _settings = settings;
         _runtimes = runtimes;
@@ -98,6 +101,7 @@ public sealed partial class DoctorService : IDoctorService
         _sttProviders = sttProviders;
         _audioCapture = audioCapture;
         _trayIntegration = trayIntegration;
+        _updateHttp = updateHttp ?? DefaultUpdateHttp;
     }
 
     public async Task<DoctorReport> ScanAsync(CancellationToken ct = default)
@@ -170,7 +174,7 @@ public sealed partial class DoctorService : IDoctorService
         return new DoctorReport(checks, DateTime.UtcNow, summary);
     }
 
-    private Task<T?> GetCachedGitHubReleaseAsync<T>(string cacheKey, Func<CancellationToken, Task<T?>> fetch, CancellationToken ct) =>
+    private Task<T> GetCachedGitHubReleaseAsync<T>(string cacheKey, Func<CancellationToken, Task<T>> fetch, CancellationToken ct) =>
         GetCachedGitHubReleaseAsync(_gitHubReleaseCache, cacheKey, fetch, GitHubReleaseCacheTtl, ct);
 
     /// <summary>Fetches through <paramref name="cache"/>, keyed by
@@ -180,15 +184,15 @@ public sealed partial class DoctorService : IDoctorService
     /// instance method reading <see cref="_gitHubReleaseCache"/> directly) so
     /// the caching behaviour itself is unit-testable without a real network
     /// call.</summary>
-    internal static async Task<T?> GetCachedGitHubReleaseAsync<T>(
+    internal static async Task<T> GetCachedGitHubReleaseAsync<T>(
         Dictionary<string, (DateTimeOffset CachedAt, object? Value)> cache,
         string cacheKey,
-        Func<CancellationToken, Task<T?>> fetch,
+        Func<CancellationToken, Task<T>> fetch,
         TimeSpan ttl,
         CancellationToken ct)
     {
         if (cache.TryGetValue(cacheKey, out var cached) && DateTimeOffset.UtcNow - cached.CachedAt < ttl)
-            return (T?)cached.Value;
+            return (T)cached.Value!;
 
         var result = await fetch(ct);
         cache[cacheKey] = (DateTimeOffset.UtcNow, result);

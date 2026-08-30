@@ -11,7 +11,9 @@ the comparison, configure the candidate value that matters, then start the
 isolated run. Its run-state card reports what is active, what just happened,
 and the current evidence refresh result. Frozen JSON, capability recipes,
 trade-off detail, and evidence filters remain available without being required
-to start a useful experiment.
+to start a useful experiment. Only one manual or guided run can be active at a
+time. The UI disables the other start path, and the experiment service enforces
+the same boundary for non-UI callers.
 
 The Experiment tab freezes one immutable definition before it starts anything.
 The definition names the protocol, exact v2 runtime/model/hardware/configuration
@@ -24,13 +26,17 @@ definition and hash rather than changing the run already in progress.
 
 Start clones the selected Chat server into a dedicated `ServerProcessManager`,
 reserves a temporary port, and binds the process to `127.0.0.1`. Network and
-port overrides in extra arguments are refused. The active Chat server is not
-stopped or reconfigured, and `settings.json` is not saved. Each temporary
-process has a run ownership id, PID, start time, executable hash, and atomic
-local ownership record. Normal cancellation stops only that owned session.
-Startup recovery kills an abandoned process only after PID, start time, and
-executable content all match; otherwise cleanup remains `Unknown` and the
-process is not touched.
+port overrides in extra arguments are refused. If the selected Chat server is
+running, Lab stops it and waits for the process to exit before starting the
+isolated runtime, so its model allocation cannot compete with the measurement.
+The source is restarted afterward only when its complete configuration is
+unchanged; a changed source is left stopped with an explicit warning rather
+than silently launching a different model or backend. `settings.json` is not
+saved by Lab. Each temporary process has a run ownership id, PID, start time,
+executable hash, and atomic local ownership record. Normal cancellation stops
+only that owned session. Startup recovery kills an abandoned process only
+after PID, start time, and executable content all match; otherwise cleanup
+remains `Unknown` and the process is not touched.
 
 Observations keep value and missing reason separate, so an absent counter never
 becomes zero. Every observation names unit, source, evidence origin, trust,
@@ -51,9 +57,15 @@ Repeated observations and output hashes are split into bounded immutable
 per-configuration evidence slices linked to the frozen start record. The final
 completion stores only comparison decisions, failures, and links to those raw
 slices, keeping every experience document inside its existing 32 KiB bound.
+The Evidence surface projects all records with the same durable run id into one
+top-level execution entry, without duplicating or migrating persisted truth.
+Its drill-down retains every slice, comparison, provenance link, and raw JSON.
 Prompt/output bodies and token values are omitted from exportable records.
 Cancellation preserves partial evidence and normalizes the result as
-`Cancelled` or `PartiallySucceeded`.
+`Cancelled` or `PartiallySucceeded`. Manual completion is deliberately explicit:
+**Finish run and save baseline** records the current runtime-health observation
+and stops the isolated runtime. It does not invent a workload or pretend that a
+candidate comparison was measured.
 
 **Apply to Services** is a separate review after a controlled, correctness-
 passing result. It shows every persisted field that would change and captures
@@ -180,10 +192,19 @@ Lab run files remain authoritative; deleting an experience does not rewrite
 those sources.
 
 Filter by domain, project or opaque workspace scope, model/runtime fingerprint,
-normalized outcome, evidence origin, status and date. Selecting a row shows its
-canonical context, action/configuration, normalized outcome, provenance links,
-fingerprints and correction status. Missing values remain visibly absent or
-`Unknown`; the UI does not substitute a guessed result.
+normalized outcome, evidence origin, status and date. Selecting an entry shows
+its concise execution result first, followed by canonical context,
+action/configuration, normalized outcome, provenance links, fingerprints and
+correction status for the retained records. Missing values remain visibly absent
+or `Unknown`; the UI does not substitute a guessed result. Lab entries use the
+named experiment when available and group completion, start, slice, and apply
+records by durable run id. Older rows without a name remain grouped by their
+opaque run prefix. Completion entries show the experiment, recorded model
+identity when available, status, timestamps, tested configurations,
+recommendation state, correctness, throughput, and RAM/VRAM deltas. Observed
+peaks are labelled separately from predicted values, and missing measurements
+remain `Unknown`. The summary retains links to the raw slices for drilldown and
+export.
 
 The empty detail pane distinguishes a fresh evidence store from an active filter
 that excludes existing records. The former directs the user to run an isolated

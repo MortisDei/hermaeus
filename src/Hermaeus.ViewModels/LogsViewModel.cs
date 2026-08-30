@@ -47,7 +47,7 @@ public partial class LogsViewModel : ViewModelBase
 
     public UiBoundCollection<LogEntryDisplayViewModel> VisibleEntries { get; } = [];
 
-    public Action<string>? RequestCopyToClipboard { get; set; }
+    public Func<string, Task<bool>>? RequestCopyToClipboard { get; set; }
     public Action<string>? RequestOpenFolder { get; set; }
 
     public LogsViewModel(IRuntimeLogService logs, RedactionService redactor)
@@ -150,21 +150,19 @@ public partial class LogsViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private void CopyVisibleLogs()
+    private async Task CopyVisibleLogsAsync()
     {
         if (RequestCopyToClipboard is null) return;
         var payload = string.Join("\n", VisibleEntries.Select(e => e.Formatted));
-        RequestCopyToClipboard(payload);
-        StatusText = "Copied visible logs";
+        StatusText = await RequestCopyToClipboard(payload) ? "Copied visible logs" : "Could not copy visible logs";
     }
 
     [RelayCommand]
-    private void CopyRedactedDiagnostics()
+    private async Task CopyRedactedDiagnosticsAsync()
     {
         if (RequestCopyToClipboard is null) return;
         var payload = string.Join("\n", VisibleEntries.Select(e => _redactor.Redact(e.Formatted)));
-        RequestCopyToClipboard(payload);
-        StatusText = "Copied redacted diagnostics";
+        StatusText = await RequestCopyToClipboard(payload) ? "Copied redacted diagnostics" : "Could not copy redacted diagnostics";
     }
 
     [RelayCommand]

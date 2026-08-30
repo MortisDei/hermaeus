@@ -66,6 +66,11 @@ public sealed class ChatRecallInjectionTests
         True(assistant.HasContext, "a Recall hit must appear in the turn's context receipt");
         True(assistant.ContextSections.Any(s => s.Kind == ProvenanceKind.Recall),
             "the hit must be tagged with ProvenanceKind.Recall, not Memory, so it can never be targeted by a [MEMORY_UPDATE]/[MEMORY_FORGET] marker");
+        var recalledSource = Assert.Single(assistant.ContextSections.Single(s => s.Kind == ProvenanceKind.Recall).Items);
+        Equal("conversation:c-old:message:3", recalledSource.Locator,
+            "the context receipt must retain the precise Recall target rather than only a title and excerpt");
+        Equal(EvidenceOrigin.Extracted, recalledSource.EvidenceOrigin,
+            "a recall receipt is extracted from local history, not a fresh direct observation");
         // r25 doc 02: it lands in its own receipt section rather than the old
         // always-visible citation strip, which used to sit above the collapsed
         // memory pill and defeat the collapse entirely.

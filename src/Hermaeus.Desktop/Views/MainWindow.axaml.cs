@@ -2,6 +2,7 @@ using System.ComponentModel;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Threading;
 using Hermaeus.Core.Models;
 using Hermaeus.Core.Services;
@@ -15,12 +16,17 @@ public partial class MainWindow : Window
     public DesktopIntegrationService? DesktopIntegration { get; set; }
     public IPatchDiffService? PatchDiffService { get; set; }
     private IInputElement? _prePaletteFocus;
+    private bool _closeAfterShutdown;
 
     public MainWindow()
     {
         InitializeComponent();
         Opened += OnOpened;
+        AddHandler(PointerWheelChangedEvent, OnPointerWheelChanged, RoutingStrategies.Tunnel);
     }
+
+    private static void OnPointerWheelChanged(object? sender, PointerWheelEventArgs e) =>
+        WheelScrollHelper.Handle(e);
 
     private void OnOpened(object? sender, EventArgs e)
     {
@@ -58,8 +64,10 @@ public partial class MainWindow : Window
             };
             vm.RequestCopyToastDetails = async text =>
             {
-                if (Clipboard is { } clipboard)
-                    await clipboard.SetTextAsync(text);
+                if (Clipboard is not { } clipboard)
+                    return false;
+                try { await clipboard.SetTextAsync(text); return true; }
+                catch { return false; }
             };
             vm.Projects.RequestOpenEditor = () =>
             {
@@ -122,7 +130,7 @@ public partial class MainWindow : Window
         return await modal.ShowDialog<bool>(this);
     }
 
-    private void OnWindowClosing(object? sender, WindowClosingEventArgs e)
+    private async void OnWindowClosing(object? sender, WindowClosingEventArgs e)
     {
         if (DesktopIntegration?.ShouldCancelCloseForTray() == true)
         {
@@ -131,7 +139,22 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (DataContext is MainWindowViewModel vm)
-            vm.Shutdown();
+        if (_closeAfterShutdown || DataContext is not MainWindowViewModel vm)
+            return;
+
+        e.Cancel = true;
+        _closeAfterShutdown = true;
+        try
+        {
+            await vm.ShutdownAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Error during shutdown: {ex}");
+        }
+        finally
+        {
+            Close();
+        }
     }
 }

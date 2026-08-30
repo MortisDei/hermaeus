@@ -13,6 +13,32 @@ limit.
 
 ### Changed
 
+- R31 release-blocker repairs preserve cross-group Settings autosave state,
+  persist MCP collection edits, wait for isolated Lab runtimes to exit before
+  switching candidates, classify Hermaeus update-check failures by cause, and
+  bound persistent runtime-log volume while retaining aggregate timing and
+  recoverable memory-fit diagnostics.
+- Nested wheel scrolling now keeps input with the pane under the pointer,
+  bubbles at content edges, and preserves horizontal overflow. Memory rows show
+  persistent pinned state, Lab blocks concurrent runs and labels manual finish
+  clearly, named Lab evidence groups its result and slices, and model cards show
+  the current auto-tune profile directly.
+- Lab Evidence now presents one top-level entry per durable experiment execution
+  while retaining slice/provenance drill-down. Review state is visible beside
+  the Evidence action, confirmation dialogs are positioned over their owning
+  Hermaeus window, and model configuration editors hydrate saved tune values
+  from the shared profile.
+- Lab completion results now lead with structured experiment and model identity,
+  status, timestamps, tested configurations, recommendation state, correctness,
+  throughput, and RAM/VRAM deltas. Missing measurements remain `Unknown`, and the
+  model configuration flyout stays bounded and work-area aware on narrow screens.
+- Tray Quit acknowledges immediately while the existing awaited shutdown runs.
+  Intentional managed-process termination no longer appears as a transient Error
+  when the OS reports exit code 137.
+- Lab now stops and awaits the selected source runtime before isolated
+  measurements, records isolated launch failures in persisted runtime logs,
+  refuses silent source-configuration drift during restoration, and reports
+  only clipboard copies that actually completed.
 - R31 graduates Hermaeus's current product maturity from Alpha to Beta. The
   next release is prepared as `0.38.0-beta`; no release or tag is created by
   this close-out.
@@ -26,9 +52,14 @@ limit.
   formatting them as zero. GGUF header reads now use exact bounded reads.
 - R31 Beta dogfood corrections now preserve chat scroll-up state during
   streaming, show known GPU Fit subtotals beside unresolved components, attach
-  Chat telemetry to the exact managed server process, validate Kokoro preview
-  WAVs before owned playback, and mark missing companions instead of treating
-  dead paths as candidates.
+  Chat telemetry to the exact managed server process through the visible
+  telemetry action, validate Kokoro preview WAVs before owned playback, and
+  mark missing companions instead of treating dead paths as candidates.
+- Fixed pending Settings autosaves being discarded during clean shutdown, Lab
+  failures being overwritten by an evidence-count refresh, and the Settings
+  Voice channel picker filtering a populated provider catalogue down to its
+  default sentinel. Shutdown now waits for model refresh callbacks before
+  disposing the services they use.
 - R31 Beta dogfood now separates managed projector use from the retained
   projector path, omits disabled projectors from llama-server launches, and
   exposes verified companion repair or explicit Browse/Clear paths when a
@@ -42,10 +73,11 @@ limit.
   the existing safe migration path, while ordinary autosave cannot migrate an
   unconfirmed workspace.
 - Fixed AI Assets root edits not reaching the normal autosave path. Managed
-  llama.cpp updates now match Linux GPU asset names, preserve the configured or
-  previously installed backend, refuse missing or unlaunchable GPU backends
-  instead of silently downgrading to CPU, and flatten the known upstream
-  `llama-bNNNNN/` archive wrapper inside Hermaeus's owned build directory.
+  llama.cpp updates now match Linux GPU asset names, re-evaluate Auto against
+  current hardware, record the selected backend separately, refuse missing or
+  unlaunchable GPU backends instead of silently downgrading to CPU, and flatten
+  the known upstream `llama-bNNNNN/` archive wrapper inside Hermaeus's owned
+  build directory.
 - Fixed model-list probes so connection refusal is quiet while a managed
   server is intentionally stopped or still starting under its health wait;
   startup errors and running-server failures remain visible.

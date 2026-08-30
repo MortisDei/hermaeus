@@ -235,6 +235,7 @@ public partial class ModelManagementViewModel : ObservableObject
             }
         }
 
+        item.ApplyTuneProfileChanges();
         await _profiles.SaveAsync(item.ToProfile());
         item.ApplySavedState();
         lock (_modelCacheLock)
@@ -417,11 +418,12 @@ public partial class ModelManagementViewModel : ObservableObject
     private void RefreshTuneSummary(ModelProfileItemViewModel item)
     {
         var profile = LlamaTuneProfileStore.Find(_settings.Settings, item.ModelId);
+        item.SetTuneProfile(profile);
         item.TuneSummary = profile is null
             ? string.Empty
             : profile.TotalLayers is int total
-                ? $"{profile.GpuLayers}/{total} GPU layers, {profile.Threads} threads"
-                : $"{profile.GpuLayers} GPU layers, {profile.Threads} threads";
+                ? $"{profile.GpuLayers}/{total} GPU layers, {profile.Threads} threads, context {profile.ContextSize:N0}"
+                : $"{profile.GpuLayers} GPU layers, {profile.Threads} threads, context {profile.ContextSize:N0}";
     }
 
     /// <summary>The first managed llama-server entry whose ExecutablePath actually resolves
@@ -1831,10 +1833,42 @@ public partial class ModelProfileItemViewModel : ObservableObject
     /// layers, 8 threads"; empty when never tuned (r13 02-model-library.md 2.3).</summary>
     [ObservableProperty] private string _tuneSummary = string.Empty;
 
+    private LlamaTuneProfile? _tuneProfile;
+    [ObservableProperty] private int _tunedGpuLayers;
+    [ObservableProperty] private int _tunedThreads;
+    [ObservableProperty] private int _tunedContextSize;
+
+    public bool HasTuneProfile => _tuneProfile is not null;
+    public string TuneProfileContextWatermark => _tuneProfile is null
+        ? "No saved tune"
+        : "Saved context";
+
+    internal void SetTuneProfile(LlamaTuneProfile? profile)
+    {
+        _tuneProfile = profile;
+        TunedGpuLayers = profile?.GpuLayers ?? 0;
+        TunedThreads = profile?.Threads ?? 0;
+        TunedContextSize = profile?.ContextSize ?? 0;
+        OnPropertyChanged(nameof(HasTuneProfile));
+        OnPropertyChanged(nameof(TuneProfileContextWatermark));
+    }
+
+    internal void ApplyTuneProfileChanges()
+    {
+        if (_tuneProfile is null)
+            return;
+        if (TunedThreads < 1 || TunedContextSize < 128)
+            throw new InvalidOperationException("A saved tune profile needs at least 1 thread and 128 context tokens.");
+
+        _tuneProfile.GpuLayers = TunedGpuLayers;
+        _tuneProfile.Threads = TunedThreads;
+        _tuneProfile.ContextSize = TunedContextSize;
+        _tuneProfile.TunedAtUtc = DateTime.UtcNow;
+    }
+
     /// <summary>
-    /// r29 doc 02 2.2: the tile has no room for <see cref="TuneSummary"/> without
-    /// crowding it, so it is appended to the Auto tune button's tooltip. No
-    /// information is lost in the move to cards.
+    /// The card shows this summary directly so a tuned model's effective
+    /// runtime profile is visible without opening the configuration flyout.
     /// </summary>
     public string AutoTuneTooltip => string.IsNullOrWhiteSpace(TuneSummary)
         ? AutoTuneExplanation

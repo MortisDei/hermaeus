@@ -259,7 +259,7 @@ public partial class RagViewModel : ObservableObject
     [ObservableProperty] private string      _datasetManagerStatus = string.Empty;
 
     public event EventHandler? ScrollToBottom;
-    public Action<string>? RequestCopyToClipboard { get; set; }
+    public Func<string, Task<bool>>? RequestCopyToClipboard { get; set; }
     public Func<RagDatasetManagerItemViewModel, Task<bool>>? RequestDeleteDatasetConfirmation { get; set; }
     public Func<RagDatasetManagerItemViewModel, Task<bool>>? RequestRemoveMissingSourcesConfirmation { get; set; }
 
@@ -938,25 +938,38 @@ public partial class RagViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void CopyAnswer()
+    private async Task CopyAnswer()
     {
         if (!string.IsNullOrEmpty(AnswerText))
-            RequestCopyToClipboard?.Invoke(AnswerText);
+            await CopyTextAsync(AnswerText, "Answer");
     }
 
     [RelayCommand]
-    private void CopySource()
+    private async Task CopySource()
     {
         if (SelectedSource is not null)
-            RequestCopyToClipboard?.Invoke(SelectedSource.Content);
+            await CopyTextAsync(SelectedSource.Content, "Source");
     }
 
     [RelayCommand]
-    private void CopySourcePath()
+    private async Task CopySourcePath()
     {
         var path = SelectedSource?.Path;
         if (!string.IsNullOrWhiteSpace(path))
-            RequestCopyToClipboard?.Invoke(path);
+            await CopyTextAsync(path, "Source path");
+    }
+
+    private async Task CopyTextAsync(string text, string label)
+    {
+        if (RequestCopyToClipboard is null)
+            return;
+
+        var copied = false;
+        try { copied = await RequestCopyToClipboard(text); }
+        catch { }
+        _toasts.Show(copied ? $"{label} copied" : $"Could not copy {label.ToLowerInvariant()}",
+            copied ? $"{label} text copied to the clipboard." : "The clipboard was unavailable.",
+            copied ? ToastKind.Success : ToastKind.Warning, 3000);
     }
 
     /// <summary>doc 04 4.1: registered next to the ViewModel that owns the action.</summary>

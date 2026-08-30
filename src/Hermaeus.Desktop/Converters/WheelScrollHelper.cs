@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.VisualTree;
 
 namespace Hermaeus.Desktop.Views;
 
@@ -11,11 +12,10 @@ namespace Hermaeus.Desktop.Views;
 /// NumericUpDowns means the pointer is almost always over one, and
 /// Avalonia's NumericUpDown consumes every wheel notch as a spin before it
 /// ever reaches the outer ScrollViewer. Each owner subscribes in the tunnel
-/// phase (runs before any child control's own handler) and always drives
-/// its page ScrollViewer directly, regardless of what is under the pointer.
-/// Known trade-off, unchanged from the original three copies: an inner
-/// scrollable under the pointer (e.g. a nested list) loses the wheel to the
-/// outer page scroll too. Not fixed this round; accepted as-is.
+/// phase (runs before any child control's own handler). It gives the nearest
+/// ScrollViewer first refusal, then bubbles to an ancestor when the child is
+/// already at the relevant edge. The same policy is used by the main window
+/// for views that do not have a page-specific handler.
 /// </summary>
 public static class WheelScrollHelper
 {
@@ -23,13 +23,61 @@ public static class WheelScrollHelper
 
     public static void Handle(ScrollViewer target, PointerWheelEventArgs e)
     {
-        var max = System.Math.Max(0, target.Extent.Height - target.Viewport.Height);
-        if (max <= 0) return;
+        for (var current = e.Source as Visual; current is not null; current = current.GetVisualParent())
+        {
+            if (current is not ScrollViewer scrollViewer)
+                continue;
+            if (TryScroll(scrollViewer, e.Delta))
+            {
+                e.Handled = true;
+                return;
+            }
+            if (ReferenceEquals(scrollViewer, target))
+                return;
+        }
 
-        var next = System.Math.Clamp(target.Offset.Y - e.Delta.Y * StepPixels, 0, max);
-        if (System.Math.Abs(next - target.Offset.Y) < 0.1) return;
+        if (TryScroll(target, e.Delta))
+            e.Handled = true;
+    }
 
-        target.Offset = new Vector(target.Offset.X, next);
-        e.Handled = true;
+    /// <summary>
+    /// Handles wheel input for the nearest ScrollViewer and its ancestors.
+    /// This is used at the shell boundary so nested lists, JSON panes, and
+    /// page scroll viewers share one predictable edge-bubbling policy.
+    /// </summary>
+    public static void Handle(PointerWheelEventArgs e)
+    {
+        for (var current = e.Source as Visual; current is not null; current = current.GetVisualParent())
+        {
+            if (current is ScrollViewer scrollViewer && TryScroll(scrollViewer, e.Delta))
+            {
+                e.Handled = true;
+                return;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Calculates a clamped wheel offset without requiring a live visual tree.
+    /// It is kept public so the boundary policy can be regression-tested.
+    /// </summary>
+    public static bool TryCalculateOffset(Vector current, Size extent, Size viewport, Vector delta, out Vector next)
+    {
+        var maxX = System.Math.Max(0, extent.Width - viewport.Width);
+        var maxY = System.Math.Max(0, extent.Height - viewport.Height);
+        var candidateX = System.Math.Clamp(current.X - delta.X * StepPixels, 0, maxX);
+        var candidateY = System.Math.Clamp(current.Y - delta.Y * StepPixels, 0, maxY);
+        next = new Vector(candidateX, candidateY);
+        return System.Math.Abs(candidateX - current.X) >= 0.1
+            || System.Math.Abs(candidateY - current.Y) >= 0.1;
+    }
+
+    private static bool TryScroll(ScrollViewer target, Vector delta)
+    {
+        if (!TryCalculateOffset(target.Offset, target.Extent, target.Viewport, delta, out var next))
+            return false;
+
+        target.Offset = next;
+        return true;
     }
 }

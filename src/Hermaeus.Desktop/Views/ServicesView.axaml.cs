@@ -190,8 +190,10 @@ public partial class ServicesView : UserControl
 
         stt.RequestCopyToClipboard = async text =>
         {
-            if (TopLevel.GetTopLevel(this)?.Clipboard is { } cb)
-                await cb.SetTextAsync(text);
+            if (TopLevel.GetTopLevel(this)?.Clipboard is not { } cb)
+                return false;
+            try { await cb.SetTextAsync(text); return true; }
+            catch { return false; }
         };
     }
 

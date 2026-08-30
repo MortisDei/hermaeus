@@ -183,6 +183,36 @@ public sealed class RuntimeOwnershipManifestTests
     }
 
     [Fact]
+    public async Task Direct_session_awaits_the_async_manager_stop_boundary()
+    {
+        using var temp = new TempDir();
+        var settings = Helpers.NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        var host = new IsolatedLabRuntimeHost(settings, new RedactionService());
+        var owner = Owner(processId: Environment.ProcessId);
+        var asyncStopCompleted = false;
+        var synchronousStopCalled = false;
+        var session = new IsolatedLabRuntimeHost.Session(
+            host,
+            owner,
+            () => synchronousStopCalled = true,
+            () => { },
+            () => ServerStatus.Running,
+            () => null,
+            _ => Task.CompletedTask,
+            async () =>
+            {
+                await Task.Yield();
+                asyncStopCompleted = true;
+            });
+
+        await session.StopAsync();
+
+        Assert.True(asyncStopCompleted);
+        Assert.False(synchronousStopCalled);
+    }
+
+    [Fact]
     public async Task Direct_session_stops_manager_when_known_cleanup_fails()
     {
         using var temp = new TempDir();

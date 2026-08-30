@@ -68,12 +68,16 @@ Any compiler warning fails the build. Fix the warning; do not suppress it withou
 - Do not invent APIs, files, or architecture; follow existing patterns unless improving them is the point of the task.
 - If you find a bug or unsafe pattern: fix it if in scope, otherwise record it and mention it in your final response.
 - Run focused tests while implementing behavioural changes, then the complete solution build and full repository suite before completion.
+- Behavioural and runtime changes follow this sequence: investigate; prove the root cause; complete the bounded implementation; audit the proven defect class and sibling paths; add representative regression coverage; complete automated verification; only then stop for owner live validation; repair and repeat after owner feedback as necessary; commit only when explicitly instructed. Owner live validation is not a reason to stop while assigned investigation, sibling audits, implementation, tests, or automated verification remain incomplete.
+- When fixing a defect, investigate the affected defect class before declaring the repair complete. After proving the root cause, audit sibling call sites, construction paths, lifecycle paths, persistence paths, and shared abstractions for the same failure mode, and add regression coverage for the original defect plus representative affected siblings. Keep the audit bounded to the proven failure class and do not expand it into unrelated refactoring.
 - Keep documentation synchronized with behaviour, configuration, workflows, APIs, and UI semantics. Stale documentation is a defect. Planned behaviour must never read as implemented. If no documentation update is required, state that explicitly in the implementation or review rather than silently omitting it.
+
+Execution environment selection: Do not knowingly run a required command in an environment that cannot satisfy its dependencies. Commands requiring NuGet restore, NuGet vulnerability/audit metadata access, or other required external network access must run on the approved host when the restricted runner is known to block that access. Likewise, commands requiring MSBuild/VSTest IPC or socket capabilities known to be blocked by the restricted runner must run on the approved host first. Do not perform a known-doomed restricted-runner attempt merely to demonstrate the existing limitation. Use the restricted runner when the command is expected to succeed there or when capability is genuinely unknown.
 
 Before finishing any task:
 1. `dotnet build Hermaeus.sln` and run the test harness.
 2. Update docs if behaviour, commands, setup, or features changed.
-3. Commit; push only after build/tests pass and docs are truthful.
+3. Commit only after the owner explicitly authorizes it; push only after build/tests pass and docs are truthful.
 4. If any step was impossible, say exactly what and why.
 
 Git rules:

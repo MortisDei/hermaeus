@@ -591,7 +591,7 @@ public sealed partial class DoctorService
 
     /// <summary>
     /// Installs the latest llama.cpp build, honouring the configured runtime
-    /// variant and the last installed backend, verifying the new binary
+    /// variant and recording the selected backend separately, verifying the new binary
     /// actually launches without silently changing backend. Returns the
     /// details the update flow needs to offer a prune of superseded versions
     /// (r14 3.2) and a restart-to-apply (r14 3.3).

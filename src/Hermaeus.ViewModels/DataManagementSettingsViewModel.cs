@@ -22,6 +22,7 @@ public partial class DataManagementSettingsViewModel : ObservableObject
     [ObservableProperty] private string _localAiAssetsRoot = string.Empty;
     [ObservableProperty] private string _localAiAssetsStatus = "Choose a local AI assets folder first.";
     [ObservableProperty] private LlamaRuntimeVariant _llamaRuntimeVariant = LlamaRuntimeVariant.Auto;
+    [ObservableProperty] private string _llamaRuntimeVariantStatus = "No managed llama.cpp build has been installed yet.";
 
     /// <summary>Selectable llama.cpp build variants for the Services/data settings (r14 1.1).</summary>
     public IReadOnlyList<LlamaRuntimeVariant> LlamaRuntimeVariantOptions { get; } =
@@ -63,8 +64,25 @@ public partial class DataManagementSettingsViewModel : ObservableObject
         DataRootDirectory = settings.DataManagement.DataRootDirectory;
         LocalAiAssetsRoot = settings.DataManagement.LocalAiAssetsRoot;
         LlamaRuntimeVariant = settings.DataManagement.LlamaRuntimeVariant;
+        UpdateLlamaRuntimeVariantStatus(settings);
         UpdateMigrationPreview();
         UpdateLocalAiAssetsStatus();
+    }
+
+    /// <summary>
+    /// Refreshes the installed-backend note after managed setup or recovery.
+    /// This is deliberately separate from <see cref="LlamaRuntimeVariant"/>:
+    /// the latter is the user's configured request, while this is only the
+    /// backend selected by the last managed installation.
+    /// </summary>
+    public void RefreshLlamaRuntimeVariantStatus() => UpdateLlamaRuntimeVariantStatus(_settings.Settings);
+
+    private void UpdateLlamaRuntimeVariantStatus(AppSettings settings)
+    {
+        var installed = settings.DataManagement.InstalledLlamaRuntimeVariant;
+        LlamaRuntimeVariantStatus = installed == LlamaRuntimeVariant.Auto
+            ? "No managed llama.cpp build has been installed yet."
+            : $"Last installed backend: {LlamaServerSetupService.VariantLabel(installed)}. This does not change Auto or identify a currently running process.";
     }
 
     public void ApplyTo(AppSettings settings)

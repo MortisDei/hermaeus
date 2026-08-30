@@ -185,7 +185,7 @@ namespace Hermaeus.Tests
             False(File.Exists(Path.Combine(next, "conversations.db")), "rollback must not leave a split destination workspace");
             False(File.Exists(Path.Combine(next, "memories.db")), "rollback must not leave the failed destination file");
 
-            var retry = new SettingsService(settingsPath);
+            var retry = NewSettings(temp);
             await retry.LoadAsync();
             retry.Settings.DataManagement.DataRootDirectory = next;
             var result = await retry.SaveAsync(previous);
@@ -298,7 +298,8 @@ namespace Hermaeus.Tests
             Directory.CreateDirectory(previousRoot);
 
             var settingsPath = Path.Combine(previousRoot, "settings.json");
-            var service = new SettingsService(settingsPath);
+            var service = NewSettings(temp, "previous/settings.json");
+            service.Settings.DataManagement.DataRootDirectory = previousRoot;
             await service.SaveAsync();
             File.WriteAllText(Path.Combine(previousRoot, "conversations.db"), "db");
 

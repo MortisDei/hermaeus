@@ -1099,6 +1099,13 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     public void StopIfRunning() => _mgr.Stop();
 
     /// <summary>
+    /// Stops this managed runtime at an awaited process boundary. Exclusive
+    /// workloads such as Lab must not begin loading a second model until the
+    /// source process has actually released its model memory.
+    /// </summary>
+    public Task StopAndWaitAsync() => _mgr.StopAsync();
+
+    /// <summary>
     /// r19 2.2: after an llama.cpp update rewrites <c>ExecutablePath</c>
     /// directly on the underlying <see cref="ServerConfig"/> (a live
     /// in-place mutation, not a settings reload), this VM's own bound
@@ -1680,9 +1687,7 @@ public partial class ServerProcessViewModel : ViewModelBase, IDisposable
     private RuntimeLogEntry MapLog(string line)
     {
         var lowered = line.ToLowerInvariant();
-        var level = lowered.Contains("error") || lowered.Contains("failed")
-            ? RuntimeLogLevel.Error
-            : lowered.Contains("warn") ? RuntimeLogLevel.Warning : RuntimeLogLevel.Info;
+        var level = RuntimeLogClassifier.ClassifyLevel(line);
         if (level == RuntimeLogLevel.Info &&
             (lowered.Contains("slot", StringComparison.Ordinal) || lowered.Contains("kv cache", StringComparison.Ordinal)))
             level = RuntimeLogLevel.Debug;
@@ -2264,10 +2269,21 @@ public partial class ServicesViewModel : ViewModelBase
         foreach (var serverId in suspended)
         {
             var server = Servers.FirstOrDefault(s => s.Id == serverId);
-            server?.StopIfRunning();
+            if (server is not null)
+                await server.StopAndWaitAsync();
         }
 
         return await Task.FromResult(suspended);
+    }
+
+    public async Task<IReadOnlyList<string>> SuspendRunningServersAsync(IEnumerable<string> serverIds)
+    {
+        var requested = serverIds.ToHashSet(StringComparer.Ordinal);
+        var suspended = Servers.Where(server => requested.Contains(server.Id) && server.IsRunning)
+            .Select(server => server.Id).ToArray();
+        foreach (var id in suspended)
+            await Servers.First(server => server.Id == id).StopAndWaitAsync();
+        return suspended;
     }
 
     public async Task<IReadOnlyList<string>> PrepareEmbeddingServerForWorkAsync()
@@ -2295,6 +2311,12 @@ public partial class ServicesViewModel : ViewModelBase
     {
         foreach (var srv in Servers)
             srv.StopIfRunning();
+    }
+
+    public async Task StopAllAsync()
+    {
+        foreach (var srv in Servers)
+            await srv.StopAndWaitAsync();
     }
 
     public async Task SelectChatModelAndRestartAsync(string modelPath, CancellationToken ct = default)

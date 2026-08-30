@@ -92,6 +92,15 @@ public sealed class VoiceChannelPickerTests
         Assert.Equal(string.Empty, channel.VoiceId);
     }
 
+    [Fact]
+    public void Channel_picker_clears_the_default_sentinel_before_filtering_a_named_catalogue()
+    {
+        var repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../"));
+        var view = File.ReadAllText(Path.Combine(repoRoot, "src", "Hermaeus.Desktop", "Views", "SettingsVoiceSectionView.axaml"));
+
+        Assert.Contains("DropDownOpening=\"OnChannelVoiceDropDownOpening\"", view, StringComparison.Ordinal);
+    }
+
     private sealed class DelayedVoiceService : ITtsService
     {
         private readonly List<TaskCompletionSource<IReadOnlyList<string>>> _requests = [];

@@ -33,31 +33,65 @@ public sealed class IsolatedLabRuntimeHost : ILabRuntimeHost
         var port = ReserveLoopbackPort();
         var manager = new ServerProcessManager(_redaction);
         var isolated = LabConfigurationMapper.Apply(source, configuration, port);
-        await manager.StartAsync(isolated, ct);
-        if (manager.Status != ServerStatus.Running || manager.CurrentProcessIdentity is not { } process)
-        {
-            var error = string.IsNullOrWhiteSpace(manager.ErrorMessage)
-                ? "The isolated runtime did not reach Running state." : manager.ErrorMessage;
-            manager.Dispose();
-            throw new InvalidOperationException(error);
-        }
-
-        var ownershipId = Guid.NewGuid().ToString("N");
-        var runtimeIdentity = await RuntimeIdentityFactory.CreateRuntimeIdentityAsync(source.ExecutablePath, null, ct);
-        var owner = new RuntimeOwner(ownershipId, runId, process.ProcessId, process.StartedAtUtc,
-            runtimeIdentity.ExecutableSha256, port, DateTime.UtcNow);
         try
         {
+            await manager.StartAsync(isolated, ct);
+            if (manager.Status != ServerStatus.Running || manager.CurrentProcessIdentity is not { } process)
+            {
+                var error = string.IsNullOrWhiteSpace(manager.ErrorMessage)
+                    ? "The isolated runtime did not reach Running state." : manager.ErrorMessage;
+                throw new InvalidOperationException(error);
+            }
+
+            var ownershipId = Guid.NewGuid().ToString("N");
+            var runtimeIdentity = await RuntimeIdentityFactory.CreateRuntimeIdentityAsync(source.ExecutablePath, null, ct);
+            var owner = new RuntimeOwner(ownershipId, runId, process.ProcessId, process.StartedAtUtc,
+                runtimeIdentity.ExecutableSha256, port, DateTime.UtcNow);
             await AddOwnerAsync(owner, ct);
             return new Session(this, owner, manager.Stop, manager.Dispose,
-                () => manager.Status, () => manager.CurrentProcessIdentity);
+                () => manager.Status, () => manager.CurrentProcessIdentity,
+                stopManagerAsync: manager.StopAsync);
         }
-        catch
+        catch (Exception ex)
         {
-            manager.Stop();
-            manager.Dispose();
+            if (ex is not OperationCanceledException)
+                RecordLaunchFailure(manager, ex);
+
+            try { await manager.StopAsync(); }
+            catch (Exception stopException)
+            {
+                try
+                {
+                    RecordLaunchFailure(manager, stopException);
+                }
+                catch
+                {
+                    // Preserve the original launch failure even if cleanup logging fails.
+                }
+            }
+            finally
+            {
+                manager.Dispose();
+            }
             throw;
         }
+    }
+
+    private void RecordLaunchFailure(ServerProcessManager manager, Exception exception)
+    {
+        if (_runtimeLogs is null)
+            return;
+
+        var detail = string.Join(" ", new[] { exception.Message, manager.ErrorMessage, manager.GetLog() }
+            .Where(value => !string.IsNullOrWhiteSpace(value)));
+        detail = _redaction.Redact(detail);
+        if (detail.Length > 2048)
+            detail = detail[..2048] + "...";
+        _runtimeLogs.Add(new RuntimeLogEntry(
+            DateTime.UtcNow,
+            RuntimeLogLevel.Error,
+            RuntimeLogCategory.ModelLoad,
+            $"Lab isolated runtime launch failed: {detail}"));
     }
 
     public async Task<IReadOnlyList<string>> RecoverOwnedProcessesAsync(CancellationToken ct = default)
@@ -206,12 +240,14 @@ public sealed class IsolatedLabRuntimeHost : ILabRuntimeHost
         Action disposeManager,
         Func<ServerStatus> getStatus,
         Func<ManagedRuntimeProcessIdentity?> getProcess,
-        Func<CancellationToken, Task>? removeOwnership = null) : ILabRuntimeSession
+        Func<CancellationToken, Task>? removeOwnership = null,
+        Func<Task>? stopManagerAsync = null) : ILabRuntimeSession
     {
         private int _stopped;
         private int _disposed;
         private readonly Func<CancellationToken, Task> _removeOwnership =
             removeOwnership ?? (ct => owner.RemoveOwnerAsync(record.OwnershipId, ct));
+        private readonly Func<Task>? _stopManagerAsync = stopManagerAsync;
         public string OwnershipId => record.OwnershipId;
         public int Port => record.Port;
         public bool IsRunning => getStatus() == ServerStatus.Running;
@@ -233,7 +269,10 @@ public sealed class IsolatedLabRuntimeHost : ILabRuntimeHost
             }
             finally
             {
-                stopManager();
+                if (_stopManagerAsync is not null)
+                    await _stopManagerAsync();
+                else
+                    stopManager();
             }
         }
 

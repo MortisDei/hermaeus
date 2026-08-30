@@ -105,7 +105,7 @@
                                         <!-- Content Section -->
                                         <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Vertical" Spacing="4">
                                             <!-- Category & Created -->
-                                            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                                    <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="8">
                                                 <TextBlock Grid.Column="0"
                                                            Text="{Binding CategoryDisplay}"
                                                            FontSize="11" FontWeight="SemiBold"
@@ -114,7 +114,13 @@
                                                            Text="{Binding ImportanceDisplay}"
                                                            FontSize="11"
                                                            Opacity="0.5" />
-                                                <TextBlock Grid.Column="2"
+                                                <Border Grid.Column="2" CornerRadius="4" Padding="5,1"
+                                                        IsVisible="{Binding IsPinned}"
+                                                        Background="{DynamicResource SystemFillColorSuccessBrush}"
+                                                        ToolTip.Tip="This memory is pinned. Pinned memories are weighted higher and are never auto-archived.">
+                                                    <TextBlock Text="{Binding PinStateLabel}" FontSize="10" FontWeight="SemiBold" />
+                                                </Border>
+                                                <TextBlock Grid.Column="3"
                                                            Text="{Binding CreatedDisplay}"
                                                            FontSize="10"
                                                            Opacity="0.4" />

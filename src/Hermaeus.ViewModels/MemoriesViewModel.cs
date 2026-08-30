@@ -433,6 +433,13 @@ public partial class MemoryItemViewModel : ObservableObject
     };
 
     public string PinButtonLabel => IsPinned ? "Unpin" : "Pin";
+    public string PinStateLabel => IsPinned ? "Pinned" : "Not pinned";
+
+    partial void OnIsPinnedChanged(bool value)
+    {
+        OnPropertyChanged(nameof(PinButtonLabel));
+        OnPropertyChanged(nameof(PinStateLabel));
+    }
 }
 
 /// <summary>

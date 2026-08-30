@@ -21,7 +21,15 @@ namespace Hermaeus.Tests
 {
     internal static class Helpers
     {
-        public static SettingsService NewSettings(TempDir temp) => new(temp.PathFor("settings/settings.json"));
+        public static SettingsService NewSettings(TempDir temp, string relativeSettingsPath = "settings/settings.json")
+        {
+            var settings = new SettingsService(temp.PathFor(relativeSettingsPath));
+            // A temporary settings file alone is not enough: an empty
+            // DataRootDirectory makes production resolution fall back to the
+            // user's real LocalApplicationData root.
+            settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+            return settings;
+        }
 
         public static TtsSettingsViewModel NewTtsSettingsViewModel(ISettingsService settings) =>
             new(new FakeTts(), new FakeVoiceProviderRegistry(settings), new FakeToasts(), new XttsProcessManager(), new KokoroProcessManager(), new FakeSecretStore(), settings);

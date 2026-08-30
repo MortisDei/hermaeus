@@ -100,7 +100,7 @@ public partial class SttSettingsViewModel : ViewModelBase
 
     /// <summary>Wired by the View's code-behind to a native file picker filtered to .wav.</summary>
     public Func<Task<string?>>? RequestAudioFilePicker { get; set; }
-    public Func<string, Task>? RequestCopyToClipboard { get; set; }
+    public Func<string, Task<bool>>? RequestCopyToClipboard { get; set; }
 
     public SttSettingsViewModel(
         ISettingsService settings,
@@ -270,6 +270,11 @@ public partial class SttSettingsViewModel : ViewModelBase
     private async Task CopyTranscriptAsync()
     {
         if (RequestCopyToClipboard is null || string.IsNullOrEmpty(TranscribedText)) return;
-        await RequestCopyToClipboard(TranscribedText);
+        var copied = false;
+        try { copied = await RequestCopyToClipboard(TranscribedText); }
+        catch { }
+        _toasts.Show(copied ? "Transcript copied" : "Could not copy transcript",
+            copied ? "The transcript was copied to the clipboard." : "The clipboard was unavailable.",
+            copied ? ToastKind.Success : ToastKind.Warning, 3000);
     }
 }

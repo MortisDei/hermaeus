@@ -1,4 +1,5 @@
 using Xunit;
+using Hermaeus.Services;
 using static Hermaeus.Tests.Helpers;
 
 namespace Hermaeus.Tests;
@@ -58,11 +59,17 @@ public sealed class ServicesPageSaveTests
         servicesVm.Tts.TtsServiceUrl = "http://127.0.0.1:9911";
         servicesVm.Tts.TtsSpeaker = "narrator";
         servicesVm.Tts.TtsSpeed = 1.25;
+        servicesVm.Tts.TtsDevice = "cuda";
 
         await servicesVm.SaveSettingsCommand.ExecuteAsync(null);
 
         Assert.Equal("http://127.0.0.1:9911", settings.Settings.Tts.ServiceUrl);
         Assert.Equal("narrator", settings.Settings.Tts.Speaker);
         Assert.Equal(1.25, settings.Settings.Tts.Speed);
+        Assert.Equal("cuda", settings.Settings.Tts.Device);
+
+        var reloaded = NewSettings(temp);
+        await reloaded.LoadAsync();
+        Assert.Equal("cuda", reloaded.Settings.Tts.Device);
     }
 }

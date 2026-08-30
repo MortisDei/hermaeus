@@ -37,6 +37,11 @@ public sealed class RecallIndexingService
             return;
         }
 
+        // Re-indexing must remove rows that no longer qualify, such as messages
+        // edited down below MinMessageChars or removed from the conversation.
+        // Upserting only the current eligible rows leaves stale recall text
+        // searchable after an otherwise successful conversation save.
+        await _index.DeleteBySourceAsync("message", conversation.Id, ct);
         var entries = new List<RecallEntry>();
         for (var i = 0; i < conversation.Messages.Count; i++)
         {

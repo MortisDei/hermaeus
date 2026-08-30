@@ -47,7 +47,7 @@ public sealed class SettingsViewModelSaveLifecycleTests
         // persists the live object as-is; it must not carry the failed edit.
         await settings.SaveAsync();
 
-        var reloaded = new SettingsService(temp.PathFor("settings/settings.json"));
+        var reloaded = NewSettings(temp);
         await reloaded.LoadAsync();
         Assert.Equal(string.Empty, reloaded.Settings.Llm.DefaultSystemPrompt);
         Assert.Equal(oldRoot, reloaded.Settings.DataManagement.DataRootDirectory);
@@ -255,7 +255,7 @@ public sealed class SettingsViewModelSaveLifecycleTests
         await WaitForAsync(
             () => settings.Settings.Llm.DefaultSystemPrompt == "persisted automatically",
             "debounced settings save", timeoutMs: 5000);
-        var reloaded = new SettingsService(temp.PathFor("settings/settings.json"));
+        var reloaded = NewSettings(temp);
         await reloaded.LoadAsync();
 
         Assert.Equal("persisted automatically", reloaded.Settings.Llm.DefaultSystemPrompt);
@@ -273,12 +273,105 @@ public sealed class SettingsViewModelSaveLifecycleTests
         vm.Data.LocalAiAssetsRoot = aiRoot;
 
         await WaitForAsync(
-            () => settings.Settings.DataManagement.LocalAiAssetsRoot == aiRoot,
-            "debounced AI assets root save", timeoutMs: 5000);
-        var reloaded = new SettingsService(temp.PathFor("settings/settings.json"));
+            () => File.Exists(temp.PathFor("settings/settings.json"))
+                && File.ReadAllText(temp.PathFor("settings/settings.json")).Contains(aiRoot, StringComparison.Ordinal),
+            "debounced AI assets root write", timeoutMs: 5000);
+        var reloaded = NewSettings(temp);
         await reloaded.LoadAsync();
 
         Assert.Equal(aiRoot, reloaded.Settings.DataManagement.LocalAiAssetsRoot);
+        vm.Shutdown();
+    }
+
+    [Fact]
+    public async Task Later_settings_vm_save_does_not_restore_a_newer_direct_save_from_another_group()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        var vm = NewSettingsViewModel(settings, new FakeSecretStore());
+
+        vm.Llm.DefaultSystemPrompt = "first group";
+        await WaitForAsync(
+            () => File.Exists(temp.PathFor("settings/settings.json"))
+                && File.ReadAllText(temp.PathFor("settings/settings.json")).Contains(
+                    "\"DefaultSystemPrompt\": \"first group\"", StringComparison.Ordinal),
+            "first settings group autosave");
+
+        settings.Settings.Memory.RecallInjectionEnabled = true;
+        await settings.SaveAsync();
+
+        vm.Ui.FontSize = 16;
+        await WaitForAsync(
+            () => File.Exists(temp.PathFor("settings/settings.json"))
+                && File.ReadAllText(temp.PathFor("settings/settings.json")).Contains(
+                    "\"FontSize\": 16", StringComparison.Ordinal),
+            "second settings group autosave");
+
+        var reloaded = NewSettings(temp);
+        await reloaded.LoadAsync();
+
+        Assert.Equal("first group", reloaded.Settings.Llm.DefaultSystemPrompt);
+        Assert.True(reloaded.Settings.Memory.RecallInjectionEnabled);
+        Assert.Equal(16, reloaded.Settings.Ui.FontSize);
+        var freshVm = NewSettingsViewModel(reloaded, new FakeSecretStore());
+        Assert.True(freshVm.Memory.RecallInjectionEnabled);
+        Assert.Equal(16, freshVm.Ui.FontSize);
+        freshVm.Shutdown();
+        vm.Shutdown();
+    }
+
+    [Fact]
+    public async Task Settings_vm_autosave_preserves_a_direct_save_that_preceded_it()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        var vm = NewSettingsViewModel(settings, new FakeSecretStore());
+
+        settings.Settings.Memory.RecallInjectionEnabled = true;
+        await settings.SaveAsync();
+
+        vm.Llm.DefaultSystemPrompt = "second group";
+        await WaitForAsync(
+            () => settings.Settings.Llm.DefaultSystemPrompt == "second group",
+            "settings VM autosave after direct save");
+
+        var reloaded = NewSettings(temp);
+        await reloaded.LoadAsync();
+
+        Assert.Equal("second group", reloaded.Settings.Llm.DefaultSystemPrompt);
+        Assert.True(reloaded.Settings.Memory.RecallInjectionEnabled);
+        vm.Shutdown();
+    }
+
+    [Fact]
+    public async Task Mcp_collection_and_child_edits_are_persisted_by_the_settings_vm()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        var vm = NewSettingsViewModel(settings, new FakeSecretStore());
+
+        var server = new McpServerConfigViewModel(new McpServerConfig { Name = "new server" });
+        vm.Mcp.Servers.Add(server);
+        server.Command = "mcp-command";
+        server.ArgumentsText = "--flag value";
+        server.AllowedToolsText = "echo, read";
+
+        await WaitForAsync(
+            () => File.Exists(temp.PathFor("settings/settings.json"))
+                && File.ReadAllText(temp.PathFor("settings/settings.json")).Contains(
+                    "\"Command\": \"mcp-command\"", StringComparison.Ordinal),
+            "MCP collection autosave");
+
+        var reloaded = NewSettings(temp);
+        await reloaded.LoadAsync();
+        var persisted = Assert.Single(reloaded.Settings.Mcp.Servers);
+        Assert.Equal("new server", persisted.Name);
+        Assert.Equal("mcp-command", persisted.Command);
+        Assert.Equal(["--flag", "value"], persisted.Arguments);
+        Assert.Equal(["echo", "read"], persisted.AllowedTools);
         vm.Shutdown();
     }
 
@@ -341,20 +434,23 @@ public sealed class SettingsViewModelSaveLifecycleTests
     }
 
     [Fact]
-    public async Task Shutdown_cancels_a_pending_autosave_without_leaking_or_saving_it()
+    public async Task Shutdown_flushes_a_pending_autosave_before_disposing_settings()
     {
         using var temp = new TempDir();
         var fixture = NewControlledFixture(temp);
 
         fixture.Vm.Llm.DefaultSystemPrompt = "shutdown";
         var pending = await fixture.Delay.WaitForCallAsync(0);
-        fixture.Vm.Shutdown();
+        var shutdown = fixture.Vm.ShutdownAsync();
         await pending.CancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(3));
         fixture.Delay.Complete(pending);
-        await fixture.Completed.WaitForCountAsync(1);
+        await shutdown;
 
-        Assert.Equal(0, fixture.Settings.SaveCount);
-        Assert.Equal(string.Empty, fixture.Settings.Settings.Llm.DefaultSystemPrompt);
+        Assert.Equal(1, fixture.Settings.SaveCount);
+        Assert.Equal("shutdown", fixture.Settings.Settings.Llm.DefaultSystemPrompt);
+        var reloaded = NewSettings(temp);
+        await reloaded.LoadAsync();
+        Assert.Equal("shutdown", reloaded.Settings.Llm.DefaultSystemPrompt);
     }
 
     [Fact]
@@ -397,6 +493,26 @@ public sealed class SettingsViewModelSaveLifecycleTests
         var vm = NewSettingsViewModel(settings, new FakeSecretStore());
 
         Assert.Equal("secret:some-reference-shaped-value", vm.Tts.TtsPythonPath);
+    }
+
+    [Fact]
+    public async Task Llama_runtime_selector_persists_configured_variant_without_overwriting_installed_backend()
+    {
+        using var temp = new TempDir();
+        var settings = NewSettings(temp);
+        settings.Settings.DataManagement.InstalledLlamaRuntimeVariant = LlamaRuntimeVariant.Vulkan;
+        var vm = NewSettingsViewModel(settings, new FakeSecretStore());
+
+        vm.Data.LlamaRuntimeVariant = LlamaRuntimeVariant.Auto;
+        await vm.SaveAsync();
+
+        Assert.Equal(LlamaRuntimeVariant.Auto, settings.Settings.DataManagement.LlamaRuntimeVariant);
+        Assert.Equal(LlamaRuntimeVariant.Vulkan, settings.Settings.DataManagement.InstalledLlamaRuntimeVariant);
+
+        var reloaded = NewSettings(temp);
+        await reloaded.LoadAsync();
+        Assert.Equal(LlamaRuntimeVariant.Auto, reloaded.Settings.DataManagement.LlamaRuntimeVariant);
+        Assert.Equal(LlamaRuntimeVariant.Vulkan, reloaded.Settings.DataManagement.InstalledLlamaRuntimeVariant);
     }
 
     private static ControlledFixture NewControlledFixture(TempDir temp)

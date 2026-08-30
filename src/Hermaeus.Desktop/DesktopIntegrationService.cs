@@ -15,6 +15,7 @@ public sealed class DesktopIntegrationService : IDisposable
     private readonly GlobalHotkeyService _globalHotkeys = new();
     private Window? _window;
     private TrayIcon? _tray;
+    private NativeMenuItem? _quitItem;
     private EventHandler<AvaloniaPropertyChangedEventArgs>? _windowPropertyChangedHandler;
     private bool _isQuitting;
 
@@ -47,8 +48,14 @@ public sealed class DesktopIntegrationService : IDisposable
 
     public void Quit()
     {
+        if (_isQuitting)
+            return;
         _isQuitting = true;
-        _vm.Shutdown();
+        if (_quitItem is not null)
+        {
+            _quitItem.Header = "Quitting Hermaeus...";
+            _quitItem.IsEnabled = false;
+        }
         _window?.Close();
     }
 
@@ -225,8 +232,35 @@ public sealed class DesktopIntegrationService : IDisposable
             _vm.OpenServicesPanel();
         }));
         menu.Items.Add(new NativeMenuItemSeparator());
-        menu.Items.Add(Item("Stop Services", _vm.Shutdown));
-        menu.Items.Add(Item("Quit Hermaeus", Quit));
+        var shutdown = new NativeMenuItem("Stop Services");
+        shutdown.Click += async (_, _) =>
+        {
+            if (!shutdown.IsEnabled)
+                return;
+            shutdown.Header = "Stopping services…";
+            shutdown.IsEnabled = false;
+            var failed = false;
+            try
+            {
+                await _vm.ShutdownAsync();
+            }
+            catch (Exception ex)
+            {
+                failed = true;
+                shutdown.Header = "Stop services failed";
+                Console.Error.WriteLine($"Error stopping services from tray: {ex}");
+            }
+            finally
+            {
+                if (!failed)
+                    shutdown.Header = "Stop Services";
+                shutdown.IsEnabled = true;
+            }
+        };
+        menu.Items.Add(shutdown);
+        _quitItem = new NativeMenuItem("Quit Hermaeus");
+        _quitItem.Click += (_, _) => Quit();
+        menu.Items.Add(_quitItem);
         return menu;
     }
 

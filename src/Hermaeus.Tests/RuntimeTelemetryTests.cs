@@ -7,6 +7,19 @@ namespace Hermaeus.Tests;
 
 public sealed class RuntimeTelemetryTests
 {
+    [Fact]
+    public void Chat_telemetry_button_invokes_the_existing_managed_runtime_request_path()
+    {
+        var repoRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../"));
+        var chatView = File.ReadAllText(Path.Combine(repoRoot, "src", "Hermaeus.Desktop", "Views", "ChatView.axaml"));
+        var buttonStart = chatView.IndexOf("<Button Grid.Column=\"10\"", StringComparison.Ordinal);
+        var buttonEnd = chatView.IndexOf('>', buttonStart);
+        Assert.True(buttonStart >= 0 && buttonEnd > buttonStart, "the telemetry button was not found");
+        var telemetryButton = chatView[buttonStart..buttonEnd];
+
+        Assert.Contains("Command=\"{Binding OpenTelemetryCommand}\"", telemetryButton, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("123, 512\n456, 1024", 123, 512L * 1024 * 1024)]
     [InlineData("123, [N/A]", 123, null)]

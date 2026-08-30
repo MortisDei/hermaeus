@@ -51,23 +51,38 @@ native Kokoro can be installed during onboarding or later through Doctor.
 **Models** lists GGUF files and models reported by configured providers. A
 Hugging Face source badge means Hermaeus retained download provenance. Open a
 model card to edit its display name and per-model defaults or to inspect its
-source.
+source. When auto-tune has a current profile for a local GGUF, the card shows
+the effective tuned GPU layers, threads, and context directly. Open the card's
+configuration to inspect and intentionally edit those same saved tune values;
+the editor stays within the available window area and scrolls when its bounded
+form does not fit. **Save model profile** persists them with the picker defaults
+and metadata.
+Extra arguments and live process overrides remain on Services, where their
+trust checks and process state are visible. Runtime process settings still use
+**Save Config** on Services.
 
 **Services** owns processes and files on disk. A managed llama.cpp server needs
 the resolved `llama-server` executable, a GGUF model, a localhost port, and
 launch settings. Start it there, then select its model in Chat. Runtime Logs
 show the exact startup stage and sanitized process output.
 
-Managed llama.cpp updates preserve the configured backend, or the last
-installed backend when the setting is **Auto**. Auto prefers the hardware's
-primary accelerated backend and may select another compatible accelerated
-asset when upstream does not publish that preferred package. If no compatible
-GPU asset is available or the selected build fails its launch probe, Hermaeus
-refuses the update with an explanation rather than silently replacing it with
-a CPU build. CPU is still available when selected explicitly. Fresh managed
-archives are stored
-under one Hermaeus build directory; older nested archive layouts remain
-discoverable for repair and pruning.
+Managed llama.cpp installs and updates honor the configured backend. When the
+setting is **Auto**, Hermaeus re-evaluates the current hardware whenever an
+installation is required, prefers the hardware's primary accelerated backend,
+and may select another compatible accelerated asset when upstream does not
+publish that preferred package. The selected backend is recorded separately as
+the last installed backend; Auto itself remains Auto. If no compatible GPU
+asset is available or the selected build fails its launch probe, Hermaeus
+refuses the update with an explanation rather than silently replacing it with a
+CPU build. CPU is still available when selected explicitly. Fresh managed
+archives are stored under one Hermaeus build directory; older nested archive
+layouts remain discoverable for repair and pruning.
+
+The Data Storage panel shows the configured request and the last installed
+backend separately. The latter is installation history, not a replacement for
+Auto and not proof of which executable a currently running process uses. The
+active process identity remains tied to the Services executable and Chat
+runtime telemetry.
 
 Capability status is evidence-scoped. `Available` means the selected runtime,
 and the selected model where relevant, advertised or demonstrated the feature.
@@ -76,9 +91,10 @@ and the selected model where relevant, advertised or demonstrated the feature.
 does not prove that MTP engages for that model.
 
 Normal fields on Settings persist automatically after editing and show a small
-Saving, Saved, or Failed state. Reset still discards unpersisted edits. Model
-and runtime forms on Services keep explicit Save Config actions because those
-changes can launch or reconfigure a process. A missing primary model,
+Saving, Saved, or Failed state. A pending edit is flushed during clean app
+shutdown. Reset still discards unpersisted edits. Model and runtime forms on
+Services keep explicit Save Config actions because those changes can launch or
+reconfigure a process. A missing primary model,
 projector, or draft companion is shown as missing and is never silently
 replaced by another file.
 
@@ -160,6 +176,9 @@ focused input.
 While a response streams, scrolling upward pauses bottom-following. Scroll back
 to the bottom to intentionally re-pin. The telemetry flyout can start bounded
 sampling for the exact managed server process serving the selected model.
+Nested panes keep wheel input when the pointer is over their content and pass it
+to the page only at an edge. Horizontal overflow remains available in panes
+that provide it.
 
 Attach text, code, PDF, DOCX, or supported image files from the attachment
 control, drag and drop, or clipboard. Images are sent only when the selected
@@ -198,7 +217,8 @@ the embedding model.
 control whether memory and Recall context may be injected into Chat. The Chat
 environment description reports only enabled context sources. The command
 palette can search the local Recall index even when Recall injection into Chat
-is disabled.
+is disabled. A pinned memory remains visibly marked in its row and exposes
+**Unpin** directly, so the state does not depend on a toast.
 
 ## Agent workspaces
 
@@ -248,10 +268,15 @@ healthy.
 Open **Lab > Experiment**, select a configured Chat server, name the run, and
 set the bounded candidate values shown by the editor. **Freeze and start**
 captures the exact definition and starts a separate runtime on a temporary
-loopback port. The Services configuration and active Chat server remain
-unchanged. **Complete baseline** preserves the shell observation and cleans up
-the temporary process; **Cancel** stops only the runtime owned by that run and
-records the cancelled or partial result.
+loopback port. A running selected Chat source is fully stopped and awaited
+first, then restored after the run only if its complete configuration is
+unchanged. Lab does not save Services settings. **Finish run and save baseline**
+records the current shell health observation and cleans up the temporary process.
+It is an intentional manual completion step, not an automatic workload or
+candidate comparison. **Cancel** stops only the runtime owned by that run and
+records the cancelled or partial result. A second manual or recipe run is
+disabled while one is active, and the service rejects concurrent callers at the
+backend boundary as well.
 
 The run state names isolation and comparison refusals. Missing counters remain
 missing. A comparison cannot show a headline delta when runtime, model,
@@ -261,14 +286,23 @@ difference fails correctness regardless of speed.
 On **Lab > Evidence**, an empty pane says whether no evidence has been captured
 yet or whether the current filters exclude existing records.
 
-**Review candidate** lists the exact Services fields that would change. A
+**Review eligible candidate** lists the exact Services fields that would change.
+A completed result names its experiment and presents one top-level Evidence
+entry for that execution. Its result card leads with the experiment, recorded
+model identity when available, result status, timestamps, tested configurations,
+recommendation state, correctness, throughput, and RAM/VRAM deltas. Observed
+peaks are labelled separately from predicted values, and missing measurements
+remain `Unknown`. Its drill-down retains the baseline, candidates, slices,
+provenance, and raw detail. The summary states the only eligible candidate or
+explains why no recommendation is available. A
 speed-only, uncontrolled, missing-correctness, or stale result is refused.
 Guided recipes select the eligible candidate from the completed result
 automatically; individual evidence slices do not need manual saving before
 review.
-**Confirm reviewed changes** asks once more, rechecks the selected server plus
-runtime/model identity, and saves through the normal Settings path. Review is
-separate from running an experiment, and experiment evidence is retained.
+**Confirm reviewed changes** asks once more in a modal owned and positioned over
+the Hermaeus window, rechecks the selected server plus runtime/model identity,
+and saves through the normal Settings path. Review is separate from running an
+experiment, and experiment evidence is retained.
 
 Choose **Inspect runtime recipes** to see GPU placement, context, KV, Flash
 Attention, CPU-MoE, external draft, EAGLE-3, and speculative parameter plans
@@ -310,9 +344,10 @@ definition.
 Large runs are persisted as bounded immutable evidence slices linked from the
 completion summary. All slices and that completion marker are committed as one
 SQLite transaction, so a process death before commit leaves no authoritative
-partial set. The slices remain the authoritative normalized evidence, and can
-still be inspected, corrected, removed, or exported through Lab > Evidence
-without putting the whole run into one oversized experience document.
+partial set. The slices remain the authoritative normalized evidence, while Lab
+groups their durable run id into one top-level Evidence entry. Its drill-down
+can still inspect, correct, remove, or export the individual records without
+putting the whole run into one oversized experience document.
 
 The configured Chat server is selected automatically when there is exactly one
 non-embedding server. With multiple servers, choose the intended server before
@@ -322,14 +357,16 @@ remain visible when a capability is unavailable or Unknown.
 Use **Lab > Evidence** to inspect structured Agent,
 GPU Fit, and experiment evidence. Filters cover domain, project/workspace
 scope, model/runtime fingerprints, normalized outcome, evidence origin, status,
-and date. Select a record to inspect its canonical context and action plus the
-raw-source links.
+and date. Select an execution entry to inspect its concise result summary, then
+expand the retained records for canonical context, action, provenance, and raw
+source links.
 
 **Save correction** creates a linked replacement without rewriting the source
-task or run. **Remove** asks for confirmation and permanently deletes only the
+task or run. **Remove** asks for confirmation and permanently deletes the
 selected empirical index record; a record with a dependent correction must be
-handled from the dependent record first. Check one or more rows and choose
-**Export selected** to prepare versioned redacted JSON in the detail pane.
+handled from the dependent record first. Check one or more execution entries
+and choose **Export selected** to prepare versioned redacted JSON for their
+retained records in the detail pane.
 
 ## Voice
 
@@ -337,13 +374,16 @@ Native Kokoro runs locally after its verified assets are installed. Other voice
 providers may require Python packages, local services, or an API key. Configure
 the provider in Services or Settings, use Doctor for readiness, and check
 Runtime Logs if synthesis fails. Remote voice providers receive the text sent
-for speech.
+for speech. **Settings > Voice** lists the active provider's discovered names
+for per-channel voice routing, while **Services > Voice** keeps the explicit
+Save Config action for provider, device, speed, and process settings.
 
 ## Activity, logs, and troubleshooting
 
 **Activity** records completed outcomes such as downloads, ingests, backups,
-and managed-server events. **Runtime Logs** contain live operational detail and
-apply redaction before display or persistence. Diagnostic notifications that
+and managed-server events. **Runtime Logs** contain live operational detail,
+apply redaction before display or persistence, and retain useful aggregate
+timing while filtering repetitive low-level slot scheduler chatter. Diagnostic notifications that
 offer **Copy details** copy only their detail text.
 
 When something fails:

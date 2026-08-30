@@ -4,6 +4,8 @@ using Hermaeus.Rag.Retrieval;
 using Hermaeus.Rag.Storage;
 using Hermaeus.Services;
 using Hermaeus.ViewModels;
+using System.Net;
+using System.Text;
 using Xunit;
 using static Hermaeus.Tests.Helpers;
 
@@ -49,11 +51,72 @@ public sealed class DoctorAppUpdateTests
     }
 
     [Fact]
+    public async Task App_update_request_uses_the_canonical_repository_and_headers()
+    {
+        HttpRequestMessage? request = null;
+        using var http = new HttpClient(new RecordingHandler(message =>
+        {
+            request = message;
+            return Json("[{\"tag_name\":\"v0.31.0-beta\",\"published_at\":\"2026-08-29T00:00:00Z\"}]");
+        }));
+
+        var result = await DoctorService.FetchLatestHermaeusReleaseAsync(http, CancellationToken.None);
+
+        Assert.Equal(GitHubReleaseFetchStatus.Success, result.Status);
+        Assert.Equal("v0.31.0-beta", result.Release!.TagName);
+        Assert.Equal("https://api.github.com/repos/MortisDei/hermaeus/releases?per_page=1", request!.RequestUri!.ToString());
+        Assert.Contains(request.Headers.UserAgent, value => value.Product?.Name == "Hermaeus-Doctor");
+        Assert.Contains(request.Headers.Accept, value => value.MediaType == "application/vnd.github+json");
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.NotFound, "RepositoryNotFound")]
+    [InlineData(HttpStatusCode.Forbidden, "RateLimited")]
+    [InlineData(HttpStatusCode.TooManyRequests, "RateLimited")]
+    [InlineData(HttpStatusCode.BadGateway, "GitHubRejected")]
+    public async Task App_update_request_classifies_github_http_failures(HttpStatusCode status, string expected)
+    {
+        using var http = new HttpClient(new RecordingHandler(_ => new HttpResponseMessage(status)));
+
+        var result = await DoctorService.FetchLatestHermaeusReleaseAsync(http, CancellationToken.None);
+
+        Assert.Equal(Enum.Parse<GitHubReleaseFetchStatus>(expected), result.Status);
+        Assert.Equal((int)status, result.HttpStatusCode);
+        Assert.Null(result.Release);
+    }
+
+    [Fact]
+    public async Task App_update_request_classifies_invalid_payload()
+    {
+        using var http = new HttpClient(new RecordingHandler(_ => Json("{\"not\":\"a release list\"}")));
+
+        var result = await DoctorService.FetchLatestHermaeusReleaseAsync(http, CancellationToken.None);
+
+        Assert.Equal(GitHubReleaseFetchStatus.ResponseInvalid, result.Status);
+        Assert.Null(result.Release);
+    }
+
+    [Fact]
+    public async Task App_update_request_classifies_timeout_and_network_failure()
+    {
+        using var timeoutHttp = new HttpClient(new RecordingHandler(_ => throw new TaskCanceledException("timed out")));
+        var timeout = await DoctorService.FetchLatestHermaeusReleaseAsync(timeoutHttp, CancellationToken.None);
+        Assert.Equal(GitHubReleaseFetchStatus.NetworkUnavailable, timeout.Status);
+        Assert.Contains("timed out", timeout.Detail, StringComparison.OrdinalIgnoreCase);
+
+        using var networkHttp = new HttpClient(new RecordingHandler(_ => throw new HttpRequestException("offline")));
+        var network = await DoctorService.FetchLatestHermaeusReleaseAsync(networkHttp, CancellationToken.None);
+        Assert.Equal(GitHubReleaseFetchStatus.NetworkUnavailable, network.Status);
+        Assert.Contains("offline", network.Detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task A_real_scan_always_includes_an_app_update_check_under_the_system_category()
     {
         using var temp = new TempDir();
         var settings = NewSettings(temp);
         settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
+        using var http = new HttpClient(new RecordingHandler(_ => Json("[]")));
 
         var doctor = new DoctorService(
             settings,
@@ -64,7 +127,8 @@ public sealed class DoctorAppUpdateTests
             new FakeEmbeddingService(),
             new FakeSystemInfo(),
             new PythonHealthValidator(),
-            new NoOpReranker());
+            new NoOpReranker(),
+            updateHttp: http);
 
         var report = await doctor.ScanAsync();
 
@@ -93,6 +157,17 @@ public sealed class DoctorAppUpdateTests
     private static readonly DoctorCheck AppUpdateCheck = new(
         "app-update", "Hermaeus update check", DoctorCheckStatus.Warning,
         "Hermaeus v0.31.0-alpha is available (running 0.30.0-alpha)", "detail", "Open Releases", true, string.Empty, "System");
+
+    private static HttpResponseMessage Json(string body) => new(HttpStatusCode.OK)
+    {
+        Content = new StringContent(body, Encoding.UTF8, "application/json")
+    };
+
+    private sealed class RecordingHandler(Func<HttpRequestMessage, HttpResponseMessage> responseFactory) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(responseFactory(request));
+    }
 
     [Fact]
     public async Task Running_the_fix_opens_the_releases_page_and_does_not_navigate()

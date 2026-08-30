@@ -8,7 +8,9 @@ namespace Hermaeus.Services;
 public sealed class RuntimeLogService : IRuntimeLogService
 {
     private const int MaxEntries = 1000;
-    private const long MaxLogFileBytes = 10 * 1024 * 1024; // 10 MB
+    private const long MaxLogFileBytes = 1 * 1024 * 1024;
+    private const long MaxTotalLogBytes = 8 * 1024 * 1024;
+    private static readonly TimeSpan MaxArchiveAge = TimeSpan.FromDays(7);
     private readonly ConcurrentQueue<RuntimeLogEntry> _entries = new();
     private readonly ISettingsService _settings;
     private readonly RedactionService? _redactor;
@@ -31,6 +33,9 @@ public sealed class RuntimeLogService : IRuntimeLogService
     {
         if (_redactor is not null)
             entry = entry with { Message = _redactor.Redact(entry.Message) };
+
+        if (!RuntimeLogClassifier.ShouldPersist(entry))
+            return;
 
         lock (_dedupeLock)
         {
@@ -123,6 +128,10 @@ public sealed class RuntimeLogService : IRuntimeLogService
                 using var fs = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.Read);
                 var bytes = System.Text.Encoding.UTF8.GetBytes(line);
                 fs.Write(bytes, 0, bytes.Length);
+                fs.Flush(true);
+                PruneArchives(Path.GetDirectoryName(path) ?? GetLogDirectory(),
+                    Path.GetFileNameWithoutExtension(path), Path.GetExtension(path),
+                    fs.Length, DateTimeOffset.UtcNow);
             }
         }
         catch
@@ -148,7 +157,7 @@ public sealed class RuntimeLogService : IRuntimeLogService
             if (File.Exists(dest))
                 dest = Path.Combine(dir, $"{name}.{stamp}.{Guid.NewGuid():N}{ext}");
             File.Move(path, dest);
-            PruneArchives(dir, name, ext);
+            PruneArchives(dir, name, ext, 0, DateTimeOffset.UtcNow);
         }
         catch
         {
@@ -156,22 +165,56 @@ public sealed class RuntimeLogService : IRuntimeLogService
         }
     }
 
-    private const int MaxArchivedLogFiles = 10;
+    private const int MaxArchivedLogFiles = 7;
 
-    private static void PruneArchives(string dir, string name, string ext)
+    internal static void PruneArchives(string dir, string name, string ext,
+        long activeBytes, DateTimeOffset now)
     {
         try
         {
-            var stale = Directory.EnumerateFiles(dir, $"{name}.*{ext}")
-                .OrderByDescending(Path.GetFileName, StringComparer.Ordinal)
-                .Skip(MaxArchivedLogFiles)
+            var archives = Directory.EnumerateFiles(dir, $"{name}.*{ext}")
+                .Select(path => new ArchiveFile(path, TryArchiveTimestamp(path, name, ext)))
+                .OrderBy(item => item.Timestamp ?? DateTimeOffset.MinValue)
+                .ThenBy(item => Path.GetFileName(item.Path), StringComparer.Ordinal)
                 .ToList();
-            foreach (var file in stale)
-                File.Delete(file);
+
+            foreach (var archive in archives.Where(item => item.Timestamp is { } timestamp
+                         && now - timestamp > MaxArchiveAge).ToArray())
+            {
+                File.Delete(archive.Path);
+                archives.Remove(archive);
+            }
+
+            long totalBytes = activeBytes + archives.Sum(item => new FileInfo(item.Path).Length);
+            while (archives.Count > 0
+                && (archives.Count > MaxArchivedLogFiles || totalBytes > MaxTotalLogBytes))
+            {
+                var oldest = archives[0];
+                var length = new FileInfo(oldest.Path).Length;
+                File.Delete(oldest.Path);
+                archives.RemoveAt(0);
+                totalBytes -= length;
+            }
         }
         catch
         {
             // best-effort retention; swallow errors
         }
     }
+
+    private static DateTimeOffset? TryArchiveTimestamp(string path, string name, string ext)
+    {
+        var file = Path.GetFileName(path);
+        var prefix = name + ".";
+        if (!file.StartsWith(prefix, StringComparison.Ordinal)
+            || !file.EndsWith(ext, StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        var token = file[prefix.Length..^ext.Length].Split('.')[0];
+        return DateTimeOffset.TryParseExact(token, "yyyyMMdd'T'HHmmss'Z'",
+            CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var timestamp)
+            ? timestamp : null;
+    }
+
+    private sealed record ArchiveFile(string Path, DateTimeOffset? Timestamp);
 }

@@ -442,7 +442,7 @@ public partial class ChatViewModel : ViewModelBase
 
     public event EventHandler?        ScrollToBottom;
     public event EventHandler<string>? ConversationSaved;
-    public Action<string>?            RequestCopyToClipboard { get; set; }
+    public Func<string, Task<bool>>?   RequestCopyToClipboard { get; set; }
     public Action?                    RequestInputFocus { get; set; }
     public Action?                    RequestContextFilePicker { get; set; }
     public Func<ConversationExportFormat, Task<string?>>? RequestConversationExportPath { get; set; }
@@ -1671,16 +1671,30 @@ public partial class ChatViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private void CopyMessage(MessageViewModel? msg)
+    private async Task CopyMessage(MessageViewModel? msg)
     {
-        if (msg is not null) RequestCopyToClipboard?.Invoke(msg.Content);
+        if (msg is not null)
+            await CopyTextAsync(msg.Content, "Message");
     }
 
     [RelayCommand]
-    private void CopyReasoning(MessageViewModel? msg)
+    private async Task CopyReasoning(MessageViewModel? msg)
     {
         if (msg is not null && !string.IsNullOrWhiteSpace(msg.ReasoningContent))
-            RequestCopyToClipboard?.Invoke(msg.ReasoningContent);
+            await CopyTextAsync(msg.ReasoningContent, "Reasoning");
+    }
+
+    private async Task CopyTextAsync(string text, string label)
+    {
+        if (RequestCopyToClipboard is null)
+            return;
+
+        var copied = false;
+        try { copied = await RequestCopyToClipboard(text); }
+        catch { }
+        _toasts.Show(copied ? $"{label} copied" : $"Could not copy {label.ToLowerInvariant()}",
+            copied ? $"{label} text copied to the clipboard." : "The clipboard was unavailable.",
+            copied ? ToastKind.Success : ToastKind.Warning, 3000);
     }
 
     [RelayCommand]
@@ -2288,9 +2302,11 @@ public partial class ChatViewModel : ViewModelBase
             var sources = selected.Select(h => new SourceReference(
                 ProvenanceKind.Recall,
                 h.Title,
+                Locator: RecallLocator(h),
                 Snippet: h.Snippet,
                 Score: h.Score,
-                Timestamp: h.Timestamp)).ToList();
+                Timestamp: h.Timestamp,
+                EvidenceOrigin: EvidenceOrigin.Extracted)).ToList();
 
             var note = result.OmittedSources.Count > 0
                 ? $"omitted: {string.Join(", ", result.OmittedSources)}"
@@ -2309,6 +2325,15 @@ public partial class ChatViewModel : ViewModelBase
             return (string.Empty, [], sw.ElapsedMilliseconds, 0, string.Empty);
         }
     }
+
+    private static string RecallLocator(RecallHit hit) => hit.Kind switch
+    {
+        RecallKind.Message => $"conversation:{hit.Target.ConversationId}:message:{hit.Target.MessageIndex}",
+        RecallKind.Task => $"task:{hit.Target.TaskId}",
+        RecallKind.Memory => $"memory:{hit.Target.MemoryId}",
+        RecallKind.Document => $"dataset:{hit.Target.DatasetId}:chunk:{hit.Target.ChunkId}",
+        _ => throw new ArgumentOutOfRangeException(nameof(hit))
+    };
 
     /// <summary>
     /// Global-scope agent lessons formatted as their own markdown block, in

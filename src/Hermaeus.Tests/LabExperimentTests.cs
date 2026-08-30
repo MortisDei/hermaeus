@@ -206,6 +206,20 @@ public sealed class LabExperimentTests
     }
 
     [Fact]
+    public async Task Start_refuses_a_second_active_run_until_the_first_is_finished()
+    {
+        using var fixture = new Fixture();
+        var definition = await fixture.DefinitionAsync();
+        var first = await fixture.Service.StartAsync(definition, fixture.Source);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => fixture.Service.StartAsync(definition, fixture.Source));
+
+        Assert.Contains("Another Lab run is already active", exception.Message, StringComparison.Ordinal);
+        await fixture.Service.CancelAsync(first.Id);
+    }
+
+    [Fact]
     public async Task Start_deep_freezes_definition_collections()
     {
         using var fixture = new Fixture();
@@ -257,6 +271,24 @@ public sealed class LabExperimentTests
         Assert.Equal(LabRunStatus.Failed, run.Status);
         Assert.Contains("launch refused", Assert.Single(run.Failures));
         Assert.NotEmpty(run.CompletionEvidenceId);
+    }
+
+    [Fact]
+    public async Task Candidate_launch_failure_does_not_leave_a_running_snapshot_without_a_session()
+    {
+        using var fixture = new Fixture();
+        var run = await fixture.Service.StartAsync(await fixture.DefinitionAsync(), fixture.Source);
+        fixture.Host.FailOnStart = 2;
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Service.SwitchConfigurationAsync(
+            run.Id, fixture.Source, "candidate"));
+
+        var failed = fixture.Service.GetRun(run.Id)!;
+        Assert.Equal(LabRunStatus.Failed, failed.Status);
+        Assert.Null(failed.TemporaryPort);
+        Assert.Null(failed.RuntimeProcessId);
+        Assert.Contains(failed.Failures, failure => failure.Contains("candidate", StringComparison.Ordinal));
+        Assert.Equal(1, fixture.Host.Session.StopCount);
     }
 
     [Fact]
@@ -471,12 +503,15 @@ public sealed class LabExperimentTests
     private sealed class FakeLabRuntimeHost : ILabRuntimeHost
     {
         public int StartCount { get; private set; }
+        public int? FailOnStart { get; set; }
         public Exception? Failure { get; set; }
         public FakeSession Session { get; } = new();
         public Task<ILabRuntimeSession> StartAsync(string runId, ServerConfig source, LabConfiguration configuration, CancellationToken ct = default)
         {
             StartCount++;
-            return Failure is null ? Task.FromResult<ILabRuntimeSession>(Session) : Task.FromException<ILabRuntimeSession>(Failure);
+            var failure = Failure ?? (FailOnStart == StartCount
+                ? new InvalidOperationException("candidate launch refused") : null);
+            return failure is null ? Task.FromResult<ILabRuntimeSession>(Session) : Task.FromException<ILabRuntimeSession>(failure);
         }
         public Task<IReadOnlyList<string>> RecoverOwnedProcessesAsync(CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<string>>([]);
