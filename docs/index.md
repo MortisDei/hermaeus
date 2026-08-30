@@ -75,21 +75,20 @@ the current control list.
 These documents describe work in progress, open decisions, or proposed
 extensions. They are not shipped-feature references:
 
-- [R31 review index](review/README.md), its numbered contracts, and the
-  [R31 evidence records](review/evidence/r31-batch-0.md) plus later batch files.
 - [R31 deferred ledger](review/deferred.md).
 - [RAG evaluation harness plan](rag-eval-harness.md), which proposes work beyond
   the native evaluation surface described in [`rag.md`](rag.md).
 - The watchlists and dated upstream audits linked from
   [`llama-cpp-features.md`](llama-cpp-features.md).
 
-The active R31 documents are preserved as engineering records. They may explain
-why a current safety boundary exists, but they do not override the current
-reference or authorize planned behavior.
+The completed R31 review contract and evidence are preserved in the historical
+[`review/archived/r31/`](review/archived/r31/) pack. They may explain why a
+current safety boundary exists, but they do not override the current reference
+or authorize planned behavior.
 
 ## Historical and archive material
 
-- [`review/archived/`](review/archived/) contains the immutable R1 through R30
+- [`review/archived/`](review/archived/) contains the immutable R1 through R31
   review packs. Each round's README explains its own document set.
 - [`security-history.md`](security-history.md) contains the historical security
   narrative that used to compete with the current threat model.

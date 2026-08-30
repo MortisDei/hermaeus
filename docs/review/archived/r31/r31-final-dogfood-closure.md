@@ -58,7 +58,7 @@ Only the items approved by the closure brief are deferred here:
 - The unproven COSMIC folder-picker or portal observation. It is kept separate
   from the shared popup/context-menu fix.
 
-These are recorded in [`deferred.md`](deferred.md). No historical review file
+These are recorded in [`deferred.md`](../../deferred.md). No historical review file
 was rewritten.
 
 ## Required owner retests

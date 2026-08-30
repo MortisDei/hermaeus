@@ -8,10 +8,12 @@ launch.
 
 The full flag survey was checked against build b10215 on 2026-08-01. The
 selected Windows CUDA runtime was directly observed at b10590 for the R31
-implementation work. Linux runtime behavior remains a live verification item;
-it is not inferred from Windows results. The dated upstream investigations are
-preserved in the [R31 evidence records](review/evidence/r31-batch-15.md) and
-the later batch files beside it.
+implementation work. The bounded R31 owner-validation gate passed on Windows
+and Pop!_OS with COSMIC. Other Linux environments and untested runtime or
+hardware combinations remain governed by the selected executable's live
+capability probe rather than being inferred from those results. The dated
+upstream investigations are preserved in the [R31 evidence records](review/archived/r31/evidence/r31-batch-15.md)
+and the later batch files beside it.
 
 ## The compatibility rule
 
@@ -156,7 +158,7 @@ Hermaeus capabilities:
   become settings.
 
 The dated upstream decisions and their evidence are in
-[`review/evidence/r31-batch-15.md`](review/evidence/r31-batch-15.md),
-[`review/evidence/r31-batch-17.md`](review/evidence/r31-batch-17.md), and
-[`review/evidence/r31-batch-18.md`](review/evidence/r31-batch-18.md). They are
+[`review/archived/r31/evidence/r31-batch-15.md`](review/archived/r31/evidence/r31-batch-15.md),
+[`review/archived/r31/evidence/r31-batch-17.md`](review/archived/r31/evidence/r31-batch-17.md), and
+[`review/archived/r31/evidence/r31-batch-18.md`](review/archived/r31/evidence/r31-batch-18.md). They are
 engineering records, not current feature authority.

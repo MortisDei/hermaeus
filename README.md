@@ -335,7 +335,13 @@ treated as build errors.
 
 # Known Issues / Beta Status
 
-Hermaeus is beta software, developed and tested primarily on Windows. Linux (Pop!_OS, Wayland) has been run and works, but is less exercised than Windows and more likely to surface rough edges. Prebuilt binaries are not code-signed; Windows SmartScreen will warn on first run (verify the published SHA256 instead of dismissing it blindly). See `CHANGELOG.md` for the pace of fixes and new features.
+Hermaeus is beta software, developed and tested primarily on Windows. The
+bounded R31 owner-validation gate passed on Windows and Pop!_OS with COSMIC.
+Other Linux environments and untested runtime or hardware combinations remain
+less exercised and more likely to surface rough edges. Prebuilt binaries are
+not code-signed; Windows SmartScreen will warn on first run (verify the
+published SHA256 instead of dismissing it blindly). See `CHANGELOG.md` for the
+pace of fixes and new features.
 
 Hermaeus has one maintainer. Issues get a best-effort response; pull requests must follow `CONTRIBUTING.md`.
 
