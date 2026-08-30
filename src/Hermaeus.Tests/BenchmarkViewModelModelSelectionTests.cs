@@ -34,11 +34,14 @@ public sealed class BenchmarkViewModelModelSelectionTests
         settings.Settings.DataManagement.DataRootDirectory = temp.PathFor("data");
         var modelPath = temp.PathFor("model.gguf");
         File.WriteAllText(modelPath, "fake");
+        var chatPort = GetFreePort();
+        var embeddingsPort = GetFreePort();
         settings.Settings.ManagedServers.Clear();
-        settings.Settings.ManagedServers.Add(new ServerConfig { Name = "Chat", Port = GetFreePort() });
-        settings.Settings.ManagedServers.Add(new ServerConfig { Name = "Embeddings", Port = GetFreePort(), EmbeddingsMode = true });
+        settings.Settings.ManagedServers.Add(new ServerConfig { Name = "Chat", Port = chatPort });
+        settings.Settings.ManagedServers.Add(new ServerConfig { Name = "Embeddings", Port = embeddingsPort, EmbeddingsMode = true });
 
         var services = NewServicesViewModel(settings);
+        Assert.Equal(chatPort, services.Servers[0].Port);
         var starts = 0;
         services.Servers[0].PropertyChanged += (_, e) =>
         {
